@@ -67,10 +67,10 @@ cd test
 cd test
 
 # 测试 SIMPLE 模式
-./quick_nat_punch_test.sh simple
+./quick_test_nat_punch.sh simple
 
 # 测试 Relay 模式
-./quick_nat_punch_test.sh relay
+./quick_test_nat_punch.sh relay
 ```
 
 ### 手动测试
@@ -237,7 +237,7 @@ cd test
 
 - **测试脚本**:
   - `test/test_nat_punch.sh` - 自动化测试套件
-  - `test/quick_nat_punch_test.sh` - 快速手动测试
+  - `test/quick_test_nat_punch.sh` - 快速手动测试
 
 - **源代码**:
   - `include/p2p.h` - 配置选项定义

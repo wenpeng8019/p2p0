@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-# quick_nat_punch_test.sh - 快速 NAT 打洞测试（带详细日志）
+# quick_test_nat_punch.sh - 快速 NAT 打洞测试（带详细日志）
 #
 # 用法：
-#   ./quick_nat_punch_test.sh simple   # 测试 SIMPLE 模式
-#   ./quick_nat_punch_test.sh ice      # 测试 Relay 模式
+#   ./quick_test_nat_punch.sh simple   # 测试 SIMPLE 模式
+#   ./quick_test_nat_punch.sh ice      # 测试 Relay 模式
 #
 
 MODE="${1:-simple}"

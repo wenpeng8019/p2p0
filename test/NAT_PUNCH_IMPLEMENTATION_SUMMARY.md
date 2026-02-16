@@ -86,7 +86,7 @@
 - **输出**: 彩色测试结果和详细日志
 - **日志保存**: `test/nat_punch_logs/`
 
-#### `test/quick_nat_punch_test.sh` (新建)
+#### `test/quick_test_nat_punch.sh` (新建)
 - **快速手动测试脚本**
 - **功能**:
   - 在新终端窗口中启动测试
@@ -94,8 +94,8 @@
   - 适合调试和观察实时日志
 - **用法**:
   ```bash
-  ./quick_nat_punch_test.sh simple  # SIMPLE 模式
-  ./quick_nat_punch_test.sh relay     # Relay 模式
+  ./quick_test_nat_punch.sh simple  # SIMPLE 模式
+  ./quick_test_nat_punch.sh relay     # Relay 模式
   ```
 
 ### 6. 文档
@@ -218,7 +218,7 @@ All tests PASSED!
 ### 1. 开发调试
 ```bash
 # 本地快速测试
-./test/quick_nat_punch_test.sh simple
+./test/quick_test_nat_punch.sh simple
 ```
 
 ### 2. CI/CD 集成
@@ -298,7 +298,7 @@ grep "NAT_PUNCH.*SUCCESS" logs/*.log | grep "Time:"
 
 **新增的文件** (3个):
 1. `test/test_nat_punch.sh` - 自动化测试套件
-2. `test/quick_nat_punch_test.sh` - 快速测试工具
+2. `test/quick_test_nat_punch.sh` - 快速测试工具
 3. `test/NAT_PUNCH_TEST_GUIDE.md` - 使用指南
 4. `test/NAT_PUNCH_IMPLEMENTATION_SUMMARY.md` - 本文档
 

@@ -136,16 +136,16 @@ cat nat_punch_logs/simple_alice.log
 
 ---
 
-#### `quick_nat_punch_test.sh`
+#### `quick_test_nat_punch.sh`
 **功能**: 在新终端窗口中手动测试 NAT 打洞（适合调试）
 
 **运行方式**:
 ```bash
 # 测试 SIMPLE 模式
-./quick_nat_punch_test.sh simple
+./quick_test_nat_punch.sh simple
 
 # 测试 Relay 模式
-./quick_nat_punch_test.sh relay
+./quick_test_nat_punch.sh relay
 ```
 
 **特点**:
@@ -503,7 +503,7 @@ test/
 │
 ├── quick_test_ice.sh                      # 🔍 ICE 快速测试
 ├── quick_test_simple.sh                   # 🔍 SIMPLE 快速测试
-├── quick_nat_punch_test.sh                # 🔍 NAT 打洞手动测试
+├── quick_test_nat_punch.sh                # 🔍 NAT 打洞手动测试
 │
 ├── test_relay_server.c                      # 单元测试：ICE 服务器
 ├── test_simple_server.c                   # 单元测试：SIMPLE 服务器
@@ -561,7 +561,7 @@ test/
 # T3: ./build_cmake/p2p_ping/p2p_ping --server 127.0.0.1 --name bob --to alice
 
 # 调试 NAT 打洞
-./quick_nat_punch_test.sh simple
+./quick_test_nat_punch.sh simple
 
 # 清理所有测试进程
 pkill -f p2p_server; pkill -f p2p_ping
