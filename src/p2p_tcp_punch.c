@@ -1,0 +1,54 @@
+
+#include "p2p_internal.h"
+#include <fcntl.h>
+#include <errno.h>
+
+/* 
+ * 尝试 TCP 同时发起 (Simultaneous Open)
+ * 这是一个复杂的流程，通常需要两端在几乎同一时间发起 connect()。
+ */
+int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
+    if (!s->cfg.enable_tcp) return -1;
+
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return -1;
+
+    /* 必须设置 SO_REUSEADDR and SO_REUSEPORT (如果支持) */
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#ifdef SO_REUSEPORT
+    setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
+
+    /* 绑定到与 UDP 相同的端口 */
+    struct sockaddr_in loc;
+    memset(&loc, 0, sizeof(loc));
+    loc.sin_family = AF_INET;
+    loc.sin_addr.s_addr = INADDR_ANY;
+    loc.sin_port = htons(s->cfg.tcp_port);
+    if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
+        /* 如果端口被占用，尝试随机端口并更新配置 */
+        loc.sin_port = 0;
+        if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
+             close(sock);
+             return -1;
+        }
+    }
+
+    /* 设置为非阻塞 */
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+    /* 进行三次握手的“同时发起”尝试 */
+    printf("[TCP] Attempting Simultaneous Open to %s:%d\n", 
+           inet_ntoa(remote->sin_addr), ntohs(remote->sin_port));
+    
+    int ret = connect(sock, (struct sockaddr *)remote, sizeof(*remote));
+    if (ret < 0 && errno != EINPROGRESS) {
+        close(sock);
+        return -1;
+    }
+
+    s->tcp_sock = sock;
+    return 0;
+}

@@ -1,0 +1,241 @@
+/*
+ * ICE 协议实现（RFC 5245 / RFC 8445）
+ *
+ * ============================================================================
+ * 概述
+ * ============================================================================
+ *
+ * ICE (Interactive Connectivity Establishment) 是一种 NAT 穿透框架，
+ * 用于在两个位于 NAT 后的端点之间建立直接通信路径。
+ *
+ * 本模块实现了 RFC 5245 的核心功能：
+ *   - 候选地址收集（Gathering）
+ *   - 连通性检查（Connectivity Check）
+ *   - Trickle ICE 增量交换
+ *   - 提名与路径选择
+ *
+ * ============================================================================
+ * 相关 RFC
+ * ============================================================================
+ *
+ * - RFC 5245: ICE 协议原始规范
+ * - RFC 8445: ICE 协议更新版（取代 RFC 5245）
+ * - RFC 8838: Trickle ICE（增量候选交换）
+ * - RFC 5389: STUN 协议（用于收集 Server Reflexive 候选）
+ * - RFC 5766: TURN 协议（用于收集 Relay 候选）
+ *
+ * ============================================================================
+ * 候选地址类型
+ * ============================================================================
+ *
+ *   类型        | 描述                    | 优先级 | 来源
+ *   ------------|------------------------|--------|------------------
+ *   Host        | 本地网卡地址            | 最高   | getifaddrs()
+ *   Srflx       | STUN 反射地址（公网IP） | 中     | STUN Binding
+ *   Relay       | TURN 中继地址          | 最低   | TURN Allocate
+ *   Prflx       | 对端反射地址           | 中     | 连通性检查发现
+ *
+ * ============================================================================
+ * ICE 状态机
+ * ============================================================================
+ *
+ *   IDLE ──→ GATHERING ──→ GATHERING_DONE ──→ CHECKING ──→ COMPLETED
+ *                                                │              │
+ *                                                └──→ FAILED ←──┘
+ *
+ *   状态说明：
+ *   - IDLE:           初始状态
+ *   - GATHERING:      正在收集本地候选地址
+ *   - GATHERING_DONE: 候选收集完成
+ *   - CHECKING:       正在进行连通性检查
+ *   - COMPLETED:      至少一条路径可用
+ *   - FAILED:         所有候选对检查失败
+ *
+ * ============================================================================
+ * 连通性检查流程
+ * ============================================================================
+ *
+ *      Peer A                          Peer B
+ *        │                               │
+ *        │ ──── STUN Request ──────────→ │  连通性检查
+ *        │ ←─── STUN Response ────────── │
+ *        │                               │
+ *        │ ←─── STUN Request ─────────── │  反向检查
+ *        │ ──── STUN Response ─────────→ │
+ *        │                               │
+ *       ICE Completed                   ICE Completed
+ *
+ * ============================================================================
+ * 本实现的简化
+ * ============================================================================
+ *
+ * 为简化实现，本模块省略了以下 RFC 5245 特性：
+ *   - 完整的优先级计算公式（使用固定优先级）
+ *   - 候选对排序（Checklist Ordering）
+ *   - Frozen/Waiting/In-Progress 状态
+ *   - ICE Lite 模式
+ *   - IPv6 候选
+ */
+
+#ifndef P2P_ICE_H
+#define P2P_ICE_H
+
+#include <stdint.h>
+#include <netinet/in.h>
+
+/* ============================================================================
+ * 候选地址类型（RFC 5245 Section 4.1.1）
+ * ============================================================================ */
+typedef enum {
+    P2P_CAND_HOST = 0,      /* 本地网卡地址（Host Candidate） */
+    P2P_CAND_SRFLX,         /* STUN 反射地址（Server Reflexive Candidate） */
+    P2P_CAND_RELAY,         /* TURN 中继地址（Relayed Candidate） */
+    P2P_CAND_PRFLX          /* 对端反射地址（Peer Reflexive Candidate） */
+} p2p_cand_type_t;
+
+/*
+ * p2p_candidate_t: ICE 候选地址结构
+ *
+ * 每个候选包含：
+ *   - type:      候选类型
+ *   - addr:      传输地址（IP:Port）
+ *   - base_addr: 基础地址（Host 候选的本地地址）
+ *   - priority:  优先级（用于排序和选择）
+ */
+typedef struct {
+    p2p_cand_type_t type;           /* 候选类型 */
+    struct sockaddr_in addr;        /* 传输地址 */
+    struct sockaddr_in base_addr;   /* 基础地址 */
+    uint32_t priority;              /* 候选优先级 */
+} p2p_candidate_t;
+
+#define P2P_MAX_CANDIDATES 8        /* 最大候选数量 */
+
+/* ============================================================================
+ * 候选对结构（RFC 5245 Section 5.7）
+ * ============================================================================
+ *
+ * 候选对由一个本地候选和一个远端候选组成。
+ * 连通性检查在候选对上进行，而不是单独的候选。
+ *
+ * 候选对优先级计算（RFC 5245 Section 5.7.2）：
+ *   pair_priority = 2^32 * MIN(G, D) + 2 * MAX(G, D) + (G > D ? 1 : 0)
+ *   其中 G = controlling 端优先级，D = controlled 端优先级
+ */
+typedef enum {
+    P2P_PAIR_FROZEN = 0,            /* 冻结：等待其他检查完成 */
+    P2P_PAIR_WAITING,               /* 等待：可以开始检查 */
+    P2P_PAIR_IN_PROGRESS,           /* 进行中：已发送检查，等待响应 */
+    P2P_PAIR_SUCCEEDED,             /* 成功：检查通过 */
+    P2P_PAIR_FAILED                 /* 失败：检查超时或失败 */
+} p2p_pair_state_t;
+
+typedef struct {
+    p2p_candidate_t local;          /* 本地候选 */
+    p2p_candidate_t remote;         /* 远端候选 */
+    uint64_t        pair_priority;  /* 候选对优先级 */
+    p2p_pair_state_t state;         /* 候选对状态 */
+    int             nominated;      /* 是否被提名 */
+    uint64_t        last_check_time;/* 上次检查时间 */
+    int             check_count;    /* 检查次数 */
+} p2p_candidate_pair_t;
+
+#define P2P_MAX_PAIRS (P2P_MAX_CANDIDATES * P2P_MAX_CANDIDATES)
+
+/* ============================================================================
+ * ICE 状态机（RFC 5245 Section 7）
+ * ============================================================================ */
+typedef enum {
+    P2P_ICE_STATE_IDLE = 0,         /* 初始状态 */
+    P2P_ICE_STATE_GATHERING,        /* 正在收集候选地址 */
+    P2P_ICE_STATE_GATHERING_DONE,   /* 候选收集完成 */
+    P2P_ICE_STATE_CHECKING,         /* 正在进行连通性检查 */
+    P2P_ICE_STATE_COMPLETED,        /* 连接建立成功 */
+    P2P_ICE_STATE_FAILED            /* 连接建立失败 */
+} p2p_ice_state_t;
+
+/* ============================================================================
+ * ICE 模块 API
+ * ============================================================================ */
+
+struct p2p_session;
+struct p2p_signaling_payload;
+
+/* 收集本地候选地址（Host + Srflx + Relay） */
+int p2p_ice_gather_candidates(struct p2p_session *s);
+
+/* ICE 状态机定时处理（发送连通性检查） */
+void p2p_ice_tick(struct p2p_session *s);
+
+/* 处理信令载荷（解析远端候选地址） */
+void p2p_ice_handle_signaling_payload(struct p2p_session *s, const struct p2p_signaling_payload *p);
+
+/* 处理 Trickle ICE 候选（增量添加） */
+void p2p_ice_on_remote_candidates(struct p2p_session *s, const uint8_t *payload, int len);
+
+/* 连通性检查成功回调 */
+void p2p_ice_on_check_success(struct p2p_session *s, const struct sockaddr_in *from);
+
+/* Trickle ICE: 发送单个本地候选 */
+void p2p_ice_send_local_candidate(struct p2p_session *s, p2p_candidate_t *c);
+
+/* ============================================================================
+ * 优先级计算（RFC 5245 Section 4.1.2）
+ * ============================================================================ */
+
+/*
+ * 计算候选优先级
+ *
+ * RFC 5245 优先级公式：
+ *   priority = (2^24) * type_preference +
+ *              (2^8)  * local_preference +
+ *              (2^0)  * (256 - component_id)
+ *
+ * 类型偏好值 (type_preference)：
+ *   - Host:  126 (本地地址最优先)
+ *   - Prflx: 110 (对端反射)
+ *   - Srflx: 100 (服务器反射)
+ *   - Relay:   0 (中继最低优先级)
+ *
+ * @param type        候选类型
+ * @param local_pref  本地偏好值 (0-65535，用于区分同类型多个候选)
+ * @param component   组件 ID (RTP=1, RTCP=2)
+ * @return            32 位优先级值
+ */
+uint32_t p2p_ice_calc_priority(p2p_cand_type_t type, uint16_t local_pref, uint8_t component);
+
+/*
+ * 计算候选对优先级
+ *
+ * RFC 5245 Section 5.7.2:
+ *   pair_priority = 2^32 * MIN(G, D) + 2 * MAX(G, D) + (G > D ? 1 : 0)
+ *
+ * @param controlling_prio  controlling 端候选优先级
+ * @param controlled_prio   controlled 端候选优先级
+ * @param is_controlling    本端是否为 controlling 角色
+ * @return                  64 位候选对优先级
+ */
+uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controlled_prio, int is_controlling);
+
+/*
+ * 生成候选对检查列表
+ *
+ * 将本地候选和远端候选组合成候选对，按优先级排序。
+ *
+ * @param pairs         输出：候选对数组
+ * @param max_pairs     数组最大容量
+ * @param local_cands   本地候选数组
+ * @param local_cnt     本地候选数量
+ * @param remote_cands  远端候选数组
+ * @param remote_cnt    远端候选数量
+ * @param is_controlling 本端是否为 controlling
+ * @return              生成的候选对数量
+ */
+int p2p_ice_form_check_list(
+    p2p_candidate_pair_t *pairs, int max_pairs,
+    const p2p_candidate_t *local_cands, int local_cnt,
+    const p2p_candidate_t *remote_cands, int remote_cnt,
+    int is_controlling
+);
+
+#endif /* P2P_ICE_H */

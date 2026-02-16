@@ -1,0 +1,14 @@
+# Build outputs
+build/
+*.o
+*.dSYM/
+
+# Test logs
+integration_logs/
+nat_punch_logs/
+pubsub_gist_logs/
+
+# Temporary files
+.gist_read.json
+.gist_resp.json
+/tmp/

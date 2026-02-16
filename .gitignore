@@ -1,0 +1,71 @@
+# Build artifacts
+build/
+build_cmake/
+cmake-build-*/
+cmake-install-*/
+out/
+local/
+
+*.iml
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Debug files
+*.dSYM/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+.gist_resp.json
+*.tmp
+*.temp
+
+# Test outputs
+node_*.log
+alice*.log
+bob*.log
+server*.log
+*_pseudo.log
+*_dtls.log
+
+# Core dumps
+core
+core.*
+vgcore.*
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# Certificates and keys (for testing)
+*.pem
+*.key
+*.crt
+*.p12
+
+# Configuration files with secrets
+config.local.*
+.env
+.env.local
+
+# Gist temporary files
+.gist*.json

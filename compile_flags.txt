@@ -1,0 +1,12 @@
+-Wall
+-Wextra
+-Wpedantic
+-std=c99
+-Iinclude
+-Ithird_party/mbedtls/include
+-Ithird_party/usrsctp/usrsctplib
+-I/opt/homebrew/Cellar/openssl@3/3.6.0/include
+-I/opt/homebrew/include
+-DWITH_OPENSSL=1
+-DWITH_DTLS=1
+-DP2P_THREADED=1
