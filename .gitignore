@@ -22,3 +22,4 @@ bin/
 
 # Test outputs
 test_output/
+_codeql_detected_source_root
