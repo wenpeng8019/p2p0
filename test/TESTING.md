@@ -47,8 +47,8 @@
 | 测试ID | 模块 | 测试项 | 验证方法 | 状态 |
 |--------|------|--------|----------|------|
 | TC-SIG-001 | p2p_signal.c | TCP 连接 | 成功连接到信令服务器 | ✅ |
-| TC-SIG-002 | p2p_signal.c | 登录消息 | MSG_LOGIN 发送和响应 | ✅ |
-| TC-SIG-003 | p2p_signal.c | 信令中继 | MSG_SIGNAL_RELAY 正确转发 | ✅ |
+| TC-SIG-002 | p2p_signal.c | 登录消息 | P2P_RLY_LOGIN 发送和响应 | ✅ |
+| TC-SIG-003 | p2p_signal.c | 信令中继 | P2P_RLY_FORWARD 正确转发 | ✅ |
 | TC-SIG-004 | p2p_signal_pub.c | Gist 轮询 | 定期 GET Gist 内容 | ✅ |
 | TC-SIG-005 | p2p_signal_pub.c | Gist 发布 | PATCH 更新 Gist 成功 | ✅ |
 | TC-SIG-006 | p2p_signal_common.c | 载荷序列化 | pack/unpack 数据一致 | ✅ |
@@ -340,7 +340,7 @@ Bob:   --name bob --server 127.0.0.1 --to alice
 | 吞吐量 | 足够 PING/PONG 交换 |
 
 **验证的功能模块：**
-- ✅ 信令协议 (MSG_LOGIN, MSG_CONNECT, MSG_SIGNAL_RELAY)
+- ✅ 信令协议 (P2P_RLY_LOGIN, P2P_RLY_CONNECT, P2P_RLY_FORWARD)
 - ✅ ICE 候选收集 (Host, Srflx)
 - ✅ STUN 映射 (Google STUN 74.125.250.129:3478)
 - ✅ NAT 类型检测
@@ -724,7 +724,7 @@ genhtml coverage.info --output-directory coverage_html
 - 📋 UDP 收发
 
 **优先级 2（重要）：**
-- 📋 信令协议（MSG_LOGIN, MSG_SIGNAL_RELAY）
+- 📋 信令协议（P2P_RLY_LOGIN, P2P_RLY_FORWARD）
 - 📋 STUN 请求/响应
 - 📋 NAT 类型检测
 

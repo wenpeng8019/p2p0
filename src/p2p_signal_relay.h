@@ -31,50 +31,7 @@
 
 #include <stdint.h>
 #include <netinet/in.h>
-
-/* ============================================================================
- * 协议定义
- * ============================================================================ */
-
-#define P2P_SIGNAL_MAGIC 0x50325030  /* "P2P0" (ASCII: 0x50='P', 0x32='2', 0x50='P', 0x30='0') */
-#define P2P_MAX_NAME 32              /* peer 名称最大长度 */
-
-/*
- * 消息类型枚举
- *
- * 客户端 → 服务器：MSG_LOGIN, MSG_LIST, MSG_CONNECT, MSG_SIGNAL_ANS, MSG_HEARTBEAT
- * 服务器 → 客户端：MSG_LOGIN_ACK, MSG_LIST_RES, MSG_SIGNAL, MSG_SIGNAL_RELAY
- */
-typedef enum {
-    MSG_LOGIN = 1,       /* 登录请求 */
-    MSG_LOGIN_ACK,       /* 登录确认 */
-    MSG_LIST,            /* 请求在线列表 */
-    MSG_LIST_RES,        /* 在线列表响应 */
-    MSG_CONNECT,         /* 连接请求（主动方 → 服务器） */
-    MSG_SIGNAL,          /* 连接请求转发（服务器 → 被动方） */
-    MSG_SIGNAL_ANS,      /* 应答（被动方 → 服务器） */
-    MSG_SIGNAL_RELAY,    /* 应答转发（服务器 → 主动方） */
-    MSG_HEARTBEAT        /* 心跳包 */
-} p2p_msg_type_t;
-
-/*
- * 消息头结构（9 字节，紧凑布局）
- *
- * ┌────────────────────────────────────────────────────┐
- * │  magic (4B)  │  type (1B)  │  length (4B)         │
- * └────────────────────────────────────────────────────┘
- */
-#pragma pack(push, 1)
-typedef struct {
-    uint32_t magic;      /* 魔数，固定为 P2P_SIGNAL_MAGIC */
-    uint8_t  type;       /* 消息类型 (p2p_msg_type_t) */
-    uint32_t length;     /* 负载长度（不含头部） */
-} p2p_msg_hdr_t;
-
-typedef struct {
-    char name[P2P_MAX_NAME];  /* peer 名称 */
-} p2p_msg_login_t;
-#pragma pack(pop)
+#include <p2pp.h>  /* RELAY 模式协议定义 */
 
 /* ============================================================================
  * 信令上下文
@@ -97,8 +54,8 @@ typedef enum {
  */
 typedef struct {
     int fd;                                      /* TCP socket 描述符 */
-    char my_name[P2P_MAX_NAME];                  /* 本地 peer 名称 */
-    char incoming_peer_name[P2P_MAX_NAME];       /* 收到请求时的对端名称 */
+    char my_name[P2P_PEER_ID_MAX];                  /* 本地 peer 名称 */
+    char incoming_peer_name[P2P_PEER_ID_MAX];       /* 收到请求时的对端名称 */
     struct sockaddr_in server_addr;              /* 服务器地址 */
     p2p_signal_relay_state_t state;              /* 连接状态 */
     uint64_t last_connect_attempt;               /* 最后连接尝试时间（毫秒） */

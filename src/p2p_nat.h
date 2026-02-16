@@ -1,5 +1,12 @@
 /*
- * NAT 穿透
+ * NAT 穿透（纯打洞逻辑）
+ *
+ * 本模块只负责 NAT 打洞的核心逻辑：
+ *   - PUNCH/PUNCH_ACK 交换
+ *   - PING/PONG 心跳保活
+ *   - 打洞状态管理
+ *
+ * 候选列表统一存储在 p2p_session 中，本模块从 session 读取远端候选进行打洞。
  */
 
 #ifndef P2P_NAT_H
@@ -8,33 +15,61 @@
 #include <p2p.h>
 #include <netinet/in.h>
 
+/* 前向声明 */
+struct p2p_session;
+
+/* 打洞状态 */
 enum {
-    NAT_IDLE = 0,
-    NAT_REGISTERING,
-    NAT_PUNCHING,
-    NAT_CONNECTED,
-    NAT_RELAY
+    NAT_IDLE = 0,       /* 未启动 */
+    NAT_PUNCHING,       /* 打洞中 */
+    NAT_CONNECTED,      /* 已连接 */
+    NAT_RELAY           /* 中继模式 */
 };
 
+/* 打洞上下文（精简版，候选列表在 session 中） */
 typedef struct {
-    int              state;
-    struct sockaddr_in server_addr;                     // 信令服务器套接口地址
-    struct sockaddr_in peer_pub_addr;                   // 外网地址套接口地址
-    struct sockaddr_in peer_priv_addr;                  // 内网地址套接口地址 (用于内网直接) */
-    char             local_peer_id[P2P_PEER_ID_MAX];    // 本端 ID
-    char             remote_peer_id[P2P_PEER_ID_MAX];   // 对端 ID
-    uint64_t         last_send_time;
-    uint64_t         last_recv_time;
-    int              punch_attempts;
-    uint64_t         punch_start;
-    int              verbose;                           // 是否输出详细日志
+    int              state;                                   /* 打洞状态 */
+    struct sockaddr_in peer_addr;                             /* 成功连接的对端地址 */
+    uint64_t         last_send_time;                          /* 上次发送时间 */
+    uint64_t         last_recv_time;                          /* 上次接收时间 */
+    int              punch_attempts;                          /* 打洞尝试次数 */
+    uint64_t         punch_start;                             /* 打洞开始时间 */
+    int              verbose;                                 /* 是否输出详细日志 */
 } nat_ctx_t;
 
+/*
+ * 初始化打洞上下文
+ */
 void nat_init(nat_ctx_t *n);
-int  nat_start(nat_ctx_t *n, const char *local_peer_id, const char *remote_peer_id,
-               int sock, const struct sockaddr_in *server, int verbose);
-int  nat_on_packet(nat_ctx_t *n, uint8_t type, const uint8_t *payload, int len,
-                   const struct sockaddr_in *from, int sock);
-int  nat_tick(nat_ctx_t *n, int sock);
+
+/*
+ * 开始打洞（从 session 的 remote_cands[] 读取目标）
+ *
+ * @param s       会话对象（包含远端候选列表）
+ * @param verbose 是否输出详细日志
+ * @return        0 成功，-1 无候选地址
+ */
+int nat_start_punch(struct p2p_session *s, int verbose);
+
+/*
+ * 处理打洞相关数据包 (PUNCH/PUNCH_ACK/PING/PONG)
+ *
+ * @param s       会话对象
+ * @param type    包类型
+ * @param payload 负载数据（可能为空）
+ * @param len     负载长度
+ * @param from    发送方地址
+ * @return        0 正常，-1 错误
+ */
+int nat_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len,
+                  const struct sockaddr_in *from);
+
+/*
+ * 周期调用，发送打洞包和心跳
+ *
+ * @param s    会话对象
+ * @return     0 正常，-1 连接超时断开
+ */
+int nat_tick(struct p2p_session *s);
 
 #endif /* P2P_NAT_H */

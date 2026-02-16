@@ -6,7 +6,7 @@ BUILDDIR = build
 TMPDIR   = $(BUILDDIR)/tmp
 SRCDIR   = src
 
-SRCS     = p2p_udp.c p2p_nat.c p2p_trans_reliable.c p2p_stream.c p2p_route.c p2p.c p2p_stun.c p2p_ice.c p2p_turn.c p2p_tcp_punch.c p2p_crypto.c p2p_trans_pseudotcp.c p2p_signal_relay.c p2p_signal_pubsub.c p2p_signal_protocol.c p2p_crypto_extra.c p2p_log.c
+SRCS     = p2p_udp.c p2p_nat.c p2p_trans_reliable.c p2p_stream.c p2p_route.c p2p.c p2p_stun.c p2p_ice.c p2p_turn.c p2p_tcp_punch.c p2p_crypto.c p2p_trans_pseudotcp.c p2p_signal_relay.c p2p_signal_pubsub.c p2p_signal_protocol.c p2p_signal_simple.c p2p_crypto_extra.c p2p_log.c
 
 # MbedTLS configuration (Prefer third_party/mbedtls if exists)
 MBEDTLS_DIR = third_party/mbedtls

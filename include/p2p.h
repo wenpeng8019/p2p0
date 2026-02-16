@@ -1,5 +1,5 @@
 /*
- * p2p.h — P2P Zero transmission library (public API)
+ * P2P Zero transmission library (public API)
  */
 
 #ifndef P2P_H
@@ -13,49 +13,6 @@ extern "C" {
 #endif
 ///////////////////////////////////////////////////////////////////////////////
 
-
-/* ---------- 包类型 ---------- */
-
-#define P2P_PKT_REGISTER        0x01            /* 向信令服务器请求的：注册到信令服务器 */ 
-#define P2P_PKT_PEER_INFO       0x02            /* 由信令服务器下发的：远程 pear 的信息（收到后开始打洞） */
-#define P2P_PKT_PUNCH           0x03            /* 向 pear 发送的：NAT 打洞包 */
-#define P2P_PKT_PUNCH_ACK       0x04            /* 从 pear 返回的：NAT 打洞确认 */
-#define P2P_PKT_PING            0x05            /* 向 pear 发送的：心跳包 */
-#define P2P_PKT_PONG            0x06            /* 从 pear 返回的：心跳响应 */
-#define P2P_PKT_DATA            0x10            /* 向 pear 发送的：数据包 */
-#define P2P_PKT_ACK             0x11            /* 从 pear 返回的：确认包 */
-#define P2P_PKT_FIN             0x12            /* 向 pear 发送的：结束包（无需应答） */
-#define P2P_PKT_RELAY_DATA      0x20            /* 从中继服务器收到的数据包 */
-#define P2P_PKT_ROUTE_PROBE     0x30            /* 向 pear 发送的：（同一子网）路由探测包 */
-#define P2P_PKT_ROUTE_PROBE_ACK 0x31            /* 从 pear 返回的：（同一子网）路由探测确认 */
-#define P2P_PKT_AUTH            0x40            /* 向 pear 发送的：安全握手包（连接成功后） */
-#define P2P_PKT_ICE_CANDIDATES  0x50            /* ICE 候选者交换 */
-
-/* ---------- P2P 包头 (4 bytes, 网络字节序) ---------- */
-
-typedef struct {
-    uint8_t  type;
-    uint8_t  flags;
-    uint16_t seq;                               /* 注意: 网络字节序 */
-} p2p_pkt_hdr_t;
-
-#define P2P_MTU       1200                      /* 安全的 UDP 负载 */
-#define P2P_HDR_SIZE  4
-#define P2P_MAX_PAYLOAD (P2P_MTU - P2P_HDR_SIZE)
-
-/* ---------- DATA 子包头 (5 bytes, 作为负载数据的一部分) ---------- */
-
-#define P2P_FRAG_FIRST  0x01
-#define P2P_FRAG_LAST   0x02
-#define P2P_FRAG_WHOLE  0x03                    /* FIRST | LAST */
-
-typedef struct {
-    uint32_t stream_offset;                     /* 注意: 网络字节序 */
-    uint8_t  frag_flags;
-} p2p_data_hdr_t;
-
-#define P2P_DATA_HDR_SIZE  5
-#define P2P_STREAM_PAYLOAD (P2P_MAX_PAYLOAD - P2P_DATA_HDR_SIZE)  /* 1191 */
 
 /* ---------- 连接模式 ---------- */
 
@@ -89,6 +46,7 @@ enum {
 
 /* ---------- 配置 ---------- */
 
+/* 最大 peer ID 长度 */
 #define P2P_PEER_ID_MAX  32
 
 /* 前向声明 */

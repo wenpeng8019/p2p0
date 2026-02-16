@@ -112,7 +112,7 @@ UDP 是无状态的，服务器无法识别"谁"发来的包。虽然有源地�
 3. 支持多客户端在同一 NAT 后面（共享公网 IP）
 4. 实现双向匹配逻辑
 
-#### SIMPLE_PKT_PEER_INFO (0x02)
+#### SIMPLE_PKT_PEER_INFO (0x03)
 
 - **方向**: 服务器 → 客户端
 - **Payload**: `[ pub_ip: 4 | pub_port: 2 | priv_ip: 4 | priv_port: 2 ]` (12 bytes)
@@ -214,13 +214,13 @@ on_peer_info(new_pub_addr, new_priv_addr) {
 
 当 NAT 打洞 5 秒仍失败时，客户端通过服务器中转。
 
-#### RELAY_DATA (0x20)
+#### RELAY_DATA (0x40)
 
 - **方向**: 客户端 → 服务器 → 客户端
 - **Payload**: `[ target_peer_id: 32 | original_data: N ]`
 - **说明**:
   - 服务器收到后，剥离 `target_peer_id`，将 `original_data` 转发给目标 peer
-  - 转发时保持包头 type=0x20，seq 保持不变
+  - 转发时保持包头 type=0x40，seq 保持不变
 
 ```
 Alice                  Server                    Bob
@@ -343,15 +343,15 @@ ICE 模式使用 **TCP 长连接**进行信令交换，支持完整的 ICE/SDP �
 
 | 值 | 名称 | 方向 | Payload | 说明 |
 |----|------|------|---------|------|
-| 1 | MSG_LOGIN | C→S | `name[32]` | 客户端登录 |
-| 2 | MSG_LOGIN_ACK | S→C | 无 | 登录确认 |
-| 3 | MSG_LIST | C→S | 无 | 请求在线用户列表 |
-| 4 | MSG_LIST_RES | S→C | `"alice,bob,..."` | 返回用户列表（逗号分隔） |
-| 5 | MSG_CONNECT | C→S | `target[32] + SDP[N]` | 发起连接请求 |
-| 6 | MSG_SIGNAL | S→C | `from[32] + SDP[N]` | 转发连接请求 |
-| 7 | MSG_SIGNAL_ANS | C→S | `target[32] + SDP[N]` | 返回应答 |
-| 8 | MSG_SIGNAL_RELAY | S→C | `from[32] + SDP[N]` | 转发应答 |
-| 9 | MSG_HEARTBEAT | C→S | 无 | 心跳（保持连接） |
+| 1 | P2P_RLY_LOGIN | C→S | `name[32]` | 客户端登录 |
+| 2 | P2P_RLY_LOGIN_ACK | S→C | 无 | 登录确认 |
+| 3 | P2P_RLY_LIST | C→S | 无 | 请求在线用户列表 |
+| 4 | P2P_RLY_LIST_RES | S→C | `"alice,bob,..."` | 返回用户列表（逗号分隔） |
+| 5 | P2P_RLY_CONNECT | C→S | `target[32] + SDP[N]` | 发起连接请求 |
+| 6 | P2P_RLY_OFFER | S→C | `from[32] + SDP[N]` | 转发连接请求 |
+| 7 | P2P_RLY_ANSWER | C→S | `target[32] + SDP[N]` | 返回应答 |
+| 8 | P2P_RLY_FORWARD | S→C | `from[32] + SDP[N]` | 转发应答 |
+| 9 | P2P_RLY_HEARTBEAT | C→S | 无 | 心跳（保持连接） |
 
 **注**：C = Client, S = Server
 
@@ -362,21 +362,21 @@ ICE 模式使用 **TCP 长连接**进行信令交换，支持完整的 ICE/SDP �
 ```
 Client                    Server
   |                          |
-  |--- MSG_LOGIN ----------->|
+  |--- P2P_RLY_LOGIN ----------->|
   |    name="alice"          |
   |                          | [记录客户端: fd→name]
-  |<-- MSG_LOGIN_ACK --------|
+  |<-- P2P_RLY_LOGIN_ACK --------|
   |                          |
 ```
 
-**MSG_LOGIN 结构**：
+**P2P_RLY_LOGIN 结构**：
 ```
 [ Header: 9 bytes ]
 [ name: 32 bytes ]  // 客户端名称（用于寻址）
 ```
 
 服务器响应：
-- 成功：发送 `MSG_LOGIN_ACK`，记录 `(fd → name)` 映射
+- 成功：发送 `P2P_RLY_LOGIN_ACK`，记录 `(fd → name)` 映射
 - 失败：关闭连接
 
 ### 2. 查询在线用户
@@ -384,13 +384,13 @@ Client                    Server
 ```
 Client                    Server
   |                          |
-  |--- MSG_LIST ------------>|
+  |--- P2P_RLY_LIST ------------>|
   |                          | [遍历在线客户端]
-  |<-- MSG_LIST_RES ---------|
+  |<-- P2P_RLY_LIST_RES ---------|
   |    "bob,charlie,..."     |
 ```
 
-**MSG_LIST_RES 结构**：
+**P2P_RLY_LIST_RES 结构**：
 ```
 [ Header: 9 bytes ]
 [ list: N bytes ]  // "bob,charlie,david," (逗号分隔)
@@ -401,17 +401,17 @@ Client                    Server
 ```
 Alice                   Server                    Bob
   |                        |                        |
-  |--- MSG_CONNECT ------->|                        |
+  |--- P2P_RLY_CONNECT ------->|                        |
   |  target="bob"          |                        |
   |  SDP(offer)            |                        |
-  |                        |--- MSG_SIGNAL -------->|
+  |                        |--- P2P_RLY_OFFER -------->|
   |                        |  from="alice"          |
   |                        |  SDP(offer)            |
   |                        |                        |
-  |                        |<-- MSG_SIGNAL_ANS -----|
+  |                        |<-- P2P_RLY_ANSWER -----|
   |                        |  target="alice"        |
   |                        |  SDP(answer)           |
-  |<-- MSG_SIGNAL_RELAY ---|                        |
+  |<-- P2P_RLY_FORWARD ---|                        |
   |  from="bob"            |                        |
   |  SDP(answer)           |                        |
   |                        |                        |
@@ -419,8 +419,8 @@ Alice                   Server                    Bob
 ```
 
 **关键点**：
-1. Alice 发送 `MSG_CONNECT` → 服务器转换为 `MSG_SIGNAL` 发给 Bob
-2. Bob 发送 `MSG_SIGNAL_ANS` → 服务器转换为 `MSG_SIGNAL_RELAY` 发给 Alice
+1. Alice 发送 `P2P_RLY_CONNECT` → 服务器转换为 `P2P_RLY_OFFER` 发给 Bob
+2. Bob 发送 `P2P_RLY_ANSWER` → 服务器转换为 `P2P_RLY_FORWARD` 发给 Alice
 3. **服务器不解析 SDP 内容**，仅作透明转发
 4. **转发时更换消息类型**（见消息转发规则）
 
@@ -428,10 +428,10 @@ Alice                   Server                    Bob
 
 | 收到消息 | 转发为 | 原因 |
 |---------|--------|------|
-| MSG_CONNECT | MSG_SIGNAL | 通知对方"有人要连接你" |
-| MSG_SIGNAL_ANS | MSG_SIGNAL_RELAY | 转发应答给发起方 |
+| P2P_RLY_CONNECT | P2P_RLY_OFFER | 通知对方"有人要连接你" |
+| P2P_RLY_ANSWER | P2P_RLY_FORWARD | 转发应答给发起方 |
 
-**包结构示例（MSG_CONNECT）**：
+**包结构示例（P2P_RLY_CONNECT）**：
 ```
 [ Header: magic=0x50325030, type=5, length=32+N ]
 [ target_name: 32 bytes ]  // 目标客户端名称
@@ -454,7 +454,7 @@ TCP 连接在以下情况**无法检测断开**：
 ```
 Client                    Server
   |                          |
-  |--- MSG_HEARTBEAT ------->|
+  |--- P2P_RLY_HEARTBEAT ------->|
   | (每 30 秒)               | [更新 last_active]
   |                          |
   |    (如果 60 秒无任何消息) |
@@ -490,7 +490,7 @@ cleanup_ice_clients() {
 ```
 
 **客户端建议**：
-- 每 30 秒发送一次 `MSG_HEARTBEAT`
+- 每 30 秒发送一次 `P2P_RLY_HEARTBEAT`
 - 服务器 60 秒超时，留出 2 倍余量
 - 也可通过其他消息（LIST、CONNECT 等）刷新活跃时间
 
@@ -511,7 +511,7 @@ cleanup_ice_clients() {
 ```c
 typedef struct {
     int fd;                  // TCP socket
-    char name[P2P_MAX_NAME]; // 客户端名称
+    char name[P2P_PEER_ID_MAX]; // 客户端名称
     time_t last_active;      // 最后活跃时间
     bool valid;              // 是否有效
 } ice_client_t;
@@ -573,32 +573,32 @@ while (1) {
 ```
 Alice (浏览器)          Server              Bob (浏览器)
      |                     |                      |
-     |--- MSG_LOGIN ------>|                      |
+     |--- P2P_RLY_LOGIN ------>|                      |
      |   name="alice"      |                      |
-     |<-- MSG_LOGIN_ACK ---|                      |
-     |                     |<---- MSG_LOGIN ------|
+     |<-- P2P_RLY_LOGIN_ACK ---|                      |
+     |                     |<---- P2P_RLY_LOGIN ------|
      |                     |     name="bob"       |
-     |                     |--- MSG_LOGIN_ACK --->|
+     |                     |--- P2P_RLY_LOGIN_ACK --->|
      |                     |                      |
-     |--- MSG_LIST ------->|                      |
-     |<-- MSG_LIST_RES ----|                      |
+     |--- P2P_RLY_LIST ------->|                      |
+     |<-- P2P_RLY_LIST_RES ----|                      |
      |   "bob"             |                      |
      |                     |                      |
      | [创建 RTCPeerConnection, 生成 offer]       |
      |                     |                      |
-     |--- MSG_CONNECT ---->|                      |
+     |--- P2P_RLY_CONNECT ---->|                      |
      |  target="bob"       |                      |
      |  SDP: {type:"offer"}|                      |
-     |                     |--- MSG_SIGNAL ------>|
+     |                     |--- P2P_RLY_OFFER ------>|
      |                     |  from="alice"        |
      |                     |  SDP: {type:"offer"} |
      |                     |                      |
      |                     | [创建 answer]        |
      |                     |                      |
-     |                     |<-- MSG_SIGNAL_ANS ---|
+     |                     |<-- P2P_RLY_ANSWER ---|
      |                     |  target="alice"      |
      |                     |  SDP: {type:"answer"}|
-     |<-- MSG_SIGNAL_RELAY-|                      |
+     |<-- P2P_RLY_FORWARD-|                      |
      |  from="bob"         |                      |
      |  SDP: {type:"answer"}                     |
      |                     |                      |
@@ -607,7 +607,7 @@ Alice (浏览器)          Server              Bob (浏览器)
      | [STUN/TURN 打洞]                           |
      |<===== 建立 P2P 连接 =======================>|
      |                     |                      |
-     |--- MSG_HEARTBEAT -->|<-- MSG_HEARTBEAT ----|
+     |--- P2P_RLY_HEARTBEAT -->|<-- P2P_RLY_HEARTBEAT ----|
      | (每 30 秒)          | (保持连接)           |
 ```
 
@@ -615,32 +615,44 @@ Alice (浏览器)          Server              Bob (浏览器)
 
 ### SIMPLE 模式（UDP）
 
-| 类型 | 名称 | 说明 |
-|------|------|------|
-| 0x01 | SIMPLE_PKT_REGISTER | 注册配对请求 |
-| 0x02 | SIMPLE_PKT_PEER_INFO | 对端地址通知 |
-| 0x03 | P2P_PKT_PUNCH | NAT 打洞 |
-| 0x04 | P2P_PKT_PUNCH_ACK | 打洞确认 |
-| 0x05 | P2P_PKT_PING | 保活 |
-| 0x06 | P2P_PKT_PONG | 保活响应 |
-| 0x10 | P2P_PKT_DATA | 应用数据 |
-| 0x11 | P2P_PKT_ACK | 数据确认 |
-| 0x12 | P2P_PKT_FIN | 连接关闭 |
-| 0x20 | P2P_PKT_RELAY_DATA | 服务器中转 |
+| 范围 | 分类 | 包类型 |
+|------|------|--------|
+| **0x01-0x0F** | **信令协议** | |
+| 0x01 | P2P_PKT_REGISTER | 注册配对请求 |
+| 0x02 | P2P_PKT_REGISTER_ACK | 注册确认 |
+| 0x03 | P2P_PKT_PEER_INFO | 对端地址通知 |
+| 0x04 | P2P_PKT_ICE_CANDIDATES | ICE 候选增量上报 |
+| **0x10-0x1F** | **打洞协议** | |
+| 0x10 | P2P_PKT_PUNCH | NAT 打洞 |
+| 0x11 | P2P_PKT_PUNCH_ACK | 打洞确认 |
+| **0x20-0x2F** | **保活协议** | |
+| 0x20 | P2P_PKT_PING | 心跳请求 |
+| 0x21 | P2P_PKT_PONG | 心跳响应 |
+| **0x30-0x3F** | **数据传输** | |
+| 0x30 | P2P_PKT_DATA | 应用数据 |
+| 0x31 | P2P_PKT_ACK | 数据确认 |
+| 0x32 | P2P_PKT_FIN | 连接关闭 |
+| **0x40-0x4F** | **中继协议** | |
+| 0x40 | P2P_PKT_RELAY_DATA | 服务器中转 |
+| **0x50-0x5F** | **路由探测** | |
+| 0x50 | P2P_PKT_ROUTE_PROBE | 路由探测 |
+| 0x51 | P2P_PKT_ROUTE_PROBE_ACK | 路由探测确认 |
+| **0x60-0x6F** | **安全协议** | |
+| 0x60 | P2P_PKT_AUTH | 安全握手 |
 
 ### ICE 模式（TCP）
 
 | 值 | 名称 | 说明 |
 |----|------|------|
-| 1 | MSG_LOGIN | 登录 |
-| 2 | MSG_LOGIN_ACK | 登录确认 |
-| 3 | MSG_LIST | 查询在线用户 |
-| 4 | MSG_LIST_RES | 用户列表响应 |
-| 5 | MSG_CONNECT | 发起连接 |
-| 6 | MSG_SIGNAL | 转发连接请求 |
-| 7 | MSG_SIGNAL_ANS | 返回应答 |
-| 8 | MSG_SIGNAL_RELAY | 转发应答 |
-| 9 | MSG_HEARTBEAT | 心跳 |
+| 1 | P2P_RLY_LOGIN | 登录 |
+| 2 | P2P_RLY_LOGIN_ACK | 登录确认 |
+| 3 | P2P_RLY_LIST | 查询在线用户 |
+| 4 | P2P_RLY_LIST_RES | 用户列表响应 |
+| 5 | P2P_RLY_CONNECT | 发起连接 |
+| 6 | P2P_RLY_OFFER | 转发连接请求 |
+| 7 | P2P_RLY_ANSWER | 返回应答 |
+| 8 | P2P_RLY_FORWARD | 转发应答 |
+| 9 | P2P_RLY_HEARTBEAT | 心跳 |
 
 ## 安全注意事项
 

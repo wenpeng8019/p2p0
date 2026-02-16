@@ -12,9 +12,11 @@
  *      - Server Reflexive: STUN 反射地址
  *      - Relay: TURN 中继地址
  *
- *   2. 候选交换（Trickle ICE）
- *      - 增量发送/接收候选地址
- *      - 无需等待全部收集完成
+ *   2. 候选交换
+ *      - 所有候选累积在 local_cands[] 数组
+ *      - 在 p2p_update() 中批量发送给信令服务器
+ *      - 周期性重发保证对端离线时不丢失
+ *      - 注：未使用 Trickle ICE 逐个发送（需要可靠信令通道）
  *
  *   3. 连通性检查（Connectivity Check）
  *      - 生成候选对检查列表
@@ -24,10 +26,14 @@
  *   4. 提名（Nomination）
  *      - 连通性检查成功后提名该路径
  *      - 切换到 COMPLETED 状态
+ *
+ * 注：本实现支持对端离线时的候选缓存，详见 p2p_ice.h 中
+ *    "与标准 ICE 的差异：离线候选缓存"章节。
  */
 
 #include "p2p_internal.h"
 #include "p2p_signal_protocol.h"
+#include "p2p_signal_relay.h"
 #include "p2p_udp.h"
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -324,34 +330,106 @@ void p2p_ice_tick(p2p_session_t *s) {
 }
 
 /* ============================================================================
- * Trickle ICE 支持
+ * Trickle ICE 候选交换（RFC 8838）
+ * ============================================================================
+ *
+ * 候选交换策略：
+ *
+ *   1. 即时发送：每收集到一个新候选，立即尝试发送
+ *      - 如果对方已在线，候选会立刻送达
+ *      - 减少连接建立延迟（无需等待全部收集完成）
+ *
+ *   2. 累积重发：所有候选累积在 local_cands[] 数组
+ *      - 如果对方离线，信令服务器会缓存候选
+ *      - p2p_update() 周期性批量重发所有候选（每 5 秒）
+ *      - 确保对方上线后能收到完整候选列表
+ *
+ * 【重要】本实现支持对端离线场景，详见 p2p_ice.h 中
+ *        "与标准 ICE 的差异：离线候选缓存"章节。
+ *
  * ============================================================================ */
 
 /*
- * 发送单个本地候选（Trickle ICE）
+ * 发送本地候选到信令服务器（仅用于 ICE/RELAY 模式）
  *
- * Trickle ICE（RFC 8838）允许增量发送候选地址，无需等待全部收集完成。
- * 这可以减少连接建立延迟。
+ * 通过 TCP 信令服务器转发候选地址给对端。
+ * 支持对端离线时的服务器缓存（与标准 ICE 的关键差异）。
  *
- * 候选载荷格式：
- *   [ type: 1B | ip: 4B | port: 2B ]
+ * 注意：SIMPLE 模式不使用此函数，候选通过 p2p_signal_simple 模块处理。
+ *
+ * @param s  会话对象
+ * @param c  候选地址
+ * @return   >0 对端在线，成功转发的候选数量
+ *            0 对端离线，候选已缓存在服务器（等待对端上线后推送）
+ *           -1 TCP 发送失败（网络错误）
  */
-void p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
+int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
 
-    uint8_t payload[16];
-    int offset = 0;
-    
-    /* 编码候选类型 */
-    payload[offset++] = (uint8_t)c->type;
-    
-    /* 编码 IP 和端口（网络字节序） */
-    memcpy(payload + offset, &c->addr.sin_addr.s_addr, 4);
-    memcpy(payload + offset + 4, &c->addr.sin_port, 2);
-    offset += 6;
+    /* 仅用于 ICE 模式（TCP 信令） */
+    if (s->signaling_mode != P2P_CONNECT_MODE_ICE) {
+        /* SIMPLE 模式不应调用此函数，候选通过 p2p_signal_simple 模块发送 */
+        printf("[ICE] Error: p2p_ice_send_local_candidate called in non-ICE mode\n");
+        return -1;
+    }
 
-    /* 发送到信令服务器 */
-    udp_send_packet(s->sock, &s->nat.server_addr, P2P_PKT_ICE_CANDIDATES, 0, 0, payload, offset);
-    printf("[ICE] [Trickle] Sent Candidate %d to peer\n", c->type);
+    /*
+     * TCP 模式：通过信令服务器转发，可以获得发送结果。
+     * - 连接已建立：立即发送，返回成功
+     * - 连接未建立：返回失败，标记 cands_pending_send
+     */
+    if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
+        printf("[ICE] [Trickle] TCP not connected, marking candidates pending\n");
+        s->cands_pending_send = 1;
+        return -1;
+    }
+
+    /* 构建负载 */
+    p2p_signaling_payload_t payload = {0};
+    strncpy(payload.sender, s->cfg.peer_id, 31);
+    if (s->remote_peer_id[0] != '\0') {
+        strncpy(payload.target, s->remote_peer_id, 31);
+    }
+
+    /* 如果有待发送的候选，发送所有本地候选 */
+    if (s->cands_pending_send && s->local_cand_cnt > 0) {
+        payload.candidate_count = s->local_cand_cnt;
+        memcpy(payload.candidates, s->local_cands, 
+               sizeof(p2p_candidate_t) * s->local_cand_cnt);
+        printf("[ICE] [Trickle] Pending detected, sending ALL %d candidates\n", s->local_cand_cnt);
+    } else {
+        /* 仅发送单个候选 */
+        payload.candidate_count = 1;
+        payload.candidates[0] = *c;
+    }
+
+    uint8_t buf[2048];
+    int n = p2p_signal_pack(&payload, buf, sizeof(buf));
+    if (n <= 0) {
+        printf("[ICE] [Trickle] Failed to pack candidate payload\n");
+        s->cands_pending_send = 1;
+        return -1;
+    }
+
+    /*
+     * 通过 TCP 发送到信令服务器（支持离线缓存，详见 p2p_ice.h）
+     *
+     * 返回值：
+     *   >0: 对端在线，候选已转发
+     *    0: 对端离线，候选已缓存在服务器
+     *   <0: 发送失败
+     */
+    int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
+    if (ret < 0) {
+        printf("[ICE] [Trickle] TCP send failed (ret=%d), marking candidates pending\n", ret);
+        s->cands_pending_send = 1;
+        return -1;
+    }
+
+    /* 发送成功（无论对端在线与否），清除 pending 标志 */
+    s->cands_pending_send = 0;
+    printf("[ICE] [Trickle] TCP sent %d candidate(s) to %s (online=%d)\n", 
+           payload.candidate_count, s->remote_peer_id, ret > 0 ? 1 : 0);
+    return ret > 0 ? ret : 0;
 }
 
 /* ============================================================================
@@ -410,8 +488,8 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                 printf("[ICE] Gathered Host Candidate: %s:%d (priority=0x%08x)\n", 
                        inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                 
-                /* 候选已添加到 local_cands，将在 p2p_update() 中定期批量发送 */
-                printf("[ICE] [Trickle] Candidate %d queued for batch sending\n", s->local_cand_cnt);
+                /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
+                p2p_ice_send_local_candidate(s, c);
             }
         }
         freeifaddrs(ifaddr);
@@ -592,7 +670,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
             if (s->sig_relay_ctx.incoming_peer_name[0] != '\0') {
                 p2p_signaling_payload_t answer;
                 memset(&answer, 0, sizeof(answer));
-                strncpy(answer.sender, s->sig_relay_ctx.my_name, P2P_MAX_NAME);
+                strncpy(answer.sender, s->sig_relay_ctx.my_name, P2P_PEER_ID_MAX);
                 answer.candidate_count = s->local_cand_cnt < P2P_MAX_CANDIDATES ? s->local_cand_cnt : P2P_MAX_CANDIDATES;
                 for (int i = 0; i < answer.candidate_count; i++) {
                     answer.candidates[i] = s->local_cands[i];

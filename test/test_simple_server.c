@@ -464,6 +464,187 @@ TEST(peer_pointer_states) {
 }
 
 /* ============================================================================
+ * 第六部分：REGISTER_ACK 协议测试
+ * ============================================================================ */
+
+// REGISTER_ACK 标志位 (与 include/p2p.h 保持一致)
+#define REGACK_PEER_ONLINE  0x01
+#define REGACK_CAN_CACHE    0x02
+#define REGACK_CACHE_FULL   0x04
+
+// 模拟服务器生成 REGISTER_ACK 响应
+typedef struct {
+    uint8_t status;     // 0 = success
+    uint8_t flags;      // REGACK_* 标志位
+} mock_register_ack_t;
+
+mock_register_ack_t server_gen_register_ack(const char *local_id, const char *remote_id) {
+    mock_register_ack_t ack = {0, 0};
+    
+    // 服务器总是支持候选缓存
+    ack.flags |= REGACK_CAN_CACHE;
+    
+    // 查找对端是否在线
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (g_simple_pairs[i].valid &&
+            strcmp(g_simple_pairs[i].local_peer_id, remote_id) == 0 &&
+            strcmp(g_simple_pairs[i].remote_peer_id, local_id) == 0) {
+            ack.flags |= REGACK_PEER_ONLINE;
+            TEST_LOG("  Found peer %s online", remote_id);
+            break;
+        }
+    }
+    
+    return ack;
+}
+
+TEST(register_ack_peer_offline) {
+    TEST_LOG("Testing REGISTER_ACK when peer is offline");
+    server_init();
+    
+    // Alice 注册，Bob 不在线
+    server_register("alice", "bob", "10.0.0.1", 5000);
+    
+    mock_register_ack_t ack = server_gen_register_ack("alice", "bob");
+    
+    ASSERT_EQ(ack.status, 0);
+    ASSERT((ack.flags & REGACK_PEER_ONLINE) == 0);  // peer 不在线
+    ASSERT((ack.flags & REGACK_CAN_CACHE) != 0);    // 支持缓存
+    TEST_LOG("  ✓ ACK flags: peer_online=0, can_cache=1");
+}
+
+TEST(register_ack_peer_online) {
+    TEST_LOG("Testing REGISTER_ACK when peer is online");
+    server_init();
+    
+    // Bob 先注册
+    server_register("bob", "alice", "10.0.0.2", 6000);
+    
+    // Alice 注册，此时 Bob 在线
+    server_register("alice", "bob", "10.0.0.1", 5000);
+    
+    mock_register_ack_t ack = server_gen_register_ack("alice", "bob");
+    
+    ASSERT_EQ(ack.status, 0);
+    ASSERT((ack.flags & REGACK_PEER_ONLINE) != 0);  // peer 在线
+    ASSERT((ack.flags & REGACK_CAN_CACHE) != 0);    // 支持缓存
+    TEST_LOG("  ✓ ACK flags: peer_online=1, can_cache=1");
+}
+
+/* ============================================================================
+ * 第七部分：ICE_CANDIDATES 增量上报测试
+ * ============================================================================ */
+
+#define MAX_CANDIDATES 8
+
+typedef struct {
+    uint32_t ip;
+    uint16_t port;
+    uint8_t  type;  // 0=host, 1=srflx, 2=relay
+} mock_candidate_t;
+
+// 扩展 simple_pair 结构以支持候选缓存
+typedef struct {
+    simple_pair_t base;
+    mock_candidate_t candidates[MAX_CANDIDATES];
+    int candidate_count;
+} simple_pair_ext_t;
+
+static simple_pair_ext_t g_ext_pairs[MAX_PEERS];
+
+void ext_server_init(void) {
+    memset(g_ext_pairs, 0, sizeof(g_ext_pairs));
+    TEST_LOG("Extended mock server initialized (with candidate cache)");
+}
+
+int ext_server_add_candidate(const char *local_id, const char *remote_id,
+                              uint32_t ip, uint16_t port, uint8_t type) {
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (g_ext_pairs[i].base.valid &&
+            strcmp(g_ext_pairs[i].base.local_peer_id, local_id) == 0 &&
+            strcmp(g_ext_pairs[i].base.remote_peer_id, remote_id) == 0) {
+            
+            if (g_ext_pairs[i].candidate_count >= MAX_CANDIDATES) {
+                TEST_LOG("  Candidate cache full for %s->%s", local_id, remote_id);
+                return -1;
+            }
+            
+            int idx = g_ext_pairs[i].candidate_count++;
+            g_ext_pairs[i].candidates[idx].ip = ip;
+            g_ext_pairs[i].candidates[idx].port = port;
+            g_ext_pairs[i].candidates[idx].type = type;
+            
+            TEST_LOG("  Added candidate %d for %s->%s: type=%d", 
+                    idx, local_id, remote_id, type);
+            return idx;
+        }
+    }
+    
+    // 创建新记录
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (!g_ext_pairs[i].base.valid) {
+            strncpy(g_ext_pairs[i].base.local_peer_id, local_id, P2P_PEER_ID_MAX - 1);
+            strncpy(g_ext_pairs[i].base.remote_peer_id, remote_id, P2P_PEER_ID_MAX - 1);
+            g_ext_pairs[i].base.valid = true;
+            g_ext_pairs[i].base.last_seen = time(NULL);
+            g_ext_pairs[i].candidate_count = 1;
+            g_ext_pairs[i].candidates[0].ip = ip;
+            g_ext_pairs[i].candidates[0].port = port;
+            g_ext_pairs[i].candidates[0].type = type;
+            
+            TEST_LOG("  Created record with first candidate for %s->%s", local_id, remote_id);
+            return 0;
+        }
+    }
+    
+    return -1;
+}
+
+TEST(ice_candidates_incremental) {
+    TEST_LOG("Testing ICE_CANDIDATES incremental upload");
+    ext_server_init();
+    
+    // 模拟客户端逐步上报候选
+    // 第一次：上报 host 候选
+    int ret1 = ext_server_add_candidate("alice", "bob", 0x0A000001, 5000, 0);
+    ASSERT_EQ(ret1, 0);
+    ASSERT_EQ(g_ext_pairs[0].candidate_count, 1);
+    TEST_LOG("  ✓ Added host candidate");
+    
+    // 第二次：上报 srflx 候选
+    int ret2 = ext_server_add_candidate("alice", "bob", 0x01020304, 12345, 1);
+    ASSERT_EQ(ret2, 1);
+    ASSERT_EQ(g_ext_pairs[0].candidate_count, 2);
+    TEST_LOG("  ✓ Added srflx candidate");
+    
+    // 第三次：上报 relay 候选
+    int ret3 = ext_server_add_candidate("alice", "bob", 0xC0A80001, 3478, 2);
+    ASSERT_EQ(ret3, 2);
+    ASSERT_EQ(g_ext_pairs[0].candidate_count, 3);
+    TEST_LOG("  ✓ Added relay candidate");
+    
+    TEST_LOG("  ✓ Incremental upload completed (3 candidates)");
+}
+
+TEST(ice_candidates_cache_full) {
+    TEST_LOG("Testing ICE_CANDIDATES cache full scenario");
+    ext_server_init();
+    
+    // 填满候选缓存
+    for (int i = 0; i < MAX_CANDIDATES; i++) {
+        int ret = ext_server_add_candidate("alice", "bob", 0x0A000000 + i, 5000 + i, 0);
+        ASSERT(ret >= 0);
+    }
+    ASSERT_EQ(g_ext_pairs[0].candidate_count, MAX_CANDIDATES);
+    TEST_LOG("  Filled %d candidates", MAX_CANDIDATES);
+    
+    // 尝试添加更多候选，应该失败
+    int ret = ext_server_add_candidate("alice", "bob", 0x0A0000FF, 9999, 0);
+    ASSERT_EQ(ret, -1);
+    TEST_LOG("  ✓ Cache full, additional candidate rejected");
+}
+
+/* ============================================================================
  * 主函数
  * ============================================================================ */
 
@@ -497,6 +678,16 @@ int main(void) {
     printf("\nPart 5: Peer Pointer State Machine\n");
     printf("----------------------------------------\n");
     RUN_TEST(peer_pointer_states);
+    
+    printf("\nPart 6: REGISTER_ACK Protocol\n");
+    printf("----------------------------------------\n");
+    RUN_TEST(register_ack_peer_offline);
+    RUN_TEST(register_ack_peer_online);
+    
+    printf("\nPart 7: ICE_CANDIDATES Protocol\n");
+    printf("----------------------------------------\n");
+    RUN_TEST(ice_candidates_incremental);
+    RUN_TEST(ice_candidates_cache_full);
     
     printf("\n");
     TEST_SUMMARY();

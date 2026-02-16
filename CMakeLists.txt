@@ -33,6 +33,7 @@ set(LIB_SRCS
     src/p2p_crypto_extra.c
     src/p2p_signal_pubsub.c
     src/p2p_signal_protocol.c
+    src/p2p_signal_simple.c
     src/p2p_log.c
 )
 

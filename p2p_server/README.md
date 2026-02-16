@@ -50,11 +50,11 @@ make p2p_server
 ./p2p_server/p2p_server [端口, 默认 8888]
 ```
 
-## 4. 协议简介 (protocol.h)
+## 4. 协议简介 (p2pp.h)
 采用简单的二进制协议：
 `[Magic: 4 bytes] [Type: 1 byte] [Payload Length: 4 bytes] [Payload: N bytes]`
 
 支持的消息类型：
-- `MSG_LOGIN`: 注册 Peer ID。
-- `MSG_LIST`: 获取当前在线列表。
-- `MSG_SIGNAL`: 透传信令数据。
+- `P2P_RLY_LOGIN`: 注册 Peer ID。
+- `P2P_RLY_LIST`: 获取当前在线列表。
+- `P2P_RLY_OFFER`: 透传信令数据。

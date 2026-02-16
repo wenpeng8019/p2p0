@@ -13,7 +13,8 @@
  */
 
 #include "test_framework.h"
-#include "../p2p_server/protocol.h"
+#include <p2p.h>                /* 公共 API */
+#include <p2pp.h>               /* 协议定义 */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -37,7 +38,7 @@ static bool g_verbose = true;
 
 typedef struct {
     int fd;
-    char name[P2P_MAX_NAME];
+    char name[P2P_PEER_ID_MAX];
     time_t last_active;
     bool valid;
 } mock_relay_client_t;
@@ -57,7 +58,7 @@ int mock_client_register(const char *name) {
     
     int idx = g_mock_client_count++;
     g_mock_clients[idx].fd = idx + 100;  // 虚拟 fd
-    strncpy(g_mock_clients[idx].name, name, P2P_MAX_NAME);
+    strncpy(g_mock_clients[idx].name, name, P2P_PEER_ID_MAX);
     g_mock_clients[idx].last_active = time(NULL);
     g_mock_clients[idx].valid = true;
     
@@ -69,7 +70,7 @@ int mock_client_register(const char *name) {
 int mock_server_handle_login(int fd, const char *name) {
     for (int i = 0; i < g_mock_client_count; i++) {
         if (g_mock_clients[i].fd == fd) {
-            strncpy(g_mock_clients[i].name, name, P2P_MAX_NAME);
+            strncpy(g_mock_clients[i].name, name, P2P_PEER_ID_MAX);
             TEST_LOG("Server: Client fd=%d logged in as '%s'", fd, name);
             return 0;
         }
@@ -98,7 +99,7 @@ int mock_server_get_user_list(int requesting_fd, char *buffer, int buf_size) {
     for (int i = 0; i < g_mock_client_count; i++) {
         if (g_mock_clients[i].valid && g_mock_clients[i].fd != requesting_fd) {
             int remaining = buf_size - offset;
-            if (remaining < P2P_MAX_NAME + 2) break;
+            if (remaining < P2P_PEER_ID_MAX + 2) break;
             
             int n = snprintf(buffer + offset, remaining, "%s,", 
                            g_mock_clients[i].name);
@@ -147,25 +148,25 @@ int mock_server_check_timeout(int timeout_sec) {
 
 TEST(protocol_header_size) {
     TEST_LOG("Testing protocol header size");
-    ASSERT_EQ(sizeof(p2p_msg_hdr_t), 9);  // 4 + 1 + 4 bytes
+    ASSERT_EQ(sizeof(p2p_relay_hdr_t), 9);  // 4 + 1 + 4 bytes
 }
 
 TEST(protocol_magic_constant) {
-    TEST_LOG("Testing magic constant: 0x%08X", P2P_SIGNAL_MAGIC);
-    ASSERT_EQ(P2P_SIGNAL_MAGIC, 0x50325030);  // "P2P0"
+    TEST_LOG("Testing magic constant: 0x%08X", P2P_RLY_MAGIC);
+    ASSERT_EQ(P2P_RLY_MAGIC, 0x50325030);  // "P2P0"
 }
 
 TEST(protocol_message_types) {
     TEST_LOG("Validating message type enums");
-    ASSERT_EQ(MSG_LOGIN, 1);
-    ASSERT_EQ(MSG_LOGIN_ACK, 2);
-    ASSERT_EQ(MSG_LIST, 3);
-    ASSERT_EQ(MSG_LIST_RES, 4);
-    ASSERT_EQ(MSG_CONNECT, 5);
-    ASSERT_EQ(MSG_SIGNAL, 6);
-    ASSERT_EQ(MSG_SIGNAL_ANS, 7);
-    ASSERT_EQ(MSG_SIGNAL_RELAY, 8);
-    ASSERT_EQ(MSG_HEARTBEAT, 9);
+    ASSERT_EQ(P2P_RLY_LOGIN, 1);
+    ASSERT_EQ(P2P_RLY_LOGIN_ACK, 2);
+    ASSERT_EQ(P2P_RLY_LIST, 3);
+    ASSERT_EQ(P2P_RLY_LIST_RES, 4);
+    ASSERT_EQ(P2P_RLY_CONNECT, 5);
+    ASSERT_EQ(P2P_RLY_OFFER, 6);
+    ASSERT_EQ(P2P_RLY_ANSWER, 7);
+    ASSERT_EQ(P2P_RLY_FORWARD, 8);
+    ASSERT_EQ(P2P_RLY_HEARTBEAT, 9);
 }
 
 /* ============================================================================
@@ -173,27 +174,27 @@ TEST(protocol_message_types) {
  * ============================================================================ */
 
 TEST(message_relay_connect_to_signal) {
-    TEST_LOG("Testing: MSG_CONNECT -> MSG_SIGNAL relay");
+    TEST_LOG("Testing: P2P_RLY_CONNECT -> P2P_RLY_OFFER relay");
     
-    uint8_t client_msg = MSG_CONNECT;
-    uint8_t expected_relay = MSG_SIGNAL;
-    uint8_t actual_relay = (client_msg == MSG_CONNECT) ? MSG_SIGNAL : MSG_SIGNAL_RELAY;
+    uint8_t client_msg = P2P_RLY_CONNECT;
+    uint8_t expected_relay = P2P_RLY_OFFER;
+    uint8_t actual_relay = (client_msg == P2P_RLY_CONNECT) ? P2P_RLY_OFFER : P2P_RLY_FORWARD;
     
-    TEST_LOG("  Client sends: MSG_CONNECT(%d)", client_msg);
-    TEST_LOG("  Server relays: MSG_SIGNAL(%d)", actual_relay);
+    TEST_LOG("  Client sends: P2P_RLY_CONNECT(%d)", client_msg);
+    TEST_LOG("  Server relays: P2P_RLY_OFFER(%d)", actual_relay);
     
     ASSERT_EQ(actual_relay, expected_relay);
 }
 
 TEST(message_relay_answer_to_relay) {
-    TEST_LOG("Testing: MSG_SIGNAL_ANS -> MSG_SIGNAL_RELAY relay");
+    TEST_LOG("Testing: P2P_RLY_ANSWER -> P2P_RLY_FORWARD relay");
     
-    uint8_t client_msg = MSG_SIGNAL_ANS;
-    uint8_t expected_relay = MSG_SIGNAL_RELAY;
-    uint8_t actual_relay = (client_msg == MSG_CONNECT) ? MSG_SIGNAL : MSG_SIGNAL_RELAY;
+    uint8_t client_msg = P2P_RLY_ANSWER;
+    uint8_t expected_relay = P2P_RLY_FORWARD;
+    uint8_t actual_relay = (client_msg == P2P_RLY_CONNECT) ? P2P_RLY_OFFER : P2P_RLY_FORWARD;
     
-    TEST_LOG("  Client sends: MSG_SIGNAL_ANS(%d)", client_msg);
-    TEST_LOG("  Server relays: MSG_SIGNAL_RELAY(%d)", actual_relay);
+    TEST_LOG("  Client sends: P2P_RLY_ANSWER(%d)", client_msg);
+    TEST_LOG("  Server relays: P2P_RLY_FORWARD(%d)", actual_relay);
     
     ASSERT_EQ(actual_relay, expected_relay);
 }
@@ -202,16 +203,16 @@ TEST(message_flow_complete) {
     TEST_LOG("Testing complete SDP exchange message flow");
     
     // Alice 发起连接
-    uint8_t step1_client = MSG_CONNECT;
-    uint8_t step1_relay = (step1_client == MSG_CONNECT) ? MSG_SIGNAL : MSG_SIGNAL_RELAY;
-    TEST_LOG("  Step 1: Alice MSG_CONNECT -> Server MSG_SIGNAL to Bob");
-    ASSERT_EQ(step1_relay, MSG_SIGNAL);
+    uint8_t step1_client = P2P_RLY_CONNECT;
+    uint8_t step1_relay = (step1_client == P2P_RLY_CONNECT) ? P2P_RLY_OFFER : P2P_RLY_FORWARD;
+    TEST_LOG("  Step 1: Alice P2P_RLY_CONNECT -> Server P2P_RLY_OFFER to Bob");
+    ASSERT_EQ(step1_relay, P2P_RLY_OFFER);
     
     // Bob 应答
-    uint8_t step2_client = MSG_SIGNAL_ANS;
-    uint8_t step2_relay = (step2_client == MSG_CONNECT) ? MSG_SIGNAL : MSG_SIGNAL_RELAY;
-    TEST_LOG("  Step 2: Bob MSG_SIGNAL_ANS -> Server MSG_SIGNAL_RELAY to Alice");
-    ASSERT_EQ(step2_relay, MSG_SIGNAL_RELAY);
+    uint8_t step2_client = P2P_RLY_ANSWER;
+    uint8_t step2_relay = (step2_client == P2P_RLY_CONNECT) ? P2P_RLY_OFFER : P2P_RLY_FORWARD;
+    TEST_LOG("  Step 2: Bob P2P_RLY_ANSWER -> Server P2P_RLY_FORWARD to Alice");
+    ASSERT_EQ(step2_relay, P2P_RLY_FORWARD);
     
     ASSERT(step1_relay != step2_relay);
 }
@@ -223,22 +224,22 @@ TEST(message_flow_complete) {
 TEST(login_message_structure) {
     TEST_LOG("Testing LOGIN message structure");
     
-    p2p_msg_hdr_t login_hdr = {
-        P2P_SIGNAL_MAGIC,
-        MSG_LOGIN,
-        sizeof(p2p_msg_login_t)
+    p2p_relay_hdr_t login_hdr = {
+        P2P_RLY_MAGIC,
+        P2P_RLY_LOGIN,
+        sizeof(p2p_relay_login_t)
     };
     
-    p2p_msg_login_t login_data;
-    strncpy(login_data.name, "alice", P2P_MAX_NAME);
+    p2p_relay_login_t login_data;
+    strncpy(login_data.name, "alice", P2P_PEER_ID_MAX);
     
     TEST_LOG("  Header: magic=0x%08X, type=%d, length=%d", 
             login_hdr.magic, login_hdr.type, login_hdr.length);
     TEST_LOG("  Login name: '%s'", login_data.name);
     
-    ASSERT_EQ(login_hdr.magic, P2P_SIGNAL_MAGIC);
-    ASSERT_EQ(login_hdr.type, MSG_LOGIN);
-    ASSERT_EQ(login_hdr.length, sizeof(p2p_msg_login_t));
+    ASSERT_EQ(login_hdr.magic, P2P_RLY_MAGIC);
+    ASSERT_EQ(login_hdr.type, P2P_RLY_LOGIN);
+    ASSERT_EQ(login_hdr.length, sizeof(p2p_relay_login_t));
     ASSERT(strcmp(login_data.name, "alice") == 0);
 }
 
@@ -249,8 +250,8 @@ TEST(complete_login_flow) {
     int client_fd = mock_client_register("unknown");
     
     // 客户端发送 LOGIN
-    p2p_msg_login_t login_data;
-    strncpy(login_data.name, "alice", P2P_MAX_NAME);
+    p2p_relay_login_t login_data;
+    strncpy(login_data.name, "alice", P2P_PEER_ID_MAX);
     TEST_LOG("  Client fd=%d sends LOGIN (name='alice')", client_fd);
     
     // 服务器处理登录
@@ -262,9 +263,9 @@ TEST(complete_login_flow) {
     TEST_LOG("  Server confirmed: client is now 'alice'");
     
     // 服务器发送 LOGIN_ACK
-    p2p_msg_hdr_t ack = {P2P_SIGNAL_MAGIC, MSG_LOGIN_ACK, 0};
+    p2p_relay_hdr_t ack = {P2P_RLY_MAGIC, P2P_RLY_LOGIN_ACK, 0};
     TEST_LOG("  Server sends LOGIN_ACK");
-    ASSERT_EQ(ack.type, MSG_LOGIN_ACK);
+    ASSERT_EQ(ack.type, P2P_RLY_LOGIN_ACK);
 }
 
 /* ============================================================================
@@ -317,16 +318,16 @@ TEST(connect_message_structure) {
     const char *sdp = "v=0\r\no=- 123 IN IP4 10.0.0.1\r\n";
     uint32_t sdp_len = strlen(sdp);
     
-    p2p_msg_hdr_t hdr = {
-        P2P_SIGNAL_MAGIC,
-        MSG_CONNECT,
-        P2P_MAX_NAME + sdp_len
+    p2p_relay_hdr_t hdr = {
+        P2P_RLY_MAGIC,
+        P2P_RLY_CONNECT,
+        P2P_PEER_ID_MAX + sdp_len
     };
     
     TEST_LOG("  Target: '%s', SDP length: %d", target, sdp_len);
     TEST_LOG("  Total payload: %d bytes", hdr.length);
     
-    ASSERT_EQ(hdr.length, P2P_MAX_NAME + sdp_len);
+    ASSERT_EQ(hdr.length, P2P_PEER_ID_MAX + sdp_len);
 }
 
 TEST(complete_sdp_exchange_flow) {
@@ -339,23 +340,23 @@ TEST(complete_sdp_exchange_flow) {
     // 步骤 1: Alice 发送 CONNECT 给 Bob
     TEST_LOG("  [1] Alice sends CONNECT(target=bob, SDP_OFFER)");
     
-    char connect_payload[P2P_MAX_NAME + 20];
+    char connect_payload[P2P_PEER_ID_MAX + 20];
     memset(connect_payload, 0, sizeof(connect_payload));
-    strncpy(connect_payload, "bob", P2P_MAX_NAME);
-    strcpy(connect_payload + P2P_MAX_NAME, "SDP_OFFER_DATA");
+    strncpy(connect_payload, "bob", P2P_PEER_ID_MAX);
+    strcpy(connect_payload + P2P_PEER_ID_MAX, "SDP_OFFER_DATA");
     
     // 步骤 2: 服务器查找 Bob
     int target_fd = mock_server_find_client("bob");
     ASSERT_EQ(target_fd, bob_fd);
     TEST_LOG("  [2] Server found Bob (fd=%d)", target_fd);
     
-    // 步骤 3: 服务器转发为 MSG_SIGNAL 给 Bob
-    TEST_LOG("  [3] Server relays as MSG_SIGNAL to Bob");
+    // 步骤 3: 服务器转发为 P2P_RLY_OFFER 给 Bob
+    TEST_LOG("  [3] Server relays as P2P_RLY_OFFER to Bob");
     
-    char signal_payload[P2P_MAX_NAME + 20];
+    char signal_payload[P2P_PEER_ID_MAX + 20];
     memset(signal_payload, 0, sizeof(signal_payload));
-    strncpy(signal_payload, "alice", P2P_MAX_NAME);  // 源客户端
-    strcpy(signal_payload + P2P_MAX_NAME, "SDP_OFFER_DATA");
+    strncpy(signal_payload, "alice", P2P_PEER_ID_MAX);  // 源客户端
+    strcpy(signal_payload + P2P_PEER_ID_MAX, "SDP_OFFER_DATA");
     
     ASSERT(strcmp(signal_payload, "alice") == 0);
     
@@ -367,13 +368,13 @@ TEST(complete_sdp_exchange_flow) {
     ASSERT_EQ(target_fd, alice_fd);
     TEST_LOG("  [5] Server found Alice (fd=%d)", target_fd);
     
-    // 步骤 6: 服务器转发为 MSG_SIGNAL_RELAY 给 Alice
-    TEST_LOG("  [6] Server relays as MSG_SIGNAL_RELAY to Alice");
+    // 步骤 6: 服务器转发为 P2P_RLY_FORWARD 给 Alice
+    TEST_LOG("  [6] Server relays as P2P_RLY_FORWARD to Alice");
     
-    char relay_payload[P2P_MAX_NAME + 20];
+    char relay_payload[P2P_PEER_ID_MAX + 20];
     memset(relay_payload, 0, sizeof(relay_payload));
-    strncpy(relay_payload, "bob", P2P_MAX_NAME);  // 源客户端
-    strcpy(relay_payload + P2P_MAX_NAME, "SDP_ANSWER_DATA");
+    strncpy(relay_payload, "bob", P2P_PEER_ID_MAX);  // 源客户端
+    strcpy(relay_payload + P2P_PEER_ID_MAX, "SDP_ANSWER_DATA");
     
     ASSERT(strcmp(relay_payload, "bob") == 0);
     TEST_LOG("  [✓] SDP exchange completed successfully");
@@ -386,10 +387,10 @@ TEST(complete_sdp_exchange_flow) {
 TEST(heartbeat_message_handling) {
     TEST_LOG("Testing heartbeat message handling");
     
-    p2p_msg_hdr_t hb = {P2P_SIGNAL_MAGIC, MSG_HEARTBEAT, 0};
+    p2p_relay_hdr_t hb = {P2P_RLY_MAGIC, P2P_RLY_HEARTBEAT, 0};
     
-    TEST_LOG("  Client sends MSG_HEARTBEAT (length=0)");
-    ASSERT_EQ(hb.type, MSG_HEARTBEAT);
+    TEST_LOG("  Client sends P2P_RLY_HEARTBEAT (length=0)");
+    ASSERT_EQ(hb.type, P2P_RLY_HEARTBEAT);
     ASSERT_EQ(hb.length, 0);
     
     // 服务器应该更新 last_active
@@ -490,14 +491,14 @@ TEST(multiple_clients_isolation) {
 TEST(invalid_magic_detection) {
     TEST_LOG("Testing invalid magic detection");
     
-    p2p_msg_hdr_t valid_hdr = {P2P_SIGNAL_MAGIC, MSG_LOGIN, 32};
-    p2p_msg_hdr_t invalid_hdr = {0x12345678, MSG_LOGIN, 32};
+    p2p_relay_hdr_t valid_hdr = {P2P_RLY_MAGIC, P2P_RLY_LOGIN, 32};
+    p2p_relay_hdr_t invalid_hdr = {0x12345678, P2P_RLY_LOGIN, 32};
     
     TEST_LOG("  Valid magic: 0x%08X", valid_hdr.magic);
     TEST_LOG("  Invalid magic: 0x%08X", invalid_hdr.magic);
     
-    ASSERT(valid_hdr.magic == P2P_SIGNAL_MAGIC);
-    ASSERT(invalid_hdr.magic != P2P_SIGNAL_MAGIC);
+    ASSERT(valid_hdr.magic == P2P_RLY_MAGIC);
+    ASSERT(invalid_hdr.magic != P2P_RLY_MAGIC);
 }
 
 TEST(client_not_found_handling) {
@@ -530,7 +531,7 @@ TEST(buffer_overflow_protection) {
     TEST_LOG("Testing buffer overflow protection");
     
     const int LIST_BUF_SIZE = 1024;
-    const int MAX_NAME = P2P_MAX_NAME;
+    const int MAX_NAME = P2P_PEER_ID_MAX;
     
     int offset = 1000;
     int remaining = LIST_BUF_SIZE - offset;

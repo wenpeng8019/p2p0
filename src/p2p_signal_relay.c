@@ -23,8 +23,8 @@
  *          │ TCP 长连接                                   │ TCP 长连接
  *          │                                              │
  *   ┌──────┴──────┐                                ┌──────┴──────┐
- *   │    Alice    │ ─────── MSG_CONNECT ──────────▶│     Bob     │
- *   │  (主动方)   │ ◀───── MSG_SIGNAL_RELAY ───────│   (被动方)  │
+ *   │    Alice    │ ─────── P2P_RLY_CONNECT ──────────▶│     Bob     │
+ *   │  (主动方)   │ ◀───── P2P_RLY_FORWARD ───────│   (被动方)  │
  *   └─────────────┘                                └─────────────┘
  *
  * ============================================================================
@@ -38,15 +38,15 @@
  * └─────────────────────────────────────────────────────────────────────────┘
  *
  * 消息类型：
- *   MSG_LOGIN        (1) → 客户端登录，携带 peer_name
- *   MSG_LOGIN_ACK    (2) → 服务器确认登录
- *   MSG_LIST         (3) → 请求在线用户列表
- *   MSG_LIST_RES     (4) → 返回在线用户列表
- *   MSG_CONNECT      (5) → 向目标方发起连接请求（服务器转为 MSG_SIGNAL 转发）
- *   MSG_SIGNAL       (6) → 服务器转发的连接请求（来自主动方）
- *   MSG_SIGNAL_ANS   (7) → 被动方应答（服务器转为 MSG_SIGNAL_RELAY 转发）
- *   MSG_SIGNAL_RELAY (8) → 服务器转发的应答（来自被动方）
- *   MSG_HEARTBEAT    (9) → 心跳包，保持 TCP 连接和 NAT 映射
+ *   P2P_RLY_LOGIN        (1) → 客户端登录，携带 peer_name
+ *   P2P_RLY_LOGIN_ACK    (2) → 服务器确认登录
+ *   P2P_RLY_LIST         (3) → 请求在线用户列表
+ *   P2P_RLY_LIST_RES     (4) → 返回在线用户列表
+ *   P2P_RLY_CONNECT      (5) → 向目标方发起连接请求（服务器转为 P2P_RLY_OFFER 转发）
+ *   P2P_RLY_OFFER       (6) → 服务器转发的连接请求（来自主动方）
+ *   P2P_RLY_ANSWER   (7) → 被动方应答（服务器转为 P2P_RLY_FORWARD 转发）
+ *   P2P_RLY_FORWARD (8) → 服务器转发的应答（来自被动方）
+ *   P2P_RLY_HEARTBEAT    (9) → 心跳包，保持 TCP 连接和 NAT 映射
  *
  * ============================================================================
  * 连接流程
@@ -54,17 +54,17 @@
  *
  *   Alice (主动方)                 Server                  Bob (被动方)
  *      │                             │                          │
- *      │── MSG_LOGIN ───────────────▶│                          │
- *      │◀─ MSG_LOGIN_ACK ────────────│                          │
+ *      │── P2P_RLY_LOGIN ───────────────▶│                          │
+ *      │◀─ P2P_RLY_LOGIN_ACK ────────────│                          │
  *      │                             │                          │
- *      │                             │◀──────── MSG_LOGIN ──────│
- *      │                             │───── MSG_LOGIN_ACK ─────▶│
+ *      │                             │◀──────── P2P_RLY_LOGIN ──────│
+ *      │                             │───── P2P_RLY_LOGIN_ACK ─────▶│
  *      │                             │                          │
- *      │── MSG_CONNECT(bob,offer) ──▶│                          │
- *      │                             │── MSG_SIGNAL(alice) ────▶│
+ *      │── P2P_RLY_CONNECT(bob,offer) ──▶│                          │
+ *      │                             │── P2P_RLY_OFFER(alice) ────▶│
  *      │                             │                          │
- *      │                             │◀─ MSG_SIGNAL_ANS(answer)─│
- *      │◀─ MSG_SIGNAL_RELAY(bob) ────│                          │
+ *      │                             │◀─ P2P_RLY_ANSWER(answer)─│
+ *      │◀─ P2P_RLY_FORWARD(bob) ────│                          │
  *      │                             │                          │
  *      ▼                             ▼                          ▼
  *   ICE 连接检查开始（使用交换的候选地址进行 UDP 打洞）
@@ -111,6 +111,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
 
@@ -122,8 +123,8 @@
  * 非阻塞模式，无数据时立即返回。
  *
  * 处理的消息类型：
- *   - MSG_SIGNAL:       来自主动方的连接请求（服务器转发）
- *   - MSG_SIGNAL_RELAY: 来自被动方的应答（服务器转发）
+ *   - P2P_RLY_OFFER:       来自主动方的连接请求（服务器转发）
+ *   - P2P_RLY_FORWARD: 来自被动方的应答（服务器转发）
  *
  * @param ctx  信令上下文
  * @param s    P2P 会话
@@ -132,26 +133,26 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
     if (ctx->fd < 0) return;
 
     // 接收信令服务数据包
-    p2p_msg_hdr_t hdr;
+    p2p_relay_hdr_t hdr;
     int n = recv(ctx->fd, &hdr, sizeof(hdr), 0);
     if (n == (int)sizeof(hdr)) {
-        if (hdr.magic != P2P_SIGNAL_MAGIC) return;
+        if (hdr.magic != P2P_RLY_MAGIC) return;
 
         // 信令服务器（中继）转发的，来自对方的请求
-        if (hdr.type == MSG_SIGNAL || hdr.type == MSG_SIGNAL_RELAY) {
+        if (hdr.type == P2P_RLY_OFFER || hdr.type == P2P_RLY_FORWARD) {
 
             // 读取对方 name，即来自谁的连接请求
-            char sender_name[P2P_MAX_NAME];
-            recv(ctx->fd, sender_name, P2P_MAX_NAME, 0);
+            char sender_name[P2P_PEER_ID_MAX];
+            recv(ctx->fd, sender_name, P2P_PEER_ID_MAX, 0);
             
             // 保存发送者名称（用于后续发送 answer）
-            if (hdr.type == MSG_SIGNAL) {
-                strncpy(ctx->incoming_peer_name, sender_name, P2P_MAX_NAME);
+            if (hdr.type == P2P_RLY_OFFER) {
+                strncpy(ctx->incoming_peer_name, sender_name, P2P_PEER_ID_MAX);
             }
             
             // 接收后面的负载数据
             // + 信令服务器只中继转发请求数据，所以数据结构是由对等双方自行约定
-            uint32_t payload_len = hdr.length - P2P_MAX_NAME;
+            uint32_t payload_len = hdr.length - P2P_PEER_ID_MAX;
             uint8_t *payload = malloc(payload_len);
             recv(ctx->fd, payload, payload_len, 0);
 
@@ -183,7 +184,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
  *   1. 创建 TCP socket
  *   2. 连接到服务器
  *   3. 设置为非阻塞模式
- *   4. 发送 MSG_LOGIN 包
+ *   4. 发送 P2P_RLY_LOGIN 包
  *   5. 状态转为 SIGNAL_CONNECTED
  *
  * @param ctx        信令上下文
@@ -233,13 +234,13 @@ int p2p_signal_relay_connect(p2p_signal_relay_ctx_t *ctx, const char *server_ip,
     fcntl(ctx->fd, F_SETFL, flags | O_NONBLOCK);
 
     // 初始化自己的 name
-    strncpy(ctx->my_name, my_name, P2P_MAX_NAME);
+    strncpy(ctx->my_name, my_name, P2P_PEER_ID_MAX);
 
     // 初始化登录数据包
-    p2p_msg_hdr_t hdr = {P2P_SIGNAL_MAGIC, MSG_LOGIN, sizeof(p2p_msg_login_t)};
-    p2p_msg_login_t login;
+    p2p_relay_hdr_t hdr = {P2P_RLY_MAGIC, P2P_RLY_LOGIN, sizeof(p2p_relay_login_t)};
+    p2p_relay_login_t login;
     memset(&login, 0, sizeof(login));
-    strncpy(login.name, my_name, P2P_MAX_NAME);
+    strncpy(login.name, my_name, P2P_PEER_ID_MAX);
 
     // 发送数据包
     send(ctx->fd, &hdr, sizeof(hdr), 0);
@@ -273,7 +274,8 @@ void p2p_signal_relay_close(p2p_signal_relay_ctx_t *ctx) {
  * 向目标对端发起连接请求
  * ============================================================================
  *
- * 发送 MSG_CONNECT 消息到信令服务器，服务器将其转为 MSG_SIGNAL 转发给目标方。
+ * 发送 P2P_RLY_CONNECT 消息到信令服务器，服务器将其转为 P2P_RLY_OFFER 转发给目标方。
+ * 服务器处理后返回 P2P_RLY_CONNECT_ACK 确认。
  *
  * 消息格式：
  *   [HDR: 9B] [target_name: 32B] [payload: N bytes]
@@ -285,7 +287,11 @@ void p2p_signal_relay_close(p2p_signal_relay_ctx_t *ctx) {
  * @param target_name 目标方 peer 名称
  * @param data        负载数据（ICE 候选等）
  * @param len         负载长度
- * @return            0 成功，-1 失败
+ * @return            >0 成功转发/存储的候选数量
+ *                    0  目标不在线（已存储等待转发）
+ *                    -1 TCP 发送失败或超时
+ *                    -2 服务器存储失败（容量不足）
+ *                    -3 服务器错误
  */
 int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len) {
     if (ctx->fd < 0) return -1;
@@ -293,27 +299,78 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
     // 构造连接请求数据包
     // + 该数据包发给信令服务器，并由信令服务器中继转发给目标方。
     //   这也意味着负载的数据结构由对等双方约定，和服务器无关
-    p2p_msg_hdr_t hdr = {P2P_SIGNAL_MAGIC, MSG_CONNECT, (uint32_t)(P2P_MAX_NAME + len)};
-    char target[P2P_MAX_NAME] = {0};
-    strncpy(target, target_name, P2P_MAX_NAME);
+    p2p_relay_hdr_t hdr = {P2P_RLY_MAGIC, P2P_RLY_CONNECT, (uint32_t)(P2P_PEER_ID_MAX + len)};
+    char target[P2P_PEER_ID_MAX] = {0};
+    strncpy(target, target_name, P2P_PEER_ID_MAX);
 
-    send(ctx->fd, &hdr, sizeof(hdr), 0);
-    send(ctx->fd, target, P2P_MAX_NAME, 0);
-
-    // 发送自定义负载数据
-    send(ctx->fd, data, len, 0);
+    if (send(ctx->fd, &hdr, sizeof(hdr), 0) != sizeof(hdr)) {
+        printf("Signaling [PUB]: Failed to send header\n");
+        return -1;
+    }
+    if (send(ctx->fd, target, P2P_PEER_ID_MAX, 0) != P2P_PEER_ID_MAX) {
+        printf("Signaling [PUB]: Failed to send target name\n");
+        return -1;
+    }
+    if (send(ctx->fd, data, len, 0) != len) {
+        printf("Signaling [PUB]: Failed to send payload\n");
+        return -1;
+    }
     
-    printf("Signaling [PUB]: Sent connect request to '%s' (%d bytes)\n", target_name, len);
+    printf("Signaling [PUB]: Sent connect request to '%s' (%d bytes), waiting for ACK...\n", target_name, len);
     fflush(stdout);
-    return 0;
+
+    /* 等待服务器 ACK（超时 2 秒） */
+    fd_set readfds;
+    struct timeval tv;
+    FD_ZERO(&readfds);
+    FD_SET(ctx->fd, &readfds);
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+
+    int ret = select(ctx->fd + 1, &readfds, NULL, NULL, &tv);
+    if (ret <= 0) {
+        printf("Signaling [PUB]: ACK timeout or select error\n");
+        return -1;  /* 超时或错误 */
+    }
+
+    /* 接收 ACK 头部 */
+    p2p_relay_hdr_t ack_hdr;
+    ssize_t n = recv(ctx->fd, &ack_hdr, sizeof(ack_hdr), 0);
+    if (n != sizeof(ack_hdr) || ack_hdr.magic != P2P_RLY_MAGIC || ack_hdr.type != P2P_RLY_CONNECT_ACK) {
+        printf("Signaling [PUB]: Invalid ACK header (n=%zd, type=%d)\n", n, ack_hdr.type);
+        return -1;
+    }
+
+    /* 接收 ACK 负载 */
+    p2p_relay_connect_ack_t ack_payload;
+    n = recv(ctx->fd, &ack_payload, sizeof(ack_payload), 0);
+    if (n != sizeof(ack_payload)) {
+        printf("Signaling [PUB]: Invalid ACK payload\n");
+        return -1;
+    }
+
+    printf("Signaling [PUB]: Received ACK (status=%d, candidates=%d)\n", 
+           ack_payload.status, ack_payload.candidates_stored);
+
+    /* 根据状态返回 */
+    switch (ack_payload.status) {
+        case 0:  /* 成功转发 */
+            return ack_payload.candidates_stored > 0 ? ack_payload.candidates_stored : 1;
+        case 1:  /* 目标不在线（已存储） */
+            return 0;
+        case 2:  /* 存储失败 */
+            return -2;
+        default: /* 服务器错误 */
+            return -3;
+    }
 }
 
 /* ============================================================================
  * 回复连接请求（发送 answer）
  * ============================================================================
  *
- * 被动方收到 MSG_SIGNAL 后，使用此函数发送 answer。
- * 发送 MSG_SIGNAL_ANS 消息，服务器将其转为 MSG_SIGNAL_RELAY 转发给主动方。
+ * 被动方收到 P2P_RLY_OFFER 后，使用此函数发送 answer。
+ * 发送 P2P_RLY_ANSWER 消息，服务器将其转为 P2P_RLY_FORWARD 转发给主动方。
  *
  * @param ctx         信令上下文
  * @param target_name 主动方 peer 名称（通常使用 ctx->incoming_peer_name）
@@ -324,14 +381,14 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
 int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len) {
     if (ctx->fd < 0) return -1;
 
-    // 构造 answer 数据包 (MSG_SIGNAL_ANS)
-    // 服务器会将其转换为 MSG_SIGNAL_RELAY 并转发给目标方
-    p2p_msg_hdr_t hdr = {P2P_SIGNAL_MAGIC, MSG_SIGNAL_ANS, (uint32_t)(P2P_MAX_NAME + len)};
-    char target[P2P_MAX_NAME] = {0};
-    strncpy(target, target_name, P2P_MAX_NAME);
+    // 构造 answer 数据包 (P2P_RLY_ANSWER)
+    // 服务器会将其转换为 P2P_RLY_FORWARD 并转发给目标方
+    p2p_relay_hdr_t hdr = {P2P_RLY_MAGIC, P2P_RLY_ANSWER, (uint32_t)(P2P_PEER_ID_MAX + len)};
+    char target[P2P_PEER_ID_MAX] = {0};
+    strncpy(target, target_name, P2P_PEER_ID_MAX);
 
     send(ctx->fd, &hdr, sizeof(hdr), 0);
-    send(ctx->fd, target, P2P_MAX_NAME, 0);
+    send(ctx->fd, target, P2P_PEER_ID_MAX, 0);
     send(ctx->fd, data, len, 0);
     
     printf("Signaling [PUB]: Sent answer to '%s' (%d bytes)\n", target_name, len);

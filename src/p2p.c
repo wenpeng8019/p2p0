@@ -2,6 +2,8 @@
 #include "p2p_internal.h"
 #include "p2p_udp.h"
 #include "p2p_signal_protocol.h"
+#include <ifaddrs.h>
+#include <net/if.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -180,6 +182,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
         s->remote_peer_id[0] = '\0';  // 空字符串表示接受任意连接
     }
     s->signal_sent = 0;
+    s->cands_pending_send = 0;
 
     switch (s->signaling_mode) {
 
@@ -194,10 +197,47 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
         }
 
         s->state = P2P_STATE_REGISTERING;
-        nat_start(&s->nat, s->cfg.peer_id, remote_peer_id, s->sock, &server_addr, s->cfg.verbose_nat_punch);
         
-        printf("[CONNECT] SIMPLE mode: registering <%s → %s>\n",
-               s->cfg.peer_id, remote_peer_id);
+        // 初始化 SIMPLE 信令上下文
+        signal_simple_init(&s->sig_simple_ctx);
+        
+        // 收集 Host 候选地址（SIMPLE 模式下只收集本地网卡地址，存入 session）
+        struct ifaddrs *ifaddr, *ifa;
+        if (getifaddrs(&ifaddr) == 0) {
+            for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+                if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET) continue;
+                if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+                if (s->local_cand_cnt >= P2P_MAX_CANDIDATES) break;
+                
+                struct sockaddr_in host_addr;
+                memcpy(&host_addr, ifa->ifa_addr, sizeof(host_addr));
+                
+                // 获取本地绑定端口
+                struct sockaddr_in loc;
+                socklen_t loclen = sizeof(loc);
+                getsockname(s->sock, (struct sockaddr *)&loc, &loclen);
+                host_addr.sin_port = loc.sin_port;
+                
+                // 直接添加到 session 的本地候选列表
+                s->local_cands[s->local_cand_cnt].type = P2P_CAND_HOST;
+                s->local_cands[s->local_cand_cnt].addr = host_addr;
+                s->local_cand_cnt++;
+                
+                printf("[SIMPLE] Added Host candidate: %s:%d\n",
+                       inet_ntoa(host_addr.sin_addr), ntohs(host_addr.sin_port));
+            }
+            freeifaddrs(ifaddr);
+        }
+        
+        // 初始化打洞上下文
+        nat_init(&s->nat);
+        
+        // 开始信令注册
+        signal_simple_start(s, s->cfg.peer_id, remote_peer_id, &server_addr,
+                            s->cfg.verbose_nat_punch);
+        
+        printf("[CONNECT] SIMPLE mode: registering <%s → %s> with %d candidates\n",
+               s->cfg.peer_id, remote_peer_id, s->local_cand_cnt);
         break;
     }
 
@@ -356,7 +396,7 @@ int p2p_update(p2p_session_t *s) {
 
         if (n < P2P_HDR_SIZE) continue;
 
-        p2p_pkt_hdr_t hdr;
+        p2p_packet_hdr_t hdr;
         pkt_hdr_decode(buf, &hdr);
 
         const uint8_t *payload = buf + P2P_HDR_SIZE;
@@ -369,14 +409,31 @@ int p2p_update(p2p_session_t *s) {
         // --------------------
     
         case P2P_PKT_REGISTER:
+            /* 忽略（服务器发给客户端的不会是 REGISTER） */
+            break;
+
+        case P2P_PKT_REGISTER_ACK:
+            /* SIMPLE 模式：服务器确认注册 */
+            if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE) {
+                signal_simple_on_packet(s, hdr.type, payload, payload_len, &from);
+            }
+            break;
 
         case P2P_PKT_PEER_INFO:
+            /* SIMPLE 模式：信令处理 → 打洞启动 */
+            if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE) {
+                if (signal_simple_on_packet(s, hdr.type, payload, payload_len, &from) == 0) {
+                    /* 远端候选已写入 session 的 remote_cands[]，直接启动打洞 */
+                    nat_start_punch(s, s->cfg.verbose_nat_punch);
+                }
+            }
+            break;
+
         case P2P_PKT_PUNCH:
         case P2P_PKT_PUNCH_ACK:
         case P2P_PKT_PING:
         case P2P_PKT_PONG:
-            nat_on_packet(&s->nat, hdr.type, payload, payload_len,
-                          &from, s->sock);
+            nat_on_packet(s, hdr.type, payload, payload_len, &from);
             break;
 
         // --------------------
@@ -476,26 +533,35 @@ int p2p_update(p2p_session_t *s) {
         s->nat.state == NAT_CONNECTED) {
         s->state = P2P_STATE_CONNECTED;
         s->path = P2P_PATH_PUNCH;
-        s->active_addr = s->nat.peer_pub_addr;
+        s->active_addr = s->nat.peer_addr;
         
         // 触发连接建立回调
         if (s->cfg.on_connected) {
             s->cfg.on_connected(s, s->cfg.userdata);
         }
 
+        // 查找远端 Host 候选（用于同子网检测）
+        struct sockaddr_in *peer_priv = NULL;
+        for (int i = 0; i < s->remote_cand_cnt; i++) {
+            if (s->remote_cands[i].type == P2P_CAND_HOST) {
+                peer_priv = &s->remote_cands[i].addr;
+                break;
+            }
+        }
+
         // 如果对方内网 IP 和自己属于同一个子网段内（且未禁用优化）
-        if (!s->cfg.disable_lan_shortcut && 
-            route_check_same_subnet(&s->route, &s->nat.peer_priv_addr)) {
-            struct sockaddr_in priv = s->nat.peer_priv_addr;
-            priv.sin_port = s->nat.peer_pub_addr.sin_port;
+        if (!s->cfg.disable_lan_shortcut && peer_priv &&
+            route_check_same_subnet(&s->route, peer_priv)) {
+            struct sockaddr_in priv = *peer_priv;
+            priv.sin_port = s->nat.peer_addr.sin_port;
             route_send_probe(&s->route, s->sock, &priv, 0);
             if (s->cfg.verbose_nat_punch) {
                 printf("[NAT_PUNCH] Same subnet detected, sent ROUTE_PROBE to %s:%d\n",
                        inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
                 fflush(stdout);
             }
-        } else if (s->cfg.disable_lan_shortcut && 
-                   route_check_same_subnet(&s->route, &s->nat.peer_priv_addr)) {
+        } else if (s->cfg.disable_lan_shortcut && peer_priv &&
+                   route_check_same_subnet(&s->route, peer_priv)) {
             if (s->cfg.verbose_nat_punch) {
                 printf("[NAT_PUNCH] Same subnet detected but LAN shortcut disabled, forcing NAT punch\n");
                 fflush(stdout);
@@ -507,7 +573,13 @@ int p2p_update(p2p_session_t *s) {
         s->nat.state == NAT_RELAY) {
         s->state = P2P_STATE_RELAY;
         s->path = P2P_PATH_RELAY;
-        s->active_addr = s->nat.server_addr;
+        /* RELAY 模式下使用信令服务器地址 */
+        if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE) {
+            s->active_addr = s->sig_simple_ctx.server_addr;
+        } else {
+            /* ICE 模式暂不支持 RELAY 回退 */
+            s->active_addr = s->nat.peer_addr;
+        }
     }
 
     // --------------------
@@ -557,10 +629,24 @@ int p2p_update(p2p_session_t *s) {
     }
 
     // --------------------
-    // 周期维护 NAT 机制状态机（保活，打洞重试）
+    // 周期维护 NAT/信令 状态机
     // --------------------
 
-    nat_tick(&s->nat, s->sock);
+    if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE) {
+        /* SIMPLE 模式：信令和打洞分开 tick */
+        if (s->sig_simple_ctx.state == SIGNAL_SIMPLE_REGISTERING ||
+            s->sig_simple_ctx.state == SIGNAL_SIMPLE_REGISTERED) {
+            /* 信令注册/等待阶段 */
+            signal_simple_tick(s);
+        }
+        if (s->nat.state != NAT_IDLE) {
+            /* 打洞/已连接阶段 */
+            nat_tick(s);
+        }
+    } else {
+        /* ICE/PUBSUB 模式：只调用 nat_tick 处理打洞 */
+        nat_tick(s);
+    }
 
     // --------------------
     // 周期维护 STUN 机制状态机（STUN 服务的流程）
@@ -597,7 +683,7 @@ int p2p_update(p2p_session_t *s) {
         // 重发条件：
         //   1. 有候选地址 且
         //   2. 未连接成功 且
-        //   3. (从未发送 或 超时 或 有新候选)
+        //   3. (从未发送 或 超时 或 有新候选 或 有待发送的候选)
         if (s->local_cand_cnt > 0 && 
             s->state == P2P_STATE_REGISTERING &&
             s->remote_peer_id[0] != '\0') {
@@ -614,6 +700,9 @@ int p2p_update(p2p_session_t *s) {
             } else if (s->local_cand_cnt > s->last_cand_cnt_sent) {
                 // 有新候选收集到（如 STUN 响应）
                 should_send = 1;
+            } else if (s->cands_pending_send) {
+                // 有待发送的候选（之前 TCP 发送失败）
+                should_send = 1;
             }
             
             if (should_send) {
@@ -627,13 +716,25 @@ int p2p_update(p2p_session_t *s) {
                 uint8_t buf[2048];
                 int n = p2p_signal_pack(&payload, buf, sizeof(buf));
                 if (n > 0) {
-                    p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
-                    s->signal_sent = 1;
-                    s->last_signal_time = now;
-                    s->last_cand_cnt_sent = s->local_cand_cnt;
-                    printf("[SIGNALING] %s ICE candidates (%d) to %s\n", 
-                           s->last_cand_cnt_sent > 0 ? "Resent" : "Sent",
-                           s->local_cand_cnt, s->remote_peer_id);
+                    int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
+                    /*
+                     * 返回值：
+                     *   >0: 成功转发的候选数量
+                     *    0: 目标不在线（已存储等待转发）
+                     *   <0: 失败（-1=超时, -2=容量不足, -3=服务器错误）
+                     */
+                    if (ret >= 0) {
+                        s->signal_sent = 1;
+                        s->last_signal_time = now;
+                        s->last_cand_cnt_sent = s->local_cand_cnt;
+                        s->cands_pending_send = 0;  /* 清除待发送标志 */
+                        printf("[SIGNALING] %s ICE candidates (%d) to %s (stored=%d)\n", 
+                               s->last_cand_cnt_sent > 0 ? "Resent" : "Sent",
+                               s->local_cand_cnt, s->remote_peer_id, ret);
+                    } else {
+                        s->cands_pending_send = 1;  /* TCP 发送失败，标记待重发 */
+                        printf("[SIGNALING] Failed to send candidates (ret=%d), will retry...\n", ret);
+                    }
                 }
             }
         }

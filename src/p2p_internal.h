@@ -62,6 +62,7 @@
 #define P2P_INTERNAL_H
 
 #include <p2p.h>
+#include <p2pp.h>           /* 协议定义 */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,6 +83,7 @@
 #include "p2p_route.h"         /* 路由表管理 */
 #include "p2p_stream.h"        /* 流式数据传输 */
 #include "p2p_transport.h"     /* 传输层抽象接口 */
+#include "p2p_udp.h"           /* UDP 传输层常量 (P2P_MTU, P2P_MAX_PAYLOAD) */
 #include "p2p_stun.h"          /* STUN 协议实现 */
 #include "p2p_crypto.h"        /* 加密功能 */
 #include "p2p_ice.h"           /* ICE 协议 */
@@ -90,7 +92,25 @@
 #include "p2p_thread.h"        /* 线程工具 */
 #include "p2p_signal_relay.h"  /* 中继模式信令 */
 #include "p2p_signal_pubsub.h" /* 发布/订阅模式信令 */
+#include "p2p_signal_simple.h" /* SIMPLE 模式信令 */
 #include "p2p_signal_protocol.h" /* 信令协议序列化 */
+
+/* ============================================================================
+ * 流层分片常量
+ * ============================================================================ */
+
+/* DATA 子包头 (5 bytes, 作为负载数据的一部分) */
+#define P2P_FRAG_FIRST    0x01
+#define P2P_FRAG_LAST     0x02
+#define P2P_FRAG_WHOLE    0x03              /* FIRST | LAST */
+
+typedef struct {
+    uint32_t stream_offset;                 /* 网络字节序 */
+    uint8_t  frag_flags;
+} p2p_data_hdr_t;
+
+#define P2P_DATA_HDR_SIZE   5
+#define P2P_STREAM_PAYLOAD  (P2P_MAX_PAYLOAD - P2P_DATA_HDR_SIZE)  /* 1191 */
 
 /* ============================================================================
  * 可靠传输层 (Reliable Transport Layer)
@@ -209,10 +229,12 @@ struct p2p_session {
     /* ======================== 信令上下文 ======================== */
     /*
      * 信令模块负责在两个对等体之间交换连接信息（候选地址、密钥等）。
-     * 支持两种模式：
-     *   - sig_relay_ctx:  中继模式，通过信令服务器转发
-     *   - sig_pubsub_ctx: 发布/订阅模式，通过 GitHub Gist
+     * 支持三种模式：
+     *   - sig_simple_ctx: SIMPLE模式，UDP 无状态信令
+     *   - sig_relay_ctx:  ICE模式，TCP 中继信令
+     *   - sig_pubsub_ctx: PUBSUB模式，通过 GitHub Gist
      */
+    signal_simple_ctx_t     sig_simple_ctx;     /* SIMPLE 模式信令上下文 */
     p2p_signal_relay_ctx_t  sig_relay_ctx;      /* ICE 模式信令上下文 */
     p2p_signal_pubsub_ctx_t sig_pubsub_ctx;     /* PUB/SUB 模式信令上下文 */
     int                     signaling_mode;     /* 信令模式 P2P_CONNECT_MODE_* */
@@ -220,6 +242,7 @@ struct p2p_session {
     int                     signal_sent;        /* 是否已发送初始信令 */
     uint64_t                last_signal_time;   /* 上次发送信令的时间戳 (ms) */
     int                     last_cand_cnt_sent; /* 上次发送时的候选数量 */
+    int                     cands_pending_send; /* 有待发送的候选（TCP 发送失败时置 1） */
 
     /* ======================== 传输层实例 ======================== */
     nat_ctx_t               nat;                /* NAT 穿透上下文 */

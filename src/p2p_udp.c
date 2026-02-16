@@ -16,7 +16,7 @@ void pkt_hdr_encode(uint8_t *buf, uint8_t type, uint8_t flags, uint16_t seq) {
     buf[3] = (uint8_t)(seq & 0xFF);
 }
 
-void pkt_hdr_decode(const uint8_t *buf, p2p_pkt_hdr_t *hdr) {
+void pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr) {
     hdr->type  = buf[0];
     hdr->flags = buf[1];
     hdr->seq   = ((uint16_t)buf[2] << 8) | buf[3];
