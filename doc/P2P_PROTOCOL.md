@@ -621,7 +621,6 @@ Alice (浏览器)          Server              Bob (浏览器)
 | 0x01 | P2P_PKT_REGISTER | 注册配对请求 |
 | 0x02 | P2P_PKT_REGISTER_ACK | 注册确认 |
 | 0x03 | P2P_PKT_PEER_INFO | 对端地址通知 |
-| 0x04 | P2P_PKT_ICE_CANDIDATES | ICE 候选增量上报 |
 | **0x10-0x1F** | **打洞协议** | |
 | 0x10 | P2P_PKT_PUNCH | NAT 打洞 |
 | 0x11 | P2P_PKT_PUNCH_ACK | 打洞确认 |

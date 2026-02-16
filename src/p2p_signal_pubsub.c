@@ -235,141 +235,6 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
 
 /*
  * ============================================================================
- * 周期性轮询 Gist
- * ============================================================================
- *
- * 轮询策略：
- *   - SUB 角色：每 5 秒轮询一次（快速检测 offer）
- *   - PUB 角色：每 10 秒轮询一次（等待 answer）
- *
- * 使用 raw URL 而非 API 以获取更好的缓存行为。
- *
- * @param ctx  信令上下文
- * @param s    P2P 会话
- */
-void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s) {
-    uint64_t now = time_ms();
-    
-    /* 根据角色设置不同的轮询间隔 */
-    int poll_interval = (ctx->role == P2P_SIGNAL_ROLE_SUB) ? 5000 : 10000;
-    uint64_t diff = now - ctx->last_poll;
-    
-    if (diff < (uint64_t)poll_interval) return;
-    ctx->last_poll = now;
-
-    /* 安全验证 */
-    if (!is_safe_string(ctx->channel_id)) {
-        P2P_LOG_ERROR("SIGNAL_PUBSUB", "Channel ID validation failed");
-        return;
-    }
-
-    /*
-     * 使用 curl 获取 Gist 原始内容
-     *
-     * 使用 raw URL 的优势：
-     *   - 响应体直接是文件内容（非 JSON API 格式）
-     *   - 更小的响应体
-     *   - 添加时间戳参数绕过 CDN 缓存
-     *
-     * TODO: 生产环境应使用 libcurl 替代 system()
-     */
-    char cmd[2048];
-    snprintf(cmd, sizeof(cmd), 
-        "curl -s -H \"Authorization: token %s\" -H \"Cache-Control: no-cache\" "
-        "\"https://gist.githubusercontent.com/raw/%s/p2p_signal.json?t=%llu\" > .gist_resp.json", 
-        ctx->auth_token, ctx->channel_id, (unsigned long long)now);
-    
-    int ret = system(cmd);
-    if (ret != 0) {
-        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "curl command failed");
-        return;
-    }
-
-    /*
-     * 解析 JSON：
-     *   - SUB 读取 "offer" 字段
-     *   - PUB 读取 "answer" 字段
-     */
-    const char *target_field = (ctx->role == P2P_SIGNAL_ROLE_SUB) ? "\"offer\"" : "\"answer\"";
-    
-    FILE *f = fopen(".gist_resp.json", "r");
-    if (!f) {
-        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "Cannot open response file");
-        return;
-    }
-    
-    /* 读取整个文件 */
-    char buffer[16384] = {0};
-    size_t total = 0;
-    size_t n;
-    while ((n = fread(buffer + total, 1, sizeof(buffer) - total - 1, f)) > 0) {
-        total += n;
-    }
-    fclose(f);
-    
-    /* 查找目标字段 */
-    char *field_start = strstr(buffer, target_field);
-    if (!field_start) {
-        return;  /* 字段不存在或为空 */
-    }
-    
-    /* 提取字段值（跳过引号） */
-    char *value_start = strchr(field_start + strlen(target_field), '\"');
-    if (!value_start) return;
-    value_start++;
-    
-    char *value_end = value_start;
-    while (*value_end && *value_end != '\"') {
-        value_end++;
-    }
-    
-    if (value_end - value_start < 10) {
-        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "Field %s is empty or too short", target_field);
-        return;
-    }
-    
-    /* 提取字段值 */
-    size_t value_len = value_end - value_start;
-    if (value_len > sizeof(buffer) - 1) value_len = sizeof(buffer) - 1;
-    
-    char content[16384];
-    memcpy(content, value_start, value_len);
-    content[value_len] = '\0';
-    
-    /*
-     * JSON 转义字符还原
-     *   \n  → 换行符
-     *   \\  → 反斜杠
-     *   \"  → 双引号
-     */
-    char *src = content;
-    char *dst = content;
-    while (*src) {
-        if (*src == '\\' && *(src+1) == 'n') {
-            *dst++ = '\n';
-            src += 2;
-        } else if (*src == '\\' && *(src+1) == '\\') {
-            *dst++ = '\\';
-            src += 2;
-        } else if (*src == '\\' && *(src+1) == '\"') {
-            *dst++ = '\"';
-            src += 2;
-        } else {
-            *dst++ = *src++;
-        }
-    }
-    *dst = '\0';
-    
-    /* 处理有效数据 */
-    if (strlen(content) > 10) {
-        P2P_LOG_INFO("SIGNAL_PUBSUB", "Processing %s (role=%s)", 
-                     target_field, ctx->role == P2P_SIGNAL_ROLE_PUB ? "PUB" : "SUB");
-        process_payload(ctx, s, content);
-    }
-}
-
-/*
- * ============================================================================
  * 发送信令数据到 Gist
  * ============================================================================
  *
@@ -553,3 +418,139 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     
     return (ret == 0) ? 0 : -1;
 }
+
+/*
+ * ============================================================================
+ * 周期性轮询 Gist
+ * ============================================================================
+ *
+ * 轮询策略：
+ *   - SUB 角色：每 5 秒轮询一次（快速检测 offer）
+ *   - PUB 角色：每 10 秒轮询一次（等待 answer）
+ *
+ * 使用 raw URL 而非 API 以获取更好的缓存行为。
+ *
+ * @param ctx  信令上下文
+ * @param s    P2P 会话
+ */
+void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s) {
+    uint64_t now = time_ms();
+
+    /* 根据角色设置不同的轮询间隔 */
+    int poll_interval = (ctx->role == P2P_SIGNAL_ROLE_SUB) ? 5000 : 10000;
+    uint64_t diff = now - ctx->last_poll;
+
+    if (diff < (uint64_t)poll_interval) return;
+    ctx->last_poll = now;
+
+    /* 安全验证 */
+    if (!is_safe_string(ctx->channel_id)) {
+        P2P_LOG_ERROR("SIGNAL_PUBSUB", "Channel ID validation failed");
+        return;
+    }
+
+    /*
+     * 使用 curl 获取 Gist 原始内容
+     *
+     * 使用 raw URL 的优势：
+     *   - 响应体直接是文件内容（非 JSON API 格式）
+     *   - 更小的响应体
+     *   - 添加时间戳参数绕过 CDN 缓存
+     *
+     * TODO: 生产环境应使用 libcurl 替代 system()
+     */
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd),
+             "curl -s -H \"Authorization: token %s\" -H \"Cache-Control: no-cache\" "
+             "\"https://gist.githubusercontent.com/raw/%s/p2p_signal.json?t=%llu\" > .gist_resp.json",
+             ctx->auth_token, ctx->channel_id, (unsigned long long)now);
+
+    int ret = system(cmd);
+    if (ret != 0) {
+        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "curl command failed");
+        return;
+    }
+
+    /*
+     * 解析 JSON：
+     *   - SUB 读取 "offer" 字段
+     *   - PUB 读取 "answer" 字段
+     */
+    const char *target_field = (ctx->role == P2P_SIGNAL_ROLE_SUB) ? "\"offer\"" : "\"answer\"";
+
+    FILE *f = fopen(".gist_resp.json", "r");
+    if (!f) {
+        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "Cannot open response file");
+        return;
+    }
+
+    /* 读取整个文件 */
+    char buffer[16384] = {0};
+    size_t total = 0;
+    size_t n;
+    while ((n = fread(buffer + total, 1, sizeof(buffer) - total - 1, f)) > 0) {
+        total += n;
+    }
+    fclose(f);
+
+    /* 查找目标字段 */
+    char *field_start = strstr(buffer, target_field);
+    if (!field_start) {
+        return;  /* 字段不存在或为空 */
+    }
+
+    /* 提取字段值（跳过引号） */
+    char *value_start = strchr(field_start + strlen(target_field), '\"');
+    if (!value_start) return;
+    value_start++;
+
+    char *value_end = value_start;
+    while (*value_end && *value_end != '\"') {
+        value_end++;
+    }
+
+    if (value_end - value_start < 10) {
+        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "Field %s is empty or too short", target_field);
+        return;
+    }
+
+    /* 提取字段值 */
+    size_t value_len = value_end - value_start;
+    if (value_len > sizeof(buffer) - 1) value_len = sizeof(buffer) - 1;
+
+    char content[16384];
+    memcpy(content, value_start, value_len);
+    content[value_len] = '\0';
+
+    /*
+     * JSON 转义字符还原
+     *   \n  → 换行符
+     *   \\  → 反斜杠
+     *   \"  → 双引号
+     */
+    char *src = content;
+    char *dst = content;
+    while (*src) {
+        if (*src == '\\' && *(src+1) == 'n') {
+            *dst++ = '\n';
+            src += 2;
+        } else if (*src == '\\' && *(src+1) == '\\') {
+            *dst++ = '\\';
+            src += 2;
+        } else if (*src == '\\' && *(src+1) == '\"') {
+            *dst++ = '\"';
+            src += 2;
+        } else {
+            *dst++ = *src++;
+        }
+    }
+    *dst = '\0';
+
+    /* 处理有效数据 */
+    if (strlen(content) > 10) {
+        P2P_LOG_INFO("SIGNAL_PUBSUB", "Processing %s (role=%s)",
+                     target_field, ctx->role == P2P_SIGNAL_ROLE_PUB ? "PUB" : "SUB");
+        process_payload(ctx, s, content);
+    }
+}
+

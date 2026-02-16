@@ -6,6 +6,20 @@
  * RFC 3489 (Classic STUN) - NAT 类型检测
  *
  * ============================================================================
+ * STUN 协议的两大核心功能
+ * ============================================================================
+ *
+ * 1. 获取公网映射地址（Server Reflexive Address - Srflx）
+ *    - 客户端向 STUN 服务器发送 Binding Request
+ *    - 服务器返回 NAT 映射后的公网 IP:Port（XOR-MAPPED-ADDRESS）
+ *    - 用于 P2P 连接中的候选地址收集和交换
+ *
+ * 2. NAT 类型检测（RFC 3489 Classic STUN）
+ *    - 通过多轮测试（Test I, II, III）判断 NAT 行为特征
+ *    - 识别 NAT 类型：完全锥形、受限锥形、端口受限、对称等
+ *    - 不同 NAT 类型决定 P2P 穿透难度和策略选择
+ *
+ * ============================================================================
  * STUN 消息格式 (RFC 5389)
  * ============================================================================
  *
@@ -127,8 +141,8 @@ typedef struct {
  * CHANGE-REQUEST 属性标志位
  * 用于 NAT 类型检测 (RFC 3489)
  */
-#define STUN_FLAG_CHANGE_IP   0x04  /* 请求服务器从不同 IP 响应 */
-#define STUN_FLAG_CHANGE_PORT 0x02  /* 请求服务器从不同端口响应 */
+#define STUN_FLAG_CHANGE_IP         0x04  /* 请求服务器从不同 IP 响应 */
+#define STUN_FLAG_CHANGE_PORT       0x02  /* 请求服务器从不同端口响应 */
 
 /*
  * NAT 类型定义 (RFC 3489)
@@ -148,34 +162,34 @@ typedef struct {
  *   │                   NAT 类型检测决策树                        │
  *   ├─────────────────────────────────────────────────────────────┤
  *   │ mapped_addr == local_addr?                                  │
- *   │     是 → P2P_NAT_OPEN (无 NAT / 公网 IP)                    │
+ *   │     是 → P2P_STUN_NAT_OPEN (无 NAT / 公网 IP)               │
  *   │     否 ↓                                                    │
  *   │ Test II 成功?                                               │
- *   │     是 → P2P_NAT_FULL_CONE (完全锥形)                       │
+ *   │     是 → P2P_STUN_NAT_FULL_CONE (完全锥形)                  │
  *   │     否 ↓                                                    │
  *   │ Test III 成功?                                              │
- *   │     是 → P2P_NAT_RESTRICTED (受限锥形)                      │
- *   │     否 → P2P_NAT_PORT_RESTRICTED (端口受限锥形)             │
+ *   │     是 → P2P_STUN_NAT_RESTRICTED (受限锥形)                 │
+ *   │     否 → P2P_STUN_NAT_PORT_RESTRICTED (端口受限锥形)        │
  *   │ 不同目标时 mapped_addr 变化?                                │
- *   │     是 → P2P_NAT_SYMMETRIC (对称型)                         │
+ *   │     是 → P2P_STUN_NAT_SYMMETRIC (对称型)                    │
  *   └─────────────────────────────────────────────────────────────┘
  */
 typedef enum {
-    P2P_NAT_UNKNOWN = 0,       /* 未知（检测未完成） */
-    P2P_NAT_OPEN,              /* 无 NAT / 公网 IP */
-    P2P_NAT_BLOCKED,           /* UDP 被阻止 */
-    P2P_NAT_FULL_CONE,         /* 完全锥形 NAT（最容易穿透） */
-    P2P_NAT_RESTRICTED,        /* 受限锥形 NAT */
-    P2P_NAT_PORT_RESTRICTED,   /* 端口受限锥形 NAT */
-    P2P_NAT_SYMMETRIC,         /* 对称型 NAT（最难穿透） */
-    P2P_NAT_SYMMETRIC_UDP      /* 对称型 UDP 防火墙 */
-} p2p_nat_type_t;
+    P2P_STUN_NAT_UNKNOWN = 0,       /* 未知（检测未完成） */
+    P2P_STUN_NAT_OPEN,              /* 无 NAT / 公网 IP */
+    P2P_STUN_NAT_BLOCKED,           /* UDP 被阻止 */
+    P2P_STUN_NAT_FULL_CONE,         /* 完全锥形 NAT（最容易穿透） */
+    P2P_STUN_NAT_RESTRICTED,        /* 受限锥形 NAT */
+    P2P_STUN_NAT_PORT_RESTRICTED,   /* 端口受限锥形 NAT */
+    P2P_STUN_NAT_SYMMETRIC,         /* 对称型 NAT（最难穿透） */
+    P2P_STUN_NAT_SYMMETRIC_UDP      /* 对称型 UDP 防火墙 */
+} p2p_stun_nat_type_t;
 
 struct p2p_session;
 
 /*
  * ============================================================================
- * STUN 协议函数
+ * STUN 公开接口
  * ============================================================================
  */
 
@@ -193,37 +207,15 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12]
                                    const char *username, const char *password);
 
 /*
- * 解析 STUN 响应
- *
- * @param buf         响应数据
- * @param len         数据长度
- * @param mapped_addr 输出：解析出的映射地址
- * @param password    密码（可选，用于验证 MESSAGE-INTEGRITY）
- * @return            0=成功，-1=失败
+ * 处理 STUN 响应包
+ * 功能：解析响应，提取映射地址（Srflx），推进 NAT 检测状态机
  */
-int p2p_stun_parse_response(const uint8_t *buf, int len, struct sockaddr_in *mapped_addr,
-                            const char *password);
-
-/*
- * ============================================================================
- * NAT 类型检测函数
- * ============================================================================
- */
+void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len, const struct sockaddr_in *from);
 
 /*
  * NAT 检测状态机 tick
- * 周期性调用以推进 NAT 检测流程
+ * 周期性调用以推进 NAT 检测流程（发送测试请求、处理超时等）
  */
-void p2p_nat_detect_tick(struct p2p_session *s);
-
-/*
- * 处理 STUN 响应包（用于 NAT 检测）
- */
-void p2p_nat_handle_stun_packet(struct p2p_session *s, const uint8_t *buf, int len, const struct sockaddr_in *from);
-
-/*
- * 获取 NAT 类型的字符串描述
- */
-const char* p2p_nat_type_str(p2p_nat_type_t type);
+void p2p_stun_detect_tick(struct p2p_session *s);
 
 #endif /* P2P_STUN_H */

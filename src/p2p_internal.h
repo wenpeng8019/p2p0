@@ -214,7 +214,7 @@ struct p2p_session {
     struct sockaddr_in      active_addr;        /* 当前通信目标地址 */
 
     /* ======================== NAT 检测 ======================== */
-    p2p_nat_type_t          nat_type;           /* 本地 NAT 类型 */
+    p2p_stun_nat_type_t     nat_type;           /* 本地 NAT 类型 */
     int                     det_step;           /* 当前检测步骤 det_step_t */
     uint64_t                det_last_send;      /* 上次发送检测包时间 */
     int                     det_retries;        /* 当前步骤重试次数 */

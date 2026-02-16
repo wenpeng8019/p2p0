@@ -29,10 +29,9 @@
  */
 
 /* 信令协议 (与信令服务器通信) */
-#define P2P_PKT_REGISTER        0x01    /* 注册到信令服务器 */
+#define P2P_PKT_REGISTER        0x01    /* 注册到信令服务器（含候选列表，可重发更新） */
 #define P2P_PKT_REGISTER_ACK    0x02    /* 注册确认 (服务器下发) */
 #define P2P_PKT_PEER_INFO       0x03    /* 远程 peer 信息 (收到后开始打洞) */
-#define P2P_PKT_ICE_CANDIDATES  0x04    /* ICE 候选增量上报 */
 
 /* 打洞协议 (NAT 穿透) */
 #define P2P_PKT_PUNCH           0x10    /* NAT 打洞包 */
@@ -84,7 +83,7 @@ typedef struct {
 /*
  * SIMPLE 模式消息格式:
  *
- * REGISTER / ICE_CANDIDATES:
+ * REGISTER:
  *   [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
  *
  * REGISTER_ACK:

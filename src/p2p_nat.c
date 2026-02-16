@@ -79,84 +79,6 @@ int nat_start_punch(p2p_session_t *s, int verbose) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * 周期调用，发送打洞包和心跳
- */
-int nat_tick(p2p_session_t *s) {
-    nat_ctx_t *n = &s->nat;
-    uint64_t now = time_ms();
-
-    switch (n->state) {
-
-    case NAT_PUNCHING:
-        /* 超时判断 */
-        if (now - n->punch_start >= PUNCH_TIMEOUT_MS) {
-            if (n->verbose) {
-                printf("[NAT_PUNCH] TIMEOUT: Punch failed after %d attempts, switching to RELAY\n",
-                       n->punch_attempts);
-                fflush(stdout);
-            }
-            n->state = NAT_RELAY;
-            return 0;
-        }
-
-        /* 定期发送打洞包 */
-        if (now - n->last_send_time >= PUNCH_INTERVAL_MS) {
-            /* 向所有远端候选发送打洞包（并行打洞） */
-            for (int i = 0; i < s->remote_cand_cnt; i++) {
-                udp_send_packet(s->sock, &s->remote_cands[i].addr,
-                                P2P_PKT_PUNCH, 0, 0, NULL, 0);
-            }
-            n->punch_attempts++;
-            n->last_send_time = now;
-            
-            if (n->verbose) {
-                printf("[NAT_PUNCH] PUNCHING: Attempt #%d to %d candidates\n",
-                       n->punch_attempts, s->remote_cand_cnt);
-                fflush(stdout);
-            }
-        }
-        break;
-
-    case NAT_CONNECTED:
-        /* 发送心跳保活包 */
-        if (now - n->last_send_time >= PING_INTERVAL_MS) {
-            udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PING, 0, 0, NULL, 0);
-            n->last_send_time = now;
-        }
-
-        /* 超时检查 */
-        if (n->last_recv_time > 0 && now - n->last_recv_time >= PONG_TIMEOUT_MS) {
-            if (n->verbose) {
-                printf("[NAT_PUNCH] TIMEOUT: Connection lost (no pong for %d ms)\n",
-                       PONG_TIMEOUT_MS);
-                fflush(stdout);
-            }
-            n->state = NAT_IDLE;
-            return -1;
-        }
-        break;
-
-    case NAT_RELAY:
-        /* 中继模式下周期性尝试直连 */
-        if (now - n->last_send_time >= PUNCH_INTERVAL_MS * 4) {
-            for (int i = 0; i < s->remote_cand_cnt; i++) {
-                udp_send_packet(s->sock, &s->remote_cands[i].addr,
-                                P2P_PKT_PUNCH, 0, 0, NULL, 0);
-            }
-            n->last_send_time = now;
-        }
-        break;
-
-    default:
-        break;
-    }
-
-    return 0;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-/*
  * 处理打洞相关数据包
  */
 int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int len,
@@ -221,3 +143,80 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
     }
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * 周期调用，发送打洞包和心跳
+ */
+int nat_tick(p2p_session_t *s) {
+    nat_ctx_t *n = &s->nat;
+    uint64_t now = time_ms();
+
+    switch (n->state) {
+
+        case NAT_PUNCHING:
+            /* 超时判断 */
+            if (now - n->punch_start >= PUNCH_TIMEOUT_MS) {
+                if (n->verbose) {
+                    printf("[NAT_PUNCH] TIMEOUT: Punch failed after %d attempts, switching to RELAY\n",
+                           n->punch_attempts);
+                    fflush(stdout);
+                }
+                n->state = NAT_RELAY;
+                return 0;
+            }
+
+            /* 定期发送打洞包 */
+            if (now - n->last_send_time >= PUNCH_INTERVAL_MS) {
+                /* 向所有远端候选发送打洞包（并行打洞） */
+                for (int i = 0; i < s->remote_cand_cnt; i++) {
+                    udp_send_packet(s->sock, &s->remote_cands[i].addr,
+                                    P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                }
+                n->punch_attempts++;
+                n->last_send_time = now;
+
+                if (n->verbose) {
+                    printf("[NAT_PUNCH] PUNCHING: Attempt #%d to %d candidates\n",
+                           n->punch_attempts, s->remote_cand_cnt);
+                    fflush(stdout);
+                }
+            }
+            break;
+
+        case NAT_CONNECTED:
+            /* 发送心跳保活包 */
+            if (now - n->last_send_time >= PING_INTERVAL_MS) {
+                udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PING, 0, 0, NULL, 0);
+                n->last_send_time = now;
+            }
+
+            /* 超时检查 */
+            if (n->last_recv_time > 0 && now - n->last_recv_time >= PONG_TIMEOUT_MS) {
+                if (n->verbose) {
+                    printf("[NAT_PUNCH] TIMEOUT: Connection lost (no pong for %d ms)\n",
+                           PONG_TIMEOUT_MS);
+                    fflush(stdout);
+                }
+                n->state = NAT_IDLE;
+                return -1;
+            }
+            break;
+
+        case NAT_RELAY:
+            /* 中继模式下周期性尝试直连 */
+            if (now - n->last_send_time >= PUNCH_INTERVAL_MS * 4) {
+                for (int i = 0; i < s->remote_cand_cnt; i++) {
+                    udp_send_packet(s->sock, &s->remote_cands[i].addr,
+                                    P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                }
+                n->last_send_time = now;
+            }
+            break;
+
+        default:
+            break;
+    }
+
+    return 0;
+}

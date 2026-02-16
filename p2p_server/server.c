@@ -28,25 +28,8 @@
 // 如果客户端超过此时间未发送任何消息（包括心跳），服务器将主动断开连接
 #define RELAY_CLIENT_TIMEOUT    60
 
-// SIMPLE 模式包类型别名 (使用 p2pp.h 定义)
-#define SIMPLE_PKT_REGISTER     P2P_PKT_REGISTER
-#define SIMPLE_PKT_REGISTER_ACK P2P_PKT_REGISTER_ACK
-#define SIMPLE_PKT_PEER_INFO    P2P_PKT_PEER_INFO
-#define SIMPLE_PKT_ICE_CANDS    P2P_PKT_ICE_CANDIDATES
-
-// SIMPLE 模式 REGISTER_ACK 标志位别名 (使用 p2pp.h 定义)
-#define REGACK_PEER_ONLINE      P2P_REGACK_PEER_ONLINE
-#define REGACK_CAN_CACHE        P2P_REGACK_CAN_CACHE
-#define REGACK_CACHE_FULL       P2P_REGACK_CACHE_FULL
-
 // 服务端候选缓存限制（独立于客户端）
 #define SIMPLE_MAX_CANDIDATES   8
-
-// SIMPLE 模式候选地址结构: 使用 p2pp.h 中的定义
-typedef p2p_simple_candidate_t simple_candidate_t;
-
-// SIMPLE 模式包头结构: 使用 p2pp.h 中的定义
-typedef p2p_packet_hdr_t simple_pkt_hdr_t;
 
 // SIMPLE 模式配对记录（UDP 无状态）
 // 注意：SIMPLE 模式采用"配对缓存"机制：
@@ -58,14 +41,14 @@ typedef p2p_packet_hdr_t simple_pkt_hdr_t;
 //   有效指针: 已配对，指向对端
 //   (void*)-1: 对端已断开
 typedef struct simple_pair_s {
-    char local_peer_id[P2P_PEER_ID_MAX];    // 本端 ID
-    char remote_peer_id[P2P_PEER_ID_MAX];   // 目标对端 ID
-    struct sockaddr_in addr;                // 公网地址（UDP 源地址）
-    simple_candidate_t candidates[SIMPLE_MAX_CANDIDATES];  // 候选列表
-    int candidate_count;                    // 候选数量
-    time_t last_seen;                       // 最后活跃时间
-    bool valid;                             // 记录是否有效（true=有效, false=已过期或空闲）
-    struct simple_pair_s *peer;             // 指向配对的对端
+    char local_peer_id[P2P_PEER_ID_MAX];                        // 本端 ID
+    char remote_peer_id[P2P_PEER_ID_MAX];                       // 目标对端 ID
+    struct sockaddr_in addr;                                    // 公网地址（UDP 源地址）
+    p2p_simple_candidate_t candidates[SIMPLE_MAX_CANDIDATES];   // 候选列表
+    int candidate_count;                                        // 候选数量
+    time_t last_seen;                                           // 最后活跃时间
+    bool valid;                                                 // 记录是否有效（true=有效, false=已过期或空闲）
+    struct simple_pair_s *peer;                                 // 指向配对的对端
 } simple_pair_t;
 
 // RELAY 模式客户端（TCP 长连接，对应 p2p_signal_relay 模块）
@@ -261,7 +244,7 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
     
     if (len < 4) return;  // 至少需要包头
     
-    simple_pkt_hdr_t *hdr = (simple_pkt_hdr_t *)buf;
+    p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)buf;
     uint8_t *payload = buf + 4;
     int payload_len = len - 4;
     
@@ -269,8 +252,8 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
     snprintf(from_str, sizeof(from_str), "%s:%d", 
              inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     
-    // SIMPLE_PKT_REGISTER: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
-    if (hdr->type == SIMPLE_PKT_REGISTER && payload_len >= P2P_PEER_ID_MAX * 2 + 1) {
+    // P2P_PKT_REGISTER: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
+    if (hdr->type == P2P_PKT_REGISTER && payload_len >= P2P_PEER_ID_MAX * 2 + 1) {
         
         // 解析 local_peer_id 和 remote_peer_id
         char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
@@ -284,7 +267,7 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         
         // 解析候选列表（新格式）
         int candidate_count = 0;
-        simple_candidate_t candidates[SIMPLE_MAX_CANDIDATES];
+        p2p_simple_candidate_t candidates[SIMPLE_MAX_CANDIDATES];
         memset(candidates, 0, sizeof(candidates));
         
         int cand_offset = P2P_PEER_ID_MAX * 2;
@@ -358,8 +341,8 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         } else {
             // 无法分配槽位，发送错误 ACK
             uint8_t ack_response[8];
-            simple_pkt_hdr_t *ack_hdr = (simple_pkt_hdr_t *)ack_response;
-            ack_hdr->type = SIMPLE_PKT_REGISTER_ACK;
+            p2p_packet_hdr_t *ack_hdr = (p2p_packet_hdr_t *)ack_response;
+            ack_hdr->type = P2P_PKT_REGISTER_ACK;
             ack_hdr->flags = 0;
             ack_hdr->seq = 0;
             ack_response[4] = 1;  /* status = error */
@@ -387,16 +370,16 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         // 格式: [hdr(4)][status(1)][flags(1)][reserved(2)]
         {
             uint8_t ack_response[8];
-            simple_pkt_hdr_t *ack_hdr = (simple_pkt_hdr_t *)ack_response;
-            ack_hdr->type = SIMPLE_PKT_REGISTER_ACK;
+            p2p_packet_hdr_t *ack_hdr = (p2p_packet_hdr_t *)ack_response;
+            ack_hdr->type = P2P_PKT_REGISTER_ACK;
             ack_hdr->flags = 0;
             ack_hdr->seq = 0;
             
             uint8_t status = 0;  /* 0 = 成功 */
-            uint8_t flags = REGACK_CAN_CACHE;  /* 服务器支持候选缓存 */
+            uint8_t flags = P2P_REGACK_CAN_CACHE;  /* 服务器支持候选缓存 */
             
             if (remote_idx >= 0) {
-                flags |= REGACK_PEER_ONLINE;  /* 对端在线 */
+                flags |= P2P_REGACK_PEER_ONLINE;  /* 对端在线 */
             }
             
             ack_response[4] = status;
@@ -422,11 +405,11 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
                 remote->peer = local;
             }
             
-            // 构造 SIMPLE_PKT_PEER_INFO 响应（新格式：发送完整候选列表）
+            // 构造 P2P_PKT_PEER_INFO 响应（新格式：发送完整候选列表）
             // 格式: [hdr(4)][candidate_count(1)][candidates(N*7)]
             uint8_t response[4 + 1 + SIMPLE_MAX_CANDIDATES * 7];
-            simple_pkt_hdr_t *resp_hdr = (simple_pkt_hdr_t *)response;
-            resp_hdr->type = SIMPLE_PKT_PEER_INFO;
+            p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)response;
+            resp_hdr->type = P2P_PKT_PEER_INFO;
             resp_hdr->flags = 0;
             resp_hdr->seq = 0;
             
@@ -472,86 +455,6 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
             printf("[UDP] Target pair (%s → %s) not found (waiting for peer registration)\n", 
                    remote_peer_id, local_peer_id);
             fflush(stdout);
-        }
-    }
-    // 处理 ICE_CANDIDATES 增量上报
-    // 格式: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
-    else if (hdr->type == SIMPLE_PKT_ICE_CANDS && payload_len >= P2P_PEER_ID_MAX * 2) {
-        
-        char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
-        char remote_peer_id[P2P_PEER_ID_MAX + 1] = {0};
-        memcpy(local_peer_id, payload, P2P_PEER_ID_MAX);
-        memcpy(remote_peer_id, payload + P2P_PEER_ID_MAX, P2P_PEER_ID_MAX);
-        
-        // 查找本端槽位
-        int local_idx = -1;
-        for (int i = 0; i < MAX_PEERS; i++) {
-            if (g_simple_pairs[i].valid && 
-                strcmp(g_simple_pairs[i].local_peer_id, local_peer_id) == 0 &&
-                strcmp(g_simple_pairs[i].remote_peer_id, remote_peer_id) == 0) {
-                local_idx = i;
-                break;
-            }
-        }
-        
-        if (local_idx < 0) {
-            printf("[UDP] ICE_CANDIDATES from %s: unknown peer '%s'\n", from_str, local_peer_id);
-            fflush(stdout);
-            return;
-        }
-        
-        // 解析并更新候选列表
-        int cand_offset = P2P_PEER_ID_MAX * 2;
-        if (payload_len > cand_offset) {
-            int candidate_count = payload[cand_offset];
-            if (candidate_count > SIMPLE_MAX_CANDIDATES) {
-                candidate_count = SIMPLE_MAX_CANDIDATES;
-            }
-            cand_offset++;
-            
-            // 解析每个候选 (7 字节: type + ip + port)
-            simple_pair_t *local = &g_simple_pairs[local_idx];
-            local->candidate_count = 0;
-            for (int i = 0; i < candidate_count && cand_offset + 7 <= payload_len; i++) {
-                local->candidates[i].type = payload[cand_offset];
-                memcpy(&local->candidates[i].ip, payload + cand_offset + 1, 4);
-                memcpy(&local->candidates[i].port, payload + cand_offset + 5, 2);
-                cand_offset += 7;
-                local->candidate_count++;
-            }
-            local->last_seen = time(NULL);
-            
-            printf("[UDP] ICE_CANDIDATES from %s: updated %d candidates for '%s'\n", 
-                   from_str, local->candidate_count, local_peer_id);
-            fflush(stdout);
-            
-            // 如果对端在线，立即转发新候选列表
-            if (local->peer != NULL && local->peer != (simple_pair_t*)(void*)-1) {
-                simple_pair_t *remote = local->peer;
-                
-                uint8_t response[4 + 1 + SIMPLE_MAX_CANDIDATES * 7];
-                simple_pkt_hdr_t *resp_hdr = (simple_pkt_hdr_t *)response;
-                resp_hdr->type = SIMPLE_PKT_PEER_INFO;
-                resp_hdr->flags = 0;
-                resp_hdr->seq = 0;
-                
-                response[4] = (uint8_t)local->candidate_count;
-                int resp_len = 5;
-                for (int i = 0; i < local->candidate_count; i++) {
-                    response[resp_len] = local->candidates[i].type;
-                    memcpy(response + resp_len + 1, &local->candidates[i].ip, 4);
-                    memcpy(response + resp_len + 5, &local->candidates[i].port, 2);
-                    resp_len += 7;
-                }
-                
-                sendto(udp_fd, response, resp_len, 0,
-                       (struct sockaddr *)&remote->addr, sizeof(remote->addr));
-                
-                printf("[UDP] Forwarded %d candidates to %s:%d\n",
-                       local->candidate_count, 
-                       inet_ntoa(remote->addr.sin_addr), ntohs(remote->addr.sin_port));
-                fflush(stdout);
-            }
         }
     }
 }

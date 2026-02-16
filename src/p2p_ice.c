@@ -284,52 +284,6 @@ int p2p_ice_form_check_list(
 }
 
 /* ============================================================================
- * ICE 状态机处理
- * ============================================================================ */
-
-/*
- * ICE 状态机周期处理
- *
- * 在 GATHERING 或 CHECKING 状态下，定期向所有远端候选发送连通性检查包。
- *
- * 检查间隔：500ms（RFC 5245 建议 Ta = 20ms * N，这里简化为固定值）
- */
-void p2p_ice_tick(p2p_session_t *s) {
-    if (s->ice_state == P2P_ICE_STATE_IDLE) return;
-    
-    /* 如果已收集候选并有远端候选，开始连通性检查 */
-    if (s->ice_state == P2P_ICE_STATE_GATHERING || s->ice_state == P2P_ICE_STATE_CHECKING) {
-        if (s->remote_cand_cnt > 0 && s->ice_state != P2P_ICE_STATE_COMPLETED) {
-
-            /* 标记状态为 CHECKING */
-            s->ice_state = P2P_ICE_STATE_CHECKING;
-
-            /* 定时发送连通性检查（间隔 500ms） */
-            static uint64_t last_check = 0;
-            uint64_t now = time_ms();
-            if (now - last_check >= 500) {
-
-                /* 向所有远端候选发送探测包 */
-                for (int i = 0; i < s->remote_cand_cnt; i++) { 
-                    p2p_candidate_t *c = &s->remote_cands[i];
-
-                    /* 
-                     * 发送连通性检查包
-                     * RFC 5245 要求使用 STUN Binding Request
-                     * 这里简化为自定义的 P2P_PKT_PUNCH
-                     */
-                    udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
-                    printf("[ICE] Sending connectivity check to Candidate %d: %s:%d\n", 
-                           i, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
-                }
-
-                last_check = now;
-            }
-        }
-    }
-}
-
-/* ============================================================================
  * Trickle ICE 候选交换（RFC 8838）
  * ============================================================================
  *
@@ -366,7 +320,7 @@ void p2p_ice_tick(p2p_session_t *s) {
 int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
 
     /* 仅用于 ICE 模式（TCP 信令） */
-    if (s->signaling_mode != P2P_CONNECT_MODE_ICE) {
+    if (s->signaling_mode != P2P_SIGNALING_MODE_ICE) {
         /* SIMPLE 模式不应调用此函数，候选通过 p2p_signal_simple 模块发送 */
         printf("[ICE] Error: p2p_ice_send_local_candidate called in non-ICE mode\n");
         return -1;
@@ -694,3 +648,50 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
         }
     }
 }
+
+/* ============================================================================
+ * ICE 状态机处理
+ * ============================================================================ */
+
+/*
+ * ICE 状态机周期处理
+ *
+ * 在 GATHERING 或 CHECKING 状态下，定期向所有远端候选发送连通性检查包。
+ *
+ * 检查间隔：500ms（RFC 5245 建议 Ta = 20ms * N，这里简化为固定值）
+ */
+void p2p_ice_tick(p2p_session_t *s) {
+    if (s->ice_state == P2P_ICE_STATE_IDLE) return;
+
+    /* 如果已收集候选并有远端候选，开始连通性检查 */
+    if (s->ice_state == P2P_ICE_STATE_GATHERING || s->ice_state == P2P_ICE_STATE_CHECKING) {
+        if (s->remote_cand_cnt > 0 && s->ice_state != P2P_ICE_STATE_COMPLETED) {
+
+            /* 标记状态为 CHECKING */
+            s->ice_state = P2P_ICE_STATE_CHECKING;
+
+            /* 定时发送连通性检查（间隔 500ms） */
+            static uint64_t last_check = 0;
+            uint64_t now = time_ms();
+            if (now - last_check >= 500) {
+
+                /* 向所有远端候选发送探测包 */
+                for (int i = 0; i < s->remote_cand_cnt; i++) {
+                    p2p_candidate_t *c = &s->remote_cands[i];
+
+                    /*
+                     * 发送连通性检查包
+                     * RFC 5245 要求使用 STUN Binding Request
+                     * 这里简化为自定义的 P2P_PKT_PUNCH
+                     */
+                    udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                    printf("[ICE] Sending connectivity check to Candidate %d: %s:%d\n",
+                           i, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                }
+
+                last_check = now;
+            }
+        }
+    }
+}
+

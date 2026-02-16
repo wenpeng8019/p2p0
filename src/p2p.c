@@ -168,7 +168,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
 
     // 保存目标 peer_id（信令模式已在 create 时设置）
     // SIMPLE 模式必须指定 remote_peer_id
-    if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE && !remote_peer_id) {
+    if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE && !remote_peer_id) {
         printf("[ERROR] SIMPLE mode requires explicit remote_peer_id\n");
         s->state = P2P_STATE_ERROR;
         UNLOCK(s);
@@ -186,7 +186,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
 
     switch (s->signaling_mode) {
 
-    case P2P_CONNECT_MODE_SIMPLE: {
+    case P2P_SIGNALING_MODE_SIMPLE: {
         // 简单无状态信令：UDP 协议，无需登录，只注册 peer_id 映射
         struct sockaddr_in server_addr;
         if (!s->cfg.server_host ||
@@ -241,7 +241,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
         break;
     }
 
-    case P2P_CONNECT_MODE_ICE: {
+    case P2P_SIGNALING_MODE_ICE: {
         // ICE 有状态信令：TCP 长连接，自动登录，交换候选者
         
         if (!s->cfg.server_host) {
@@ -253,8 +253,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
         
         // 首次连接：自动连接信令服务器（单例模式，只执行一次）
         if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
-            if (p2p_signal_relay_connect(&s->sig_relay_ctx, s->cfg.server_host, s->cfg.server_port, 
-                                   s->cfg.peer_id) < 0) {
+            if (p2p_signal_relay_connect(&s->sig_relay_ctx, s->cfg.server_host, s->cfg.server_port, s->cfg.peer_id) < 0) {
                 printf("[ERROR] Failed to connect to signaling server\n");
                 s->state = P2P_STATE_ERROR;
                 UNLOCK(s);
@@ -295,7 +294,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
         break;
     }
 
-    case P2P_CONNECT_MODE_PUBSUB: {
+    case P2P_SIGNALING_MODE_PUBSUB: {
         // PUBSUB 模式：使用 Gist 作为信令中介，角色由 remote_peer_id 决定
         
         if (!s->cfg.gh_token || !s->cfg.gist_id) {
@@ -388,7 +387,7 @@ int p2p_update(p2p_session_t *s) {
         if (n >= 20 && buf[0] < 2) { // STUN type 0x00xx or 0x01xx
             uint32_t magic = ntohl(*(uint32_t *)(buf + 4));
             if (magic == STUN_MAGIC) {
-                p2p_nat_handle_stun_packet(s, buf, n, &from);
+                p2p_stun_handle_packet(s, buf, n, &from);
                 p2p_turn_handle_packet(s, buf, n, &from);
                 continue;
             }
@@ -414,14 +413,14 @@ int p2p_update(p2p_session_t *s) {
 
         case P2P_PKT_REGISTER_ACK:
             /* SIMPLE 模式：服务器确认注册 */
-            if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE) {
+            if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
                 signal_simple_on_packet(s, hdr.type, payload, payload_len, &from);
             }
             break;
 
         case P2P_PKT_PEER_INFO:
             /* SIMPLE 模式：信令处理 → 打洞启动 */
-            if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE) {
+            if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
                 if (signal_simple_on_packet(s, hdr.type, payload, payload_len, &from) == 0) {
                     /* 远端候选已写入 session 的 remote_cands[]，直接启动打洞 */
                     nat_start_punch(s, s->cfg.verbose_nat_punch);
@@ -478,14 +477,6 @@ int p2p_update(p2p_session_t *s) {
 
         case P2P_PKT_FIN:
             s->state = P2P_STATE_CLOSED;
-            break;
-
-        // --------------------
-        // 由信令服务中转的来自对方的候选地址
-        // --------------------
-
-        case P2P_PKT_ICE_CANDIDATES:
-            p2p_ice_on_remote_candidates(s, payload, payload_len);
             break;
 
         // --------------------
@@ -574,7 +565,7 @@ int p2p_update(p2p_session_t *s) {
         s->state = P2P_STATE_RELAY;
         s->path = P2P_PATH_RELAY;
         /* RELAY 模式下使用信令服务器地址 */
-        if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE) {
+        if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
             s->active_addr = s->sig_simple_ctx.server_addr;
         } else {
             /* ICE 模式暂不支持 RELAY 回退 */
@@ -632,7 +623,7 @@ int p2p_update(p2p_session_t *s) {
     // 周期维护 NAT/信令 状态机
     // --------------------
 
-    if (s->signaling_mode == P2P_CONNECT_MODE_SIMPLE) {
+    if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
         /* SIMPLE 模式：信令和打洞分开 tick */
         if (s->sig_simple_ctx.state == SIGNAL_SIMPLE_REGISTERING ||
             s->sig_simple_ctx.state == SIGNAL_SIMPLE_REGISTERED) {
@@ -652,7 +643,7 @@ int p2p_update(p2p_session_t *s) {
     // 周期维护 STUN 机制状态机（STUN 服务的流程）
     // --------------------
 
-    p2p_nat_detect_tick(s);
+    p2p_stun_detect_tick(s);
 
     // --------------------
     // 周期维护 ICE 机制状态机
@@ -676,7 +667,7 @@ int p2p_update(p2p_session_t *s) {
     // 周期维护信令服务状态机（ICE 模式）
     // --------------------
 
-    if (s->signaling_mode == P2P_CONNECT_MODE_ICE) {
+    if (s->signaling_mode == P2P_SIGNALING_MODE_ICE) {
         p2p_signal_relay_tick(&s->sig_relay_ctx, s);
         
         // 定期重发信令（处理对方不在线或新候选收集）
@@ -744,7 +735,7 @@ int p2p_update(p2p_session_t *s) {
     // 周期维护信令服务状态机（PUBSUB 模式）
     // --------------------
 
-    if (s->signaling_mode == P2P_CONNECT_MODE_PUBSUB) {
+    if (s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         p2p_signal_pubsub_tick(&s->sig_pubsub_ctx, s);
         
         // PUB 角色：等待 STUN 响应后发送 offer（必须包含公网地址）

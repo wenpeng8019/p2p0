@@ -108,7 +108,7 @@ int main(int argc, char *argv[]) {
     cfg.use_dtls = use_dtls;
     cfg.use_openssl = use_openssl;
     cfg.use_pseudotcp = use_pseudo;
-    cfg.use_ice = use_simple ? 0 : 1;  // --simple 标志禁用 ICE
+    cfg.use_ice = !use_simple;  // --simple 标志禁用 ICE
     cfg.stun_server = "stun.l.google.com";
     cfg.stun_port = 3478;
     cfg.server_host = server_ip;
@@ -129,9 +129,9 @@ int main(int argc, char *argv[]) {
     
     // 根据配置确定信令模式
     if (server_ip) {
-        cfg.signaling_mode = cfg.use_ice ? P2P_CONNECT_MODE_ICE : P2P_CONNECT_MODE_SIMPLE;
+        cfg.signaling_mode = cfg.use_ice ? P2P_SIGNALING_MODE_ICE : P2P_SIGNALING_MODE_SIMPLE;
     } else if (gh_token && gist_id) {
-        cfg.signaling_mode = P2P_CONNECT_MODE_PUBSUB;
+        cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
     }
 
     p2p_session_t *s = p2p_create(&cfg);

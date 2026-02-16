@@ -116,64 +116,6 @@
 #include <fcntl.h>
 
 /* ============================================================================
- * 信令客户端状态机周期维护
- * ============================================================================
- *
- * 在主循环中调用，处理从信令服务器接收的消息。
- * 非阻塞模式，无数据时立即返回。
- *
- * 处理的消息类型：
- *   - P2P_RLY_OFFER:       来自主动方的连接请求（服务器转发）
- *   - P2P_RLY_FORWARD: 来自被动方的应答（服务器转发）
- *
- * @param ctx  信令上下文
- * @param s    P2P 会话
- */
-void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
-    if (ctx->fd < 0) return;
-
-    // 接收信令服务数据包
-    p2p_relay_hdr_t hdr;
-    int n = recv(ctx->fd, &hdr, sizeof(hdr), 0);
-    if (n == (int)sizeof(hdr)) {
-        if (hdr.magic != P2P_RLY_MAGIC) return;
-
-        // 信令服务器（中继）转发的，来自对方的请求
-        if (hdr.type == P2P_RLY_OFFER || hdr.type == P2P_RLY_FORWARD) {
-
-            // 读取对方 name，即来自谁的连接请求
-            char sender_name[P2P_PEER_ID_MAX];
-            recv(ctx->fd, sender_name, P2P_PEER_ID_MAX, 0);
-            
-            // 保存发送者名称（用于后续发送 answer）
-            if (hdr.type == P2P_RLY_OFFER) {
-                strncpy(ctx->incoming_peer_name, sender_name, P2P_PEER_ID_MAX);
-            }
-            
-            // 接收后面的负载数据
-            // + 信令服务器只中继转发请求数据，所以数据结构是由对等双方自行约定
-            uint32_t payload_len = hdr.length - P2P_PEER_ID_MAX;
-            uint8_t *payload = malloc(payload_len);
-            recv(ctx->fd, payload, payload_len, 0);
-
-            printf("Signaling: Received signal from '%s' (%u bytes)\n", sender_name, payload_len);
-            fflush(stdout);
-            
-            // 解析信令数据并注入 ICE 状态机
-            p2p_signaling_payload_t p;
-            if (p2p_signal_unpack(&p, payload, payload_len) == 0) {
-                p2p_ice_handle_signaling_payload(s, &p);
-            } else {
-                /* 解包失败，尝试作为旧版 trickle 候选处理 */
-                p2p_ice_on_remote_candidates(s, payload, payload_len);
-            }
-            
-            free(payload);
-        }
-    }
-}
-
-/* ============================================================================
  * 连接信令服务器
  * ============================================================================
  *
@@ -397,3 +339,62 @@ int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *targ
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+/* ============================================================================
+ * 信令客户端状态机周期维护
+ * ============================================================================
+ *
+ * 在主循环中调用，处理从信令服务器接收的消息。
+ * 非阻塞模式，无数据时立即返回。
+ *
+ * 处理的消息类型：
+ *   - P2P_RLY_OFFER:       来自主动方的连接请求（服务器转发）
+ *   - P2P_RLY_FORWARD: 来自被动方的应答（服务器转发）
+ *
+ * @param ctx  信令上下文
+ * @param s    P2P 会话
+ */
+void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
+    if (ctx->fd < 0) return;
+
+    // 接收信令服务数据包
+    p2p_relay_hdr_t hdr;
+    int n = recv(ctx->fd, &hdr, sizeof(hdr), 0);
+    if (n == (int)sizeof(hdr)) {
+        if (hdr.magic != P2P_RLY_MAGIC) return;
+
+        // 信令服务器（中继）转发的，来自对方的请求
+        if (hdr.type == P2P_RLY_OFFER || hdr.type == P2P_RLY_FORWARD) {
+
+            // 读取对方 name，即来自谁的连接请求
+            char sender_name[P2P_PEER_ID_MAX];
+            recv(ctx->fd, sender_name, P2P_PEER_ID_MAX, 0);
+
+            // 保存发送者名称（用于后续发送 answer）
+            if (hdr.type == P2P_RLY_OFFER) {
+                strncpy(ctx->incoming_peer_name, sender_name, P2P_PEER_ID_MAX);
+            }
+
+            // 接收后面的负载数据
+            // + 信令服务器只中继转发请求数据，所以数据结构是由对等双方自行约定
+            uint32_t payload_len = hdr.length - P2P_PEER_ID_MAX;
+            uint8_t *payload = malloc(payload_len);
+            recv(ctx->fd, payload, payload_len, 0);
+
+            printf("Signaling: Received signal from '%s' (%u bytes)\n", sender_name, payload_len);
+            fflush(stdout);
+
+            // 解析信令数据并注入 ICE 状态机
+            p2p_signaling_payload_t p;
+            if (p2p_signal_unpack(&p, payload, payload_len) == 0) {
+                p2p_ice_handle_signaling_payload(s, &p);
+            } else {
+                /* 解包失败，尝试作为旧版 trickle 候选处理 */
+                p2p_ice_on_remote_candidates(s, payload, payload_len);
+            }
+
+            free(payload);
+        }
+    }
+}
+

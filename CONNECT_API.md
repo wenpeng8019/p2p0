@@ -6,9 +6,9 @@ P2P 库提供三种信令模式，通过统一的 `p2p_connect()` 接口连接�
 
 | 模式 | 枚举值 | 信令方式 | 适用场景 |
 |------|--------|---------|---------|
-| **SIMPLE** | `P2P_CONNECT_MODE_SIMPLE` | UDP 无状态 | 轻量级应用、简单 NAT |
-| **ICE** | `P2P_CONNECT_MODE_ICE` | TCP 长连接 | 生产环境、复杂 NAT |
-| **PUBSUB** | `P2P_CONNECT_MODE_PUBSUB` | GitHub Gist | 无服务器、演示测试 |
+| **SIMPLE** | `P2P_SIGNALING_MODE_SIMPLE` | UDP 无状态 | 轻量级应用、简单 NAT |
+| **ICE** | `P2P_SIGNALING_MODE_ICE` | TCP 长连接 | 生产环境、复杂 NAT |
+| **PUBSUB** | `P2P_SIGNALING_MODE_PUBSUB` | GitHub Gist | 无服务器、演示测试 |
 
 ## API 接口
 
@@ -53,7 +53,7 @@ typedef struct {
     const char* gist_id;                    // Gist ID (PUBSUB)
     
     /* ICE/STUN/TURN 配置 */
-    int         use_ice;                    // 1 = 启用 ICE 协议栈
+    bool        use_ice;                    // 1 = 启用 ICE 协议栈
     const char* stun_server;                // STUN 服务器
     uint16_t    stun_port;                  // STUN 端口 (默认 3478)
     const char* turn_server;                // TURN 服务器 (可选)
@@ -62,9 +62,9 @@ typedef struct {
     const char* turn_pass;                  // TURN 密码
     
     /* 传输选项 */
-    int         use_pseudotcp;              // 1 = 启用拥塞控制
-    int         use_dtls;                   // 1 = 启用 DTLS 加密
-    int         enable_tcp;                 // 1 = 尝试 TCP 打洞
+    bool        use_pseudotcp;              // 1 = 启用拥塞控制
+    bool        use_dtls;                   // 1 = 启用 DTLS 加密
+    bool        enable_tcp;                 // 1 = 尝试 TCP 打洞
     
     /* 事件回调 */
     p2p_on_connected_fn    on_connected;    // 连接建立回调
@@ -73,8 +73,8 @@ typedef struct {
     void*                  userdata;        // 用户数据
     
     /* 调试选项 */
-    int         disable_lan_shortcut;       // 禁止同子网直连
-    int         verbose_nat_punch;          // 输出详细 NAT 打洞日志
+    bool        disable_lan_shortcut;       // 禁止同子网直连
+    bool        verbose_nat_punch;          // 输出详细 NAT 打洞日志
 } p2p_config_t;
 ```
 
@@ -98,7 +98,7 @@ typedef struct {
 
 ```c
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_CONNECT_MODE_SIMPLE;
+cfg.signaling_mode = P2P_SIGNALING_MODE_SIMPLE;
 cfg.server_host = "signal.example.com";
 cfg.server_port = 8888;
 strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
@@ -135,7 +135,7 @@ p2p_send(s, "Hello", 5);
 ```c
 // 主动方 (Alice)
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_CONNECT_MODE_ICE;
+cfg.signaling_mode = P2P_SIGNALING_MODE_ICE;
 cfg.server_host = "ice.example.com";
 cfg.server_port = 8888;
 cfg.stun_server = "stun.l.google.com";
@@ -149,7 +149,7 @@ p2p_connect(s, "bob");  // 主动连接 bob
 ```c
 // 被动方 (Bob)
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_CONNECT_MODE_ICE;
+cfg.signaling_mode = P2P_SIGNALING_MODE_ICE;
 cfg.server_host = "ice.example.com";
 cfg.server_port = 8888;
 strncpy(cfg.peer_id, "bob", P2P_PEER_ID_MAX);
@@ -181,7 +181,7 @@ p2p_connect(s, NULL);  // 被动等待任意连接
 ```c
 // PUB 角色 (Bob - 主动发起)
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_CONNECT_MODE_PUBSUB;
+cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 cfg.gh_token = "ghp_xxxxxxxxxxxx";
 cfg.gist_id = "abc123def456";
 cfg.stun_server = "stun.l.google.com";
@@ -195,7 +195,7 @@ p2p_connect(s, "alice");  // PUB: 发布 offer 给 alice
 ```c
 // SUB 角色 (Alice - 被动等待)
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_CONNECT_MODE_PUBSUB;
+cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 cfg.gh_token = "ghp_xxxxxxxxxxxx";
 cfg.gist_id = "abc123def456";
 cfg.stun_server = "stun.l.google.com";
@@ -284,7 +284,7 @@ cfg.userdata = my_context;
 ```c
 // === alice.c ===
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_CONNECT_MODE_SIMPLE;
+cfg.signaling_mode = P2P_SIGNALING_MODE_SIMPLE;
 cfg.server_host = "127.0.0.1";
 cfg.server_port = 8888;
 strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
@@ -304,7 +304,7 @@ p2p_destroy(s);
 ```c
 // === bob.c ===
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_CONNECT_MODE_SIMPLE;
+cfg.signaling_mode = P2P_SIGNALING_MODE_SIMPLE;
 cfg.server_host = "127.0.0.1";
 cfg.server_port = 8888;
 strncpy(cfg.peer_id, "bob", P2P_PEER_ID_MAX);
