@@ -5,6 +5,10 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/* ---- 信令重发配置 ---- */
+#define SIGNAL_RESEND_INTERVAL_MS  5000   /* 信令重发间隔 (5秒) */
+#define SIGNAL_MAX_RESEND_COUNT    12     /* 最大重发次数 (共约60秒) */
+
 /* ---- 锁辅助函数（单线程模式下为空操作） ---- */
 
 #ifdef P2P_THREADED
@@ -589,21 +593,48 @@ int p2p_update(p2p_session_t *s) {
     if (s->signaling_mode == P2P_CONNECT_MODE_ICE) {
         p2p_signal_relay_tick(&s->sig_relay_ctx, s);
         
-        // 自动发送初始信令（候选者准备好后）
-        if (!s->signal_sent && s->local_cand_cnt > 0) {
-            p2p_signaling_payload_t payload = {0};
-            strncpy(payload.sender, s->cfg.peer_id, 31);
-            strncpy(payload.target, s->remote_peer_id, 31);
-            payload.candidate_count = s->local_cand_cnt;
-            memcpy(payload.candidates, s->local_cands, 
-                   sizeof(p2p_candidate_t) * s->local_cand_cnt);
+        // 定期重发信令（处理对方不在线或新候选收集）
+        // 重发条件：
+        //   1. 有候选地址 且
+        //   2. 未连接成功 且
+        //   3. (从未发送 或 超时 或 有新候选)
+        if (s->local_cand_cnt > 0 && 
+            s->state == P2P_STATE_REGISTERING &&
+            s->remote_peer_id[0] != '\0') {
             
-            uint8_t buf[2048];
-            int n = p2p_signal_pack(&payload, buf, sizeof(buf));
-            if (n > 0) {
-                p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
-                s->signal_sent = 1;
-                printf("[SIGNALING] Auto-sent ICE candidates to %s\n", s->remote_peer_id);
+            uint64_t now = time_ms();
+            int should_send = 0;
+            
+            if (!s->signal_sent) {
+                // 从未发送过
+                should_send = 1;
+            } else if (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) {
+                // 超过重发间隔
+                should_send = 1;
+            } else if (s->local_cand_cnt > s->last_cand_cnt_sent) {
+                // 有新候选收集到（如 STUN 响应）
+                should_send = 1;
+            }
+            
+            if (should_send) {
+                p2p_signaling_payload_t payload = {0};
+                strncpy(payload.sender, s->cfg.peer_id, 31);
+                strncpy(payload.target, s->remote_peer_id, 31);
+                payload.candidate_count = s->local_cand_cnt;
+                memcpy(payload.candidates, s->local_cands, 
+                       sizeof(p2p_candidate_t) * s->local_cand_cnt);
+                
+                uint8_t buf[2048];
+                int n = p2p_signal_pack(&payload, buf, sizeof(buf));
+                if (n > 0) {
+                    p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
+                    s->signal_sent = 1;
+                    s->last_signal_time = now;
+                    s->last_cand_cnt_sent = s->local_cand_cnt;
+                    printf("[SIGNALING] %s ICE candidates (%d) to %s\n", 
+                           s->last_cand_cnt_sent > 0 ? "Resent" : "Sent",
+                           s->local_cand_cnt, s->remote_peer_id);
+                }
             }
         }
     }
@@ -616,8 +647,10 @@ int p2p_update(p2p_session_t *s) {
         p2p_signal_pubsub_tick(&s->sig_pubsub_ctx, s);
         
         // PUB 角色：等待 STUN 响应后发送 offer（必须包含公网地址）
+        // 定期重发直到连接成功
         if (s->sig_pubsub_ctx.role == P2P_SIGNAL_ROLE_PUB && 
-            !s->signal_sent && s->local_cand_cnt > 0) {
+            s->local_cand_cnt > 0 &&
+            s->state == P2P_STATE_REGISTERING) {
             
             // 检查是否已收集到 Srflx 候选地址（公网反射地址）
             int has_srflx = 0;
@@ -628,23 +661,38 @@ int p2p_update(p2p_session_t *s) {
                 }
             }
             
-            // 只有在收到 STUN 响应（有 Srflx）或超时后才发布
-            // 注意：Gist 无法看到客户端公网地址，必须包含 Srflx
+            // 只有在收到 STUN 响应（有 Srflx）后才发布
             if (has_srflx) {
-                p2p_signaling_payload_t payload = {0};
-                strncpy(payload.sender, s->cfg.peer_id, 31);
-                strncpy(payload.target, s->remote_peer_id, 31);
-                payload.candidate_count = s->local_cand_cnt;
-                memcpy(payload.candidates, s->local_cands, 
-                       sizeof(p2p_candidate_t) * s->local_cand_cnt);
+                uint64_t now = time_ms();
+                int should_send = 0;
                 
-                uint8_t buf[2048];
-                int n = p2p_signal_pack(&payload, buf, sizeof(buf));
-                if (n > 0) {
-                    p2p_signal_pubsub_send(&s->sig_pubsub_ctx, s->remote_peer_id, buf, n);
-                    s->signal_sent = 1;
-                    printf("[SIGNALING] Auto-published offer with %d candidates (including Srflx) to %s\n", 
-                           s->local_cand_cnt, s->remote_peer_id);
+                if (!s->signal_sent) {
+                    should_send = 1;
+                } else if (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) {
+                    should_send = 1;
+                } else if (s->local_cand_cnt > s->last_cand_cnt_sent) {
+                    should_send = 1;
+                }
+                
+                if (should_send) {
+                    p2p_signaling_payload_t payload = {0};
+                    strncpy(payload.sender, s->cfg.peer_id, 31);
+                    strncpy(payload.target, s->remote_peer_id, 31);
+                    payload.candidate_count = s->local_cand_cnt;
+                    memcpy(payload.candidates, s->local_cands, 
+                           sizeof(p2p_candidate_t) * s->local_cand_cnt);
+                    
+                    uint8_t buf[2048];
+                    int n = p2p_signal_pack(&payload, buf, sizeof(buf));
+                    if (n > 0) {
+                        p2p_signal_pubsub_send(&s->sig_pubsub_ctx, s->remote_peer_id, buf, n);
+                        s->signal_sent = 1;
+                        s->last_signal_time = now;
+                        s->last_cand_cnt_sent = s->local_cand_cnt;
+                        printf("[SIGNALING] %s offer with %d candidates to %s\n", 
+                               s->last_cand_cnt_sent > 0 ? "Resent" : "Published",
+                               s->local_cand_cnt, s->remote_peer_id);
+                    }
                 }
             }
         }

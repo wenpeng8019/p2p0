@@ -410,8 +410,8 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                 printf("[ICE] Gathered Host Candidate: %s:%d (priority=0x%08x)\n", 
                        inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                 
-                /* Trickle ICE: 立即发送候选 */
-                p2p_ice_send_local_candidate(s, c);
+                /* 候选已添加到 local_cands，将在 p2p_update() 中定期批量发送 */
+                printf("[ICE] [Trickle] Candidate %d queued for batch sending\n", s->local_cand_cnt);
             }
         }
         freeifaddrs(ifaddr);

@@ -219,8 +219,8 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                         printf("[ICE] Gathered Relay Candidate: %s:%u (priority=%u)\n", 
                                inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                         
-                        /* Trickle ICE（涓流模式）: 候选收集后立即发送给对端 */
-                        p2p_ice_send_local_candidate(s, c);
+                        /* 候选已添加到 local_cands，将在 p2p_update() 中定期批量发送 */
+                        printf("[ICE] [Trickle] Candidate %d queued for batch sending\n", s->local_cand_cnt);
                     }
                     
                     /*

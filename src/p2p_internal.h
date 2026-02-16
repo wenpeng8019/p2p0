@@ -218,6 +218,8 @@ struct p2p_session {
     int                     signaling_mode;     /* 信令模式 P2P_CONNECT_MODE_* */
     char                    remote_peer_id[P2P_PEER_ID_MAX]; /* 目标对等体 ID */
     int                     signal_sent;        /* 是否已发送初始信令 */
+    uint64_t                last_signal_time;   /* 上次发送信令的时间戳 (ms) */
+    int                     last_cand_cnt_sent; /* 上次发送时的候选数量 */
 
     /* ======================== 传输层实例 ======================== */
     nat_ctx_t               nat;                /* NAT 穿透上下文 */
