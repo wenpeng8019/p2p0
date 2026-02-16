@@ -134,15 +134,19 @@ int p2p0_ice_relay_receive_answer(p2p0_ctx_t *ctx) {
         return P2P0_ERROR;
     }
 
-    /* Parse remote candidates */
-    char *token = strtok(msg.data, ";");
+    /* Parse remote candidates - use manual parsing to avoid strtok issues */
     ice_ctx->num_remote_candidates = 0;
+    char *data_ptr = msg.data;
+    char *semicolon;
 
-    while (token && ice_ctx->num_remote_candidates < P2P0_ICE_RELAY_MAX_CANDIDATES) {
+    while ((semicolon = strchr(data_ptr, ';')) != NULL && 
+           ice_ctx->num_remote_candidates < P2P0_ICE_RELAY_MAX_CANDIDATES) {
+        *semicolon = '\0';  /* Temporarily null-terminate */
+        
         char address[128];
         unsigned int port, priority;
 
-        if (sscanf(token, "%127[^:]:%u:%u", address, &port, &priority) == 3) {
+        if (sscanf(data_ptr, "%127[^:]:%u:%u", address, &port, &priority) == 3) {
             int idx = ice_ctx->num_remote_candidates;
             snprintf(ice_ctx->remote_candidates[idx].address,
                     sizeof(ice_ctx->remote_candidates[idx].address), "%s", address);
@@ -151,7 +155,7 @@ int p2p0_ice_relay_receive_answer(p2p0_ctx_t *ctx) {
             ice_ctx->num_remote_candidates++;
         }
 
-        token = strtok(NULL, ";");
+        data_ptr = semicolon + 1;  /* Move to next token */
     }
 
     return ice_ctx->num_remote_candidates > 0 ? P2P0_OK : P2P0_ERROR;

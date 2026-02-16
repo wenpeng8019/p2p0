@@ -14,7 +14,24 @@
     #include <unistd.h>
 #endif
 
-/* HTTP helper functions for GitHub API */
+/*
+ * NOTE: This is a demonstration implementation of the PUBSUB protocol concept.
+ * 
+ * IMPORTANT LIMITATIONS:
+ * - This implementation uses plain HTTP, NOT HTTPS
+ * - GitHub API requires HTTPS for actual use
+ * - For production use, you must implement TLS/SSL support (e.g., using OpenSSL, mbedTLS)
+ * - This code serves as a conceptual example of the serverless signaling approach
+ * 
+ * To make this production-ready:
+ * 1. Add TLS/SSL library (breaks zero-dependency promise for this protocol)
+ * 2. Or use system TLS (platform-specific)
+ * 3. Or use curl/libcurl as HTTP client
+ * 
+ * For demonstration purposes, this shows the protocol flow and message format.
+ */
+
+/* HTTP helper functions for GitHub API (DEMONSTRATION ONLY - requires HTTPS) */
 static int http_request(const char *host, const char *port, const char *method,
                        const char *path, const char *token, const char *body,
                        char *response, size_t response_size) {
@@ -75,7 +92,15 @@ static int http_request(const char *host, const char *port, const char *method,
     }
 
     /* Send request */
-    send(sockfd, request, request_len, 0);
+    int total_sent = 0;
+    while (total_sent < request_len) {
+        int sent = send(sockfd, request + total_sent, request_len - total_sent, 0);
+        if (sent < 0) {
+            close(sockfd);
+            return P2P0_ERROR;
+        }
+        total_sent += sent;
+    }
 
     /* Receive response */
     int total_received = 0;
@@ -177,7 +202,14 @@ int p2p0_pubsub_subscribe(p2p0_ctx_t *ctx, const char *peer_id, p2p0_peer_t *pee
                     char address[128];
                     unsigned int port;
 
-                    /* Parse JSON content */
+                    /* 
+                     * Parse JSON content with escaped quotes
+                     * Expected format: {\"address\":\"1.2.3.4\",\"port\":5000}
+                     * 
+                     * Note: This uses a complex sscanf pattern with escape sequences.
+                     * For production code, consider using a proper JSON parser library.
+                     * The pattern matches: {\\"address\\":\\"<address>\\",\\"port\\":<port>}
+                     */
                     if (sscanf(content_pos, "{\\\"address\\\":\\\"%127[^\\]\\\",\\\"port\\\":%u}",
                                address, &port) == 2) {
                         snprintf(peer->address, sizeof(peer->address), "%s", address);

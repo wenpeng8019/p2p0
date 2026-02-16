@@ -60,7 +60,20 @@ static session_t *find_session(const char *session_id, int create) {
     return NULL;
 }
 
-/* Handle client connection */
+/* 
+ * Handle client connection
+ * 
+ * NOTE: This is a simple synchronous implementation for demonstration.
+ * LIMITATIONS:
+ * - Handles clients sequentially in the main thread
+ * - One slow/unresponsive client blocks all others
+ * - No timeouts on blocking recv() operations
+ * 
+ * For production use, consider:
+ * - Multi-threading or async I/O (select/poll/epoll)
+ * - Setting socket timeouts with SO_RCVTIMEO
+ * - Connection pooling and rate limiting
+ */
 static void handle_client(int client_fd) {
     p2p0_ice_relay_msg_t msg;
     int received = recv(client_fd, (char *)&msg, sizeof(msg), 0);

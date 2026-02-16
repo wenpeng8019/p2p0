@@ -105,8 +105,11 @@ int p2p0_simple_get_peer(p2p0_ctx_t *ctx, const char *peer_id, p2p0_peer_t *peer
         return P2P0_ERROR_CONNECT;
     }
 
-    sendto(simple_ctx->signaling_fd, &msg, sizeof(msg), 0,
-           (struct sockaddr *)&server_addr, sizeof(server_addr));
+    int sent = sendto(simple_ctx->signaling_fd, &msg, sizeof(msg), 0,
+                      (struct sockaddr *)&server_addr, sizeof(server_addr));
+    if (sent < 0) {
+        return P2P0_ERROR;
+    }
 
     /* Receive response */
     socklen_t addr_len = sizeof(server_addr);
