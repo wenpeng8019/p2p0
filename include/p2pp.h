@@ -66,8 +66,9 @@
 /* 安全协议 */
 #define P2P_PKT_AUTH            0x60    /* 安全握手包 */
 
-/* REGISTER_ACK 标志位 */
-#define P2P_REGACK_PEER_ONLINE  0x01    /* 对端在线 */
+/* REGISTER_ACK status 码 */
+#define P2P_REGACK_PEER_OFFLINE  0   /* 成功，对端离线 */
+#define P2P_REGACK_PEER_ONLINE   1   /* 成功，对端在线 */
 
 /* SIMPLE 模式包头 (4 bytes) */
 typedef struct {

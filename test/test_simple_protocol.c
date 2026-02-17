@@ -41,10 +41,10 @@ typedef struct {
 } test_candidate_t;
 
 typedef struct {
-    uint8_t status;          // 0=success
-    uint8_t flags;           // P2P_REGACK_*
+    uint8_t status;          // 0=离线, 1=在线, >=2=error
     uint8_t max_candidates;  // 服务器缓存能力
-    uint8_t reserved;
+    uint32_t public_ip;      // 客户端的公网 IP
+    uint16_t public_port;    // 客户端的公网端口
 } test_register_ack_t;
 
 typedef struct {
@@ -67,26 +67,25 @@ TEST(register_ack_basic) {
     
     // 构造 REGISTER_ACK 包
     test_register_ack_t ack;
-    ack.status = 0;
-    ack.flags = P2P_REGACK_PEER_ONLINE;
+    ack.status = P2P_REGACK_PEER_ONLINE;  // 对端在线
     ack.max_candidates = 5;
-    ack.reserved = 0;
+    ack.public_ip = htonl(0x01020304);  // 1.2.3.4
+    ack.public_port = htons(12345);
     
     // 验证字段
-    ASSERT_EQ(ack.status, 0);
-    ASSERT_EQ(ack.flags, P2P_REGACK_PEER_ONLINE);
+    ASSERT_EQ(ack.status, P2P_REGACK_PEER_ONLINE);
     ASSERT_EQ(ack.max_candidates, 5);
-    TEST_LOG("  ✓ REGISTER_ACK format correct: peer_online=1, max=5");
+    ASSERT_EQ(ntohl(ack.public_ip), 0x01020304);
+    ASSERT_EQ(ntohs(ack.public_port), 12345);
+    TEST_LOG("  ✓ REGISTER_ACK format correct: peer_online=1, max=5, public=1.2.3.4:12345");
 }
 
 TEST(register_ack_no_cache) {
     TEST_LOG("Testing REGISTER_ACK with no cache support");
     
     test_register_ack_t ack;
-    ack.status = 0;
-    ack.flags = 0;
+    ack.status = P2P_REGACK_PEER_OFFLINE;  // 对端离线
     ack.max_candidates = 0;  // 不支持缓存
-    ack.reserved = 0;
     
     ASSERT_EQ(ack.max_candidates, 0);
     TEST_LOG("  ✓ max_candidates=0 means no cache support");
@@ -96,14 +95,43 @@ TEST(register_ack_peer_offline) {
     TEST_LOG("Testing REGISTER_ACK when peer is offline");
     
     test_register_ack_t ack;
-    ack.status = 0;
-    ack.flags = 0;  // peer_online=0
+    ack.status = P2P_REGACK_PEER_OFFLINE;  // 对端离线
     ack.max_candidates = 8;
-    ack.reserved = 0;
+    ack.public_ip = htonl(0xC0A80001);  // 192.168.0.1
+    ack.public_port = htons(54321);
     
-    ASSERT_EQ(ack.flags & P2P_REGACK_PEER_ONLINE, 0);
+    ASSERT_EQ(ack.status, P2P_REGACK_PEER_OFFLINE);
     ASSERT_EQ(ack.max_candidates, 8);
-    TEST_LOG("  ✓ peer_online=0, max=8 (offline but cacheable)");
+    ASSERT_EQ(ntohl(ack.public_ip), 0xC0A80001);
+    ASSERT_EQ(ntohs(ack.public_port), 54321);
+    TEST_LOG("  ✓ status=0 (offline), max=8, public=192.168.0.1:54321");
+}
+
+TEST(register_ack_public_address_detection) {
+    TEST_LOG("Testing REGISTER_ACK public address detection");
+    
+    // 模拟场景：客户端在 NAT 后，不知道自己的公网地址
+    // 发送 REGISTER 到服务器，服务器返回客户端的公网地址
+    
+    test_register_ack_t ack;
+    ack.status = P2P_REGACK_PEER_ONLINE;  // 对端在线
+    ack.max_candidates = 8;
+    
+    // 服务器探测到的客户端公网地址
+    ack.public_ip = htonl(0x5F6B8C01);     // 95.107.140.1 (假设的公网IP)
+    ack.public_port = htons(45678);         // NAT 映射的端口
+    
+    // 验证客户端可以获取自己的公网地址
+    struct in_addr addr;
+    addr.s_addr = ack.public_ip;
+    char ip_str[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &addr, ip_str, sizeof(ip_str));
+    
+    ASSERT_EQ(strcmp(ip_str, "95.107.140.1"), 0);
+    ASSERT_EQ(ntohs(ack.public_port), 45678);
+    
+    TEST_LOG("  ✓ Client discovered public address: %s:%d", ip_str, ntohs(ack.public_port));
+    TEST_LOG("  ✓ NAT traversal: client now knows its external endpoint");
 }
 
 /* ============================================================================
@@ -256,10 +284,8 @@ TEST(flow_both_online) {
     
     // Phase 2: Server -> Alice REGISTER_ACK
     test_register_ack_t ack1;
-    ack1.status = 0;
-    ack1.flags = P2P_REGACK_PEER_ONLINE;  // Bob 在线
+    ack1.status = P2P_REGACK_PEER_ONLINE;  // Bob 在线
     ack1.max_candidates = 5;  // 服务器缓存了 5 个
-    ack1.reserved = 0;
     TEST_LOG("  [Server->Alice] REGISTER_ACK: peer_online=1, max=5");
     
     // Phase 3: Server -> Alice PEER_INFO(seq=1)
@@ -314,10 +340,8 @@ TEST(flow_offline_cache) {
     
     // Phase 2: Server -> Alice REGISTER_ACK (Bob 离线)
     test_register_ack_t ack1;
-    ack1.status = 0;
-    ack1.flags = 0;  // peer_online=0
+    ack1.status = P2P_REGACK_PEER_OFFLINE;  // peer_online=0
     ack1.max_candidates = 5;
-    ack1.reserved = 0;
     TEST_LOG("  [Server->Alice] REGISTER_ACK: peer_online=0, max=5");
     TEST_LOG("  [Alice] Enters REGISTERED state, waiting...");
     
@@ -326,10 +350,8 @@ TEST(flow_offline_cache) {
     
     // Phase 4: Server -> Bob REGISTER_ACK
     test_register_ack_t ack2;
-    ack2.status = 0;
-    ack2.flags = P2P_REGACK_PEER_ONLINE;  // Alice 在线
+    ack2.status = P2P_REGACK_PEER_ONLINE;  // Alice 在线
     ack2.max_candidates = 5;
-    ack2.reserved = 0;
     TEST_LOG("  [Server->Bob] REGISTER_ACK: peer_online=1, max=5");
     
     // Phase 5: Server 向双方发送 PEER_INFO(seq=1)
@@ -375,10 +397,8 @@ TEST(flow_no_cache_support) {
     
     // Phase 2: Server -> Alice REGISTER_ACK (不支持缓存)
     test_register_ack_t ack;
-    ack.status = 0;
-    ack.flags = 0;
+    ack.status = P2P_REGACK_PEER_OFFLINE;
     ack.max_candidates = 0;  // 不支持缓存
-    ack.reserved = 0;
     
     ASSERT_EQ(ack.max_candidates, 0);
     TEST_LOG("  [Server->Alice] REGISTER_ACK: max=0 (no cache)");
@@ -528,12 +548,10 @@ TEST(error_register_ack_failed) {
     TEST_LOG("Testing REGISTER_ACK failure status");
     
     test_register_ack_t ack;
-    ack.status = 1;  // 非零表示失败
-    ack.flags = 0;
-    ack.max_candidates = 0;
+    ack.status = 2;  // >=2 表示错误
     
-    ASSERT_EQ(ack.status, 1);
-    TEST_LOG("  ✓ status=1 indicates registration failed");
+    ASSERT(ack.status >= 2);
+    TEST_LOG("  ✓ status>=2 indicates registration failed");
 }
 
 /* ============================================================================
@@ -551,6 +569,7 @@ int main(void) {
     RUN_TEST(register_ack_basic);
     RUN_TEST(register_ack_no_cache);
     RUN_TEST(register_ack_peer_offline);
+    RUN_TEST(register_ack_public_address_detection);
     
     printf("\nPart 2: PEER_INFO Serialization\n");
     printf("----------------------------------------\n");

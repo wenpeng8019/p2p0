@@ -367,31 +367,30 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         }
         
         // 构造并发送 REGISTER_ACK
-        // 格式: [hdr(4)][status(1)][flags(1)][max_candidates(1)][reserved(1)]
+        // 格式: [hdr(4)][status(1)][max_candidates(1)][public_ip(4)][public_port(2)]
         {
-            uint8_t ack_response[8];
+            uint8_t ack_response[12];
             p2p_packet_hdr_t *ack_hdr = (p2p_packet_hdr_t *)ack_response;
             ack_hdr->type = P2P_PKT_REGISTER_ACK;
             ack_hdr->flags = 0;
             ack_hdr->seq = 0;
             
-            uint8_t status = 0;  /* 0 = 成功 */
-            uint8_t flags = 0;
+            /* status: 0=成功/对端离线, 1=成功/对端在线 */
+            uint8_t status = (remote_idx >= 0) ? P2P_REGACK_PEER_ONLINE : P2P_REGACK_PEER_OFFLINE;
             uint8_t max_cands = SIMPLE_MAX_CANDIDATES;  /* 服务器缓存能力（0=不支持） */
             
-            if (remote_idx >= 0) {
-                flags |= P2P_REGACK_PEER_ONLINE;  /* 对端在线 */
-            }
-            
             ack_response[4] = status;
-            ack_response[5] = flags;
-            ack_response[6] = max_cands;  /* max_candidates */
-            ack_response[7] = 0;  /* reserved */
+            ack_response[5] = max_cands;  /* max_candidates */
             
-            sendto(udp_fd, ack_response, 8, 0, (struct sockaddr *)from, sizeof(*from));
+            /* 填入客户端的公网地址（服务器观察到的 UDP 源地址）*/
+            memcpy(ack_response + 6, &from->sin_addr.s_addr, 4);   /* public_ip */
+            memcpy(ack_response + 10, &from->sin_port, 2);          /* public_port */
             
-            printf("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d\n", 
-                   from_str, (remote_idx >= 0) ? 1 : 0, max_cands);
+            sendto(udp_fd, ack_response, 12, 0, (struct sockaddr *)from, sizeof(*from));
+            
+            printf("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, public=%s:%d\n", 
+                   from_str, (remote_idx >= 0) ? 1 : 0, max_cands,
+                   inet_ntoa(from->sin_addr), ntohs(from->sin_port));
             fflush(stdout);
         }
         

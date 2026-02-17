@@ -204,11 +204,11 @@ int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_
     switch (type) {
     
     case P2P_PKT_REGISTER_ACK:
-        /* 解析 REGISTER_ACK: [status(1)][flags(1)][max_candidates(1)][reserved(1)] */
-        if (len < 4) return -1;
+        /* 解析 REGISTER_ACK: [status(1)][max_candidates(1)][public_ip(4)][public_port(2)] */
+        if (len < 8) return -1;
         
         uint8_t status = payload[0];
-        if (status != 0) {
+        if (status >= 2) {
             if (ctx->verbose) {
                 printf("[SIGNAL_SIMPLE] REGISTER_ACK: Server error (status=%d)\n", status);
                 fflush(stdout);
@@ -216,11 +216,16 @@ int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_
             return -1;
         }
 
-        uint8_t ack_flags = payload[1];
-        uint8_t max_cands = payload[2];
+        uint8_t max_cands = payload[1];
         
-        ctx->peer_online = (ack_flags & P2P_REGACK_PEER_ONLINE) ? 1 : 0;
+        ctx->peer_online = (status == P2P_REGACK_PEER_ONLINE) ? 1 : 0;
         ctx->max_remote_candidates = max_cands;
+        
+        /* 解析公网地址（服务器探测到的 UDP 源地址）*/
+        memset(&ctx->public_addr, 0, sizeof(ctx->public_addr));
+        ctx->public_addr.sin_family = AF_INET;
+        memcpy(&ctx->public_addr.sin_addr.s_addr, payload + 2, 4);
+        memcpy(&ctx->public_addr.sin_port, payload + 6, 2);
         
         /* 根据服务器缓存能力确定每个包的候选数量 */
         if (max_cands > 0 && max_cands < MAX_CANDS_PER_PACKET) {
@@ -230,8 +235,9 @@ int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_
         }
         
         if (ctx->verbose) {
-            printf("[SIGNAL_SIMPLE] REGISTER_ACK: peer_online=%d, max_cands=%d (cache=%s)\n",
-                   ctx->peer_online, max_cands, max_cands > 0 ? "yes" : "no");
+            printf("[SIGNAL_SIMPLE] REGISTER_ACK: peer_online=%d, max_cands=%d (cache=%s), public_addr=%s:%d\n",
+                   ctx->peer_online, max_cands, max_cands > 0 ? "yes" : "no",
+                   inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port));
             fflush(stdout);
         }
         

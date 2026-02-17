@@ -63,10 +63,10 @@ void mock_server_init(void) {
 }
 
 typedef struct {
-    uint8_t status;          // 0=success, 1=error
-    uint8_t flags;           // P2P_REGACK_PEER_ONLINE
+    uint8_t status;          // 0=离线, 1=在线, >=2=error
     uint8_t max_candidates;  // 服务器缓存能力
-    uint8_t reserved;
+    uint32_t public_ip;      // 客户端的公网 IP
+    uint16_t public_port;    // 客户端的公网端口
 } register_ack_t;
 
 // 模拟 REGISTER 处理逻辑
@@ -134,13 +134,15 @@ register_ack_t mock_server_register(const char *local_id, const char *remote_id,
     }
     
     // 4. 构造 REGISTER_ACK
-    ack.status = 0;
-    ack.flags = (remote_idx >= 0) ? P2P_REGACK_PEER_ONLINE : 0;
+    ack.status = (remote_idx >= 0) ? P2P_REGACK_PEER_ONLINE : P2P_REGACK_PEER_OFFLINE;
     ack.max_candidates = SIMPLE_MAX_CANDIDATES;
-    ack.reserved = 0;
     
-    TEST_LOG("  REGISTER_ACK: peer_online=%d, max=%d", 
-             (remote_idx >= 0) ? 1 : 0, SIMPLE_MAX_CANDIDATES);
+    // 填充公网地址（服务器观察到的客户端源地址）
+    inet_pton(AF_INET, ip_str, &ack.public_ip);
+    ack.public_port = htons(port);
+    
+    TEST_LOG("  REGISTER_ACK: peer_online=%d, max=%d, public=%s:%d", 
+             (remote_idx >= 0) ? 1 : 0, SIMPLE_MAX_CANDIDATES, ip_str, port);
     
     // 5. 如果对端在线，建立双向配对
     if (remote_idx >= 0) {
@@ -250,8 +252,7 @@ TEST(register_ack_peer_offline) {
     
     register_ack_t ack = mock_server_register("alice", "bob", "10.0.0.1", 5000, cands, 3);
     
-    ASSERT_EQ(ack.status, 0);
-    ASSERT_EQ(ack.flags & P2P_REGACK_PEER_ONLINE, 0);  // peer_online=0
+    ASSERT_EQ(ack.status, P2P_REGACK_PEER_OFFLINE);  // peer offline
     ASSERT_EQ(ack.max_candidates, SIMPLE_MAX_CANDIDATES);
     
     // 验证候选已缓存
@@ -282,8 +283,7 @@ TEST(register_ack_peer_online) {
     // Bob 注册
     register_ack_t ack = mock_server_register("bob", "alice", "10.0.0.2", 6000, cands_bob, 2);
     
-    ASSERT_EQ(ack.status, 0);
-    ASSERT_EQ(ack.flags & P2P_REGACK_PEER_ONLINE, P2P_REGACK_PEER_ONLINE);  // peer_online=1
+    ASSERT_EQ(ack.status, P2P_REGACK_PEER_ONLINE);  // peer online
     ASSERT_EQ(ack.max_candidates, SIMPLE_MAX_CANDIDATES);
     
     // 验证双向配对
@@ -399,7 +399,7 @@ TEST(offline_cache_basic) {
     register_ack_t ack1 = mock_server_register("alice", "bob", "10.0.0.1", 5000, 
                                                 cands_alice, 4);
     
-    ASSERT_EQ(ack1.flags & P2P_REGACK_PEER_ONLINE, 0);
+    ASSERT_EQ(ack1.status, P2P_REGACK_PEER_OFFLINE);
     TEST_LOG("  Alice registered, Bob offline, candidates cached");
     
     // 验证缓存
@@ -418,7 +418,7 @@ TEST(offline_cache_basic) {
     register_ack_t ack2 = mock_server_register("bob", "alice", "10.0.0.2", 6000, 
                                                 cands_bob, 3);
     
-    ASSERT_EQ(ack2.flags & P2P_REGACK_PEER_ONLINE, P2P_REGACK_PEER_ONLINE);
+    ASSERT_EQ(ack2.status, P2P_REGACK_PEER_ONLINE);
     TEST_LOG("  Bob registered, Alice online, pairing established");
     
     // 验证双向配对

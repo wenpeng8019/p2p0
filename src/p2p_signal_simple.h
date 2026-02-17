@@ -1,11 +1,11 @@
 /*
- * SIMPLE 模式信令（UDP 无状态）
+ * SIMPLE 模式信令（UDP, 缓存配对机制 + 公网地址探测）
  *
  * ============================================================================
  * 协议概述
  * ============================================================================
  *
- * 实现简单的 UDP 信令协议，用于交换对端地址信息：
+ * 实现简单的 UDP 信令协议，用于交换对端地址信息，包括双方的公网地址：
  *   - REGISTER:      向服务器注册自己的 ID 和初始候选地址
  *   - REGISTER_ACK:  服务器确认，返回对端状态和缓存能力
  *   - PEER_INFO:     序列化候选同步包（服务器转发 seq=1，后续 P2P 传输）
@@ -89,9 +89,10 @@ struct p2p_session;
  *   [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
  *
  * REGISTER_ACK:
- *   [status(1)][flags(1)][max_candidates(1)][reserved(1)]
- *   flags: P2P_REGACK_PEER_ONLINE
+ *   [status(1)][max_candidates(1)][public_ip(4)][public_port(2)]
+ *   status: 0=成功/对端离线, 1=成功/对端在线, >=2=错误码
  *   max_candidates: 服务器为对端缓存的最大候选数量（0=不支持缓存）
+ *   public_ip/port: 客户端的公网地址（服务器观察到的 UDP 源地址）
  *
  * PEER_INFO (seq 字段在包头 hdr.seq):
  *   [base_index(1)][candidate_count(1)][candidates(N*7)]
@@ -129,6 +130,7 @@ typedef struct {
     /* REGISTER_ACK 返回的信息 */
     uint8_t             peer_online;                        /* 对端是否在线 */
     uint8_t             max_remote_candidates;              /* 服务器为对端缓存的最大候选数（0=不支持） */
+    struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器探测到的）*/
     
     /* REGISTER 重发控制（仅 REGISTERING 状态） */
     int                 register_attempts;                  /* REGISTER 重发次数 */
