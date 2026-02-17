@@ -36,7 +36,7 @@ echo ""
 echo "请选择要运行的测试："
 echo ""
 echo "  1) Relay 模式测试 (TCP 信令，需要3个终端)"
-echo "  2) SIMPLE 模式测试 (UDP 信令，NAT 打洞)"
+echo "  2) COMPACT 模式测试 (UDP 信令，NAT 打洞)"
 echo "  3) NAT 打洞详细日志测试"
 echo "  4) 手动测试命令参考"
 echo "  5) 查看测试指南"
@@ -98,7 +98,7 @@ case $choice in
         
     2)
         echo ""
-        echo -e "${YELLOW}=== 测试 2: SIMPLE 模式测试 ===${NC}"
+        echo -e "${YELLOW}=== 测试 2: COMPACT 模式测试 ===${NC}"
         echo ""
         echo "这将启动："
         echo "  1. 信令服务器 (端口 8888, UDP)"
@@ -119,19 +119,19 @@ case $choice in
         # 启动信令服务器
         echo ""
         echo "启动信令服务器..."
-        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== P2P SIGNALING SERVER (SIMPLE Mode) ===\" && ./build_cmake/p2p_server/p2p_server 8888"'
+        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== P2P SIGNALING SERVER (COMPACT Mode) ===\" && ./build_cmake/p2p_server/p2p_server 8888"'
         
         sleep 3
         
         # 启动 Alice
         echo "启动 Alice..."
-        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== ALICE ===\" && ./build_cmake/p2p_ping/p2p_ping --name alice --server 127.0.0.1 --simple --to bob"'
+        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== ALICE ===\" && ./build_cmake/p2p_ping/p2p_ping --name alice --server 127.0.0.1 --compact --to bob"'
         
         sleep 2
         
         # 启动 Bob
         echo "启动 Bob..."
-        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== BOB ===\" && ./build_cmake/p2p_ping/p2p_ping --name bob --server 127.0.0.1 --simple --to alice"'
+        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== BOB ===\" && ./build_cmake/p2p_ping/p2p_ping --name bob --server 127.0.0.1 --compact --to alice"'
         
         echo -e "${YELLOW}=== 手动测试命令参考 ===${NC}"
         echo ""
@@ -147,15 +147,15 @@ case $choice in
         echo "# 终端 3: 启动 Bob (主动方)"
         echo "./build_cmake/p2p_ping/p2p_ping --name bob --server 127.0.0.1 --to alice"
         echo ""
-        echo -e "${GREEN}# SIMPLE 模式测试:${NC}"
+        echo -e "${GREEN}# COMPACT 模式测试:${NC}"
         echo "# 终端 1: 启动服务器"
         echo "./build_cmake/p2p_server/p2p_server 8888"
         echo ""
         echo "# 终端 2: 启动 Alice"
-        echo "./build_cmake/p2p_ping/p2p_ping --name alice --server 127.0.0.1 --simple --to bob"
+        echo "./build_cmake/p2p_ping/p2p_ping --name alice --server 127.0.0.1 --compact --to bob"
         echo ""
         echo "# 终端 3: 启动 Bob"
-        echo "./build_cmake/p2p_ping/p2p_ping --name bob --server 127.0.0.1 --simple --to alice"
+        echo "./build_cmake/p2p_ping/p2p_ping --name bob --server 127.0.0.1 --compact --to alice"
         echo ""
         echo -e "${GREEN}# NAT 打洞详细日志:${NC}"
         echo "./build_cmake/p2p_ping/p2p_ping --disable-lan --verbose-punch ..."
@@ -197,13 +197,13 @@ case $choice in
         
         # 启动 Alice (带详细日志)
         echo "启动 Alice (带详细日志)..."
-        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== ALICE (Verbose Logs) ===\" && ./build_cmake/p2p_ping/p2p_ping --name alice --server 127.0.0.1 --simple --to bob --disable-lan --verbose-punch"'
+        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== ALICE (Verbose Logs) ===\" && ./build_cmake/p2p_ping/p2p_ping --name alice --server 127.0.0.1 --compact --to bob --disable-lan --verbose-punch"'
         
         sleep 2
         
         # 启动 Bob (带详细日志)
         echo "启动 Bob (带详细日志)..."
-        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== BOB (Verbose Logs) ===\" && ./build_cmake/p2p_ping/p2p_ping --name bob --server 127.0.0.1 --simple --to alice --disable-lan --verbose-punch"'
+        osascript -e 'tell app "Terminal" to do script "cd /Users/wenpeng/dev/c/p2p && echo \"=== BOB (Verbose Logs) ===\" && ./build_cmake/p2p_ping/p2p_ping --name bob --server 127.0.0.1 --compact --to alice --disable-lan --verbose-punch"'
         
         echo ""
         echo -e "${GREEN}✓ 测试已启动！${NC}"

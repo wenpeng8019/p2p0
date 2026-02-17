@@ -115,7 +115,7 @@ p2p_session_t *p2p_create(const p2p_config_t *cfg) {
     
     memset(&s->sig_pubsub_ctx, 0, sizeof(s->sig_pubsub_ctx));
     
-    // ICE 模式：信令服务器连接在首次执行 p2p_connect 时建立
+    // RELAY 模式：信令服务器连接在首次执行 p2p_connect 时建立
     // PUBSUB 模式：角色在 p2p_connect 时根据 remote_peer_id 决定
 
     // 获取本地所有有效的网络地址
@@ -167,8 +167,8 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
     LOCK(s);
 
     // 保存目标 peer_id（信令模式已在 create 时设置）
-    // SIMPLE 模式必须指定 remote_peer_id
-    if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE && !remote_peer_id) {
+    // COMPACT 模式必须指定 remote_peer_id
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT && !remote_peer_id) {
         printf("[ERROR] SIMPLE mode requires explicit remote_peer_id\n");
         s->state = P2P_STATE_ERROR;
         UNLOCK(s);
@@ -186,7 +186,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
 
     switch (s->signaling_mode) {
 
-    case P2P_SIGNALING_MODE_SIMPLE: {
+    case P2P_SIGNALING_MODE_COMPACT: {
         // 简单无状态信令：UDP 协议，无需登录，只注册 peer_id 映射
         struct sockaddr_in server_addr;
         if (!s->cfg.server_host ||
@@ -198,10 +198,10 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
 
         s->state = P2P_STATE_REGISTERING;
         
-        // 初始化 SIMPLE 信令上下文
-        signal_simple_init(&s->sig_simple_ctx);
+        // 初始化 COMPACT 信令上下文
+        signal_compact_init(&s->sig_compact_ctx);
         
-        // 收集 Host 候选地址（SIMPLE 模式下只收集本地网卡地址，存入 session）
+        // 收集 Host 候选地址（COMPACT 模式下只收集本地网卡地址，存入 session）
         struct ifaddrs *ifaddr, *ifa;
         if (getifaddrs(&ifaddr) == 0) {
             for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
@@ -223,7 +223,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
                 s->local_cands[s->local_cand_cnt].addr = host_addr;
                 s->local_cand_cnt++;
                 
-                printf("[SIMPLE] Added Host candidate: %s:%d\n",
+                printf("[COMPACT] Added Host candidate: %s:%d\n",
                        inet_ntoa(host_addr.sin_addr), ntohs(host_addr.sin_port));
             }
             freeifaddrs(ifaddr);
@@ -233,7 +233,7 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
         nat_init(&s->nat);
         
         // 开始信令注册
-        signal_simple_start(s, s->cfg.peer_id, remote_peer_id, &server_addr,
+        signal_compact_start(s, s->cfg.peer_id, remote_peer_id, &server_addr,
                             s->cfg.verbose_nat_punch);
         
         printf("[CONNECT] SIMPLE mode: registering <%s → %s> with %d candidates\n",
@@ -241,11 +241,11 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
         break;
     }
 
-    case P2P_SIGNALING_MODE_ICE: {
+    case P2P_SIGNALING_MODE_RELAY: {
         // ICE 有状态信令：TCP 长连接，自动登录，交换候选者
         
         if (!s->cfg.server_host) {
-            printf("[ERROR] ICE mode requires server_host configuration\n");
+            printf("[ERROR] RELAY mode requires server_host configuration\n");
             s->state = P2P_STATE_ERROR;
             UNLOCK(s);
             return -1;
@@ -282,12 +282,12 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
             if (n > 0) {
                 p2p_signal_relay_send_connect(&s->sig_relay_ctx, remote_peer_id, buf, n);
                 s->signal_sent = 1;
-                printf("[CONNECT] ICE mode: sent initial offer with %d candidates to %s\n", 
+                printf("[CONNECT] RELAY mode: sent initial offer with %d candidates to %s\n", 
                        s->local_cand_cnt, remote_peer_id);
             }
         } else if (!remote_peer_id) {
             // 被动模式：等待任意对等方的 offer
-            printf("[CONNECT] ICE mode: waiting for incoming offer from any peer...\n");
+            printf("[CONNECT] RELAY mode: waiting for incoming offer from any peer...\n");
         }
         
         // 注意：后续 Srflx 候选者（STUN 响应）会在 p2p_update 中增量发送
@@ -407,21 +407,21 @@ int p2p_update(p2p_session_t *s) {
         // NAT / 信令包
         // --------------------
     
-        case P2P_PKT_REGISTER:
+        case SIG_PKT_REGISTER:
             /* 忽略（服务器发给客户端的不会是 REGISTER） */
             break;
 
-        case P2P_PKT_REGISTER_ACK:
-            /* SIMPLE 模式：服务器确认注册 */
-            if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
-                signal_simple_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
+        case SIG_PKT_REGISTER_ACK:
+            /* COMPACT 模式：服务器确认注册 */
+            if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+                signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
             }
             break;
 
-        case P2P_PKT_PEER_INFO:
-            /* SIMPLE 模式：信令处理 → 打洞启动 */
-            if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
-                if (signal_simple_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from) == 0) {
+        case SIG_PKT_PEER_INFO:
+            /* COMPACT 模式：信令处理 → 打洞启动 */
+            if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+                if (signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from) == 0) {
                     /* seq=1 时启动打洞（首次收到服务器转发的候选） */
                     if (hdr.seq == 1) {
                         nat_start_punch(s, s->cfg.verbose_nat_punch);
@@ -430,10 +430,10 @@ int p2p_update(p2p_session_t *s) {
             }
             break;
         
-        case P2P_PKT_PEER_INFO_ACK:
-            /* SIMPLE 模式：候选确认 */
-            if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
-                signal_simple_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
+        case SIG_PKT_PEER_INFO_ACK:
+            /* COMPACT 模式：候选确认 */
+            if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+                signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
             }
             break;
 
@@ -574,10 +574,10 @@ int p2p_update(p2p_session_t *s) {
         s->state = P2P_STATE_RELAY;
         s->path = P2P_PATH_RELAY;
         /* RELAY 模式下使用信令服务器地址 */
-        if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
-            s->active_addr = s->sig_simple_ctx.server_addr;
+        if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+            s->active_addr = s->sig_compact_ctx.server_addr;
         } else {
-            /* ICE 模式暂不支持 RELAY 回退 */
+            /* RELAY 模式暂不支持 RELAY 回退 */
             s->active_addr = s->nat.peer_addr;
         }
     }
@@ -632,12 +632,12 @@ int p2p_update(p2p_session_t *s) {
     // 周期维护 NAT/信令 状态机
     // --------------------
 
-    if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
-        /* SIMPLE 模式：信令和打洞分开 tick */
-        if (s->sig_simple_ctx.state == SIGNAL_SIMPLE_REGISTERING ||
-            s->sig_simple_ctx.state == SIGNAL_SIMPLE_REGISTERED) {
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+        /* COMPACT 模式：信令和打洞分开 tick */
+        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERING ||
+            s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERED) {
             /* 信令注册/等待阶段 */
-            signal_simple_tick(s);
+            signal_compact_tick(s);
         }
         if (s->nat.state != NAT_IDLE) {
             /* 打洞/已连接阶段 */
@@ -673,10 +673,10 @@ int p2p_update(p2p_session_t *s) {
     }
 
     // --------------------
-    // 周期维护信令服务状态机（ICE 模式）
+    // 周期维护信令服务状态机（RELAY 模式）
     // --------------------
 
-    if (s->signaling_mode == P2P_SIGNALING_MODE_ICE) {
+    if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
         p2p_signal_relay_tick(&s->sig_relay_ctx, s);
         
         // 定期重发信令（处理对方不在线或新候选收集）

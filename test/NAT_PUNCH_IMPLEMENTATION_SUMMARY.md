@@ -79,7 +79,7 @@
 #### `test/test_nat_punch.sh` (新建)
 - **自动化测试套件**
 - **功能**:
-  - 测试 SIMPLE 模式 NAT 打洞
+  - 测试 COMPACT 模式 NAT 打洞
   - 测试 Relay 模式 NAT 打洞
   - 验证打洞流程日志
   - 自动清理进程
@@ -94,7 +94,7 @@
   - 适合调试和观察实时日志
 - **用法**:
   ```bash
-  ./quick_test_nat_punch.sh simple  # SIMPLE 模式
+  ./quick_test_nat_punch.sh simple  # COMPACT 模式
   ./quick_test_nat_punch.sh relay     # Relay 模式
   ```
 
@@ -147,7 +147,7 @@ if (n->verbose) {
 
 ### 3. 流程完整性
 
-**SIMPLE 模式流程**:
+**COMPACT 模式流程**:
 ```
 START → REGISTERING → PUNCHING → SUCCESS
   ↓         ↓            ↓          ↓
@@ -243,7 +243,7 @@ grep "NAT_PUNCH.*SUCCESS" logs/*.log | grep "Time:"
 
 在 MacOS localhost 环境下测试：
 
-| 指标 | SIMPLE 模式 | Relay 模式 |
+| 指标 | COMPACT 模式 | Relay 模式 |
 |------|-------------|----------|
 | 打洞用时 | ~10-20 ms | ~100-200 ms (含协商) |
 | 尝试次数 | 1-2 次 | N/A (ICE 内部) |
@@ -251,7 +251,7 @@ grep "NAT_PUNCH.*SUCCESS" logs/*.log | grep "Time:"
 
 ## 兼容性
 
-- ✅ SIMPLE 模式（UDP 信令）
+- ✅ COMPACT 模式（UDP 信令）
 - ✅ Relay 模式（TCP 信令）
 - ✅ 本地测试（localhost）
 - ✅ 跨网络测试（需公网服务器）

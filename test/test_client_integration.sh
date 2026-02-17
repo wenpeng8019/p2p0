@@ -3,7 +3,7 @@
 # test_client_integration.sh - P2P 客户端集成测试
 #
 # 测试策略：
-# 1. 启动真实服务器（ICE 或 SIMPLE 模式）
+# 1. 启动真实服务器（ICE 或 COMPACT 模式）
 # 2. 启动两个 p2p_ping 客户端（alice 和 bob）
 # 3. 验证连接建立和数据交换
 # 4. 清理环境
@@ -237,15 +237,15 @@ test_ice_mode() {
 }
 
 # ============================================================================
-# 测试 2: SIMPLE 模式
+# 测试 2: COMPACT 模式
 # ============================================================================
-test_simple_mode() {
+test_compact_mode() {
     echo ""
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}Test 2: SIMPLE Mode Integration${NC}"
+    echo -e "${BLUE}Test 2: COMPACT Mode Integration${NC}"
     echo -e "${BLUE}========================================${NC}"
     
-    local server_log="${LOG_DIR}/simple_server.log"
+    local server_log="${LOG_DIR}/compact_server.log"
     local alice_log="${LOG_DIR}/simple_alice.log"
     local bob_log="${LOG_DIR}/simple_bob.log"
     
@@ -264,16 +264,16 @@ test_simple_mode() {
         return 1
     fi
     
-    # 步骤 2: 启动 Alice (SIMPLE 模式需要指定对端)
-    echo -e "\n${YELLOW}[2] Starting Alice (SIMPLE mode, alice <-> bob)...${NC}"
-    "$CLIENT_BIN" --server 127.0.0.1 --simple --name alice --to bob > "$alice_log" 2>&1 &
+    # 步骤 2: 启动 Alice (COMPACT 模式需要指定对端)
+    echo -e "\n${YELLOW}[2] Starting Alice (COMPACT mode, alice <-> bob)...${NC}"
+    "$CLIENT_BIN" --server 127.0.0.1 --compact --name alice --to bob > "$alice_log" 2>&1 &
     ALICE_PID=$!
     echo "  Alice PID: $ALICE_PID"
     sleep 2  # 等待 Alice 注册到服务器
     
     # 步骤 3: 启动 Bob (主动连接 Alice)
-    echo -e "\n${YELLOW}[3] Starting Bob (SIMPLE mode, bob <-> alice)...${NC}"
-    "$CLIENT_BIN" --server 127.0.0.1 --simple --name bob --to alice > "$bob_log" 2>&1 &
+    echo -e "\n${YELLOW}[3] Starting Bob (COMPACT mode, bob <-> alice)...${NC}"
+    "$CLIENT_BIN" --server 127.0.0.1 --compact --name bob --to alice > "$bob_log" 2>&1 &
     BOB_PID=$!
     echo "  Bob PID: $BOB_PID"
     
@@ -310,7 +310,7 @@ test_simple_mode() {
     
     # 测试通过
     echo -e "\n${GREEN}========================================${NC}"
-    echo -e "${GREEN}✓ SIMPLE Mode Test PASSED${NC}"
+    echo -e "${GREEN}✓ COMPACT Mode Test PASSED${NC}"
     echo -e "${GREEN}========================================${NC}"
     
     # 清理此次测试进程
@@ -348,9 +348,9 @@ main() {
         failed_tests=$((failed_tests + 1))
     fi
     
-    # 运行 SIMPLE 模式测试
+    # 运行 COMPACT 模式测试
     total_tests=$((total_tests + 1))
-    if test_simple_mode; then
+    if test_compact_mode; then
         passed_tests=$((passed_tests + 1))
     else
         failed_tests=$((failed_tests + 1))

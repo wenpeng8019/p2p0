@@ -1,5 +1,5 @@
 /*
- * test_simple_protocol.c - SIMPLE 协议完整测试套件
+ * test_compact_protocol.c - COMPACT 协议完整测试套件
  * 
  * 测试覆盖新协议特性：
  * 1. REGISTER / REGISTER_ACK (含 max_candidates)
@@ -38,14 +38,15 @@ typedef struct {
     uint8_t  type;
     uint32_t ip;
     uint16_t port;
-} test_candidate_t;
+} __attribute__((packed)) test_candidate_t;
 
 typedef struct {
     uint8_t status;          // 0=离线, 1=在线, >=2=error
     uint8_t max_candidates;  // 服务器缓存能力
     uint32_t public_ip;      // 客户端的公网 IP
     uint16_t public_port;    // 客户端的公网端口
-} test_register_ack_t;
+    uint16_t probe_port;     // NAT 探测端口（0=不支持）
+} __attribute__((packed)) test_register_ack_t;
 
 typedef struct {
     uint8_t base_index;      // 候选起始索引
@@ -67,40 +68,88 @@ TEST(register_ack_basic) {
     
     // 构造 REGISTER_ACK 包
     test_register_ack_t ack;
-    ack.status = P2P_REGACK_PEER_ONLINE;  // 对端在线
+    ack.status = SIG_REGACK_PEER_ONLINE;  // 对端在线
     ack.max_candidates = 5;
     ack.public_ip = htonl(0x01020304);  // 1.2.3.4
     ack.public_port = htons(12345);
+    ack.probe_port = htons(3479);  // 探测端口
     
     // 验证字段
-    ASSERT_EQ(ack.status, P2P_REGACK_PEER_ONLINE);
+    ASSERT_EQ(ack.status, SIG_REGACK_PEER_ONLINE);
     ASSERT_EQ(ack.max_candidates, 5);
     ASSERT_EQ(ntohl(ack.public_ip), 0x01020304);
     ASSERT_EQ(ntohs(ack.public_port), 12345);
-    TEST_LOG("  ✓ REGISTER_ACK format correct: peer_online=1, max=5, public=1.2.3.4:12345");
+    ASSERT_EQ(ntohs(ack.probe_port), 3479);
+    TEST_LOG("  ✓ REGISTER_ACK format correct: peer_online=1, max=5, public=1.2.3.4:12345, probe_port=3479");
 }
 
 TEST(register_ack_no_cache) {
     TEST_LOG("Testing REGISTER_ACK with no cache support");
     
     test_register_ack_t ack;
-    ack.status = P2P_REGACK_PEER_OFFLINE;  // 对端离线
+    ack.status = SIG_REGACK_PEER_OFFLINE;  // 对端离线
     ack.max_candidates = 0;  // 不支持缓存
+    ack.probe_port = 0;  // 不支持 NAT 探测
     
     ASSERT_EQ(ack.max_candidates, 0);
-    TEST_LOG("  ✓ max_candidates=0 means no cache support");
+    ASSERT_EQ(ack.probe_port, 0);
+    TEST_LOG("  ✓ max_candidates=0 means no cache support, probe_port=0 means no NAT detection");
+}
+
+TEST(register_ack_with_relay_flag) {
+    TEST_LOG("Testing REGISTER_ACK with relay support in header flags");
+    
+    // 构造带 relay 标志的 REGISTER_ACK
+    test_pkt_hdr_t hdr;
+    hdr.type = SIG_PKT_REGISTER_ACK;
+    hdr.flags = SIG_REGACK_FLAG_RELAY;  // 服务器支持中继
+    hdr.seq = 0;
+    
+    test_register_ack_t ack;
+    ack.status = SIG_REGACK_PEER_ONLINE;
+    ack.max_candidates = 8;
+    ack.probe_port = htons(3479);
+    
+    // 验证 relay 标志在 header 中
+    ASSERT_EQ(hdr.flags & SIG_REGACK_FLAG_RELAY, SIG_REGACK_FLAG_RELAY);
+    TEST_LOG("  ✓ Relay flag correctly set in header.flags");
+}
+
+TEST(register_ack_with_probe_port) {
+    TEST_LOG("Testing REGISTER_ACK with NAT probe port");
+    
+    test_register_ack_t ack;
+    ack.status = SIG_REGACK_PEER_OFFLINE;
+    ack.max_candidates = 8;
+    ack.probe_port = htons(3479);  // NAT 探测端口
+    
+    ASSERT_EQ(ntohs(ack.probe_port), 3479);
+    TEST_LOG("  ✓ NAT probe port = 3479 (server supports NAT detection)");
+}
+
+TEST(register_ack_no_probe_support) {
+    TEST_LOG("Testing REGISTER_ACK without NAT probe support");
+    
+    test_register_ack_t ack;
+    ack.status = SIG_REGACK_PEER_OFFLINE;
+    ack.max_candidates = 8;
+    ack.probe_port = 0;  // 不支持 NAT 探测
+    
+    ASSERT_EQ(ack.probe_port, 0);
+    TEST_LOG("  ✓ probe_port=0 means server does not support NAT detection");
 }
 
 TEST(register_ack_peer_offline) {
     TEST_LOG("Testing REGISTER_ACK when peer is offline");
     
     test_register_ack_t ack;
-    ack.status = P2P_REGACK_PEER_OFFLINE;  // 对端离线
+    ack.status = SIG_REGACK_PEER_OFFLINE;  // 对端离线
     ack.max_candidates = 8;
     ack.public_ip = htonl(0xC0A80001);  // 192.168.0.1
     ack.public_port = htons(54321);
+    ack.probe_port = 0;
     
-    ASSERT_EQ(ack.status, P2P_REGACK_PEER_OFFLINE);
+    ASSERT_EQ(ack.status, SIG_REGACK_PEER_OFFLINE);
     ASSERT_EQ(ack.max_candidates, 8);
     ASSERT_EQ(ntohl(ack.public_ip), 0xC0A80001);
     ASSERT_EQ(ntohs(ack.public_port), 54321);
@@ -114,7 +163,7 @@ TEST(register_ack_public_address_detection) {
     // 发送 REGISTER 到服务器，服务器返回客户端的公网地址
     
     test_register_ack_t ack;
-    ack.status = P2P_REGACK_PEER_ONLINE;  // 对端在线
+    ack.status = SIG_REGACK_PEER_ONLINE;  // 对端在线
     ack.max_candidates = 8;
     
     // 服务器探测到的客户端公网地址
@@ -142,7 +191,7 @@ TEST(peer_info_seq1_from_server) {
     TEST_LOG("Testing PEER_INFO(seq=1) from server");
     
     test_pkt_hdr_t hdr;
-    hdr.type = P2P_PKT_PEER_INFO;
+    hdr.type = SIG_PKT_PEER_INFO;
     hdr.flags = 0;
     hdr.seq = htons(1);  // seq=1 服务器发送
     
@@ -173,7 +222,7 @@ TEST(peer_info_seq2_with_base_index) {
     TEST_LOG("Testing PEER_INFO(seq=2) with base_index");
     
     test_pkt_hdr_t hdr;
-    hdr.type = P2P_PKT_PEER_INFO;
+    hdr.type = SIG_PKT_PEER_INFO;
     hdr.flags = 0;
     hdr.seq = htons(2);  // seq=2 客户端发送
     
@@ -198,15 +247,15 @@ TEST(peer_info_fin_flag) {
     TEST_LOG("Testing PEER_INFO with FIN flag");
     
     test_pkt_hdr_t hdr;
-    hdr.type = P2P_PKT_PEER_INFO;
-    hdr.flags = P2P_PEER_INFO_FIN;  // FIN 标志
+    hdr.type = SIG_PKT_PEER_INFO;
+    hdr.flags = SIG_PEER_INFO_FIN;  // FIN 标志
     hdr.seq = htons(4);
     
     test_peer_info_t info;
     info.base_index = 15;  // 指向列表末尾
     info.count = 0;        // count=0 表示结束
     
-    ASSERT_EQ(hdr.flags & P2P_PEER_INFO_FIN, P2P_PEER_INFO_FIN);
+    ASSERT_EQ(hdr.flags & SIG_PEER_INFO_FIN, SIG_PEER_INFO_FIN);
     ASSERT_EQ(info.count, 0);
     TEST_LOG("  ✓ PEER_INFO(seq=4, FIN, count=0) signals end");
 }
@@ -215,8 +264,8 @@ TEST(peer_info_last_packet_with_data) {
     TEST_LOG("Testing PEER_INFO last packet with data and FIN");
     
     test_pkt_hdr_t hdr;
-    hdr.type = P2P_PKT_PEER_INFO;
-    hdr.flags = P2P_PEER_INFO_FIN;
+    hdr.type = SIG_PKT_PEER_INFO;
+    hdr.flags = SIG_PEER_INFO_FIN;
     hdr.seq = htons(3);
     
     test_peer_info_t info;
@@ -231,7 +280,7 @@ TEST(peer_info_last_packet_with_data) {
     info.candidates[1].ip = htonl(0x0A00000B);
     info.candidates[1].port = htons(7001);
     
-    ASSERT_EQ(hdr.flags & P2P_PEER_INFO_FIN, P2P_PEER_INFO_FIN);
+    ASSERT_EQ(hdr.flags & SIG_PEER_INFO_FIN, SIG_PEER_INFO_FIN);
     ASSERT_EQ(info.count, 2);
     TEST_LOG("  ✓ PEER_INFO(seq=3, base=10, FIN) with last 2 candidates");
 }
@@ -244,7 +293,7 @@ TEST(peer_info_ack_basic) {
     TEST_LOG("Testing PEER_INFO_ACK basic format");
     
     test_pkt_hdr_t hdr;
-    hdr.type = P2P_PKT_PEER_INFO_ACK;
+    hdr.type = SIG_PKT_PEER_INFO_ACK;
     hdr.flags = 0;
     hdr.seq = 0;
     
@@ -252,7 +301,7 @@ TEST(peer_info_ack_basic) {
     ack.ack_seq = htons(1);  // 确认 seq=1
     ack.reserved = 0;
     
-    ASSERT_EQ(hdr.type, P2P_PKT_PEER_INFO_ACK);
+    ASSERT_EQ(hdr.type, SIG_PKT_PEER_INFO_ACK);
     ASSERT_EQ(ntohs(ack.ack_seq), 1);
     TEST_LOG("  ✓ PEER_INFO_ACK(seq=1) format correct");
 }
@@ -284,7 +333,7 @@ TEST(flow_both_online) {
     
     // Phase 2: Server -> Alice REGISTER_ACK
     test_register_ack_t ack1;
-    ack1.status = P2P_REGACK_PEER_ONLINE;  // Bob 在线
+    ack1.status = SIG_REGACK_PEER_ONLINE;  // Bob 在线
     ack1.max_candidates = 5;  // 服务器缓存了 5 个
     TEST_LOG("  [Server->Alice] REGISTER_ACK: peer_online=1, max=5");
     
@@ -313,7 +362,7 @@ TEST(flow_both_online) {
     
     // Phase 7: Alice -> Bob PEER_INFO(seq=3, FIN)
     test_pkt_hdr_t hdr3;
-    hdr3.flags = P2P_PEER_INFO_FIN;
+    hdr3.flags = SIG_PEER_INFO_FIN;
     hdr3.seq = htons(3);
     test_peer_info_t info3;
     info3.base_index = 10;
@@ -340,7 +389,7 @@ TEST(flow_offline_cache) {
     
     // Phase 2: Server -> Alice REGISTER_ACK (Bob 离线)
     test_register_ack_t ack1;
-    ack1.status = P2P_REGACK_PEER_OFFLINE;  // peer_online=0
+    ack1.status = SIG_REGACK_PEER_OFFLINE;  // peer_online=0
     ack1.max_candidates = 5;
     TEST_LOG("  [Server->Alice] REGISTER_ACK: peer_online=0, max=5");
     TEST_LOG("  [Alice] Enters REGISTERED state, waiting...");
@@ -350,7 +399,7 @@ TEST(flow_offline_cache) {
     
     // Phase 4: Server -> Bob REGISTER_ACK
     test_register_ack_t ack2;
-    ack2.status = P2P_REGACK_PEER_ONLINE;  // Alice 在线
+    ack2.status = SIG_REGACK_PEER_ONLINE;  // Alice 在线
     ack2.max_candidates = 5;
     TEST_LOG("  [Server->Bob] REGISTER_ACK: peer_online=1, max=5");
     
@@ -379,7 +428,7 @@ TEST(flow_offline_cache) {
     info3.base_index = 10;
     info3.count = 2;       // 最后 2 个候选 [10-11]
     test_pkt_hdr_t hdr3;
-    hdr3.flags = P2P_PEER_INFO_FIN;
+    hdr3.flags = SIG_PEER_INFO_FIN;
     TEST_LOG("  [Alice->Bob] PEER_INFO(seq=3, base=10, count=2, FIN)");
     
     TEST_LOG("  ✓ Offline cache flow completed");
@@ -397,7 +446,7 @@ TEST(flow_no_cache_support) {
     
     // Phase 2: Server -> Alice REGISTER_ACK (不支持缓存)
     test_register_ack_t ack;
-    ack.status = P2P_REGACK_PEER_OFFLINE;
+    ack.status = SIG_REGACK_PEER_OFFLINE;
     ack.max_candidates = 0;  // 不支持缓存
     
     ASSERT_EQ(ack.max_candidates, 0);
@@ -554,6 +603,37 @@ TEST(error_register_ack_failed) {
     TEST_LOG("  ✓ status>=2 indicates registration failed");
 }
 
+TEST(protocol_number_verification) {
+    TEST_LOG("Testing SIMPLE protocol number ranges");
+    
+    // COMPACT 信令协议编号: 0x80-0x9F
+    ASSERT_EQ(SIG_PKT_REGISTER, 0x80);
+    ASSERT_EQ(SIG_PKT_REGISTER_ACK, 0x81);
+    ASSERT_EQ(SIG_PKT_PEER_INFO, 0x82);
+    ASSERT_EQ(SIG_PKT_PEER_INFO_ACK, 0x83);
+    ASSERT_EQ(SIG_PKT_NAT_PROBE, 0x84);
+    ASSERT_EQ(SIG_PKT_NAT_PROBE_ACK, 0x85);
+    
+    // 中继扩展协议: 0xA0-0xBF
+    ASSERT_EQ(P2P_PKT_RELAY_DATA, 0xA0);
+    
+    TEST_LOG("  ✓ SIMPLE protocols: 0x80-0x85");
+    TEST_LOG("  ✓ Relay extension: 0xA0");
+}
+
+TEST(packet_size_verification) {
+    TEST_LOG("Testing packet size calculations");
+    
+    // REGISTER_ACK: 4(header) + 10(payload) = 14 bytes
+    size_t register_ack_size = sizeof(test_pkt_hdr_t) + sizeof(test_register_ack_t);
+    TEST_LOG("  REGISTER_ACK size: %zu bytes (expected 14)", register_ack_size);
+    
+    // 候选结构: 7 bytes (type + ip + port)
+    size_t candidate_size = sizeof(test_candidate_t);
+    ASSERT_EQ(candidate_size, 7);
+    TEST_LOG("  ✓ Candidate size: 7 bytes");
+}
+
 /* ============================================================================
  * 主函数
  * ============================================================================ */
@@ -561,7 +641,7 @@ TEST(error_register_ack_failed) {
 int main(void) {
     printf("\n");
     printf("========================================\n");
-    printf("SIMPLE Protocol Complete Test Suite\n");
+    printf("COMPACT Protocol Complete Test Suite\n");
     printf("========================================\n\n");
     
     printf("Part 1: REGISTER_ACK Protocol\n");
@@ -579,7 +659,12 @@ int main(void) {
     RUN_TEST(peer_info_last_packet_with_data);
     
     printf("\nPart 3: PEER_INFO_ACK Mechanism\n");
+    printf("--Part 10: Protocol Verification\n");
     printf("----------------------------------------\n");
+    RUN_TEST(protocol_number_verification);
+    RUN_TEST(packet_size_verification);
+    
+    printf("\n--------------------------------------\n");
     RUN_TEST(peer_info_ack_basic);
     RUN_TEST(peer_info_ack_sequence);
     

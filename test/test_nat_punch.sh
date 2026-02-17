@@ -3,7 +3,7 @@
 # test_nat_punch.sh - NAT 打洞流程测试脚本
 #
 # 功能：
-# 1. 测试 SIMPLE 模式 NAT 打洞流程
+# 1. 测试 COMPACT 模式 NAT 打洞流程
 # 2. 测试 Relay 模式 NAT 打洞流程
 # 3. 禁用同子网直连优化，强制执行 NAT 打洞
 # 4. 输出详细的打洞流程日志
@@ -122,20 +122,20 @@ verify_nat_punch() {
     fi
 }
 
-# 测试 SIMPLE 模式 NAT 打洞
+# 测试 COMPACT 模式 NAT 打洞
 test_simple_nat_punch() {
     echo ""
     echo "========================================"
-    echo "Test 1: SIMPLE Mode NAT Punch"
+    echo "Test 1: COMPACT Mode NAT Punch"
     echo "========================================"
     echo ""
     
-    local server_log="$LOG_DIR/simple_server.log"
+    local server_log="$LOG_DIR/compact_server.log"
     local alice_log="$LOG_DIR/simple_alice.log"
     local bob_log="$LOG_DIR/simple_bob.log"
     
     # 启动服务器
-    echo "[1] Starting server (SIMPLE mode)..."
+    echo "[1] Starting server (COMPACT mode)..."
     "$SERVER_BIN" 8888 > "$server_log" 2>&1 &
     local server_pid=$!
     echo "  Server PID: $server_pid"
@@ -147,7 +147,7 @@ test_simple_nat_punch() {
     echo "[2] Starting Alice (--disable-lan --verbose-punch)..."
     "$CLIENT_BIN" \
         --server 127.0.0.1 \
-        --simple \
+        --compact \
         --name alice \
         --to bob \
         --disable-lan \
@@ -163,7 +163,7 @@ test_simple_nat_punch() {
     echo "[3] Starting Bob (--disable-lan --verbose-punch)..."
     "$CLIENT_BIN" \
         --server 127.0.0.1 \
-        --simple \
+        --compact \
         --name bob \
         --to alice \
         --disable-lan \
@@ -183,7 +183,7 @@ test_simple_nat_punch() {
         if verify_nat_punch "$alice_log" "$bob_log"; then
             echo ""
             echo "========================================"
-            echo -e "${GREEN}✓ SIMPLE Mode NAT Punch Test PASSED${NC}"
+            echo -e "${GREEN}✓ COMPACT Mode NAT Punch Test PASSED${NC}"
             echo "========================================"
             return 0
         fi
@@ -191,7 +191,7 @@ test_simple_nat_punch() {
     
     echo ""
     echo "========================================"
-    echo -e "${RED}✗ SIMPLE Mode NAT Punch Test FAILED${NC}"
+    echo -e "${RED}✗ COMPACT Mode NAT Punch Test FAILED${NC}"
     echo "========================================"
     echo ""
     echo "Recent Alice log:"
@@ -312,7 +312,7 @@ main() {
     local passed=0
     local failed=0
     
-    # 测试 SIMPLE 模式
+    # 测试 COMPACT 模式
     if test_simple_nat_punch; then
         passed=$((passed + 1))
     else

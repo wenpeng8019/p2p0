@@ -154,7 +154,7 @@ int main() {
 cd test
 
 # 单元测试
-make && ./test_transport && ./test_simple_server && ./test_relay_server
+make && ./test_transport && ./test_compact_server && ./test_relay_server
 
 # 集成测试
 ./test_client_integration.sh

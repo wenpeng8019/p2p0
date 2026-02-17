@@ -55,7 +55,7 @@ cd test
 ```
 
 测试结果：
-- ✅ 测试 SIMPLE 模式 NAT 打洞
+- ✅ 测试 COMPACT 模式 NAT 打洞
 - ✅ 测试 Relay 模式 NAT 打洞
 - 日志保存在 `test/nat_punch_logs/`
 
@@ -66,7 +66,7 @@ cd test
 ```bash
 cd test
 
-# 测试 SIMPLE 模式
+# 测试 COMPACT 模式
 ./quick_test_nat_punch.sh simple
 
 # 测试 Relay 模式
@@ -75,7 +75,7 @@ cd test
 
 ### 手动测试
 
-#### SIMPLE 模式测试
+#### COMPACT 模式测试
 
 **终端 1 (服务器)**:
 ```bash
@@ -132,7 +132,7 @@ cd test
 
 ## 日志输出示例
 
-### SIMPLE 模式典型日志流程
+### COMPACT 模式典型日志流程
 
 ```
 [TEST] LAN shortcut disabled - forcing NAT punch
@@ -196,7 +196,7 @@ cd test
 
 测试不同信令服务下的打洞流程：
 
-- **SIMPLE 模式**: 简单 UDP 信令
+- **COMPACT 模式**: 简单 UDP 信令
   ```bash
   ./p2p_ping --server 127.0.0.1 --simple --verbose-punch ...
   ```
@@ -250,7 +250,7 @@ cd test
 
 在本地测试环境下（MacOS, localhost）：
 
-- **SIMPLE 模式打洞时间**: ~10-20 ms
+- **COMPACT 模式打洞时间**: ~10-20 ms
 - **Relay 模式协商时间**: ~100-200 ms
 - **打洞尝试次数**: 通常 1-2 次即可成功
 

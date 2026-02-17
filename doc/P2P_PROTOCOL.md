@@ -19,7 +19,7 @@ Signaling Server（信令服务器）负责：
 
 ---
 
-# 第一部分：SIMPLE 模式（UDP）
+# 第一部分：COMPACT 模式（UDP）
 
 ## 数据包格式
 
@@ -31,21 +31,21 @@ Signaling Server（信令服务器）负责：
 
 ## 核心概念：配对缓存机制
 
-SIMPLE 模式采用**双向配对缓存**设计，而非简单的单向映射。
+COMPACT 模式采用**双向配对缓存**设计，而非简单的单向映射。
 
 ### 配对记录结构
 
 服务器为每个注册请求维护一条配对记录：
 
 ```c
-typedef struct simple_pair_s {
+typedef struct compact_pair_s {
     char local_peer_id[32];      // 本端 ID
     char remote_peer_id[32];     // 目标对端 ID
     struct sockaddr_in addr;     // 公网地址
     time_t last_seen;            // 最后活跃时间
     bool valid;                  // 记录是否有效
-    struct simple_pair_s *peer;  // 指向配对的对端（NULL=未配对, 有效指针=已配对, -1=对方已断开）
-} simple_pair_t;
+    struct compact_pair_s *peer;  // 指向配对的对端（NULL=未配对, 有效指针=已配对, -1=对方已断开）
+} compact_pair_t;
 ```
 
 ### 配对匹配规则
@@ -93,7 +93,7 @@ Alice                  Server                    Bob
   |   双向通知！          |                        |
 ```
 
-#### SIMPLE_PKT_REGISTER (0x01)
+#### COMPACT_PKT_REGISTER (0x01)
 
 - **方向**: 客户端 → 服务器
 - **Payload**: `[ local_peer_id: 32 bytes | remote_peer_id: 32 bytes ]` (64 bytes total)
@@ -112,7 +112,7 @@ UDP 是无状态的，服务器无法识别"谁"发来的包。虽然有源地�
 3. 支持多客户端在同一 NAT 后面（共享公网 IP）
 4. 实现双向匹配逻辑
 
-#### SIMPLE_PKT_PEER_INFO (0x03)
+#### COMPACT_PKT_PEER_INFO (0x03)
 
 - **方向**: 服务器 → 客户端
 - **Payload**: `[ pub_ip: 4 | pub_port: 2 | priv_ip: 4 | priv_port: 2 ]` (12 bytes)
@@ -235,8 +235,8 @@ Alice                  Server                    Bob
 服务器定期(10秒)清理过期记录：
 
 ```c
-cleanup_simple_pairs() {
-    for each pair in simple_pairs:
+cleanup_compact_pairs() {
+    for each pair in compact_pairs:
         if (pair.valid && now() - pair.last_seen > TIMEOUT) {
             // 如果有配对对端，标记对端的 peer 为 (void*)-1
             if (pair.peer != NULL && pair.peer != (void*)-1) {
@@ -254,10 +254,10 @@ cleanup_simple_pairs() {
 
 ### 5. 服务器实现要求
 
-| 功能 | SIMPLE 模式 (UDP) | ICE 模式 (TCP) |
+| 功能 | COMPACT 模式 (UDP) | RELAY 模式 (TCP) |
 |------|------------------|----------------|
 | 协议 | 无状态 UDP | 长连接 TCP |
-| 数据结构 | `simple_pair_t` 双向配对 | `ice_client_t` 单向映射 |
+| 数据结构 | `compact_pair_t` 双向配对 | `ice_client_t` 单向映射 |
 | 超时清理 | 30 秒无 REGISTER 则清除 | 连接断开立即清除 |
 | 地址变化 | 主动推送 PEER_INFO | N/A（TCP 连接地址不变） |
 | 并发支持 | 需支持多对 peer 同时在线 | 同左 |
@@ -312,15 +312,15 @@ Alice (peer_id="alice")    Server                Bob (peer_id="bob")
 - `PUNCH_TIMEOUT_MS = 5000ms` — 打洞超时（转 RELAY）
 - `PING_INTERVAL_MS = 15000ms` — 心跳间隔
 - `PONG_TIMEOUT_MS = 30000ms` — 心跳超时
-- `SIMPLE_PAIR_TIMEOUT = 30s` — 服务器配对记录超时
+- `COMPACT_PAIR_TIMEOUT = 30s` — 服务器配对记录超时
 
 ---
 
-# 第二部分：ICE 模式（TCP）
+# 第二部分：RELAY 模式（TCP）
 
 ## 概述
 
-ICE 模式使用 **TCP 长连接**进行信令交换，支持完整的 ICE/SDP 协商流程。相比 SIMPLE 模式：
+RELAY 模式使用 **TCP 长连接**进行信令交换，支持完整的 ICE/SDP 协商流程。相比 COMPACT 模式：
 - ✅ 可靠传输（TCP 自动重传）
 - ✅ 支持大型 SDP 负载（WebRTC 场景）
 - ✅ 服务器可主动推送
@@ -531,7 +531,7 @@ while (1) {
     // 2. select 监听所有 fd
     FD_ZERO(&read_fds);
     FD_SET(listen_fd, &read_fds);  // TCP 监听
-    FD_SET(udp_fd, &read_fds);     // UDP (SIMPLE 模式)
+    FD_SET(udp_fd, &read_fds);     // UDP (COMPACT 模式)
     for (client in ice_clients) {
         FD_SET(client.fd, &read_fds);
     }
@@ -555,7 +555,7 @@ while (1) {
 
 ## ICE vs SIMPLE 对比
 
-| 特性 | SIMPLE 模式 | ICE 模式 |
+| 特性 | COMPACT 模式 | RELAY 模式 |
 |------|------------|----------|
 | **传输层** | UDP | TCP |
 | **连接状态** | 无状态 | 长连接 |
@@ -613,7 +613,7 @@ Alice (浏览器)          Server              Bob (浏览器)
 
 ## 附录：完整包类型列表
 
-### SIMPLE 模式（UDP）
+### COMPACT 模式（UDP）
 
 | 范围 | 分类 | 包类型 |
 |------|------|--------|
@@ -639,7 +639,7 @@ Alice (浏览器)          Server              Bob (浏览器)
 | **0x60-0x6F** | **安全协议** | |
 | 0x60 | P2P_PKT_AUTH | 安全握手 |
 
-### ICE 模式（TCP）
+### RELAY 模式（TCP）
 
 | 值 | 名称 | 说明 |
 |----|------|------|
@@ -668,13 +668,13 @@ Alice (浏览器)          Server              Bob (浏览器)
 | **DDoS** | Rate limiting、IP 白名单 |
 | **中间人攻击** | 端到端加密、证书验证 |
 
-### SIMPLE 模式特定风险
+### COMPACT 模式特定风险
 
 - ❌ **无 peer_id 验证**：任何人可冒充他人注册
 - ❌ **明文传输**：地址信息未加密
 - ⚠️ **UDP 泛洪**：需要服务器端 rate limiting
 
-### ICE 模式特定风险
+### RELAY 模式特定风险
 
 - ❌ **无登录验证**：任何人可连接服务器
 - ❌ **SDP 劫持**：中间人可修改 ICE candidates
@@ -696,7 +696,7 @@ Alice (浏览器)          Server              Bob (浏览器)
 
 **测试覆盖**：43/43 单元测试通过
 - 14 传输层测试
-- 10 SIMPLE 模式测试  
+- 10 COMPACT 模式测试  
 - 19 ICE 服务端测试
 
 **最后更新**：2026-02-15

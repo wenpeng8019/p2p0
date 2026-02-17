@@ -18,8 +18,8 @@ extern "C" {
 /* ---------- 连接模式 ---------- */
 
 enum {
-    P2P_SIGNALING_MODE_SIMPLE = 0,              // 简单无状态信令（UDP，无登录，无需 STUN 服务）
-    P2P_SIGNALING_MODE_ICE,                     // ICE 有状态信令（TCP，需登录，基于 STUN/ICE 协议）
+    P2P_SIGNALING_MODE_COMPACT = 0,             // 简单无状态信令（UDP，无登录，无需 STUN 服务）
+    P2P_SIGNALING_MODE_RELAY,                     // ICE 有状态信令（TCP，需登录，基于 STUN/ICE 协议）
     P2P_SIGNALING_MODE_PUBSUB                   // 发布/订阅模式（Gist 交换信令，无登录，需 STUN 服务）
 };
 
@@ -89,7 +89,7 @@ typedef struct {
     
     /* 信令配置 */
     int                     signaling_mode;             // P2P_SIGNALING_MODE_* (连接时使用的信令模式)
-    const char*             server_host;                // 信令服务器主机名 (用于 SIMPLE/ICE 模式)
+    const char*             server_host;                // 信令服务器主机名 (用于 COMPACT/RELAY 模式)
     uint16_t                server_port;                // 信令服务器端口
     const char*             gh_token;                   // GitHub Token (用于 Gist API)
     const char*             gist_id;                    // Gist ID (用于 PUB/SUB 模式)
@@ -156,13 +156,13 @@ void p2p_destroy(p2p_session_t *s);
  * 
  * 信令模式由 cfg.signaling_mode 决定，remote_peer_id 的使用规则如下：
  * 
- * 1. SIMPLE 模式（简单信令，UDP）
+ * 1. COMPACT 模式（简单信令，UDP）
  *    - remote_peer_id: 必须非 NULL，指定对方的明确 peer_id
  *    - 原理：双方各自向服务器注册 pair<local_id, remote_id> 映射，服务器匹配成功后返回对方地址，开始 NAT 打洞
  *    - cfg 配置要求：server_host, server_port
  *    - 示例：p2p_connect(s, "bob")  // 连接到 bob
  * 
- * 2. ICE 模式（有状态信令，TCP）
+ * 2. RELAY 模式（有状态信令，TCP）
  *    - remote_peer_id: 可为 NULL 或非 NULL
  *      * 非 NULL: 主动发起，连接到指定目标（发送 offer）
  *      * NULL: 被动等待，接受来自任意对等方的连接（等待 offer），等价于登录信令服务器

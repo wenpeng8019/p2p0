@@ -3,7 +3,7 @@
 ## 概述
 
 本目录包含 P2P Zero 项目的所有测试工具和脚本。测试分为五大类：
-1. **客户端集成测试** - 验证 Relay 和 SIMPLE 模式的端到端功能
+1. **客户端集成测试** - 验证 Relay 和 COMPACT 模式的端到端功能
 2. **NAT 打洞测试** - 验证 NAT 穿透流程和详细日志
 3. **PubSub 模式测试** - 验证 GitHub Gist 信令通道功能
 4. **调试工具** - STUN 诊断和综合功能测试
@@ -35,7 +35,7 @@ cd ../test
 
 **测试内容**:
 - ✅ Relay 模式：信令交换、候选者收集、连接建立、数据传输
-- ✅ SIMPLE 模式：NAT 打洞、连接建立、数据传输
+- ✅ COMPACT 模式：NAT 打洞、连接建立、数据传输
 
 **运行方式**:
 ```bash
@@ -78,7 +78,7 @@ All tests PASSED!
 ---
 
 #### `quick_test_simple.sh`
-**功能**: 快速测试 SIMPLE 模式（单次运行，查看详细日志）
+**功能**: 快速测试 COMPACT 模式（单次运行，查看详细日志）
 
 **运行方式**:
 ```bash
@@ -100,7 +100,7 @@ All tests PASSED!
 **功能**: 完整的 NAT 打洞流程测试套件
 
 **测试内容**:
-- ✅ SIMPLE 模式 NAT 打洞（禁用 LAN shortcut）
+- ✅ COMPACT 模式 NAT 打洞（禁用 LAN shortcut）
 - ✅ Relay 模式 NAT 打洞（禁用 LAN shortcut）
 - ✅ 详细的打洞流程日志验证
 
@@ -141,7 +141,7 @@ cat nat_punch_logs/simple_alice.log
 
 **运行方式**:
 ```bash
-# 测试 SIMPLE 模式
+# 测试 COMPACT 模式
 ./quick_test_nat_punch.sh simple
 
 # 测试 Relay 模式
@@ -260,17 +260,17 @@ make test_relay_server
 
 ---
 
-#### `test_simple_server`
+#### `test_compact_server`
 **功能**: 测试 SIMPLE 信令服务器
 
 **编译**:
 ```bash
-make test_simple_server
+make test_compact_server
 ```
 
 **运行**:
 ```bash
-./test_simple_server
+./test_compact_server
 ```
 
 ---
@@ -323,7 +323,7 @@ cd /Users/wenpeng/dev/c/p2p
 
 ---
 
-### SIMPLE 模式手动测试
+### COMPACT 模式手动测试
 
 **终端 1 - 服务器**:
 ```bash
@@ -407,7 +407,7 @@ cd /Users/wenpeng/dev/c/p2p
   --server IP          信令服务器 IP 地址
   --name NAME          本端名称/ID
   --to TARGET          目标对端名称（主动连接）
-  --simple             使用 SIMPLE 模式（默认 ICE）
+  --simple             使用 COMPACT 模式（默认 ICE）
 
 测试选项:
   --disable-lan        禁用 LAN shortcut（强制 NAT 打洞）
@@ -437,7 +437,7 @@ GitHub Gist 信令:
 
 服务器支持两种模式：
 - **TCP 端口 8888**: Relay 模式信令（有状态，需要登录）
-- **UDP 端口 8888**: SIMPLE 模式信令（无状态，peer 匹配）
+- **UDP 端口 8888**: COMPACT 模式信令（无状态，peer 匹配）
 
 ---
 
@@ -482,7 +482,7 @@ cat nat_punch_logs/simple_alice.log | grep NAT_PUNCH
 - 查看服务器日志：`cat integration_logs/relay_server.log`
 - 确认 Alice 发送了 answer：`grep "Sent answer" integration_logs/relay_alice.log`
 
-**SIMPLE 模式**:
+**COMPACT 模式**:
 - 检查双方是否都连接到服务器
 - 查看 NAT 打洞日志：`grep "NAT_PUNCH" integration_logs/simple_alice.log`
 - 确认收到 PEER_INFO：`grep "PEER_INFO" integration_logs/simple_alice.log`
@@ -506,7 +506,7 @@ test/
 ├── quick_test_nat_punch.sh                # 🔍 NAT 打洞手动测试
 │
 ├── test_relay_server.c                      # 单元测试：ICE 服务器
-├── test_simple_server.c                   # 单元测试：SIMPLE 服务器
+├── test_compact_server.c                   # 单元测试：SIMPLE 服务器
 ├── test_transport.c                       # 单元测试：传输层
 │
 ├── integration_logs/                      # 集成测试日志
@@ -526,7 +526,7 @@ test/
 - [ ] 客户端集成测试通过：`./test_client_integration.sh`
 - [ ] NAT 打洞测试通过：`./test_nat_punch.sh`
 - [ ] 手动验证 Relay 模式：启动服务器 + Alice + Bob
-- [ ] 手动验证 SIMPLE 模式：启动服务器 + Alice + Bob
+- [ ] 手动验证 COMPACT 模式：启动服务器 + Alice + Bob
 
 ### 发布前检查
 - [ ] 所有自动化测试通过

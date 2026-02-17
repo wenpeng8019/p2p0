@@ -6,8 +6,8 @@ P2P 库提供三种信令模式，通过统一的 `p2p_connect()` 接口连接�
 
 | 模式 | 枚举值 | 信令方式 | 适用场景 |
 |------|--------|---------|---------|
-| **SIMPLE** | `P2P_SIGNALING_MODE_SIMPLE` | UDP 无状态 | 轻量级应用、简单 NAT |
-| **ICE** | `P2P_SIGNALING_MODE_ICE` | TCP 长连接 | 生产环境、复杂 NAT |
+| **COMPACT** | `P2P_SIGNALING_MODE_COMPACT` | UDP 无状态 | 轻量级应用、简单 NAT |
+| **RELAY** | `P2P_SIGNALING_MODE_RELAY` | TCP 长连接 | 生产环境、复杂 NAT |
 | **PUBSUB** | `P2P_SIGNALING_MODE_PUBSUB` | GitHub Gist | 无服务器、演示测试 |
 
 ## API 接口
@@ -98,7 +98,7 @@ typedef struct {
 
 ```c
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_SIGNALING_MODE_SIMPLE;
+cfg.signaling_mode = P2P_SIGNALING_MODE_COMPACT;
 cfg.server_host = "signal.example.com";
 cfg.server_port = 8888;
 strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
@@ -135,8 +135,8 @@ p2p_send(s, "Hello", 5);
 ```c
 // 主动方 (Alice)
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_SIGNALING_MODE_ICE;
-cfg.server_host = "ice.example.com";
+cfg.signaling_mode = P2P_SIGNALING_MODE_RELAY;
+cfg.server_host = "relay.example.com";
 cfg.server_port = 8888;
 cfg.stun_server = "stun.l.google.com";
 cfg.stun_port = 3478;
@@ -149,8 +149,8 @@ p2p_connect(s, "bob");  // 主动连接 bob
 ```c
 // 被动方 (Bob)
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_SIGNALING_MODE_ICE;
-cfg.server_host = "ice.example.com";
+cfg.signaling_mode = P2P_SIGNALING_MODE_RELAY;
+cfg.server_host = "relay.example.com";
 cfg.server_port = 8888;
 strncpy(cfg.peer_id, "bob", P2P_PEER_ID_MAX);
 
@@ -279,12 +279,12 @@ cfg.userdata = my_context;
 
 ## 完整示例
 
-### SIMPLE 模式 (双向)
+### COMPACT 模式 (双向)
 
 ```c
 // === alice.c ===
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_SIGNALING_MODE_SIMPLE;
+cfg.signaling_mode = P2P_SIGNALING_MODE_COMPACT;
 cfg.server_host = "127.0.0.1";
 cfg.server_port = 8888;
 strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
@@ -304,7 +304,7 @@ p2p_destroy(s);
 ```c
 // === bob.c ===
 p2p_config_t cfg = {0};
-cfg.signaling_mode = P2P_SIGNALING_MODE_SIMPLE;
+cfg.signaling_mode = P2P_SIGNALING_MODE_COMPACT;
 cfg.server_host = "127.0.0.1";
 cfg.server_port = 8888;
 strncpy(cfg.peer_id, "bob", P2P_PEER_ID_MAX);
@@ -350,7 +350,7 @@ p2p_destroy(s);
 ```bash
 # 运行单元测试
 cd test
-make && ./test_transport && ./test_simple_server && ./test_relay_server
+make && ./test_transport && ./test_compact_server && ./test_relay_server
 
 # 运行集成测试
 ./test_client_integration.sh

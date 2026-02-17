@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick test for SIMPLE mode
+# Quick test for COMPACT mode
 
 cd /Users/wenpeng/dev/c/p2p
 
@@ -10,14 +10,14 @@ SERVER_PID=$!
 sleep 2
 
 # Start Alice
-echo "Starting Alice (SIMPLE mode)..."
-./build_cmake/p2p_ping/p2p_ping --server 127.0.0.1 --simple --name alice --to bob > /tmp/test_alice.log 2>&1 &
+echo "Starting Alice (COMPACT mode)..."
+./build_cmake/p2p_ping/p2p_ping --server 127.0.0.1 --compact --name alice --to bob > /tmp/test_alice.log 2>&1 &
 ALICE_PID=$!
 sleep 2
 
 # Start Bob
-echo "Starting Bob (SIMPLE mode)..."
-./build_cmake/p2p_ping/p2p_ping --server 127.0.0.1 --simple --name bob --to alice > /tmp/test_bob.log 2>&1 &
+echo "Starting Bob (COMPACT mode)..."
+./build_cmake/p2p_ping/p2p_ping --server 127.0.0.1 --compact --name bob --to alice > /tmp/test_bob.log 2>&1 &
 BOB_PID=$!
 
 # Wait and collect logs

@@ -1,9 +1,17 @@
 /*
- * p2p_server/server.c — P2P 信令服务器
+ * P2P 信令服务器
  *
- * 支持两种模式：
- *   - RELAY 模式 (TCP): 对应 p2p_signal_relay 模块，用于 ICE 候选交换和信令转发
- *   - SIMPLE 模式 (UDP): 对应 p2p_trans_simple 模块，简单的地址交换
+ * 支持两种信令模式：
+ *
+ * 1. COMPACT 模式 (UDP)
+ *    - 对应客户端 p2p_signal_compact 模块
+ *    - 无状态信令，基于 UDP 数据包交换
+ *    - 紧凑集成：信令交换 + NAT端口检测 + 候选交换 + 数据中继，一个完整的 P2P 统一协议实现
+ *
+ * 2. RELAY 模式 (TCP)
+ *    - 对应客户端 p2p_signal_relay 模块
+ *    - 有状态信令，基于 TCP 长连接
+ *    - 支持在线状态查询、以及基本数据中转功能，用于支持 ICE/STUN/TURN 协议架构实现的信令服务器
  */
 
 #include <stdio.h>
@@ -17,53 +25,57 @@
 #include <time.h>
 #include <stdbool.h>
 #include <p2p.h>
-#include <p2pp.h>              /* 协议定义 */
+#include <p2pp.h>
 
-#define MAX_PEERS               128
+#define MAX_PEERS                   128
 
-// SIMPLE 模式配对超时时间（秒）
-#define SIMPLE_PAIR_TIMEOUT     30
+// COMPACT 模式配对超时时间（秒）
+#define COMPACT_PAIR_TIMEOUT        30
 
 // RELAY 模式心跳超时时间（秒）
 // 如果客户端超过此时间未发送任何消息（包括心跳），服务器将主动断开连接
-#define RELAY_CLIENT_TIMEOUT    60
+#define RELAY_CLIENT_TIMEOUT        60
 
 // 服务端候选缓存限制（独立于客户端）
-#define SIMPLE_MAX_CANDIDATES   8
+#define COMPACT_MAX_CANDIDATES      8
 
-// SIMPLE 模式配对记录（UDP 无状态）
-// 注意：SIMPLE 模式采用"配对缓存"机制：
-//   A 注册 (local=alice, remote=bob, candidates=[...])
-//   B 注册 (local=bob, remote=alice, candidates=[...])
-//   服务器检测到双向匹配后，同时向 A 和 B 发送对方的候选列表
-// peer 指针状态：
-//   NULL: 未配对
-//   有效指针: 已配对，指向对端
-//   (void*)-1: 对端已断开
-typedef struct simple_pair_s {
-    char local_peer_id[P2P_PEER_ID_MAX];                        // 本端 ID
-    char remote_peer_id[P2P_PEER_ID_MAX];                       // 目标对端 ID
-    struct sockaddr_in addr;                                    // 公网地址（UDP 源地址）
-    p2p_simple_candidate_t candidates[SIMPLE_MAX_CANDIDATES];   // 候选列表
-    int candidate_count;                                        // 候选数量
-    time_t last_seen;                                           // 最后活跃时间
-    bool valid;                                                 // 记录是否有效（true=有效, false=已过期或空闲）
-    struct simple_pair_s *peer;                                 // 指向配对的对端
-} simple_pair_t;
+// COMPACT 模式配对记录（UDP 无状态）
+/* 注意：COMPACT 模式采用"配对缓存"机制：
+ *   A 注册 (local=alice, remote=bob, candidates=[...])
+ *   B 注册 (local=bob, remote=alice, candidates=[...])
+ *   服务器检测到双向匹配后，同时向 A 和 B 发送对方的候选列表
+ */
+typedef struct compact_pair {
+    bool                    valid;                              // 记录是否有效（无效意味着未分配或已回收）
+    char                    local_peer_id[P2P_PEER_ID_MAX];     // 本端 ID
+    char                    remote_peer_id[P2P_PEER_ID_MAX];    // 目标对端 ID
+    struct sockaddr_in      addr;                               // 公网地址（UDP 源地址）
+    p2p_compact_candidate_t candidates[COMPACT_MAX_CANDIDATES]; // 候选列表
+    int                     candidate_count;                    // 候选数量
+    struct compact_pair*    peer;                               // 指向配对的对端。(void*)-1 表示对端已断开
+    time_t                  last_active;                        // 最后活跃时间
+} compact_pair_t;
 
-// RELAY 模式客户端（TCP 长连接，对应 p2p_signal_relay 模块）
-typedef struct {
-    int fd;
-    char name[P2P_PEER_ID_MAX];
-    time_t last_active;                     // 最后活跃时间（用于检测死连接）
-    bool valid;                             // 客户端是否有效（true=已连接, false=已断开）
+// RELAY 模式客户端（TCP 长连接）
+typedef struct relay_client {
+    bool                    valid;                              // 客户端是否有效（无效意味着未分配或已回收）
+    char                    name[P2P_PEER_ID_MAX];
+    int                     fd;
+    time_t                  last_active;                        // 最后活跃时间（用于检测死连接）
 } relay_client_t;
 
-static simple_pair_t            g_simple_pairs[MAX_PEERS];
-static relay_client_t           g_relay_clients[MAX_PEERS];
+static compact_pair_t       g_compact_pairs[MAX_PEERS];
+static relay_client_t       g_relay_clients[MAX_PEERS];
+
+// 服务器配置（运行时参数）
+static int                  g_probe_port = 0;                   // compact 模式 NAT 探测端口（0=不支持探测）
+static bool                 g_relay_enabled = false;            // compact 模式是否支持中继功能
+
+///////////////////////////////////////////////////////////////////////////////
 
 // 处理 RELAY 模式信令（TCP 长连接，对应 p2p_signal_relay 模块）
-void handle_relay_signaling(int idx) {
+static void handle_relay_signaling(int idx) {
+
     p2p_relay_hdr_t hdr;
     int fd = g_relay_clients[idx].fd;
 
@@ -236,11 +248,26 @@ void handle_relay_signaling(int idx) {
     }
 }
 
-// 处理 SIMPLE 模式信令（UDP 无状态）
-// 新协议格式支持候选列表：
-//   注册包: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
-//   响应包: [hdr(4)][candidate_count(1)][candidates(N*7)]
-void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_in *from) {
+// 清理过期的 Relay 模式客户端连接（检测死连接）
+static void cleanup_relay_clients(void) {
+    time_t now = time(NULL);
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (g_relay_clients[i].valid) {
+            // 检查是否超时（超过 RELAY_CLIENT_TIMEOUT 秒未收到任何消息）
+            if ((now - g_relay_clients[i].last_active) > RELAY_CLIENT_TIMEOUT) {
+                printf("[TCP] Client '%s' (fd:%d) timed out (no activity for %ld seconds)\n",
+                       g_relay_clients[i].name, g_relay_clients[i].fd,
+                       now - g_relay_clients[i].last_active);
+                
+                close(g_relay_clients[i].fd);
+                g_relay_clients[i].valid = false;
+            }
+        }
+    }
+}
+
+// 处理 COMPACT 模式信令（UDP 无状态）
+static void handle_compact_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_in *from) {
     
     if (len < 4) return;  // 至少需要包头
     
@@ -252,8 +279,8 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
     snprintf(from_str, sizeof(from_str), "%s:%d", 
              inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     
-    // P2P_PKT_REGISTER: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
-    if (hdr->type == P2P_PKT_REGISTER && payload_len >= P2P_PEER_ID_MAX * 2 + 1) {
+    // SIG_PKT_REGISTER: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
+    if (hdr->type == SIG_PKT_REGISTER && payload_len >= P2P_PEER_ID_MAX * 2 + 1) {
         
         // 解析 local_peer_id 和 remote_peer_id
         char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
@@ -267,14 +294,14 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         
         // 解析候选列表（新格式）
         int candidate_count = 0;
-        p2p_simple_candidate_t candidates[SIMPLE_MAX_CANDIDATES];
+        p2p_compact_candidate_t candidates[COMPACT_MAX_CANDIDATES];
         memset(candidates, 0, sizeof(candidates));
         
         int cand_offset = P2P_PEER_ID_MAX * 2;
         if (payload_len > cand_offset) {
             candidate_count = payload[cand_offset];
-            if (candidate_count > SIMPLE_MAX_CANDIDATES) {
-                candidate_count = SIMPLE_MAX_CANDIDATES;
+            if (candidate_count > COMPACT_MAX_CANDIDATES) {
+                candidate_count = COMPACT_MAX_CANDIDATES;
             }
             cand_offset++;
             
@@ -300,9 +327,9 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         // 查找本端槽位
         int local_idx = -1;
         for (int i = 0; i < MAX_PEERS; i++) {
-            if (g_simple_pairs[i].valid && 
-                strcmp(g_simple_pairs[i].local_peer_id, local_peer_id) == 0 &&
-                strcmp(g_simple_pairs[i].remote_peer_id, remote_peer_id) == 0) {
+            if (g_compact_pairs[i].valid && 
+                strcmp(g_compact_pairs[i].local_peer_id, local_peer_id) == 0 &&
+                strcmp(g_compact_pairs[i].remote_peer_id, remote_peer_id) == 0) {
                 local_idx = i;
                 break;
             }
@@ -311,9 +338,9 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         // 如果配对不存在，分配一个空位
         if (local_idx == -1) {
             for (int i = 0; i < MAX_PEERS; i++) {
-                if (!g_simple_pairs[i].valid) { 
+                if (!g_compact_pairs[i].valid) { 
                     local_idx = i; 
-                    g_simple_pairs[i].peer = NULL;
+                    g_compact_pairs[i].peer = NULL;
                     break; 
                 }
             }
@@ -322,34 +349,32 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         // 检测地址是否变化
         int addr_changed = 0;
         if (local_idx >= 0) {
-            if (g_simple_pairs[local_idx].valid) {
-                addr_changed = (memcmp(&g_simple_pairs[local_idx].addr, from, sizeof(*from)) != 0);
+            if (g_compact_pairs[local_idx].valid) {
+                addr_changed = (memcmp(&g_compact_pairs[local_idx].addr, from, sizeof(*from)) != 0);
             }
             
             // 记录本端的注册信息（包括候选列表）
-            strncpy(g_simple_pairs[local_idx].local_peer_id, local_peer_id, P2P_PEER_ID_MAX);
-            strncpy(g_simple_pairs[local_idx].remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX);
-            g_simple_pairs[local_idx].addr = *from;
-            g_simple_pairs[local_idx].candidate_count = candidate_count;
-            memcpy(g_simple_pairs[local_idx].candidates, candidates, sizeof(candidates));
-            g_simple_pairs[local_idx].last_seen = time(NULL);
-            g_simple_pairs[local_idx].valid = true;
+            strncpy(g_compact_pairs[local_idx].local_peer_id, local_peer_id, P2P_PEER_ID_MAX);
+            strncpy(g_compact_pairs[local_idx].remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX);
+            g_compact_pairs[local_idx].addr = *from;
+            g_compact_pairs[local_idx].candidate_count = candidate_count;
+            memcpy(g_compact_pairs[local_idx].candidates, candidates, sizeof(candidates));
+            g_compact_pairs[local_idx].last_active = time(NULL);
+            g_compact_pairs[local_idx].valid = true;
             
-            if (g_simple_pairs[local_idx].peer == (simple_pair_t*)(void*)-1) {
-                g_simple_pairs[local_idx].peer = NULL;
+            if (g_compact_pairs[local_idx].peer == (compact_pair_t*)(void*)-1) {
+                g_compact_pairs[local_idx].peer = NULL;
             }
         } else {
             // 无法分配槽位，发送错误 ACK
-            uint8_t ack_response[8];
+            uint8_t ack_response[14];
             p2p_packet_hdr_t *ack_hdr = (p2p_packet_hdr_t *)ack_response;
-            ack_hdr->type = P2P_PKT_REGISTER_ACK;
+            ack_hdr->type = SIG_PKT_REGISTER_ACK;
             ack_hdr->flags = 0;
             ack_hdr->seq = 0;
-            ack_response[4] = 1;  /* status = error */
-            ack_response[5] = 0;  /* flags = 0 */
-            ack_response[6] = 0;
-            ack_response[7] = 0;
-            sendto(udp_fd, ack_response, 8, 0, (struct sockaddr *)from, sizeof(*from));
+            ack_response[4] = 2;  /* status = error */
+            memset(ack_response + 5, 0, 9);  /* 其余字段全部置 0 */
+            sendto(udp_fd, ack_response, 14, 0, (struct sockaddr *)from, sizeof(*from));
             printf("[UDP] REGISTER_ACK to %s: error (no slot available)\n", from_str);
             fflush(stdout);
             return;
@@ -358,45 +383,50 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         // 查找反向配对
         int remote_idx = -1;
         for (int i = 0; i < MAX_PEERS; i++) {
-            if (g_simple_pairs[i].valid && 
-                strcmp(g_simple_pairs[i].local_peer_id, remote_peer_id) == 0 &&
-                strcmp(g_simple_pairs[i].remote_peer_id, local_peer_id) == 0) {
+            if (g_compact_pairs[i].valid && 
+                strcmp(g_compact_pairs[i].local_peer_id, remote_peer_id) == 0 &&
+                strcmp(g_compact_pairs[i].remote_peer_id, local_peer_id) == 0) {
                 remote_idx = i;
                 break;
             }
         }
         
         // 构造并发送 REGISTER_ACK
-        // 格式: [hdr(4)][status(1)][max_candidates(1)][public_ip(4)][public_port(2)]
+        // 格式: [hdr(4)][status(1)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] = 14字节
         {
-            uint8_t ack_response[12];
+            uint8_t ack_response[14];
             p2p_packet_hdr_t *ack_hdr = (p2p_packet_hdr_t *)ack_response;
-            ack_hdr->type = P2P_PKT_REGISTER_ACK;
-            ack_hdr->flags = 0;
+            ack_hdr->type = SIG_PKT_REGISTER_ACK;
+            ack_hdr->flags = g_relay_enabled ? SIG_REGACK_FLAG_RELAY : 0;
             ack_hdr->seq = 0;
             
             /* status: 0=成功/对端离线, 1=成功/对端在线 */
-            uint8_t status = (remote_idx >= 0) ? P2P_REGACK_PEER_ONLINE : P2P_REGACK_PEER_OFFLINE;
-            uint8_t max_cands = SIMPLE_MAX_CANDIDATES;  /* 服务器缓存能力（0=不支持） */
+            uint8_t status = (remote_idx >= 0) ? SIG_REGACK_PEER_ONLINE : SIG_REGACK_PEER_OFFLINE;
+            uint8_t max_cands = COMPACT_MAX_CANDIDATES;  /* 服务器缓存能力（0=不支持） */
             
             ack_response[4] = status;
-            ack_response[5] = max_cands;  /* max_candidates */
+            ack_response[5] = max_cands;    /* max_candidates */
             
-            /* 填入客户端的公网地址（服务器观察到的 UDP 源地址）*/
+            /* 填入客户端的公网地址（服务器主端口观察到的 UDP 源地址）*/
             memcpy(ack_response + 6, &from->sin_addr.s_addr, 4);   /* public_ip */
             memcpy(ack_response + 10, &from->sin_port, 2);          /* public_port */
             
-            sendto(udp_fd, ack_response, 12, 0, (struct sockaddr *)from, sizeof(*from));
+            /* NAT 探测端口（根据配置填入，0=不支持探测）*/
+            uint16_t probe_port_net = htons(g_probe_port);
+            memcpy(ack_response + 12, &probe_port_net, 2);         /* probe_port */
             
-            printf("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, public=%s:%d\n", 
+            sendto(udp_fd, ack_response, 14, 0, (struct sockaddr *)from, sizeof(*from));
+            
+            printf("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n", 
                    from_str, (remote_idx >= 0) ? 1 : 0, max_cands,
-                   inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+                   g_relay_enabled ? "yes" : "no",
+                   inet_ntoa(from->sin_addr), ntohs(from->sin_port), g_probe_port);
             fflush(stdout);
         }
         
         if (remote_idx >= 0) {
-            simple_pair_t *local = &g_simple_pairs[local_idx];
-            simple_pair_t *remote = &g_simple_pairs[remote_idx];
+            compact_pair_t *local = &g_compact_pairs[local_idx];
+            compact_pair_t *remote = &g_compact_pairs[remote_idx];
             
             int first_match = (local->peer == NULL || remote->peer == NULL);
             
@@ -405,11 +435,11 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
                 remote->peer = local;
             }
             
-            // 构造 P2P_PKT_PEER_INFO 响应（序列化传输首包 seq=1）
+            // 构造 SIG_PKT_PEER_INFO 响应（序列化传输首包 seq=1）
             // 格式: [hdr(4)][base_index(1)][candidate_count(1)][candidates(N*7)]
-            uint8_t response[4 + 2 + SIMPLE_MAX_CANDIDATES * 7];
+            uint8_t response[4 + 2 + COMPACT_MAX_CANDIDATES * 7];
             p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)response;
-            resp_hdr->type = P2P_PKT_PEER_INFO;
+            resp_hdr->type = SIG_PKT_PEER_INFO;
             resp_hdr->flags = 0;
             resp_hdr->seq = htons(1);  /* seq=1 表示服务器发送的首包 */
             
@@ -433,7 +463,7 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
             fflush(stdout);
             
             // 首次匹配或地址变化：也通知对方本端的候选列表
-            if (first_match || (addr_changed && remote->peer == local && remote->peer != (simple_pair_t*)(void*)-1)) {
+            if (first_match || (addr_changed && remote->peer == local && remote->peer != (compact_pair_t*)(void*)-1)) {
                 response[4] = 0;  /* base_index = 0 */
                 response[5] = (uint8_t)local->candidate_count;
                 resp_len = 6;
@@ -461,54 +491,46 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
     }
 }
 
-// 清理过期的 SIMPLE 模式配对记录
-void cleanup_simple_pairs(void) {
+// 清理过期的 COMPACT 模式配对记录
+static void cleanup_compact_pairs(void) {
+
     time_t now = time(NULL);
     for (int i = 0; i < MAX_PEERS; i++) {
-        if (g_simple_pairs[i].valid && (now - g_simple_pairs[i].last_seen) > SIMPLE_PAIR_TIMEOUT) {
+        if (g_compact_pairs[i].valid && (now - g_compact_pairs[i].last_active) > COMPACT_PAIR_TIMEOUT) {
             printf("[UDP] Peer pair (%s → %s) timed out\n", 
-                   g_simple_pairs[i].local_peer_id, g_simple_pairs[i].remote_peer_id);
+                   g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id);
             
             // 如果有配对对端，标记对端的 peer 为 (void*)-1
-            if (g_simple_pairs[i].peer != NULL && g_simple_pairs[i].peer != (simple_pair_t*)(void*)-1) {
-                g_simple_pairs[i].peer->peer = (simple_pair_t*)(void*)-1;
+            if (g_compact_pairs[i].peer != NULL && g_compact_pairs[i].peer != (compact_pair_t*)(void*)-1) {
+                g_compact_pairs[i].peer->peer = (compact_pair_t*)(void*)-1;
             }
             
-            g_simple_pairs[i].valid = false;
-            g_simple_pairs[i].peer = NULL;  // 清空指针
+            g_compact_pairs[i].valid = false;
+            g_compact_pairs[i].peer = NULL;  // 清空指针
         }
     }
 }
 
-// 清理过期的 Relay 模式客户端连接（检测死连接）
-void cleanup_relay_clients(void) {
-    time_t now = time(NULL);
-    for (int i = 0; i < MAX_PEERS; i++) {
-        if (g_relay_clients[i].valid) {
-            // 检查是否超时（超过 RELAY_CLIENT_TIMEOUT 秒未收到任何消息）
-            if ((now - g_relay_clients[i].last_active) > RELAY_CLIENT_TIMEOUT) {
-                printf("[TCP] Client '%s' (fd:%d) timed out (no activity for %ld seconds)\n",
-                       g_relay_clients[i].name, g_relay_clients[i].fd,
-                       now - g_relay_clients[i].last_active);
-                
-                close(g_relay_clients[i].fd);
-                g_relay_clients[i].valid = false;
-            }
-        }
-    }
-}
+///////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char *argv[]) {
 
     int port = 8888;
     if (argc > 1) port = atoi(argv[1]);
+    if (argc > 2) g_probe_port = atoi(argv[2]);
+    if (argc > 3 && strcmp(argv[3], "relay") == 0) g_relay_enabled = true;
+    
+    printf("[SERVER] Starting P2P signal server on port %d\n", port);
+    printf("[SERVER] NAT probe: %s (port %d)\n", g_probe_port > 0 ? "enabled" : "disabled", g_probe_port);
+    printf("[SERVER] Relay support: %s\n", g_relay_enabled ? "enabled" : "disabled");
+    fflush(stdout);
 
     // 创建 TCP 监听套接口（Relay 模式）
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     int opt = 1;
     setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    // 创建 UDP 套接口（SIMPLE 模式）
+    // 创建 UDP 套接口（COMPACT 模式）
     int udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
     setsockopt(udp_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
@@ -542,7 +564,7 @@ int main(int argc, char *argv[]) {
         // 定期清理过期记录
         time_t now = time(NULL);
         if (now - last_cleanup >= 10) {
-            cleanup_simple_pairs();  // 清理 SIMPLE 模式配对
+            cleanup_compact_pairs();  // 清理 COMPACT 模式配对
             cleanup_relay_clients();   // 清理 RELAY 模式死连接
             last_cleanup = now;
         }
@@ -603,7 +625,7 @@ int main(int argc, char *argv[]) {
             int n = recvfrom(udp_fd, buf, sizeof(buf), 0, 
                             (struct sockaddr *)&from, &from_len);
             if (n > 0) {
-                handle_simple_signaling(udp_fd, buf, n, &from);
+                handle_compact_signaling(udp_fd, buf, n, &from);
             }
         }
 

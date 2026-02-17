@@ -46,7 +46,7 @@ typedef struct {
 static mock_relay_client_t g_mock_clients[MAX_MOCK_CLIENTS];
 static int g_mock_client_count = 0;
 
-void mock_server_init(void) {
+void mock_compact_server_init(void) {
     memset(g_mock_clients, 0, sizeof(g_mock_clients));
     g_mock_client_count = 0;
     TEST_LOG("Mock server initialized");
@@ -67,7 +67,7 @@ int mock_client_register(const char *name) {
 }
 
 // Mock 服务器处理登录
-int mock_server_handle_login(int fd, const char *name) {
+int mock_compact_server_handle_login(int fd, const char *name) {
     for (int i = 0; i < g_mock_client_count; i++) {
         if (g_mock_clients[i].fd == fd) {
             strncpy(g_mock_clients[i].name, name, P2P_PEER_ID_MAX);
@@ -79,7 +79,7 @@ int mock_server_handle_login(int fd, const char *name) {
 }
 
 // Mock 服务器查找客户端
-int mock_server_find_client(const char *name) {
+int mock_compact_server_find_client(const char *name) {
     for (int i = 0; i < g_mock_client_count; i++) {
         if (g_mock_clients[i].valid && 
             strcmp(g_mock_clients[i].name, name) == 0) {
@@ -92,7 +92,7 @@ int mock_server_find_client(const char *name) {
 }
 
 // Mock 服务器生成用户列表
-int mock_server_get_user_list(int requesting_fd, char *buffer, int buf_size) {
+int mock_compact_server_get_user_list(int requesting_fd, char *buffer, int buf_size) {
     int offset = 0;
     TEST_LOG("Server: Generating user list for fd=%d", requesting_fd);
     
@@ -114,7 +114,7 @@ int mock_server_get_user_list(int requesting_fd, char *buffer, int buf_size) {
 }
 
 // Mock 服务器更新活跃时间
-void mock_server_update_active(int fd) {
+void mock_compact_server_update_active(int fd) {
     for (int i = 0; i < g_mock_client_count; i++) {
         if (g_mock_clients[i].fd == fd) {
             g_mock_clients[i].last_active = time(NULL);
@@ -124,7 +124,7 @@ void mock_server_update_active(int fd) {
 }
 
 // Mock 服务器心跳超时检查
-int mock_server_check_timeout(int timeout_sec) {
+int mock_compact_server_check_timeout(int timeout_sec) {
     time_t now = time(NULL);
     int timeout_count = 0;
     
@@ -246,7 +246,7 @@ TEST(login_message_structure) {
 TEST(complete_login_flow) {
     TEST_LOG("Testing complete login flow with mock server");
     
-    mock_server_init();
+    mock_compact_server_init();
     int client_fd = mock_client_register("unknown");
     
     // 客户端发送 LOGIN
@@ -255,7 +255,7 @@ TEST(complete_login_flow) {
     TEST_LOG("  Client fd=%d sends LOGIN (name='alice')", client_fd);
     
     // 服务器处理登录
-    int ret = mock_server_handle_login(client_fd, login_data.name);
+    int ret = mock_compact_server_handle_login(client_fd, login_data.name);
     ASSERT_EQ(ret, 0);
     
     // 验证状态
@@ -275,7 +275,7 @@ TEST(complete_login_flow) {
 TEST(user_list_generation) {
     TEST_LOG("Testing user list generation");
     
-    mock_server_init();
+    mock_compact_server_init();
     int alice_fd = mock_client_register("alice");
     mock_client_register("bob");
     mock_client_register("charlie");
@@ -284,7 +284,7 @@ TEST(user_list_generation) {
     
     // alice 请求列表
     char list_buf[1024];
-    int list_len = mock_server_get_user_list(alice_fd, list_buf, sizeof(list_buf));
+    int list_len = mock_compact_server_get_user_list(alice_fd, list_buf, sizeof(list_buf));
     
     TEST_LOG("  Alice's list: '%.*s'", list_len, list_buf);
     
@@ -297,11 +297,11 @@ TEST(user_list_generation) {
 TEST(empty_user_list_handling) {
     TEST_LOG("Testing empty user list (only requester online)");
     
-    mock_server_init();
+    mock_compact_server_init();
     int alice_fd = mock_client_register("alice");
     
     char list_buf[1024];
-    int list_len = mock_server_get_user_list(alice_fd, list_buf, sizeof(list_buf));
+    int list_len = mock_compact_server_get_user_list(alice_fd, list_buf, sizeof(list_buf));
     
     TEST_LOG("  Only alice online, list length: %d", list_len);
     ASSERT_EQ(list_len, 0);
@@ -333,7 +333,7 @@ TEST(connect_message_structure) {
 TEST(complete_sdp_exchange_flow) {
     TEST_LOG("Testing complete SDP exchange flow");
     
-    mock_server_init();
+    mock_compact_server_init();
     int alice_fd = mock_client_register("alice");
     int bob_fd = mock_client_register("bob");
     
@@ -346,7 +346,7 @@ TEST(complete_sdp_exchange_flow) {
     strcpy(connect_payload + P2P_PEER_ID_MAX, "SDP_OFFER_DATA");
     
     // 步骤 2: 服务器查找 Bob
-    int target_fd = mock_server_find_client("bob");
+    int target_fd = mock_compact_server_find_client("bob");
     ASSERT_EQ(target_fd, bob_fd);
     TEST_LOG("  [2] Server found Bob (fd=%d)", target_fd);
     
@@ -364,7 +364,7 @@ TEST(complete_sdp_exchange_flow) {
     TEST_LOG("  [4] Bob sends SIGNAL_ANS(target=alice, SDP_ANSWER)");
     
     // 步骤 5: 服务器查找 Alice
-    target_fd = mock_server_find_client("alice");
+    target_fd = mock_compact_server_find_client("alice");
     ASSERT_EQ(target_fd, alice_fd);
     TEST_LOG("  [5] Server found Alice (fd=%d)", target_fd);
     
@@ -394,12 +394,12 @@ TEST(heartbeat_message_handling) {
     ASSERT_EQ(hb.length, 0);
     
     // 服务器应该更新 last_active
-    mock_server_init();
+    mock_compact_server_init();
     int fd = mock_client_register("alice");
     time_t before = g_mock_clients[0].last_active;
     
     sleep(1);
-    mock_server_update_active(fd);
+    mock_compact_server_update_active(fd);
     time_t after = g_mock_clients[0].last_active;
     
     TEST_LOG("  Server updated last_active: %ld -> %ld", before, after);
@@ -435,7 +435,7 @@ TEST(heartbeat_timeout_logic) {
 TEST(server_timeout_cleanup) {
     TEST_LOG("Testing server timeout cleanup");
     
-    mock_server_init();
+    mock_compact_server_init();
     mock_client_register("alice");
     mock_client_register("bob");
     
@@ -445,7 +445,7 @@ TEST(server_timeout_cleanup) {
     g_mock_clients[0].last_active = time(NULL) - 70;
     TEST_LOG("  Alice last_active set to 70s ago");
     
-    int timeout_count = mock_server_check_timeout(60);
+    int timeout_count = mock_compact_server_check_timeout(60);
     TEST_LOG("  Cleanup found %d timeout clients", timeout_count);
     
     ASSERT_EQ(timeout_count, 1);
@@ -460,7 +460,7 @@ TEST(server_timeout_cleanup) {
 TEST(multiple_clients_isolation) {
     TEST_LOG("Testing multiple clients isolation");
     
-    mock_server_init();
+    mock_compact_server_init();
     int alice_fd = mock_client_register("alice");
     int bob_fd = mock_client_register("bob");
     int charlie_fd = mock_client_register("charlie");
@@ -469,12 +469,12 @@ TEST(multiple_clients_isolation) {
     TEST_LOG("  4 clients registered");
     
     // Alice 连接 Bob
-    int target = mock_server_find_client("bob");
+    int target = mock_compact_server_find_client("bob");
     ASSERT_EQ(target, bob_fd);
     TEST_LOG("  Alice -> Bob connection OK");
     
     // Charlie 连接 David
-    target = mock_server_find_client("david");
+    target = mock_compact_server_find_client("david");
     ASSERT_EQ(target, david_fd);
     TEST_LOG("  Charlie -> David connection OK");
     
@@ -504,10 +504,10 @@ TEST(invalid_magic_detection) {
 TEST(client_not_found_handling) {
     TEST_LOG("Testing client not found handling");
     
-    mock_server_init();
+    mock_compact_server_init();
     mock_client_register("alice");
     
-    int target_fd = mock_server_find_client("eve");
+    int target_fd = mock_compact_server_find_client("eve");
     TEST_LOG("  Search for 'eve': fd=%d (expected: -1)", target_fd);
     ASSERT_EQ(target_fd, -1);
 }

@@ -1,9 +1,9 @@
 /*
- * p2p_ping.c — P2P 诊断工具
+ * P2P 诊断工具
  *
  * 此工具演示统一的连接 API：
  * 1. SIMPLE 模式 - 简单信令服务器（UDP）
- * 2. ICE 模式 - ICE 信令服务器（TCP）
+ * 2. RELAY 模式 - RELAY 信令服务器（TCP）
  * 3. PUBSUB 模式 - 公共信令（GitHub Gist，角色由 target 参数决定）
  */
 
@@ -26,7 +26,7 @@ static void print_help(const char *prog) {
     printf("  --openssl         Enable DTLS (OpenSSL)\n");
     printf("  --pseudo          Enable PseudoTCP\n");
     printf("  --server IP       Standard Signaling Server IP\n");
-    printf("  --simple          Use SIMPLE mode (UDP signaling, default is ICE/TCP)\n");
+    printf("  --compact          Use COMPACT mode (UDP signaling, default is ICE/TCP)\n");
     printf("  --github TOKEN    GitHub Token for Public Signaling\n");
     printf("  --gist ID         GitHub Gist ID for Public Signaling\n");
     printf("  --name NAME       Your Peer Name\n");
@@ -84,7 +84,7 @@ static void on_disconnected(p2p_session_t *s, void *userdata) {
 int main(int argc, char *argv[]) {
     printf("=== P2P Ping Diagnostic Tool ===\n\n");
 
-    int use_dtls = 0, use_openssl = 0, use_pseudo = 0, use_simple = 0;
+    int use_dtls = 0, use_openssl = 0, use_pseudo = 0, use_compact = 0;
     int disable_lan = 0, verbose_punch = 0;
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
     const char *my_name = "unnamed", *target_name = NULL;
@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[i], "--dtls") == 0) use_dtls = 1;
         else if (strcmp(argv[i], "--openssl") == 0) use_openssl = 1;
         else if (strcmp(argv[i], "--pseudo") == 0) use_pseudo = 1;
-        else if (strcmp(argv[i], "--simple") == 0) use_simple = 1;
+        else if (strcmp(argv[i], "--compact") == 0) use_compact = 1;
         else if (strcmp(argv[i], "--disable-lan") == 0) disable_lan = 1;
         else if (strcmp(argv[i], "--verbose-punch") == 0) verbose_punch = 1;
         else if (strcmp(argv[i], "--server") == 0 && i+1 < argc) server_ip = argv[++i];
@@ -108,7 +108,7 @@ int main(int argc, char *argv[]) {
     cfg.use_dtls = use_dtls;
     cfg.use_openssl = use_openssl;
     cfg.use_pseudotcp = use_pseudo;
-    cfg.use_ice = !use_simple;  // --simple 标志禁用 ICE
+    cfg.use_ice = !use_compact;  // --compact 标志禁用 ICE
     cfg.stun_server = "stun.l.google.com";
     cfg.stun_port = 3478;
     cfg.server_host = server_ip;
@@ -129,7 +129,7 @@ int main(int argc, char *argv[]) {
     
     // 根据配置确定信令模式
     if (server_ip) {
-        cfg.signaling_mode = cfg.use_ice ? P2P_SIGNALING_MODE_ICE : P2P_SIGNALING_MODE_SIMPLE;
+        cfg.signaling_mode = cfg.use_ice ? P2P_SIGNALING_MODE_RELAY : P2P_SIGNALING_MODE_COMPACT;
     } else if (gh_token && gist_id) {
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
     }

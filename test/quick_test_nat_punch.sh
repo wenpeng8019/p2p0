@@ -3,7 +3,7 @@
 # quick_test_nat_punch.sh - 快速 NAT 打洞测试（带详细日志）
 #
 # 用法：
-#   ./quick_test_nat_punch.sh simple   # 测试 SIMPLE 模式
+#   ./quick_test_nat_punch.sh simple   # 测试 COMPACT 模式
 #   ./quick_test_nat_punch.sh ice      # 测试 Relay 模式
 #
 
@@ -27,7 +27,7 @@ trap cleanup EXIT INT TERM
 case "$MODE" in
     simple)
         echo "========================================="
-        echo "NAT Punch Test - SIMPLE Mode"
+        echo "NAT Punch Test - COMPACT Mode"
         echo "========================================="
         echo "Features:"
         echo "  • --disable-lan: Force NAT punch"
@@ -43,7 +43,7 @@ case "$MODE" in
         echo ""
         echo "Starting Alice in new terminal..."
         osascript -e 'tell application "Terminal"
-            do script "cd '"$PROJECT_ROOT"' && '"$CLIENT_BIN"' --server 127.0.0.1 --simple --name alice --to bob --disable-lan --verbose-punch"
+            do script "cd '"$PROJECT_ROOT"' && '"$CLIENT_BIN"' --server 127.0.0.1 --compact --name alice --to bob --disable-lan --verbose-punch"
         end tell' &
         
         sleep 1
@@ -51,7 +51,7 @@ case "$MODE" in
         # 启动 Bob (新终端)
         echo "Starting Bob in new terminal..."
         osascript -e 'tell application "Terminal"
-            do script "cd '"$PROJECT_ROOT"' && '"$CLIENT_BIN"' --server 127.0.0.1 --simple --name bob --to alice --disable-lan --verbose-punch"
+            do script "cd '"$PROJECT_ROOT"' && '"$CLIENT_BIN"' --server 127.0.0.1 --compact --name bob --to alice --disable-lan --verbose-punch"
         end tell' &
         
         echo ""
@@ -103,7 +103,7 @@ case "$MODE" in
         echo "Usage: $0 [simple|ice]"
         echo ""
         echo "Examples:"
-        echo "  $0 simple   # Test SIMPLE mode NAT punch"
+        echo "  $0 simple   # Test COMPACT mode NAT punch"
         echo "  $0 ice      # Test ICE mode NAT punch"
         exit 1
         ;;

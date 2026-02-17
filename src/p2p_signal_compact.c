@@ -1,5 +1,5 @@
 /*
- * SIMPLE 模式信令实现（UDP 无状态）
+ * COMPACT 模式信令实现（UDP 无状态）
  *
  * 从 p2p_nat.c 中提取的信令相关代码。
  * 负责 REGISTER/REGISTER_ACK/PEER_INFO/PEER_INFO_ACK 协议。
@@ -19,7 +19,7 @@
  */
 
 #include "p2p_internal.h"
-#include "p2p_signal_simple.h"
+#include "p2p_signal_compact.h"
 #include "p2p_udp.h"
 
 #include <string.h>
@@ -33,7 +33,7 @@
 #define MAX_CANDS_PER_PACKET    10      /* 每个 PEER_INFO 包最大候选数 */
 
 /* 获取当前时间戳（毫秒） */
-static inline uint64_t simple_time_ms(void) {
+static inline uint64_t compact_time_ms(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
@@ -42,9 +42,9 @@ static inline uint64_t simple_time_ms(void) {
 /*
  * 初始化信令上下文
  */
-void signal_simple_init(signal_simple_ctx_t *ctx) {
+void signal_compact_init(signal_compact_ctx_t *ctx) {
     memset(ctx, 0, sizeof(*ctx));
-    ctx->state = SIGNAL_SIMPLE_IDLE;
+    ctx->state = SIGNAL_COMPACT_IDLE;
 }
 
 /*
@@ -56,7 +56,7 @@ void signal_simple_init(signal_simple_ctx_t *ctx) {
  */
 static int build_register_payload(p2p_session_t *s, uint8_t *buf, int buf_sz) {
 
-    signal_simple_ctx_t *ctx = &s->sig_simple_ctx;
+    signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     int cand_cnt = s->local_cand_cnt;
     
     int required = P2P_PEER_ID_MAX * 2 + 1 + cand_cnt * 7;
@@ -105,11 +105,11 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
     }
     
     /* count=0 或 FIN 标志表示对端发送完毕 */
-    if (count == 0 || (flags & P2P_PEER_INFO_FIN)) {
-        signal_simple_ctx_t *ctx = &s->sig_simple_ctx;
+    if (count == 0 || (flags & SIG_PEER_INFO_FIN)) {
+        signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
         ctx->remote_recv_complete = 1;
         if (ctx->verbose) {
-            printf("[SIGNAL_SIMPLE] PEER_INFO(seq=%d): Received FIN, total candidates=%d\n",
+            printf("[SIGNAL_COMPACT] PEER_INFO(seq=%d): Received FIN, total candidates=%d\n",
                    seq, s->remote_cand_cnt);
             fflush(stdout);
         }
@@ -132,7 +132,7 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
         
         p2p_candidate_t *c = &s->remote_cands[idx];
         c->type = (p2p_cand_type_t)payload[offset];
-        c->priority = 0;  /* SIMPLE 模式不使用优先级 */
+        c->priority = 0;  /* COMPACT 模式不使用优先级 */
         memset(&c->addr, 0, sizeof(c->addr));
         c->addr.sin_family = AF_INET;
         memcpy(&c->addr.sin_addr.s_addr, payload + offset + 1, 4);
@@ -146,13 +146,13 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
 /*
  * 开始信令交换（发送 REGISTER）
  */
-int signal_simple_start(p2p_session_t *s, const char *local_peer_id,
+int signal_compact_start(p2p_session_t *s, const char *local_peer_id,
                         const char *remote_peer_id,
                         const struct sockaddr_in *server, int verbose) {
 
-    signal_simple_ctx_t *ctx = &s->sig_simple_ctx;
+    signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    if (ctx->state != SIGNAL_SIMPLE_IDLE) return -1;
+    if (ctx->state != SIGNAL_COMPACT_IDLE) return -1;
 
     ctx->server_addr = *server;
     ctx->verbose = verbose;
@@ -165,11 +165,11 @@ int signal_simple_start(p2p_session_t *s, const char *local_peer_id,
     ctx->peer_online = 0;
     ctx->register_attempts = 0;
 
-    ctx->state = SIGNAL_SIMPLE_REGISTERING;
-    ctx->last_send_time = simple_time_ms();
+    ctx->state = SIGNAL_COMPACT_REGISTERING;
+    ctx->last_send_time = compact_time_ms();
 
     if (ctx->verbose) {
-        printf("[SIGNAL_SIMPLE] START: Registering '%s' -> '%s' with server %s:%d (%d candidates)\n",
+        printf("[SIGNAL_COMPACT] START: Registering '%s' -> '%s' with server %s:%d (%d candidates)\n",
                local_peer_id, remote_peer_id,
                inet_ntoa(server->sin_addr), ntohs(server->sin_port),
                s->local_cand_cnt);
@@ -180,7 +180,7 @@ int signal_simple_start(p2p_session_t *s, const char *local_peer_id,
     uint8_t payload[256];
     int payload_len = build_register_payload(s, payload, sizeof(payload));
     if (payload_len > 0) {
-        udp_send_packet(s->sock, server, P2P_PKT_REGISTER, 0, 0, payload, payload_len);
+        udp_send_packet(s->sock, server, SIG_PKT_REGISTER, 0, 0, payload, payload_len);
     }
 
     return 0;
@@ -194,38 +194,43 @@ int signal_simple_start(p2p_session_t *s, const char *local_peer_id,
  * - PEER_INFO: 对端候选列表（序列化）
  * - PEER_INFO_ACK: 对端确认
  */
-int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_t flags,
+int signal_compact_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_t flags,
                             const uint8_t *payload, int len,
                             const struct sockaddr_in *from) {
 
-    signal_simple_ctx_t *ctx = &s->sig_simple_ctx;
+    signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     (void)flags;  /* 暂时未使用 */
     
     switch (type) {
     
-    case P2P_PKT_REGISTER_ACK:
-        /* 解析 REGISTER_ACK: [status(1)][max_candidates(1)][public_ip(4)][public_port(2)] */
-        if (len < 8) return -1;
+    case SIG_PKT_REGISTER_ACK:
+        /* 解析 REGISTER_ACK: [status(1)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] */
+        if (len < 10) return -1;
         
         uint8_t status = payload[0];
         if (status >= 2) {
             if (ctx->verbose) {
-                printf("[SIGNAL_SIMPLE] REGISTER_ACK: Server error (status=%d)\n", status);
-                fflush(stdout);
-            }
+                printf("[SIGNAL_COMPACT] REGISTER_ACK: Server error (status=%d)\n", status);
+                fflush(stdout);            }
             return -1;
         }
 
         uint8_t max_cands = payload[1];
+        uint8_t relay_flags_value = flags;  /* 从 header 的 flags 字段读取 */
         
-        ctx->peer_online = (status == P2P_REGACK_PEER_ONLINE) ? 1 : 0;
+        ctx->peer_online = (status == SIG_REGACK_PEER_ONLINE) ? 1 : 0;
         ctx->max_remote_candidates = max_cands;
+        ctx->relay_support = (relay_flags_value & SIG_REGACK_FLAG_RELAY) ? 1 : 0;
         
-        /* 解析公网地址（服务器探测到的 UDP 源地址）*/
+        /* 解析公网地址（服务器主端口探测到的 UDP 源地址）*/
         memset(&ctx->public_addr, 0, sizeof(ctx->public_addr));
         ctx->public_addr.sin_family = AF_INET;
         memcpy(&ctx->public_addr.sin_addr.s_addr, payload + 2, 4);
         memcpy(&ctx->public_addr.sin_port, payload + 6, 2);
+        
+        /* 解析 NAT 探测端口 */
+        memcpy(&ctx->probe_port, payload + 8, 2);
+        ctx->probe_port = ntohs(ctx->probe_port);
         
         /* 根据服务器缓存能力确定每个包的候选数量 */
         if (max_cands > 0 && max_cands < MAX_CANDS_PER_PACKET) {
@@ -235,38 +240,40 @@ int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_
         }
         
         if (ctx->verbose) {
-            printf("[SIGNAL_SIMPLE] REGISTER_ACK: peer_online=%d, max_cands=%d (cache=%s), public_addr=%s:%d\n",
+            printf("[SIGNAL_COMPACT] REGISTER_ACK: peer_online=%d, max_cands=%d (cache=%s), relay=%s, public_addr=%s:%d, probe_port=%d\n",
                    ctx->peer_online, max_cands, max_cands > 0 ? "yes" : "no",
-                   inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port));
+                   ctx->relay_support ? "yes" : "no",
+                   inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
+                   ctx->probe_port);
             fflush(stdout);
         }
         
         /* 如果已经收到 PEER_INFO 进入 READY 状态，忽略延迟到达的 ACK */
-        if (ctx->state == SIGNAL_SIMPLE_READY) {
+        if (ctx->state == SIGNAL_COMPACT_READY) {
             if (ctx->verbose) {
-                printf("[SIGNAL_SIMPLE] Already READY, ignoring delayed REGISTER_ACK\n");
+                printf("[SIGNAL_COMPACT] Already READY, ignoring delayed REGISTER_ACK\n");
                 fflush(stdout);
             }
             return 0;
         }
         
         /* 仅在 REGISTERING 状态处理状态转换 */
-        if (ctx->state == SIGNAL_SIMPLE_REGISTERING) {
+        if (ctx->state == SIGNAL_COMPACT_REGISTERING) {
             /* 收到 ACK 后进入 REGISTERED 状态，停止发送 REGISTER */
-            ctx->state = SIGNAL_SIMPLE_REGISTERED;
+            ctx->state = SIGNAL_COMPACT_REGISTERED;
             
             if (ctx->verbose) {
                 const char *status_msg = ctx->peer_online ? 
                     "Peer online, waiting for PEER_INFO(seq=1)" :
                     "Peer offline, waiting for peer to come online";
-                printf("[SIGNAL_SIMPLE] Entered REGISTERED state: %s\n", status_msg);
+                printf("[SIGNAL_COMPACT] Entered REGISTERED state: %s\n", status_msg);
                 fflush(stdout);
             }
         }
         
         return 0;
     
-    case P2P_PKT_PEER_INFO:
+    case SIG_PKT_PEER_INFO:
 
         if (parse_peer_info(s, payload, len, seq, flags) < 0) {
             return -1;
@@ -280,7 +287,7 @@ int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_
         if (ctx->verbose && !ctx->remote_recv_complete) {
             uint8_t base_idx = (len >= 1) ? payload[0] : 0;
             uint8_t count = (len >= 2) ? payload[1] : 0;
-            printf("[SIGNAL_SIMPLE] PEER_INFO(seq=%u, base=%u): Received %u candidates (total: %d)\n", 
+            printf("[SIGNAL_COMPACT] PEER_INFO(seq=%u, base=%u): Received %u candidates (total: %d)\n", 
                    seq, base_idx, count, s->remote_cand_cnt);
             fflush(stdout);
         }
@@ -292,28 +299,28 @@ int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_
         ack_payload[2] = 0;  /* reserved */
         ack_payload[3] = 0;  /* reserved */
         
-        udp_send_packet(s->sock, from, P2P_PKT_PEER_INFO_ACK, 0, 0, ack_payload, sizeof(ack_payload));
+        udp_send_packet(s->sock, from, SIG_PKT_PEER_INFO_ACK, 0, 0, ack_payload, sizeof(ack_payload));
         
         if (ctx->verbose) {
-            printf("[SIGNAL_SIMPLE] Sent PEER_INFO_ACK(seq=%u)\n", seq);
+            printf("[SIGNAL_COMPACT] Sent PEER_INFO_ACK(seq=%u)\n", seq);
             fflush(stdout);
         }
         
         /* seq=1 是服务器发送的首包，收到后从 REGISTERED 进入 READY 状态 */
-        if (seq == 1 && ctx->state == SIGNAL_SIMPLE_REGISTERED) {
-            ctx->state = SIGNAL_SIMPLE_READY;
+        if (seq == 1 && ctx->state == SIGNAL_COMPACT_REGISTERED) {
+            ctx->state = SIGNAL_COMPACT_READY;
             /* 初始化发送序列号（从 2 开始，1 是服务器发的） */
             ctx->next_send_seq = 2;
             
             if (ctx->verbose) {
-                printf("[SIGNAL_SIMPLE] Entered READY state, starting NAT punch and candidate sync\n");
+                printf("[SIGNAL_COMPACT] Entered READY state, starting NAT punch and candidate sync\n");
                 fflush(stdout);
             }
         }
         
         return 0;
     
-    case P2P_PKT_PEER_INFO_ACK:
+    case SIG_PKT_PEER_INFO_ACK:
         /* 解析 PEER_INFO_ACK: [ack_seq(2)][reserved(2)] */
         if (len < 4) return -1;
         
@@ -324,7 +331,7 @@ int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_
             ctx->last_acked_seq = ack_seq;
             
             if (ctx->verbose) {
-                printf("[SIGNAL_SIMPLE] PEER_INFO_ACK(seq=%u): Confirmed\n", ack_seq);
+                printf("[SIGNAL_COMPACT] PEER_INFO_ACK(seq=%u): Confirmed\n", ack_seq);
                 fflush(stdout);
             }
         }
@@ -342,13 +349,13 @@ int signal_simple_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_
  * REGISTERING 状态：快速重发（1秒），等待 ACK 确认，有超时限制
  * READY 状态：序列化发送剩余候选（2秒重传间隔），确认后停止
  */
-int signal_simple_tick(p2p_session_t *s) {
+int signal_compact_tick(p2p_session_t *s) {
 
-    signal_simple_ctx_t *ctx = &s->sig_simple_ctx;
-    uint64_t now = simple_time_ms();
+    signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    uint64_t now = compact_time_ms();
 
     /* REGISTERING 状态：重发 REGISTER */
-    if (ctx->state == SIGNAL_SIMPLE_REGISTERING) {
+    if (ctx->state == SIGNAL_COMPACT_REGISTERING) {
         if (now - ctx->last_send_time < REGISTER_INTERVAL_MS) {
             return 0;
         }
@@ -356,7 +363,7 @@ int signal_simple_tick(p2p_session_t *s) {
         /* 检查超时 */
         if (++ctx->register_attempts > MAX_REGISTER_ATTEMPTS) {
             if (ctx->verbose) {
-                printf("[SIGNAL_SIMPLE] TIMEOUT: Max register attempts reached (%d)\n",
+                printf("[SIGNAL_COMPACT] TIMEOUT: Max register attempts reached (%d)\n",
                        MAX_REGISTER_ATTEMPTS);
                 fflush(stdout);
             }
@@ -367,10 +374,10 @@ int signal_simple_tick(p2p_session_t *s) {
         uint8_t payload[256];
         int payload_len = build_register_payload(s, payload, sizeof(payload));
         if (payload_len > 0) {
-            udp_send_packet(s->sock, &ctx->server_addr, P2P_PKT_REGISTER, 0, 0, payload, payload_len);
+            udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, payload_len);
             
             if (ctx->verbose) {
-                printf("[SIGNAL_SIMPLE] REGISTERING: Attempt #%d (%d candidates)...\n",
+                printf("[SIGNAL_COMPACT] REGISTERING: Attempt #%d (%d candidates)...\n",
                        ctx->register_attempts, s->local_cand_cnt);
                 fflush(stdout);
             }
@@ -380,7 +387,7 @@ int signal_simple_tick(p2p_session_t *s) {
     }
     
     /* READY 状态：序列化发送剩余候选 */
-    if (ctx->state == SIGNAL_SIMPLE_READY) {
+    if (ctx->state == SIGNAL_COMPACT_READY) {
         /* 如果已发送完毕，无需继续 */
         if (ctx->local_send_complete) {
             return 0;
@@ -418,7 +425,7 @@ int signal_simple_tick(p2p_session_t *s) {
         /* 检查是否已发送完所有候选 */
         if (count <= 0 || end_idx >= s->local_cand_cnt) {
             /* 发送 FIN 标志 */
-            flags = P2P_PEER_INFO_FIN;
+            flags = SIG_PEER_INFO_FIN;
             count = 0;
             base_idx = s->local_cand_cnt;  /* 指向列表末尾 */
         }
@@ -437,22 +444,22 @@ int signal_simple_tick(p2p_session_t *s) {
         /* 直接向对端发送（P2P 模式，不通过服务器） */
         /* 使用第一个远端候选作为目标地址 */
         if (s->remote_cand_cnt > 0) {
-            udp_send_packet(s->sock, &s->remote_cands[0].addr, P2P_PKT_PEER_INFO, flags, seq_to_send, 
+            udp_send_packet(s->sock, &s->remote_cands[0].addr, SIG_PKT_PEER_INFO, flags, seq_to_send, 
                            payload, offset);
             
             if (ctx->verbose) {
-                if (flags & P2P_PEER_INFO_FIN) {
-                    printf("[SIGNAL_SIMPLE] READY: Sent PEER_INFO(seq=%u) with FIN flag (total sent: %d)\n",
+                if (flags & SIG_PEER_INFO_FIN) {
+                    printf("[SIGNAL_COMPACT] READY: Sent PEER_INFO(seq=%u) with FIN flag (total sent: %d)\n",
                            seq_to_send, s->local_cand_cnt);
                 } else {
-                    printf("[SIGNAL_SIMPLE] READY: Sent PEER_INFO(seq=%u, base=%d) with %d candidates [%d-%d]\n",
+                    printf("[SIGNAL_COMPACT] READY: Sent PEER_INFO(seq=%u, base=%d) with %d candidates [%d-%d]\n",
                            seq_to_send, base_idx, count, base_idx, end_idx - 1);
                 }
                 fflush(stdout);
             }
             
             /* 如果发送了 FIN，标记完成 */
-            if (flags & P2P_PEER_INFO_FIN) {
+            if (flags & SIG_PEER_INFO_FIN) {
                 ctx->local_send_complete = 1;
             }
         }

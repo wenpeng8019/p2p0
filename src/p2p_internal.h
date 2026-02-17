@@ -92,7 +92,7 @@
 #include "p2p_thread.h"        /* 线程工具 */
 #include "p2p_signal_relay.h"  /* 中继模式信令 */
 #include "p2p_signal_pubsub.h" /* 发布/订阅模式信令 */
-#include "p2p_signal_simple.h" /* SIMPLE 模式信令 */
+#include "p2p_signal_compact.h" /* COMPACT 模式信令 */
 #include "p2p_signal_protocol.h" /* 信令协议序列化 */
 
 /* ============================================================================
@@ -230,12 +230,12 @@ struct p2p_session {
     /*
      * 信令模块负责在两个对等体之间交换连接信息（候选地址、密钥等）。
      * 支持三种模式：
-     *   - sig_simple_ctx: SIMPLE模式，UDP 无状态信令
+     *   - sig_compact_ctx: COMPACT模式，UDP 无状态信令
      *   - sig_relay_ctx:  ICE模式，TCP 中继信令
      *   - sig_pubsub_ctx: PUBSUB模式，通过 GitHub Gist
      */
-    signal_simple_ctx_t     sig_simple_ctx;     /* SIMPLE 模式信令上下文 */
-    p2p_signal_relay_ctx_t  sig_relay_ctx;      /* ICE 模式信令上下文 */
+    signal_compact_ctx_t     sig_compact_ctx;     /* COMPACT 模式信令上下文 */
+    p2p_signal_relay_ctx_t  sig_relay_ctx;      /* RELAY 模式信令上下文 */
     p2p_signal_pubsub_ctx_t sig_pubsub_ctx;     /* PUB/SUB 模式信令上下文 */
     int                     signaling_mode;     /* 信令模式 P2P_CONNECT_MODE_* */
     char                    remote_peer_id[P2P_PEER_ID_MAX]; /* 目标对等体 ID */

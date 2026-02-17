@@ -309,7 +309,7 @@ int p2p_ice_form_check_list(
  * 通过 TCP 信令服务器转发候选地址给对端。
  * 支持对端离线时的服务器缓存（与标准 ICE 的关键差异）。
  *
- * 注意：SIMPLE 模式不使用此函数，候选通过 p2p_signal_simple 模块处理。
+ * 注意：COMPACT 模式不使用此函数，候选通过 p2p_signal_compact 模块处理。
  *
  * @param s  会话对象
  * @param c  候选地址
@@ -319,10 +319,10 @@ int p2p_ice_form_check_list(
  */
 int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
 
-    /* 仅用于 ICE 模式（TCP 信令） */
-    if (s->signaling_mode != P2P_SIGNALING_MODE_ICE) {
-        /* SIMPLE 模式不应调用此函数，候选通过 p2p_signal_simple 模块发送 */
-        printf("[ICE] Error: p2p_ice_send_local_candidate called in non-ICE mode\n");
+    /* 仅用于 RELAY 模式（TCP 信令） */
+    if (s->signaling_mode != P2P_SIGNALING_MODE_RELAY) {
+        /* COMPACT 模式不应调用此函数，候选通过 p2p_signal_compact 模块发送 */
+        printf("[RELAY] Error: p2p_ice_send_local_candidate called in non-RELAY mode\n");
         return -1;
     }
 

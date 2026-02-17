@@ -508,7 +508,7 @@ static int dtls_is_ready(p2p_session_t *s) {
  * ┌─────────────────────┬───────────┬───────────┬─────────────┐
  * │ 传输层              │ 可靠性    │ 加密      │ 适用场景    │
  * ├─────────────────────┼───────────┼───────────┼─────────────┤
- * │ p2p_trans_simple    │ 无        │ 无        │ 低延迟      │
+ * │ p2p_trans_compact    │ 无        │ 无        │ 低延迟      │
  * │ p2p_trans_reliable  │ ARQ       │ 无        │ 简单可靠    │
  * │ p2p_trans_pseudotcp │ TCP风格   │ 无        │ 拥塞控制    │
  * │ p2p_trans_sctp      │ SCTP      │ 无        │ 多流        │

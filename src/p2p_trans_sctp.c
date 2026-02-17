@@ -338,7 +338,7 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
  * 注册为 P2P 传输层实现，可通过配置选择使用。
  *
  * 与其他传输层对比：
- *   - p2p_trans_simple:    无可靠性，最低延迟
+ *   - p2p_trans_compact:    无可靠性，最低延迟
  *   - p2p_trans_reliable:  ARQ 可靠性，简单实现
  *   - p2p_trans_pseudotcp: TCP 风格拥塞控制
  *   - p2p_trans_sctp:      SCTP 多流可靠/不可靠混合

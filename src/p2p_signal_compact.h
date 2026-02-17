@@ -1,5 +1,5 @@
 /*
- * SIMPLE 模式信令（UDP, 缓存配对机制 + 公网地址探测）
+ * COMPACT 模式信令（UDP, 缓存配对机制 + 公网地址探测）
  *
  * ============================================================================
  * 协议概述
@@ -70,8 +70,8 @@
  * 候选列表统一存储在 p2p_session 中，本模块只负责序列化和发送。
  */
 
-#ifndef P2P_SIGNAL_SIMPLE_H
-#define P2P_SIGNAL_SIMPLE_H
+#ifndef P2P_SIGNAL_COMPACT_H
+#define P2P_SIGNAL_COMPACT_H
 
 #include <p2p.h>
 #include <netinet/in.h>
@@ -80,10 +80,10 @@
 struct p2p_session;
 
 /* ============================================================================
- * SIMPLE 模式消息格式
+ * COMPACT 模式消息格式
  * ============================================================================
  *
- * 候选地址使用 p2p_simple_candidate_t（定义在 p2pp.h），每个 7 字节。
+ * 候选地址使用 p2p_compact_candidate_t（定义在 p2pp.h），每个 7 字节。
  *
  * REGISTER:
  *   [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
@@ -174,17 +174,17 @@ struct p2p_session;
  */
 
 /* PEER_INFO flags */
-#define P2P_PEER_INFO_FIN  0x01     /* 候选列表发送完毕 */
+#define SIG_PEER_INFO_FIN  0x01     /* 候选列表发送完毕 */
 
 /* 信令状态 */
 enum {
-    SIGNAL_SIMPLE_IDLE = 0,         /* 未启动 */
-    SIGNAL_SIMPLE_REGISTERING,      /* 等待 REGISTER_ACK */
-    SIGNAL_SIMPLE_REGISTERED,       /* 已注册，等待 PEER_INFO(seq=1) */
-    SIGNAL_SIMPLE_READY             /* 已收到 PEER_INFO，开始打洞并同步剩余候选 */
+    SIGNAL_COMPACT_IDLE = 0,         /* 未启动 */
+    SIGNAL_COMPACT_REGISTERING,      /* 等待 REGISTER_ACK */
+    SIGNAL_COMPACT_REGISTERED,       /* 已注册，等待 PEER_INFO(seq=1) */
+    SIGNAL_COMPACT_READY             /* 已收到 PEER_INFO，开始打洞并同步剩余候选 */
 };
 
-/* SIMPLE 信令上下文 */
+/* COMPACT 信令上下文 */
 typedef struct {
     int                 state;                              /* 信令状态 */
     struct sockaddr_in  server_addr;                        /* 信令服务器地址 */
@@ -196,6 +196,7 @@ typedef struct {
     /* REGISTER_ACK 返回的信息 */
     uint8_t             peer_online;                        /* 对端是否在线 */
     uint8_t             max_remote_candidates;              /* 服务器为对端缓存的最大候选数（0=不支持） */
+    uint8_t             relay_support;                      /* 服务器是否支持中继（0=不支持, 1=支持）*/
     struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器主端口探测到的）*/
     uint16_t            probe_port;                         /* NAT 探测端口（0=不支持探测）*/
     
@@ -216,12 +217,12 @@ typedef struct {
     uint8_t             remote_recv_complete;               /* 对端已接收完所有候选 */
     uint16_t            last_recv_seq;                      /* 已收到的最大 PEER_INFO 序列号 */
     uint8_t             local_send_complete;                /* 本端已发送完所有候选 */
-} signal_simple_ctx_t;
+} signal_compact_ctx_t;
 
 /*
  * 初始化信令上下文
  */
-void signal_simple_init(signal_simple_ctx_t *ctx);
+void signal_compact_init(signal_compact_ctx_t *ctx);
 
 /*
  * 开始信令交换（发送 REGISTER）
@@ -233,7 +234,7 @@ void signal_simple_init(signal_simple_ctx_t *ctx);
  * @param verbose       是否输出详细日志
  * @return              0 成功，-1 失败
  */
-int signal_simple_start(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
+int signal_compact_start(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
                         const struct sockaddr_in *server, int verbose);
 
 /*
@@ -245,7 +246,7 @@ int signal_simple_start(struct p2p_session *s, const char *local_peer_id, const 
  * @param s   会话对象
  * @return    0 正常，-1 错误
  */
-int signal_simple_tick(struct p2p_session *s);
+int signal_compact_tick(struct p2p_session *s);
 
 /*
  * 处理收到的信令包
@@ -265,9 +266,9 @@ int signal_simple_tick(struct p2p_session *s);
  * @param from    发送方地址
  * @return        0 成功处理，-1 解析失败，1 未处理
  */
-int signal_simple_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
+int signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
                             const uint8_t *payload, int len,
                             const struct sockaddr_in *from);
 
-#endif /* P2P_SIGNAL_SIMPLE_H */
+#endif /* P2P_SIGNAL_COMPACT_H */
 
