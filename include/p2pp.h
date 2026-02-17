@@ -42,6 +42,8 @@
 #define P2P_PKT_REGISTER_ACK    0x02    /* 注册确认（告知服务器缓存能力） */
 #define P2P_PKT_PEER_INFO       0x03    /* 候选列表同步包（序列化传输） */
 #define P2P_PKT_PEER_INFO_ACK   0x04    /* 候选列表确认（确认指定序列号） */
+#define P2P_PKT_NAT_PROBE       0x05    /* NAT 类型探测请求（发往探测端口） */
+#define P2P_PKT_NAT_PROBE_ACK   0x06    /* NAT 类型探测响应（返回第二次映射地址） */
 
 /* 打洞协议 (NAT 穿透) */
 #define P2P_PKT_PUNCH           0x10    /* NAT 打洞包 */
