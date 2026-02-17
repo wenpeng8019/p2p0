@@ -20,8 +20,14 @@ add_executable(test_relay_server
     test_relay_server.c
 )
 
+# SIMPLE 协议完整测试（独立运行，测试协议本身）
+add_executable(test_simple_protocol
+    test_simple_protocol.c
+)
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport COMMAND test_transport)
 add_test(NAME test_simple_server COMMAND test_simple_server)
 add_test(NAME test_relay_server COMMAND test_relay_server)
+add_test(NAME test_simple_protocol COMMAND test_simple_protocol)

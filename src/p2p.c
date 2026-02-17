@@ -414,17 +414,26 @@ int p2p_update(p2p_session_t *s) {
         case P2P_PKT_REGISTER_ACK:
             /* SIMPLE 模式：服务器确认注册 */
             if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
-                signal_simple_on_packet(s, hdr.type, payload, payload_len, &from);
+                signal_simple_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
             }
             break;
 
         case P2P_PKT_PEER_INFO:
             /* SIMPLE 模式：信令处理 → 打洞启动 */
             if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
-                if (signal_simple_on_packet(s, hdr.type, payload, payload_len, &from) == 0) {
-                    /* 远端候选已写入 session 的 remote_cands[]，直接启动打洞 */
-                    nat_start_punch(s, s->cfg.verbose_nat_punch);
+                if (signal_simple_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from) == 0) {
+                    /* seq=1 时启动打洞（首次收到服务器转发的候选） */
+                    if (hdr.seq == 1) {
+                        nat_start_punch(s, s->cfg.verbose_nat_punch);
+                    }
                 }
+            }
+            break;
+        
+        case P2P_PKT_PEER_INFO_ACK:
+            /* SIMPLE 模式：候选确认 */
+            if (s->signaling_mode == P2P_SIGNALING_MODE_SIMPLE) {
+                signal_simple_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
             }
             break;
 

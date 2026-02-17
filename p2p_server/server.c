@@ -367,7 +367,7 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
         }
         
         // 构造并发送 REGISTER_ACK
-        // 格式: [hdr(4)][status(1)][flags(1)][reserved(2)]
+        // 格式: [hdr(4)][status(1)][flags(1)][max_candidates(1)][reserved(1)]
         {
             uint8_t ack_response[8];
             p2p_packet_hdr_t *ack_hdr = (p2p_packet_hdr_t *)ack_response;
@@ -376,7 +376,8 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
             ack_hdr->seq = 0;
             
             uint8_t status = 0;  /* 0 = 成功 */
-            uint8_t flags = P2P_REGACK_CAN_CACHE;  /* 服务器支持候选缓存 */
+            uint8_t flags = 0;
+            uint8_t max_cands = SIMPLE_MAX_CANDIDATES;  /* 服务器缓存能力（0=不支持） */
             
             if (remote_idx >= 0) {
                 flags |= P2P_REGACK_PEER_ONLINE;  /* 对端在线 */
@@ -384,13 +385,13 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
             
             ack_response[4] = status;
             ack_response[5] = flags;
-            ack_response[6] = 0;  /* reserved */
+            ack_response[6] = max_cands;  /* max_candidates */
             ack_response[7] = 0;  /* reserved */
             
             sendto(udp_fd, ack_response, 8, 0, (struct sockaddr *)from, sizeof(*from));
             
-            printf("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, can_cache=1\n", 
-                   from_str, (remote_idx >= 0) ? 1 : 0);
+            printf("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d\n", 
+                   from_str, (remote_idx >= 0) ? 1 : 0, max_cands);
             fflush(stdout);
         }
         
@@ -405,17 +406,18 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
                 remote->peer = local;
             }
             
-            // 构造 P2P_PKT_PEER_INFO 响应（新格式：发送完整候选列表）
-            // 格式: [hdr(4)][candidate_count(1)][candidates(N*7)]
-            uint8_t response[4 + 1 + SIMPLE_MAX_CANDIDATES * 7];
+            // 构造 P2P_PKT_PEER_INFO 响应（序列化传输首包 seq=1）
+            // 格式: [hdr(4)][base_index(1)][candidate_count(1)][candidates(N*7)]
+            uint8_t response[4 + 2 + SIMPLE_MAX_CANDIDATES * 7];
             p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)response;
             resp_hdr->type = P2P_PKT_PEER_INFO;
             resp_hdr->flags = 0;
-            resp_hdr->seq = 0;
+            resp_hdr->seq = htons(1);  /* seq=1 表示服务器发送的首包 */
             
             // 向当前请求方发送对方的候选列表
-            response[4] = (uint8_t)remote->candidate_count;
-            int resp_len = 5;
+            response[4] = 0;  /* base_index = 0 (从第一个候选开始) */
+            response[5] = (uint8_t)remote->candidate_count;
+            int resp_len = 6;
             for (int i = 0; i < remote->candidate_count; i++) {
                 response[resp_len] = remote->candidates[i].type;
                 memcpy(response + resp_len + 1, &remote->candidates[i].ip, 4);
@@ -426,15 +428,16 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
             sendto(udp_fd, response, resp_len, 0, 
                    (struct sockaddr *)from, sizeof(*from));
             
-            printf("[UDP] Sent PEER_INFO to %s (local='%s') with %d candidates%s\n", 
+            printf("[UDP] Sent PEER_INFO(seq=1, base=0) to %s (local='%s') with %d candidates%s\n", 
                    from_str, local_peer_id, remote->candidate_count,
                    first_match ? " [FIRST MATCH]" : "");
             fflush(stdout);
             
             // 首次匹配或地址变化：也通知对方本端的候选列表
             if (first_match || (addr_changed && remote->peer == local && remote->peer != (simple_pair_t*)(void*)-1)) {
-                response[4] = (uint8_t)local->candidate_count;
-                resp_len = 5;
+                response[4] = 0;  /* base_index = 0 */
+                response[5] = (uint8_t)local->candidate_count;
+                resp_len = 6;
                 for (int i = 0; i < local->candidate_count; i++) {
                     response[resp_len] = local->candidates[i].type;
                     memcpy(response + resp_len + 1, &local->candidates[i].ip, 4);
@@ -445,7 +448,7 @@ void handle_simple_signaling(int udp_fd, uint8_t *buf, int len, struct sockaddr_
                 sendto(udp_fd, response, resp_len, 0,
                        (struct sockaddr *)&remote->addr, sizeof(remote->addr));
                 
-                printf("[UDP] Sent PEER_INFO to %s:%d (local='%s') with %d candidates%s\n",
+                printf("[UDP] Sent PEER_INFO(seq=1, base=0) to %s:%d (local='%s') with %d candidates%s\n",
                        inet_ntoa(remote->addr.sin_addr), ntohs(remote->addr.sin_port),
                        remote_peer_id, local->candidate_count,
                        first_match ? " [BILATERAL]" : " [ADDR_CHANGED]");

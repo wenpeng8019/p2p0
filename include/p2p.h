@@ -18,9 +18,9 @@ extern "C" {
 /* ---------- 连接模式 ---------- */
 
 enum {
-    P2P_SIGNALING_MODE_SIMPLE = 0,              // 简单无状态信令（UDP，无登录）
-    P2P_SIGNALING_MODE_ICE,                     // ICE 有状态信令（TCP，需登录）
-    P2P_SIGNALING_MODE_PUBSUB                   // 发布/订阅模式（Gist/KV 存储，角色由 remote_peer_id 决定）
+    P2P_SIGNALING_MODE_SIMPLE = 0,              // 简单无状态信令（UDP，无登录，无需 STUN 服务）
+    P2P_SIGNALING_MODE_ICE,                     // ICE 有状态信令（TCP，需登录，基于 STUN/ICE 协议）
+    P2P_SIGNALING_MODE_PUBSUB                   // 发布/订阅模式（Gist 交换信令，无登录，需 STUN 服务）
 };
 
 /* ---------- 连接状态 ---------- */

@@ -26,12 +26,22 @@
  *   0x40-0x4F: 中继协议
  *   0x50-0x5F: 路由探测
  *   0x60-0x6F: 安全协议
+ *
+ * 候选列表同步流程:
+ * 1. 客户端发送 REGISTER（含 UDP 包可容纳的最大候选列表）
+ * 2. 服务器回复 REGISTER_ACK（告知远程缓存的候选数量限制）
+ * 3. 双方上线后，服务器向双方发送 PEER_INFO(seq=1)，包含服务器缓存的对端候选
+ * 4. 双方通过 PEER_INFO(seq=2,3,...)继续向对方同步剩余候选列表
+ * 5. 每个 PEER_INFO 需要 PEER_INFO_ACK 确认，未确认则重发
+ *
+ * 注：REGISTER 仅在注册阶段发送，收到 REGISTER_ACK 后停止（直到重连）
  */
 
 /* 信令协议 (与信令服务器通信) */
-#define P2P_PKT_REGISTER        0x01    /* 注册到信令服务器（含候选列表，可重发更新） */
-#define P2P_PKT_REGISTER_ACK    0x02    /* 注册确认 (服务器下发) */
-#define P2P_PKT_PEER_INFO       0x03    /* 远程 peer 信息 (收到后开始打洞) */
+#define P2P_PKT_REGISTER        0x01    /* 注册到信令服务器（含本地候选列表） */
+#define P2P_PKT_REGISTER_ACK    0x02    /* 注册确认（告知服务器缓存能力） */
+#define P2P_PKT_PEER_INFO       0x03    /* 候选列表同步包（序列化传输） */
+#define P2P_PKT_PEER_INFO_ACK   0x04    /* 候选列表确认（确认指定序列号） */
 
 /* 打洞协议 (NAT 穿透) */
 #define P2P_PKT_PUNCH           0x10    /* NAT 打洞包 */
@@ -58,8 +68,6 @@
 
 /* REGISTER_ACK 标志位 */
 #define P2P_REGACK_PEER_ONLINE  0x01    /* 对端在线 */
-#define P2P_REGACK_CAN_CACHE    0x02    /* 服务器支持候选缓存 */
-#define P2P_REGACK_CACHE_FULL   0x04    /* 候选缓存已满 */
 
 /* SIMPLE 模式包头 (4 bytes) */
 typedef struct {
@@ -87,11 +95,25 @@ typedef struct {
  *   [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
  *
  * REGISTER_ACK:
- *   [status(1)][flags(1)][reserved(2)]
+ *   [status(1)][flags(1)][max_candidates(1)][reserved(1)]
+ *   - flags: P2P_REGACK_PEER_ONLINE
+ *   - max_candidates: 服务器为该对端缓存的最大候选数量（0=不支持缓存）
  *
- * PEER_INFO:
- *   [candidate_count(1)][candidates(N*7)]
+ * PEER_INFO (seq 字段在包头 p2p_packet_hdr_t.seq):
+ *   [base_index(1)][candidate_count(1)][candidates(N*7)]
+ *   - base_index: 本批候选的起始索引（0-based）
+ *   - candidate_count: 本批候选数量，0 表示结束标识
+ *   - seq=1: 服务器发送，包含缓存的对端候选
+ *   - seq>1: 客户端发送，继续同步剩余候选
+ *   - flags: 可包含 P2P_PEER_INFO_FIN (0x01) 表示候选列表发送完毕
+ *
+ * PEER_INFO_ACK:
+ *   [ack_seq(2)][reserved(2)]
+ *   - ack_seq: 确认的 PEER_INFO 序列号
  */
+
+/* PEER_INFO 标志位 */
+#define P2P_PEER_INFO_FIN  0x01    /* 候选列表发送完毕 */
 
 /* ============================================================================
  * RELAY 模式协议 (TCP)
