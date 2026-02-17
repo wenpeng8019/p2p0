@@ -19,8 +19,8 @@
  * 可通过 Relay 服务器或 PubSub (GitHub Gist) 传输。
  */
 typedef struct p2p_signaling_payload {
-    char sender[32];              /* 发送方 peer_id */
-    char target[32];              /* 目标方 peer_id */
+    char sender[32];              /* 发送方 local_peer_id */
+    char target[32];              /* 目标方 local_peer_id */
     uint32_t timestamp;           /* 时间戳（用于排序和去重） */
     uint32_t delay_trigger;       /* 延迟触发打洞（毫秒） */
     int candidate_count;          /* ICE 候选数量（0-8） */

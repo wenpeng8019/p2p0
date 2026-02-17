@@ -116,7 +116,7 @@ int main(int argc, char *argv[]) {
     cfg.gh_token = gh_token;
     cfg.gist_id = gist_id;
     cfg.bind_port = 0;
-    strncpy(cfg.peer_id, my_name, P2P_PEER_ID_MAX);
+    strncpy(cfg.local_peer_id, my_name, P2P_PEER_ID_MAX);
     
     // 测试选项
     cfg.disable_lan_shortcut = disable_lan;

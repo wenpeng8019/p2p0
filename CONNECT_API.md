@@ -43,7 +43,7 @@ void p2p_destroy(p2p_session_t *s);
 typedef struct {
     /* 基础配置 */
     uint16_t    bind_port;                  // 本地 UDP 端口 (0 = 自动)
-    char        peer_id[P2P_PEER_ID_MAX];   // 本端身份标识
+    char        local_peer_id[P2P_PEER_ID_MAX];   // 本端身份标识
     
     /* 信令配置 */
     int         signaling_mode;             // P2P_CONNECT_MODE_*
@@ -94,14 +94,14 @@ typedef struct {
 
 **配置要求**: `server_host`, `server_port`
 
-**连接规则**: `remote_peer_id` 必须非 NULL，指定对方的明确 peer_id
+**连接规则**: `remote_peer_id` 必须非 NULL，指定对方的明确 local_peer_id
 
 ```c
 p2p_config_t cfg = {0};
 cfg.signaling_mode = P2P_SIGNALING_MODE_COMPACT;
 cfg.server_host = "signal.example.com";
 cfg.server_port = 8888;
-strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
+strncpy(cfg.local_peer_id, "alice", P2P_PEER_ID_MAX);
 
 p2p_session_t *s = p2p_create(&cfg);
 p2p_connect(s, "bob");  // 连接到 bob
@@ -140,7 +140,7 @@ cfg.server_host = "relay.example.com";
 cfg.server_port = 8888;
 cfg.stun_server = "stun.l.google.com";
 cfg.stun_port = 3478;
-strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
+strncpy(cfg.local_peer_id, "alice", P2P_PEER_ID_MAX);
 
 p2p_session_t *s = p2p_create(&cfg);
 p2p_connect(s, "bob");  // 主动连接 bob
@@ -152,7 +152,7 @@ p2p_config_t cfg = {0};
 cfg.signaling_mode = P2P_SIGNALING_MODE_RELAY;
 cfg.server_host = "relay.example.com";
 cfg.server_port = 8888;
-strncpy(cfg.peer_id, "bob", P2P_PEER_ID_MAX);
+strncpy(cfg.local_peer_id, "bob", P2P_PEER_ID_MAX);
 
 p2p_session_t *s = p2p_create(&cfg);
 p2p_connect(s, NULL);  // 被动等待任意连接
@@ -186,7 +186,7 @@ cfg.gh_token = "ghp_xxxxxxxxxxxx";
 cfg.gist_id = "abc123def456";
 cfg.stun_server = "stun.l.google.com";
 cfg.stun_port = 3478;
-strncpy(cfg.peer_id, "bob", P2P_PEER_ID_MAX);
+strncpy(cfg.local_peer_id, "bob", P2P_PEER_ID_MAX);
 
 p2p_session_t *s = p2p_create(&cfg);
 p2p_connect(s, "alice");  // PUB: 发布 offer 给 alice
@@ -200,7 +200,7 @@ cfg.gh_token = "ghp_xxxxxxxxxxxx";
 cfg.gist_id = "abc123def456";
 cfg.stun_server = "stun.l.google.com";
 cfg.stun_port = 3478;
-strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
+strncpy(cfg.local_peer_id, "alice", P2P_PEER_ID_MAX);
 
 p2p_session_t *s = p2p_create(&cfg);
 p2p_connect(s, NULL);  // SUB: 监听任意 offer
@@ -287,7 +287,7 @@ p2p_config_t cfg = {0};
 cfg.signaling_mode = P2P_SIGNALING_MODE_COMPACT;
 cfg.server_host = "127.0.0.1";
 cfg.server_port = 8888;
-strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
+strncpy(cfg.local_peer_id, "alice", P2P_PEER_ID_MAX);
 
 p2p_session_t *s = p2p_create(&cfg);
 p2p_connect(s, "bob");
@@ -307,7 +307,7 @@ p2p_config_t cfg = {0};
 cfg.signaling_mode = P2P_SIGNALING_MODE_COMPACT;
 cfg.server_host = "127.0.0.1";
 cfg.server_port = 8888;
-strncpy(cfg.peer_id, "bob", P2P_PEER_ID_MAX);
+strncpy(cfg.local_peer_id, "bob", P2P_PEER_ID_MAX);
 
 p2p_session_t *s = p2p_create(&cfg);
 p2p_connect(s, "alice");

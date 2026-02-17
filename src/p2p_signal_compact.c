@@ -42,7 +42,7 @@ static inline uint64_t compact_time_ms(void) {
 /*
  * 初始化信令上下文
  */
-void signal_compact_init(signal_compact_ctx_t *ctx) {
+void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx) {
     memset(ctx, 0, sizeof(*ctx));
     ctx->state = SIGNAL_COMPACT_IDLE;
 }
@@ -56,7 +56,7 @@ void signal_compact_init(signal_compact_ctx_t *ctx) {
  */
 static int build_register_payload(p2p_session_t *s, uint8_t *buf, int buf_sz) {
 
-    signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     int cand_cnt = s->local_cand_cnt;
     
     int required = P2P_PEER_ID_MAX * 2 + 1 + cand_cnt * 7;
@@ -64,7 +64,7 @@ static int build_register_payload(p2p_session_t *s, uint8_t *buf, int buf_sz) {
     
     int offset = 0;
     
-    /* peer_id */
+    /* local_peer_id */
     memset(buf, 0, P2P_PEER_ID_MAX * 2);
     memcpy(buf, ctx->local_peer_id, strlen(ctx->local_peer_id));
     memcpy(buf + P2P_PEER_ID_MAX, ctx->remote_peer_id, strlen(ctx->remote_peer_id));
@@ -106,7 +106,7 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
     
     /* count=0 或 FIN 标志表示对端发送完毕 */
     if (count == 0 || (flags & SIG_PEER_INFO_FIN)) {
-        signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+        p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
         ctx->remote_recv_complete = 1;
         if (ctx->verbose) {
             printf("[SIGNAL_COMPACT] PEER_INFO(seq=%d): Received FIN, total candidates=%d\n",
@@ -146,11 +146,11 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
 /*
  * 开始信令交换（发送 REGISTER）
  */
-int signal_compact_start(p2p_session_t *s, const char *local_peer_id,
-                        const char *remote_peer_id,
-                        const struct sockaddr_in *server, int verbose) {
+int p2p_signal_compact_start(struct p2p_session *s, const char *local_peer_id,
+                             const char *remote_peer_id,
+                             const struct sockaddr_in *server, int verbose) {
 
-    signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
     if (ctx->state != SIGNAL_COMPACT_IDLE) return -1;
 
@@ -194,11 +194,11 @@ int signal_compact_start(p2p_session_t *s, const char *local_peer_id,
  * - PEER_INFO: 对端候选列表（序列化）
  * - PEER_INFO_ACK: 对端确认
  */
-int signal_compact_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8_t flags,
-                            const uint8_t *payload, int len,
-                            const struct sockaddr_in *from) {
+int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
+                                 const uint8_t *payload, int len,
+                                 const struct sockaddr_in *from) {
 
-    signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     (void)flags;  /* 暂时未使用 */
     
     switch (type) {
@@ -349,9 +349,9 @@ int signal_compact_on_packet(p2p_session_t *s, uint8_t type, uint16_t seq, uint8
  * REGISTERING 状态：快速重发（1秒），等待 ACK 确认，有超时限制
  * READY 状态：序列化发送剩余候选（2秒重传间隔），确认后停止
  */
-int signal_compact_tick(p2p_session_t *s) {
+int p2p_signal_compact_tick(struct p2p_session *s) {
 
-    signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     uint64_t now = compact_time_ms();
 
     /* REGISTERING 状态：重发 REGISTER */

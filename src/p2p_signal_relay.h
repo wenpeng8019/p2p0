@@ -65,7 +65,8 @@ typedef struct {
  * API 函数
  * ============================================================================ */
 
-int  p2p_signal_relay_connect(p2p_signal_relay_ctx_t *ctx, const char *server_ip, int port, const char *my_name);
+void  p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx);
+int  p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, int port, const char *my_name);
 void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
 int  p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len);
 int  p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len);

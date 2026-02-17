@@ -50,8 +50,8 @@
  *   原始数据 → DES 加密 → Base64 编码 → JSON 存储
  *
  * p2p_signaling_payload_t 结构：
- *   - sender[32]:     发送方 peer_id
- *   - target[32]:     目标方 peer_id
+ *   - sender[32]:     发送方 local_peer_id
+ *   - target[32]:     目标方 local_peer_id
  *   - candidate_count: 候选数量
  *   - candidates[8]:  ICE 候选数组
  */
@@ -127,9 +127,10 @@ static int is_safe_string(const char *str) {
  * @param channel_id Gist ID（作为信令通道）
  * @return           0=成功，-1=失败
  */
-int p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t role, const char *token, const char *channel_id) {
+int p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, const char *channel_id) {
+
     memset(ctx, 0, sizeof(*ctx));
-    ctx->role = role;
+    ctx->role = P2P_SIGNAL_ROLE_UNKNOWN;
     strncpy(ctx->auth_token, token, sizeof(ctx->auth_token) - 1);
     strncpy(ctx->channel_id, channel_id, sizeof(ctx->channel_id) - 1);
     
@@ -139,9 +140,14 @@ int p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t role,
         return -1;
     }
     
-    P2P_LOG_INFO("SIGNAL_PUBSUB", "Initialized: role=%s, channel=%s", 
-           role == P2P_SIGNAL_ROLE_PUB ? "PUB" : "SUB", channel_id);
+    P2P_LOG_INFO("SIGNAL_PUBSUB", "Initialized: channel=%s", channel_id);
     return 0;
+}
+
+void p2p_signal_pubsub_set_role(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t role) {
+
+    ctx->role = role;
+    P2P_LOG_INFO("SIGNAL_PUBSUB", "Initialized: role=%s", role == P2P_SIGNAL_ROLE_PUB ? "PUB" : "SUB");
 }
 
 /*
@@ -206,12 +212,12 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
             ctx->answered = 1;
             
-            /* 保存远端 peer_id */
+            /* 保存远端 local_peer_id */
             strncpy(s->remote_peer_id, p.sender, sizeof(s->remote_peer_id) - 1);
             
             /* 构建 answer 数据包 */
             p2p_signaling_payload_t answer = {0};
-            strncpy(answer.sender, s->cfg.peer_id, 31);
+            strncpy(answer.sender, s->cfg.local_peer_id, 31);
             strncpy(answer.target, p.sender, 31);
             answer.candidate_count = s->local_cand_cnt;
             memcpy(answer.candidates, s->local_cands, 
@@ -250,14 +256,20 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
  *   - SUB 角色写入 "answer" 字段
  *
  * @param ctx         信令上下文
- * @param target_name 目标 peer_id（暂未使用）
+ * @param target_name 目标 local_peer_id（暂未使用）
  * @param data        要发送的数据
  * @param len         数据长度
  * @return            0=成功，-1=失败
  */
 int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name, const void *data, int len) {
     (void)target_name;
-    
+
+    const char *field_name;
+
+    if (ctx->role == P2P_SIGNAL_ROLE_PUB) field_name = "offer";
+    else if (ctx->role == P2P_SIGNAL_ROLE_SUB) field_name = "answer";
+    else return -1;
+
     /* 安全验证 */
     if (!is_safe_string(ctx->channel_id)) {
         P2P_LOG_ERROR("SIGNAL_PUBSUB", "Channel ID validation failed");
@@ -291,9 +303,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     char b64[2048] = {0};
     p2p_base64_encode(enc_data, padded_len, b64, sizeof(b64));
     
-    /* 确定要更新的字段 */
-    const char *field_name = (ctx->role == P2P_SIGNAL_ROLE_PUB) ? "offer" : "answer";
-    
+
     /*
      * JSON 转义处理
      * Base64 字符串中可能包含需要转义的字符
@@ -434,12 +444,15 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
  * @param s    P2P 会话
  */
 void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s) {
-    uint64_t now = time_ms();
 
     /* 根据角色设置不同的轮询间隔 */
-    int poll_interval = (ctx->role == P2P_SIGNAL_ROLE_SUB) ? 5000 : 10000;
-    uint64_t diff = now - ctx->last_poll;
+    int poll_interval;
+    if (ctx->role == P2P_SIGNAL_ROLE_PUB) poll_interval = 10000;
+    else if (ctx->role == P2P_SIGNAL_ROLE_SUB) poll_interval = 5000;
+    else return;
 
+    uint64_t now = time_ms();
+    uint64_t diff = now - ctx->last_poll;
     if (diff < (uint64_t)poll_interval) return;
     ctx->last_poll = now;
 

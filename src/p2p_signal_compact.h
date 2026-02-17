@@ -217,12 +217,12 @@ typedef struct {
     uint8_t             remote_recv_complete;               /* 对端已接收完所有候选 */
     uint16_t            last_recv_seq;                      /* 已收到的最大 PEER_INFO 序列号 */
     uint8_t             local_send_complete;                /* 本端已发送完所有候选 */
-} signal_compact_ctx_t;
+} p2p_signal_compact_ctx_t;
 
 /*
  * 初始化信令上下文
  */
-void signal_compact_init(signal_compact_ctx_t *ctx);
+void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx);
 
 /*
  * 开始信令交换（发送 REGISTER）
@@ -234,8 +234,8 @@ void signal_compact_init(signal_compact_ctx_t *ctx);
  * @param verbose       是否输出详细日志
  * @return              0 成功，-1 失败
  */
-int signal_compact_start(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
-                        const struct sockaddr_in *server, int verbose);
+int p2p_signal_compact_start(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
+                             const struct sockaddr_in *server, int verbose);
 
 /*
  * 周期调用，处理重发和候选同步
@@ -246,7 +246,7 @@ int signal_compact_start(struct p2p_session *s, const char *local_peer_id, const
  * @param s   会话对象
  * @return    0 正常，-1 错误
  */
-int signal_compact_tick(struct p2p_session *s);
+int p2p_signal_compact_tick(struct p2p_session *s);
 
 /*
  * 处理收到的信令包
@@ -266,9 +266,9 @@ int signal_compact_tick(struct p2p_session *s);
  * @param from    发送方地址
  * @return        0 成功处理，-1 解析失败，1 未处理
  */
-int signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
-                            const uint8_t *payload, int len,
-                            const struct sockaddr_in *from);
+int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
+                                 const uint8_t *payload, int len,
+                                 const struct sockaddr_in *from);
 
 #endif /* P2P_SIGNAL_COMPACT_H */
 

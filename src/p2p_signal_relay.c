@@ -91,7 +91,7 @@
  *   p2p_signal_relay_ctx_t ctx = {0};
  *
  *   // 连接信令服务器
- *   p2p_signal_relay_connect(&ctx, "192.168.1.100", 8888, "alice");
+ *   p2p_signal_relay_login(&ctx, "192.168.1.100", 8888, "alice");
  *
  *   // 发送连接请求给 bob
  *   p2p_signal_relay_send_connect(&ctx, "bob", payload_data, payload_len);
@@ -115,6 +115,13 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 
+void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx) {
+
+    memset(ctx, 0, sizeof(p2p_signal_relay_ctx_t));
+    ctx->fd = -1;
+    ctx->state = SIGNAL_DISCONNECTED;
+}
+
 /* ============================================================================
  * 连接信令服务器
  * ============================================================================
@@ -135,7 +142,7 @@
  * @param my_name    本地 peer 名称（用于标识自己）
  * @return           0 成功，-1 失败
  */
-int p2p_signal_relay_connect(p2p_signal_relay_ctx_t *ctx, const char *server_ip, int port, const char *my_name) {
+int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, int port, const char *my_name) {
 
     /* 单例模式：如果已经连接，直接返回成功 */
     if (ctx->state == SIGNAL_CONNECTED) {

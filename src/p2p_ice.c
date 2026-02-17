@@ -333,13 +333,13 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
      */
     if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
         printf("[ICE] [Trickle] TCP not connected, marking candidates pending\n");
-        s->cands_pending_send = 1;
+        s->cands_pending_send = true;
         return -1;
     }
 
     /* 构建负载 */
     p2p_signaling_payload_t payload = {0};
-    strncpy(payload.sender, s->cfg.peer_id, 31);
+    strncpy(payload.sender, s->cfg.local_peer_id, 31);
     if (s->remote_peer_id[0] != '\0') {
         strncpy(payload.target, s->remote_peer_id, 31);
     }
@@ -360,7 +360,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
     int n = p2p_signal_pack(&payload, buf, sizeof(buf));
     if (n <= 0) {
         printf("[ICE] [Trickle] Failed to pack candidate payload\n");
-        s->cands_pending_send = 1;
+        s->cands_pending_send = true;
         return -1;
     }
 
@@ -375,12 +375,12 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
     int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
     if (ret < 0) {
         printf("[ICE] [Trickle] TCP send failed (ret=%d), marking candidates pending\n", ret);
-        s->cands_pending_send = 1;
+        s->cands_pending_send = true;
         return -1;
     }
 
     /* 发送成功（无论对端在线与否），清除 pending 标志 */
-    s->cands_pending_send = 0;
+    s->cands_pending_send = false;
     printf("[ICE] [Trickle] TCP sent %d candidate(s) to %s (online=%d)\n", 
            payload.candidate_count, s->remote_peer_id, ret > 0 ? 1 : 0);
     return ret > 0 ? ret : 0;

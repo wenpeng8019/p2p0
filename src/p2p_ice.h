@@ -54,7 +54,7 @@
  *                   - 对端上线后收到完整候选列表
  *
  *      返回值 < 0:  发送失败（网络错误/服务器断开）
- *                   - 标记 cands_pending_send = 1
+ *                   - 标记 cands_pending_send = true
  *                   - 下次 tick 时重试
  *
  *   3. 离线场景的时序：

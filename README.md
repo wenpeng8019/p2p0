@@ -90,7 +90,7 @@ int main() {
     p2p_config_t cfg = {0};
     cfg.server_host = "127.0.0.1";
     cfg.server_port = 8888;
-    strncpy(cfg.peer_id, "alice", P2P_PEER_ID_MAX);
+    strncpy(cfg.local_peer_id, "alice", P2P_PEER_ID_MAX);
     
     p2p_session_t *s = p2p_create(&cfg);
     p2p_connect(s, "bob");

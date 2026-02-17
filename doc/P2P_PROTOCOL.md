@@ -261,7 +261,7 @@ cleanup_compact_pairs() {
 | 超时清理 | 30 秒无 REGISTER 则清除 | 连接断开立即清除 |
 | 地址变化 | 主动推送 PEER_INFO | N/A（TCP 连接地址不变） |
 | 并发支持 | 需支持多对 peer 同时在线 | 同左 |
-| 认证 | 无（基于 peer_id 信任） | 无（基于 peer_id 信任） |
+| 认证 | 无（基于 local_peer_id 信任） | 无（基于 local_peer_id 信任） |
 | 中转限流 | RELAY 模式应限速 | 同左 |
 
 **参考实现**: `p2p_server/server.c` 同时支持 TCP 和 UDP。
@@ -269,7 +269,7 @@ cleanup_compact_pairs() {
 ### 6. 完整流程示例（含地址变化）
 
 ```
-Alice (peer_id="alice")    Server                Bob (peer_id="bob")
+Alice (local_peer_id="alice")    Server                Bob (local_peer_id="bob")
       |                      |                        |
       |-- REGISTER ---------->|                        |
       |  ["alice", "bob"]     |                        |
@@ -564,7 +564,7 @@ while (1) {
 | **服务器清理** | 30秒无 REGISTER | 60秒无消息 |
 | **地址变化** | 主动推送 | N/A（TCP 地址不变） |
 | **死连接检测** | N/A（UDP 无连接） | 应用层心跳 |
-| **用户寻址** | peer_id (32 bytes) | name (32 bytes) |
+| **用户寻址** | local_peer_id (32 bytes) | name (32 bytes) |
 | **典型场景** | 嵌入式/IoT | WebRTC/跨平台 |
 | **消息格式** | `[type:u8|flags:u8|seq:u16]` | `[magic:u32|type:u8|length:u32]` |
 
@@ -670,7 +670,7 @@ Alice (浏览器)          Server              Bob (浏览器)
 
 ### COMPACT 模式特定风险
 
-- ❌ **无 peer_id 验证**：任何人可冒充他人注册
+- ❌ **无 local_peer_id 验证**：任何人可冒充他人注册
 - ❌ **明文传输**：地址信息未加密
 - ⚠️ **UDP 泛洪**：需要服务器端 rate limiting
 

@@ -85,7 +85,7 @@ typedef void (*p2p_on_data_fn)(p2p_session_t *session, const void *data, int len
 
 typedef struct {
     uint16_t                bind_port;                  // 本地 UDP 端口 (0 = any)
-    char                    peer_id[P2P_PEER_ID_MAX];   // 本端身份
+    char                    local_peer_id[P2P_PEER_ID_MAX];   // 本端身份
     
     /* 信令配置 */
     int                     signaling_mode;             // P2P_SIGNALING_MODE_* (连接时使用的信令模式)
@@ -157,7 +157,7 @@ void p2p_destroy(p2p_session_t *s);
  * 信令模式由 cfg.signaling_mode 决定，remote_peer_id 的使用规则如下：
  * 
  * 1. COMPACT 模式（简单信令，UDP）
- *    - remote_peer_id: 必须非 NULL，指定对方的明确 peer_id
+ *    - remote_peer_id: 必须非 NULL，指定对方的明确 local_peer_id
  *    - 原理：双方各自向服务器注册 pair<local_id, remote_id> 映射，服务器匹配成功后返回对方地址，开始 NAT 打洞
  *    - cfg 配置要求：server_host, server_port
  *    - 示例：p2p_connect(s, "bob")  // 连接到 bob

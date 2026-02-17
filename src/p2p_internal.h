@@ -67,6 +67,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -204,27 +205,27 @@ typedef struct stream_s stream_t;
  */
 struct p2p_session {
     /* ======================== 配置与状态 ======================== */
-    p2p_config_t            cfg;                /* 用户配置（STUN 服务器、模式等） */
-    int                     state;              /* 连接状态 P2P_STATE_* */
-    int                     path;               /* 连接路径 P2P_PATH_* */
+    p2p_config_t                cfg;                // 用户配置（STUN 服务器、模式等）
+    int                         state;              // 连接状态 P2P_STATE_*
+    int                         path;               // 连接路径 P2P_PATH_*
 
     /* ======================== Socket 资源 ======================== */
-    int                     sock;               /* UDP 套接字描述符 */
-    int                     tcp_sock;           /* TCP 套接字（打洞/回退用） */
-    struct sockaddr_in      active_addr;        /* 当前通信目标地址 */
+    int                         sock;               // UDP 套接字描述符
+    int                         tcp_sock;           // TCP 套接字（打洞/回退用）
+    struct sockaddr_in          active_addr;        // 当前通信目标地址
 
     /* ======================== NAT 检测 ======================== */
-    p2p_stun_nat_type_t     nat_type;           /* 本地 NAT 类型 */
-    int                     det_step;           /* 当前检测步骤 det_step_t */
-    uint64_t                det_last_send;      /* 上次发送检测包时间 */
-    int                     det_retries;        /* 当前步骤重试次数 */
+    p2p_stun_nat_type_t         nat_type;           // 本地 NAT 类型
+    int                         det_step;           // 当前检测步骤 det_step_t
+    uint64_t                    det_last_send;      // 上次发送检测包时间
+    int                         det_retries;        // 当前步骤重试次数
 
     /* ======================== ICE 状态 ======================== */
-    p2p_ice_state_t         ice_state;          /* ICE 协商状态 */
-    p2p_candidate_t         local_cands[P2P_MAX_CANDIDATES];   /* 本地候选地址 */
-    int                     local_cand_cnt;     /* 本地候选数量 */
-    p2p_candidate_t         remote_cands[P2P_MAX_CANDIDATES];  /* 远端候选地址 */
-    int                     remote_cand_cnt;    /* 远端候选数量 */
+    p2p_ice_state_t             ice_state;          // ICE 协商状态
+    p2p_candidate_t             local_cands[P2P_MAX_CANDIDATES];   // 本地候选地址
+    int                         local_cand_cnt;     // 本地候选数量
+    p2p_candidate_t             remote_cands[P2P_MAX_CANDIDATES];  // 远端候选地址
+    int                         remote_cand_cnt;    // 远端候选数量
 
     /* ======================== 信令上下文 ======================== */
     /*
@@ -234,21 +235,21 @@ struct p2p_session {
      *   - sig_relay_ctx:  ICE模式，TCP 中继信令
      *   - sig_pubsub_ctx: PUBSUB模式，通过 GitHub Gist
      */
-    signal_compact_ctx_t     sig_compact_ctx;     /* COMPACT 模式信令上下文 */
-    p2p_signal_relay_ctx_t  sig_relay_ctx;      /* RELAY 模式信令上下文 */
-    p2p_signal_pubsub_ctx_t sig_pubsub_ctx;     /* PUB/SUB 模式信令上下文 */
-    int                     signaling_mode;     /* 信令模式 P2P_CONNECT_MODE_* */
-    char                    remote_peer_id[P2P_PEER_ID_MAX]; /* 目标对等体 ID */
-    int                     signal_sent;        /* 是否已发送初始信令 */
-    uint64_t                last_signal_time;   /* 上次发送信令的时间戳 (ms) */
-    int                     last_cand_cnt_sent; /* 上次发送时的候选数量 */
-    int                     cands_pending_send; /* 有待发送的候选（TCP 发送失败时置 1） */
+    p2p_signal_compact_ctx_t    sig_compact_ctx;    // COMPACT 模式信令上下文
+    p2p_signal_relay_ctx_t      sig_relay_ctx;      // RELAY 模式信令上下文
+    p2p_signal_pubsub_ctx_t     sig_pubsub_ctx;     // PUB/SUB 模式信令上下文
+    int                         signaling_mode;     // 信令模式 P2P_CONNECT_MODE_*
+    char                        remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
+    bool                        signal_sent;        // 是否已发送初始信令
+    uint64_t                    last_signal_time;   // 上次发送信令的时间戳 (ms)
+    int                         last_cand_cnt_sent; // 上次发送时的候选数量
+    bool                        cands_pending_send; // 有待发送的候选（TCP 发送失败时置 1）
 
     /* ======================== 传输层实例 ======================== */
-    nat_ctx_t               nat;                /* NAT 穿透上下文 */
-    route_ctx_t             route;              /* 路由表上下文 */
-    reliable_t              reliable;           /* 可靠传输层状态 */
-    stream_t                stream;             /* 流传输层状态 */
+    nat_ctx_t                   nat;                // NAT 穿透上下文
+    route_ctx_t                 route;              // 路由表上下文
+    reliable_t                  reliable;           // 可靠传输层状态
+    stream_t                    stream;             // 流传输层状态
 
     /* ======================== 模块化传输 ======================== */
     /*
@@ -258,8 +259,8 @@ struct p2p_session {
      *   - sctp:      SCTP 协议 (usrsctp)
      *   - pseudotcp: 模拟 TCP 拥塞控制
      */
-    const p2p_transport_ops_t* trans;           /* 传输层操作函数表 */
-    void*                   transport_data;     /* 传输层私有数据 */
+    const p2p_transport_ops_t*  trans;              // 传输层操作函数表
+    void*                       transport_data;     // 传输层私有数据
 
     /* ======================== PseudoTCP 拥塞控制 ======================== */
     /*
@@ -270,16 +271,16 @@ struct p2p_session {
      *   - sack:     选择确认位图
      */
     struct {
-        uint32_t cwnd;      /* 拥塞窗口 (字节/包数) */
-        uint32_t ssthresh;  /* 慢启动阈值 */
-        uint32_t dup_acks;  /* 重复 ACK 计数（>=3 触发快速重传） */
-        uint32_t sack;      /* SACK 位图 */
-        uint64_t last_ack;  /* 上次收到 ACK 的时间戳 */
-        int      cc_state;  /* 拥塞控制状态 TCP_STATE_* */
+        uint32_t cwnd;      // 拥塞窗口 (字节/包数)
+        uint32_t ssthresh;  // 慢启动阈值
+        uint32_t dup_acks;  // 重复 ACK 计数（>=3 触发快速重传）
+        uint32_t sack;      // SACK 位图
+        uint64_t last_ack;  // 上次收到 ACK 的时间戳
+        int      cc_state;  // 拥塞控制状态 TCP_STATE_*
     } tcp;
 
     /* ======================== 定时器 ======================== */
-    uint64_t            last_update;            /* 上次调用 p2p_update() 的时间 */
+    uint64_t                    last_update;        // 上次调用 p2p_update() 的时间
 
 #ifdef P2P_THREADED
     /* ======================== 多线程支持 ======================== */
@@ -287,10 +288,10 @@ struct p2p_session {
      * 启用 P2P_THREADED 时，会话在独立线程中运行。
      * 需要互斥锁保护共享状态。
      */
-    pthread_t           thread;                 /* 工作线程 */
-    pthread_mutex_t     mtx;                    /* 互斥锁 */
-    int                 thread_running;         /* 线程是否运行中 */
-    int                 quit;                   /* 退出标志 */
+    pthread_t                   thread;             // 工作线程
+    pthread_mutex_t             mtx;                // 互斥锁
+    int                         thread_running;     // 线程是否运行中
+    int                         quit;               // 退出标志
 #endif
 };
 
