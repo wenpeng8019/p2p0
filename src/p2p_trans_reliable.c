@@ -16,7 +16,7 @@ static inline int seq_in_window(uint16_t seq, uint16_t base, int window) {
     return d >= 0 && d < window;
 }
 
-static void reliable_init(reliable_t *r) {
+void reliable_init(reliable_t *r) {
     memset(r, 0, sizeof(*r));
     r->rto = RELIABLE_RTO_INIT;
     r->srtt = 0;
@@ -167,67 +167,23 @@ static int build_ack_payload(const reliable_t *r, uint8_t *buf) {
  * 周期性 tick：重传 + 发送 ACK + 刷新待处理数据
  * 仅在需要时发送 ACK
  */
-void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr) {
+void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode) {
     if (r->recv_base > 0 || r->recv_bitmap[r->recv_base % RELIABLE_WINDOW]) {
         uint8_t ack_payload[6];
         build_ack_payload(r, ack_payload);
-        udp_send_packet(sock, addr, P2P_PKT_ACK, 0, 0, ack_payload, 6);
+        // 中继模式使用 RELAY_ACK，直连P2P使用 ACK
+        uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_ACK : P2P_PKT_ACK;
+        udp_send_packet(sock, addr, pkt_type, 0, 0, ack_payload, 6);
     }
 }
 
 /*
- * 标准 ARQ 重传循环
+ * 注：reliable 作为基础传输层，由 p2p.c 和高级传输层直接调用：
+ *   - reliable_init()        → p2p_create() 初始化
+ *   - reliable_send_pkt()    → stream_flush_to_reliable()
+ *   - reliable_tick_ack()    → PseudoTCP tick 中调用
+ *   - reliable_on_data()     → p2p_update() 接收 DATA 包
+ *   - reliable_on_ack()      → p2p_update() 接收 ACK 包
+ *
+ * 不再暴露为 p2p_transport_ops_t 对象，避免不必要的 VTable 间接调用。
  */
-static int reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr) {
-    uint64_t now = time_ms();
-    
-    for (int i = 0; i < RELIABLE_WINDOW; i++) {
-        uint16_t seq = r->send_base + i;
-        if (seq_diff(seq, r->send_seq) >= 0) break;
-
-        int idx = seq % RELIABLE_WINDOW;
-        retx_entry_t *e = &r->send_buf[idx];
-        if (e->acked) continue;
-
-        if (e->send_time == 0 || now - e->send_time >= (uint64_t)r->rto) {
-            udp_send_packet(sock, addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
-            if (e->send_time != 0) {
-                r->rto = (r->rto * 3) / 2;
-            }
-            e->send_time = now;
-            e->retx_count++;
-        }
-    }
-
-    reliable_tick_ack(r, sock, addr);
-    return 0;
-}
-
-/*
- * ============================================================================
- * Transport VTable 实现 (Simple ARQ)
- * ============================================================================
- */
-
-static int trans_reliable_init(struct p2p_session *s) {
-    reliable_init(&s->reliable);
-    return 0;
-}
-
-static int trans_reliable_send(struct p2p_session *s, const void *buf, int len) {
-    return reliable_send_pkt(&s->reliable, buf, len);
-}
-
-static void trans_reliable_tick(struct p2p_session *s) {
-    /*
-     * 在简单模式下，我们使用原本的 reliable_tick
-     */
-    reliable_tick(&s->reliable, s->sock, &s->active_addr);
-}
-
-const p2p_transport_ops_t p2p_trans_reliable = {
-    .name = "SimpleARQ",
-    .init = trans_reliable_init,
-    .send_data = trans_reliable_send,
-    .tick = trans_reliable_tick
-};

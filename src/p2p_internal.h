@@ -346,6 +346,9 @@ static inline int16_t seq_diff(uint16_t a, uint16_t b) {
  * 可靠传输层：实现 ARQ 重传机制
  */
 
+/* 初始化 reliable 模块 */
+void reliable_init(reliable_t *r);
+
 /* 发送数据包（加入发送缓冲区等待确认） */
 int  reliable_send_pkt(reliable_t *r, const uint8_t *data, int len);
 
@@ -359,7 +362,7 @@ int  reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int l
 int  reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits);
 
 /* 定时 ACK 处理（检查超时重传） */
-void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr);
+void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode);
 
 /* 查询发送窗口剩余空间 */
 int  reliable_window_avail(const reliable_t *r);

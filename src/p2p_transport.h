@@ -29,7 +29,7 @@ typedef struct p2p_transport_ops {
 } p2p_transport_ops_t;
 
 // 已知的传输层具体实现
-extern const p2p_transport_ops_t p2p_trans_reliable;  /* 可靠传输 (ARQ) */
+// 注：reliable 作为基础传输层，直接调用 reliable_* 函数，无需 VTable
 extern const p2p_transport_ops_t p2p_trans_pseudotcp; /* 拥塞控制 */
 extern const p2p_transport_ops_t p2p_trans_dtls;      /* DTLS (MbedTLS) */
 extern const p2p_transport_ops_t p2p_trans_openssl;   /* DTLS (OpenSSL) */

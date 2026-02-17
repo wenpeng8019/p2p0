@@ -128,7 +128,8 @@ static int pseudotcp_send(struct p2p_session *s, const void *buf, int len) {
 
 static void pseudotcp_tick(struct p2p_session *s) {
     p2p_pseudotcp_tick(s);
-    reliable_tick_ack(&s->reliable, s->sock, &s->active_addr);
+    int is_relay_mode = (s->path == P2P_PATH_RELAY);
+    reliable_tick_ack(&s->reliable, s->sock, &s->active_addr, is_relay_mode);
 }
 
 static void pseudotcp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {

@@ -6,22 +6,6 @@
 #include <string.h>
 #include <unistd.h>
 
-
-/* ---- Packet header ---- */
-
-void pkt_hdr_encode(uint8_t *buf, uint8_t type, uint8_t flags, uint16_t seq) {
-    buf[0] = type;
-    buf[1] = flags;
-    buf[2] = (uint8_t)(seq >> 8);
-    buf[3] = (uint8_t)(seq & 0xFF);
-}
-
-void pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr) {
-    hdr->type  = buf[0];
-    hdr->flags = buf[1];
-    hdr->seq   = ((uint16_t)buf[2] << 8) | buf[3];
-}
-
 /* ---- UDP socket ---- */
 
 int udp_create_socket(uint16_t port) {
@@ -81,7 +65,7 @@ int udp_send_packet(int sock, const struct sockaddr_in *addr,
     uint8_t buf[P2P_MTU];
     if (P2P_HDR_SIZE + payload_len > P2P_MTU) return -1;
 
-    pkt_hdr_encode(buf, type, flags, seq);
+    p2p_pkt_hdr_encode(buf, type, flags, seq);
     if (payload_len > 0 && payload)
         memcpy(buf + P2P_HDR_SIZE, payload, payload_len);
 

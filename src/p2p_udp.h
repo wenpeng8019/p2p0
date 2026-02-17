@@ -23,7 +23,7 @@ int  udp_send_packet(int sock, const struct sockaddr_in *addr,
                      uint8_t type, uint8_t flags, uint16_t seq,
                      const void *payload, int payload_len);
 
-void pkt_hdr_encode(uint8_t *buf, uint8_t type, uint8_t flags, uint16_t seq);
-void pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr);
+void p2p_pkt_hdr_encode(uint8_t *buf, uint8_t type, uint8_t flags, uint16_t seq);
+void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr);
 
 #endif /* P2P_UDP_H */

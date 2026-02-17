@@ -102,15 +102,22 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
     // 初始化路由层（检测是否处于同一子网）
     route_init(&s->route);
 
-    // 初始化传输层（支持：DTLS/OpenSSL/SCTP/PseudoTCP/Reliable）
-    // + 如果配置中启动了多个传输模块，则优先级为
-    //   DTLS > OpenSSL > SCTP > PseudoTCP > Reliable
+    // 初始化基础传输层（reliable ARQ）
+    reliable_init(&s->reliable);
+
+    // 初始化基础传输层（reliable）
+    reliable_init(&s->reliable);
+
+    // 初始化传输层（可选的高级传输模块）
+    // 注：reliable 是基础传输层，始终存在于 s->reliable
+    //     这里的 s->trans 只用于高级传输模块（DTLS/OpenSSL/SCTP/PseudoTCP）
+    s->trans = NULL;  // 默认无高级传输层
+    
     if (cfg->use_dtls) {
 #ifdef WITH_DTLS
         s->trans = &p2p_trans_dtls;
 #else
         P2P_LOG_WARN("p2p", "DTLS (MbedTLS) requested but library not linked!\n");
-        s->trans = &p2p_trans_reliable;
 #endif
     } 
     else if (cfg->use_openssl) {
@@ -118,7 +125,6 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
         s->trans = &p2p_trans_openssl;
 #else
         P2P_LOG_WARN("p2p", "OpenSSL requested but library not linked!\n");
-        s->trans = &p2p_trans_reliable;
 #endif
     }
     else if (cfg->use_sctp) {
@@ -126,13 +132,10 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
         s->trans = &p2p_trans_sctp;
 #else
         P2P_LOG_WARN("p2p", "SCTP (usrsctp) requested but library not linked!\n");
-        s->trans = &p2p_trans_reliable;
 #endif
     }
     else if (cfg->use_pseudotcp) {
         s->trans = &p2p_trans_pseudotcp;
-    } else {
-        s->trans = &p2p_trans_reliable;
     }
 
     // 执行传输模块的初始化处理
@@ -384,159 +387,155 @@ int p2p_update(p2p_session_t *s) {
     while ((n = udp_recv_from(s->sock, &from, buf, sizeof(buf))) > 0) {
 
         // --------------------
-        // STUN 服务返回包 
+        // STUN/TURN 协议包
         // --------------------
+        // 注：TURN 是 STUN 的扩展，共享相同的包格式和 Magic Cookie (0x2112A442)
+        //     两个 handler 内部会根据消息类型（Method）分别过滤处理
 
-        // 简单检查：长度 >= 20 且 Magic Cookie 匹配
         if (n >= 20 && buf[0] < 2) { // STUN type 0x00xx or 0x01xx
             uint32_t magic = ntohl(*(uint32_t *)(buf + 4));
             if (magic == STUN_MAGIC) {
-                p2p_stun_handle_packet(s, buf, n, &from);
-                p2p_turn_handle_packet(s, buf, n, &from);
+                p2p_stun_handle_packet(s, buf, n, &from);  // 处理 Binding Response
+                p2p_turn_handle_packet(s, buf, n, &from);  // 处理 Allocate Success 等
                 continue;
             }
         }
 
+        // --------------------
+        // P2P 协议（见 p2pp.h）
+        // --------------------
+
         if (n < P2P_HDR_SIZE) continue;
 
+        // 获取 header
         p2p_packet_hdr_t hdr;
-        pkt_hdr_decode(buf, &hdr);
+        p2p_pkt_hdr_decode(buf, &hdr);
 
+        // 获取 payload
         const uint8_t *payload = buf + P2P_HDR_SIZE;
         int payload_len = n - P2P_HDR_SIZE;
 
         switch (hdr.type) {
 
-        // --------------------
-        // NAT / 信令包
-        // --------------------
+            // --------------------
+            // 打洞/保活
+            // --------------------
 
-        case SIG_PKT_REGISTER_ACK:
-            /* COMPACT 模式：服务器确认注册 */
-            if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-                p2p_signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
-            }
-            break;
+            case P2P_PKT_PUNCH:
+            case P2P_PKT_PUNCH_ACK:
+            case P2P_PKT_PING:
+            case P2P_PKT_PONG:
+                nat_on_packet(s, hdr.type, payload, payload_len, &from);
+                break;
 
-        case SIG_PKT_PEER_INFO:
-            /* COMPACT 模式：信令处理 → 打洞启动 */
-            if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-                if (p2p_signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from) == 0) {
-                    /* seq=1 时启动打洞（首次收到服务器转发的候选） */
-                    if (hdr.seq == 1) {
-                        nat_start_punch(s, s->cfg.verbose_nat_punch);
+            // --------------------
+            // 数据传输（P2P 直连 或 服务器中继）
+            // --------------------
+
+            case P2P_PKT_DATA: case P2P_PKT_RELAY_DATA:
+
+                // 高级传输层（DTLS/SCTP/PseudoTCP）有自己的解包逻辑
+                if (s->trans && s->trans->on_packet)
+                    s->trans->on_packet(s, hdr.type, payload, payload_len, &from);
+                // 基础 reliable 层处理
+                else if (payload_len > 0)
+                    reliable_on_data(&s->reliable, hdr.seq, payload, payload_len);
+                
+                break;
+
+            // ACK 仅基础 reliable 层使用
+            // + 注：DTLS/SCTP 有自己的确认机制，不使用 P2P_PKT_ACK
+            case P2P_PKT_ACK: case P2P_PKT_RELAY_ACK:
+
+                // 只有使用基础 reliable 层时才处理（无高级传输层或高级传输层无 on_packet）
+                if ((!s->trans || !s->trans->on_packet) && payload_len >= 6) {
+                    uint16_t ack_seq = ((uint16_t)payload[0] << 8) | payload[1];
+                    uint32_t sack = ((uint32_t)payload[2] << 24) |
+                                    ((uint32_t)payload[3] << 16) |
+                                    ((uint32_t)payload[4] << 8) |
+                                    (uint32_t)payload[5];
+                    reliable_on_ack(&s->reliable, ack_seq, sack);
+                }
+                break;
+
+            // --------------------
+            // FIN 连接断开
+            // --------------------
+
+            case P2P_PKT_FIN:
+                s->state = P2P_STATE_CLOSED;
+                break;
+
+            // --------------------
+            // 路由探测包，即处于同一个子网内的双方的探测和确认
+            // --------------------
+
+            case P2P_PKT_ROUTE_PROBE:
+                route_on_probe(&s->route, &from, s->sock);
+                break;
+            case P2P_PKT_ROUTE_PROBE_ACK:
+                route_on_probe_ack(&s->route, &from);
+                break;
+
+            // --------------------
+            // 连接授权验证
+            // --------------------
+
+            case P2P_PKT_AUTH:
+
+                // 简化版安全握手：检查 payload 是否匹配 cfg.auth_key
+                if (s->cfg.auth_key && payload_len > 0) {
+                    if (strncmp((const char*)payload, s->cfg.auth_key, payload_len) == 0) {
+                        P2P_LOG_INFO("P2P", "[AUTH] Authenticated successfully!\n");
+                    } else {
+                        P2P_LOG_INFO("P2P", "[AUTH] Authentication failed!\n");
+                        s->state = P2P_STATE_ERROR;
                     }
                 }
-            }
-            break;
-        
-        case SIG_PKT_PEER_INFO_ACK:
-            /* COMPACT 模式：候选确认 */
-            if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-                p2p_signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
-            }
-            break;
+                break;
 
-        case P2P_PKT_PUNCH:
-        case P2P_PKT_PUNCH_ACK:
-        case P2P_PKT_PING:
-        case P2P_PKT_PONG:
-            nat_on_packet(s, hdr.type, payload, payload_len, &from);
-            break;
+            // --------------------
+            // COMPACT 模式的信令包（REGISTER_ACK、PEER_INFO、PEER_INFO_ACK）
+            // --------------------
 
-        // --------------------
-        // 数据传输
-        // --------------------
+            case SIG_PKT_REGISTER_ACK:
+            case SIG_PKT_PEER_INFO:
+            case SIG_PKT_PEER_INFO_ACK:
+                if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) break;
 
-        case P2P_PKT_DATA:
-            if (s->trans && s->trans->on_packet) {
-                s->trans->on_packet(s, hdr.type, payload, payload_len, &from);
-            } else {
-                reliable_on_data(&s->reliable, hdr.seq, payload, payload_len);
-            }
-            break;
-
-        // ACK（仅 reliable/pseudotcp 使用）
-        case P2P_PKT_ACK:
-            // DTLS/SCTP 有自己的确认机制，不使用 P2P_PKT_ACK
-            if ((!s->trans || !s->trans->on_packet) && payload_len >= 6) {
-                uint16_t ack_seq = ((uint16_t)payload[0] << 8) | payload[1];
-                uint32_t sack = ((uint32_t)payload[2] << 24) |
-                                ((uint32_t)payload[3] << 16) |
-                                ((uint32_t)payload[4] << 8) |
-                                 (uint32_t)payload[5];
-                reliable_on_ack(&s->reliable, ack_seq, sack);
-            }
-            break;
-
-        // --------------------
-        // 中继数据（来自服务器）
-        // --------------------
-
-        case P2P_PKT_RELAY_DATA:
-
-            // 作为 DATA 处理，但来自服务器
-            if (payload_len > 0)
-                reliable_on_data(&s->reliable, hdr.seq, payload, payload_len);
-            break;
-
-        // --------------------
-        // FIN 连接断开
-        // --------------------
-
-        case P2P_PKT_FIN:
-            s->state = P2P_STATE_CLOSED;
-            break;
-
-        // --------------------
-        // 路由探测包，即处于同一个子网内的双方的探测和确认
-        // --------------------
-
-        case P2P_PKT_ROUTE_PROBE:
-            route_on_probe(&s->route, &from, s->sock);
-            break;
-        case P2P_PKT_ROUTE_PROBE_ACK:
-            route_on_probe_ack(&s->route, &from);
-            break;
-
-        // --------------------
-        // 连接授权验证
-        // --------------------
-
-        case P2P_PKT_AUTH:
-        
-            // 简化版安全握手：检查 payload 是否匹配 cfg.auth_key
-            if (s->cfg.auth_key && payload_len > 0) {
-                if (strncmp((const char*)payload, s->cfg.auth_key, payload_len) == 0) {
-                    P2P_LOG_INFO("P2P", "[AUTH] Authenticated successfully!\n");
-                } else {
-                    P2P_LOG_INFO("P2P", "[AUTH] Authentication failed!\n");
-                    s->state = P2P_STATE_ERROR;
+                // 处理信令包
+                int ret = p2p_signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
+                
+                // PEER_INFO 特殊处理：seq=1 时启动打洞（首次收到服务器转发的候选）
+                if (ret == 0 && hdr.type == SIG_PKT_PEER_INFO && hdr.seq == 1) {
+                    nat_start_punch(s, s->cfg.verbose_nat_punch);
                 }
-            }
-            break;
+                break;
 
-        default:
+            default:
 
-            P2P_LOG_WARN("P2P", "Received unknown packet type: 0x%02X\n", hdr.type);
-            break;
+                P2P_LOG_WARN("P2P", "Received unknown packet type: 0x%02X\n", hdr.type);
+                break;
         }
-    }
+
+    } // while ((n = udp_recv_from(s->sock, &from, buf, sizeof(buf))) > 0)
 
     // --------------------
-    // 周期维护 NAT 打洞
+    // 维护连接状态机（未连接到已连接）
     // --------------------
 
     if (s->state == P2P_STATE_REGISTERING && s->nat.state == NAT_PUNCHING) {
         s->state = P2P_STATE_PUNCHING;
     }
 
+    // 成功 NAT 穿透连接
     if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING) &&
         s->nat.state == NAT_CONNECTED) {
+
         s->state = P2P_STATE_CONNECTED;
         s->path = P2P_PATH_PUNCH;
         s->active_addr = s->nat.peer_addr;
-        
+
         // 触发连接建立回调
         if (s->cfg.on_connected) {
             s->cfg.on_connected(s, s->cfg.userdata);
@@ -571,16 +570,33 @@ int p2p_update(p2p_session_t *s) {
         }
     }
 
+    // 降级到服务器中继
     if (s->state == P2P_STATE_PUNCHING &&
         s->nat.state == NAT_RELAY) {
+
         s->state = P2P_STATE_RELAY;
         s->path = P2P_PATH_RELAY;
-        /* RELAY 模式下使用信令服务器地址 */
+
+        // 中继模式：NAT 打洞失败后的降级方案
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-            s->active_addr = s->sig_compact_ctx.server_addr;
-        } else {
-            /* RELAY 模式暂不支持 RELAY 回退 */
+            // 检查服务器是否支持中继功能
+            if (s->sig_compact_ctx.relay_support) {
+                // COMPACT 模式：通过 UDP 信令服务器中继数据
+                // 服务器会将 P2P_PKT_RELAY_DATA 转发给对端
+                s->active_addr = s->sig_compact_ctx.server_addr;
+                P2P_LOG_INFO("P2P", "[NAT_PUNCH] Failed, using server relay mode\n");
+            } else {
+                // 服务器不支持中继，继续尝试打洞
+                s->active_addr = s->nat.peer_addr;
+                P2P_LOG_WARN("P2P", "[NAT_PUNCH] Failed, server does not support relay. Will keep trying direct connection...\n");
+            }
+        } 
+        else {
+            // RELAY/PUBSUB 模式：目前不支持数据中继
+            // 保持 peer_addr，继续尝试打洞（NAT_RELAY 状态会周期性重试）
+            // TODO: 需要配置 TURN 服务器或扩展 RELAY 服务器的中继功能
             s->active_addr = s->nat.peer_addr;
+            P2P_LOG_WARN("P2P", "[NAT_PUNCH] Failed, no TURN server configured. Will keep trying direct connection...\n");
         }
     }
 
@@ -588,7 +604,7 @@ int p2p_update(p2p_session_t *s) {
     // 周期维护 ROUTE 状态机
     // --------------------
 
-    // 升级到 LAN 路径（如果确认）
+    // 升级到 LAN 路径（如果确认同一子网）
     if (s->route.lan_confirmed && s->path != P2P_PATH_LAN) {
         s->path = P2P_PATH_LAN;
         s->active_addr = s->route.lan_peer_addr;
@@ -598,14 +614,12 @@ int p2p_update(p2p_session_t *s) {
     // P2P 已经连接（周期进行数据读写）
     // --------------------
 
-    // 发送数据：数据流层 → 可靠/传输层 flush 写入
+    // 发送数据：数据流层 → 传输层 flush 写入
     if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
         
-        // 如果启动了传输模块（DTLS、PseudoTCP、...）
-        if (s->trans && s->trans != &p2p_trans_reliable
-            && s->trans->send_data) {
-
-            // 由传输模块自行处理流的数据
+        // 如果使用高级传输层（DTLS、SCTP、PseudoTCP）
+        if (s->trans && s->trans->send_data) {
+            // 由高级传输模块自行处理流的数据
             uint8_t tmp[P2P_MTU];
             int n = ring_read(&s->stream.send_ring, tmp, sizeof(tmp));
             if (n > 0) {
@@ -614,6 +628,7 @@ int p2p_update(p2p_session_t *s) {
                 s->stream.send_offset += n;
             }
         } 
+        // 使用基础 reliable 层
         else stream_flush_to_reliable(&s->stream, &s->reliable);
     }
 
@@ -624,61 +639,48 @@ int p2p_update(p2p_session_t *s) {
         }
     }
 
-    // 接收数据：可靠/传输层 → 数据流层（仅 reliable/pseudotcp 需要）
-    // DTLS/SCTP 直接写入 stream.recv_ring，不需要此步骤
+    // 接收数据：传输层 → 数据流层
+    // 注：DTLS/SCTP 直接写入 stream.recv_ring，不需要此步骤
+    //     只有基础 reliable 层需要从 reliable 缓冲区读取
     if (!s->trans || !s->trans->on_packet) {
         stream_feed_from_reliable(&s->stream, &s->reliable);
     }
 
     // --------------------
-    // 周期维护 NAT/信令 状态机
-    // --------------------
-
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-        /* COMPACT 模式：信令和打洞分开 tick */
-        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERING ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERED) {
-            /* 信令注册/等待阶段 */
-            p2p_signal_compact_tick(s);
-        }
-        if (s->nat.state != NAT_IDLE) {
-            /* 打洞/已连接阶段 */
-            nat_tick(s);
-        }
-    } else {
-        /* ICE/PUBSUB 模式：只调用 nat_tick 处理打洞 */
-        nat_tick(s);
-    }
-
-    // --------------------
-    // 周期维护 STUN 机制状态机（STUN 服务的流程）
+    // 周期维护 STUN/ICE 机制状态机
     // --------------------
 
     p2p_stun_detect_tick(s);
-
-    // --------------------
-    // 周期维护 ICE 机制状态机
-    // --------------------
 
     if (s->cfg.use_ice) {
         p2p_ice_tick(s);
     }
 
     // --------------------
-    // 检测 NAT 断开连接（仅当使用 NAT 时）
+    // 周期维护 NAT/信令 状态机（按信令模式分组）
     // --------------------
 
-    if (s->nat.state == NAT_IDLE && s->nat.last_send_time > 0
-        && (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)) {
-
-        s->state = P2P_STATE_ERROR;
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+        
+        // 信令层维护（注册、等待、候选同步）
+        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERING ||
+            s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERED ||
+            s->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
+            p2p_signal_compact_tick(s);
+        }
+        
+        // NAT 层维护（打洞、保活）
+        // 注：READY 状态时两者需要同时执行
+        if (s->nat.state != NAT_IDLE) {
+            nat_tick(s);
+        }
     }
-
-    // --------------------
-    // 周期维护信令服务状态机（RELAY 模式）
-    // --------------------
-
-    if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+        
+        // NAT 层维护
+        nat_tick(s);
+        
+        // 信令层维护
         p2p_signal_relay_tick(&s->sig_relay_ctx, s);
         
         // 定期重发信令（处理对方不在线或新候选收集）
@@ -691,29 +693,17 @@ int p2p_update(p2p_session_t *s) {
             s->remote_peer_id[0] != '\0') {
             
             uint64_t now = time_ms();
-            int should_send = 0;
-            
-            if (!s->signal_sent) {
-                // 从未发送过
-                should_send = 1;
-            } else if (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) {
-                // 超过重发间隔
-                should_send = 1;
-            } else if (s->local_cand_cnt > s->last_cand_cnt_sent) {
-                // 有新候选收集到（如 STUN 响应）
-                should_send = 1;
-            } else if (s->cands_pending_send) {
-                // 有待发送的候选（之前 TCP 发送失败）
-                should_send = 1;
-            }
-            
-            if (should_send) {
+            if (!s->signal_sent ||                                          // 从未发送过
+                (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) || // 超过重发间隔
+                (s->local_cand_cnt > s->last_cand_cnt_sent) ||              // 有新候选收集到（如 STUN 响应）
+                s->cands_pending_send                                       // 有待发送的候选（之前 TCP 发送失败）
+            ) {
+
                 p2p_signaling_payload_t payload = {0};
                 strncpy(payload.sender, s->cfg.local_peer_id, 31);
                 strncpy(payload.target, s->remote_peer_id, 31);
                 payload.candidate_count = s->local_cand_cnt;
-                memcpy(payload.candidates, s->local_cands, 
-                       sizeof(p2p_candidate_t) * s->local_cand_cnt);
+                memcpy(payload.candidates, s->local_cands, sizeof(p2p_candidate_t) * s->local_cand_cnt);
                 
                 uint8_t buf[2048];
                 int n = p2p_signal_pack(&payload, buf, sizeof(buf));
@@ -731,8 +721,8 @@ int p2p_update(p2p_session_t *s) {
                         s->last_cand_cnt_sent = s->local_cand_cnt;
                         s->cands_pending_send = false;  /* 清除待发送标志 */
                         P2P_LOG_INFO("P2P", "[SIGNALING] %s ICE candidates (%d) to %s (stored=%d)\n",
-                               s->last_cand_cnt_sent > 0 ? "Resent" : "Sent",
-                               s->local_cand_cnt, s->remote_peer_id, ret);
+                                     s->last_cand_cnt_sent > 0 ? "Resent" : "Sent",
+                                     s->local_cand_cnt, s->remote_peer_id, ret);
                     } else {
                         s->cands_pending_send = true;  /* TCP 发送失败，标记待重发 */
                         P2P_LOG_INFO("P2P", "[SIGNALING] Failed to send candidates (ret=%d), will retry...\n", ret);
@@ -741,12 +731,12 @@ int p2p_update(p2p_session_t *s) {
             }
         }
     }
-
-    // --------------------
-    // 周期维护信令服务状态机（PUBSUB 模式）
-    // --------------------
-
-    if (s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
+        
+        // NAT 层维护
+        nat_tick(s);
+        
+        // 信令层维护
         p2p_signal_pubsub_tick(&s->sig_pubsub_ctx, s);
         
         // PUB 角色：等待 STUN 响应后发送 offer（必须包含公网地址）
@@ -767,23 +757,16 @@ int p2p_update(p2p_session_t *s) {
             // 只有在收到 STUN 响应（有 Srflx）后才发布
             if (has_srflx) {
                 uint64_t now = time_ms();
-                int should_send = 0;
-                
-                if (!s->signal_sent) {
-                    should_send = 1;
-                } else if (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) {
-                    should_send = 1;
-                } else if (s->local_cand_cnt > s->last_cand_cnt_sent) {
-                    should_send = 1;
-                }
-                
-                if (should_send) {
+                if (!s->signal_sent ||
+                    (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) ||
+                    (s->local_cand_cnt > s->last_cand_cnt_sent)
+                ) {
+
                     p2p_signaling_payload_t payload = {0};
                     strncpy(payload.sender, s->cfg.local_peer_id, 31);
                     strncpy(payload.target, s->remote_peer_id, 31);
                     payload.candidate_count = s->local_cand_cnt;
-                    memcpy(payload.candidates, s->local_cands, 
-                           sizeof(p2p_candidate_t) * s->local_cand_cnt);
+                    memcpy(payload.candidates, s->local_cands, sizeof(p2p_candidate_t) * s->local_cand_cnt);
                     
                     uint8_t buf[2048];
                     int n = p2p_signal_pack(&payload, buf, sizeof(buf));
@@ -793,12 +776,22 @@ int p2p_update(p2p_session_t *s) {
                         s->last_signal_time = now;
                         s->last_cand_cnt_sent = s->local_cand_cnt;
                         P2P_LOG_INFO("P2P", "[SIGNALING] %s offer with %d candidates to %s\n",
-                               s->last_cand_cnt_sent > 0 ? "Resent" : "Published",
-                               s->local_cand_cnt, s->remote_peer_id);
+                                     s->last_cand_cnt_sent > 0 ? "Resent" : "Published",
+                                     s->local_cand_cnt, s->remote_peer_id);
                     }
                 }
             }
         }
+    }
+
+    // --------------------
+    // 检测 NAT 断开连接（仅当使用 NAT 时）
+    // --------------------
+
+    if (s->nat.state == NAT_IDLE && s->nat.last_send_time > 0
+        && (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)) {
+
+        s->state = P2P_STATE_ERROR;
     }
 
     s->last_update = time_ms();

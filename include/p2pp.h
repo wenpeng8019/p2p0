@@ -40,6 +40,19 @@ typedef struct {
  * - 具体含义由各协议类型自行定义
  */
 
+static inline void p2p_pkt_hdr_encode(uint8_t *buf, uint8_t type, uint8_t flags, uint16_t seq) {
+    buf[0] = type;
+    buf[1] = flags;
+    buf[2] = (uint8_t)(seq >> 8);
+    buf[3] = (uint8_t)(seq & 0xFF);
+}
+
+static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr) {
+    hdr->type  = buf[0];
+    hdr->flags = buf[1];
+    hdr->seq   = ((uint16_t)buf[2] << 8) | buf[3];
+}
+
 /* ============================================================================
  * P2P 协议（UDP, NAT 链路）
  * ============================================================================
@@ -97,6 +110,7 @@ typedef struct {
 
 /* COMPACT 服务器中继扩展协议 - 0xA0-0xBF */
 #define P2P_PKT_RELAY_DATA      0xA0    // 中继服务器转发的数据（P2P 打洞失败后的降级方案）
+#define P2P_PKT_RELAY_ACK       0xA1    // 中继服务器转发的 ACK 确认包
 
 /* REGISTER_ACK status 码 */
 #define SIG_REGACK_PEER_OFFLINE  0      // 成功，对端离线
