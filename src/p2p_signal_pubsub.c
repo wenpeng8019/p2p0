@@ -38,7 +38,7 @@
  * ============================================================================
  *
  * - 本实现使用 DES 加密（仅用于演示，生产环境应使用 AES-256）
- * - 使用 system() 调用 curl（存在命令注入风险，生产环境应使用 libcurl）
+ * - 使用 p2p_http 模块发起 HTTPS 请求（跨平台，无 shell 中间层）
  * - 需要配置 auth_key 作为加密密钥
  * - GitHub Token 需要 gist 读写权限
  *
@@ -57,6 +57,7 @@
  */
 
 #include "p2p_signal_pubsub.h"
+#include "p2p_http.h"
 #include "p2p_crypto_extra.h"
 #include "p2p_internal.h"
 #include "p2p_log.h"
@@ -65,10 +66,9 @@
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
-#include <curl/curl.h>
-#include <openssl/des.h>
-#include <openssl/evp.h>
+#endif
 
 /*
  * ============================================================================
@@ -336,104 +336,152 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     *dst = '\0';
     
     /*
-     * 读取现有 Gist 内容
-     * 需要保留另一个字段的值（PUB 保留 answer，SUB 保留 offer）
+     * 读取现有 Gist 内容（保留另一个字段：PUB 保留 answer，SUB 保留 offer）
      */
-    char cmd_read[2048];
-    snprintf(cmd_read, sizeof(cmd_read), 
-        "curl -s -H \"Authorization: token %s\" "
-        "https://api.github.com/gists/%s > .gist_read.json",
-        ctx->auth_token, ctx->channel_id);
-    system(cmd_read);
-    
-    /* 解析现有内容 */
     char existing_offer[4096] = {0};
     char existing_answer[4096] = {0};
-    
-    FILE *rf = fopen(".gist_read.json", "r");
-    if (rf) {
-        char rbuf[32768];
-        size_t total = 0;
-        size_t n;
-        while ((n = fread(rbuf + total, 1, sizeof(rbuf) - total - 1, rf)) > 0) {
-            total += n;
-        }
-        fclose(rf);
-        rbuf[total] = '\0';
-        
-        /* 提取现有 "offer" 字段 */
-        char *offer_start = strstr(rbuf, "\"offer\"");
-        if (offer_start) {
-            char *val_start = strchr(offer_start, '\"');
-            if (val_start) {
-                val_start = strchr(val_start + 1, '\"');
-                if (val_start) {
-                    val_start++;
-                    char *val_end = val_start;
-                    while (*val_end && *val_end != '\"') val_end++;
-                    size_t len = val_end - val_start;
-                    if (len > 0 && len < sizeof(existing_offer)) {
-                        memcpy(existing_offer, val_start, len);
-                        existing_offer[len] = '\0';
+
+    {
+        char get_url[256];
+        snprintf(get_url, sizeof(get_url),
+                 "https://api.github.com/gists/%s", ctx->channel_id);
+
+        char *rbuf = calloc(1, 32768);
+        if (rbuf) {
+            p2p_http_get(get_url, ctx->auth_token, rbuf, 32768);
+
+            /* 同 tick 函数：找到 p2p_signal.json 节，提取 content 字段，还原转义 */
+            const char *file_key = "\"p2p_signal.json\"";
+            char *file_sec = strstr(rbuf, file_key);
+            if (file_sec) {
+                char *cnt_key = strstr(file_sec, "\"content\"");
+                if (cnt_key) {
+                    char *cs = strchr(cnt_key + 9, '\"');
+                    if (cs) {
+                        cs++;  /* skip opening quote */
+                        char inner[8192] = {0};
+                        char *ip = cs, *id = inner, *ie = inner + sizeof(inner) - 1;
+                        while (*ip && id < ie) {
+                            if (*ip == '\\') {
+                                ip++;
+                                if (*ip == 'n')       { *id++ = '\n'; ip++; }
+                                else if (*ip == '\\') { *id++ = '\\'; ip++; }
+                                else if (*ip == '"')  { *id++ = '"';  ip++; }
+                                else if (*ip == '/')  { *id++ = '/';  ip++; }
+                                else if (*ip == 'r')  { *id++ = '\r'; ip++; }
+                                else if (*ip == 't')  { *id++ = '\t'; ip++; }
+                                else { *id++ = '\\'; *id++ = *ip++; }
+                            } else if (*ip == '"') {
+                                break;  /* end of JSON string */
+                            } else {
+                                *id++ = *ip++;
+                            }
+                        }
+                        *id = '\0';
+
+                        /* 在内层 JSON 中提取 offer 字段 */
+                        char *os = strstr(inner, "\"offer\"");
+                        if (os) {
+                            char *v = strchr(os + 7, '"');
+                            if (v) {
+                                v++;
+                                char *ve = v;
+                                while (*ve && *ve != '"') ve++;
+                                size_t vl = ve - v;
+                                if (vl > 0 && vl < sizeof(existing_offer)) {
+                                    memcpy(existing_offer, v, vl);
+                                    existing_offer[vl] = '\0';
+                                }
+                            }
+                        }
+
+                        /* 在内层 JSON 中提取 answer 字段 */
+                        char *as2 = strstr(inner, "\"answer\"");
+                        if (as2) {
+                            char *v = strchr(as2 + 8, '"');
+                            if (v) {
+                                v++;
+                                char *ve = v;
+                                while (*ve && *ve != '"') ve++;
+                                size_t vl = ve - v;
+                                if (vl > 0 && vl < sizeof(existing_answer)) {
+                                    memcpy(existing_answer, v, vl);
+                                    existing_answer[vl] = '\0';
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
-        
-        /* 提取现有 "answer" 字段 */
-        char *answer_start = strstr(rbuf, "\"answer\"");
-        if (answer_start) {
-            char *val_start = strchr(answer_start, '\"');
-            if (val_start) {
-                val_start = strchr(val_start + 1, '\"');
-                if (val_start) {
-                    val_start++;
-                    char *val_end = val_start;
-                    while (*val_end && *val_end != '\"') val_end++;
-                    size_t len = val_end - val_start;
-                    if (len > 0 && len < sizeof(existing_answer)) {
-                        memcpy(existing_answer, val_start, len);
-                        existing_answer[len] = '\0';
-                    }
-                }
-            }
+            free(rbuf);
         }
     }
-    
+
     /*
-     * 构建 JSON 内容
-     * 保留另一个字段的值，只更新自己的字段
+     * PUB 角色：如果对方（SUB）已经写入了 answer，不再重发 offer 覆盖它
+     * 直接返回成功，等待 tick 轮询时读取 answer
      */
-    const char *offer_value = (ctx->role == P2P_SIGNAL_ROLE_PUB) ? escaped_b64 : existing_offer;
-    const char *answer_value = (ctx->role == P2P_SIGNAL_ROLE_SUB) ? escaped_b64 : existing_answer;
-    
-    char json_content[8192];
-    snprintf(json_content, sizeof(json_content),
-        "{\\\"offer\\\":\\\"%s\\\",\\\"answer\\\":\\\"%s\\\"}",
-        offer_value, answer_value);
-    
+    if (ctx->role == P2P_SIGNAL_ROLE_PUB && existing_answer[0] != '\0') {
+        P2P_LOG_INFO("SIGNAL_PUBSUB", "Answer already present, skipping offer re-publish");
+        free(padded_data);
+        free(enc_data);
+        return 0;
+    }
+
     /*
-     * PATCH 请求更新 Gist
+     * 构建 PATCH 请求体（全部在内存中，无临时文件）
      *
-     * GitHub Gist API：
-     *   PATCH /gists/{gist_id}
-     *   Body: {"files": {"filename": {"content": "new content"}}}
+     * 外层格式：{"files":{"p2p_signal.json":{"content":"<JSON 转义的内层 JSON>"}}}
      */
-    char cmd[16384];
-    snprintf(cmd, sizeof(cmd),
-        "curl -s -X PATCH -H \"Authorization: token %s\" "
-        "-H \"Content-Type: application/json\" "
-        "-d '{\"files\":{\"p2p_signal.json\":{\"content\":\"%s\"}}}' "
-        "https://api.github.com/gists/%s > /dev/null",
-        ctx->auth_token, json_content, ctx->channel_id);
-    
-    P2P_LOG_INFO("SIGNAL_PUBSUB", "Updating Gist field '%s'...", field_name);
-    int ret = system(cmd);
-    
-    free(padded_data);
-    free(enc_data);
-    
-    return (ret == 0) ? 0 : -1;
+    {
+        const char *offer_value  = (ctx->role == P2P_SIGNAL_ROLE_PUB) ? escaped_b64 : existing_offer;
+        const char *answer_value = (ctx->role == P2P_SIGNAL_ROLE_SUB) ? escaped_b64 : existing_answer;
+        char inner_json[8192];
+        size_t inner_len;
+        char *body_buf;
+        const char *pi;
+        char *bp;
+        char patch_url[256];
+        int ret;
+
+        /* 内层 JSON：{"offer":"...","answer":"..."} */
+        snprintf(inner_json, sizeof(inner_json),
+            "{\"offer\":\"%s\",\"answer\":\"%s\"}",
+            offer_value, answer_value);
+
+        /* 分配外层请求体缓冲区（最坏情况每字符变两字节） */
+        inner_len = strlen(inner_json);
+        body_buf = (char *)malloc(inner_len * 2 + 64);
+        if (!body_buf) {
+            free(padded_data);
+            free(enc_data);
+            return -1;
+        }
+
+        bp = body_buf;
+        bp += sprintf(bp, "{\"files\":{\"p2p_signal.json\":{\"content\":\"");
+        for (pi = inner_json; *pi; pi++) {
+            if      (*pi == '\\') { *bp++ = '\\'; *bp++ = '\\'; }
+            else if (*pi == '"')  { *bp++ = '\\'; *bp++ = '"';  }
+            else if (*pi == '\n') { *bp++ = '\\'; *bp++ = 'n';  }
+            else if (*pi == '\r') { *bp++ = '\\'; *bp++ = 'r';  }
+            else                  { *bp++ = *pi; }
+        }
+        bp += sprintf(bp, "\"}}}");
+        *bp = '\0';
+
+        snprintf(patch_url, sizeof(patch_url),
+                 "https://api.github.com/gists/%s", ctx->channel_id);
+
+        P2P_LOG_INFO("SIGNAL_PUBSUB", "Updating Gist field '%s'...", field_name);
+        ret = p2p_http_patch(patch_url, ctx->auth_token, body_buf);
+
+        free(body_buf);
+        free(padded_data);
+        free(enc_data);
+
+        return ret;
+    }
 }
 
 /*
@@ -470,52 +518,70 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
     }
 
     /*
-     * 使用 curl 获取 Gist 原始内容
+     * 通过 p2p_http_get 获取 Gist 内容（内存直接接收，无临时文件）
      *
-     * 使用 raw URL 的优势：
-     *   - 响应体直接是文件内容（非 JSON API 格式）
-     *   - 更小的响应体
-     *   - 添加时间戳参数绕过 CDN 缓存
+     * GitHub API 响应格式：
+     *   { "files": { "p2p_signal.json": { "content": "{\"offer\":\"...\",\"answer\":\"\"}" } } }
      *
-     * TODO: 生产环境应使用 libcurl 替代 system()
-     */
-    char cmd[2048];
-    snprintf(cmd, sizeof(cmd),
-             "curl -s -H \"Authorization: token %s\" -H \"Cache-Control: no-cache\" "
-             "\"https://gist.githubusercontent.com/raw/%s/p2p_signal.json?t=%llu\" > .gist_resp.json",
-             ctx->auth_token, ctx->channel_id, (unsigned long long)now);
-
-    int ret = system(cmd);
-    if (ret != 0) {
-        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "curl command failed");
-        return;
-    }
-
-    /*
-     * 解析 JSON：
-     *   - SUB 读取 "offer" 字段
-     *   - PUB 读取 "answer" 字段
+     * SUB 读取 "offer" 字段，PUB 读取 "answer" 字段。
      */
     const char *target_field = (ctx->role == P2P_SIGNAL_ROLE_SUB) ? "\"offer\"" : "\"answer\"";
 
-    FILE *f = fopen(".gist_resp.json", "r");
-    if (!f) {
-        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "Cannot open response file");
+    char get_url[256];
+    snprintf(get_url, sizeof(get_url),
+             "https://api.github.com/gists/%s", ctx->channel_id);
+
+    char *buffer = calloc(1, 32768);
+    if (!buffer) return;
+
+    int got = p2p_http_get(get_url, ctx->auth_token, buffer, 32768);
+    if (got <= 0) {
+        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "Gist GET failed");
+        free(buffer);
         return;
     }
 
-    /* 读取整个文件 */
-    char buffer[16384] = {0};
-    size_t total = 0;
-    size_t n;
-    while ((n = fread(buffer + total, 1, sizeof(buffer) - total - 1, f)) > 0) {
-        total += n;
+    /* 从 API 响应中提取 p2p_signal.json → content → 内层 JSON → 目标字段 */
+    const char *content_key = "\"p2p_signal.json\"";
+    char *file_section = strstr(buffer, content_key);
+    if (!file_section) {
+        return;  /* Gist 中没有 p2p_signal.json 文件 */
     }
-    fclose(f);
 
-    /* 查找目标字段 */
-    char *field_start = strstr(buffer, target_field);
+    /* 在文件节中找 "content": "..." */
+    char *content_start = strstr(file_section, "\"content\"");
+    if (!content_start) return;
+    content_start = strchr(content_start + 9, '\"');
+    if (!content_start) return;
+    content_start++;  /* skip opening quote */
+
+    /* 复制并还原 JSON 转义，得到内层 JSON 字符串 */
+    char inner_json[16384] = {0};
+    char *src2 = content_start;
+    char *dst2 = inner_json;
+    char *end2 = inner_json + sizeof(inner_json) - 1;
+    while (*src2 && dst2 < end2) {
+        if (*src2 == '\\') {
+            src2++;
+            if (*src2 == 'n')       { *dst2++ = '\n'; src2++; }
+            else if (*src2 == '\\') { *dst2++ = '\\'; src2++; }
+            else if (*src2 == '"')  { *dst2++ = '"';  src2++; }
+            else if (*src2 == '/')  { *dst2++ = '/';  src2++; }
+            else if (*src2 == 'r')  { *dst2++ = '\r'; src2++; }
+            else if (*src2 == 't')  { *dst2++ = '\t'; src2++; }
+            else { *dst2++ = '\\'; *dst2++ = *src2++; }
+        } else if (*src2 == '\"') {
+            break;  /* end of outer JSON string value */
+        } else {
+            *dst2++ = *src2++;
+        }
+    }
+    *dst2 = '\0';
+
+    /* 在内层 JSON 中查找目标字段 */
+    char *field_start = strstr(inner_json, target_field);
     if (!field_start) {
+        free(buffer);
         return;  /* 字段不存在或为空 */
     }
 
@@ -536,7 +602,7 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
 
     /* 提取字段值 */
     size_t value_len = value_end - value_start;
-    if (value_len > sizeof(buffer) - 1) value_len = sizeof(buffer) - 1;
+    if (value_len > sizeof(inner_json) - 1) value_len = sizeof(inner_json) - 1;
 
     char content[16384];
     memcpy(content, value_start, value_len);
@@ -572,5 +638,7 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
                      target_field, ctx->role == P2P_SIGNAL_ROLE_PUB ? "PUB" : "SUB");
         process_payload(ctx, s, content);
     }
+
+    free(buffer);
 }
 

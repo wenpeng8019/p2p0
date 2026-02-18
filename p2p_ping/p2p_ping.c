@@ -15,7 +15,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <time.h>
 
 static void print_help(const char *prog) {
@@ -62,6 +64,7 @@ static void log_state_change(p2p_session_t *s) {
 /* 连接建立回调 */
 static void on_connected(p2p_session_t *s, void *userdata) {
     (void)userdata;
+    log_state_change(s);   /* 立即打印状态变更，不等主循环 */
     printf("[EVENT] Connection established!\n");
     fflush(stdout);
     
@@ -186,7 +189,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        usleep(10000);
+        p2p_sleep_ms(10);
     }
 
     return 0;

@@ -2,20 +2,19 @@
 #include "p2p_internal.h"
 #include "p2p_udp.h"
 #include "p2p_log.h"
-#include <ifaddrs.h>
-#include <net/if.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 
 /* ---- 信令重发配置 ---- */
-#define SIGNAL_RESEND_INTERVAL_MS  5000   /* 信令重发间隔 (5秒) */
+#define SIGNAL_RESEND_INTERVAL_MS       5000   /* 信令重发间隔 (5秒，relay/compact/等) */
+#define SIGNAL_RESEND_INTERVAL_PUBSUB_MS 15000  /* PUBSUB 重发间隔 (15秒，给对方充足时间回复) */
 #define SIGNAL_MAX_RESEND_COUNT    12     /* 最大重发次数 (共约60秒) */
 
 /* ---- 锁辅助函数（单线程模式下为空操作） ---- */
 
 #ifdef P2P_THREADED
-#define LOCK(s)   do { if ((s)->cfg.threaded) pthread_mutex_lock(&(s)->mtx); } while(0)
-#define UNLOCK(s) do { if ((s)->cfg.threaded) pthread_mutex_unlock(&(s)->mtx); } while(0)
+#define LOCK(s)   do { if ((s)->cfg.threaded) p2p_mutex_lock(&(s)->mtx); } while(0)
+#define UNLOCK(s) do { if ((s)->cfg.threaded) p2p_mutex_unlock(&(s)->mtx); } while(0)
 #else
 #define LOCK(s)   ((void)0)
 #define UNLOCK(s) ((void)0)
@@ -45,6 +44,13 @@ static int resolve_host(const char *host, uint16_t port, struct sockaddr_in *out
 p2p_session_t* p2p_create(const p2p_config_t *cfg) {
     if (!cfg) return NULL;
 
+    // Initialize Winsock on Windows (no-op on POSIX)
+    static int net_initialized = 0;
+    if (!net_initialized) {
+        p2p_net_init();
+        net_initialized = 1;
+    }
+
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
 
         if (!cfg->gh_token || !cfg->gist_id) {
@@ -65,14 +71,10 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
     }
 
 
-    if (!cfg->bind_port) {
-        P2P_LOG_ERROR("P2P", "bind_port must be specified in configuration");
-        return NULL;
-    }
-
+    // bind_port = 0 means let the OS assign a random port (valid)
     // 创建 UDP 套接字
-    int sock = udp_create_socket(cfg->bind_port);
-    if (sock < 0) {
+    p2p_socket_t sock = udp_create_socket(cfg->bind_port);
+    if (sock == P2P_INVALID_SOCKET) {
         P2P_LOG_ERROR("P2P", "Failed to create UDP socket on port %d", cfg->bind_port);
         return NULL;
     }
@@ -86,7 +88,7 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_init(&s->sig_compact_ctx);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_init(&s->sig_relay_ctx);
     else if (p2p_signal_pubsub_init(&s->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id) != 0) {
-        free(s); close(sock);
+        free(s); p2p_close_socket(sock);
         return NULL;
     } else if (cfg->auth_key) {
         strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1);
@@ -94,6 +96,8 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
 
     s->cfg = *cfg;
     if (s->cfg.update_interval_ms <= 0) s->cfg.update_interval_ms = 10;
+    s->sock = sock;
+    s->tcp_sock = P2P_INVALID_SOCKET;
     s->state = P2P_STATE_IDLE;
     s->path = P2P_PATH_NONE;
 
@@ -153,7 +157,7 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
 #ifdef P2P_THREADED
     if (cfg->threaded) {
         if (p2p_thread_start(s) < 0) {
-            close(s->sock);
+            p2p_close_socket(s->sock);
             free(s);
             return NULL;
         }
@@ -178,12 +182,12 @@ void p2p_destroy(p2p_session_t *s) {
     }
 
     //  COMPACT 模式的 server UDP 套接口和 NAT p2p 是同一个
-    if (s->sock >= 0) {
+    if (s->sock != P2P_INVALID_SOCKET) {
 
         // 发送 FIN 包，断开连接
         if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)
             udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
-        close(s->sock);
+        p2p_close_socket(s->sock);
     }
 
     free(s);
@@ -790,10 +794,14 @@ int p2p_update(p2p_session_t *s) {
             }
             
             // 只有在收到 STUN 响应（有 Srflx）后才发布
-            if (has_srflx) {
+            // PUBSUB 模式下，一旦已收到对方候选（remote_cand_cnt > 0），不再重发
+            // （避免重发 offer 时覆盖 Gist 里对方已写入的 answer）
+            int peer_answered = (s->remote_cand_cnt > 0);
+            if (has_srflx && !peer_answered) {
                 uint64_t now = time_ms();
+                uint64_t resend_interval = SIGNAL_RESEND_INTERVAL_PUBSUB_MS;
                 if (!s->signal_sent ||
-                    (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) ||
+                    (now - s->last_signal_time >= resend_interval) ||
                     (s->local_cand_cnt > s->last_cand_cnt_sent)
                 ) {
 
