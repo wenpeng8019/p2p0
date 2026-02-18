@@ -105,7 +105,7 @@ graph TD
 | 传输层       | TCP 长连接                | UDP 无连接                | HTTPS (GitHub API)    |
 | 服务器       | 自建 p2p_server           | 自建 UDP 信令服务器       | GitHub Gist           |
 | 实时性       | 高（推送模式）            | 高（推送模式）            | 低（轮询模式）        |
-| 离线缓存     | 支持（单候选，最大256）   | 支持（整包，可配置）      | 不支持                |
+| 离线缓存     | 支持（单候选，最大256）   | 支持（整包，可配置）      | Gist 持久化（天然支持异步）|
 | 可靠性       | TCP 保证                  | 需应用层确认/重传         | HTTP 保证             |
 | 部署复杂度   | 需自建服务器              | 需自建服务器              | 无需服务器            |
 | 加密         | 可选 TLS 或应用层         | 应用层加密                | 内置 DES 加密         |
@@ -173,28 +173,29 @@ graph TD
 **模块**: `p2p_signal_pubsub.c/h`
 
 **特点**:
-- 基于 GitHub Gist 作为信令通道
-- 无需自建服务器
-- 内置 DES 加密保护候选信息
-- 轮询模式（poll interval 可配置）
-- 适合快速原型和演示
+- 基于 GitHub Gist 作为信令通道，无需自建服务器
+- 非对称角色: **PUB（发起端）** 写 offer / 读 answer，**SUB（订阅端）** 读 offer / 写 answer
+- 内置 DES + Base64 加密，密钥来自 `p2p_config_t.auth_key`
+- ETag 条件轮询（If-None-Match），304 节省流量
+- PUB/SUB 轮询间隔独立可配: `P2P_PUBSUB_PUB_POLL_MS`（1s）/ `P2P_PUBSUB_SUB_POLL_MS`（5s）
+- Gist 持久化，天然支持双方异步上线场景
 
 **核心流程**:
-1. 创建 Gist 作为通信通道
-2. 通过 HTTP PUT 上传候选信息
-3. 通过 HTTP GET 轮询对端候选
-4. DES 加密/解密候选数据
+1. PUB 调用 `p2p_signal_pubsub_send()` 将加密 ICE 候选写入 Gist `offer` 字段
+2. SUB 每 `P2P_PUBSUB_SUB_POLL_MS`（5s）轮询 Gist，检测 `offer` 更新
+3. SUB 解密 offer，注入本地 ICE 候选，自动回写 `answer`（仅一次）
+4. PUB 每 `P2P_PUBSUB_PUB_POLL_MS`（1s）轮询 Gist，尽快检测 `answer` 更新
+5. PUB 解密 answer，双方开始 ICE 连通性检查
 
 **优势**:
 - 零部署成本（利用 GitHub 基础设施）
 - 快速上手，适合演示和测试
-- HTTP/TLS 保证传输安全
+- 数据持久化，支持异步场景（双方无需同时在线）
 
 **劣势**:
-- 轮询模式实时性低（通常 2-5 秒延迟）
-- 依赖 GitHub 服务可用性
-- 不支持离线缓存
-- API 速率限制
+- 轮询模式，建连延迟受轮询间隔影响（典型总延迟 ≤6s）
+- 依赖 GitHub 服务可用性和 API 速率限制
+- DES 加密强度低，生产环境应替换为 AES-256-GCM
 
 ### 3.5 选型建议
 
@@ -214,7 +215,8 @@ graph TD
 - 快速原型开发
 - 无服务器部署条件
 - 演示或测试场景
-- 可接受轮询延迟
+- 可接受轮询延迟（建连 ≤6s）
+- 双方可能异步上线（Gist 持久化）
 
 ---
 

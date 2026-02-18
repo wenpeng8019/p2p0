@@ -19,7 +19,7 @@ P2P 系统采用**信令-打洞-数据传输**三阶段架构，信令层负责�
 |------|--------|--------|--------|---------|------|---------|
 | **COMPACT** | UDP | 自建 | 高 | 整包 | 需自建 | 嵌入式/移动网络 |
 | **RELAY** | TCP | 自建 | 高 | 单候选 | 需自建 | 企业内网/WebRTC |
-| **PUBSUB** | HTTPS | GitHub Gist | 低 | 无 | 零部署 | 快速原型/演示 |
+| **PUBSUB** | HTTPS | GitHub Gist | 低 | Gist 持久化 | 零部署 | 快速原型/演示 |
 
 **服务器兼容性**：`p2p_server` 可同时支持 COMPACT (UDP端口) 和 RELAY (TCP端口)。
 
@@ -879,23 +879,90 @@ Alice (浏览器)          Server              Bob (浏览器)
 
 ## 概述
 
-PUBSUB 模式使用 **GitHub Gist** 作为信令通道，通过 HTTPS API 进行候选交换。
+PUBSUB 模式使用 **GitHub Gist** 作为信令通道，通过 HTTPS Polling 进行候选交换。
+双方扮演不同角色：**PUB（发起端）** 写入 offer，**SUB（订阅端）** 轮询读取 offer 后写入 answer。
 
 ### 核心特性
 
 - ✅ **零部署**：无需自建服务器（利用 GitHub 基础设施）
 - ✅ **快速原型**：适合演示和测试
-- ✅ **加密传输**：内置 DES 加密保护候选信息
-- ⚠️ **轮询模式**：实时性低（2-5 秒延迟）
+- ✅ **内置加密**：DES + Base64 保护候选信息隐私
+- ✅ **天然持久化**：数据存于 Gist，不受网络抖动影响，天然支持异步场景
+- ⚠️ **轮询模式**：建连延迟受轮询间隔影响（PUB 默认 1s，SUB 默认 5s，均可通过宏调节）
 - ⚠️ **API 限制**：依赖 GitHub API 速率限制
-- ❌ **无离线缓存**：不支持异步通信
 
 ## 工作原理
 
-1. 创建 GitHub Gist 作为通信通道（文件：`alice_to_bob.json`）
-2. Alice 通过 `HTTP PUT` 上传加密的候选信息
-3. Bob 通过 `HTTP GET` 轮询读取候选
-4. 使用 DES 加密/解密保护数据
+双端通过同一个 Gist 文件的两个字段交换信息：
+
+```json
+{
+  "offer":  "<PUB 的 ICE 候选，DES 加密后 Base64 编码>",
+  "answer": "<SUB 的 ICE 候选，DES 加密后 Base64 编码>"
+}
+```
+
+**完整信令流程**：
+
+```
+PUB                    GitHub Gist                    SUB
+ |                          |                           |
+ |--- PATCH offer --------->|                           |  [1]
+ |    (PUB 的 ICE 候选)     |                           |
+ |                          |   .--- tick() 每 5s ----> |
+ |                          |<------- GET (轮询) -------|
+ |                          |   If-None-Match: ETag     |
+ |                          |--- 304 Not Modified ----->|  (offer 未更新)
+ |                          |   .--- tick() 每 5s ----> |
+ |                          |<------- GET (轮询) -------|
+ |                          |-------- 200 OK ---------->|  (offer 有新内容)
+ |                          |                           |
+ |                          |   [2] SUB 解密 offer     |
+ |                          |       添加远端候选        |
+ |                          |                           |
+ |                          |<------- PATCH answer -----|
+ |                          |       (SUB 的 ICE 候选)   |
+ |                          |                           |
+ |   .--- tick() 每 1s ---> |                           |
+ |<------- GET (轮询) ------|                           |
+ |--- 304 Not Modified ---->|                           |  (answer 未更新)
+ |   .--- tick() 每 1s ---> |                           |
+ |<------- GET (轮询) ------|                           |
+ |<-------- 200 OK ---------|                           |  (answer 有新内容)
+ |                          |                           |
+ |  [3] PUB 解密 answer     |                           |
+ |      添加远端候选         |                           |
+ |                          |                           |
+ |<======= ICE 连通性检查（直连 / STUN 打洞）==========>|
+```
+
+**步骤说明**：
+- **[1]** PUB 调用 `p2p_signal_pubsub_send()` 将加密候选写入 `offer` 字段
+- **[2]** SUB 通过 `p2p_signal_pubsub_tick()` 每 5s（`P2P_PUBSUB_SUB_POLL_MS`）轮询，自动写入 `answer`（仅一次）
+- **[3]** PUB 通过 `p2p_signal_pubsub_tick()` 每 1s（`P2P_PUBSUB_PUB_POLL_MS`）轮询，尽快检测 answer
+
+**ETag 优化**：每次 GET 携带 `If-None-Match: <etag>`，Gist 未变化时返回 304 Not Modified，节省流量。
+
+## 数据格式
+
+**加密编码流程**：
+
+```
+p2p_signaling_payload_t (76B header + N×32B candidates)
+        ↓  p2p_des_encrypt(ctx.auth_key)
+  DES 加密密文（ECB 模式，8 字节块对齐）
+        ↓  p2p_base64_encode()
+  Base64 字符串
+        ↓  JSON 转义
+  "offer" / "answer" 字段值
+```
+
+**轮询间隔宏**（可编译期覆盖）：
+
+| 宏 | 默认值 | 说明 |
+|----|--------|------|
+| `P2P_PUBSUB_PUB_POLL_MS` | 1000 ms | PUB 轮询 answer 间隔，宜短以降低建连延迟 |
+| `P2P_PUBSUB_SUB_POLL_MS` | 5000 ms | SUB 轮询 offer 间隔，offer 写入后等待时间较长 |
 
 **模块**：`p2p_signal_pubsub.c/h`
 

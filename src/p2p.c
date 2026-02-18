@@ -88,6 +88,8 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
     else if (p2p_signal_pubsub_init(&s->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id) != 0) {
         free(s); close(sock);
         return NULL;
+    } else if (cfg->auth_key) {
+        strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1);
     }
 
     s->cfg = *cfg;

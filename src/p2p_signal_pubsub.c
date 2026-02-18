@@ -171,7 +171,7 @@ void p2p_signal_pubsub_set_role(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t 
 static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s, const char *b64_data) {
     /* 派生解密密钥 */
     uint8_t key[8];
-    derive_key(s->cfg.auth_key, key, sizeof(key));
+    derive_key(ctx->auth_key, key, sizeof(key));
     
     /* Base64 解码 */
     uint8_t enc_buf[1024];
@@ -285,7 +285,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     
     /* 派生加密密钥 */
     uint8_t key[8];
-    derive_key(NULL, key, sizeof(key));  /* TODO: 传入实际的 auth_key */
+    derive_key(ctx->auth_key, key, sizeof(key));
     
     /* DES 加密需要 8 字节对齐 */
     int padded_len = (len + 7) & ~7;
@@ -442,8 +442,8 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
  * ============================================================================
  *
  * 轮询策略：
- *   - SUB 角色：每 5 秒轮询一次（快速检测 offer）
- *   - PUB 角色：每 10 秒轮询一次（等待 answer）
+ *   - PUB 角色：每 1 秒轮询一次（尽快获取 answer，缩短建连延迟）
+ *   - SUB 角色：每 5 秒轮询一次（等待 offer，无需频繁轮询）
  *
  * 使用 raw URL 而非 API 以获取更好的缓存行为。
  *
@@ -454,8 +454,8 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
 
     /* 根据角色设置不同的轮询间隔 */
     int poll_interval;
-    if (ctx->role == P2P_SIGNAL_ROLE_PUB) poll_interval = 10000;
-    else if (ctx->role == P2P_SIGNAL_ROLE_SUB) poll_interval = 5000;
+    if (ctx->role == P2P_SIGNAL_ROLE_PUB) poll_interval = P2P_PUBSUB_PUB_POLL_MS;
+    else if (ctx->role == P2P_SIGNAL_ROLE_SUB) poll_interval = P2P_PUBSUB_SUB_POLL_MS;
     else return;
 
     uint64_t now = time_ms();
