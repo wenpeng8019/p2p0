@@ -10,6 +10,7 @@
 #define P2PP_H
 
 #include <stdint.h>
+#include <netinet/in.h>
 #include <p2p.h>
 
 /* ============================================================================
@@ -27,9 +28,9 @@
  *   0x80-0xFF: COMPACT 信令协议（本节）
 */
 typedef struct {
-    uint8_t  type;                      // 包类型（0x01-0x7F: P2P协议, 0x80-0xFF: 信令协议）
-    uint8_t  flags;                     // 标志位（具体含义由 type 决定，见各协议定义）
-    uint16_t seq;                       // 序列号（网络字节序，用于可靠传输/去重）
+    uint8_t             type;               // 包类型（0x01-0x7F: P2P协议, 0x80-0xFF: 信令协议）
+    uint8_t             flags;              // 标志位（具体含义由 type 决定，见各协议定义）
+    uint16_t            seq;                // 序列号（网络字节序，用于可靠传输/去重）
 } p2p_packet_hdr_t;
 
 /*
@@ -62,24 +63,24 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 
 /* 打洞协议 (NAT 穿透) */
-#define P2P_PKT_PUNCH           0x01    // NAT 打洞包
-#define P2P_PKT_PUNCH_ACK       0x02    // NAT 打洞确认
+#define P2P_PKT_PUNCH           0x01        // NAT 打洞包
+#define P2P_PKT_PUNCH_ACK       0x02        // NAT 打洞确认
 
 /* 安全协议 */
-#define P2P_PKT_AUTH            0x03    // 安全握手包
+#define P2P_PKT_AUTH            0x03        // 安全握手包
 
 /* 保活协议 */
-#define P2P_PKT_PING            0x10    // 心跳请求
-#define P2P_PKT_PONG            0x11    // 心跳响应
+#define P2P_PKT_PING            0x10        // 心跳请求
+#define P2P_PKT_PONG            0x11        // 心跳响应
 
 /* 数据传输 (peer-to-peer) */
-#define P2P_PKT_DATA            0x20    // 数据包
-#define P2P_PKT_ACK             0x21    // 确认包
-#define P2P_PKT_FIN             0x22    // 结束包 (无需应答)
+#define P2P_PKT_DATA            0x20        // 数据包
+#define P2P_PKT_ACK             0x21        // 确认包
+#define P2P_PKT_FIN             0x22        // 结束包 (无需应答)
 
 /* 路由探测 (同一子网) */
-#define P2P_PKT_ROUTE_PROBE     0x30    // 路由探测包
-#define P2P_PKT_ROUTE_PROBE_ACK 0x31    // 路由探测确认
+#define P2P_PKT_ROUTE_PROBE     0x30        // 路由探测包
+#define P2P_PKT_ROUTE_PROBE_ACK 0x31        // 路由探测确认
 
 /* ============================================================================
  * COMPACT 模式信令服务协议 (UDP)
@@ -101,26 +102,26 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 
 /* COMPACT 信令协议 (客户端 <-> 信令服务器) - 0x80-0x9F */
-#define SIG_PKT_REGISTER        0x80    // 注册到信令服务器（含本地候选列表）
-#define SIG_PKT_REGISTER_ACK    0x81    // 注册确认（告知缓存能力、公网地址、探测端口、中继支持）
-#define SIG_PKT_PEER_INFO       0x82    // 候选列表同步包（序列化传输）
-#define SIG_PKT_PEER_INFO_ACK   0x83    // 候选列表确认（确认指定序列号）
-#define SIG_PKT_NAT_PROBE       0x84    // NAT 类型探测请求（发往探测端口）
-#define SIG_PKT_NAT_PROBE_ACK   0x85    // NAT 类型探测响应（返回第二次映射地址）
+#define SIG_PKT_REGISTER        0x80        // 注册到信令服务器（含本地候选列表）
+#define SIG_PKT_REGISTER_ACK    0x81        // 注册确认（告知缓存能力、公网地址、探测端口、中继支持）
+#define SIG_PKT_PEER_INFO       0x82        // 候选列表同步包（序列化传输）
+#define SIG_PKT_PEER_INFO_ACK   0x83        // 候选列表确认（确认指定序列号）
+#define SIG_PKT_NAT_PROBE       0x84        // NAT 类型探测请求（发往探测端口）
+#define SIG_PKT_NAT_PROBE_ACK   0x85        // NAT 类型探测响应（返回第二次映射地址）
 
 /* COMPACT 服务器中继扩展协议 - 0xA0-0xBF */
-#define P2P_PKT_RELAY_DATA      0xA0    // 中继服务器转发的数据（P2P 打洞失败后的降级方案）
-#define P2P_PKT_RELAY_ACK       0xA1    // 中继服务器转发的 ACK 确认包
+#define P2P_PKT_RELAY_DATA      0xA0        // 中继服务器转发的数据（P2P 打洞失败后的降级方案）
+#define P2P_PKT_RELAY_ACK       0xA1        // 中继服务器转发的 ACK 确认包
 
 /* REGISTER_ACK status 码 */
-#define SIG_REGACK_PEER_OFFLINE  0      // 成功，对端离线
-#define SIG_REGACK_PEER_ONLINE   1      // 成功，对端在线
+#define SIG_REGACK_PEER_OFFLINE  0          // 成功，对端离线
+#define SIG_REGACK_PEER_ONLINE   1          // 成功，对端在线
 
 /* REGISTER_ACK 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_REGACK_FLAG_RELAY    0x01   // 服务器支持中继功能
+#define SIG_REGACK_FLAG_RELAY    0x01       // 服务器支持中继功能
 
 /* PEER_INFO 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_PEER_INFO_FIN        0x01   // 候选列表发送完毕
+#define SIG_PEER_INFO_FIN        0x01       // 候选列表发送完毕
 
 /*
  * COMPACT 模式精简候选结构 (7 bytes)
@@ -129,9 +130,9 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 布局: [type: 1B][ip: 4B][port: 2B]
  */
 typedef struct {
-    uint8_t  type;                      // 候选类型 (0=Host, 1=Srflx, 2=Relay, 3=Prflx)
-    uint32_t ip;                        // IP 地址（网络字节序）
-    uint16_t port;                      // 端口（网络字节序）
+    uint8_t             type;               // 候选类型 (0=Host, 1=Srflx, 2=Relay, 3=Prflx)
+    uint32_t            ip;                 // IP 地址（网络字节序）
+    uint16_t            port;               // 端口（网络字节序）
 } __attribute__((packed)) p2p_compact_candidate_t;
 
 /*
@@ -193,49 +194,86 @@ typedef struct {
  * magic = 0x50325030 ("P2P0")
  */
 
-#define P2P_RLY_MAGIC 0x50325030        // "P2P0"
+#define P2P_RLY_MAGIC 0x50325030            // "P2P0"
 
 /* RELAY 模式消息类型 */
 typedef enum {
-    P2P_RLY_LOGIN = 1,                  // 登录请求: Client -> Server
-    P2P_RLY_LOGIN_ACK,                  // 登录确认: Server -> Client
-    P2P_RLY_LIST,                       // 查询在线用户: Client -> Server
-    P2P_RLY_LIST_RES,                   // 在线用户列表: Server -> Client
-    P2P_RLY_CONNECT,                    // 发起连接: Client -> Server (携带 SDP/ICE)
-    P2P_RLY_OFFER,                      // 转发连接请求: Server -> Target
-    P2P_RLY_ANSWER,                     // 返回应答: Target -> Server
-    P2P_RLY_FORWARD,                    // 转发应答: Server -> Client
-    P2P_RLY_HEARTBEAT,                  // 心跳: Client -> Server
-    P2P_RLY_CONNECT_ACK                 // 连接确认: Server -> Client
+    P2P_RLY_LOGIN = 1,                      // 登录请求: Client -> Server
+    P2P_RLY_LOGIN_ACK,                      // 登录确认: Server -> Client
+    P2P_RLY_LIST,                           // 查询在线用户: Client -> Server
+    P2P_RLY_LIST_RES,                       // 在线用户列表: Server -> Client
+    P2P_RLY_CONNECT,                        // 发起连接: Client -> Server (携带候选)
+    P2P_RLY_OFFER,                          // 转发连接请求: Server -> Target（含缓存候选）
+    P2P_RLY_ANSWER,                         // 返回应答: Target -> Server
+    P2P_RLY_FORWARD,                        // 转发应答: Server -> Client
+    P2P_RLY_HEARTBEAT,                      // 心跳: Client -> Server
+    P2P_RLY_CONNECT_ACK                     // 连接确认: Server -> Client
 } p2p_relay_type_t;
 
 /* RELAY 模式包头 (9 bytes) */
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t magic;
-    uint8_t  type;
-    uint32_t length;
+    uint32_t            magic;
+    uint8_t             type;
+    uint32_t            length;
 } p2p_relay_hdr_t;
 
 /* RELAY 模式登录消息 */
 typedef struct {
-    char name[P2P_PEER_ID_MAX];
+    char                name[P2P_PEER_ID_MAX];
 } p2p_relay_login_t;
 
 /*
  * RELAY 模式连接确认 (P2P_RLY_CONNECT_ACK)
  *
  * status:
- *   0 = 成功转发给目标
- *   1 = 目标不在线（已存储等待转发）
- *   2 = 存储失败（容量不足）
- *   3 = 服务器错误
+ *   0 = 成功转发给目标（对端在线）
+ *   1 = 已缓存且有剩余空间（对端离线，可以继续发送候选）
+ *   2 = 缓存已满（对端离线，停止发送，等待对端上线）
+ *
+ * candidates_acked: 服务器已确认的候选数量（本次 CONNECT 中的候选）
+ *                   - status=0（在线）: 全部转发，等于发送数量
+ *                   - status=1（离线）: 实际缓存数量，缓存后仍有剩余空间
+ *                   - status=2（已满）: 实际缓存数量（可能为 0 或 >0，缓存满）
+ *
+ * 客户端逻辑：
+ *   - status=0: 继续 Trickle ICE（对端在线，实时转发）
+ *   - status=1: 继续 Trickle ICE（对端离线，但服务器还能缓存）
+ *   - status=2: 停止发送，进入等待状态（等待收到 FORWARD）
  */
 typedef struct {
-    uint8_t  status;
-    uint8_t  candidates_stored;
-    uint8_t  reserved[2];
+    uint8_t             status;
+    uint8_t             candidates_acked;   // 本次确认的候选数量
+    uint8_t             reserved[2];
 } p2p_relay_connect_ack_t;
+
+/*
+ * ICE 候选地址结构（32 字节）
+ *
+ * 用于 RELAY 模式信令传输，包含完整的候选信息。
+ * type 字段：0=Host, 1=Srflx, 2=Relay, 3=Prflx（见 RFC 5245）
+ */
+typedef struct {
+    int                 type;               // 候选类型（0-3）
+    struct sockaddr_in  addr;               // 传输地址（16B）
+    struct sockaddr_in  base_addr;          // 基础地址（16B）
+    uint32_t            priority;           // 候选优先级
+} p2p_candidate_t;
+
+/*
+ * RELAY 模式信令负载头部
+ *
+ * 用于封装 ICE 候选交换的元数据。
+ * 序列化格式（76字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
+ */
+typedef struct {
+    char                sender[32];         // 发送方 peer_id
+    char                target[32];         // 目标方 peer_id
+    uint32_t            timestamp;          // 时间戳（用于排序和去重）
+    uint32_t            delay_trigger;      // 延迟触发打洞（毫秒）
+    int                 candidate_count;    // ICE 候选数量
+} p2p_signaling_payload_hdr_t;
+
 #pragma pack(pop)
 
 #endif /* P2PP_H */

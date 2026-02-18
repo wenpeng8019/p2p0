@@ -150,18 +150,49 @@ int main() {
 
 ## 测试
 
+### 测试体系
+
+```
+单元测试 (9个 .c):
+  ├── test_compact_protocol.c      COMPACT 协议层测试
+  ├── test_compact_server.c        COMPACT 服务器端测试
+  ├── test_relay_protocol.c        RELAY 协议层测试（CONNECT_ACK 三状态）
+  ├── test_relay_server.c          RELAY 服务器端测试
+  ├── test_pubsub_protocol.c       PUBSUB 协议层测试（DES、JSON）
+  ├── test_transport.c             传输层测试（ARQ、流控）
+  ├── test_stun_protocol.c         STUN 协议层测试（包格式、XOR 解码、NAT 检测）
+  ├── test_ice_protocol.c          ICE 协议层测试（优先级计算、候选、状态流转）
+  └── test_turn_protocol.c         TURN 协议层测试（Allocate、XOR 解码、错误码）
+
+集成测试 (6个 .sh):
+  ├── test_compact_integration.sh  COMPACT 端到端测试
+  ├── test_relay_integration.sh    RELAY 端到端测试
+  ├── test_pubsub_integration.sh   PUBSUB 端到端测试
+  ├── test_ice_integration.sh      ICE 端到端测试
+  ├── test_turn_integration.sh     TURN 中继测试（需 TURN 服务器）
+  └── test_all.sh                  全量测试
+
+专项测试 (2个 .sh):
+  ├── test_nat_punch.sh            NAT 打洞流程测试
+  └── test_stun_integration.sh     STUN 协议集成测试
+```
+
+### 快速开始
+
 ```bash
-cd test
+cd build_cmake
 
-# 单元测试
-make && ./test_transport && ./test_compact_server && ./test_relay_server
+# 编译并运行所有单元测试
+make
+ctest -V
 
-# 集成测试
-./test_client_integration.sh
+# 运行集成测试
+cd ../test
+./test_compact_integration.sh
+./test_relay_integration.sh
+
+# NAT 打洞测试（详细日志）
 ./test_nat_punch.sh
-
-# PubSub 测试
-./test_pubsub_gist.sh
 ```
 
 详见 [test/README.md](test/README.md)

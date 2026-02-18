@@ -3,10 +3,8 @@ build/
 *.o
 *.dSYM/
 
-# Test logs
-integration_logs/
-nat_punch_logs/
-pubsub_gist_logs/
+# Test logs (auto-match all *_logs directories)
+*_logs/
 
 # Temporary files
 .gist_read.json

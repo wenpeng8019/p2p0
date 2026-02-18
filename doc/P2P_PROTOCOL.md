@@ -1,25 +1,51 @@
-# P2P Signaling Server 协议文档
+# P2P 信令协议文档
 
-> **注意**: 此文档定义了服务器支持的两种信令模式协议。服务器参考实现见 `p2p_server/`。
-
-## 概述
-
-Signaling Server（信令服务器）负责：
-1. **交换 Peer 信息** — 让两个 NAT 后的 peer 知道对方的地址/SDP
-2. **中转信令/数据** — 转发连接请求、SDP 交换、Relay 数据
-
-### 两种工作模式
-
-| 模式 | 协议 | 传输层 | 用途 | 状态 |
-|------|------|--------|------|------|
-| **SIMPLE** | 自定义二进制 | UDP | 轻量级 NAT 穿透 | 无状态 |
-| **ICE** | 自定义二进制 | TCP | 完整 ICE/SDP 交换 | 长连接 |
-
-服务器可**同时支持两种模式**（同一端口，TCP + UDP）。
+> **定义**: 此文档定义了 P2P 系统支持的三种信令模式协议规范。  
+> **参考实现**: `p2p_server/server.c` (服务器端), `src/p2p_signal_*.c` (客户端)  
+> **协议定义**: `include/p2pp.h` (统一协议头文件)
 
 ---
 
-# 第一部分：COMPACT 模式（UDP）
+## 概述
+
+P2P 系统采用**信令-打洞-数据传输**三阶段架构，信令层负责：
+1. **候选交换** — 让 NAT 后的双方互相知道对方的网络地址（ICE Candidates）
+2. **状态同步** — 通知对端上下线、地址变化等事件
+3. **可靠转发** — 在 P2P 打洞失败时提供降级数据中继
+
+### 三种信令模式
+
+| 模式 | 传输层 | 服务器 | 实时性 | 离线缓存 | 部署 | 典型场景 |
+|------|--------|--------|--------|---------|------|---------|
+| **COMPACT** | UDP | 自建 | 高 | 整包 | 需自建 | 嵌入式/移动网络 |
+| **RELAY** | TCP | 自建 | 高 | 单候选 | 需自建 | 企业内网/WebRTC |
+| **PUBSUB** | HTTPS | GitHub Gist | 低 | 无 | 零部署 | 快速原型/演示 |
+
+**服务器兼容性**：`p2p_server` 可同时支持 COMPACT (UDP端口) 和 RELAY (TCP端口)。
+
+---
+
+## 通用包头定义
+
+所有 P2P 协议包共享 **4 字节包头**（网络字节序）：
+
+```c
+typedef struct {
+    uint8_t  type;    // 包类型 (0x01-0x7F: P2P协议, 0x80-0xFF: 信令协议)
+    uint8_t  flags;   // 标志位（具体含义由 type 决定）
+    uint16_t seq;     // 序列号（用于 ACK、去重、顺序控制）
+} p2p_packet_hdr_t;
+```
+
+**编解码辅助函数**：
+```c
+void p2p_pkt_hdr_encode(uint8_t *buf, uint8_t type, uint8_t flags, uint16_t seq);
+void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr);
+```
+
+---
+
+# 第一部分：COMPACT 模式 (UDP)
 
 ## 数据包格式
 
@@ -314,129 +340,278 @@ Alice (local_peer_id="alice")    Server                Bob (local_peer_id="bob")
 - `PONG_TIMEOUT_MS = 30000ms` — 心跳超时
 - `COMPACT_PAIR_TIMEOUT = 30s` — 服务器配对记录超时
 
+
 ---
 
-# 第二部分：RELAY 模式（TCP）
+# 第二部分：RELAY 模式 (TCP)
 
 ## 概述
 
-RELAY 模式使用 **TCP 长连接**进行信令交换，支持完整的 ICE/SDP 协商流程。相比 COMPACT 模式：
-- ✅ 可靠传输（TCP 自动重传）
-- ✅ 支持大型 SDP 负载（WebRTC 场景）
-- ✅ 服务器可主动推送
-- ⚠️ 需要维护连接状态
-- ⚠️ 需要心跳检测死连接
+RELAY 模式使用 **TCP 长连接**进行信令交换，支持完整的 ICE/Trickle ICE 候选协商流程。
+
+### 核心特性
+
+- ✅ **可靠传输**：TCP 自动重传，无需应用层确认
+- ✅ **实时推送**：服务器可主动推送消息（OFFER/FORWARD）
+- ✅ **离线缓存**：支持单候选粒度缓存（最大 255 个/用户）
+- ✅ **Trickle ICE**：候选收集过程中即时发送（批量限制 8 个/批次）
+- ✅ **三状态 ACK**：区分在线转发、离线缓存、缓存满
+- ⚠️ **连接管理**：需要心跳检测死连接，需要维护连接状态
+
+### 与 COMPACT 模式对比
+
+| 特性 | COMPACT (UDP) | RELAY (TCP) |
+|------|--------------|-------------|
+| **连接状态** | 无状态 | 长连接 |
+| **重传** | 应用层 PEER_INFO_ACK | TCP 自动 |
+| **负载大小** | < 1400 bytes | 无限制（建议<64KB） |
+| **离线缓存** | 整包缓存 | 单候选缓存（最大255个） |
+| **服务器清理** | 30秒无REGISTER | 60秒无消息 |
+| **地址变化** | 主动推送 | N/A（TCP地址不变） |
+| **寻址方式** | local_peer_id (32B) | name (32B) |
+
+---
 
 ## 协议格式
 
-所有消息共享统一的二进制包头：
+所有消息共享 **9 字节包头**（网络字节序）：
 
+```c
+typedef struct {
+    uint32_t magic;    // 0x50325030 ("P2P0")
+    uint8_t  type;     // 消息类型（见下表）
+    uint32_t length;   // 后续 Payload 长度（字节）
+} p2p_relay_hdr_t;
 ```
-[ magic: u32 | type: u8 | length: u32 ]  (9 bytes, network byte order)
-```
-
-- `magic = 0x50325030` ("P2P0")
-- `type` = 消息类型（见下表）
-- `length` = 后续 Payload 长度（字节）
 
 ### 消息类型
 
 | 值 | 名称 | 方向 | Payload | 说明 |
 |----|------|------|---------|------|
-| 1 | P2P_RLY_LOGIN | C→S | `name[32]` | 客户端登录 |
+| 1 | P2P_RLY_LOGIN | C→S | `name[32]` | 客户端登录/注册 |
 | 2 | P2P_RLY_LOGIN_ACK | S→C | 无 | 登录确认 |
 | 3 | P2P_RLY_LIST | C→S | 无 | 请求在线用户列表 |
 | 4 | P2P_RLY_LIST_RES | S→C | `"alice,bob,..."` | 返回用户列表（逗号分隔） |
-| 5 | P2P_RLY_CONNECT | C→S | `target[32] + SDP[N]` | 发起连接请求 |
-| 6 | P2P_RLY_OFFER | S→C | `from[32] + SDP[N]` | 转发连接请求 |
-| 7 | P2P_RLY_ANSWER | C→S | `target[32] + SDP[N]` | 返回应答 |
-| 8 | P2P_RLY_FORWARD | S→C | `from[32] + SDP[N]` | 转发应答 |
+| 5 | P2P_RLY_CONNECT | C→S | `target[32] + payload` | 发送候选给目标（主动方） |
+| 6 | P2P_RLY_OFFER | S→C | `from[32] + payload` | 转发连接请求（推送给被动方） |
+| 7 | P2P_RLY_ANSWER | C→S | `target[32] + payload` | 返回候选给发起方（被动方） |
+| 8 | P2P_RLY_FORWARD | S→C | `from[32] + payload` | 转发应答给主动方 |
 | 9 | P2P_RLY_HEARTBEAT | C→S | 无 | 心跳（保持连接） |
+| 10 | P2P_RLY_CONNECT_ACK | S→C | `ack_t[4]` | 连接确认（三状态） |
 
-**注**：C = Client, S = Server
+> **注**：C = Client, S = Server
 
-## 工作流程
+---
 
-### 1. 客户端登录
+## 核心消息详解
 
+### 1. LOGIN - 客户端登录
+
+**结构**：
+```c
+typedef struct {
+    char name[32];  // 客户端唯一标识符（用于寻址）
+} p2p_relay_login_t;
+```
+
+**流程**：
 ```
 Client                    Server
   |                          |
-  |--- P2P_RLY_LOGIN ----------->|
-  |    name="alice"          |
-  |                          | [记录客户端: fd→name]
-  |<-- P2P_RLY_LOGIN_ACK --------|
+  |--- P2P_RLY_LOGIN ------->|
+  |    name="alice"          | [记录映射: fd → name]
+  |<-- P2P_RLY_LOGIN_ACK ----|
   |                          |
 ```
 
-**P2P_RLY_LOGIN 结构**：
-```
-[ Header: 9 bytes ]
-[ name: 32 bytes ]  // 客户端名称（用于寻址）
-```
+**服务器行为**：
+- 检查名称是否已被占用（同名踢掉旧连接）
+- 记录 `(fd → name)` 映射
+- 响应 `P2P_RLY_LOGIN_ACK`
+- 失败则关闭连接
 
-服务器响应：
-- 成功：发送 `P2P_RLY_LOGIN_ACK`，记录 `(fd → name)` 映射
-- 失败：关闭连接
+---
 
-### 2. 查询在线用户
+### 2. CONNECT / CONNECT_ACK - 候选发送与确认 ⭐
 
-```
-Client                    Server
-  |                          |
-  |--- P2P_RLY_LIST ------------>|
-  |                          | [遍历在线客户端]
-  |<-- P2P_RLY_LIST_RES ---------|
-  |    "bob,charlie,..."     |
-```
+这是 RELAY 模式的**核心机制**，支持 Trickle ICE 增量候选交换。
 
-**P2P_RLY_LIST_RES 结构**：
-```
-[ Header: 9 bytes ]
-[ list: N bytes ]  // "bob,charlie,david," (逗号分隔)
+#### CONNECT 消息结构
+
+```c
+// Payload = 目标名称 + 信令负载头部 + N 个候选
+[target_name: 32B]
+[p2p_signaling_payload_hdr_t: 76B]  // sender, target, timestamp, count, ...
+[candidates: N * 32B]               // ICE 候选列表
 ```
 
-### 3. ICE/SDP 交换（完整流程）
-
-```
-Alice                   Server                    Bob
-  |                        |                        |
-  |--- P2P_RLY_CONNECT ------->|                        |
-  |  target="bob"          |                        |
-  |  SDP(offer)            |                        |
-  |                        |--- P2P_RLY_OFFER -------->|
-  |                        |  from="alice"          |
-  |                        |  SDP(offer)            |
-  |                        |                        |
-  |                        |<-- P2P_RLY_ANSWER -----|
-  |                        |  target="alice"        |
-  |                        |  SDP(answer)           |
-  |<-- P2P_RLY_FORWARD ---|                        |
-  |  from="bob"            |                        |
-  |  SDP(answer)           |                        |
-  |                        |                        |
-  |<========== ICE 协商，建立 P2P 连接 =============>|
+**信令负载头部**：
+```c
+typedef struct {
+    char     sender[32];         // 发送方 peer_id
+    char     target[32];         // 目标方 peer_id
+    uint32_t timestamp;          // 时间戳（用于排序和去重）
+    uint32_t delay_trigger;      // 延迟触发打洞（毫秒）
+    int      candidate_count;    // 本次发送的候选数量
+} p2p_signaling_payload_hdr_t;
 ```
 
-**关键点**：
-1. Alice 发送 `P2P_RLY_CONNECT` → 服务器转换为 `P2P_RLY_OFFER` 发给 Bob
-2. Bob 发送 `P2P_RLY_ANSWER` → 服务器转换为 `P2P_RLY_FORWARD` 发给 Alice
-3. **服务器不解析 SDP 内容**，仅作透明转发
-4. **转发时更换消息类型**（见消息转发规则）
-
-#### 消息转发规则
-
-| 收到消息 | 转发为 | 原因 |
-|---------|--------|------|
-| P2P_RLY_CONNECT | P2P_RLY_OFFER | 通知对方"有人要连接你" |
-| P2P_RLY_ANSWER | P2P_RLY_FORWARD | 转发应答给发起方 |
-
-**包结构示例（P2P_RLY_CONNECT）**：
+**ICE 候选结构**：
+```c
+typedef struct {
+    int                type;        // 候选类型（0=Host, 1=Srflx, 2=Relay, 3=Prflx）
+    struct sockaddr_in addr;        // 传输地址（16B）
+    struct sockaddr_in base_addr;   // 基础地址（16B）
+    uint32_t           priority;    // 候选优先级
+} p2p_candidate_t;  // 总大小 36 字节
 ```
-[ Header: magic=0x50325030, type=5, length=32+N ]
-[ target_name: 32 bytes ]  // 目标客户端名称
-[ sdp_data: N bytes ]      // SDP offer/answer 数据
+
+#### CONNECT_ACK 响应（三状态设计）⭐
+
+```c
+typedef struct {
+    uint8_t status;              // 0=在线, 1=离线有空间, 2=缓存已满
+    uint8_t candidates_acked;    // 服务器确认的候选数量（0-255）
+    uint8_t reserved[2];         // 保留字段
+} p2p_relay_connect_ack_t;
 ```
+
+**status 字段语义**：
+
+| status | 含义 | candidates_acked | 客户端行为 |
+|--------|------|------------------|-----------|
+| **0** | 对端在线，已转发 | N（全部） | 继续 Trickle ICE |
+| **1** | 对端离线，已缓存且有剩余空间 | N（全部） | 继续 Trickle ICE |
+| **2** | 缓存已满 | 0 或 M（<N） | 停止发送，等待 FORWARD |
+
+**关键设计**：
+- `status=1` vs `status=2` 的区分：服务器在缓存候选后检查 `pending_count >= MAX_CANDIDATES`
+- `candidates_acked` 支持**部分缓存**：发送 8 个，缓存 5 个（剩余 3 个等对端上线）
+- 客户端根据 `candidates_acked` 更新 `next_candidate_index`，确保未确认的候选会重传
+
+#### 边界条件验证
+
+| 场景 | 服务器判断 | ACK 返回 | 客户端状态更新 |
+|------|----------|---------|--------------|
+| **对端在线** | `target_online=true` | `status=0, acked=N` | `next_index+=N, waiting=false` |
+| **离线全缓存** | `pending<MAX, acked=N` | `status=1, acked=N` | `next_index+=N, waiting=false` |
+| **部分缓存后满** | `pending=MAX-3, acked=3` | `status=2, acked=3` | `next_index+=3, waiting=true` |
+| **之前就满** | `pending=MAX, acked=0` | `status=2, acked=0` | `next_index+=0, waiting=true` |
+
+**服务器实现伪代码**：
+```c
+ack_status = 0;
+candidates_acked = 0;
+
+if (target_online) {
+    // 在线：全部转发
+    forward_all_to_target();
+    ack_status = 0;
+    candidates_acked = candidate_count;
+} else {
+    // 离线：尝试缓存
+    for (i = 0; i < candidate_count; i++) {
+        if (pending_count >= MAX_CANDIDATES) {
+            ack_status = 2;  // 缓存满
+            break;
+        }
+        cache_candidate(candidates[i]);
+        pending_count++;
+        candidates_acked++;
+    }
+    
+    // 检查缓存后状态
+    if (candidates_acked > 0) {
+        if (pending_count >= MAX_CANDIDATES) {
+            ack_status = 2;  // 本次缓存后满
+        } else {
+            ack_status = 1;  // 还有剩余空间
+        }
+    }
+}
+
+send_connect_ack(ack_status, candidates_acked);
+```
+
+**客户端处理逻辑**：
+```c
+switch (ack.status) {
+    case 0:  // 在线转发
+        waiting_for_peer = false;
+        next_candidate_index += ack.candidates_acked;
+        return ack.candidates_acked;  // 继续 Trickle ICE
+        
+    case 1:  // 离线有空间
+        waiting_for_peer = false;
+        next_candidate_index += ack.candidates_acked;
+        return 0;  // 继续发送剩余候选
+        
+    case 2:  // 缓存已满
+        waiting_for_peer = true;  // 停止发送
+        next_candidate_index += ack.candidates_acked;  // 可能为 0
+        return -2;  // 等待对端上线推送 FORWARD
+}
+```
+
+---
+
+### 3. OFFER / ANSWER / FORWARD - 消息转发
+
+**消息转换规则**：
+
+| 客户端发送 | 服务器转发为 | 原因 |
+|-----------|-------------|------|
+| P2P_RLY_CONNECT | P2P_RLY_OFFER | 通知被动方"有人要连接你" |
+| P2P_RLY_ANSWER | P2P_RLY_FORWARD | 转发应答给主动方 |
+
+**完整流程**：
+```
+Alice (主动方)         Server                Bob (被动方)
+      |                   |                      |
+      |--- CONNECT ------>|                      |
+      | target="bob"      | [Bob 在线？]         |
+      | candidates[0-7]   |                      |
+      |<-- CONNECT_ACK ---|                      |
+      | status=0, acked=8 |                      |
+      |                   |--- OFFER ----------->|
+      |                   | from="alice"         |
+      |                   | candidates[0-7]      |
+      |                   |                      |
+      |                   |<-- ANSWER -----------|
+      |                   | target="alice"       |
+      |                   | candidates[0-5]      |
+      |<-- FORWARD -------|                      |
+      | from="bob"        |                      |
+      | candidates[0-5]   |                      |
+      |                   |                      |
+      |<======== ICE 协商，建立 P2P 直连 ========>|
+```
+
+**Trickle ICE 增量发送**：
+```
+Alice                  Server                Bob
+  |                      |                      |
+  |--- CONNECT(cand 0-7)-->|--- OFFER(cand 0-7)-->|
+  |<-- ACK(acked=8) ------|                      |
+  |                      |                      |
+  | [收集到新候选 8-9]    |                      |
+  |--- CONNECT(cand 8-9)-->|--- OFFER(cand 8-9)-->|
+  |<-- ACK(acked=2) ------|                      |
+  |                      |                      |
+  |                      |<-- ANSWER(cand 0-5)--|
+  |<-- FORWARD(cand 0-5)--|                      |
+  |                      |                      |
+  |                      |<-- ANSWER(cand 6-7)--|
+  |<-- FORWARD(cand 6-7)--|                      |
+```
+
+**批量发送限制**：
+- 客户端每次最多发送 **8 个候选**（`MAX_CANDIDATES_PER_BATCH`）
+- 目的：避免单个 TCP 包过大，提高重传效率
+- Trickle ICE 本质：边收集边发送（每收集 1 个就发送 1 个）
+- 批量限制仅用于**失败重传**场景（如超时后重发未确认的候选）
+
+---
 
 ### 4. 心跳与死连接检测
 
@@ -454,7 +629,7 @@ TCP 连接在以下情况**无法检测断开**：
 ```
 Client                    Server
   |                          |
-  |--- P2P_RLY_HEARTBEAT ------->|
+  |--- P2P_RLY_HEARTBEAT ---->|
   | (每 30 秒)               | [更新 last_active]
   |                          |
   |    (如果 60 秒无任何消息) |
@@ -467,10 +642,10 @@ Client                    Server
 #define ICE_CLIENT_TIMEOUT 60  // 秒
 
 typedef struct {
-    int fd;
-    char name[32];
+    int    fd;
+    char   name[32];
     time_t last_active;  // 最后活跃时间
-    bool valid;
+    bool   valid;
 } ice_client_t;
 
 // 收到任何消息时更新
@@ -480,6 +655,7 @@ on_recv_message(client_idx) {
 
 // 定期清理（每 10 秒）
 cleanup_ice_clients() {
+    time_t now = time(NULL);
     for (int i = 0; i < MAX_PEERS; i++) {
         if (valid && (now - last_active) > ICE_CLIENT_TIMEOUT) {
             close(fd);
@@ -490,213 +666,348 @@ cleanup_ice_clients() {
 ```
 
 **客户端建议**：
-- 每 30 秒发送一次 `P2P_RLY_HEARTBEAT`
-- 服务器 60 秒超时，留出 2 倍余量
-- 也可通过其他消息（LIST、CONNECT 等）刷新活跃时间
+- 每 **30 秒**发送一次心跳
+- 服务器 **60 秒**超时（留 2 倍余量）
+- 也可通过其他消息（LIST、CONNECT）刷新活跃时间
 
-### 5. 错误处理
+---
 
-| 错误场景 | 服务器行为 |
-|---------|----------|
-| 收到无效 magic | 关闭连接 |
-| 目标用户不在线 | 丢弃消息，打印日志 |
-| Payload 过大 (>65536) | 关闭连接 |
-| recv 失败 | 关闭连接，标记 valid=false |
-| 客户端超时 | 主动关闭连接 |
+## 离线候选缓存机制
 
-### 6. 服务端实现
+### 缓存策略
 
-#### 关键数据结构
-
+**服务器端数据结构**：
 ```c
 typedef struct {
-    int fd;                  // TCP socket
-    char name[P2P_PEER_ID_MAX]; // 客户端名称
-    time_t last_active;      // 最后活跃时间
-    bool valid;              // 是否有效
+    int                  fd;
+    char                 name[32];
+    time_t               last_active;
+    bool                 valid;
+    
+    // 离线缓存（单候选粒度）
+    p2p_candidate_t      pending_candidates[MAX_CANDIDATES];  // 队列
+    int                  pending_count;                       // 当前数量
+    char                 pending_from[32];                    // 来源 peer_id
 } ice_client_t;
-
-static ice_client_t g_ice_clients[MAX_PEERS];
 ```
 
-#### 主循环逻辑
+**缓存触发条件**：
+1. 收到 `P2P_RLY_CONNECT` 且目标离线（`target->valid=false`）
+2. 缓存未满（`pending_count < MAX_CANDIDATES`）
 
+**缓存推送时机**：
+- 对端上线（收到 `P2P_RLY_LOGIN`）时
+- 服务器检查该用户是否有待推送的候选
+- 如果有，立即发送 `P2P_RLY_OFFER` 推送缓存队列
+
+**缓存限制**：
+- 每用户最大缓存 **255 个候选**（`uint8_t candidates_acked`）
+- FIFO 队列（先进先出）
+- 超过限制时，新候选被拒绝（`status=2, candidates_acked=0`）
+
+### 离线场景完整流程
+
+```
+Alice                  Server                Bob (离线)
+  |                      |                      |
+  |--- LOGIN ----------->|                      |
+  |<-- LOGIN_ACK --------|                      |
+  |                      |                      |
+  |--- CONNECT(bob) ---->|                      |
+  | candidates[0-7]      | [Bob 离线，缓存]     |
+  |<-- CONNECT_ACK ------|  pending_count=8     |
+  | status=1, acked=8    |                      |
+  |                      |                      |
+  |--- CONNECT(bob) ---->|                      |
+  | candidates[8-15]     | [继续缓存]           |
+  |<-- CONNECT_ACK ------|  pending_count=16    |
+  | status=1, acked=8    |                      |
+  |                      |                      |
+  | ... (Alice 继续发送) |                      |
+  |                      |                      |
+  |                      |<-- LOGIN ------------|
+  |                      |--- LOGIN_ACK -------->|
+  |                      | [检测到缓存]         |
+  |                      |--- OFFER ----------->|
+  |                      | from="alice"         |
+  |                      | candidates[0-15]     |
+  |                      | [清空缓存]           |
+  |                      |                      |
+  |                      |<-- ANSWER -----------|
+  |<-- FORWARD ----------|                      |
+  |                      |                      |
+  |<======== ICE 协商，建立 P2P 直连 ==========>|
+```
+
+---
+
+## 错误处理
+
+| 错误场景 | 服务器行为 | 客户端建议 |
+|---------|----------|-----------|
+| 收到无效 magic | 关闭连接 | 检查协议版本 |
+| 目标用户不在线且缓存满 | 返回 `status=2, acked=0` | 停止发送，等待 FORWARD |
+| Payload 过大 (>65536) | 关闭连接 | 限制候选批量大小 |
+| recv 失败 | 关闭连接，标记 `valid=false` | 重连并重新 LOGIN |
+| 客户端超时（60秒无消息） | 主动关闭连接 | 发送心跳 |
+| 同名登录 | 踢掉旧连接，接受新连接 | 检测到断开后重连 |
+
+---
+
+## 设计注意事项
+
+### 1. Trickle ICE 批量大小的权衡
+
+**问题**：每次应该发送多少个候选？
+
+**设计选择**：
+- **1 个/批次**：真正的 Trickle ICE（边收集边发送）
+  - ✅ 最低延迟（收集到立即发送）
+  - ⚠️ TCP 包数量多，开销大
+  
+- **8 个/批次**（当前实现）：批量发送
+  - ✅ 减少 TCP 包数量
+  - ✅ 适合重传场景（失败后批量重发）
+  - ⚠️ 增加首次候选发送延迟
+
+**实际策略**：
+- 正常 Trickle ICE：收集 1-2 个就发送（实时性优先）
+- 失败重传：批量发送最多 8 个（效率优先）
+- 通过 `MAX_CANDIDATES_PER_BATCH` 限制批量大小
+
+### 2. 候选状态追踪的隐式假设
+
+**当前实现假设**：
+- 服务器**按顺序缓存前 N 个候选**
+- 客户端通过 `next_candidate_index += candidates_acked` 更新索引
+
+**隐患**：
+```
+发送候选 [0-7] (8个)
+服务器只缓存 [0-4] (5个)，返回 acked=5
+
+客户端：next_candidate_index = 0 + 5 = 5
+下次发送：候选 [5-12]
+
+问题：候选 5, 6, 7 在第一批中发送了但未被确认
+     下次从索引 5 开始，候选 5, 6, 7 会被重发 ✅ 正确！
+```
+
+**验证**：当前实现**正确**，因为：
+1. 服务器确实按顺序缓存（循环从 `i=0` 开始）
+2. `candidates_acked` 表示"前 N 个候选成功"
+3. 未确认的候选（索引 ≥ next_candidate_index）会在下次重发
+
+**脆弱性**：
+- 依赖服务器"按顺序缓存"的隐式假设
+- 如果服务器改为随机缓存，客户端逻辑会失效
+
+**改进方向**（未实现）：
+- 每个候选独立状态追踪（PENDING/SENDING/ACKED/FAILED）
+- 协议返回位图或索引范围（明确告知哪些候选成功）
+- 见架构文档中的"候选状态机设计"章节
+
+### 3. `status=1` vs `status=2` 的必要性
+
+**问题**：为什么需要区分"有空间"和"已满"？
+
+**原因**：
+- `status=1`：客户端可以**继续 Trickle ICE**（服务器还能缓存）
+- `status=2`：客户端应该**停止发送**（避免浪费带宽）
+
+**边界条件**：
+- 发送 8 个，缓存 5 个，剩余 10 个空间 → `status=1`（继续发送）
+- 发送 8 个，缓存 5 个，剩余 0 个空间 → `status=2`（停止发送）
+
+**实现**：
 ```c
-while (1) {
-    // 1. 定期清理超时连接
-    if (now - last_cleanup >= 10) {
-        cleanup_ice_clients();
-    }
-    
-    // 2. select 监听所有 fd
-    FD_ZERO(&read_fds);
-    FD_SET(listen_fd, &read_fds);  // TCP 监听
-    FD_SET(udp_fd, &read_fds);     // UDP (COMPACT 模式)
-    for (client in ice_clients) {
-        FD_SET(client.fd, &read_fds);
-    }
-    
-    select(max_fd + 1, &read_fds, ...);
-    
-    // 3. 处理新连接
-    if (FD_ISSET(listen_fd, &read_fds)) {
-        client_fd = accept(...);
-        // 添加到 ice_clients[]
-    }
-    
-    // 4. 处理客户端消息
-    for (client in ice_clients) {
-        if (FD_ISSET(client.fd, &read_fds)) {
-            handle_ice_signaling(client_idx);
-        }
-    }
+if (candidates_acked > 0 && pending_count >= MAX_CANDIDATES) {
+    ack_status = 2;  // 本次缓存后满
+} else if (candidates_acked > 0) {
+    ack_status = 1;  // 还有剩余空间
 }
 ```
 
-## ICE vs SIMPLE 对比
+---
 
-| 特性 | COMPACT 模式 | RELAY 模式 |
-|------|------------|----------|
-| **传输层** | UDP | TCP |
-| **连接状态** | 无状态 | 长连接 |
-| **重传** | 客户端负责 | TCP 自动 |
-| **负载大小** | < 1500 bytes | 无限制（建议 < 64KB） |
-| **服务器清理** | 30秒无 REGISTER | 60秒无消息 |
-| **地址变化** | 主动推送 | N/A（TCP 地址不变） |
-| **死连接检测** | N/A（UDP 无连接） | 应用层心跳 |
-| **用户寻址** | local_peer_id (32 bytes) | name (32 bytes) |
-| **典型场景** | 嵌入式/IoT | WebRTC/跨平台 |
-| **消息格式** | `[type:u8|flags:u8|seq:u16]` | `[magic:u32|type:u8|length:u32]` |
-
-## 完整示例：WebRTC 连接建立
+## 完整示例：WebRTC ICE 协商
 
 ```
 Alice (浏览器)          Server              Bob (浏览器)
      |                     |                      |
-     |--- P2P_RLY_LOGIN ------>|                      |
-     |   name="alice"      |                      |
-     |<-- P2P_RLY_LOGIN_ACK ---|                      |
-     |                     |<---- P2P_RLY_LOGIN ------|
-     |                     |     name="bob"       |
-     |                     |--- P2P_RLY_LOGIN_ACK --->|
-     |                     |                      |
-     |--- P2P_RLY_LIST ------->|                      |
-     |<-- P2P_RLY_LIST_RES ----|                      |
-     |   "bob"             |                      |
+     |--- LOGIN ------------->|                      |
+     |<-- LOGIN_ACK ----------|                      |
+     |                     |<---- LOGIN -------------|
+     |                     |--- LOGIN_ACK ---------->|
      |                     |                      |
      | [创建 RTCPeerConnection, 生成 offer]       |
      |                     |                      |
-     |--- P2P_RLY_CONNECT ---->|                      |
-     |  target="bob"       |                      |
-     |  SDP: {type:"offer"}|                      |
-     |                     |--- P2P_RLY_OFFER ------>|
-     |                     |  from="alice"        |
-     |                     |  SDP: {type:"offer"} |
+     |--- CONNECT ---------->|                      |
+     | candidates[0-7]     |                      |
+     |<-- CONNECT_ACK ------|                      |
+     | status=0, acked=8   |                      |
+     |                     |--- OFFER ------------->|
+     |                     | candidates[0-7]      |
      |                     |                      |
-     |                     | [创建 answer]        |
+     | [收集新候选 8-9]     |                      |
+     |--- CONNECT ---------->|                      |
+     | candidates[8-9]     |                      |
+     |<-- CONNECT_ACK ------|                      |
+     | status=0, acked=2   |                      |
+     |                     |--- OFFER ------------->|
+     |                     | candidates[8-9]      |
      |                     |                      |
-     |                     |<-- P2P_RLY_ANSWER ---|
-     |                     |  target="alice"      |
-     |                     |  SDP: {type:"answer"}|
-     |<-- P2P_RLY_FORWARD-|                      |
-     |  from="bob"         |                      |
-     |  SDP: {type:"answer"}                     |
+     |                     | [Bob 生成 answer]    |
      |                     |                      |
-     | [设置 remote description]                  |
-     |<===== ICE candidates 交换 =================>|
-     | [STUN/TURN 打洞]                           |
-     |<===== 建立 P2P 连接 =======================>|
+     |                     |<-- ANSWER ------------|
+     |                     | candidates[0-5]      |
+     |<-- FORWARD ----------|                      |
+     | candidates[0-5]     |                      |
      |                     |                      |
-     |--- P2P_RLY_HEARTBEAT -->|<-- P2P_RLY_HEARTBEAT ----|
-     | (每 30 秒)          | (保持连接)           |
+     | [设置 remote description, ICE 协商开始]    |
+     |<===== STUN/TURN 打洞，建立 P2P 连接 =======>|
+     |                     |                      |
+     |--- HEARTBEAT -------->|<---- HEARTBEAT ------|
+     | (每 30 秒保持连接)   |                      |
 ```
 
-## 附录：完整包类型列表
+---
 
-### COMPACT 模式（UDP）
+---
 
-| 范围 | 分类 | 包类型 |
-|------|------|--------|
-| **0x01-0x0F** | **信令协议** | |
-| 0x01 | P2P_PKT_REGISTER | 注册配对请求 |
-| 0x02 | P2P_PKT_REGISTER_ACK | 注册确认 |
-| 0x03 | P2P_PKT_PEER_INFO | 对端地址通知 |
-| **0x10-0x1F** | **打洞协议** | |
-| 0x10 | P2P_PKT_PUNCH | NAT 打洞 |
-| 0x11 | P2P_PKT_PUNCH_ACK | 打洞确认 |
-| **0x20-0x2F** | **保活协议** | |
-| 0x20 | P2P_PKT_PING | 心跳请求 |
-| 0x21 | P2P_PKT_PONG | 心跳响应 |
-| **0x30-0x3F** | **数据传输** | |
-| 0x30 | P2P_PKT_DATA | 应用数据 |
-| 0x31 | P2P_PKT_ACK | 数据确认 |
-| 0x32 | P2P_PKT_FIN | 连接关闭 |
-| **0x40-0x4F** | **中继协议** | |
-| 0x40 | P2P_PKT_RELAY_DATA | 服务器中转 |
-| **0x50-0x5F** | **路由探测** | |
-| 0x50 | P2P_PKT_ROUTE_PROBE | 路由探测 |
-| 0x51 | P2P_PKT_ROUTE_PROBE_ACK | 路由探测确认 |
-| **0x60-0x6F** | **安全协议** | |
-| 0x60 | P2P_PKT_AUTH | 安全握手 |
+# 第三部分：PUBSUB 模式 (HTTPS)
 
-### RELAY 模式（TCP）
+## 概述
+
+PUBSUB 模式使用 **GitHub Gist** 作为信令通道，通过 HTTPS API 进行候选交换。
+
+### 核心特性
+
+- ✅ **零部署**：无需自建服务器（利用 GitHub 基础设施）
+- ✅ **快速原型**：适合演示和测试
+- ✅ **加密传输**：内置 DES 加密保护候选信息
+- ⚠️ **轮询模式**：实时性低（2-5 秒延迟）
+- ⚠️ **API 限制**：依赖 GitHub API 速率限制
+- ❌ **无离线缓存**：不支持异步通信
+
+## 工作原理
+
+1. 创建 GitHub Gist 作为通信通道（文件：`alice_to_bob.json`）
+2. Alice 通过 `HTTP PUT` 上传加密的候选信息
+3. Bob 通过 `HTTP GET` 轮询读取候选
+4. 使用 DES 加密/解密保护数据
+
+**模块**：`p2p_signal_pubsub.c/h`
+
+---
+
+## 附录：协议包类型完整列表
+
+### P2P 直连协议 (0x01-0x7F)
+
+| 范围 | 分类 | 包类型 | 说明 |
+|------|------|--------|------|
+| **0x01-0x0F** | **打洞与安全** | | |
+| 0x01 | P2P_PKT_PUNCH | NAT 打洞包 |
+| 0x02 | P2P_PKT_PUNCH_ACK | NAT 打洞确认 |
+| 0x03 | P2P_PKT_AUTH | 安全握手包 |
+| **0x10-0x1F** | **保活协议** | | |
+| 0x10 | P2P_PKT_PING | 心跳请求 |
+| 0x11 | P2P_PKT_PONG | 心跳响应 |
+| **0x20-0x2F** | **数据传输** | | |
+| 0x20 | P2P_PKT_DATA | 应用数据 |
+| 0x21 | P2P_PKT_ACK | 数据确认 |
+| 0x22 | P2P_PKT_FIN | 连接关闭 |
+| **0x30-0x3F** | **路由探测** | | |
+| 0x30 | P2P_PKT_ROUTE_PROBE | 路由探测包 |
+| 0x31 | P2P_PKT_ROUTE_PROBE_ACK | 路由探测确认 |
+
+### COMPACT 信令协议 (0x80-0xBF)
+
+| 范围 | 包类型 | 说明 |
+|------|--------|------|
+| **0x80-0x8F** | **核心信令** | |
+| 0x80 | SIG_PKT_REGISTER | 注册到信令服务器 |
+| 0x81 | SIG_PKT_REGISTER_ACK | 注册确认 |
+| 0x82 | SIG_PKT_PEER_INFO | 候选列表同步包 |
+| 0x83 | SIG_PKT_PEER_INFO_ACK | 候选列表确认 |
+| 0x84 | SIG_PKT_NAT_PROBE | NAT 类型探测请求 |
+| 0x85 | SIG_PKT_NAT_PROBE_ACK | NAT 类型探测响应 |
+| **0xA0-0xAF** | **中继扩展** | |
+| 0xA0 | P2P_PKT_RELAY_DATA | 中继服务器转发的数据 |
+| 0xA1 | P2P_PKT_RELAY_ACK | 中继服务器转发的 ACK |
+
+### RELAY 信令协议 (TCP)
 
 | 值 | 名称 | 说明 |
 |----|------|------|
-| 1 | P2P_RLY_LOGIN | 登录 |
+| 1 | P2P_RLY_LOGIN | 登录/注册 |
 | 2 | P2P_RLY_LOGIN_ACK | 登录确认 |
 | 3 | P2P_RLY_LIST | 查询在线用户 |
 | 4 | P2P_RLY_LIST_RES | 用户列表响应 |
-| 5 | P2P_RLY_CONNECT | 发起连接 |
+| 5 | P2P_RLY_CONNECT | 发送候选给目标 |
 | 6 | P2P_RLY_OFFER | 转发连接请求 |
-| 7 | P2P_RLY_ANSWER | 返回应答 |
+| 7 | P2P_RLY_ANSWER | 返回候选给发起方 |
 | 8 | P2P_RLY_FORWARD | 转发应答 |
 | 9 | P2P_RLY_HEARTBEAT | 心跳 |
+| 10 | P2P_RLY_CONNECT_ACK | 连接确认（三状态） |
+
+---
 
 ## 安全注意事项
 
 > [!CAUTION]
-> 当前协议设计侧重功能完整性，**不含任何加密或认证机制**。
+> 当前协议设计侧重功能完整性，**不含强加密或身份认证机制**。
 
 ### 通用安全建议
 
 | 威胁 | 解决方案 |
 |------|---------|
-| **窃听** | DTLS/TLS 加密（库已支持，见 `use_dtls` 配置） |
+| **窃听** | 启用 DTLS/TLS 加密（库已支持，见 `use_dtls` 配置） |
 | **身份冒用** | 添加认证 token、签名机制 |
 | **重放攻击** | 添加 nonce/timestamp 验证 |
 | **DDoS** | Rate limiting、IP 白名单 |
 | **中间人攻击** | 端到端加密、证书验证 |
 
-### COMPACT 模式特定风险
+### 模式特定风险
 
-- ❌ **无 local_peer_id 验证**：任何人可冒充他人注册
-- ❌ **明文传输**：地址信息未加密
+#### COMPACT 模式
+- ❌ **无 peer_id 验证**：任何人可冒充他人注册
+- ❌ **明文传输**：地址信息未加密（建议应用层加密）
 - ⚠️ **UDP 泛洪**：需要服务器端 rate limiting
 
-### RELAY 模式特定风险
-
+#### RELAY 模式
 - ❌ **无登录验证**：任何人可连接服务器
-- ❌ **SDP 劫持**：中间人可修改 ICE candidates
-- ⚠️ **死连接占用**：已通过心跳超时机制解决 ✅
+- ❌ **候选劫持**：中间人可修改 ICE candidates
+- ✅ **死连接检测**：已通过心跳机制解决
+
+#### PUBSUB 模式
+- ✅ **DES 加密**：候选信息已加密（基础保护）
+- ⚠️ **Gist 可见性**：Public Gist 可被他人访问
+- ⚠️ **依赖 GitHub**：服务可用性依赖第三方
 
 ### 生产部署 Checklist
 
-- [ ] 启用 DTLS/TLS 加密
-- [ ] 实现 token 认证机制
-- [ ] 配置防火墙规则
+- [ ] 启用 DTLS/TLS 加密（端到端）
+- [ ] 实现 token 认证机制（登录验证）
+- [ ] 配置防火墙规则（限制访问）
 - [ ] 部署 rate limiting（建议：100 req/min/IP）
-- [ ] 监控异常连接模式
-- [ ] 定期更新依赖库（mbedtls/openssl）
-- [ ] 记录审计日志
+- [ ] 监控异常连接模式（DDoS 检测）
+- [ ] 定期更新依赖库（mbedtls/openssl/usrsctp）
+- [ ] 记录审计日志（安全事件追踪）
 
 ---
 
-**参考实现**：`p2p_server/server.c`
+## 参考资料
 
-**测试覆盖**：43/43 单元测试通过
-- 14 传输层测试
-- 10 COMPACT 模式测试  
-- 19 ICE 服务端测试
+- **协议定义**：`include/p2pp.h`
+- **服务器实现**：`p2p_server/server.c`
+- **客户端实现**：
+  - COMPACT: `src/p2p_signal_compact.c/.h`
+  - RELAY: `src/p2p_signal_relay.c/.h`
+  - PUBSUB: `src/p2p_signal_pubsub.c/.h`
+- **架构文档**：`doc/ARCHITECTURE.md`
+- **测试用例**：`test/` 目录
 
-**最后更新**：2026-02-15
+**最后更新**：2026-02-18  
+**协议版本**：1.0

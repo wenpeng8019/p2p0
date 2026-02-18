@@ -280,23 +280,12 @@ static inline int n2sockaddr(const uint8_t *buf, struct sockaddr_in *addr) {
 }
 
 /* ============================================================================
- * 信令协议数据结构
- * ============================================================================ */
-
-/*
- * p2p_signaling_payload_hdr_t: 信令负载头部结构
+ * 信令协议序列化函数
+ * ============================================================================
  *
- * 包含 ICE 信令的元数据（不包含候选数组）。
- * 候选数据通过 pack_candidate/unpack_candidate 单独序列化。
- * 可通过 Relay 服务器或 PubSub (GitHub Gist) 传输。
+ * p2p_signaling_payload_hdr_t 定义在 p2pp.h 中
+ * 这里仅提供序列化/反序列化的静态内联实现
  */
-typedef struct p2p_signaling_payload_hdr {
-    char sender[32];              /* 发送方 local_peer_id */
-    char target[32];              /* 目标方 local_peer_id */
-    uint32_t timestamp;           /* 时间戳（用于排序和去重） */
-    uint32_t delay_trigger;       /* 延迟触发打洞（毫秒） */
-    int candidate_count;          /* ICE 候选数量（0-8） */
-} p2p_signaling_payload_hdr_t;
 
 /*
  * pack_signaling_payload_hdr: 序列化信令负载头部到字节流

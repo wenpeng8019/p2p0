@@ -133,6 +133,7 @@
 
 #include <stdint.h>
 #include <netinet/in.h>
+#include "p2pp.h"
 
 /* ============================================================================
  * 候选地址类型（RFC 5245 Section 4.1.1）
@@ -145,20 +146,10 @@ typedef enum {
 } p2p_cand_type_t;
 
 /*
- * p2p_candidate_t: ICE 候选地址结构
- *
- * 每个候选包含：
- *   - type:      候选类型
- *   - addr:      传输地址（IP:Port）
- *   - base_addr: 基础地址（Host 候选的本地地址）
- *   - priority:  优先级（用于排序和选择）
+ * 注：p2p_candidate_t 已移至 p2pp.h 作为信令协议定义
+ * 内部代码可继续使用 p2p_cand_type_t 枚举，但需要显式转换：
+ *   cand.type = (int)P2P_CAND_HOST;
  */
-typedef struct {
-    p2p_cand_type_t type;           /* 候选类型 */
-    struct sockaddr_in addr;        /* 传输地址 */
-    struct sockaddr_in base_addr;   /* 基础地址 */
-    uint32_t priority;              /* 候选优先级 */
-} p2p_candidate_t;
 
 #define P2P_MAX_CANDIDATES 8        /* 最大候选数量 */
 

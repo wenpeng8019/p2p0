@@ -308,27 +308,38 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
         return -1;
     }
 
-    printf("Signaling [PUB]: Received ACK (status=%d, candidates=%d)\n", 
-           ack_payload.status, ack_payload.candidates_stored);
+    printf("Signaling [PUB]: Received ACK (status=%d, candidates_acked=%d)\n", 
+           ack_payload.status, ack_payload.candidates_acked);
 
     // 更新状态追踪
-    ctx->total_candidates_sent = candidates_in_payload;
-    
+    ctx->total_candidates_sent += candidates_in_payload;
+    ctx->total_candidates_acked += ack_payload.candidates_acked;
+    ctx->next_candidate_index += ack_payload.candidates_acked;
+
     // 根据状态返回
     switch (ack_payload.status) {
-        case 0:  // 成功转发
-            ctx->total_candidates_acked = ack_payload.candidates_stored;
-            ctx->next_candidate_index = ack_payload.candidates_stored;
-            return ack_payload.candidates_stored > 0 ? ack_payload.candidates_stored : 1;
-        case 1:  // 目标不在线（已存储）
-            ctx->total_candidates_acked = ack_payload.candidates_stored;
-            ctx->next_candidate_index = ack_payload.candidates_stored;
+        case 0:  // 对端在线，成功转发
+            printf("Signaling [PUB]: Peer online, forwarded %d candidates\n", ack_payload.candidates_acked);
+            ctx->waiting_for_peer = false;  // 对端在线，无需等待
+            return ack_payload.candidates_acked > 0 ? ack_payload.candidates_acked : 1;
+            
+        case 1:  // 对端离线，已缓存且有剩余空间
+            printf("Signaling [PUB]: Peer offline, cached %d candidates (storage has remaining space)\n", 
+                   ack_payload.candidates_acked);
+            ctx->waiting_for_peer = false;  // 还有空间，继续 Trickle ICE
             return 0;  // 返回 0 表示已缓存（目标离线）
-        case 2:  // 存储失败（容量不足）
-            ctx->total_candidates_acked = 0;
-            ctx->next_candidate_index = 0;
-            return -2;
+            
+        case 2:  // 缓存已满（可能缓存了部分候选后满，也可能之前就满了）
+            printf("Signaling [PUB]: Storage full (cached %d candidates), waiting for peer to come online\n",
+                   ack_payload.candidates_acked);
+            // 进入等待状态（等待对端上线后收到 FORWARD）
+            ctx->waiting_for_peer = true;
+            strncpy(ctx->waiting_target, target_name, P2P_PEER_ID_MAX);
+            ctx->waiting_start_time = time_ms();
+            return -2;  // 返回 -2 表示缓存已满，停止发送
+            
         default: // 服务器错误
+            printf("Signaling [PUB]: Unknown status %d\n", ack_payload.status);
             return -3;
     }
 }
@@ -383,6 +394,18 @@ int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *targ
 void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
     if (ctx->fd < 0) return;
 
+    // 检查等待超时（60 秒）
+    if (ctx->waiting_for_peer) {
+        uint64_t elapsed = time_ms() - ctx->waiting_start_time;
+        if (elapsed > 60000) {  // 60 秒超时
+            printf("Signaling: Waiting for peer '%s' timed out (60s), giving up\n", ctx->waiting_target);
+            ctx->waiting_for_peer = false;
+            ctx->waiting_target[0] = '\0';
+            // 可选：断开连接或重置状态
+            return;
+        }
+    }
+
     // 接收信令服务数据包
     p2p_relay_hdr_t hdr;
     int n = recv(ctx->fd, &hdr, sizeof(hdr), 0);
@@ -399,6 +422,15 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
             // 保存发送者名称（用于后续发送 answer）
             if (hdr.type == P2P_RLY_OFFER) {
                 strncpy(ctx->incoming_peer_name, sender_name, P2P_PEER_ID_MAX);
+            }
+            
+            // 收到 FORWARD：对端已上线，清除等待状态
+            if (hdr.type == P2P_RLY_FORWARD && ctx->waiting_for_peer && 
+                strcmp(ctx->waiting_target, sender_name) == 0) {
+                printf("Signaling: Peer '%s' is now online (received FORWARD), resuming...\n", sender_name);
+                ctx->waiting_for_peer = false;
+                ctx->waiting_target[0] = '\0';
+                // 注：后续应该继续发送剩余候选，由上层 p2p_update() 检查 next_candidate_index
             }
 
             // 接收后面的负载数据

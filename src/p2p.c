@@ -689,7 +689,8 @@ int p2p_update(p2p_session_t *s) {
         // 重发条件：
         //   1. 有候选地址 且
         //   2. 未连接成功 且
-        //   3. (从未发送 或 超时 或 有新候选 或 有待发送的候选)
+        //   3. (从未发送 或 超时 或 有新候选 或 有待发送的候选) 且
+        //   4. 不在等待对端上线状态（status=2 后需等待 FORWARD）
         if (s->local_cand_cnt > 0 && 
             s->state == P2P_STATE_REGISTERING &&
             s->remote_peer_id[0] != '\0') {
@@ -698,9 +699,11 @@ int p2p_update(p2p_session_t *s) {
             int unsent_count = s->local_cand_cnt - s->sig_relay_ctx.total_candidates_acked;
             
             // 检查是否需要发送（包括断点续传）
+            // 注意：waiting_for_peer=true 时，只有收到 FORWARD 清除该标志后才会继续发送
             if (unsent_count > 0 &&
+                !s->sig_relay_ctx.waiting_for_peer &&                        // 不在等待对端上线状态
                 (!s->signal_sent ||                                          // 从未发送过
-                 (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) || // 超过重发间隔
+                 (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) || // 超过重发间隔（Trickle ICE）
                  (s->local_cand_cnt > s->last_cand_cnt_sent) ||              // 有新候选收集到（如 STUN 响应）
                  s->cands_pending_send                                       // 有待发送的候选（之前 TCP 发送失败）
                 )) {
@@ -711,7 +714,10 @@ int p2p_update(p2p_session_t *s) {
                     start_idx = 0;  // 重置（可能是全新的候选列表）
                 }
                 
-                int batch_size = s->local_cand_cnt - start_idx;
+                // Trickle ICE：每次最多发送 8 个候选（协议规定 1-8 个/批次）
+                #define MAX_CANDIDATES_PER_BATCH 8
+                int remaining = s->local_cand_cnt - start_idx;
+                int batch_size = (remaining > MAX_CANDIDATES_PER_BATCH) ? MAX_CANDIDATES_PER_BATCH : remaining;
                 
                 uint8_t buf[2048];
                 int n = pack_signaling_payload_hdr(
@@ -747,10 +753,11 @@ int p2p_update(p2p_session_t *s) {
                                          batch_size, s->remote_peer_id);
                         }
                     } else if (ret == -2) {
-                        s->cands_pending_send = true;  /* 服务器缓存满，标记待重发 */
-                        P2P_LOG_WARN("P2P", "[SIGNALING] Server storage full, will retry later...\n");
+                        /* 服务器缓存满（status=2）：停止发送，等待对端上线后收到 FORWARD */
+                        /* waiting_for_peer 已在 send_connect() 中设置为 true */
+                        P2P_LOG_WARN("P2P", "[SIGNALING] Server storage full (status=2), waiting for peer to come online...\n");
                     } else {
-                        s->cands_pending_send = true;  /* TCP 发送失败，标记待重发 */
+                        s->cands_pending_send = true;  /* TCP 发送失败（-1/-3），标记待重发 */
                         P2P_LOG_WARN("P2P", "[SIGNALING] Failed to send candidates (ret=%d), will retry...\n", ret);
                     }
                 }
