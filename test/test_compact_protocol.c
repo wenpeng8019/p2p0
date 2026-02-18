@@ -15,7 +15,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 #include <p2pp.h>
 
 // 测试日志开关
@@ -34,19 +36,23 @@ typedef struct {
     uint16_t seq;
 } test_pkt_hdr_t;
 
+#pragma pack(push, 1)
 typedef struct {
     uint8_t  type;
     uint32_t ip;
     uint16_t port;
-} __attribute__((packed)) test_candidate_t;
+} test_candidate_t;
+#pragma pack(pop)
 
+#pragma pack(push, 1)
 typedef struct {
     uint8_t status;          // 0=离线, 1=在线, >=2=error
     uint8_t max_candidates;  // 服务器缓存能力
     uint32_t public_ip;      // 客户端的公网 IP
     uint16_t public_port;    // 客户端的公网端口
     uint16_t probe_port;     // NAT 探测端口（0=不支持）
-} __attribute__((packed)) test_register_ack_t;
+} test_register_ack_t;
+#pragma pack(pop)
 
 typedef struct {
     uint8_t base_index;      // 候选起始索引

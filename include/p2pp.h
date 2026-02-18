@@ -10,8 +10,19 @@
 #define P2PP_H
 
 #include <stdint.h>
-#include <netinet/in.h>
 #include <p2p.h>
+
+#if defined(_WIN32) || defined(_WIN64)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#else
+#  include <netinet/in.h>
+#endif
+
+/* #pragma pack(push/pop) 受 MSVC / GCC / Clang 三大编译器支持，无需平台宏 */
 
 /* ============================================================================
  * NAT UDP 包定义
@@ -129,11 +140,13 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 
  * 布局: [type: 1B][ip: 4B][port: 2B]
  */
+#pragma pack(push, 1)
 typedef struct {
     uint8_t             type;               // 候选类型 (0=Host, 1=Srflx, 2=Relay, 3=Prflx)
     uint32_t            ip;                 // IP 地址（网络字节序）
     uint16_t            port;               // 端口（网络字节序）
-} __attribute__((packed)) p2p_compact_candidate_t;
+} p2p_compact_candidate_t;
+#pragma pack(pop)
 
 /*
  * COMPACT 模式消息格式（以下均为 payload 部分，前面需加 4 字节包头）:
