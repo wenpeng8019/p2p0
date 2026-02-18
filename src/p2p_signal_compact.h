@@ -74,7 +74,7 @@
 #define P2P_SIGNAL_COMPACT_H
 
 #include <p2p.h>
-#include <netinet/in.h>
+#include "p2p_platform.h"   /* cross-platform socket headers */
 
 /* 前向声明 */
 struct p2p_session;

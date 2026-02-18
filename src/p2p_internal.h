@@ -110,8 +110,8 @@ struct p2p_session {
     int                         path;               // 连接路径 P2P_PATH_*
 
     /* ======================== Socket 资源 ======================== */
-    int                         sock;               // UDP 套接字描述符
-    int                         tcp_sock;           // TCP 套接字（打洞/回退用）
+    p2p_socket_t                sock;               // UDP 套接字描述符
+    p2p_socket_t                tcp_sock;           // TCP 套接字（打洞/回退用）
     struct sockaddr_in          active_addr;        // 当前通信目标地址
 
     /* ======================== NAT 检测 ======================== */

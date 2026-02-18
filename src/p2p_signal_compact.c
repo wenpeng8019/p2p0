@@ -23,9 +23,13 @@
 #include "p2p_udp.h"
 
 #include <string.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 #include <stdio.h>
+#ifndef _WIN32
 #include <sys/time.h>
+#endif
 
 #define REGISTER_INTERVAL_MS    1000    /* 注册重发间隔 */
 #define PEER_INFO_INTERVAL_MS   2000    /* PEER_INFO 重发间隔 */

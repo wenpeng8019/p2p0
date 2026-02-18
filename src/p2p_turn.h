@@ -122,7 +122,7 @@
 #define P2P_TURN_H
 
 #include <stdint.h>
-#include <netinet/in.h>
+#include "p2p_platform.h"   /* cross-platform socket headers */
 
 struct p2p_session;
 

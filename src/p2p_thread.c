@@ -4,7 +4,7 @@
 #include "p2p_thread.h"
 #include "p2p_internal.h"
 
-#ifdef P2P_OS_WINDOWS
+#ifdef _WIN32
 static DWORD WINAPI p2p_thread_func(LPVOID arg) {
 #else
 static void *p2p_thread_func(void *arg) {
@@ -21,7 +21,7 @@ static void *p2p_thread_func(void *arg) {
         p2p_sleep_ms(ms);
     }
 
-#ifdef P2P_OS_WINDOWS
+#ifdef _WIN32
     return 0;
 #else
     return NULL;

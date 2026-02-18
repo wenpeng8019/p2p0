@@ -11,7 +11,9 @@
 #include "p2p_udp.h"
 
 #include <string.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 #include <stddef.h>
 #include <stdio.h>
 

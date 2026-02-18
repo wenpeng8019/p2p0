@@ -34,9 +34,15 @@
 #include "p2p_internal.h"
 #include "p2p_signal_relay.h"
 #include "p2p_udp.h"
-#include <ifaddrs.h>
-#include <net/if.h>
-#include <netdb.h>
+#ifndef _WIN32
+#   include <ifaddrs.h>
+#   include <net/if.h>
+#   include <netdb.h>
+#endif
+#ifdef _WIN32
+#   include <iphlpapi.h>
+#   pragma comment(lib, "iphlpapi.lib")
+#endif
 
 /* ============================================================================
  * 优先级计算（RFC 5245 Section 4.1.2）
@@ -331,6 +337,15 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
     }
 
     /*
+     * Passive peer (no --to): wait for incoming OFFER before sending candidates.
+     * The remote_peer_id will be set when relay_tick receives the OFFER.
+     */
+    if (s->remote_peer_id[0] == '\0') {
+        /* No target peer yet, skip trickle send. batch resend in p2p_update() after OFFER. */
+        return 0;
+    }
+
+    /*
      * 检查 TCP 连接状态
      * 如果未连接，返回失败。批量重发由 p2p_update() 的定期逻辑处理。
      */
@@ -396,44 +411,76 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      * Host Candidate 是本地网卡的 IP 地址。
      * 在同一局域网内的对端可以直接使用此地址通信。
      */
-    struct ifaddrs *ifaddr, *ifa;
-    if (getifaddrs(&ifaddr) == 0) {
+    {
+        /* 获取本地端口 */
+        struct sockaddr_in loc;
+        socklen_t loclen = sizeof(loc);
+        getsockname(s->sock, (struct sockaddr *)&loc, &loclen);
 
         int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
-        for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-            /* 只处理 IPv4 地址，跳过回环接口 */
-            if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET) continue;
-            if (ifa->ifa_flags & IFF_LOOPBACK) continue;
 
-            if (s->local_cand_cnt < P2P_MAX_CANDIDATES) {
-                p2p_candidate_t *c = &s->local_cands[s->local_cand_cnt++];
+#ifdef _WIN32
+        /* Windows: 使用 GetAdaptersAddresses 枚举 IPv4 地址 */
+        ULONG bufLen = 15000;
+        PIP_ADAPTER_ADDRESSES pAddrs = NULL;
+        DWORD ret;
+        do {
+            pAddrs = (PIP_ADAPTER_ADDRESSES)malloc(bufLen);
+            if (!pAddrs) break;
+            ret = GetAdaptersAddresses(AF_INET,
+                    GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                    GAA_FLAG_SKIP_DNS_SERVER, NULL, pAddrs, &bufLen);
+            if (ret == ERROR_BUFFER_OVERFLOW) { free(pAddrs); pAddrs = NULL; }
+        } while (ret == ERROR_BUFFER_OVERFLOW);
 
-                c->type = P2P_CAND_HOST;
-                
-                /* 
-                 * 使用 RFC 5245 优先级计算公式
-                 * local_pref 递减以区分多个网卡（第一个网卡优先级最高）
-                 */
-                uint16_t local_pref = 65535 - host_index;
-                c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
-                host_index++;
+        if (pAddrs && ret == NO_ERROR) {
+            for (PIP_ADAPTER_ADDRESSES a = pAddrs; a != NULL; a = a->Next) {
+                if (a->OperStatus != IfOperStatusUp) continue;
+                if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+                for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress;
+                     ua != NULL; ua = ua->Next) {
+                    if (s->local_cand_cnt >= P2P_MAX_CANDIDATES) break;
+                    struct sockaddr_in *sa = (struct sockaddr_in *)ua->Address.lpSockaddr;
+                    if (sa->sin_family != AF_INET) continue;
 
-                memcpy(&c->addr, ifa->ifa_addr, sizeof(struct sockaddr_in));
-
-                /* 使用 socket 绑定的端口 */
-                struct sockaddr_in loc;
-                socklen_t loclen = sizeof(loc);
-                getsockname(s->sock, (struct sockaddr *)&loc, &loclen);
-                c->addr.sin_port = loc.sin_port;
-                
-                printf("[ICE] Gathered Host Candidate: %s:%d (priority=0x%08x)\n", 
-                       inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
-                
-                /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
-                p2p_ice_send_local_candidate(s, c);
+                    p2p_candidate_t *c = &s->local_cands[s->local_cand_cnt++];
+                    c->type = P2P_CAND_HOST;
+                    uint16_t local_pref = (uint16_t)(65535 - host_index);
+                    c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
+                    host_index++;
+                    memcpy(&c->addr, sa, sizeof(struct sockaddr_in));
+                    c->addr.sin_port = loc.sin_port;
+                    printf("[ICE] Gathered Host Candidate: %s:%d (priority=0x%08x)\n",
+                           inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                    p2p_ice_send_local_candidate(s, c);
+                }
             }
         }
-        freeifaddrs(ifaddr);
+        if (pAddrs) free(pAddrs);
+#else
+        struct ifaddrs *ifaddr, *ifa;
+        if (getifaddrs(&ifaddr) == 0) {
+            for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+                /* 只处理 IPv4 地址，跳过回环接口 */
+                if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET) continue;
+                if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+
+                if (s->local_cand_cnt < P2P_MAX_CANDIDATES) {
+                    p2p_candidate_t *c = &s->local_cands[s->local_cand_cnt++];
+                    c->type = P2P_CAND_HOST;
+                    uint16_t local_pref = (uint16_t)(65535 - host_index);
+                    c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
+                    host_index++;
+                    memcpy(&c->addr, ifa->ifa_addr, sizeof(struct sockaddr_in));
+                    c->addr.sin_port = loc.sin_port;
+                    printf("[ICE] Gathered Host Candidate: %s:%d (priority=0x%08x)\n",
+                           inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                    p2p_ice_send_local_candidate(s, c);
+                }
+            }
+            freeifaddrs(ifaddr);
+        }
+#endif
     }
 
     /* ======================== 2. 收集 Srflx 候选 ======================== */

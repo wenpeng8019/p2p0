@@ -8,8 +8,16 @@
 #include "p2p_internal.h"
 
 #include <string.h>
-#include <ifaddrs.h>
-#include <net/if.h>
+
+#ifdef _WIN32
+#   include <winsock2.h>
+#   include <ws2tcpip.h>
+#   include <iphlpapi.h>
+#   pragma comment(lib, "iphlpapi.lib")
+#else
+#   include <ifaddrs.h>
+#   include <net/if.h>
+#endif
 
 void route_init(route_ctx_t *rt) {
     memset(rt, 0, sizeof(*rt));
@@ -18,19 +26,59 @@ void route_init(route_ctx_t *rt) {
 // 检测获取本地所有有效的网络地址
 int route_detect_local(route_ctx_t *rt) {
 
-    // 读取本地网络接口列表
+    rt->addr_count = 0;
+
+#ifdef _WIN32
+    /* Windows: 使用 GetAdaptersAddresses 枚举 IPv4 地址 */
+    ULONG bufLen = 15000;
+    PIP_ADAPTER_ADDRESSES pAddrs = NULL;
+    DWORD ret;
+
+    do {
+        pAddrs = (PIP_ADAPTER_ADDRESSES)malloc(bufLen);
+        if (!pAddrs) return -1;
+        ret = GetAdaptersAddresses(AF_INET,
+                GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                GAA_FLAG_SKIP_DNS_SERVER,
+                NULL, pAddrs, &bufLen);
+        if (ret == ERROR_BUFFER_OVERFLOW) { free(pAddrs); pAddrs = NULL; }
+    } while (ret == ERROR_BUFFER_OVERFLOW);
+
+    if (ret != NO_ERROR) { free(pAddrs); return -1; }
+
+    for (PIP_ADAPTER_ADDRESSES a = pAddrs; a != NULL; a = a->Next) {
+        if (rt->addr_count >= 8) break;
+        if (a->OperStatus != IfOperStatusUp) continue;          /* 接口未启动 */
+        if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;   /* 跳过 localhost */
+
+        for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress;
+             ua != NULL; ua = ua->Next) {
+            if (rt->addr_count >= 8) break;
+            struct sockaddr_in *sa = (struct sockaddr_in *)ua->Address.lpSockaddr;
+            if (sa->sin_family != AF_INET) continue;
+
+            /* 计算子网掩码 */
+            ULONG prefixLen = ua->OnLinkPrefixLength;
+            uint32_t mask = prefixLen ? htonl(~((1u << (32 - prefixLen)) - 1)) : 0;
+
+            rt->local_addrs[rt->addr_count] = *sa;
+            rt->local_masks[rt->addr_count] = mask;
+            rt->addr_count++;
+        }
+    }
+    free(pAddrs);
+
+#else
+    /* POSIX: 使用 getifaddrs */
     struct ifaddrs *ifa_list, *ifa;
     if (getifaddrs(&ifa_list) < 0) return -1;
 
-    rt->addr_count = 0;
-
-    // 遍历所有地网络接口
     for (ifa = ifa_list; ifa != NULL; ifa = ifa->ifa_next) {
         if (rt->addr_count >= 8) break;
         if (!ifa->ifa_addr) continue;
-        if (ifa->ifa_addr->sa_family != AF_INET) continue;      // 协议无效
-        if (ifa->ifa_flags & IFF_LOOPBACK) continue;            // 跳过 localhost
-        if (!(ifa->ifa_flags & IFF_UP)) continue;               // 接口未启动
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;      /* 协议无效 */
+        if (ifa->ifa_flags & IFF_LOOPBACK) continue;            /* 跳过 localhost */
+        if (!(ifa->ifa_flags & IFF_UP)) continue;               /* 接口未启动 */
 
         struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
         struct sockaddr_in *mask = (struct sockaddr_in *)ifa->ifa_netmask;
@@ -41,6 +89,8 @@ int route_detect_local(route_ctx_t *rt) {
     }
 
     freeifaddrs(ifa_list);
+#endif
+
     return rt->addr_count;
 }
 
@@ -59,7 +109,7 @@ int route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv
 }
 
 // 直接向对方内网地址发送 ROUTE_PROBE 消息，用于确认自己可以和对方直接通讯，即处于同一个子网内
-int route_send_probe(route_ctx_t *rt, int sock,
+int route_send_probe(route_ctx_t *rt, p2p_socket_t sock,
                      const struct sockaddr_in *peer_priv,
                      uint16_t local_port) {
 
@@ -73,7 +123,7 @@ int route_send_probe(route_ctx_t *rt, int sock,
 }
 
 // 处理对方直接发过来的 ROUTE_PROBE 消息，说明对方和自己处于同一个子网内
-int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, int sock) { (void)rt;
+int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, p2p_socket_t sock) { (void)rt;
 
     // ROUTE_PROBE 回复应答消息
     return udp_send_packet(sock, from, P2P_PKT_ROUTE_PROBE_ACK, 0, 0, NULL, 0);

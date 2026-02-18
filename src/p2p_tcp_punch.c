@@ -9,12 +9,12 @@
 int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
     if (!s->cfg.enable_tcp) return -1;
 
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) return -1;
+    p2p_socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == P2P_INVALID_SOCKET) return -1;
 
     /* 必须设置 SO_REUSEADDR and SO_REUSEPORT (如果支持) */
     int opt = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 #ifdef SO_REUSEPORT
     setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
 #endif

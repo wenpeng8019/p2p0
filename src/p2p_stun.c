@@ -23,8 +23,10 @@
 
 #include "p2p_internal.h"
 #include "p2p_udp.h"
+#ifndef _WIN32
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#endif
 
 /* 前向声明 */
 extern uint64_t time_ms(void);
@@ -433,7 +435,7 @@ static const char* p2p_stun_nat_type_str(p2p_stun_nat_type_t type) {
 /*
  * 获取本地 socket 绑定的地址
  */
-static int get_local_address(int sock, struct sockaddr_in *addr) {
+static int get_local_address(p2p_socket_t sock, struct sockaddr_in *addr) {
     socklen_t len = sizeof(*addr);
     if (getsockname(sock, (struct sockaddr *)addr, &len) < 0) {
         return -1;

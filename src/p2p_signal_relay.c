@@ -113,7 +113,7 @@
 void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx) {
 
     memset(ctx, 0, sizeof(p2p_signal_relay_ctx_t));
-    ctx->fd = -1;
+    ctx->fd = P2P_INVALID_SOCKET;
     ctx->state = SIGNAL_DISCONNECTED;
     ctx->total_candidates_sent = 0;
     ctx->total_candidates_acked = 0;
@@ -159,7 +159,7 @@ int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, i
     // 建立标准 tcp 连接
 
     ctx->fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (ctx->fd < 0) {
+    if (ctx->fd == P2P_INVALID_SOCKET) {
         ctx->state = SIGNAL_ERROR;
         return -1;
     }
@@ -170,14 +170,11 @@ int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, i
     inet_pton(AF_INET, server_ip, &ctx->server_addr.sin_addr);
 
     if (connect(ctx->fd, (struct sockaddr *)&ctx->server_addr, sizeof(ctx->server_addr)) < 0) {
-        close(ctx->fd);
-        ctx->fd = -1;
+        p2p_close_socket(ctx->fd);
+        ctx->fd = P2P_INVALID_SOCKET;
         ctx->state = SIGNAL_ERROR;
         return -1;
     }
-
-    // 设置为非阻塞模式
-    p2p_set_nonblock(ctx->fd);
 
     // 初始化自己的 name
     strncpy(ctx->my_name, my_name, P2P_PEER_ID_MAX);
@@ -187,9 +184,47 @@ int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, i
     p2p_relay_login_t login; memset(&login, 0, sizeof(login));
     strncpy(login.name, my_name, P2P_PEER_ID_MAX);
 
-    // 发送数据包
-    send(ctx->fd, &hdr, sizeof(hdr), 0);
-    send(ctx->fd, &login, sizeof(login), 0);
+    // 发送数据包 (socket is blocking here)
+    send(ctx->fd, (const char *)&hdr, sizeof(hdr), 0);
+    send(ctx->fd, (const char *)&login, sizeof(login), 0);
+
+    // 等待 LOGIN_ACK (blocking recv with 3s timeout)
+    {
+        fd_set rfds;
+        struct timeval tv;
+        FD_ZERO(&rfds);
+        FD_SET(ctx->fd, &rfds);
+        tv.tv_sec = 3;
+        tv.tv_usec = 0;
+#ifdef _WIN32
+        int sel = select(0, &rfds, NULL, NULL, &tv);
+#else
+        int sel = select((int)ctx->fd + 1, &rfds, NULL, NULL, &tv);
+#endif
+        if (sel > 0) {
+            p2p_relay_hdr_t ack_hdr;
+            int rn = recv(ctx->fd, (char *)&ack_hdr, sizeof(ack_hdr), 0);
+            if (rn == sizeof(ack_hdr) && ack_hdr.magic == P2P_RLY_MAGIC &&
+                ack_hdr.type == P2P_RLY_LOGIN_ACK) {
+                /* consume any LOGIN_ACK payload (length bytes) */
+                if (ack_hdr.length > 0) {
+                    char discard[64];
+                    uint32_t to_read = ack_hdr.length;
+                    while (to_read > 0) {
+                        uint32_t chunk = to_read < sizeof(discard) ? to_read : sizeof(discard);
+                        int rd = recv(ctx->fd, discard, chunk, 0);
+                        if (rd <= 0) break;
+                        to_read -= rd;
+                    }
+                }
+            }
+            /* If we got something else, it stays unread — unusual but non-fatal */
+        }
+        /* On timeout we continue anyway; server may send LOGIN_ACK asynchronously */
+    }
+
+    // 设置为非阻塞模式 (after LOGIN_ACK is consumed)
+    p2p_set_nonblock(ctx->fd);
 
     // 标记为已连接
     ctx->state = SIGNAL_CONNECTED;
@@ -208,9 +243,9 @@ int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, i
  * @param ctx  信令上下文
  */
 void p2p_signal_relay_close(p2p_signal_relay_ctx_t *ctx) {
-    if (ctx->fd >= 0) {
-        close(ctx->fd);
-        ctx->fd = -1;
+    if (ctx->fd != P2P_INVALID_SOCKET) {
+        p2p_close_socket(ctx->fd);
+        ctx->fd = P2P_INVALID_SOCKET;
     }
     ctx->state = SIGNAL_DISCONNECTED;
 }
@@ -239,7 +274,7 @@ void p2p_signal_relay_close(p2p_signal_relay_ctx_t *ctx) {
  *                    -3 服务器错误
  */
 int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len) {
-    if (ctx->fd < 0) return -1;
+    if (ctx->fd == P2P_INVALID_SOCKET) return -1;
 
     // 构造连接请求数据包
     // + 该数据包发给信令服务器，并由信令服务器中继转发给目标方。
@@ -248,7 +283,7 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
     char target[P2P_PEER_ID_MAX] = {0};
     strncpy(target, target_name, P2P_PEER_ID_MAX);
 
-    if (send(ctx->fd, &hdr, sizeof(hdr), 0) != sizeof(hdr)) {
+    if (send(ctx->fd, (const char *)&hdr, sizeof(hdr), 0) != sizeof(hdr)) {
         printf("Signaling [PUB]: Failed to send header\n");
         return -1;
     }
@@ -256,7 +291,7 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
         printf("Signaling [PUB]: Failed to send target name\n");
         return -1;
     }
-    if (send(ctx->fd, data, len, 0) != len) {
+    if (send(ctx->fd, (const char *)data, len, 0) != len) {
         printf("Signaling [PUB]: Failed to send payload\n");
         return -1;
     }
@@ -273,32 +308,39 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
         memcpy(&candidates_in_payload, (const uint8_t*)data + 72, 4);
     }
 
-    // 等待服务器 ACK（超时 2 秒）
-    fd_set readfds;
-    struct timeval tv;
-    FD_ZERO(&readfds);
-    FD_SET(ctx->fd, &readfds);
-    tv.tv_sec = 2;
-    tv.tv_usec = 0;
-
-    int ret = select(ctx->fd + 1, &readfds, NULL, NULL, &tv);
-    if (ret <= 0) {
-        printf("Signaling [PUB]: ACK timeout or select error\n");
-        return -1;  // 超时或错误
-    }
-
-    // 接收 ACK 头部
+    // 接收 ACK (blocking select + recv, socket is non-blocking now)
     p2p_relay_hdr_t ack_hdr;
-    ssize_t n = recv(ctx->fd, &ack_hdr, sizeof(ack_hdr), 0);
-    if (n != sizeof(ack_hdr) || ack_hdr.magic != P2P_RLY_MAGIC || ack_hdr.type != P2P_RLY_CONNECT_ACK) {
-        printf("Signaling [PUB]: Invalid ACK header (n=%zd, type=%d)\n", n, ack_hdr.type);
+    {
+        fd_set rfds; struct timeval tv;
+        FD_ZERO(&rfds); FD_SET(ctx->fd, &rfds);
+        tv.tv_sec = 3; tv.tv_usec = 0;
+#ifdef _WIN32
+        int sel = select(0, &rfds, NULL, NULL, &tv);
+#else
+        int sel = select((int)ctx->fd + 1, &rfds, NULL, NULL, &tv);
+#endif
+        if (sel <= 0) { printf("Signaling [PUB]: ACK timeout\n"); return -1; }
+    }
+    int rn = recv(ctx->fd, (char *)&ack_hdr, sizeof(ack_hdr), 0);
+    if (rn != (int)sizeof(ack_hdr) || ack_hdr.magic != P2P_RLY_MAGIC || ack_hdr.type != P2P_RLY_CONNECT_ACK) {
+        printf("Signaling [PUB]: Invalid ACK header (type=%d)\n", rn > 0 ? (int)ack_hdr.type : -1);
         return -1;
     }
 
     // 接收 ACK 负载
     p2p_relay_connect_ack_t ack_payload;
-    n = recv(ctx->fd, &ack_payload, sizeof(ack_payload), 0);
-    if (n != sizeof(ack_payload)) {
+    {
+        fd_set rfds; struct timeval tv;
+        FD_ZERO(&rfds); FD_SET(ctx->fd, &rfds);
+        tv.tv_sec = 3; tv.tv_usec = 0;
+#ifdef _WIN32
+        int sel = select(0, &rfds, NULL, NULL, &tv);
+#else
+        int sel = select((int)ctx->fd + 1, &rfds, NULL, NULL, &tv);
+#endif
+        if (sel <= 0) { printf("Signaling [PUB]: ACK payload timeout\n"); return -1; }
+    }
+    if (recv(ctx->fd, (char *)&ack_payload, sizeof(ack_payload), 0) != (int)sizeof(ack_payload)) {
         printf("Signaling [PUB]: Invalid ACK payload\n");
         return -1;
     }
@@ -353,7 +395,7 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
  * @return            0 成功，-1 失败
  */
 int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len) {
-    if (ctx->fd < 0) return -1;
+    if (ctx->fd == P2P_INVALID_SOCKET) return -1;
 
     // 构造 answer 数据包 (P2P_RLY_ANSWER)
     // 服务器会将其转换为 P2P_RLY_FORWARD 并转发给目标方
@@ -361,9 +403,9 @@ int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *targ
     char target[P2P_PEER_ID_MAX] = {0};
     strncpy(target, target_name, P2P_PEER_ID_MAX);
 
-    send(ctx->fd, &hdr, sizeof(hdr), 0);
+    send(ctx->fd, (const char *)&hdr, sizeof(hdr), 0);
     send(ctx->fd, target, P2P_PEER_ID_MAX, 0);
-    send(ctx->fd, data, len, 0);
+    send(ctx->fd, (const char *)data, len, 0);
     
     printf("Signaling [PUB]: Sent answer to '%s' (%d bytes)\n", target_name, len);
     fflush(stdout);
@@ -387,7 +429,7 @@ int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *targ
  * @param s    P2P 会话
  */
 void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
-    if (ctx->fd < 0) return;
+    if (ctx->fd == P2P_INVALID_SOCKET) return;
 
     // 检查等待超时（60 秒）
     if (ctx->waiting_for_peer) {
@@ -401,22 +443,50 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
         }
     }
 
-    // 接收信令服务数据包
+    // 接收信令服务数据包 (non-blocking peek; if data available read full header)
     p2p_relay_hdr_t hdr;
-    int n = recv(ctx->fd, &hdr, sizeof(hdr), 0);
-    if (n == (int)sizeof(hdr)) {
-        if (hdr.magic != P2P_RLY_MAGIC) return;
+    int n = recv(ctx->fd, (char *)&hdr, sizeof(hdr), 0);
+    if (n == 0) {
+        /* Connection closed by server */
+        p2p_close_socket(ctx->fd);
+        ctx->fd = P2P_INVALID_SOCKET;
+        ctx->state = SIGNAL_DISCONNECTED;
+        return;
+    }
+    if (n < (int)sizeof(hdr)) {
+        /* n <= 0: EAGAIN / EWOULDBLOCK (no data) or error; n > 0: shouldn't happen on local TCP */
+        return;
+    }
+    if (hdr.magic != P2P_RLY_MAGIC) return;
 
         // 信令服务器（中继）转发的，来自对方的请求
         if (hdr.type == P2P_RLY_OFFER || hdr.type == P2P_RLY_FORWARD) {
 
             // 读取对方 name，即来自谁的连接请求
             char sender_name[P2P_PEER_ID_MAX];
-            recv(ctx->fd, sender_name, P2P_PEER_ID_MAX, 0);
+            if (recv(ctx->fd, sender_name, P2P_PEER_ID_MAX, 0) != P2P_PEER_ID_MAX) return;
 
             // 保存发送者名称（用于后续发送 answer）
             if (hdr.type == P2P_RLY_OFFER) {
                 strncpy(ctx->incoming_peer_name, sender_name, P2P_PEER_ID_MAX);
+                /* If passive peer (no --to), learn peer ID from the incoming OFFER.
+                 * Reset trickle-ICE counters so p2p_update() will send all
+                 * local candidates to the correct target (sender_name). */
+                if (s->remote_peer_id[0] == '\0') {
+                    /* Passive peer (no --to): learn the remote ID from the incoming OFFER.
+                     * p2p_update() checks remote_peer_id before sending candidates, so
+                     * candidates gathered before this point were silently skipped.
+                     * Defensively reset counters so nothing is accidentally counted as sent. */
+                    strncpy(s->remote_peer_id, sender_name, P2P_PEER_ID_MAX - 1);
+                    s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+                    ctx->total_candidates_sent  = 0;
+                    ctx->total_candidates_acked = 0;
+                    ctx->next_candidate_index   = 0;
+                    ctx->waiting_for_peer       = false;
+                    s->signal_sent              = false;
+                    s->last_cand_cnt_sent       = 0;
+                    printf("Signaling: Passive peer learned remote ID '%s' from OFFER\n", sender_name);
+                }
             }
             
             // 收到 FORWARD：对端已上线，清除等待状态
@@ -432,7 +502,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
             // + 信令服务器只中继转发请求数据，所以数据结构是由对等双方自行约定
             uint32_t payload_len = hdr.length - P2P_PEER_ID_MAX;
             uint8_t *payload = malloc(payload_len);
-            recv(ctx->fd, payload, payload_len, 0);
+            if (recv(ctx->fd, (char *)payload, payload_len, 0) != (int)payload_len) { free(payload); return; }
 
             printf("Signaling: Received signal from '%s' (%u bytes)\n", sender_name, payload_len);
             fflush(stdout);
@@ -470,6 +540,5 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
 
             free(payload);
         }
-    }
 }
 
