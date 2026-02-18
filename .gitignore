@@ -1,6 +1,8 @@
 # Build artifacts
 build/
 build_cmake/
+build_win/
+build_win*/
 cmake-build-*/
 cmake-install-*/
 out/

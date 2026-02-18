@@ -22,7 +22,7 @@ static const char *current_test = NULL;
 /* 测试宏 */
 #define TEST(name) \
     static void test_##name(void); \
-    static void __attribute__((constructor)) register_##name(void) { \
+    static void register_##name(void) { \
         (void)0; \
     } \
     static void test_##name(void)

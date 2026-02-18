@@ -17,7 +17,9 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 
 // 测试日志开关
 static bool g_verbose = true;

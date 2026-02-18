@@ -21,8 +21,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 // 测试日志开关
 static bool g_verbose = true;
@@ -398,7 +402,11 @@ TEST(heartbeat_message_handling) {
     int fd = mock_client_register("alice");
     time_t before = g_mock_clients[0].last_active;
     
+#ifdef _WIN32
+    Sleep(1000);
+#else
     sleep(1);
+#endif
     mock_compact_server_update_active(fd);
     time_t after = g_mock_clients[0].last_active;
     

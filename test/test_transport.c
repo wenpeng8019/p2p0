@@ -11,8 +11,10 @@
 #include "../src/p2p_internal.h"
 #include "../src/p2p_stream.h"
 #include "../src/p2p_udp.h"
+#ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
+#endif
 
 /* ============================================================================
  * 模拟 UDP 包队列

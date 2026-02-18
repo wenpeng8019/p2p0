@@ -17,7 +17,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <stdbool.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 #include <p2pp.h>
 
 // 测试日志开关

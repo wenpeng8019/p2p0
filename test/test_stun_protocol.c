@@ -17,7 +17,9 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 
 /* ---- 从 p2p_stun.h 复制必要的常量与类型，保持独立 ---- */
 
