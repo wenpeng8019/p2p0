@@ -58,7 +58,6 @@
 
 #include "p2p_signal_pubsub.h"
 #include "p2p_crypto_extra.h"
-#include "p2p_signal_protocol.h"
 #include "p2p_internal.h"
 #include "p2p_log.h"
 #include <stdio.h>
@@ -67,6 +66,9 @@
 #include <time.h>
 #include <ctype.h>
 #include <arpa/inet.h>
+#include <curl/curl.h>
+#include <openssl/des.h>
+#include <openssl/evp.h>
 
 /*
  * ============================================================================
@@ -190,18 +192,21 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
     p2p_des_decrypt(key, enc_buf, enc_len, dec_buf);
     
     /* 反序列化信令数据 */
-    p2p_signaling_payload_t p;
-    if (p2p_signal_unpack(&p, dec_buf, enc_len) == 0) {
-        P2P_LOG_INFO("SIGNAL_PUBSUB", "Received valid signal from '%s'", p.sender);
+    p2p_signaling_payload_hdr_t payload;
+    if (enc_len >= 76 && unpack_signaling_payload_hdr(&payload, dec_buf) == 0 &&
+        enc_len >= (size_t)(76 + payload.candidate_count * 32)) {
+        P2P_LOG_INFO("SIGNAL_PUBSUB", "Received valid signal from '%s'", payload.sender);
         
         /* 添加远端 ICE 候选 */
-        for (int i = 0; i < p.candidate_count && i < 8; i++) {
+        for (int i = 0; i < payload.candidate_count && i < 8; i++) {
             if (s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
-                s->remote_cands[s->remote_cand_cnt++] = p.candidates[i];
+                p2p_candidate_t c;
+                unpack_candidate(&c, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
+                s->remote_cands[s->remote_cand_cnt++] = c;
                 printf("[ICE] 收到远端候选: 类型=%d, 地址=%s:%d\n",
-                       p.candidates[i].type,
-                       inet_ntoa(p.candidates[i].addr.sin_addr),
-                       ntohs(p.candidates[i].addr.sin_port));
+                       c.type,
+                       inet_ntoa(c.addr.sin_addr),
+                       ntohs(c.addr.sin_port));
             }
         }
         
@@ -213,23 +218,25 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             ctx->answered = 1;
             
             /* 保存远端 local_peer_id */
-            strncpy(s->remote_peer_id, p.sender, sizeof(s->remote_peer_id) - 1);
+            strncpy(s->remote_peer_id, payload.sender, sizeof(s->remote_peer_id) - 1);
             
-            /* 构建 answer 数据包 */
-            p2p_signaling_payload_t answer = {0};
-            strncpy(answer.sender, s->cfg.local_peer_id, 31);
-            strncpy(answer.target, p.sender, 31);
-            answer.candidate_count = s->local_cand_cnt;
-            memcpy(answer.candidates, s->local_cands, 
-                   sizeof(p2p_candidate_t) * s->local_cand_cnt);
-            
-            /* 序列化并发送 */
+            /* 构建并发送 answer */
             uint8_t buf[2048];
-            int n = p2p_signal_pack(&answer, buf, sizeof(buf));
+            int n = pack_signaling_payload_hdr(
+                s->cfg.local_peer_id,
+                payload.sender,
+                0,  /* timestamp */
+                0,  /* delay_trigger */
+                s->local_cand_cnt,
+                buf
+            );
+            for (int i = 0; i < s->local_cand_cnt; i++) {
+                n += pack_candidate(&s->local_cands[i], buf + n);
+            }
             if (n > 0) {
-                p2p_signal_pubsub_send(ctx, p.sender, buf, n);
+                p2p_signal_pubsub_send(ctx, payload.sender, buf, n);
                 printf("[SIGNALING] 自动发送 answer（包含 %d 个候选）给 %s\n", 
-                       s->local_cand_cnt, p.sender);
+                       s->local_cand_cnt, payload.sender);
             }
         }
     } else {

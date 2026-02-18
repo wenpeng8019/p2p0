@@ -11,7 +11,6 @@
 #include "p2p_internal.h"
 #include "p2p_signal_relay.h"
 #include "p2p_signal_pubsub.h"
-#include "p2p_signal_protocol.h"
 #include "p2p_log.h"
 #include <stdio.h>
 #include <stdlib.h>

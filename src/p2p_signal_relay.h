@@ -59,6 +59,11 @@ typedef struct {
     struct sockaddr_in server_addr;              /* 服务器地址 */
     p2p_signal_relay_state_t state;              /* 连接状态 */
     uint64_t last_connect_attempt;               /* 最后连接尝试时间（毫秒） */
+    
+    /* ===== 候选发送追踪（用于断点续传） ===== */
+    int total_candidates_sent;                   /* 累计发送的候选总数 */
+    int total_candidates_acked;                  /* 服务器已确认缓存的总数 */
+    int next_candidate_index;                    /* 下次应从第几个开始发（断点续传） */
 } p2p_signal_relay_ctx_t;
 
 /* ============================================================================

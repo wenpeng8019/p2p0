@@ -43,9 +43,9 @@
  *   P2P_RLY_LIST         (3) → 请求在线用户列表
  *   P2P_RLY_LIST_RES     (4) → 返回在线用户列表
  *   P2P_RLY_CONNECT      (5) → 向目标方发起连接请求（服务器转为 P2P_RLY_OFFER 转发）
- *   P2P_RLY_OFFER       (6) → 服务器转发的连接请求（来自主动方）
- *   P2P_RLY_ANSWER   (7) → 被动方应答（服务器转为 P2P_RLY_FORWARD 转发）
- *   P2P_RLY_FORWARD (8) → 服务器转发的应答（来自被动方）
+ *   P2P_RLY_OFFER        (6) → 服务器转发的连接请求（来自主动方）
+ *   P2P_RLY_ANSWER       (7) → 被动方应答（服务器转为 P2P_RLY_FORWARD 转发）
+ *   P2P_RLY_FORWARD      (8) → 服务器转发的应答（来自被动方）
  *   P2P_RLY_HEARTBEAT    (9) → 心跳包，保持 TCP 连接和 NAT 映射
  *
  * ============================================================================
@@ -104,7 +104,6 @@
  */
 
 #include "p2p_signal_relay.h"
-#include "p2p_signal_protocol.h"
 #include "p2p_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -120,6 +119,9 @@ void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx) {
     memset(ctx, 0, sizeof(p2p_signal_relay_ctx_t));
     ctx->fd = -1;
     ctx->state = SIGNAL_DISCONNECTED;
+    ctx->total_candidates_sent = 0;
+    ctx->total_candidates_acked = 0;
+    ctx->next_candidate_index = 0;
 }
 
 /* ============================================================================
@@ -187,8 +189,7 @@ int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, i
 
     // 初始化登录数据包
     p2p_relay_hdr_t hdr = {P2P_RLY_MAGIC, P2P_RLY_LOGIN, sizeof(p2p_relay_login_t)};
-    p2p_relay_login_t login;
-    memset(&login, 0, sizeof(login));
+    p2p_relay_login_t login; memset(&login, 0, sizeof(login));
     strncpy(login.name, my_name, P2P_PEER_ID_MAX);
 
     // 发送数据包
@@ -268,7 +269,16 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
     printf("Signaling [PUB]: Sent connect request to '%s' (%d bytes), waiting for ACK...\n", target_name, len);
     fflush(stdout);
 
-    /* 等待服务器 ACK（超时 2 秒） */
+    // 从负载中提取候选数量（用于状态追踪）
+    // 负载格式（p2p_signaling_payload_t 序列化后）：
+    //   [sender: 32B][target: 32B][timestamp: 4B][delay_trigger: 4B][candidate_count: 4B][...]
+    // candidate_count 位于偏移量 32+32+4+4 = 72
+    uint32_t candidates_in_payload = 0;
+    if (len >= 76) {  /* 至少包含到 candidate_count */
+        memcpy(&candidates_in_payload, (const uint8_t*)data + 72, 4);
+    }
+
+    // 等待服务器 ACK（超时 2 秒）
     fd_set readfds;
     struct timeval tv;
     FD_ZERO(&readfds);
@@ -279,10 +289,10 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
     int ret = select(ctx->fd + 1, &readfds, NULL, NULL, &tv);
     if (ret <= 0) {
         printf("Signaling [PUB]: ACK timeout or select error\n");
-        return -1;  /* 超时或错误 */
+        return -1;  // 超时或错误
     }
 
-    /* 接收 ACK 头部 */
+    // 接收 ACK 头部
     p2p_relay_hdr_t ack_hdr;
     ssize_t n = recv(ctx->fd, &ack_hdr, sizeof(ack_hdr), 0);
     if (n != sizeof(ack_hdr) || ack_hdr.magic != P2P_RLY_MAGIC || ack_hdr.type != P2P_RLY_CONNECT_ACK) {
@@ -290,7 +300,7 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
         return -1;
     }
 
-    /* 接收 ACK 负载 */
+    // 接收 ACK 负载
     p2p_relay_connect_ack_t ack_payload;
     n = recv(ctx->fd, &ack_payload, sizeof(ack_payload), 0);
     if (n != sizeof(ack_payload)) {
@@ -301,15 +311,24 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
     printf("Signaling [PUB]: Received ACK (status=%d, candidates=%d)\n", 
            ack_payload.status, ack_payload.candidates_stored);
 
-    /* 根据状态返回 */
+    // 更新状态追踪
+    ctx->total_candidates_sent = candidates_in_payload;
+    
+    // 根据状态返回
     switch (ack_payload.status) {
-        case 0:  /* 成功转发 */
+        case 0:  // 成功转发
+            ctx->total_candidates_acked = ack_payload.candidates_stored;
+            ctx->next_candidate_index = ack_payload.candidates_stored;
             return ack_payload.candidates_stored > 0 ? ack_payload.candidates_stored : 1;
-        case 1:  /* 目标不在线（已存储） */
-            return 0;
-        case 2:  /* 存储失败 */
+        case 1:  // 目标不在线（已存储）
+            ctx->total_candidates_acked = ack_payload.candidates_stored;
+            ctx->next_candidate_index = ack_payload.candidates_stored;
+            return 0;  // 返回 0 表示已缓存（目标离线）
+        case 2:  // 存储失败（容量不足）
+            ctx->total_candidates_acked = 0;
+            ctx->next_candidate_index = 0;
             return -2;
-        default: /* 服务器错误 */
+        default: // 服务器错误
             return -3;
     }
 }
@@ -392,9 +411,31 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
             fflush(stdout);
 
             // 解析信令数据并注入 ICE 状态机
-            p2p_signaling_payload_t p;
-            if (p2p_signal_unpack(&p, payload, payload_len) == 0) {
-                p2p_ice_handle_signaling_payload(s, &p);
+            p2p_signaling_payload_hdr_t p;
+            if (payload_len >= 76 && unpack_signaling_payload_hdr(&p, payload) == 0 &&
+                payload_len >= (size_t)(76 + p.candidate_count * 32)) {
+                
+                /* 添加远端 ICE 候选 */
+                for (int i = 0; i < p.candidate_count; i++) {
+                    p2p_candidate_t c;
+                    unpack_candidate(&c, payload + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
+                    
+                    /* 排重检查 */
+                    int exists = 0;
+                    for (int j = 0; j < s->remote_cand_cnt; j++) {
+                        if (s->remote_cands[j].addr.sin_addr.s_addr == c.addr.sin_addr.s_addr &&
+                            s->remote_cands[j].addr.sin_port == c.addr.sin_port) {
+                            exists = 1;
+                            break;
+                        }
+                    }
+                    
+                    if (!exists && s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
+                        s->remote_cands[s->remote_cand_cnt++] = c;
+                        printf("[ICE] Added Remote Candidate: %d -> %s:%d\n",
+                               c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
+                    }
+                }
             } else {
                 /* 解包失败，尝试作为旧版 trickle 候选处理 */
                 p2p_ice_on_remote_candidates(s, payload, payload_len);

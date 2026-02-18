@@ -56,12 +56,26 @@ typedef struct compact_pair {
     time_t                  last_active;                        // 最后活跃时间
 } compact_pair_t;
 
+// RELAY 模式待转发缓存项
+typedef struct {
+    char     sender_name[P2P_PEER_ID_MAX];  // 发送者名称
+    uint8_t  payload[2048];                 // 序列化的候选数据
+    uint32_t length;                        // 负载长度
+    time_t   timestamp;                     // 缓存时间戳
+} pending_offer_t;
+
+#define RELAY_MAX_PENDING_OFFERS  16        // 每个用户最多缓存 16 个待转发 OFFER
+
 // RELAY 模式客户端（TCP 长连接）
 typedef struct relay_client {
     bool                    valid;                              // 客户端是否有效（无效意味着未分配或已回收）
     char                    name[P2P_PEER_ID_MAX];
     int                     fd;
     time_t                  last_active;                        // 最后活跃时间（用于检测死连接）
+    
+    // ===== 离线缓存队列 =====
+    pending_offer_t         pending_offers[RELAY_MAX_PENDING_OFFERS];  // 待转发的 OFFER 队列
+    int                     pending_count;                              // 已缓存的 OFFER 数量
 } relay_client_t;
 
 static compact_pair_t       g_compact_pairs[MAX_PEERS];
@@ -110,8 +124,42 @@ static void handle_relay_signaling(int idx) {
         printf("[TCP] Peer '%s' logged in (fd: %d)\n", g_relay_clients[idx].name, fd);
         fflush(stdout);
 
+        // 发送登录确认
         p2p_relay_hdr_t ack = {P2P_RLY_MAGIC, P2P_RLY_LOGIN_ACK, 0};
         send(fd, &ack, sizeof(ack), 0);
+        
+        // 检查是否有待转发的缓存 OFFER
+        if (g_relay_clients[idx].pending_count > 0) {
+            relay_client_t *client = &g_relay_clients[idx];
+            
+            printf("[TCP] Flushing %d pending OFFERs to '%s'...\n", 
+                   client->pending_count, client->name);
+            fflush(stdout);
+            
+            for (int i = 0; i < client->pending_count; i++) {
+                pending_offer_t *offer = &client->pending_offers[i];
+                
+                // 转发为 P2P_RLY_OFFER
+                p2p_relay_hdr_t relay_hdr = {
+                    P2P_RLY_MAGIC,
+                    P2P_RLY_OFFER,
+                    (uint32_t)(P2P_PEER_ID_MAX + offer->length)
+                };
+                
+                send(fd, &relay_hdr, sizeof(relay_hdr), 0);
+                send(fd, offer->sender_name, P2P_PEER_ID_MAX, 0);  // 发送者名称
+                send(fd, offer->payload, offer->length, 0);        // 负载数据
+                
+                printf("[TCP]   → Forwarded OFFER from '%s' (%u bytes, cached at %ld)\n",
+                       offer->sender_name, offer->length, offer->timestamp);
+                fflush(stdout);
+            }
+            
+            // 清空缓存
+            client->pending_count = 0;
+            printf("[TCP] All pending OFFERs flushed to '%s'\n", client->name);
+            fflush(stdout);
+        }
     }
     // 信令转发：P2P_RLY_CONNECT → P2P_RLY_OFFER，P2P_RLY_ANSWER → P2P_RLY_FORWARD
     else if (hdr.type == P2P_RLY_CONNECT || hdr.type == P2P_RLY_ANSWER) {
@@ -187,9 +235,65 @@ static void handle_relay_signaling(int idx) {
             }
         }
         if (!found) {
-            printf("[TCP] Target %s not found\n", target_name);
-            ack_status = 1;  /* 目标不在线 */
-            /* TODO: 可以在此存储候选，等目标上线后转发 */
+            printf("[TCP] Target %s not found (offline)\n", target_name);
+            
+            // 查找或创建目标用户槽位（用于缓存）
+            int target_idx = -1;
+            for (int i = 0; i < MAX_PEERS; i++) {
+                if (g_relay_clients[i].valid && strcmp(g_relay_clients[i].name, target_name) == 0) {
+                    target_idx = i;
+                    break;
+                }
+            }
+            
+            // 如果目标从未登录，分配一个离线槽位
+            if (target_idx == -1) {
+                for (int i = 0; i < MAX_PEERS; i++) {
+                    if (!g_relay_clients[i].valid) {
+                        target_idx = i;
+                        g_relay_clients[i].valid = true;
+                        g_relay_clients[i].fd = -1;  // 离线标识
+                        strncpy(g_relay_clients[i].name, target_name, P2P_PEER_ID_MAX);
+                        g_relay_clients[i].pending_count = 0;
+                        g_relay_clients[i].last_active = time(NULL);
+                        break;
+                    }
+                }
+            }
+            
+            // 尝试缓存候选
+            if (target_idx >= 0) {
+                relay_client_t *target = &g_relay_clients[target_idx];
+                
+                if (target->pending_count < RELAY_MAX_PENDING_OFFERS) {
+                    // 缓存 OFFER
+                    pending_offer_t *slot = &target->pending_offers[target->pending_count];
+                    strncpy(slot->sender_name, g_relay_clients[idx].name, P2P_PEER_ID_MAX);
+                    slot->length = payload_len;
+                    memcpy(slot->payload, payload, payload_len);
+                    slot->timestamp = time(NULL);
+                    target->pending_count++;
+                    
+                    ack_status = 1;  /* 目标不在线（已缓存） */
+                    candidates_stored = candidates_in_payload;  /* 全部缓存成功 */
+                    
+                    printf("[TCP] Cached OFFER for offline user '%s' (%d/%d), from '%s', %d candidates\n",
+                           target_name, target->pending_count, RELAY_MAX_PENDING_OFFERS,
+                           g_relay_clients[idx].name, candidates_in_payload);
+                    fflush(stdout);
+                } else {
+                    ack_status = 2;  /* 缓存已满 */
+                    candidates_stored = 0;
+                    printf("[TCP] Cannot cache OFFER for '%s': storage full (%d/%d)\n",
+                           target_name, RELAY_MAX_PENDING_OFFERS, RELAY_MAX_PENDING_OFFERS);
+                    fflush(stdout);
+                }
+            } else {
+                ack_status = 3;  /* 服务器错误（无法分配槽位） */
+                candidates_stored = 0;
+                printf("[TCP] Cannot allocate slot for offline user '%s'\n", target_name);
+                fflush(stdout);
+            }
         }
 
         /* 仅对 P2P_RLY_CONNECT 发送 ACK（P2P_RLY_ANSWER 不需要确认） */
@@ -603,6 +707,7 @@ int main(int argc, char *argv[]) {
                     g_relay_clients[i].fd = client_fd;
                     g_relay_clients[i].valid = true;
                     g_relay_clients[i].last_active = time(NULL);  // 初始化活跃时间
+                    g_relay_clients[i].pending_count = 0;         // 初始化缓存计数
                     strncpy(g_relay_clients[i].name, "unknown", P2P_PEER_ID_MAX);
                     printf("[TCP] New connection from %s:%d\n", 
                            inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));

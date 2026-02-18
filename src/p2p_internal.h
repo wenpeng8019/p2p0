@@ -94,7 +94,6 @@
 #include "p2p_signal_relay.h"  /* 中继模式信令 */
 #include "p2p_signal_pubsub.h" /* 发布/订阅模式信令 */
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
-#include "p2p_signal_protocol.h" /* 信令协议序列化 */
 
 /* ============================================================================
  * p2p_session: P2P 会话主结构体
@@ -241,6 +240,168 @@ static inline uint64_t time_ms(void) {
  */
 static inline int16_t seq_diff(uint16_t a, uint16_t b) {
     return (int16_t)(a - b);
+}
+
+/*
+ * sockaddr2n: sockaddr_in 转网络字节流（序列化）
+ *
+ * 格式（12 字节）：[sin_family: 4B] [sin_port: 4B] [sin_addr.s_addr: 4B]
+ *
+ * @param buf   输出缓冲区（至少 12 字节）
+ * @param addr  要序列化的地址
+ * @return      写入的字节数（12）
+ */
+static inline int sockaddr2n(uint8_t *buf, const struct sockaddr_in *addr) {
+    int n = 0;
+    *(uint32_t*)&buf[n] = htonl((uint32_t)addr->sin_family); n += 4;
+    *(uint32_t*)&buf[n] = htonl((uint32_t)addr->sin_port); n += 4;
+    *(uint32_t*)&buf[n] = addr->sin_addr.s_addr; n += 4;
+    return n;
+}
+
+/*
+ * n2sockaddr: 网络字节流转 sockaddr_in（反序列化）
+ *
+ * 格式（12 字节）：[sin_family: 4B] [sin_port: 4B] [sin_addr.s_addr: 4B]
+ *
+ * 注意：会清零整个结构体（包括 sin_zero 填充字段，某些系统要求填充字段为 0）
+ *
+ * @param buf   输入缓冲区（至少 12 字节）
+ * @param addr  输出地址结构
+ * @return      读取的字节数（12）
+ */
+static inline int n2sockaddr(const uint8_t *buf, struct sockaddr_in *addr) {
+    int n = 0;
+    memset(addr, 0, sizeof(*addr));  /* 清零 sin_zero 填充字段（8字节） */
+    addr->sin_family = (sa_family_t)ntohl(*(uint32_t*)&buf[n]); n += 4;
+    addr->sin_port = (in_port_t)ntohl(*(uint32_t*)&buf[n]); n += 4;
+    addr->sin_addr.s_addr = *(uint32_t*)&buf[n]; n += 4;
+    return n;
+}
+
+/* ============================================================================
+ * 信令协议数据结构
+ * ============================================================================ */
+
+/*
+ * p2p_signaling_payload_hdr_t: 信令负载头部结构
+ *
+ * 包含 ICE 信令的元数据（不包含候选数组）。
+ * 候选数据通过 pack_candidate/unpack_candidate 单独序列化。
+ * 可通过 Relay 服务器或 PubSub (GitHub Gist) 传输。
+ */
+typedef struct p2p_signaling_payload_hdr {
+    char sender[32];              /* 发送方 local_peer_id */
+    char target[32];              /* 目标方 local_peer_id */
+    uint32_t timestamp;           /* 时间戳（用于排序和去重） */
+    uint32_t delay_trigger;       /* 延迟触发打洞（毫秒） */
+    int candidate_count;          /* ICE 候选数量（0-8） */
+} p2p_signaling_payload_hdr_t;
+
+/*
+ * pack_signaling_payload_hdr: 序列化信令负载头部到字节流
+ *
+ * 格式（76 字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
+ *
+ * @param sender          发送方 peer_id
+ * @param target          目标方 peer_id
+ * @param timestamp       时间戳
+ * @param delay_trigger   延迟触发（毫秒）
+ * @param candidate_count 候选数量
+ * @param buf             输出缓冲区（至少 76 字节）
+ * @return                写入的字节数（76）
+ */
+static inline int pack_signaling_payload_hdr(
+    const char *sender,
+    const char *target,
+    uint32_t timestamp,
+    uint32_t delay_trigger,
+    int candidate_count,
+    uint8_t *buf
+) {
+    int n = 0, m;
+    
+    /* sender (32字节) */
+    m = sizeof(((p2p_signaling_payload_hdr_t*)0)->sender) - 1;
+    strncpy((char*)buf, sender, m); 
+    buf[m] = '\0';
+    n = m + 1;
+    
+    /* target (32字节) */
+    m = sizeof(((p2p_signaling_payload_hdr_t*)0)->target) - 1;
+    strncpy((char*)(buf + n), target, m); 
+    buf[n + m] = '\0';
+    n += m + 1;
+    
+    /* timestamp, delay_trigger, candidate_count */
+    *(uint32_t*)&buf[n] = htonl(timestamp); n += 4;
+    *(uint32_t*)&buf[n] = htonl(delay_trigger); n += 4;
+    *(uint32_t*)&buf[n] = htonl((uint32_t)candidate_count); n += 4;
+    
+    return n;  /* 76 */
+}
+
+/*
+ * unpack_signaling_payload_hdr: 从字节流反序列化信令负载头部
+ *
+ * 格式（76 字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
+ *
+ * @param p    输出：信令负载结构（仅写入头部字段）
+ * @param buf  输入缓冲区（至少 76 字节）
+ * @return     0=成功，-1=失败
+ */
+static inline int unpack_signaling_payload_hdr(p2p_signaling_payload_hdr_t *p, const uint8_t *buf) {
+    int n = 0;
+    
+    /* sender, target */
+    memcpy(p->sender, buf + n, 32); n += 32;
+    memcpy(p->target, buf + n, 32); n += 32;
+    
+    /* timestamp, delay_trigger, candidate_count */
+    p->timestamp = ntohl(*(uint32_t*)&buf[n]); n += 4;
+    p->delay_trigger = ntohl(*(uint32_t*)&buf[n]); n += 4;
+    p->candidate_count = (int)ntohl(*(uint32_t*)&buf[n]); n += 4;
+    
+    /* 验证候选数量 */
+    if (p->candidate_count < 0 || p->candidate_count > 8) return -1;
+    
+    return 0;
+}
+
+/*
+ * pack_candidate: 序列化单个 ICE 候选到字节流
+ *
+ * 格式（32 字节）：[type:4B][addr:12B][base_addr:12B][priority:4B]
+ *
+ * @param c    ICE 候选结构
+ * @param buf  输出缓冲区（至少 32 字节）
+ * @return     写入的字节数（32）
+ */
+static inline int pack_candidate(const p2p_candidate_t *c, uint8_t *buf) {
+    int n = 0;
+    *(uint32_t*)&buf[n] = htonl((uint32_t)c->type); n += 4;
+    n += sockaddr2n(buf + n, &c->addr);
+    n += sockaddr2n(buf + n, &c->base_addr);
+    *(uint32_t*)&buf[n] = htonl(c->priority); n += 4;
+    return n;
+}
+
+/*
+ * unpack_candidate: 从字节流反序列化单个 ICE 候选
+ *
+ * 格式（32 字节）：[type:4B][addr:12B][base_addr:12B][priority:4B]
+ *
+ * @param c    输出：ICE 候选结构
+ * @param buf  输入缓冲区（至少 32 字节）
+ * @return     读取的字节数（32）
+ */
+static inline int unpack_candidate(p2p_candidate_t *c, const uint8_t *buf) {
+    int n = 0;
+    c->type = (p2p_cand_type_t)ntohl(*(uint32_t*)&buf[n]); n += 4;
+    n += n2sockaddr(buf + n, &c->addr);
+    n += n2sockaddr(buf + n, &c->base_addr);
+    c->priority = ntohl(*(uint32_t*)&buf[n]); n += 4;
+    return n;
 }
 
 #endif /* P2P_INTERNAL_H */

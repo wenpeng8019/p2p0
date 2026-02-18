@@ -1,7 +1,6 @@
 
 #include "p2p_internal.h"
 #include "p2p_udp.h"
-#include "p2p_signal_protocol.h"
 #include "p2p_log.h"
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -281,15 +280,18 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
 
             // 如果指定了 remote_peer_id，立即发送初始 offer
             if (remote_peer_id && s->local_cand_cnt > 0) {
-                p2p_signaling_payload_t payload = {0};
-                strncpy(payload.sender, s->cfg.local_peer_id, 31);
-                strncpy(payload.target, remote_peer_id, 31);
-                payload.candidate_count = s->local_cand_cnt;
-                memcpy(payload.candidates, s->local_cands,
-                       sizeof(p2p_candidate_t) * s->local_cand_cnt);
-
                 uint8_t buf[2048];
-                int n = p2p_signal_pack(&payload, buf, sizeof(buf));
+                int n = pack_signaling_payload_hdr(
+                    s->cfg.local_peer_id,
+                    remote_peer_id,
+                    0,  /* timestamp */
+                    0,  /* delay_trigger */
+                    s->local_cand_cnt,
+                    buf
+                );
+                for (int i = 0; i < s->local_cand_cnt; i++) {
+                    n += pack_candidate(&s->local_cands[i], buf + n);
+                }
                 if (n > 0) {
                     p2p_signal_relay_send_connect(&s->sig_relay_ctx, remote_peer_id, buf, n);
                     s->signal_sent = true;
@@ -693,20 +695,36 @@ int p2p_update(p2p_session_t *s) {
             s->remote_peer_id[0] != '\0') {
             
             uint64_t now = time_ms();
-            if (!s->signal_sent ||                                          // 从未发送过
-                (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) || // 超过重发间隔
-                (s->local_cand_cnt > s->last_cand_cnt_sent) ||              // 有新候选收集到（如 STUN 响应）
-                s->cands_pending_send                                       // 有待发送的候选（之前 TCP 发送失败）
-            ) {
+            int unsent_count = s->local_cand_cnt - s->sig_relay_ctx.total_candidates_acked;
+            
+            // 检查是否需要发送（包括断点续传）
+            if (unsent_count > 0 &&
+                (!s->signal_sent ||                                          // 从未发送过
+                 (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) || // 超过重发间隔
+                 (s->local_cand_cnt > s->last_cand_cnt_sent) ||              // 有新候选收集到（如 STUN 响应）
+                 s->cands_pending_send                                       // 有待发送的候选（之前 TCP 发送失败）
+                )) {
 
-                p2p_signaling_payload_t payload = {0};
-                strncpy(payload.sender, s->cfg.local_peer_id, 31);
-                strncpy(payload.target, s->remote_peer_id, 31);
-                payload.candidate_count = s->local_cand_cnt;
-                memcpy(payload.candidates, s->local_cands, sizeof(p2p_candidate_t) * s->local_cand_cnt);
+                // 从 next_candidate_index 开始发送剩余候选（断点续传）
+                int start_idx = s->sig_relay_ctx.next_candidate_index;
+                if (start_idx >= s->local_cand_cnt) {
+                    start_idx = 0;  // 重置（可能是全新的候选列表）
+                }
+                
+                int batch_size = s->local_cand_cnt - start_idx;
                 
                 uint8_t buf[2048];
-                int n = p2p_signal_pack(&payload, buf, sizeof(buf));
+                int n = pack_signaling_payload_hdr(
+                    s->cfg.local_peer_id,
+                    s->remote_peer_id,
+                    0,  /* timestamp */
+                    0,  /* delay_trigger */
+                    batch_size,
+                    buf
+                );
+                for (int i = 0; i < batch_size; i++) {
+                    n += pack_candidate(&s->local_cands[start_idx + i], buf + n);
+                }
                 if (n > 0) {
                     int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
                     /*
@@ -720,12 +738,20 @@ int p2p_update(p2p_session_t *s) {
                         s->last_signal_time = now;
                         s->last_cand_cnt_sent = s->local_cand_cnt;
                         s->cands_pending_send = false;  /* 清除待发送标志 */
-                        P2P_LOG_INFO("P2P", "[SIGNALING] %s ICE candidates (%d) to %s (stored=%d)\n",
-                                     s->last_cand_cnt_sent > 0 ? "Resent" : "Sent",
-                                     s->local_cand_cnt, s->remote_peer_id, ret);
+                        
+                        if (ret > 0) {
+                            P2P_LOG_INFO("P2P", "[SIGNALING] Sent candidates [%d-%d] to %s (forwarded=%d)\n",
+                                         start_idx, start_idx + batch_size - 1, s->remote_peer_id, ret);
+                        } else {
+                            P2P_LOG_INFO("P2P", "[SIGNALING] Sent %d candidates to %s (cached, peer offline)\n",
+                                         batch_size, s->remote_peer_id);
+                        }
+                    } else if (ret == -2) {
+                        s->cands_pending_send = true;  /* 服务器缓存满，标记待重发 */
+                        P2P_LOG_WARN("P2P", "[SIGNALING] Server storage full, will retry later...\n");
                     } else {
                         s->cands_pending_send = true;  /* TCP 发送失败，标记待重发 */
-                        P2P_LOG_INFO("P2P", "[SIGNALING] Failed to send candidates (ret=%d), will retry...\n", ret);
+                        P2P_LOG_WARN("P2P", "[SIGNALING] Failed to send candidates (ret=%d), will retry...\n", ret);
                     }
                 }
             }
@@ -762,14 +788,18 @@ int p2p_update(p2p_session_t *s) {
                     (s->local_cand_cnt > s->last_cand_cnt_sent)
                 ) {
 
-                    p2p_signaling_payload_t payload = {0};
-                    strncpy(payload.sender, s->cfg.local_peer_id, 31);
-                    strncpy(payload.target, s->remote_peer_id, 31);
-                    payload.candidate_count = s->local_cand_cnt;
-                    memcpy(payload.candidates, s->local_cands, sizeof(p2p_candidate_t) * s->local_cand_cnt);
-                    
                     uint8_t buf[2048];
-                    int n = p2p_signal_pack(&payload, buf, sizeof(buf));
+                    int n = pack_signaling_payload_hdr(
+                        s->cfg.local_peer_id,
+                        s->remote_peer_id,
+                        0,  /* timestamp */
+                        0,  /* delay_trigger */
+                        s->local_cand_cnt,
+                        buf
+                    );
+                    for (int i = 0; i < s->local_cand_cnt; i++) {
+                        n += pack_candidate(&s->local_cands[i], buf + n);
+                    }
                     if (n > 0) {
                         p2p_signal_pubsub_send(&s->sig_pubsub_ctx, s->remote_peer_id, buf, n);
                         s->signal_sent = true;
