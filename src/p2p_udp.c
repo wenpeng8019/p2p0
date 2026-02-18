@@ -1,10 +1,8 @@
 
 #include "p2p_udp.h"
+#include "p2p_platform.h"
 
-#include <errno.h>
-#include <fcntl.h>
 #include <string.h>
-#include <unistd.h>
 
 /* ---- UDP socket ---- */
 
@@ -14,10 +12,8 @@ int udp_create_socket(uint16_t port) {
     if (sock < 0) return -1;
 
     // 设置为非阻塞模式
-    int flags = fcntl(sock, F_GETFL, 0);
-    if (flags < 0) { close(sock); return -1; }
-    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
-        close(sock);
+    if (p2p_set_nonblock(sock) < 0) {
+        p2p_close_socket(sock);
         return -1;
     }
 
@@ -33,7 +29,7 @@ int udp_create_socket(uint16_t port) {
     addr.sin_port = htons(port);
 
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(sock);
+        p2p_close_socket(sock);
         return -1;
     }
 
@@ -53,7 +49,8 @@ int udp_recv_from(int sock, struct sockaddr_in *from,
     ssize_t n = recvfrom(sock, buf, max_len, 0,
                          (struct sockaddr *)from, &fromlen);
     if (n < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+        int e = p2p_errno();
+        if (e == P2P_EAGAIN) return 0;
         return -1;
     }
     return (int)n;

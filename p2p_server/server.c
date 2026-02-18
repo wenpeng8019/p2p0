@@ -17,15 +17,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <errno.h>
 #include <time.h>
 #include <stdbool.h>
 #include <p2p.h>
 #include <p2pp.h>
+#include "../src/p2p_platform.h"
 #include "../src/p2p_internal.h"
 
 // 允许最大同时在线客户端数量

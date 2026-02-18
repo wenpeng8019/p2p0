@@ -1,16 +1,16 @@
 
 #include "p2p_log.h"
+#include "p2p_platform.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <sys/time.h>
 
-#define COLOR_RESET   "\033[0m"
-#define COLOR_RED     "\033[31m"
-#define COLOR_YELLOW  "\033[33m"
-#define COLOR_GREEN   "\033[32m"
-#define COLOR_CYAN    "\033[36m"
-#define COLOR_GRAY    "\033[90m"
+#define COLOR_RESET   P2P_COLOR_RESET
+#define COLOR_RED     P2P_COLOR_RED
+#define COLOR_YELLOW  P2P_COLOR_YELLOW
+#define COLOR_GREEN   P2P_COLOR_GREEN
+#define COLOR_CYAN    P2P_COLOR_CYAN
+#define COLOR_GRAY    P2P_COLOR_GRAY
 
 static struct {
     p2p_log_level_t level;
@@ -75,12 +75,12 @@ void p2p_log(p2p_log_level_t level, const char *module, const char *fmt, ...) {
     FILE *out = log_state.output ? log_state.output : stdout;
 
     if (log_state.use_timestamp) {
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        struct tm *tm_info = localtime(&tv.tv_sec);
-        char time_buf[32];
-        strftime(time_buf, sizeof(time_buf), "%H:%M:%S", tm_info);
-        fprintf(out, "[%s.%03d] ", time_buf, (int)(tv.tv_usec / 1000));
+        uint64_t ms = p2p_time_ms();
+        unsigned int hh = (unsigned int)((ms / 3600000) % 24);
+        unsigned int mm = (unsigned int)((ms / 60000) % 60);
+        unsigned int ss = (unsigned int)((ms / 1000) % 60);
+        unsigned int ms3 = (unsigned int)(ms % 1000);
+        fprintf(out, "[%02u:%02u:%02u.%03u] ", hh, mm, ss, ms3);
     }
 
     if (log_state.use_color) {

@@ -4,28 +4,36 @@
 #include "p2p_thread.h"
 #include "p2p_internal.h"
 
+#ifdef P2P_OS_WINDOWS
+static DWORD WINAPI p2p_thread_func(LPVOID arg) {
+#else
 static void *p2p_thread_func(void *arg) {
+#endif
     p2p_session_t *s = (p2p_session_t *)arg;
 
     while (!s->quit) {
-        pthread_mutex_lock(&s->mtx);
+        p2p_mutex_lock(&s->mtx);
         p2p_update(s);
-        pthread_mutex_unlock(&s->mtx);
+        p2p_mutex_unlock(&s->mtx);
 
         int ms = s->cfg.update_interval_ms;
         if (ms <= 0) ms = 10;
-        usleep(ms * 1000);
+        p2p_sleep_ms(ms);
     }
 
+#ifdef P2P_OS_WINDOWS
+    return 0;
+#else
     return NULL;
+#endif
 }
 
 int p2p_thread_start(p2p_session_t *s) {
     s->quit = 0;
-    if (pthread_mutex_init(&s->mtx, NULL) != 0)
+    if (p2p_mutex_init(&s->mtx) != 0)
         return -1;
-    if (pthread_create(&s->thread, NULL, p2p_thread_func, s) != 0) {
-        pthread_mutex_destroy(&s->mtx);
+    if (p2p_thread_create(&s->thread, p2p_thread_func, s) != 0) {
+        p2p_mutex_destroy(&s->mtx);
         return -1;
     }
     s->thread_running = 1;
@@ -36,8 +44,8 @@ void p2p_thread_stop(p2p_session_t *s) {
     if (!s->thread_running) return;
 
     s->quit = 1;
-    pthread_join(s->thread, NULL);
-    pthread_mutex_destroy(&s->mtx);
+    p2p_thread_join(s->thread);
+    p2p_mutex_destroy(&s->mtx);
     s->thread_running = 0;
 }
 

@@ -68,17 +68,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <unistd.h>
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
 
-/* 多线程支持（可选） */
-#ifdef P2P_THREADED
-#include <pthread.h>
-#endif
+/* 跨平台兼容层（socket / 线程 / 时钟 / sleep） */
+#include "p2p_platform.h"
 
 #include "p2p_nat.h"           /* NAT 穿透与类型检测 */
 #include "p2p_route.h"         /* 路由表管理 */
@@ -195,9 +187,10 @@ struct p2p_session {
     /*
      * 启用 P2P_THREADED 时，会话在独立线程中运行。
      * 需要互斥锁保护共享状态。
+     * 类型由 p2p_platform.h 定义（pthread_t / HANDLE）。
      */
-    pthread_t                   thread;             // 工作线程
-    pthread_mutex_t             mtx;                // 互斥锁
+    p2p_thread_t                thread;             // 工作线程
+    p2p_mutex_t                 mtx;                // 互斥锁
     int                         thread_running;     // 线程是否运行中
     int                         quit;               // 退出标志
 #endif
@@ -218,9 +211,7 @@ struct p2p_session {
  * @return 自 1970-01-01 00:00:00 UTC 以来的毫秒数
  */
 static inline uint64_t time_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    return p2p_time_ms();
 }
 
 /*

@@ -1,7 +1,6 @@
 
 #include "p2p_internal.h"
-#include <fcntl.h>
-#include <errno.h>
+/* fcntl/errno 已由 p2p_platform.h 通过 p2p_internal.h 引入 */
 
 /* 
  * 尝试 TCP 同时发起 (Simultaneous Open)
@@ -30,22 +29,21 @@ int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
         /* 如果端口被占用，尝试随机端口并更新配置 */
         loc.sin_port = 0;
         if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
-             close(sock);
+             p2p_close_socket(sock);
              return -1;
         }
     }
 
     /* 设置为非阻塞 */
-    int flags = fcntl(sock, F_GETFL, 0);
-    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+    p2p_set_nonblock(sock);
 
-    /* 进行三次握手的“同时发起”尝试 */
+    /* 进行三次握手的"同时发起"尝试 */
     printf("[TCP] Attempting Simultaneous Open to %s:%d\n", 
            inet_ntoa(remote->sin_addr), ntohs(remote->sin_port));
     
     int ret = connect(sock, (struct sockaddr *)remote, sizeof(*remote));
-    if (ret < 0 && errno != EINPROGRESS) {
-        close(sock);
+    if (ret < 0 && p2p_errno() != P2P_EINPROGRESS) {
+        p2p_close_socket(sock);
         return -1;
     }
 

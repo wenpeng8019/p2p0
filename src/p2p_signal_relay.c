@@ -108,11 +108,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
+#include "p2p_platform.h"
 
 void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx) {
 
@@ -181,8 +177,7 @@ int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, i
     }
 
     // 设置为非阻塞模式
-    int flags = fcntl(ctx->fd, F_GETFL, 0);
-    fcntl(ctx->fd, F_SETFL, flags | O_NONBLOCK);
+    p2p_set_nonblock(ctx->fd);
 
     // 初始化自己的 name
     strncpy(ctx->my_name, my_name, P2P_PEER_ID_MAX);

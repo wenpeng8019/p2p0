@@ -34,9 +34,7 @@
 
 /* 获取当前时间戳（毫秒） */
 static inline uint64_t compact_time_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    return p2p_time_ms();
 }
 
 /*

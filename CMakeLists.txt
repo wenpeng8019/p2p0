@@ -7,9 +7,36 @@ option(WITH_OPENSSL "Enable OpenSSL DTLS support" OFF)
 option(WITH_SCTP    "Enable usrsctp support" OFF)
 option(THREADED     "Enable internal threading" ON)
 
+# --- Platform Detection ---
+if(WIN32)
+    message(STATUS "Platform: Windows")
+    add_definitions(-DP2P_OS_WINDOWS)
+    # Winsock2 is linked via #pragma comment in p2p_platform.h (MSVC),
+    # but we also add it explicitly for MinGW / cross-compilers.
+    set(PLATFORM_LIBS ws2_32)
+elseif(APPLE)
+    message(STATUS "Platform: macOS")
+    set(PLATFORM_LIBS "")
+elseif(UNIX)
+    message(STATUS "Platform: Linux/POSIX")
+    # clock_gettime lives in librt on older glibc (< 2.17)
+    find_library(RT_LIB rt)
+    if(RT_LIB)
+        set(PLATFORM_LIBS ${RT_LIB})
+    else()
+        set(PLATFORM_LIBS "")
+    endif()
+endif()
+
 # --- Compiler Configuration ---
 set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wpedantic -O2")
+if(MSVC)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3 /O2")
+    # Disable "unsafe" CRT warnings that MSVC emits for standard POSIX functions
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_WINSOCK_DEPRECATED_NO_WARNINGS)
+else()
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wpedantic -O2")
+endif()
 
 # --- Include Directories ---
 include_directories(include)
@@ -89,6 +116,7 @@ endif()
 
 # --- Target Definition ---
 add_library(p2p_static STATIC ${LIB_SRCS})
+target_link_libraries(p2p_static ${PLATFORM_LIBS})
 if(THREADED)
     target_link_libraries(p2p_static Threads::Threads)
 endif()
