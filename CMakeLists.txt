@@ -10,10 +10,9 @@ option(THREADED     "Enable internal threading" ON)
 # --- Platform Detection ---
 if(WIN32)
     message(STATUS "Platform: Windows")
-    add_definitions(-DP2P_OS_WINDOWS)
     # Winsock2 is linked via #pragma comment in p2p_platform.h (MSVC),
     # but we also add it explicitly for MinGW / cross-compilers.
-    set(PLATFORM_LIBS ws2_32)
+    set(PLATFORM_LIBS ws2_32 winhttp)
 elseif(APPLE)
     message(STATUS "Platform: macOS")
     set(PLATFORM_LIBS "")
@@ -31,11 +30,11 @@ endif()
 # --- Compiler Configuration ---
 set(CMAKE_C_STANDARD 99)
 if(MSVC)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3 /O2")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3 /utf-8 /std:c11")
     # Disable "unsafe" CRT warnings that MSVC emits for standard POSIX functions
     add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_WINSOCK_DEPRECATED_NO_WARNINGS)
 else()
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wpedantic -O2")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wpedantic")
 endif()
 
 # --- Include Directories ---
@@ -61,6 +60,7 @@ set(LIB_SRCS
     src/p2p_signal_pubsub.c
     src/p2p_signal_compact.c
     src/p2p_log.c
+    src/p2p_http.c
 )
 
 if(THREADED)

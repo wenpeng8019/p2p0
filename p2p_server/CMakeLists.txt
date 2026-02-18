@@ -3,10 +3,10 @@ project(p2p_server LANGUAGES C)
 
 set(CMAKE_C_STANDARD 99)
 if(MSVC)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3 /O2")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3")
     add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_WINSOCK_DEPRECATED_NO_WARNINGS)
 else()
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -O2")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
 endif()
 
 add_executable(p2p_server server.c)
