@@ -30,6 +30,16 @@ typedef enum {
     P2P_LOG_LEVEL_TRACE = 5   /* 追踪：高频细节（性能敏感）*/
 } p2p_log_level_t;
 
+/*
+ * 日志回调类型。
+ * level   — 日志等级
+ * module  — 模块名（可为 NULL/空）
+ * message — 已格式化的日志正文（不含时间戳，不含 ANSI 颜色）
+ */
+typedef void (*p2p_log_callback_t)(p2p_log_level_t level,
+                                   const char *module,
+                                   const char *message);
+
 /* ---------- 连接模式 ---------- */
 
 enum {
@@ -317,6 +327,14 @@ void p2p_set_log_level(p2p_log_level_t level);
  * 获取当前全局日志等级。
  */
 p2p_log_level_t p2p_get_log_level(void);
+
+/*
+ * 设置日志输出回调。
+ * 设置后，每条通过等级过滤的日志将调用 cb(level, module, message)。
+ * message 不含时间戳与 ANSI 颜色转义序列。
+ * 传 NULL 可清除回调，恢复默认 FILE 输出行为。
+ */
+void p2p_set_log_output(p2p_log_callback_t cb);
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus

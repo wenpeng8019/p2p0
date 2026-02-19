@@ -14,6 +14,9 @@ void p2p_log_set_output(FILE *fp);
 void p2p_log_set_timestamp(int enabled);
 void p2p_log_set_color(int enabled);
 
+/* 回调路径中格式化缓冲区的最大长度（含终止符）*/
+#define P2P_LOG_MSG_MAX 1024
+
 void p2p_log(p2p_log_level_t level, const char *module, const char *fmt, ...);
 
 #define P2P_LOG_ERROR(module, ...) p2p_log(P2P_LOG_LEVEL_ERROR, module, __VA_ARGS__)

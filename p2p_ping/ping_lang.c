@@ -37,6 +37,11 @@ static const char* messages_en[MSG_PING_COUNT] = {
     [MSG_PING_MODE_WAITING]     = "Running in %s mode (waiting for connection)...",
     [MSG_PING_LAN_DISABLED]     = "[TEST] LAN shortcut disabled - forcing NAT punch",
     [MSG_PING_VERBOSE_ENABLED]  = "[TEST] Verbose NAT punch logging enabled",
+    [MSG_PING_OPT_ECHO]         = "  --echo             Auto-echo received messages back to sender",
+    [MSG_PING_CHAT_ENTER]       = "[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.",
+    [MSG_PING_CHAT_CONNECTED]   = "--- Connected ---",
+    [MSG_PING_CHAT_DISCONNECT]  = "--- Peer disconnected ---",
+    [MSG_PING_CHAT_ECHO_ON]     = "[Chat] Echo mode enabled: received messages will be echoed back.",
 };
 
 /* 中文词表 */
@@ -69,6 +74,11 @@ static const char* messages_zh[MSG_PING_COUNT] = {
     [MSG_PING_MODE_WAITING]     = "运行在 %s 模式（等待连接）...",
     [MSG_PING_LAN_DISABLED]     = "[测试] 内网快捷方式已禁用 - 强制 NAT 打洞",
     [MSG_PING_VERBOSE_ENABLED]  = "[测试] 详细 NAT 打洞日志已启用",
+    [MSG_PING_OPT_ECHO]         = "  --echo             收到消息自动 echo 回复发送者",
+    [MSG_PING_CHAT_ENTER]       = "[聊天] 进入报文模式，输入消息回车发送，Ctrl+C 退出",
+    [MSG_PING_CHAT_CONNECTED]   = "--- 连接成功 ---",
+    [MSG_PING_CHAT_DISCONNECT]  = "--- 对端已断开 ---",
+    [MSG_PING_CHAT_ECHO_ON]     = "[聊天] Echo 模式已启用，收到的消息将自动回复",
 };
 
 /* 设置当前语言 */

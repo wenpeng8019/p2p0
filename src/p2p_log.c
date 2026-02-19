@@ -17,11 +17,13 @@ static struct {
     FILE *output;
     int use_timestamp;
     int use_color;
+    p2p_log_callback_t callback;
 } log_state = {
     .level = P2P_LOG_LEVEL_INFO,
     .output = NULL,  /* NULL 代表使用 stdout */
     .use_timestamp = 1,
-    .use_color = 1
+    .use_color = 1,
+    .callback = NULL
 };
 
 void p2p_set_log_level(p2p_log_level_t level) {
@@ -34,6 +36,10 @@ p2p_log_level_t p2p_get_log_level(void) {
 
 void p2p_log_set_output(FILE *fp) {
     log_state.output = fp;
+}
+
+void p2p_set_log_output(p2p_log_callback_t cb) {
+    log_state.callback = cb;
 }
 
 void p2p_log_set_timestamp(int enabled) {
@@ -69,6 +75,17 @@ static const char *level_to_color(p2p_log_level_t level) {
 void p2p_log(p2p_log_level_t level, const char *module, const char *fmt, ...) {
 
     if (level > log_state.level) {
+        return;
+    }
+
+    /* 回调路径：格式化正文后直接回调，不写 FILE */
+    if (log_state.callback) {
+        char msg[P2P_LOG_MSG_MAX];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(msg, sizeof(msg), fmt, args);
+        va_end(args);
+        log_state.callback(level, module, msg);
         return;
     }
 

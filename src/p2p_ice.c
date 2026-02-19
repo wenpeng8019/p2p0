@@ -690,42 +690,55 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 /*
  * ICE 状态机周期处理
  *
- * 在 GATHERING 或 CHECKING 状态下，定期向所有远端候选发送连通性检查包。
- *
- * 检查间隔：500ms（RFC 5245 建议 Ta = 20ms * N，这里简化为固定值）
+ * 在 CHECKING 状态下，每 500ms 向所有远端候选发送一次连通性检查包。
+ * 最多发送 P2P_ICE_MAX_CHECKS 轮（默认 20 轮 = 10 秒），超时则标记 FAILED。
  */
+#define P2P_ICE_MAX_CHECKS 20
+#define P2P_ICE_CHECK_INTERVAL_MS 500
+
 void p2p_ice_tick(p2p_session_t *s) {
-    if (s->ice_state == P2P_ICE_STATE_IDLE) return;
+    if (s->ice_state == P2P_ICE_STATE_IDLE ||
+        s->ice_state == P2P_ICE_STATE_COMPLETED ||
+        s->ice_state == P2P_ICE_STATE_FAILED) return;
 
-    /* 如果已收集候选并有远端候选，开始连通性检查 */
-    if (s->ice_state == P2P_ICE_STATE_GATHERING || s->ice_state == P2P_ICE_STATE_CHECKING) {
-        if (s->remote_cand_cnt > 0 && s->ice_state != P2P_ICE_STATE_COMPLETED) {
+    /* 等待有远端候选再开始 */
+    if (s->remote_cand_cnt <= 0) return;
 
-            /* 标记状态为 CHECKING */
-            s->ice_state = P2P_ICE_STATE_CHECKING;
+    /* 标记状态为 CHECKING */
+    if (s->ice_state == P2P_ICE_STATE_GATHERING ||
+        s->ice_state == P2P_ICE_STATE_GATHERING_DONE) {
+        s->ice_state = P2P_ICE_STATE_CHECKING;
+        s->ice_check_last_ms = 0;
+        s->ice_check_count   = 0;
+    }
 
-            /* 定时发送连通性检查（间隔 500ms） */
-            static uint64_t last_check = 0;
-            uint64_t now = time_ms();
-            if (now - last_check >= 500) {
+    /* 已超过最大重试次数 → FAILED */
+    if (s->ice_check_count >= P2P_ICE_MAX_CHECKS) {
+        P2P_LOG_WARN("ICE", "连通性检查超时（已发送 %d 轮），放弃", s->ice_check_count);
+        s->ice_state = P2P_ICE_STATE_FAILED;
+        return;
+    }
 
-                /* 向所有远端候选发送探测包 */
-                for (int i = 0; i < s->remote_cand_cnt; i++) {
-                    p2p_candidate_t *c = &s->remote_cands[i];
+    uint64_t now = time_ms();
+    if (now - s->ice_check_last_ms < P2P_ICE_CHECK_INTERVAL_MS) return;
 
-                    /*
-                     * 发送连通性检查包
-                     * RFC 5245 要求使用 STUN Binding Request
-                     * 这里简化为自定义的 P2P_PKT_PUNCH
-                     */
-                    udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
-                    P2P_LOG_INFO("ICE", "%s %d: %s:%d",
-                           MSG(MSG_ICE_CONNECTIVITY_CHECK), i, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
-                }
+    s->ice_check_last_ms = now;
+    s->ice_check_count++;
 
-                last_check = now;
-            }
-        }
+    /* 向所有远端候选发送探测包 */
+    for (int i = 0; i < s->remote_cand_cnt; i++) {
+        p2p_candidate_t *c = &s->remote_cands[i];
+        udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+    }
+
+    /* 第 1 轮打 INFO，此后每隔 1s（2 轮）打一次 DEBUG */
+    if (s->ice_check_count == 1) {
+        P2P_LOG_INFO("ICE", "%s (%d %s)",
+               MSG(MSG_ICE_CONNECTIVITY_CHECK),
+               s->remote_cand_cnt, "candidates");
+    } else if (s->ice_check_count % 2 == 0) {
+        P2P_LOG_DEBUG("ICE", "%s round %d/%d",
+               MSG(MSG_ICE_CONNECTIVITY_CHECK),
+               s->ice_check_count, P2P_ICE_MAX_CHECKS);
     }
 }
-

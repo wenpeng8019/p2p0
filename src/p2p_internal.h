@@ -127,6 +127,8 @@ struct p2p_session {
     int                         local_cand_cnt;     // 本地候选数量
     p2p_candidate_t             remote_cands[P2P_MAX_CANDIDATES];  // 远端候选地址
     int                         remote_cand_cnt;    // 远端候选数量
+    uint64_t                    ice_check_last_ms;  // 上次连通性检查时间
+    int                         ice_check_count;    // 已发送检查轮数
 
     /* ======================== 信令上下文 ======================== */
     /*
