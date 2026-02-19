@@ -90,6 +90,7 @@ int main(int argc, char *argv[]) {
     int disable_lan = 0, verbose_punch = 0;
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
     const char *my_name = "unnamed", *target_name = NULL;
+    int server_port = 8888;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--dtls") == 0) use_dtls = 1;
@@ -106,6 +107,22 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--help") == 0) { print_help(argv[0]); return 0; }
     }
 
+    // 解析 server_ip 中的端口号（支持 IP:PORT 格式）
+    char server_host_buf[256] = {0};
+    const char *server_host = server_ip;
+    if (server_ip) {
+        const char *colon = strchr(server_ip, ':');
+        if (colon) {
+            size_t len = colon - server_ip;
+            if (len < sizeof(server_host_buf)) {
+                memcpy(server_host_buf, server_ip, len);
+                server_host_buf[len] = '\0';
+                server_host = server_host_buf;
+                server_port = atoi(colon + 1);
+            }
+        }
+    }
+
     p2p_config_t cfg = {0};
     cfg.use_dtls = use_dtls;
     cfg.use_openssl = use_openssl;
@@ -113,8 +130,8 @@ int main(int argc, char *argv[]) {
     cfg.use_ice = !use_compact;  // --compact 标志禁用 ICE
     cfg.stun_server = "stun.l.google.com";
     cfg.stun_port = 3478;
-    cfg.server_host = server_ip;
-    cfg.server_port = 8888;
+    cfg.server_host = server_host;
+    cfg.server_port = server_port;
     cfg.gh_token = gh_token;
     cfg.gist_id = gist_id;
     cfg.bind_port = 0;
