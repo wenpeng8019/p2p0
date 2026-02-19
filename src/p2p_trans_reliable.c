@@ -199,6 +199,47 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
 }
 
 /*
+ * 周期 tick：发送/重传数据包 + 发 ACK
+ *
+ * 每次 p2p_update 调用一次，负责：
+ *   1. 首次发送队列中 send_time==0 的包
+ *   2. 对超过 RTO 未确认的包进行指数退避重传
+ *   3. 和 reliable_tick_ack 一起发送 ACK
+ */
+void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode) {
+    if (!addr) return;
+    uint64_t now = time_ms();
+    uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_DATA : P2P_PKT_DATA;
+
+    /* 遍历所有未确认的发送条目 */
+    int window = (uint16_t)(r->send_seq - r->send_base);
+    for (int i = 0; i < window && i < RELIABLE_WINDOW; i++) {
+        int idx = (r->send_base + i) % RELIABLE_WINDOW;
+        retx_entry_t *e = &r->send_buf[idx];
+        if (e->acked) continue;
+
+        if (e->send_time == 0) {
+            /* 首次发送 */
+            udp_send_packet(sock, addr, pkt_type, 0, e->seq, e->data, e->len);
+            e->send_time = now;
+            e->retx_count = 0;
+        } else if ((int)(now - e->send_time) >= r->rto) {
+            /* 超时重传 + 指数退避 */
+            udp_send_packet(sock, addr, pkt_type, 0, e->seq, e->data, e->len);
+            e->send_time = now;
+            e->retx_count++;
+            r->rto = r->rto * 2;
+            if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
+            P2P_LOG_WARN("RELIABLE", "重传 seq=%u retx=%d rto=%d",
+                         e->seq, e->retx_count, r->rto);
+        }
+    }
+
+    /* 发送 ACK */
+    reliable_tick_ack(r, sock, addr, is_relay_mode);
+}
+
+/*
  * 注：reliable 作为基础传输层，由 p2p.c 和高级传输层直接调用：
  *   - reliable_init()        → p2p_create() 初始化
  *   - reliable_send_pkt()    → stream_flush_to_reliable()

@@ -97,6 +97,9 @@ int  reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits);
 /* 定时 ACK 处理（检查超时重传） */
 void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode);
 
+/* 周期 tick：发送队列中尚未发出的包、重传超时包、发送 ACK */
+void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode);
+
 /* 查询发送窗口剩余空间 */
 int  reliable_window_avail(const reliable_t *r);
 

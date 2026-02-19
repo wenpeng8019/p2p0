@@ -650,6 +650,12 @@ int p2p_update(p2p_session_t *s) {
         else stream_flush_to_reliable(&s->stream, &s->reliable);
     }
 
+    /* reliable 周期 tick：发送/重传数据包 + 发 ACK */
+    if (!s->trans || !s->trans->on_packet) {
+        int is_relay = (s->state == P2P_STATE_RELAY);
+        reliable_tick(&s->reliable, s->sock, &s->active_addr, is_relay);
+    }
+
     // 传输模块周期 tick（重传，拥塞控制等）
     if (s->trans && s->trans->tick) {
         if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
