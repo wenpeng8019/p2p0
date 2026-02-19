@@ -70,7 +70,19 @@ static const char* messages_en[MSG_COUNT] = {
     /* NAT 检测相关 */
     [MSG_NAT_DETECTION_START]   = "Starting NAT detection",
     [MSG_NAT_DETECTION_COMPLETED] = "Detection completed",
-    
+
+    /* NAT 类型名称 */
+    [MSG_NAT_TYPE_DETECTING]       = "Detecting...",
+    [MSG_NAT_TYPE_TIMEOUT]         = "Timeout (no response)",
+    [MSG_NAT_TYPE_UNKNOWN]         = "Unknown",
+    [MSG_NAT_TYPE_OPEN]            = "Open Internet (No NAT)",
+    [MSG_NAT_TYPE_FULL_CONE]       = "Full Cone NAT",
+    [MSG_NAT_TYPE_RESTRICTED]      = "Restricted Cone NAT",
+    [MSG_NAT_TYPE_PORT_RESTRICTED] = "Port Restricted Cone NAT",
+    [MSG_NAT_TYPE_SYMMETRIC]       = "Symmetric NAT (port-random)",
+    [MSG_NAT_TYPE_BLOCKED]         = "UDP Blocked (STUN unreachable)",
+    [MSG_NAT_TYPE_UNSUPPORTED]     = "Unsupported (no STUN/probe configured)",
+
     /* TCP 打洞相关 */
     [MSG_TCP_SIMULTANEOUS_OPEN]  = "Attempting Simultaneous Open to",
     [MSG_TCP_FALLBACK_PORT]      = "port busy, trying random port",
@@ -106,6 +118,14 @@ static const char* messages_en[MSG_COUNT] = {
     [MSG_COMPACT_ATTEMPT]       = "Attempt",
     [MSG_COMPACT_WITH]          = "with",
     [MSG_COMPACT_TOTAL_SENT]    = "total sent",
+
+    /* COMPACT 模式 NAT 探测相关 */
+    [MSG_COMPACT_NAT_PROBE_SENT]    = "NAT probe sent to",
+    [MSG_COMPACT_NAT_PROBE_RETRY]   = "NAT probe retry",
+    [MSG_COMPACT_NAT_PROBE_TIMEOUT] = "NAT probe timeout, type unknown",
+    [MSG_COMPACT_NAT_OPEN]          = "Open Internet (No NAT)",
+    [MSG_COMPACT_NAT_CONE]          = "Cone NAT (port-consistent)",
+    [MSG_COMPACT_NAT_SYMMETRIC]     = "Symmetric NAT (port-random)",
     
     /* RELAY 信令相关 */
     [MSG_RELAY_CONNECT_ACK]     = "Received ACK",
@@ -316,7 +336,19 @@ static const char* messages_zh[MSG_COUNT] = {
     /* NAT 检测相关 */
     [MSG_NAT_DETECTION_START]   = "开始 NAT 检测",
     [MSG_NAT_DETECTION_COMPLETED] = "检测完成",
-    
+
+    /* NAT 类型名称 */
+    [MSG_NAT_TYPE_DETECTING]       = "检测中...",
+    [MSG_NAT_TYPE_TIMEOUT]         = "超时（无响应）",
+    [MSG_NAT_TYPE_UNKNOWN]         = "未知",
+    [MSG_NAT_TYPE_OPEN]            = "无 NAT（公网直连）",
+    [MSG_NAT_TYPE_FULL_CONE]       = "完全锥形 NAT",
+    [MSG_NAT_TYPE_RESTRICTED]      = "受限锥形 NAT",
+    [MSG_NAT_TYPE_PORT_RESTRICTED] = "端口受限锥形 NAT",
+    [MSG_NAT_TYPE_SYMMETRIC]       = "对称型 NAT（端口随机）",
+    [MSG_NAT_TYPE_BLOCKED]         = "UDP 不可达",
+    [MSG_NAT_TYPE_UNSUPPORTED]     = "不支持（未配置 STUN/探测端口）",
+
     /* TCP 打洞相关 */
     [MSG_TCP_SIMULTANEOUS_OPEN]  = "尝试 TCP 同时发起到",
     [MSG_TCP_FALLBACK_PORT]      = "端口已占用，改用随机端口",
@@ -352,6 +384,14 @@ static const char* messages_zh[MSG_COUNT] = {
     [MSG_COMPACT_ATTEMPT]       = "尝试",
     [MSG_COMPACT_WITH]          = "带",
     [MSG_COMPACT_TOTAL_SENT]    = "总发送",
+
+    /* COMPACT 模式 NAT 探测相关 */
+    [MSG_COMPACT_NAT_PROBE_SENT]    = "NAT 探测已发送至",
+    [MSG_COMPACT_NAT_PROBE_RETRY]   = "NAT 探测重试",
+    [MSG_COMPACT_NAT_PROBE_TIMEOUT] = "NAT 探测超时，无法确定类型",
+    [MSG_COMPACT_NAT_OPEN]          = "无 NAT（公网直连）",
+    [MSG_COMPACT_NAT_CONE]          = "锥形 NAT（端口一致）",
+    [MSG_COMPACT_NAT_SYMMETRIC]     = "对称型 NAT（端口随机）",
     
     /* RELAY 信令相关 */
     [MSG_RELAY_CONNECT_ACK]     = "收到 ACK",
@@ -518,6 +558,18 @@ void p2p_set_language(p2p_language_t lang) {
 /* 获取当前语言 */
 p2p_language_t p2p_get_language(void) {
     return current_language;
+}
+
+/* 获取消息文本（显式指定语言）*/
+const char* p2p_msg_lang(p2p_msg_id_t id, p2p_language_t lang) {
+    if (id >= MSG_COUNT) return "Invalid message ID";
+#ifdef P2P_ENABLE_CHINESE
+    if (lang == P2P_LANG_ZH)
+        return messages_zh[id] ? messages_zh[id] : messages_en[id];
+#else
+    (void)lang;
+#endif
+    return messages_en[id] ? messages_en[id] : "Unknown message";
 }
 
 /* 获取消息文本 */

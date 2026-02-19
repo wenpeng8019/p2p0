@@ -141,33 +141,70 @@ struct p2p_session;
  *    - 服务器探测端口观察到源地址 Mapped_IP2:Mapped_Port2
  *    - NAT_PROBE_ACK 返回 probe_ip/probe_port = Mapped_IP2:Mapped_Port2
  *
- * 4. NAT 类型判断：
- *    - 如果 Local_IP == Mapped_IP1：无 NAT（公网直连）
- *    - 如果 Mapped_IP1 != Mapped_IP2：异常情况（服务器 IP 变化？）
- *    - 如果 Mapped_Port1 == Mapped_Port2：端口一致性 NAT
- *      · Port-Consistent NAT（包括 Full Cone / Restricted Cone NAT）
- *      · 特征：同一本地端口对不同目标映射到相同外部端口
- *      · P2P 打洞成功率高（95%+）
- *    - 如果 Mapped_Port1 != Mapped_Port2：端口随机 NAT
- *      · Port-Random NAT（典型如 Symmetric NAT）
- *      · 特征：同一本地端口对不同目标映射到不同外部端口
- *      · P2P 打洞成功率低（需端口预测或中继）
+ * 4. NAT 类型判断（三分类模型）：
  *
- * 5. 实现要点：
- *    - 服务器配置：主端口必选，探测端口可选
+ *    ┌─────────────────────────────────────────────────────────────────────┐
+ *    │ 条件                                    │ 结论                       │
+ *    ├─────────────────────────────────────────────────────────────────────┤
+ *    │ Local_IP == Mapped_IP1                  │ OPEN（无 NAT，公网直连）   │
+ *    │ Mapped_Port1 == Mapped_Port2            │ CONE（端口一致性 NAT）     │
+ *    │ Mapped_Port1 != Mapped_Port2            │ SYMMETRIC（端口随机 NAT）  │
+ *    └─────────────────────────────────────────────────────────────────────┘
+ *
+ *    OPEN：
+ *      - 本地 IP 与服务器观察到的源 IP 一致，无地址转换
+ *      - P2P 直连无障碍
+ *
+ *    CONE（端口一致性 NAT）：
+ *      - 同一本地端口对不同目标（主端口/探测端口）映射外部端口相同
+ *      - 对应 RFC 3489 中的 Full Cone / Restricted Cone / Port Restricted Cone
+ *      - 由于 COMPACT 使用单 IP 服务器，无法通过 CHANGE-IP 测试区分三种子类型
+ *      - P2P 打洞成功率高（约 80–95%，取决于对端类型）
+ *      - 报告为 P2P_NAT_FULL_CONE（最乐观估计，打洞策略相同）
+ *
+ *    SYMMETRIC（端口随机 NAT）：
+ *      - 同一本地端口对不同目标映射的外部端口不同
+ *      - 对应 RFC 3489 中的 Symmetric NAT
+ *      - P2P 打洞成功率低（需端口预测或依赖中继）
+ *      - 报告为 P2P_NAT_SYMMETRIC
+ *
+ * 5. 与 RFC 3489 全量检测的对比：
+ *
+ *    RFC 3489 完整流程需要服务器拥有两个独立 IP（双 IP 服务器）：
+ *      Test I:   获取 Mapped_Addr
+ *      Test II:  CHANGE-IP + CHANGE-PORT → 识别 Full Cone
+ *      Test III: CHANGE-PORT only       → 区分 Restricted / Port Restricted
+ *
+ *    COMPACT 是单 IP 服务器模式，CHANGE-IP 测试天然不可能，因此：
+ *
+ *    ┌───────────────────┬───────────────┬───────────────────────────────────┐
+ *    │ RFC 3489 类型      │ COMPACT 结论  │ 原因                               │
+ *    ├───────────────────┼───────────────┼───────────────────────────────────┤
+ *    │ Open (No NAT)     │ OPEN          │ ✅ 可精确识别（本地 IP = 映射 IP） │
+ *    │ Full Cone         │ CONE          │ ✅ 端口一致性可判断               │
+ *    │ Restricted Cone   │ CONE          │ ⚠️ 无法与 Full Cone 区分          │
+ *    │ Port Restricted   │ CONE          │ ⚠️ 无法与 Full Cone 区分          │
+ *    │ Symmetric         │ SYMMETRIC     │ ✅ 端口随机性可判断               │
+ *    │ UDP Blocked       │ TIMEOUT       │ ✅ 注册/探测超时推断              │
+ *    └───────────────────┴───────────────┴───────────────────────────────────┘
+ *
+ *    三种 Cone 子类型在 P2P 打洞策略上并无本质差异（都需要对端先打洞），
+ *    故此处合并为 CONE 已满足实际需求。
+ *
+ * 6. 实现要点：
+ *    - 服务器配置：主端口必选，探测端口可选（建议与主端口同 IP 不同端口）
  *    - 客户端流程：
- *      1) 发送 REGISTER 到主端口
- *      2) 收到 REGISTER_ACK，检查 probe_port
- *      3) 若 probe_port > 0，发送 NAT_PROBE 到探测端口
- *      4) 收到 NAT_PROBE_ACK，比较两次映射端口
- *      5) 存储 NAT 类型，用于后续连接策略选择
- *    - 整个探测在 REGISTERED 状态完成（等待 PEER_INFO 期间）
- *    - 探测失败不影响主流程，降级为普通 P2P 打洞
+ *      1) 发送 REGISTER 到主端口，获得 Mapped_Addr1 + probe_port
+ *      2) 若 probe_port > 0，发送 NAT_PROBE 到探测端口，获得 Mapped_Addr2
+ *      3) 比较 Mapped_Port1 vs Mapped_Port2，写入 nat_detected_result
+ *      4) 若 probe_port == 0，结论为 P2P_NAT_UNSUPPORTED（无法探测）
+ *    - 整个探测在 REGISTERED 状态完成（等待 PEER_INFO 期间，不阻塞主流程）
+ *    - 探测失败（超时）不影响 P2P 打洞，降级为普通打洞策略
  *
- * 6. 优化建议：
- *    - 探测结果可缓存（如 5 分钟），避免频繁探测
- *    - NAT_PROBE 可设置超时（如 500ms），快速失败
- *    - 探测端口可与主端口共用 socket（通过 SO_REUSEPORT）
+ * 7. 优化建议：
+ *    - 探测结果可缓存（如 5 分钟），避免每次连接都重新探测
+ *    - NAT_PROBE 可设置超时（如 500ms × 3 次重试），快速失败
+ *    - 探测端口可与主端口同进程监听（通过 SO_REUSEPORT 或 select 多路复用）
  * PEER_INFO_ACK:
  *   [ack_seq(2)][reserved(2)]
  *   - ack_seq: 确认的 PEER_INFO 序列号
@@ -205,6 +242,9 @@ typedef struct {
     uint8_t             nat_type_detected;                  /* NAT 类型是否已探测 */
     uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
     uint16_t            nat_probe_request_id;               /* NAT_PROBE 请求 ID */
+    uint8_t             nat_probe_retries;                  /* NAT_PROBE 已发次数（0=尚未发送，最多 3 次）*/
+    int                 nat_detected_result;                /* NAT 类型探测结论（p2p_nat_type_t，0=未探测）*/
+    uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 PEER_INFO 重传定时器）*/
     
     /* REGISTER 重发控制（仅 REGISTERING 状态） */
     int                 register_attempts;                  /* REGISTER 重发次数 */
@@ -269,6 +309,12 @@ int p2p_signal_compact_tick(struct p2p_session *s);
 int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
                                  const uint8_t *payload, int len,
                                  const struct sockaddr_in *from);
+
+/*
+ * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果
+ * 每次 p2p_update() tick 时调用，用于同步 s->nat_type
+ */
+void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
 
 #endif /* P2P_SIGNAL_COMPACT_H */
 

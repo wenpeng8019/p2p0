@@ -75,8 +75,20 @@ typedef enum {
     MSG_NAT_PUNCH_NO_PONG,
     
     /* NAT 检测相关 */
-    MSG_NAT_DETECTION_START = 0,
+    MSG_NAT_DETECTION_START,
     MSG_NAT_DETECTION_COMPLETED,
+
+    /* NAT 类型名称（用于 p2p_nat_type_str） */
+    MSG_NAT_TYPE_DETECTING,       /* 检测中 */
+    MSG_NAT_TYPE_TIMEOUT,         /* 超时（无响应）*/
+    MSG_NAT_TYPE_UNKNOWN,         /* 未知 */
+    MSG_NAT_TYPE_OPEN,            /* 无 NAT / 公网直连 */
+    MSG_NAT_TYPE_FULL_CONE,       /* 完全锥形 NAT */
+    MSG_NAT_TYPE_RESTRICTED,      /* 受限锥形 NAT */
+    MSG_NAT_TYPE_PORT_RESTRICTED, /* 端口受限锥形 NAT */
+    MSG_NAT_TYPE_SYMMETRIC,       /* 对称型 NAT */
+    MSG_NAT_TYPE_BLOCKED,         /* UDP 不可达 */
+    MSG_NAT_TYPE_UNSUPPORTED,     /* 不支持（未配置 STUN/探测端口）*/
     
     /* TCP 打洞相关 */
     MSG_TCP_SIMULTANEOUS_OPEN,
@@ -248,6 +260,14 @@ typedef enum {
     /* PseudoTCP 传输层 */
     MSG_PSEUDOTCP_CONGESTION,  /* 检测到拥塞 */
     
+    /* COMPACT 模式 NAT 探测相关 */
+    MSG_COMPACT_NAT_PROBE_SENT,     /* NAT_PROBE 已发送 */
+    MSG_COMPACT_NAT_PROBE_RETRY,    /* NAT_PROBE 重试 */
+    MSG_COMPACT_NAT_PROBE_TIMEOUT,  /* NAT_PROBE 超时，无法确定类型 */
+    MSG_COMPACT_NAT_OPEN,           /* 无 NAT（公网直连）*/
+    MSG_COMPACT_NAT_CONE,           /* 锥形 NAT（端口一致）*/
+    MSG_COMPACT_NAT_SYMMETRIC,      /* 对称 NAT（端口随机）*/
+
     /* DTLS/MbedTLS 传输层 */
     MSG_DTLS_SETUP_FAIL,       /* ssl_setup 失败 */
     MSG_DTLS_HANDSHAKE_DONE,   /* 握手成功 */
@@ -267,11 +287,15 @@ typedef enum {
 /* 内部函数：设置当前语言（通过 p2p_config_t.language 配置） */
 void p2p_set_language(p2p_language_t lang);
 
-/* 获取消息文本 */
+/* 获取消息文本（使用全局当前语言）*/
 const char* p2p_msg(p2p_msg_id_t id);
 
-/* 便捷宏，简化调用 */
-#define MSG(id) p2p_msg(id)
+/* 获取消息文本（显式指定语言）*/
+const char* p2p_msg_lang(p2p_msg_id_t id, p2p_language_t lang);
+
+/* 便捷宏 */
+#define MSG(id)           p2p_msg(id)
+#define MSG_LANG(id, lng) p2p_msg_lang(id, lng)
 
 #ifdef __cplusplus
 }

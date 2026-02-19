@@ -517,6 +517,7 @@ int p2p_update(p2p_session_t *s) {
             case SIG_PKT_REGISTER_ACK:
             case SIG_PKT_PEER_INFO:
             case SIG_PKT_PEER_INFO_ACK:
+            case SIG_PKT_NAT_PROBE_ACK:
                 if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) break;
 
                 // 处理信令包
@@ -667,7 +668,10 @@ int p2p_update(p2p_session_t *s) {
     // 周期维护 STUN/ICE 机制状态机
     // --------------------
 
-    p2p_stun_detect_tick(s);
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+        p2p_signal_compact_nat_detect_tick(s);
+    else
+        p2p_stun_nat_detect_tick(s);
 
     if (s->cfg.use_ice) {
         p2p_ice_tick(s);
@@ -888,6 +892,10 @@ int p2p_state(const p2p_session_t *s) {
 
 int p2p_path(const p2p_session_t *s) {
     return s ? s->path : P2P_PATH_NONE;
+}
+
+int p2p_get_nat_type(const p2p_session_t *s) {
+    return s ? s->nat_type : P2P_NAT_UNKNOWN;
 }
 
 int p2p_is_ready(p2p_session_t *s) {

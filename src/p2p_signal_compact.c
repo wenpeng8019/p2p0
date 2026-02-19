@@ -36,6 +36,7 @@
 #define PEER_INFO_INTERVAL_MS   2000    /* PEER_INFO 重发间隔 */
 #define MAX_REGISTER_ATTEMPTS   10      /* 最大 REGISTER 重发次数 */
 #define MAX_CANDS_PER_PACKET    10      /* 每个 PEER_INFO 包最大候选数 */
+#define NAT_PROBE_MAX_RETRIES   3       /* NAT_PROBE 最大发送次数 */
 
 /* 获取当前时间戳（毫秒） */
 static inline uint64_t compact_time_ms(void) {
@@ -269,6 +270,24 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             }
         }
         
+        /* 服务器支持 NAT 探测端口：立即发送第一个 NAT_PROBE */
+        if (ctx->probe_port > 0 && !ctx->nat_type_detected) {
+            struct sockaddr_in probe_addr = ctx->server_addr;
+            probe_addr.sin_port = htons(ctx->probe_port);
+            ctx->nat_probe_request_id = 1;
+            ctx->nat_probe_retries = 1;
+            ctx->nat_detected_result = P2P_NAT_UNKNOWN;
+            uint8_t probe_payload[4] = {0, 1, 0, 0};  /* request_id=1, reserved=0 */
+            udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, 0, probe_payload, 4);
+            ctx->nat_probe_send_time = compact_time_ms();
+            if (ctx->verbose) {
+                P2P_LOG_INFO("COMPACT", "NAT_PROBE: %s %s:%d (1/%d)",
+                       MSG(MSG_COMPACT_NAT_PROBE_SENT),
+                       inet_ntoa(probe_addr.sin_addr), ctx->probe_port,
+                       NAT_PROBE_MAX_RETRIES);
+            }
+        }
+        
         return 0;
     
     case SIG_PKT_PEER_INFO:
@@ -332,8 +351,88 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         
         return 0;
     
+    case SIG_PKT_NAT_PROBE_ACK: {
+        /* 解析 NAT_PROBE_ACK: [request_id(2)][probe_ip(4)][probe_port(2)] 共 8 字节 */
+        if (len < 8) return -1;
+        uint16_t req_id = ((uint16_t)payload[0] << 8) | payload[1];
+        if (req_id != ctx->nat_probe_request_id) return 1;  /* 非本次请求的响应，忽略 */
+        
+        struct sockaddr_in probe_mapped;
+        memset(&probe_mapped, 0, sizeof(probe_mapped));
+        probe_mapped.sin_family = AF_INET;
+        memcpy(&probe_mapped.sin_addr.s_addr, payload + 2, 4);
+        memcpy(&probe_mapped.sin_port,        payload + 6, 2);
+        
+        /* 端口一致性：主端口映射端口 == 探测端口映射端口 → 锥形，否则 → 对称 */
+        ctx->nat_is_port_consistent =
+            (probe_mapped.sin_port == ctx->public_addr.sin_port) ? 1 : 0;
+        
+        /* 检测 OPEN：公网地址 IP 与任意本地地址相同（无 NAT） */
+        int is_open = 0;
+        for (int i = 0; i < s->route.addr_count; i++) {
+            if (ctx->public_addr.sin_addr.s_addr == s->route.local_addrs[i].sin_addr.s_addr) {
+                is_open = 1;
+                break;
+            }
+        }
+        
+        if (is_open) {
+            ctx->nat_detected_result = P2P_NAT_OPEN;
+        } else if (ctx->nat_is_port_consistent) {
+            /* 端口一致性 → Cone NAT（无法区分 Full/Restricted/Port-Restricted，取最乐观估计） */
+            ctx->nat_detected_result = P2P_NAT_FULL_CONE;
+        } else {
+            ctx->nat_detected_result = P2P_NAT_SYMMETRIC;
+        }
+        ctx->nat_type_detected = 1;
+        
+        if (ctx->verbose) {
+            const char *result_str = p2p_nat_type_str(ctx->nat_detected_result, s->cfg.language);
+            P2P_LOG_INFO("COMPACT", "%s %s %s:%d probe=%s:%d -> %s",
+                   MSG(MSG_NAT_DETECTION_COMPLETED),
+                   MSG(MSG_STUN_MAPPED_ADDRESS),
+                   inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
+                   inet_ntoa(probe_mapped.sin_addr),     ntohs(probe_mapped.sin_port),
+                   result_str);
+        }
+        return 0;
+    }
+    
     default:
         return 1;  /* 未处理 */
+    }
+}
+
+/*
+ * NAT_PROBE 重试 / 超时处理（独立于信令状态，REGISTERED 和 READY 均调用）
+ */
+static void nat_probe_tick(p2p_signal_compact_ctx_t *ctx,
+                                    struct p2p_session *s, uint64_t now) {
+    if (ctx->probe_port == 0 || ctx->nat_type_detected || ctx->nat_probe_retries == 0)
+        return;
+    if (now - ctx->nat_probe_send_time < 1000)
+        return;
+    if (ctx->nat_probe_retries < NAT_PROBE_MAX_RETRIES) {
+        struct sockaddr_in probe_addr = ctx->server_addr;
+        probe_addr.sin_port = htons(ctx->probe_port);
+        uint8_t probe_payload[4] = {0, 1, 0, 0};
+        udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, 0, probe_payload, 4);
+        ctx->nat_probe_retries++;
+        ctx->nat_probe_send_time = now;
+        if (ctx->verbose) {
+            P2P_LOG_INFO("COMPACT", "NAT_PROBE: %s %d/%d %s %s:%d",
+                   MSG(MSG_COMPACT_NAT_PROBE_RETRY),
+                   (int)ctx->nat_probe_retries, NAT_PROBE_MAX_RETRIES,
+                   MSG(MSG_STUN_TO),
+                   inet_ntoa(probe_addr.sin_addr), ctx->probe_port);
+        }
+    } else {
+        /* 所有重试耗尽，探测端口无应答，无法确定 NAT 类型 */
+        ctx->nat_type_detected = 1;
+        ctx->nat_detected_result = P2P_NAT_TIMEOUT;
+        if (ctx->verbose) {
+            P2P_LOG_WARN("COMPACT", "NAT_PROBE: %s", MSG(MSG_COMPACT_NAT_PROBE_TIMEOUT));
+        }
     }
 }
 
@@ -347,6 +446,9 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     uint64_t now = compact_time_ms();
+
+    /* NAT_PROBE 重试/超时：无论当前处于哪个信令状态都需要处理 */
+    nat_probe_tick(ctx, s, now);
 
     /* REGISTERING 状态：重发 REGISTER */
     if (ctx->state == SIGNAL_COMPACT_REGISTERING) {
@@ -459,7 +561,29 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
         return 0;
     }
     
-    /* REGISTERED 状态：等待 PEER_INFO(seq=1)，无需发送 */
+    /* REGISTERED 状态：等待 PEER_INFO(seq=1)，NAT_PROBE 重试已在顶部处理 */
     return 0;
+}
+
+/*
+ * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果到 s->nat_type。
+ * 由 p2p.c 在每次 update tick 中调用。
+ */
+void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    if (ctx->state == SIGNAL_COMPACT_IDLE) {
+        s->nat_type = P2P_NAT_UNKNOWN;          /* 尚未启动 */
+    } else if (ctx->state == SIGNAL_COMPACT_REGISTERING) {
+        if (ctx->register_attempts > MAX_REGISTER_ATTEMPTS)
+            s->nat_type = P2P_NAT_TIMEOUT;      /* 注册超时，信令服务器不可达 */
+        else
+            s->nat_type = P2P_NAT_DETECTING;    /* 等待 REGISTER_ACK */
+    } else if (ctx->probe_port == 0) {
+        s->nat_type = P2P_NAT_UNSUPPORTED;      /* 服务器不支持探测 */
+    } else if (ctx->nat_type_detected) {
+        s->nat_type = ctx->nat_detected_result; /* 直接使用探测结论 */
+    } else {
+        s->nat_type = P2P_NAT_DETECTING;        /* NAT_PROBE 等待响应中 */
+    }
 }
 

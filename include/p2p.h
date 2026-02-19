@@ -50,6 +50,44 @@ enum {
     P2P_PATH_RELAY                              // 服务器中继（fallback）
 };
 
+/* ---------- NAT 类型（STUN 检测结果） ---------- */
+
+/*
+ * NAT 类型（由 RFC 3489 Classic STUN 检测）
+ *
+ * 当前实现通过向单个 STUN 服务器依次发送 Test I / Test II / Test III 识别以下类型：
+ *
+ * P2P 穿透难度（从易到难）：
+ *   OPEN < FULL_CONE < RESTRICTED < PORT_RESTRICTED < BLOCKED
+ *
+ * 注：对称型 NAT (Symmetric NAT) 无法通过 STUN 单服务器检测，但 COMPACT 信令
+ *     模式在服务器配置了 probe_port 时可通过两次映射对比检测出来。
+ * 以下类型需要两个独立 STUN 服务器对比，STUN 检测不支持：
+ *   - 对称型 UDP 防火墙 (Symmetric UDP Firewall)：有公网 IP 但过滤出站方向
+ */
+typedef enum {
+    P2P_NAT_UNKNOWN = 0,        /* 未知：检测尚未完成或未启动 */
+    P2P_NAT_OPEN,               /* 无 NAT：有公网 IP，映射地址 == 本地地址 */
+    P2P_NAT_FULL_CONE,          /* 完全锥形：最容易穿透（Test II 成功） */
+    P2P_NAT_RESTRICTED,         /* 受限锥形（Test III 成功，Test II 失败） */
+    P2P_NAT_PORT_RESTRICTED,    /* 端口受限锥形（Test I 成功，II/III 均失败） */
+    P2P_NAT_SYMMETRIC,          /* 对称型 NAT：不同目标端口映射到不同外部端口;
+                                 * 仅 COMPACT 模式（服务器有 probe_port）可检测 */
+    P2P_NAT_BLOCKED,            /* UDP 不可达：无法联系 STUN 服务器（Test I 超时） */
+    P2P_NAT_UNSUPPORTED,        /* 不支持检测：未配置 STUN 服务器；
+                                 * 或使用 COMPACT 信令但服务器返回检测端口为 0；
+                                 * 此时 NAT 类型无法确定，但不影响连接功能 */
+} p2p_nat_type_t;
+
+/*
+ * p2p_get_nat_type() 的负值返回状态（检测尚在进行中时使用）
+ *
+ * 当返回值 < 0 时，表示检测处于瞬态，尚未得出最终结果；
+ * 当返回值 >= 0 时，可直接强转为 p2p_nat_type_t 读取检测结论。
+ */
+#define P2P_NAT_DETECTING    (-1)   /* 检测进行中：已发出请求，等待服务器响应 */
+#define P2P_NAT_TIMEOUT      (-2)   /* 检测超时：注册或探测无响应，服务器不可达 */
+
 /* ---------- 配置 ---------- */
 
 /* 最大 peer ID 长度 */
@@ -236,6 +274,27 @@ int p2p_path(const p2p_session_t *s);
  * 判断会话是否已经建立，即确定建立连接，允许进行 I/O 操作
  */
 int  p2p_is_ready(p2p_session_t *sa);
+
+/*
+ * 获取本地 NAT 类型（由 STUN 检测得出，仅在 use_ice=true 时自动检测）。
+ *
+ * 返回值含义：
+ *
+ *   负值（检测瞬态，尚未完成）：
+ *     P2P_NAT_DETECTING  (-1)  检测进行中，已发送请求，等待响应
+ *     P2P_NAT_TIMEOUT    (-2)  检测超时，注册或探测无服务器响应
+ *
+ *   >= 0（检测已结束，可强转为 p2p_nat_type_t）：
+ *     P2P_NAT_UNKNOWN        (0)  检测未启动
+ *     P2P_NAT_OPEN           (1)  无 NAT / 公网直连
+ *     P2P_NAT_FULL_CONE      (2)  完全锥形NAT
+ *     P2P_NAT_RESTRICTED     (3)  受限锥形NAT
+ *     P2P_NAT_PORT_RESTRICTED(4)  端口受限锥形NAT
+ *     P2P_NAT_SYMMETRIC      (5)  对称型NAT（仅COMPACT+probe_port可检测）
+ *     P2P_NAT_BLOCKED        (6)  UDP 不可达（STUN 服务器无响应）
+ *     P2P_NAT_UNSUPPORTED    (7)  不支持检测（无STUN配置 / 信令模式不支持）
+ */
+int p2p_get_nat_type(const p2p_session_t *s);
 
 
 ///////////////////////////////////////////////////////////////////////////////

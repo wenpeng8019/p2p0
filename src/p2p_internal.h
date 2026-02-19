@@ -71,6 +71,7 @@
 
 /* 跨平台兼容层（socket / 线程 / 时钟 / sleep） */
 #include "p2p_platform.h"
+#include "p2p_lang.h"          /* 多语言消息 / p2p_nat_type_str 依赖 */
 
 #include "p2p_nat.h"           /* NAT 穿透与类型检测 */
 #include "p2p_route.h"         /* 路由表管理 */
@@ -115,7 +116,7 @@ struct p2p_session {
     struct sockaddr_in          active_addr;        // 当前通信目标地址
 
     /* ======================== NAT 检测 ======================== */
-    p2p_stun_nat_type_t         nat_type;           // 本地 NAT 类型
+    int                         nat_type;           // NAT 检测结果（p2p_get_nat_type() 返回值，同时支持负值状态）
     int                         det_step;           // 当前检测步骤 det_step_t
     uint64_t                    det_last_send;      // 上次发送检测包时间
     int                         det_retries;        // 当前步骤重试次数
@@ -195,6 +196,28 @@ struct p2p_session {
     int                         quit;               // 退出标志
 #endif
 };
+
+/*
+ * NAT 类型转可读字符串（支持多语言）
+ *
+ * 覆盖所有负值（检测中/超时）和 p2p_nat_type_t 枚举值。
+ * 通常传入 s->cfg.language 以匹配当前会话语言配置。
+ */
+static inline const char* p2p_nat_type_str(int type, p2p_language_t lang) {
+    switch (type) {
+        case P2P_NAT_DETECTING:        return p2p_msg_lang(MSG_NAT_TYPE_DETECTING,       lang);
+        case P2P_NAT_TIMEOUT:          return p2p_msg_lang(MSG_NAT_TYPE_TIMEOUT,         lang);
+        case P2P_NAT_UNKNOWN:          return p2p_msg_lang(MSG_NAT_TYPE_UNKNOWN,         lang);
+        case P2P_NAT_OPEN:             return p2p_msg_lang(MSG_NAT_TYPE_OPEN,            lang);
+        case P2P_NAT_FULL_CONE:        return p2p_msg_lang(MSG_NAT_TYPE_FULL_CONE,       lang);
+        case P2P_NAT_RESTRICTED:       return p2p_msg_lang(MSG_NAT_TYPE_RESTRICTED,      lang);
+        case P2P_NAT_PORT_RESTRICTED:  return p2p_msg_lang(MSG_NAT_TYPE_PORT_RESTRICTED, lang);
+        case P2P_NAT_SYMMETRIC:        return p2p_msg_lang(MSG_NAT_TYPE_SYMMETRIC,       lang);
+        case P2P_NAT_BLOCKED:          return p2p_msg_lang(MSG_NAT_TYPE_BLOCKED,         lang);
+        case P2P_NAT_UNSUPPORTED:      return p2p_msg_lang(MSG_NAT_TYPE_UNSUPPORTED,     lang);
+        default:                       return p2p_msg_lang(MSG_NAT_TYPE_UNKNOWN,         lang);
+    }
+}
 
 /* ============================================================================
  * 内联工具函数

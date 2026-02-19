@@ -411,28 +411,11 @@ typedef struct {
     int test_iii_success;               /* Test III 是否收到响应 */
     
     uint8_t tsx_id[12];                 /* 当前 Transaction ID */
-    p2p_stun_nat_type_t detected_type;  /* 检测结果：NAT 类型 */
+    p2p_nat_type_t detected_type;       /* 检测结果：NAT 类型 */
 } nat_detect_ctx_t;
 
 /* 全局检测上下文（临时方案，后续应移入 p2p_session） */
 static nat_detect_ctx_t g_nat_detect_ctx = {0};
-
-/*
- * NAT 类型转可读字符串（内部静态函数）
- */
-static const char* p2p_stun_nat_type_str(p2p_stun_nat_type_t type) {
-    switch (type) {
-        case P2P_STUN_NAT_UNKNOWN:         return "Unknown";
-        case P2P_STUN_NAT_OPEN:            return "Open Internet (No NAT)";
-        case P2P_STUN_NAT_BLOCKED:         return "UDP Blocked";
-        case P2P_STUN_NAT_FULL_CONE:       return "Full Cone NAT";
-        case P2P_STUN_NAT_RESTRICTED:      return "Restricted Cone NAT";
-        case P2P_STUN_NAT_PORT_RESTRICTED: return "Port Restricted Cone NAT";
-        case P2P_STUN_NAT_SYMMETRIC:       return "Symmetric NAT";
-        case P2P_STUN_NAT_SYMMETRIC_UDP:   return "Symmetric UDP Firewall";
-        default:                           return "Unknown";
-    }
-}
 
 /*
  * 获取本地 socket 绑定的地址
@@ -495,9 +478,10 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         struct sockaddr_in local;
         if (get_local_address(s->sock, &local) == 0) {
             if (addr_equal(&mapped, &local)) {
-                ctx->detected_type = P2P_STUN_NAT_OPEN;
+                ctx->detected_type = P2P_NAT_OPEN;
                 ctx->state = NAT_TEST_COMPLETED;
-                P2P_LOG_INFO("NAT", "%s %s", MSG(MSG_NAT_DETECTION_COMPLETED), p2p_stun_nat_type_str(ctx->detected_type));
+                s->nat_type = (int)ctx->detected_type;
+                P2P_LOG_INFO("NAT", "%s %s", MSG(MSG_NAT_DETECTION_COMPLETED), p2p_nat_type_str(ctx->detected_type, s->cfg.language));
                 return;
             }
         }
@@ -505,7 +489,7 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         /* 解析 CHANGED-ADDRESS（如果有） */
         /* TODO: 解析 alt_addr */
         
-        P2P_LOG_INFO("NAT", "%s %s %s:%d", MSG(MSG_STUN_TEST), "I:", MSG(MSG_STUN_MAPPED_ADDRESS),
+        P2P_LOG_INFO("NAT", "%s %s %s: %s:%d", MSG(MSG_STUN_TEST), "I:", MSG(MSG_STUN_MAPPED_ADDRESS),
                      inet_ntoa(mapped.sin_addr), ntohs(mapped.sin_port));
         
         /* ★ 添加 Srflx 候选到 ICE 候选列表 */
@@ -533,10 +517,11 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         /* Test II 响应：从不同 IP/Port 收到响应 */
         ctx->test_ii_success = 1;
         ctx->state = NAT_TEST_II_DONE;
-        ctx->detected_type = P2P_STUN_NAT_FULL_CONE;
+        ctx->detected_type = P2P_NAT_FULL_CONE;
         ctx->state = NAT_TEST_COMPLETED;
+        s->nat_type = (int)ctx->detected_type;
         P2P_LOG_INFO("NAT", "%s %s %s! %s %s", MSG(MSG_STUN_TEST), "II:", MSG(MSG_STUN_SUCCESS),
-                     MSG(MSG_NAT_DETECTION_COMPLETED), p2p_stun_nat_type_str(ctx->detected_type));
+                     MSG(MSG_NAT_DETECTION_COMPLETED), p2p_nat_type_str(ctx->detected_type, s->cfg.language));
         break;
     }
     
@@ -544,10 +529,11 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         /* Test III 响应：从不同 Port 收到响应 */
         ctx->test_iii_success = 1;
         ctx->state = NAT_TEST_III_DONE;
-        ctx->detected_type = P2P_STUN_NAT_RESTRICTED;
+        ctx->detected_type = P2P_NAT_RESTRICTED;
         ctx->state = NAT_TEST_COMPLETED;
+        s->nat_type = (int)ctx->detected_type;
         P2P_LOG_INFO("NAT", "%s %s %s! %s %s", MSG(MSG_STUN_TEST), "III:", MSG(MSG_STUN_SUCCESS),
-                     MSG(MSG_NAT_DETECTION_COMPLETED), p2p_stun_nat_type_str(ctx->detected_type));
+                     MSG(MSG_NAT_DETECTION_COMPLETED), p2p_nat_type_str(ctx->detected_type, s->cfg.language));
         break;
     }
     
@@ -556,22 +542,24 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
     }
 }
 
-/* 周期性 NAT 检测 tick */
-void p2p_stun_detect_tick(struct p2p_session *s) {
+/* 周期性 STUN NAT 检测 tick（仅负责 STUN 路径，COMPACT 路径由 compact_nat_detect_tick 处理） */
+void p2p_stun_nat_detect_tick(struct p2p_session *s) {
     if (!s->cfg.stun_server) {
-        return;  /* 未配置 STUN 服务器 */
+        s->nat_type = P2P_NAT_UNSUPPORTED;  /* 未配置 STUN 服务器 */
+        return;
     }
     
     nat_detect_ctx_t *ctx = &g_nat_detect_ctx;
     uint64_t now = time_ms();
-    
-    /* 首次调用时打印调试信息 */
-    // printf("[NAT_DEBUG] p2p_stun_detect_tick called, state=%d\n", ctx->state);
-    
-    /* 如果已完成检测，不再重复 */
+
+    /* 如果已完成检测，写回最终结果后返回 */
     if (ctx->state == NAT_TEST_COMPLETED) {
+        s->nat_type = (int)ctx->detected_type;
         return;
     }
+
+    /* 检测进行中：每帧都推导并写入状态，确保调用方随时能拿到准确值 */
+    s->nat_type = P2P_NAT_DETECTING;
     
     /* 检查超时 */
     if (ctx->state != NAT_TEST_IDLE && 
@@ -582,8 +570,9 @@ void p2p_stun_detect_tick(struct p2p_session *s) {
             switch (ctx->state) {
             case NAT_TEST_I_SENT:
                 P2P_LOG_WARN("NAT", "%s %s %s", MSG(MSG_STUN_TEST), "I:", MSG(MSG_ERROR_TIMEOUT));
+                ctx->detected_type = P2P_NAT_BLOCKED;  /* 无法联系 STUN 服务器 */
                 ctx->state = NAT_TEST_COMPLETED;
-                ctx->detected_type = P2P_STUN_NAT_SYMMETRIC;  /* 默认最严格 */
+                s->nat_type = (int)ctx->detected_type;
                 return;
             
             case NAT_TEST_II_SENT:
@@ -597,9 +586,10 @@ void p2p_stun_detect_tick(struct p2p_session *s) {
                 P2P_LOG_WARN("NAT", "%s %s %s", MSG(MSG_STUN_TEST), "III:", MSG(MSG_ERROR_TIMEOUT));
                 ctx->test_iii_success = 0;
                 ctx->state = NAT_TEST_III_DONE;
-                ctx->detected_type = P2P_STUN_NAT_PORT_RESTRICTED;
+                ctx->detected_type = P2P_NAT_PORT_RESTRICTED;
                 ctx->state = NAT_TEST_COMPLETED;
-                P2P_LOG_INFO("NAT", "%s %s", MSG(MSG_NAT_DETECTION_COMPLETED), p2p_stun_nat_type_str(ctx->detected_type));
+                s->nat_type = (int)ctx->detected_type;
+                P2P_LOG_INFO("NAT", "%s %s", MSG(MSG_NAT_DETECTION_COMPLETED), p2p_nat_type_str(ctx->detected_type, s->cfg.language));
                 return;
             
             default:
@@ -627,9 +617,11 @@ void p2p_stun_detect_tick(struct p2p_session *s) {
             return;
         }
         
-        /* 生成新的 Transaction ID */
-        for (int i = 0; i < 12; i++) {
-            ctx->tsx_id[i] = (uint8_t)rand();
+        /* 只在首次启动时生成新的 Transaction ID */
+        if (ctx->retry_count == 0) {
+            for (int i = 0; i < 12; i++) {
+                ctx->tsx_id[i] = (uint8_t)rand();
+            }
         }
         
         /* DEBUG: Print Transaction ID
@@ -655,7 +647,7 @@ void p2p_stun_detect_tick(struct p2p_session *s) {
             udp_send_to(s->sock, &stun_addr, req, len);
             ctx->last_send_time = now;
             ctx->state = NAT_TEST_I_SENT;
-            ctx->retry_count = 0;
+            /* 不要在这里重置 retry_count，保留重试计数 */
             P2P_LOG_INFO("NAT", "%s %s %s %s %s:%d (%s=%d)", MSG(MSG_STUN_SENDING), MSG(MSG_STUN_TEST), "I",
                          MSG(MSG_STUN_TO), s->cfg.stun_server, s->cfg.stun_port, MSG(MSG_STUN_LEN), len);
         } else {
@@ -690,11 +682,12 @@ void p2p_stun_detect_tick(struct p2p_session *s) {
     case NAT_TEST_III_DONE: {
         /* 根据结果判断最终类型 */
         if (!ctx->test_ii_success && !ctx->test_iii_success) {
-            ctx->detected_type = P2P_STUN_NAT_PORT_RESTRICTED;
+            ctx->detected_type = P2P_NAT_PORT_RESTRICTED;
         }
         ctx->state = NAT_TEST_COMPLETED;
-        P2P_LOG_INFO("NAT", "%s %s %s", MSG(MSG_NAT_DETECTION_START), MSG(MSG_NAT_DETECTION_COMPLETED),
-                     p2p_stun_nat_type_str(ctx->detected_type));
+        s->nat_type = (int)ctx->detected_type;
+        P2P_LOG_INFO("NAT", "%s %s", MSG(MSG_NAT_DETECTION_COMPLETED),
+                     p2p_nat_type_str(ctx->detected_type, s->cfg.language));
         break;
     }
     

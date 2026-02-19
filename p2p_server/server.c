@@ -791,6 +791,17 @@ int main(int argc, char *argv[]) {
     }
     setsockopt(udp_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
+    // Create NAT probe UDP socket (optional, only if probe_port configured)
+    server_socket_t probe_fd = SERVER_INVALID_SOCKET;
+    if (g_probe_port > 0) {
+        probe_fd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (probe_fd == SERVER_INVALID_SOCKET) {
+            perror("probe UDP socket");
+            return 1;
+        }
+        setsockopt(probe_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
+    }
+
     // 绑定监听端口（TCP 和 UDP 同一端口）
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
@@ -805,6 +816,24 @@ int main(int argc, char *argv[]) {
     if (bind(udp_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("UDP bind");
         return 1;
+    }
+
+    // 绑定 NAT 探测端口（独立端口，客户端用同一本地端口发包，服务器在此处看到不同映射地址）
+    if (probe_fd != SERVER_INVALID_SOCKET) {
+        struct sockaddr_in probe_addr = {0};
+        probe_addr.sin_family = AF_INET;
+        probe_addr.sin_addr.s_addr = INADDR_ANY;
+        probe_addr.sin_port = htons((unsigned short)g_probe_port);
+        if (bind(probe_fd, (struct sockaddr *)&probe_addr, sizeof(probe_addr)) < 0) {
+            perror("probe UDP bind");
+            server_close_socket(probe_fd);
+            probe_fd = SERVER_INVALID_SOCKET;
+            g_probe_port = 0;  /* 绑定失败，禁用探测功能 */
+            printf("[SERVER] NAT probe disabled (bind failed)\n");
+        } else {
+            printf("[SERVER] NAT probe socket listening on port %d\n", g_probe_port);
+        }
+        fflush(stdout);
     }
 
     // Start TCP listen
@@ -826,14 +855,17 @@ int main(int argc, char *argv[]) {
             last_cleanup = now;
         }
 
-        // Build fd_set: TCP listen + TCP clients + UDP
+        // Build fd_set: TCP listen + TCP clients + UDP + probe UDP
         FD_ZERO(&read_fds);
         FD_SET(listen_fd, &read_fds);
         FD_SET(udp_fd, &read_fds);
+        if (probe_fd != SERVER_INVALID_SOCKET) FD_SET(probe_fd, &read_fds);
         /* max_fd is only meaningful on POSIX; ignored by Windows select() */
         int max_fd = 0;
 #ifndef _WIN32
         max_fd = (int)((listen_fd > udp_fd) ? listen_fd : udp_fd);
+        if (probe_fd != SERVER_INVALID_SOCKET && (int)probe_fd > max_fd)
+            max_fd = (int)probe_fd;
 #endif
 
         for (int i = 0; i < MAX_PEERS; i++) {
@@ -885,7 +917,7 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        // UDP packet received
+        // UDP packet received (COMPACT signaling)
         if (FD_ISSET(udp_fd, &read_fds)) {
             uint8_t buf[2048];
             struct sockaddr_in from;
@@ -895,6 +927,36 @@ int main(int argc, char *argv[]) {
                             (struct sockaddr *)&from, &from_len);
             if (n > 0) {
                 handle_compact_signaling(udp_fd, buf, n, &from);
+            }
+        }
+
+        // NAT probe UDP packet received
+        if (probe_fd != SERVER_INVALID_SOCKET && FD_ISSET(probe_fd, &read_fds)) {
+            uint8_t buf[64];
+            struct sockaddr_in from;
+            socklen_t from_len = sizeof(from);
+            int n = recvfrom(probe_fd, (char *)buf, sizeof(buf), 0,
+                             (struct sockaddr *)&from, &from_len);
+            // NAT_PROBE: [hdr(4)][request_id(2)][reserved(2)] = 8 bytes
+            if (n >= 8 && buf[0] == SIG_PKT_NAT_PROBE) {
+                uint16_t req_id = ((uint16_t)buf[4] << 8) | buf[5];
+                // NAT_PROBE_ACK: [hdr(4)][request_id(2)][probe_ip(4)][probe_port(2)] = 12 bytes
+                uint8_t ack[12];
+                ack[0] = SIG_PKT_NAT_PROBE_ACK;
+                ack[1] = 0;  /* flags */
+                ack[2] = 0;  /* seq hi */
+                ack[3] = 0;  /* seq lo */
+                ack[4] = (uint8_t)(req_id >> 8);
+                ack[5] = (uint8_t)(req_id & 0xFF);
+                memcpy(ack + 6,  &from.sin_addr.s_addr, 4);  /* probe_ip   */
+                memcpy(ack + 10, &from.sin_port,         2);  /* probe_port */
+                sendto(probe_fd, (const char *)ack, 12, 0,
+                       (struct sockaddr *)&from, sizeof(from));
+                printf("[PROBE] NAT_PROBE_ACK -> %s:%d (req_id=%u, mapped=%s:%d)\n",
+                       inet_ntoa(from.sin_addr), ntohs(from.sin_port),
+                       req_id,
+                       inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+                fflush(stdout);
             }
         }
 
@@ -910,6 +972,7 @@ int main(int argc, char *argv[]) {
 
     server_close_socket(listen_fd);
     server_close_socket(udp_fd);
+    if (probe_fd != SERVER_INVALID_SOCKET) server_close_socket(probe_fd);
 #ifdef _WIN32
     WSACleanup();
 #endif

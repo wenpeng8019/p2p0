@@ -13,6 +13,7 @@
  */
 
 #include "test_framework.h"
+#include <p2p.h>     /* p2p_nat_type_t, P2P_NAT_* */
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -21,7 +22,7 @@
 #include <arpa/inet.h>
 #endif
 
-/* ---- 从 p2p_stun.h 复制必要的常量与类型，保持独立 ---- */
+/* ---- 从 p2p_stun.h 复制必要的常量与类型，保持独立 （p2p_nat_type_t 已由 p2p.h 提供） ----*/
 
 #define STUN_MAGIC               0x2112A442U
 #define STUN_BINDING_REQUEST     0x0001
@@ -43,16 +44,7 @@ typedef struct {
     uint8_t  tsx_id[12];
 } stun_hdr_t;
 
-typedef enum {
-    P2P_STUN_NAT_UNKNOWN = 0,
-    P2P_STUN_NAT_OPEN,
-    P2P_STUN_NAT_BLOCKED,
-    P2P_STUN_NAT_FULL_CONE,
-    P2P_STUN_NAT_RESTRICTED,
-    P2P_STUN_NAT_PORT_RESTRICTED,
-    P2P_STUN_NAT_SYMMETRIC,
-    P2P_STUN_NAT_SYMMETRIC_UDP
-} p2p_stun_nat_type_t;
+/* p2p_nat_type_t 已包含在 p2p.h 中 */
 
 /* ---- 内联实现 Binding Request 构造（不依赖 p2p_static） ---- */
 static int stun_build_binding_request_inline(uint8_t *buf, int max_len,
@@ -185,26 +177,27 @@ static void xor_mapped_address_decode(void) {
 static void nat_type_enum(void) {
     printf("[TEST] Testing NAT type enum completeness...\n");
 
-    /* 按穿透难度覆盖所有类型 */
-    p2p_stun_nat_type_t types[] = {
-        P2P_STUN_NAT_UNKNOWN,
-        P2P_STUN_NAT_OPEN,
-        P2P_STUN_NAT_BLOCKED,
-        P2P_STUN_NAT_FULL_CONE,
-        P2P_STUN_NAT_RESTRICTED,
-        P2P_STUN_NAT_PORT_RESTRICTED,
-        P2P_STUN_NAT_SYMMETRIC,
-        P2P_STUN_NAT_SYMMETRIC_UDP,
+    /* 当前可检测的8 种类型 */
+    p2p_nat_type_t types[] = {
+        P2P_NAT_UNKNOWN,
+        P2P_NAT_OPEN,
+        P2P_NAT_FULL_CONE,
+        P2P_NAT_RESTRICTED,
+        P2P_NAT_PORT_RESTRICTED,
+        P2P_NAT_SYMMETRIC,          /* COMPACT 模式 + probe_port 可检浌 */
+        P2P_NAT_BLOCKED,
+        P2P_NAT_UNSUPPORTED,
     };
     int count = (int)(sizeof(types) / sizeof(types[0]));
     ASSERT_EQ(count, 8);
 
-    /* 穿透难度验证：OPEN < FULL_CONE < PORT_RESTRICTED < SYMMETRIC */
-    ASSERT(P2P_STUN_NAT_OPEN       < P2P_STUN_NAT_FULL_CONE);
-    ASSERT(P2P_STUN_NAT_FULL_CONE  < P2P_STUN_NAT_PORT_RESTRICTED);
-    ASSERT(P2P_STUN_NAT_PORT_RESTRICTED < P2P_STUN_NAT_SYMMETRIC);
+    /* 穿透难度验证：OPEN < FULL_CONE < PORT_RESTRICTED < SYMMETRIC < BLOCKED */
+    ASSERT(P2P_NAT_OPEN            < P2P_NAT_FULL_CONE);
+    ASSERT(P2P_NAT_FULL_CONE       < P2P_NAT_PORT_RESTRICTED);
+    ASSERT(P2P_NAT_PORT_RESTRICTED < P2P_NAT_SYMMETRIC);
+    ASSERT(P2P_NAT_SYMMETRIC       < P2P_NAT_BLOCKED);
 
-    printf("[TEST] ✓ NAT type enum passed (%d types)\n", count);
+    printf("[TEST] \u2713 NAT type enum passed (%d types)\n", count);
 }
 
 /* ============================================================================
@@ -212,46 +205,42 @@ static void nat_type_enum(void) {
  * ============================================================================ */
 
 /*
- * 模拟 RFC 3489 决策树逻辑：
+ * 模拟 RFC 3489 实际实现的检测逻辑：
  *
  *   mapped == local  → OPEN
  *   test_ii_ok       → FULL_CONE
  *   test_iii_ok      → RESTRICTED
  *   else             → PORT_RESTRICTED
- *   mapped_changes   → SYMMETRIC
+ *
+ * 注：Symmetric NAT 仅在 COMPACT 模式下通过服务器 probe_port 可检测。
  */
-static p2p_stun_nat_type_t simulate_nat_detection(
+static p2p_nat_type_t simulate_nat_detection(
     int mapped_eq_local,
     int test_ii_ok,
-    int test_iii_ok,
-    int mapped_changes)
+    int test_iii_ok)
 {
-    if (mapped_eq_local)  return P2P_STUN_NAT_OPEN;
-    if (mapped_changes)   return P2P_STUN_NAT_SYMMETRIC;
-    if (test_ii_ok)       return P2P_STUN_NAT_FULL_CONE;
-    if (test_iii_ok)      return P2P_STUN_NAT_RESTRICTED;
-    return P2P_STUN_NAT_PORT_RESTRICTED;
+    if (mapped_eq_local)  return P2P_NAT_OPEN;
+    if (test_ii_ok)       return P2P_NAT_FULL_CONE;
+    if (test_iii_ok)      return P2P_NAT_RESTRICTED;
+    return P2P_NAT_PORT_RESTRICTED;
 }
 
 static void nat_detection_logic(void) {
     printf("[TEST] Testing NAT detection decision tree (mock)...\n");
 
     /* 场景1：公网直连 */
-    ASSERT_EQ(simulate_nat_detection(1, 0, 0, 0), P2P_STUN_NAT_OPEN);
+    ASSERT_EQ(simulate_nat_detection(1, 0, 0), P2P_NAT_OPEN);
 
-    /* 场景2：对称型 NAT（映射地址随目标变化） */
-    ASSERT_EQ(simulate_nat_detection(0, 0, 0, 1), P2P_STUN_NAT_SYMMETRIC);
+    /* 场景2：完全锥形 NAT */
+    ASSERT_EQ(simulate_nat_detection(0, 1, 0), P2P_NAT_FULL_CONE);
 
-    /* 场景3：完全锥形 NAT */
-    ASSERT_EQ(simulate_nat_detection(0, 1, 0, 0), P2P_STUN_NAT_FULL_CONE);
+    /* 场景3：受限锥形 NAT */
+    ASSERT_EQ(simulate_nat_detection(0, 0, 1), P2P_NAT_RESTRICTED);
 
-    /* 场景4：受限锥形 NAT */
-    ASSERT_EQ(simulate_nat_detection(0, 0, 1, 0), P2P_STUN_NAT_RESTRICTED);
+    /* 场景4：端口受限锥形 NAT */
+    ASSERT_EQ(simulate_nat_detection(0, 0, 0), P2P_NAT_PORT_RESTRICTED);
 
-    /* 场景5：端口受限锥形 NAT */
-    ASSERT_EQ(simulate_nat_detection(0, 0, 0, 0), P2P_STUN_NAT_PORT_RESTRICTED);
-
-    printf("[TEST] ✓ NAT detection decision tree passed (5 scenarios)\n");
+    printf("[TEST] ✓ NAT detection decision tree passed (4 scenarios)\n");
 }
 
 /* ============================================================================

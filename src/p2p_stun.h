@@ -81,6 +81,7 @@
 #define P2P_STUN_H
 
 #include <stdint.h>
+#include <p2p.h>            /* p2p_nat_type_t */
 #include "p2p_platform.h"   /* cross-platform socket headers */
 
 /*
@@ -144,47 +145,6 @@ typedef struct {
 #define STUN_FLAG_CHANGE_IP         0x04  /* 请求服务器从不同 IP 响应 */
 #define STUN_FLAG_CHANGE_PORT       0x02  /* 请求服务器从不同端口响应 */
 
-/*
- * NAT 类型定义 (RFC 3489)
- *
- * P2P 穿透难度（从易到难）：
- *   1. Open/Full Cone: 最容易穿透
- *   2. Restricted Cone: 较容易
- *   3. Port Restricted: 中等难度
- *   4. Symmetric: 最难穿透，通常需要 TURN 中继
- *
- * 检测流程：
- *   Test I:  向 STUN 服务器发送请求 → 获取映射地址
- *   Test II: 请求服务器从不同 IP+端口响应
- *   Test III: 请求服务器从相同 IP 不同端口响应
- *
- *   ┌─────────────────────────────────────────────────────────────┐
- *   │                   NAT 类型检测决策树                        │
- *   ├─────────────────────────────────────────────────────────────┤
- *   │ mapped_addr == local_addr?                                  │
- *   │     是 → P2P_STUN_NAT_OPEN (无 NAT / 公网 IP)               │
- *   │     否 ↓                                                    │
- *   │ Test II 成功?                                               │
- *   │     是 → P2P_STUN_NAT_FULL_CONE (完全锥形)                  │
- *   │     否 ↓                                                    │
- *   │ Test III 成功?                                              │
- *   │     是 → P2P_STUN_NAT_RESTRICTED (受限锥形)                 │
- *   │     否 → P2P_STUN_NAT_PORT_RESTRICTED (端口受限锥形)        │
- *   │ 不同目标时 mapped_addr 变化?                                │
- *   │     是 → P2P_STUN_NAT_SYMMETRIC (对称型)                    │
- *   └─────────────────────────────────────────────────────────────┘
- */
-typedef enum {
-    P2P_STUN_NAT_UNKNOWN = 0,       /* 未知（检测未完成） */
-    P2P_STUN_NAT_OPEN,              /* 无 NAT / 公网 IP */
-    P2P_STUN_NAT_BLOCKED,           /* UDP 被阻止 */
-    P2P_STUN_NAT_FULL_CONE,         /* 完全锥形 NAT（最容易穿透） */
-    P2P_STUN_NAT_RESTRICTED,        /* 受限锥形 NAT */
-    P2P_STUN_NAT_PORT_RESTRICTED,   /* 端口受限锥形 NAT */
-    P2P_STUN_NAT_SYMMETRIC,         /* 对称型 NAT（最难穿透） */
-    P2P_STUN_NAT_SYMMETRIC_UDP      /* 对称型 UDP 防火墙 */
-} p2p_stun_nat_type_t;
-
 struct p2p_session;
 
 /*
@@ -213,9 +173,9 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12]
 void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len, const struct sockaddr_in *from);
 
 /*
- * NAT 检测状态机 tick
- * 周期性调用以推进 NAT 检测流程（发送测试请求、处理超时等）
+ * STUN NAT 检测状态机 tick
+ * 仅处理 STUN 路径（需配置 stun_server），COMPACT 路径由 compact_nat_detect_tick 处理
  */
-void p2p_stun_detect_tick(struct p2p_session *s);
+void p2p_stun_nat_detect_tick(struct p2p_session *s);
 
 #endif /* P2P_STUN_H */
