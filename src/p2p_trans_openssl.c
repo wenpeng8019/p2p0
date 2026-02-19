@@ -1,6 +1,8 @@
 
 #include "p2p_internal.h"
 #include "p2p_udp.h"
+#include "p2p_log.h"
+#include "p2p_lang.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/bio.h>
@@ -97,7 +99,7 @@ static void openssl_tick(p2p_session_t *s) {
         int ret = SSL_do_handshake(os->ssl);
         if (ret == 1) {
             os->handshake_done = 1;
-            printf("[OpenSSL] DTLS Handshake completed successfully!\n");
+            P2P_LOG_INFO("openssl", "%s", MSG(MSG_OPENSSL_HANDSHAKE_DONE));
         }
     }
 

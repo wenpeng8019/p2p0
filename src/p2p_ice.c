@@ -34,6 +34,8 @@
 #include "p2p_internal.h"
 #include "p2p_signal_relay.h"
 #include "p2p_udp.h"
+#include "p2p_log.h"
+#include "p2p_lang.h"
 #ifndef _WIN32
 #   include <ifaddrs.h>
 #   include <net/if.h>
@@ -271,9 +273,9 @@ int p2p_ice_form_check_list(
         pairs[0].state = P2P_PAIR_WAITING;
     }
     
-    printf("[ICE] Formed check list with %d candidate pairs:\n", pair_cnt);
+    P2P_LOG_INFO("ICE", "%s %d %s", MSG(MSG_ICE_FORMED_CHECKLIST), pair_cnt, MSG(MSG_ICE_CANDIDATE_PAIRS));
     for (int i = 0; i < pair_cnt && i < 5; i++) {  /* 只打印前 5 个 */
-        printf("  [%d] L=%s:%d -> R=%s:%d, pri=0x%016llx\n",
+        P2P_LOG_INFO("ICE", "  [%d] L=%s:%d -> R=%s:%d, pri=0x%016llx",
                i,
                inet_ntoa(pairs[i].local.addr.sin_addr),
                ntohs(pairs[i].local.addr.sin_port),
@@ -282,7 +284,7 @@ int p2p_ice_form_check_list(
                (unsigned long long)pairs[i].pair_priority);
     }
     if (pair_cnt > 5) {
-        printf("  ... and %d more pairs\n", pair_cnt - 5);
+        P2P_LOG_INFO("ICE", "  ... %s %d %s", MSG(MSG_ICE_AND), pair_cnt - 5, MSG(MSG_ICE_MORE_PAIRS));
     }
     
     return pair_cnt;
@@ -332,7 +334,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
     /* 仅用于 RELAY 模式（TCP 信令） */
     if (s->signaling_mode != P2P_SIGNALING_MODE_RELAY) {
         /* COMPACT 模式不应调用此函数，候选通过 p2p_signal_compact 模块发送 */
-        printf("[RELAY] Error: p2p_ice_send_local_candidate called in non-RELAY mode\n");
+        P2P_LOG_ERROR("RELAY", "%s", MSG(MSG_ICE_ERROR_NON_RELAY));
         return -1;
     }
 
@@ -350,7 +352,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
      * 如果未连接，返回失败。批量重发由 p2p_update() 的定期逻辑处理。
      */
     if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
-        printf("[ICE] [Trickle] TCP not connected, skipping single candidate send\n");
+        P2P_LOG_WARN("ICE", "%s", MSG(MSG_ICE_TRICKLE_TCP_NOT_CONNECTED));
         return -1;
     }
 
@@ -378,13 +380,13 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
      */
     int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
     if (ret < 0) {
-        printf("[ICE] [Trickle] TCP send failed (ret=%d), will be retried by p2p_update()\n", ret);
+        P2P_LOG_WARN("ICE", "%s (ret=%d), %s", MSG(MSG_ICE_TRICKLE_TCP_FAILED), ret, MSG(MSG_ICE_WILL_RETRY));
         return -1;
     }
 
     /* 发送成功（无论对端在线与否）*/
-    printf("[ICE] [Trickle] Sent 1 candidate to %s (online=%s)\n", 
-           s->remote_peer_id, ret > 0 ? "yes" : "no (cached)");
+    P2P_LOG_INFO("ICE", "%s %s %s (%s=%s)", MSG(MSG_ICE_TRICKLE_SENT), MSG(MSG_ICE_ONE_CANDIDATE), s->remote_peer_id,
+           MSG(MSG_ICE_ONLINE), ret > 0 ? MSG(MSG_ICE_YES) : MSG(MSG_ICE_NO_CACHED));
     return ret > 0 ? ret : 0;
 }
 
@@ -450,7 +452,8 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                     host_index++;
                     memcpy(&c->addr, sa, sizeof(struct sockaddr_in));
                     c->addr.sin_port = loc.sin_port;
-                    printf("[ICE] Gathered Host Candidate: %s:%d (priority=0x%08x)\n",
+                    P2P_LOG_INFO("ICE", "%s %s: %s:%d (priority=0x%08x)",
+                           MSG(MSG_ICE_GATHERED), MSG(MSG_ICE_HOST_CANDIDATE),
                            inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                     p2p_ice_send_local_candidate(s, c);
                 }
@@ -473,7 +476,8 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                     host_index++;
                     memcpy(&c->addr, ifa->ifa_addr, sizeof(struct sockaddr_in));
                     c->addr.sin_port = loc.sin_port;
-                    printf("[ICE] Gathered Host Candidate: %s:%d (priority=0x%08x)\n",
+                    P2P_LOG_INFO("ICE", "%s %s: %s:%d (priority=0x%08x)",
+                           MSG(MSG_ICE_GATHERED), MSG(MSG_ICE_HOST_CANDIDATE),
                            inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                     p2p_ice_send_local_candidate(s, c);
                 }
@@ -503,7 +507,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
             if (he) {
                 memcpy(&stun_addr.sin_addr, he->h_addr_list[0], he->h_length);
                 udp_send_to(s->sock, &stun_addr, stun_buf, slen);
-                printf("[ICE] Requested Srflx Candidate from %s\n", s->cfg.stun_server);
+                P2P_LOG_INFO("ICE", "%s %s %s %s", MSG(MSG_ICE_REQUESTED), MSG(MSG_ICE_SRFLX_CANDIDATE), MSG(MSG_ICE_FROM), s->cfg.stun_server);
             }
         }
     }
@@ -515,7 +519,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      */
     if (s->cfg.turn_server) {
         if (p2p_turn_allocate(s) == 0) {
-            printf("[ICE] Requested Relay Candidate from %s\n", s->cfg.turn_server);
+            P2P_LOG_INFO("ICE", "%s %s %s %s", MSG(MSG_ICE_REQUESTED), MSG(MSG_ICE_RELAY_CANDIDATE), MSG(MSG_ICE_FROM), s->cfg.turn_server);
         }
     }
 
@@ -577,7 +581,7 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
             p2p_candidate_t *c = &s->remote_cands[s->remote_cand_cnt++];
             c->type = ctype;
             c->addr = caddr;
-            printf("[ICE] Received New Remote Candidate: %d -> %s:%d\n", 
+            P2P_LOG_INFO("ICE", "%s: %d -> %s:%d", MSG(MSG_ICE_RECEIVED_REMOTE), 
                    c->type, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
         }
     }
@@ -628,8 +632,9 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
                     break;
             }
 
-            printf("[ICE] Nomination successful! Using %s path %s:%d%s\n", 
-                   cand_type_str, inet_ntoa(from->sin_addr), ntohs(from->sin_port),
+            P2P_LOG_INFO("ICE", "%s! %s %s %s %s:%d%s",
+                   MSG(MSG_ICE_NOMINATION_SUCCESS), MSG(MSG_ICE_USING), cand_type_str, MSG(MSG_ICE_PATH),
+                   inet_ntoa(from->sin_addr), ntohs(from->sin_port),
                    connection_desc);
             
             /* 设置活动地址 */
@@ -663,14 +668,14 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
                 }
                 if (answer_len > 0) {
                     p2p_signal_relay_reply_connect(&s->sig_relay_ctx, s->sig_relay_ctx.incoming_peer_name, answer_buf, answer_len);
-                    printf("[ICE] Sent answer to '%s'\n", s->sig_relay_ctx.incoming_peer_name);
+                    P2P_LOG_INFO("ICE", "%s '%s'", MSG(MSG_ICE_SENT_ANSWER), s->sig_relay_ctx.incoming_peer_name);
                 }
             }
 
             /* 认证握手 */
             if (s->cfg.auth_key) {
                 udp_send_packet(s->sock, from, P2P_PKT_AUTH, 0, 0, s->cfg.auth_key, strlen(s->cfg.auth_key));
-                printf("[AUTH] Sent authentication request to peer\n");
+                P2P_LOG_INFO("AUTH", "%s", MSG(MSG_ICE_AUTH_SENT));
             }
 
             break;
@@ -714,8 +719,8 @@ void p2p_ice_tick(p2p_session_t *s) {
                      * 这里简化为自定义的 P2P_PKT_PUNCH
                      */
                     udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
-                    printf("[ICE] Sending connectivity check to Candidate %d: %s:%d\n",
-                           i, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                    P2P_LOG_INFO("ICE", "%s %d: %s:%d",
+                           MSG(MSG_ICE_CONNECTIVITY_CHECK), i, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
                 }
 
                 last_check = now;

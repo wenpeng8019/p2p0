@@ -9,6 +9,8 @@
 #include "p2p_internal.h"
 #include "p2p_nat.h"
 #include "p2p_udp.h"
+#include "p2p_log.h"
+#include "p2p_lang.h"
 
 #include <string.h>
 #ifndef _WIN32
@@ -40,8 +42,7 @@ int nat_start_punch(p2p_session_t *s, int verbose) {
     
     if (s->remote_cand_cnt == 0) {
         if (verbose) {
-            printf("[NAT_PUNCH] ERROR: No remote candidates to punch\n");
-            fflush(stdout);
+            P2P_LOG_ERROR("NAT", "%s", MSG(MSG_NAT_PUNCH_ERROR_NO_CAND));
         }
         return -1;
     }
@@ -54,7 +55,7 @@ int nat_start_punch(p2p_session_t *s, int verbose) {
     n->peer_addr = s->remote_cands[0].addr;
     
     if (n->verbose) {
-        printf("[NAT_PUNCH] START: Punching to %d candidates\n", s->remote_cand_cnt);
+        P2P_LOG_INFO("NAT", "%s %d %s", MSG(MSG_NAT_PUNCH_START), s->remote_cand_cnt, MSG(MSG_NAT_PUNCH_CANDIDATES));
         for (int i = 0; i < s->remote_cand_cnt; i++) {
             const char *type_str = "Unknown";
             switch (s->remote_cands[i].type) {
@@ -63,11 +64,10 @@ int nat_start_punch(p2p_session_t *s, int verbose) {
                 case P2P_CAND_PRFLX: type_str = "Prflx"; break;
                 case P2P_CAND_RELAY: type_str = "Relay"; break;
             }
-            printf("            [%d] %s: %s:%d\n", i, type_str,
+            P2P_LOG_INFO("NAT", "  [%d] %s: %s:%d", i, type_str,
                    inet_ntoa(s->remote_cands[i].addr.sin_addr),
                    ntohs(s->remote_cands[i].addr.sin_port));
         }
-        fflush(stdout);
     }
     
     /* 立即向第一个候选发送打洞包 */
@@ -95,9 +95,8 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
 
     case P2P_PKT_PUNCH:
         if (n->verbose) {
-            printf("[NAT_PUNCH] PUNCH: Received from %s:%d, sending ACK\n",
+            P2P_LOG_INFO("NAT", "%s %s:%d", MSG(MSG_NAT_PUNCH_RECEIVED),
                    inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-            fflush(stdout);
         }
         /* 回复应答包 */
         udp_send_packet(s->sock, from, P2P_PKT_PUNCH_ACK, 0, 0, NULL, 0);
@@ -105,9 +104,8 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
 
     case P2P_PKT_PUNCH_ACK:
         if (n->verbose && type == P2P_PKT_PUNCH_ACK) {
-            printf("[NAT_PUNCH] PUNCH_ACK: Received from %s:%d\n",
+            P2P_LOG_INFO("NAT", "%s %s:%d", MSG(MSG_NAT_PUNCH_ACK_RECEIVED),
                    inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-            fflush(stdout);
         }
         
         /* 通知 ICE 层（如果启用） */
@@ -122,11 +120,10 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
             n->last_recv_time = now;
             
             if (n->verbose) {
-                printf("[NAT_PUNCH] SUCCESS: Hole punched! Connected to %s:%d\n",
+                P2P_LOG_INFO("NAT", "%s %s:%d", MSG(MSG_NAT_PUNCH_SUCCESS),
                        inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-                printf("            Attempts: %d, Time: %llu ms\n",
-                       n->punch_attempts, now - n->punch_start);
-                fflush(stdout);
+                P2P_LOG_INFO("NAT", "  %s %d, %s %llu ms", MSG(MSG_NAT_PUNCH_ATTEMPTS),
+                       n->punch_attempts, MSG(MSG_NAT_PUNCH_TIME), now - n->punch_start);
             }
         }
         return 0;
@@ -160,9 +157,8 @@ int nat_tick(p2p_session_t *s) {
             /* 超时判断 */
             if (now - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 if (n->verbose) {
-                    printf("[NAT_PUNCH] TIMEOUT: Punch failed after %d attempts, switching to RELAY\n",
-                           n->punch_attempts);
-                    fflush(stdout);
+                    P2P_LOG_WARN("NAT", "%s %d %s", MSG(MSG_NAT_PUNCH_TIMEOUT),
+                           n->punch_attempts, MSG(MSG_NAT_PUNCH_SWITCH_RELAY));
                 }
                 n->state = NAT_RELAY;
                 return 0;
@@ -179,9 +175,8 @@ int nat_tick(p2p_session_t *s) {
                 n->last_send_time = now;
 
                 if (n->verbose) {
-                    printf("[NAT_PUNCH] PUNCHING: Attempt #%d to %d candidates\n",
-                           n->punch_attempts, s->remote_cand_cnt);
-                    fflush(stdout);
+                    P2P_LOG_INFO("NAT", "%s #%d %s %d %s", MSG(MSG_NAT_PUNCH_PUNCHING),
+                           n->punch_attempts, MSG(MSG_NAT_PUNCH_TO), s->remote_cand_cnt, MSG(MSG_NAT_PUNCH_CANDIDATES));
                 }
             }
             break;
@@ -196,9 +191,8 @@ int nat_tick(p2p_session_t *s) {
             /* 超时检查 */
             if (n->last_recv_time > 0 && now - n->last_recv_time >= PONG_TIMEOUT_MS) {
                 if (n->verbose) {
-                    printf("[NAT_PUNCH] TIMEOUT: Connection lost (no pong for %d ms)\n",
-                           PONG_TIMEOUT_MS);
-                    fflush(stdout);
+                    P2P_LOG_WARN("NAT", "%s (%s %d ms)", MSG(MSG_NAT_PUNCH_CONN_LOST),
+                           MSG(MSG_NAT_PUNCH_NO_PONG), PONG_TIMEOUT_MS);
                 }
                 n->state = NAT_IDLE;
                 return -1;

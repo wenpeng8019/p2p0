@@ -108,6 +108,8 @@
 
 #include "p2p_internal.h"
 #include "p2p_udp.h"
+#include "p2p_log.h"
+#include "p2p_lang.h"
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
@@ -122,7 +124,7 @@
  */
 static void p2p_dtls_debug(void *ctx, int level, const char *file, int line, const char *str) {
     (void)ctx; (void)level;
-    printf("[MBEDTLS] %s:%04d: %s", file, line, str);
+    P2P_LOG_DEBUG("dtls", "[MBEDTLS] %s:%04d: %s", file, line, str);
 }
 
 /*
@@ -340,7 +342,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret;
     if ((ret = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        printf("[DTLS] ssl_setup 失败: -0x%x\n", -ret);
+        P2P_LOG_ERROR("dtls", MSG(MSG_DTLS_SETUP_FAIL), -ret);
         return -1;
     }
     
@@ -402,11 +404,11 @@ static void dtls_tick(p2p_session_t *s) {
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            printf("[DTLS] ✓ 握手成功！\n");
+            P2P_LOG_INFO("dtls", "%s", MSG(MSG_DTLS_HANDSHAKE_DONE));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));
-            printf("[DTLS] ✗ 握手失败: %s (-0x%04x)\n", ebuf, -ret);
+            P2P_LOG_ERROR("dtls", MSG(MSG_DTLS_HANDSHAKE_FAIL), ebuf, -ret);
             s->state = P2P_STATE_ERROR;
         }
     }

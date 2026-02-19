@@ -21,12 +21,13 @@
 #include "p2p_internal.h"
 #include "p2p_signal_compact.h"
 #include "p2p_udp.h"
+#include "p2p_log.h"
+#include "p2p_lang.h"
 
 #include <string.h>
 #ifndef _WIN32
 #include <arpa/inet.h>
 #endif
-#include <stdio.h>
 #ifndef _WIN32
 #include <sys/time.h>
 #endif
@@ -111,9 +112,8 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
         p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
         ctx->remote_recv_complete = 1;
         if (ctx->verbose) {
-            printf("[SIGNAL_COMPACT] PEER_INFO(seq=%d): Received FIN, total candidates=%d\n",
-                   seq, s->remote_cand_cnt);
-            fflush(stdout);
+            P2P_LOG_INFO("COMPACT", "PEER_INFO(seq=%d): %s, %s=%d",
+                   seq, MSG(MSG_COMPACT_RECEIVED_FIN), MSG(MSG_COMPACT_TOTAL_CANDIDATES), s->remote_cand_cnt);
         }
         return 0;
     }
@@ -171,11 +171,10 @@ int p2p_signal_compact_start(struct p2p_session *s, const char *local_peer_id,
     ctx->last_send_time = compact_time_ms();
 
     if (ctx->verbose) {
-        printf("[SIGNAL_COMPACT] START: Registering '%s' -> '%s' with server %s:%d (%d candidates)\n",
-               local_peer_id, remote_peer_id,
-               inet_ntoa(server->sin_addr), ntohs(server->sin_port),
-               s->local_cand_cnt);
-        fflush(stdout);
+        P2P_LOG_INFO("COMPACT", "START: %s '%s' -> '%s' %s %s:%d (%d %s)",
+               MSG(MSG_COMPACT_REGISTERING), local_peer_id, remote_peer_id,
+               MSG(MSG_COMPACT_WITH_SERVER), inet_ntoa(server->sin_addr), ntohs(server->sin_port),
+               s->local_cand_cnt, MSG(MSG_ICE_CANDIDATE_PAIRS));
     }
 
     /* 构造并发送带候选列表的注册包 */
@@ -212,8 +211,8 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         uint8_t status = payload[0];
         if (status >= 2) {
             if (ctx->verbose) {
-                printf("[SIGNAL_COMPACT] REGISTER_ACK: Server error (status=%d)\n", status);
-                fflush(stdout);            }
+                P2P_LOG_ERROR("COMPACT", "REGISTER_ACK: %s (status=%d)", MSG(MSG_COMPACT_SERVER_ERROR), status);
+            }
             return -1;
         }
 
@@ -242,19 +241,17 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         }
         
         if (ctx->verbose) {
-            printf("[SIGNAL_COMPACT] REGISTER_ACK: peer_online=%d, max_cands=%d (cache=%s), relay=%s, public_addr=%s:%d, probe_port=%d\n",
-                   ctx->peer_online, max_cands, max_cands > 0 ? "yes" : "no",
-                   ctx->relay_support ? "yes" : "no",
+            P2P_LOG_INFO("COMPACT", "REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d",
+                   ctx->peer_online, max_cands, MSG(MSG_COMPACT_CACHE), max_cands > 0 ? MSG(MSG_ICE_YES) : MSG(MSG_ICE_NO_CACHED),
+                   MSG(MSG_COMPACT_RELAY), ctx->relay_support ? MSG(MSG_ICE_YES) : MSG(MSG_ICE_NO_CACHED),
                    inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
                    ctx->probe_port);
-            fflush(stdout);
         }
         
         /* 如果已经收到 PEER_INFO 进入 READY 状态，忽略延迟到达的 ACK */
         if (ctx->state == SIGNAL_COMPACT_READY) {
             if (ctx->verbose) {
-                printf("[SIGNAL_COMPACT] Already READY, ignoring delayed REGISTER_ACK\n");
-                fflush(stdout);
+                P2P_LOG_WARN("COMPACT", "%s", MSG(MSG_COMPACT_ALREADY_READY));
             }
             return 0;
         }
@@ -266,10 +263,9 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             
             if (ctx->verbose) {
                 const char *status_msg = ctx->peer_online ? 
-                    "Peer online, waiting for PEER_INFO(seq=1)" :
-                    "Peer offline, waiting for peer to come online";
-                printf("[SIGNAL_COMPACT] Entered REGISTERED state: %s\n", status_msg);
-                fflush(stdout);
+                    MSG(MSG_COMPACT_PEER_ONLINE) :
+                    MSG(MSG_COMPACT_PEER_OFFLINE);
+                P2P_LOG_INFO("COMPACT", "%s: %s", MSG(MSG_COMPACT_ENTERED_REGISTERED), status_msg);
             }
         }
         
@@ -289,9 +285,8 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         if (ctx->verbose && !ctx->remote_recv_complete) {
             uint8_t base_idx = (len >= 1) ? payload[0] : 0;
             uint8_t count = (len >= 2) ? payload[1] : 0;
-            printf("[SIGNAL_COMPACT] PEER_INFO(seq=%u, base=%u): Received %u candidates (total: %d)\n", 
-                   seq, base_idx, count, s->remote_cand_cnt);
-            fflush(stdout);
+            P2P_LOG_INFO("COMPACT", "PEER_INFO(seq=%u, %s=%u): %s %u %s (%s: %d)", 
+                   seq, MSG(MSG_COMPACT_BASE), base_idx, MSG(MSG_RELAY_FORWARD_RECEIVED), count, MSG(MSG_ICE_CANDIDATE_PAIRS), MSG(MSG_COMPACT_TOTAL_CANDIDATES), s->remote_cand_cnt);
         }
         
         /* 发送 PEER_INFO_ACK 确认 */
@@ -304,8 +299,7 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         udp_send_packet(s->sock, from, SIG_PKT_PEER_INFO_ACK, 0, 0, ack_payload, sizeof(ack_payload));
         
         if (ctx->verbose) {
-            printf("[SIGNAL_COMPACT] Sent PEER_INFO_ACK(seq=%u)\n", seq);
-            fflush(stdout);
+            P2P_LOG_INFO("COMPACT", "%s PEER_INFO_ACK(seq=%u)", MSG(MSG_RELAY_ANSWER_SENT), seq);
         }
         
         /* seq=1 是服务器发送的首包，收到后从 REGISTERED 进入 READY 状态 */
@@ -315,8 +309,7 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             ctx->next_send_seq = 2;
             
             if (ctx->verbose) {
-                printf("[SIGNAL_COMPACT] Entered READY state, starting NAT punch and candidate sync\n");
-                fflush(stdout);
+                P2P_LOG_INFO("COMPACT", "%s", MSG(MSG_COMPACT_ENTERED_READY));
             }
         }
         
@@ -333,8 +326,7 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             ctx->last_acked_seq = ack_seq;
             
             if (ctx->verbose) {
-                printf("[SIGNAL_COMPACT] PEER_INFO_ACK(seq=%u): Confirmed\n", ack_seq);
-                fflush(stdout);
+                P2P_LOG_INFO("COMPACT", "PEER_INFO_ACK(seq=%u): %s", ack_seq, MSG(MSG_RELAY_CONNECT_ACK));
             }
         }
         
@@ -365,9 +357,8 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
         /* 检查超时 */
         if (++ctx->register_attempts > MAX_REGISTER_ATTEMPTS) {
             if (ctx->verbose) {
-                printf("[SIGNAL_COMPACT] TIMEOUT: Max register attempts reached (%d)\n",
-                       MAX_REGISTER_ATTEMPTS);
-                fflush(stdout);
+                P2P_LOG_ERROR("COMPACT", "TIMEOUT: %s (%d)",
+                       MSG(MSG_COMPACT_MAX_ATTEMPTS), MAX_REGISTER_ATTEMPTS);
             }
             return -1;
         }
@@ -379,9 +370,8 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
             udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, payload_len);
             
             if (ctx->verbose) {
-                printf("[SIGNAL_COMPACT] REGISTERING: Attempt #%d (%d candidates)...\n",
-                       ctx->register_attempts, s->local_cand_cnt);
-                fflush(stdout);
+                P2P_LOG_INFO("COMPACT", "REGISTERING: %s #%d (%d %s)...",
+                       MSG(MSG_COMPACT_ATTEMPT), ctx->register_attempts, s->local_cand_cnt, MSG(MSG_ICE_CANDIDATE_PAIRS));
             }
         }
         ctx->last_send_time = now;
@@ -451,13 +441,12 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
             
             if (ctx->verbose) {
                 if (flags & SIG_PEER_INFO_FIN) {
-                    printf("[SIGNAL_COMPACT] READY: Sent PEER_INFO(seq=%u) with FIN flag (total sent: %d)\n",
-                           seq_to_send, s->local_cand_cnt);
+                    P2P_LOG_INFO("COMPACT", "READY: %s PEER_INFO(seq=%u) %s FIN (%s: %d)",
+                           MSG(MSG_RELAY_ANSWER_SENT), seq_to_send, MSG(MSG_COMPACT_WITH), MSG(MSG_COMPACT_TOTAL_SENT), s->local_cand_cnt);
                 } else {
-                    printf("[SIGNAL_COMPACT] READY: Sent PEER_INFO(seq=%u, base=%d) with %d candidates [%d-%d]\n",
-                           seq_to_send, base_idx, count, base_idx, end_idx - 1);
+                    P2P_LOG_INFO("COMPACT", "READY: %s PEER_INFO(seq=%u, %s=%d) %s %d %s [%d-%d]",
+                           MSG(MSG_RELAY_ANSWER_SENT), seq_to_send, MSG(MSG_COMPACT_BASE), base_idx, MSG(MSG_COMPACT_WITH), count, MSG(MSG_ICE_CANDIDATE_PAIRS), base_idx, end_idx - 1);
                 }
-                fflush(stdout);
             }
             
             /* 如果发送了 FIN，标记完成 */

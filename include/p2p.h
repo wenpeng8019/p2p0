@@ -126,6 +126,9 @@ typedef struct {
     bool                    disable_lan_shortcut;       // 是否禁止同子网直连优化 (用于测试 NAT 打洞)
     bool                    verbose_nat_punch;          // 是否输出详细的 NAT 打洞流程日志
     
+    /* 语言选项 */
+    int                     language;                   // 日志语言: 0=English(默认), 1=中文
+    
     /* 事件回调 */
     p2p_on_connected_fn     on_connected;               // 连接建立回调 (可选)
     p2p_on_disconnected_fn  on_disconnected;            // 连接断开回调 (可选)

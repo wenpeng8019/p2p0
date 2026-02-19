@@ -6,8 +6,22 @@
 #include "p2p_route.h"
 #include "p2p_udp.h"
 #include "p2p_internal.h"
+#include "p2p_log.h"
+#include "p2p_lang.h"
 
 #include <string.h>
+
+/* 子网掩码前缀长度计算：GCC/Clang 使用内建指令，其他编译器使用位运算 */
+#if defined(__GNUC__) || defined(__clang__)
+#  define mask_to_prefix(mask_net) __builtin_popcount(ntohl(mask_net))
+#else
+static int mask_to_prefix(uint32_t mask_net) {
+    uint32_t m = ntohl(mask_net);
+    int n = 0;
+    while (m & 0x80000000u) { n++; m <<= 1; }
+    return n;
+}
+#endif
 
 #ifdef _WIN32
 #   include <winsock2.h>
@@ -27,6 +41,7 @@ void route_init(route_ctx_t *rt) {
 int route_detect_local(route_ctx_t *rt) {
 
     rt->addr_count = 0;
+    P2P_LOG_DEBUG("ROUTE", "%s", MSG(MSG_ROUTE_DETECT_START));
 
 #ifdef _WIN32
     /* Windows: 使用 GetAdaptersAddresses 枚举 IPv4 地址 */
@@ -91,6 +106,12 @@ int route_detect_local(route_ctx_t *rt) {
     freeifaddrs(ifa_list);
 #endif
 
+    for (int i = 0; i < rt->addr_count; i++) {
+        P2P_LOG_DEBUG("ROUTE", "  [%d] %s/%d", i,
+                      inet_ntoa(rt->local_addrs[i].sin_addr),
+                      mask_to_prefix(rt->local_masks[i]));
+    }
+    P2P_LOG_INFO("ROUTE", "%s: %d %s", MSG(MSG_ROUTE_DETECT_DONE), rt->addr_count, MSG(MSG_ROUTE_ADDRS));
     return rt->addr_count;
 }
 
@@ -102,9 +123,14 @@ int route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv
     for (int i = 0; i < rt->addr_count; i++) {
         uint32_t local_ip = rt->local_addrs[i].sin_addr.s_addr;
         uint32_t mask = rt->local_masks[i];
-        if ((local_ip & mask) == (peer_ip & mask))
+        if ((local_ip & mask) == (peer_ip & mask)) {
+            P2P_LOG_INFO("ROUTE", "%s %s %s %s", MSG(MSG_ROUTE_SAME_SUBNET),
+                         inet_ntoa(peer_priv->sin_addr), MSG(MSG_ROUTE_VIA),
+                         inet_ntoa(rt->local_addrs[i].sin_addr));
             return 1;
+        }
     }
+    P2P_LOG_DEBUG("ROUTE", "%s: %s", MSG(MSG_ROUTE_DIFF_SUBNET), inet_ntoa(peer_priv->sin_addr));
     return 0;
 }
 
@@ -118,6 +144,8 @@ int route_send_probe(route_ctx_t *rt, p2p_socket_t sock,
     payload[0] = (uint8_t)(local_port >> 8);
     payload[1] = (uint8_t)(local_port & 0xFF);
 
+    P2P_LOG_INFO("ROUTE", "%s %s:%d", MSG(MSG_ROUTE_PROBE_SENT),
+                 inet_ntoa(peer_priv->sin_addr), ntohs(peer_priv->sin_port));
     rt->probe_time = time_ms();
     return udp_send_packet(sock, peer_priv, P2P_PKT_ROUTE_PROBE, 0, 0, payload, 2);
 }
@@ -125,6 +153,9 @@ int route_send_probe(route_ctx_t *rt, p2p_socket_t sock,
 // 处理对方直接发过来的 ROUTE_PROBE 消息，说明对方和自己处于同一个子网内
 int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, p2p_socket_t sock) { (void)rt;
 
+    P2P_LOG_INFO("ROUTE", "%s %s:%d, %s", MSG(MSG_ROUTE_PROBE_RECV),
+                 inet_ntoa(from->sin_addr), ntohs(from->sin_port),
+                 MSG(MSG_ROUTE_PROBE_ACK_SENT));
     // ROUTE_PROBE 回复应答消息
     return udp_send_packet(sock, from, P2P_PKT_ROUTE_PROBE_ACK, 0, 0, NULL, 0);
 }
@@ -133,5 +164,7 @@ int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, p2p_socket_t
 int route_on_probe_ack(route_ctx_t *rt, const struct sockaddr_in *from) {
     rt->lan_peer_addr = *from;
     rt->lan_confirmed = 1;
+    P2P_LOG_INFO("ROUTE", "%s %s:%d", MSG(MSG_ROUTE_LAN_CONFIRMED),
+                 inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     return 0;
 }

@@ -1,6 +1,8 @@
 
 #include "p2p_internal.h"
 #include "p2p_udp.h"
+#include "p2p_log.h"
+#include "p2p_lang.h"
 
 /* ----------------------------------------------------------------------------
  * TURN 消息类型定义（RFC 5766）
@@ -58,8 +60,8 @@
 int p2p_turn_allocate(p2p_session_t *s) {
     if (!s->cfg.turn_server) return -1;
     
-    printf("[TURN] Sending Allocate Request to %s:%d\n", 
-           s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
+    P2P_LOG_INFO("TURN", "%s %s:%d",
+                 MSG(MSG_TURN_SENDING_ALLOC), s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
     
     uint8_t buf[256];
 
@@ -121,7 +123,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
     
     struct hostent *he = gethostbyname(s->cfg.turn_server);
     if (!he) {
-        printf("[TURN] Failed to resolve TURN server: %s\n", s->cfg.turn_server);
+        P2P_LOG_ERROR("TURN", "%s %s", MSG(MSG_TURN_RESOLVE_FAILED), s->cfg.turn_server);
         return -1;
     }
     memcpy(&turn_addr.sin_addr, he->h_addr_list[0], he->h_length);
@@ -154,7 +156,7 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
     
     /* 处理 Allocate Success Response */
     if (type == TURN_ALLOCATE_SUCCESS) {
-        printf("[TURN] Allocation successful!\n");
+        P2P_LOG_INFO("TURN", "%s", MSG(MSG_TURN_ALLOC_SUCCESS));
         
         /*
          * 解析 RELAYED-ADDRESS / XOR-RELAYED-ADDRESS 属性
@@ -216,8 +218,10 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                         /* RFC 5245: Relay 候选优先级使用标准公式计算 */
                         c->priority = p2p_ice_calc_priority(P2P_CAND_RELAY, 65535, 1);
 
-                        printf("[ICE] Gathered Relay Candidate: %s:%u (priority=%u)\n", 
-                               inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                        P2P_LOG_INFO("ICE", "%s %s:%u (%s=%u)",
+                                     MSG(MSG_ICE_GATHERED_RELAY),
+                                     inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                                     MSG(MSG_STUN_PRIORITY), c->priority);
                         
                         /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
                         p2p_ice_send_local_candidate(s, c);

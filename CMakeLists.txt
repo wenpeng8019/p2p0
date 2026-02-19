@@ -6,6 +6,7 @@ option(WITH_DTLS    "Enable MbedTLS DTLS support" OFF)
 option(WITH_OPENSSL "Enable OpenSSL DTLS support" OFF)
 option(WITH_SCTP    "Enable usrsctp support" OFF)
 option(THREADED     "Enable internal threading" ON)
+option(ENABLE_CHINESE "Enable Chinese language support" ON)
 
 # --- Platform Detection ---
 if(WIN32)
@@ -61,12 +62,21 @@ set(LIB_SRCS
     src/p2p_signal_compact.c
     src/p2p_log.c
     src/p2p_http.c
+    src/p2p_lang.c
 )
 
 if(THREADED)
     add_definitions(-DP2P_THREADED)
     list(APPEND LIB_SRCS src/p2p_thread.c)
     find_package(Threads REQUIRED)
+endif()
+
+# --- Chinese Language Support ---
+if(ENABLE_CHINESE)
+    add_definitions(-DP2P_ENABLE_CHINESE)
+    message(STATUS "Chinese language support: ENABLED")
+else()
+    message(STATUS "Chinese language support: DISABLED (use -DENABLE_CHINESE=ON to enable)")
 endif()
 
 # --- MbedTLS Integration ---

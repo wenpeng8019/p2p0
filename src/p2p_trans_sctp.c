@@ -132,6 +132,8 @@
 
 #include "p2p_internal.h"
 #include "p2p_udp.h"
+#include "p2p_log.h"
+#include "p2p_lang.h"
 
 /*
  * SCTP 上下文结构
@@ -207,7 +209,7 @@ static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, ui
  */
 static int sctp_init(p2p_session_t *s) {
     (void)s;
-    printf("[SCTP] 初始化 usrsctp 封装（骨架实现）\n");
+    P2P_LOG_INFO("sctp", "%s", MSG(MSG_SCTP_INIT));
     
     /*
      * 完整实现示例：
@@ -263,7 +265,7 @@ static int sctp_init(p2p_session_t *s) {
  */
 static int sctp_send(p2p_session_t *s, const void *buf, int len) {
     (void)s; (void)buf;
-    printf("[SCTP] 发送 %d 字节数据\n", len);
+    P2P_LOG_TRACE("sctp", MSG(MSG_SCTP_SEND), len);
     
     /* 
      * 完整实现：
@@ -316,7 +318,7 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
     if (type != P2P_PKT_DATA) return;
     (void)from; (void)s; (void)payload;
     
-    printf("[SCTP] 收到封装的 SCTP 数据包，长度 %d\n", len);
+    P2P_LOG_TRACE("sctp", MSG(MSG_SCTP_RECV), len);
     
     /*
      * 完整实现：

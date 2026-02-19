@@ -61,6 +61,7 @@
 #include "p2p_crypto_extra.h"
 #include "p2p_internal.h"
 #include "p2p_log.h"
+#include "p2p_lang.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,7 +93,7 @@ static void derive_key(const char *auth_key, uint8_t *key_out, size_t key_len) {
         }
     } else {
         /* 未提供密钥时使用默认值（不安全，仅用于测试） */
-        P2P_LOG_WARN("SIGNAL_PUBSUB", "No auth_key provided, using default key (insecure)");
+        P2P_LOG_WARN("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_NO_AUTH_KEY));
         memset(key_out, 0xAA, key_len);
     }
 }
@@ -138,18 +139,19 @@ int p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, cons
     
     /* 安全验证：防止命令注入 */
     if (!is_safe_string(channel_id)) {
-        P2P_LOG_ERROR("SIGNAL_PUBSUB", "Invalid channel_id format (security risk)");
+        P2P_LOG_ERROR("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_INVALID_CHANNEL));
         return -1;
     }
     
-    P2P_LOG_INFO("SIGNAL_PUBSUB", "Initialized: channel=%s", channel_id);
+    P2P_LOG_INFO("SIGNAL_PUBSUB", "%s %s", MSG(MSG_PUBSUB_INITIALIZED), channel_id);
     return 0;
 }
 
 void p2p_signal_pubsub_set_role(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t role) {
 
     ctx->role = role;
-    P2P_LOG_INFO("SIGNAL_PUBSUB", "Initialized: role=%s", role == P2P_SIGNAL_ROLE_PUB ? "PUB" : "SUB");
+    P2P_LOG_INFO("SIGNAL_PUBSUB", "%s %s", MSG(MSG_PUBSUB_INITIALIZED), 
+                 role == P2P_SIGNAL_ROLE_PUB ? MSG(MSG_PUBSUB_ROLE_PUB) : MSG(MSG_PUBSUB_ROLE_SUB));
 }
 
 /*
@@ -177,14 +179,14 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
     uint8_t enc_buf[1024];
     int enc_len = p2p_base64_decode(b64_data, strlen(b64_data), enc_buf, sizeof(enc_buf));
     if (enc_len <= 0) {
-        P2P_LOG_WARN("SIGNAL_PUBSUB", "Base64 decode failed");
+        P2P_LOG_WARN("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_BASE64_FAILED));
         return;
     }
     
     /* 分配解密缓冲区 */
     uint8_t *dec_buf = malloc(enc_len);
     if (!dec_buf) {
-        P2P_LOG_ERROR("SIGNAL_PUBSUB", "Memory allocation failed");
+        P2P_LOG_ERROR("SIGNAL_PUBSUB", "%s", MSG(MSG_ERROR_NO_MEMORY));
         return;
     }
     
@@ -195,7 +197,7 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
     p2p_signaling_payload_hdr_t payload;
     if (enc_len >= 76 && unpack_signaling_payload_hdr(&payload, dec_buf) == 0 &&
         enc_len >= (size_t)(76 + payload.candidate_count * 32)) {
-        P2P_LOG_INFO("SIGNAL_PUBSUB", "Received valid signal from '%s'", payload.sender);
+        P2P_LOG_INFO("SIGNAL_PUBSUB", "%s '%s'", MSG(MSG_PUBSUB_RECEIVED_SIGNAL), payload.sender);
         
         /* 添加远端 ICE 候选 */
         for (int i = 0; i < payload.candidate_count && i < 8; i++) {
@@ -203,10 +205,9 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
                 p2p_candidate_t c;
                 unpack_candidate(&c, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
                 s->remote_cands[s->remote_cand_cnt++] = c;
-                printf("[ICE] 收到远端候选: 类型=%d, 地址=%s:%d\n",
-                       c.type,
-                       inet_ntoa(c.addr.sin_addr),
-                       ntohs(c.addr.sin_port));
+                P2P_LOG_INFO("ICE", "%s: %s=%d, %s=%s:%d",
+                       MSG(MSG_PUBSUB_RECEIVED_REMOTE_CAND), MSG(MSG_PUBSUB_TYPE), c.type,
+                       MSG(MSG_PUBSUB_ADDRESS), inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
             }
         }
         
@@ -235,12 +236,13 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             }
             if (n > 0) {
                 p2p_signal_pubsub_send(ctx, payload.sender, buf, n);
-                printf("[SIGNALING] 自动发送 answer（包含 %d 个候选）给 %s\n", 
-                       s->local_cand_cnt, payload.sender);
+                P2P_LOG_INFO("SIGNALING", "%s (%s %d %s) %s %s",
+                       MSG(MSG_PUBSUB_AUTO_SEND_ANSWER), MSG(MSG_COMPACT_WITH), s->local_cand_cnt,
+                       MSG(MSG_NAT_PUNCH_CANDIDATES), MSG(MSG_COMPACT_TOTAL_SENT), payload.sender);
             }
         }
     } else {
-        P2P_LOG_WARN("SIGNAL_PUBSUB", "Signal payload deserialization failed");
+        P2P_LOG_WARN("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_DESERIALIZE_FAILED));
     }
     
     free(dec_buf);
@@ -279,7 +281,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
 
     /* 安全验证 */
     if (!is_safe_string(ctx->channel_id)) {
-        P2P_LOG_ERROR("SIGNAL_PUBSUB", "Channel ID validation failed");
+        P2P_LOG_ERROR("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_CHANNEL_VALIDATION_FAILED));
         return -1;
     }
     
@@ -291,7 +293,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     int padded_len = (len + 7) & ~7;
     uint8_t *padded_data = calloc(1, padded_len);
     if (!padded_data) {
-        P2P_LOG_ERROR("SIGNAL_PUBSUB", "Memory allocation failed");
+        P2P_LOG_ERROR("SIGNAL_PUBSUB", "%s", MSG(MSG_ERROR_NO_MEMORY));
         return -1;
     }
     memcpy(padded_data, data, len);
@@ -300,7 +302,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     uint8_t *enc_data = malloc(padded_len);
     if (!enc_data) {
         free(padded_data);
-        P2P_LOG_ERROR("SIGNAL_PUBSUB", "Memory allocation failed");
+        P2P_LOG_ERROR("SIGNAL_PUBSUB", "%s", MSG(MSG_ERROR_NO_MEMORY));
         return -1;
     }
     
@@ -422,7 +424,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
      * 直接返回成功，等待 tick 轮询时读取 answer
      */
     if (ctx->role == P2P_SIGNAL_ROLE_PUB && existing_answer[0] != '\0') {
-        P2P_LOG_INFO("SIGNAL_PUBSUB", "Answer already present, skipping offer re-publish");
+        P2P_LOG_INFO("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_ANSWER_PRESENT));
         free(padded_data);
         free(enc_data);
         return 0;
@@ -473,7 +475,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
         snprintf(patch_url, sizeof(patch_url),
                  "https://api.github.com/gists/%s", ctx->channel_id);
 
-        P2P_LOG_INFO("SIGNAL_PUBSUB", "Updating Gist field '%s'...", field_name);
+        P2P_LOG_INFO("SIGNAL_PUBSUB", "%s '%s'...", MSG(MSG_PUBSUB_UPDATING_GIST), field_name);
         ret = p2p_http_patch(patch_url, ctx->auth_token, body_buf);
 
         free(body_buf);
@@ -513,7 +515,7 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
 
     /* 安全验证 */
     if (!is_safe_string(ctx->channel_id)) {
-        P2P_LOG_ERROR("SIGNAL_PUBSUB", "Channel ID validation failed");
+        P2P_LOG_ERROR("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_CHANNEL_VALIDATION_FAILED));
         return;
     }
 
@@ -536,7 +538,7 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
 
     int got = p2p_http_get(get_url, ctx->auth_token, buffer, 32768);
     if (got <= 0) {
-        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "Gist GET failed");
+        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_GET_FAILED));
         free(buffer);
         return;
     }
@@ -596,7 +598,7 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
     }
 
     if (value_end - value_start < 10) {
-        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "Field %s is empty or too short", target_field);
+        P2P_LOG_DEBUG("SIGNAL_PUBSUB", "%s %s %s", MSG(MSG_PUBSUB_FIELD), target_field, MSG(MSG_PUBSUB_FIELD_EMPTY));
         return;
     }
 
@@ -634,8 +636,9 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
 
     /* 处理有效数据 */
     if (strlen(content) > 10) {
-        P2P_LOG_INFO("SIGNAL_PUBSUB", "Processing %s (role=%s)",
-                     target_field, ctx->role == P2P_SIGNAL_ROLE_PUB ? "PUB" : "SUB");
+        P2P_LOG_INFO("SIGNAL_PUBSUB", "%s %s (%s=%s)",
+                     MSG(MSG_PUBSUB_PROCESSING), target_field, MSG(MSG_PUBSUB_ROLE),
+                     ctx->role == P2P_SIGNAL_ROLE_PUB ? MSG(MSG_PUBSUB_ROLE_PUB) : MSG(MSG_PUBSUB_ROLE_SUB));
         process_payload(ctx, s, content);
     }
 
