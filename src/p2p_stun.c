@@ -420,15 +420,15 @@ static nat_detect_ctx_t g_nat_detect_ctx = {0};
  */
 static const char* p2p_stun_nat_type_str(p2p_stun_nat_type_t type) {
     switch (type) {
-        case P2P_STUN_NAT_UNKNOWN:         return "未知 (Unknown)";
-        case P2P_STUN_NAT_OPEN:            return "公网 IP (无 NAT)";
-        case P2P_STUN_NAT_BLOCKED:         return "UDP 被屏蔽";
-        case P2P_STUN_NAT_FULL_CONE:       return "完全锥形 NAT (Full Cone)";
-        case P2P_STUN_NAT_RESTRICTED:      return "受限锥形 NAT (Restricted)";
-        case P2P_STUN_NAT_PORT_RESTRICTED: return "端口受限锥形 NAT (Port Restricted)";
-        case P2P_STUN_NAT_SYMMETRIC:       return "对称型 NAT (Symmetric)";
-        case P2P_STUN_NAT_SYMMETRIC_UDP:   return "对称 UDP 防火墙";
-        default:                           return "未知";
+        case P2P_STUN_NAT_UNKNOWN:         return "Unknown";
+        case P2P_STUN_NAT_OPEN:            return "Open Internet (No NAT)";
+        case P2P_STUN_NAT_BLOCKED:         return "UDP Blocked";
+        case P2P_STUN_NAT_FULL_CONE:       return "Full Cone NAT";
+        case P2P_STUN_NAT_RESTRICTED:      return "Restricted Cone NAT";
+        case P2P_STUN_NAT_PORT_RESTRICTED: return "Port Restricted Cone NAT";
+        case P2P_STUN_NAT_SYMMETRIC:       return "Symmetric NAT";
+        case P2P_STUN_NAT_SYMMETRIC_UDP:   return "Symmetric UDP Firewall";
+        default:                           return "Unknown";
     }
 }
 

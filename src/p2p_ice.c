@@ -606,8 +606,31 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
         if (s->remote_cands[i].addr.sin_addr.s_addr == from->sin_addr.s_addr &&
             s->remote_cands[i].addr.sin_port == from->sin_port) {
 
-            printf("[ICE] Nomination successful! Using path %s:%d\n", 
-                   inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+            /* 确定连接类型 */
+            const char *cand_type_str = "Unknown";
+            const char *connection_desc = "";
+            switch (s->remote_cands[i].type) {
+                case P2P_CAND_HOST:
+                    cand_type_str = "Host (Local Network)";
+                    connection_desc = " - Direct LAN connection";
+                    break;
+                case P2P_CAND_SRFLX:
+                    cand_type_str = "Srflx (Internet P2P)";
+                    connection_desc = " - NAT traversal via STUN";
+                    break;
+                case P2P_CAND_RELAY:
+                    cand_type_str = "Relay (TURN)";
+                    connection_desc = " - Relayed through TURN server";
+                    break;
+                case P2P_CAND_PRFLX:
+                    cand_type_str = "Prflx (Peer Reflexive)";
+                    connection_desc = " - Discovered via connectivity check";
+                    break;
+            }
+
+            printf("[ICE] Nomination successful! Using %s path %s:%d%s\n", 
+                   cand_type_str, inet_ntoa(from->sin_addr), ntohs(from->sin_port),
+                   connection_desc);
             
             /* 设置活动地址 */
             s->active_addr = *from;

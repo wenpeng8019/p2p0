@@ -319,6 +319,29 @@
 #include <p2pp.h>  /* RELAY 模式协议定义 */
 
 /* ============================================================================
+ * 配置参数
+ * ============================================================================ */
+
+/* 等待对端上线的超时时间（毫秒）
+ * 当对端离线且服务器缓存已满（status=2）时，客户端会等待对端上线
+ * 如果超过此时间仍未收到 FORWARD 消息，则放弃连接 */
+#ifndef P2P_RELAY_PEER_WAIT_TIMEOUT_MS
+#define P2P_RELAY_PEER_WAIT_TIMEOUT_MS  60000  /* 60 秒 */
+#endif
+
+/* LOGIN_ACK 等待超时（毫秒）
+ * 登录阶段等待服务器 LOGIN_ACK 响应的超时时间 */
+#ifndef P2P_RELAY_LOGIN_ACK_TIMEOUT_MS
+#define P2P_RELAY_LOGIN_ACK_TIMEOUT_MS  3000   /* 3 秒 */
+#endif
+
+/* CONNECT_ACK 等待超时（毫秒）
+ * 发送 CONNECT 消息后等待服务器 ACK 的超时时间 */
+#ifndef P2P_RELAY_CONNECT_ACK_TIMEOUT_MS
+#define P2P_RELAY_CONNECT_ACK_TIMEOUT_MS  3000  /* 3 秒 */
+#endif
+
+/* ============================================================================
  * 信令上下文
  * ============================================================================ */
 
@@ -331,6 +354,15 @@ typedef enum {
     SIGNAL_CONNECTED,         /* 已连接并登录成功 */
     SIGNAL_ERROR              /* 错误状态 */
 } p2p_signal_relay_state_t;
+
+/* TCP 读取状态机（异步 I/O） */
+typedef enum {
+    RELAY_READ_IDLE = 0,      /* 空闲：等待新消息 */
+    RELAY_READ_HEADER,        /* 正在读取消息头（9 字节） */
+    RELAY_READ_SENDER,        /* 正在读取 sender_name（32 字节） */
+    RELAY_READ_PAYLOAD,       /* 正在读取 payload（变长） */
+    RELAY_READ_DISCARD        /* 丢弃未处理的消息 */
+} relay_read_state_t;
 
 /*
  * 信令上下文结构
@@ -355,12 +387,26 @@ typedef struct {
     char waiting_target[P2P_PEER_ID_MAX];        /* 等待的目标 peer 名称 */
     uint64_t waiting_start_time;                 /* 开始等待的时间戳（毫秒） */
     
+    /* ===== 异步 TCP 读取状态机 ===== */
+    relay_read_state_t read_state;               /* 当前读取状态 */
+    p2p_relay_hdr_t read_hdr;                    /* 正在读取的消息头 */
+    char read_sender[P2P_PEER_ID_MAX];           /* 正在读取的发送者名称 */
+    uint8_t *read_payload;                       /* 正在读取的 payload 缓冲区 */
+    int read_offset;                             /* 当前已读取的字节数 */
+    int read_expected;                           /* 当前阶段期望读取的总字节数 */
+    
     /* 注：
      * - next_candidate_index 初始为 0
      * - 每次收到 CONNECT_ACK 后：next_candidate_index += candidates_acked
      * - p2p_update() 检查是否有新候选：if (local_candidate_count > next_candidate_index)
      * - 收到 FORWARD 表示对端上线，继续发送剩余候选
      * - waiting_for_peer=true 时，超时 60 秒后放弃连接
+     *
+     * 异步读取流程：
+     * - IDLE → HEADER: 开始读取 9 字节消息头
+     * - HEADER → SENDER/PAYLOAD/IDLE: 根据消息类型决定下一步
+     * - 每次 tick 只调用一次 recv()，返回值可能 < expected
+     * - 读取完成后才执行业务逻辑，避免循环阻塞
      */
 } p2p_signal_relay_ctx_t;
 

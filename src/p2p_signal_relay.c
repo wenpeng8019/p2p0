@@ -103,11 +103,11 @@
  *   p2p_signal_relay_close(&ctx);
  */
 
-#include "p2p_signal_relay.h"
-#include "p2p_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "p2p_signal_relay.h"
+#include "p2p_internal.h"
 #include "p2p_platform.h"
 
 void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx) {
@@ -118,6 +118,12 @@ void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx) {
     ctx->total_candidates_sent = 0;
     ctx->total_candidates_acked = 0;
     ctx->next_candidate_index = 0;
+    
+    /* 异步读取状态机初始化 */
+    ctx->read_state = RELAY_READ_IDLE;
+    ctx->read_payload = NULL;
+    ctx->read_offset = 0;
+    ctx->read_expected = 0;
 }
 
 /* ============================================================================
@@ -188,14 +194,14 @@ int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, i
     send(ctx->fd, (const char *)&hdr, sizeof(hdr), 0);
     send(ctx->fd, (const char *)&login, sizeof(login), 0);
 
-    // 等待 LOGIN_ACK (blocking recv with 3s timeout)
+    // 等待 LOGIN_ACK (blocking recv with timeout)
     {
         fd_set rfds;
         struct timeval tv;
         FD_ZERO(&rfds);
         FD_SET(ctx->fd, &rfds);
-        tv.tv_sec = 3;
-        tv.tv_usec = 0;
+        tv.tv_sec = P2P_RELAY_LOGIN_ACK_TIMEOUT_MS / 1000;
+        tv.tv_usec = (P2P_RELAY_LOGIN_ACK_TIMEOUT_MS % 1000) * 1000;
 #ifdef _WIN32
         int sel = select(0, &rfds, NULL, NULL, &tv);
 #else
@@ -218,12 +224,12 @@ int p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, i
                     }
                 }
             }
-            /* If we got something else, it stays unread — unusual but non-fatal */
+            /* 如果收到其他类型消息，留在缓冲区未读 — 不常见但不致命 */
         }
-        /* On timeout we continue anyway; server may send LOGIN_ACK asynchronously */
+        /* 超时则继续执行；服务器可能异步发送 LOGIN_ACK */
     }
 
-    // 设置为非阻塞模式 (after LOGIN_ACK is consumed)
+    // 设置为非阻塞模式（消费 LOGIN_ACK 后）
     p2p_set_nonblock(ctx->fd);
 
     // 标记为已连接
@@ -247,7 +253,17 @@ void p2p_signal_relay_close(p2p_signal_relay_ctx_t *ctx) {
         p2p_close_socket(ctx->fd);
         ctx->fd = P2P_INVALID_SOCKET;
     }
+    
+    /* 释放读取缓冲区 */
+    if (ctx->read_payload) {
+        free(ctx->read_payload);
+        ctx->read_payload = NULL;
+    }
+    
     ctx->state = SIGNAL_DISCONNECTED;
+    ctx->read_state = RELAY_READ_IDLE;
+    ctx->read_offset = 0;
+    ctx->read_expected = 0;
 }
 
 /* ============================================================================
@@ -296,89 +312,11 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
         return -1;
     }
     
-    printf("Signaling [PUB]: Sent connect request to '%s' (%d bytes), waiting for ACK...\n", target_name, len);
+    printf("Signaling [PUB]: Sent connect request to '%s' (%d bytes)\n", target_name, len);
     fflush(stdout);
-
-    // 从负载中提取候选数量（用于状态追踪）
-    // 负载格式（p2p_signaling_payload_t 序列化后）：
-    //   [sender: 32B][target: 32B][timestamp: 4B][delay_trigger: 4B][candidate_count: 4B][...]
-    // candidate_count 位于偏移量 32+32+4+4 = 72
-    uint32_t candidates_in_payload = 0;
-    if (len >= 76) {  /* 至少包含到 candidate_count */
-        memcpy(&candidates_in_payload, (const uint8_t*)data + 72, 4);
-    }
-
-    // 接收 ACK (blocking select + recv, socket is non-blocking now)
-    p2p_relay_hdr_t ack_hdr;
-    {
-        fd_set rfds; struct timeval tv;
-        FD_ZERO(&rfds); FD_SET(ctx->fd, &rfds);
-        tv.tv_sec = 3; tv.tv_usec = 0;
-#ifdef _WIN32
-        int sel = select(0, &rfds, NULL, NULL, &tv);
-#else
-        int sel = select((int)ctx->fd + 1, &rfds, NULL, NULL, &tv);
-#endif
-        if (sel <= 0) { printf("Signaling [PUB]: ACK timeout\n"); return -1; }
-    }
-    int rn = recv(ctx->fd, (char *)&ack_hdr, sizeof(ack_hdr), 0);
-    if (rn != (int)sizeof(ack_hdr) || ack_hdr.magic != P2P_RLY_MAGIC || ack_hdr.type != P2P_RLY_CONNECT_ACK) {
-        printf("Signaling [PUB]: Invalid ACK header (type=%d)\n", rn > 0 ? (int)ack_hdr.type : -1);
-        return -1;
-    }
-
-    // 接收 ACK 负载
-    p2p_relay_connect_ack_t ack_payload;
-    {
-        fd_set rfds; struct timeval tv;
-        FD_ZERO(&rfds); FD_SET(ctx->fd, &rfds);
-        tv.tv_sec = 3; tv.tv_usec = 0;
-#ifdef _WIN32
-        int sel = select(0, &rfds, NULL, NULL, &tv);
-#else
-        int sel = select((int)ctx->fd + 1, &rfds, NULL, NULL, &tv);
-#endif
-        if (sel <= 0) { printf("Signaling [PUB]: ACK payload timeout\n"); return -1; }
-    }
-    if (recv(ctx->fd, (char *)&ack_payload, sizeof(ack_payload), 0) != (int)sizeof(ack_payload)) {
-        printf("Signaling [PUB]: Invalid ACK payload\n");
-        return -1;
-    }
-
-    printf("Signaling [PUB]: Received ACK (status=%d, candidates_acked=%d)\n", 
-           ack_payload.status, ack_payload.candidates_acked);
-
-    // 更新状态追踪
-    ctx->total_candidates_sent += candidates_in_payload;
-    ctx->total_candidates_acked += ack_payload.candidates_acked;
-    ctx->next_candidate_index += ack_payload.candidates_acked;
-
-    // 根据状态返回
-    switch (ack_payload.status) {
-        case 0:  // 对端在线，成功转发
-            printf("Signaling [PUB]: Peer online, forwarded %d candidates\n", ack_payload.candidates_acked);
-            ctx->waiting_for_peer = false;  // 对端在线，无需等待
-            return ack_payload.candidates_acked > 0 ? ack_payload.candidates_acked : 1;
-            
-        case 1:  // 对端离线，已缓存且有剩余空间
-            printf("Signaling [PUB]: Peer offline, cached %d candidates (storage has remaining space)\n", 
-                   ack_payload.candidates_acked);
-            ctx->waiting_for_peer = false;  // 还有空间，继续 Trickle ICE
-            return 0;  // 返回 0 表示已缓存（目标离线）
-            
-        case 2:  // 缓存已满（可能缓存了部分候选后满，也可能之前就满了）
-            printf("Signaling [PUB]: Storage full (cached %d candidates), waiting for peer to come online\n",
-                   ack_payload.candidates_acked);
-            // 进入等待状态（等待对端上线后收到 FORWARD）
-            ctx->waiting_for_peer = true;
-            strncpy(ctx->waiting_target, target_name, P2P_PEER_ID_MAX);
-            ctx->waiting_start_time = time_ms();
-            return -2;  // 返回 -2 表示缓存已满，停止发送
-            
-        default: // 服务器错误
-            printf("Signaling [PUB]: Unknown status %d\n", ack_payload.status);
-            return -3;
-    }
+    
+    /* 发送成功，ACK 将在状态机中异步接收 */
+    return 0;
 }
 
 /* ============================================================================
@@ -415,15 +353,31 @@ int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *targ
 ///////////////////////////////////////////////////////////////////////////////
 
 /* ============================================================================
- * 信令客户端状态机周期维护
+ * 信令客户端状态机周期维护（异步 I/O 实现）
  * ============================================================================
  *
  * 在主循环中调用，处理从信令服务器接收的消息。
- * 非阻塞模式，无数据时立即返回。
+ * 使用状态机 + 单次 recv() 实现真正的异步读取，避免循环阻塞。
+ *
+ * 设计原则：
+ *   1. 每次 tick 只调用一次 recv()，不循环死读
+ *   2. 使用 select 检查数据可读性（非阻塞，0 超时）
+ *   3. 维护读取状态机，分段读取消息（header → sender → payload）
+ *   4. 读取完成后才执行业务逻辑
+ *
+ * 状态机转换：
+ *   IDLE → HEADER（开始读取 9 字节消息头）
+ *   HEADER → SENDER（OFFER/FORWARD 消息需读取 32 字节发送者名称）
+ *   HEADER → PAYLOAD（其他消息直接读取 payload）
+ *   HEADER → IDLE（无 payload 的消息）
+ *   SENDER → PAYLOAD（读完 sender_name 后读取 payload）
+ *   PAYLOAD → IDLE（读完 payload，处理消息）
+ *   DISCARD → IDLE（丢弃未处理的消息）
  *
  * 处理的消息类型：
- *   - P2P_RLY_OFFER:       来自主动方的连接请求（服务器转发）
+ *   - P2P_RLY_OFFER:   来自主动方的连接请求（服务器转发）
  *   - P2P_RLY_FORWARD: 来自被动方的应答（服务器转发）
+ *   - 其他类型：读取并丢弃（避免数据流错位）
  *
  * @param ctx  信令上下文
  * @param s    P2P 会话
@@ -431,114 +385,360 @@ int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *targ
 void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
     if (ctx->fd == P2P_INVALID_SOCKET) return;
 
-    // 检查等待超时（60 秒）
+    /* 检查等待超时 */
     if (ctx->waiting_for_peer) {
         uint64_t elapsed = time_ms() - ctx->waiting_start_time;
-        if (elapsed > 60000) {  // 60 秒超时
-            printf("Signaling: Waiting for peer '%s' timed out (60s), giving up\n", ctx->waiting_target);
+        if (elapsed > P2P_RELAY_PEER_WAIT_TIMEOUT_MS) {
+            printf("Signaling: Waiting for peer '%s' timed out (%dms), giving up\n", 
+                   ctx->waiting_target, P2P_RELAY_PEER_WAIT_TIMEOUT_MS);
             ctx->waiting_for_peer = false;
             ctx->waiting_target[0] = '\0';
-            // 可选：断开连接或重置状态
             return;
         }
     }
 
-    // 接收信令服务数据包 (non-blocking peek; if data available read full header)
-    p2p_relay_hdr_t hdr;
-    int n = recv(ctx->fd, (char *)&hdr, sizeof(hdr), 0);
-    if (n == 0) {
-        /* Connection closed by server */
-        p2p_close_socket(ctx->fd);
-        ctx->fd = P2P_INVALID_SOCKET;
-        ctx->state = SIGNAL_DISCONNECTED;
-        return;
-    }
-    if (n < (int)sizeof(hdr)) {
-        /* n <= 0: EAGAIN / EWOULDBLOCK (no data) or error; n > 0: shouldn't happen on local TCP */
-        return;
-    }
-    if (hdr.magic != P2P_RLY_MAGIC) return;
-
-        // 信令服务器（中继）转发的，来自对方的请求
-        if (hdr.type == P2P_RLY_OFFER || hdr.type == P2P_RLY_FORWARD) {
-
-            // 读取对方 name，即来自谁的连接请求
-            char sender_name[P2P_PEER_ID_MAX];
-            if (recv(ctx->fd, sender_name, P2P_PEER_ID_MAX, 0) != P2P_PEER_ID_MAX) return;
-
-            // 保存发送者名称（用于后续发送 answer）
-            if (hdr.type == P2P_RLY_OFFER) {
-                strncpy(ctx->incoming_peer_name, sender_name, P2P_PEER_ID_MAX);
-                /* If passive peer (no --to), learn peer ID from the incoming OFFER.
-                 * Reset trickle-ICE counters so p2p_update() will send all
-                 * local candidates to the correct target (sender_name). */
-                if (s->remote_peer_id[0] == '\0') {
-                    /* Passive peer (no --to): learn the remote ID from the incoming OFFER.
-                     * p2p_update() checks remote_peer_id before sending candidates, so
-                     * candidates gathered before this point were silently skipped.
-                     * Defensively reset counters so nothing is accidentally counted as sent. */
-                    strncpy(s->remote_peer_id, sender_name, P2P_PEER_ID_MAX - 1);
-                    s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
-                    ctx->total_candidates_sent  = 0;
-                    ctx->total_candidates_acked = 0;
-                    ctx->next_candidate_index   = 0;
-                    ctx->waiting_for_peer       = false;
-                    s->signal_sent              = false;
-                    s->last_cand_cnt_sent       = 0;
-                    printf("Signaling: Passive peer learned remote ID '%s' from OFFER\n", sender_name);
-                }
+    /* 状态机：循环读取，直到没有数据（EAGAIN）或完成消息处理 
+     * 关键：每次 recv() 如果返回 EAGAIN，说明 TCP 缓冲区空了，立即返回
+     * 这样可以一次 tick 处理完缓冲区的所有数据，又不会阻塞 */
+    for(;;) {
+        switch (ctx->read_state) {
+        
+        case RELAY_READ_IDLE: {
+            /* 空闲状态：开始读取新消息的头部 */
+            ctx->read_offset = 0;
+            ctx->read_expected = sizeof(p2p_relay_hdr_t);
+            ctx->read_state = RELAY_READ_HEADER;
+            /* fall through - 不 break，继续读取 */
+        }
+        
+        case RELAY_READ_HEADER: {
+            /* 读取消息头（9 字节）*/
+            int remaining = ctx->read_expected - ctx->read_offset;
+            char *buf = ((char*)&ctx->read_hdr) + ctx->read_offset;
+            
+            int n = recv(ctx->fd, buf, remaining, 0);
+            
+            if (n == 0) {
+                /* 连接关闭 */
+                printf("Signaling: Connection closed by server\n");
+                p2p_signal_relay_close(ctx);
+                return;
             }
             
-            // 收到 FORWARD：对端已上线，清除等待状态
-            if (hdr.type == P2P_RLY_FORWARD && ctx->waiting_for_peer && 
-                strcmp(ctx->waiting_target, sender_name) == 0) {
-                printf("Signaling: Peer '%s' is now online (received FORWARD), resuming...\n", sender_name);
-                ctx->waiting_for_peer = false;
-                ctx->waiting_target[0] = '\0';
-                // 注：后续应该继续发送剩余候选，由上层 p2p_update() 检查 next_candidate_index
+            if (n < 0) {
+                int err = p2p_errno();
+                if (err == P2P_EAGAIN || err == P2P_EINPROGRESS) {
+                    /* 缓冲区空了，等待下次 tick */
+                    return;
+                }
+                /* 真正的错误 */
+                printf("Signaling: recv error %d\n", err);
+                p2p_signal_relay_close(ctx);
+                return;
             }
-
-            // 接收后面的负载数据
-            // + 信令服务器只中继转发请求数据，所以数据结构是由对等双方自行约定
-            uint32_t payload_len = hdr.length - P2P_PEER_ID_MAX;
-            uint8_t *payload = malloc(payload_len);
-            if (recv(ctx->fd, (char *)payload, payload_len, 0) != (int)payload_len) { free(payload); return; }
-
-            printf("Signaling: Received signal from '%s' (%u bytes)\n", sender_name, payload_len);
-            fflush(stdout);
-
-            // 解析信令数据并注入 ICE 状态机
-            p2p_signaling_payload_hdr_t p;
-            if (payload_len >= 76 && unpack_signaling_payload_hdr(&p, payload) == 0 &&
-                payload_len >= (size_t)(76 + p.candidate_count * 32)) {
+            
+            ctx->read_offset += n;
+            
+            /* 检查是否读完 header */
+            if (ctx->read_offset >= ctx->read_expected) {
+                /* 验证 magic */
+                if (ctx->read_hdr.magic != P2P_RLY_MAGIC) {
+                    printf("Signaling: Invalid magic 0x%x (expected 0x%x), resetting\n",
+                           ctx->read_hdr.magic, P2P_RLY_MAGIC);
+                    ctx->read_state = RELAY_READ_IDLE;
+                    return;
+                }
                 
-                /* 添加远端 ICE 候选 */
-                for (int i = 0; i < p.candidate_count; i++) {
-                    p2p_candidate_t c;
-                    unpack_candidate(&c, payload + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
+                printf("[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u\n",
+                       ctx->read_hdr.magic, ctx->read_hdr.type, ctx->read_hdr.length);
+                fflush(stdout);
+                
+                /* 根据消息类型决定下一步 */
+                if (ctx->read_hdr.type == P2P_RLY_OFFER || ctx->read_hdr.type == P2P_RLY_FORWARD) {
+                    /* 需要读取 sender_name（32 字节） */
+                    ctx->read_offset = 0;
+                    ctx->read_expected = P2P_PEER_ID_MAX;
+                    ctx->read_state = RELAY_READ_SENDER;
+                } else if (ctx->read_hdr.type == P2P_RLY_CONNECT_ACK) {
+                    /* 处理 CONNECT_ACK（8 字节 payload） */
+                    if (ctx->read_hdr.length > 0) {
+                        ctx->read_payload = (uint8_t*)malloc(ctx->read_hdr.length);
+                        if (!ctx->read_payload) {
+                            printf("Signaling: Failed to allocate ACK payload buffer\n");
+                            ctx->read_state = RELAY_READ_IDLE;
+                            return;
+                        }
+                        ctx->read_offset = 0;
+                        ctx->read_expected = ctx->read_hdr.length;
+                        ctx->read_state = RELAY_READ_PAYLOAD;
+                    } else {
+                        ctx->read_state = RELAY_READ_IDLE;
+                    }
+                } else if (ctx->read_hdr.length > 0) {
+                    /* 其他消息类型，读取并丢弃 payload */
+                    ctx->read_offset = 0;
+                    ctx->read_expected = ctx->read_hdr.length;
+                    ctx->read_state = RELAY_READ_DISCARD;
+                } else {
+                    /* 无 payload 的消息，直接完成 */
+                    ctx->read_state = RELAY_READ_IDLE;
+                    /* 继续循环，处理下一个消息（如果有） */
+                }
+            }
+            /* 继续循环 */
+            break;
+        }
+        
+        case RELAY_READ_SENDER: {
+            /* 读取 sender_name（32 字节） */
+            int remaining = ctx->read_expected - ctx->read_offset;
+            char *buf = ctx->read_sender + ctx->read_offset;
+            
+            int n = recv(ctx->fd, buf, remaining, 0);
+            
+            if (n == 0) {
+                printf("Signaling: Connection closed while reading sender\n");
+                p2p_signal_relay_close(ctx);
+                return;
+            }
+            
+            if (n < 0) {
+                int err = p2p_errno();
+                if (err == P2P_EAGAIN || err == P2P_EINPROGRESS) {
+                    /* 缓冲区空了，等待下次 tick */
+                    return;
+                }
+                printf("Signaling: recv error %d while reading sender\n", err);
+                p2p_signal_relay_close(ctx);
+                return;
+            }
+            
+            ctx->read_offset += n;
+            
+            /* 检查是否读完 sender_name */
+            if (ctx->read_offset >= ctx->read_expected) {
+                /* 计算 payload 长度（总长度 - sender_name） */
+                uint32_t payload_len = ctx->read_hdr.length - P2P_PEER_ID_MAX;
+                
+                if (payload_len > 0) {
+                    /* 分配 payload 缓冲区 */
+                    ctx->read_payload = (uint8_t*)malloc(payload_len);
+                    if (!ctx->read_payload) {
+                        printf("Signaling: Failed to allocate %u bytes for payload\n", payload_len);
+                        ctx->read_state = RELAY_READ_IDLE;
+                        return;
+                    }
                     
-                    /* 排重检查 */
-                    int exists = 0;
-                    for (int j = 0; j < s->remote_cand_cnt; j++) {
-                        if (s->remote_cands[j].addr.sin_addr.s_addr == c.addr.sin_addr.s_addr &&
-                            s->remote_cands[j].addr.sin_port == c.addr.sin_port) {
-                            exists = 1;
-                            break;
+                    ctx->read_offset = 0;
+                    ctx->read_expected = payload_len;
+                    ctx->read_state = RELAY_READ_PAYLOAD;
+                } else {
+                    /* 无 payload（不应该，但防御性处理） */
+                    ctx->read_state = RELAY_READ_IDLE;
+                }
+            }
+            /* 继续循环 */
+            break;
+        }
+        
+        case RELAY_READ_PAYLOAD: {
+            /* 读取 payload（变长） */
+            int remaining = ctx->read_expected - ctx->read_offset;
+            char *buf = (char*)ctx->read_payload + ctx->read_offset;
+            
+            int n = recv(ctx->fd, buf, remaining, 0);
+            
+            if (n == 0) {
+                printf("Signaling: Connection closed while reading payload\n");
+                p2p_signal_relay_close(ctx);
+                return;
+            }
+            
+            if (n < 0) {
+                int err = p2p_errno();
+                if (err == P2P_EAGAIN || err == P2P_EINPROGRESS) {
+                    /* 缓冲区空了，等待下次 tick */
+                    return;
+                }
+                printf("Signaling: recv error %d while reading payload\n", err);
+                p2p_signal_relay_close(ctx);
+                return;
+            }
+            
+            ctx->read_offset += n;
+            
+            /* 检查是否读完 payload */
+            if (ctx->read_offset >= ctx->read_expected) {
+                /* 读取完成，处理消息 */
+                uint32_t payload_len = ctx->read_expected;
+                
+                /* 处理 CONNECT_ACK */
+                if (ctx->read_hdr.type == P2P_RLY_CONNECT_ACK) {
+                    if (payload_len >= sizeof(p2p_relay_connect_ack_t)) {
+                        p2p_relay_connect_ack_t *ack = (p2p_relay_connect_ack_t *)ctx->read_payload;
+                        printf("Signaling [PUB]: Received ACK (status=%d, candidates_acked=%d)\n",
+                               ack->status, ack->candidates_acked);
+                        
+                        /* 根据状态处理 */
+                        switch (ack->status) {
+                            case 0:  // 对端在线
+                                printf("Signaling [PUB]: Peer online, forwarded %d candidates\n", ack->candidates_acked);
+                                ctx->waiting_for_peer = false;
+                                break;
+                            case 1:  // 对端离线，已缓存
+                                printf("Signaling [PUB]: Peer offline, cached %d candidates\n", ack->candidates_acked);
+                                ctx->waiting_for_peer = false;
+                                break;
+                            case 2:  // 缓存已满
+                                printf("Signaling [PUB]: Storage full, waiting for peer to come online\n");
+                                ctx->waiting_for_peer = true;
+                                ctx->waiting_start_time = time_ms();
+                                break;
+                            default:
+                                printf("Signaling [PUB]: Unknown ACK status %d\n", ack->status);
+                                break;
                         }
                     }
                     
-                    if (!exists && s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
-                        s->remote_cands[s->remote_cand_cnt++] = c;
-                        printf("[ICE] Added Remote Candidate: %d -> %s:%d\n",
-                               c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
+                    /* 释放 payload 并重置 */
+                    free(ctx->read_payload);
+                    ctx->read_payload = NULL;
+                    ctx->read_state = RELAY_READ_IDLE;
+                    break;
+                }
+                
+                /* 保存发送者名称（用于后续发送 answer） */
+                if (ctx->read_hdr.type == P2P_RLY_OFFER) {
+                    strncpy(ctx->incoming_peer_name, ctx->read_sender, P2P_PEER_ID_MAX);
+                    
+                    /* 被动方（无 --to）从 OFFER 中学习 remote_peer_id */
+                    if (s->remote_peer_id[0] == '\0') {
+                        strncpy(s->remote_peer_id, ctx->read_sender, P2P_PEER_ID_MAX - 1);
+                        s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+                        
+                        /* 重置 Trickle ICE 计数器 */
+                        ctx->total_candidates_sent  = 0;
+                        ctx->total_candidates_acked = 0;
+                        ctx->next_candidate_index   = 0;
+                        ctx->waiting_for_peer       = false;
+                        s->signal_sent              = false;
+                        s->last_cand_cnt_sent       = 0;
+                        
+                        printf("Signaling: Passive peer learned remote ID '%s' from OFFER\n", ctx->read_sender);
                     }
                 }
-            } else {
-                /* 解包失败，尝试作为旧版 trickle 候选处理 */
-                p2p_ice_on_remote_candidates(s, payload, payload_len);
+                
+                /* 收到 FORWARD：对端已上线，清除等待状态 */
+                if (ctx->read_hdr.type == P2P_RLY_FORWARD && ctx->waiting_for_peer &&
+                    strcmp(ctx->waiting_target, ctx->read_sender) == 0) {
+                    printf("Signaling: Peer '%s' is now online (received FORWARD), resuming...\n", ctx->read_sender);
+                    ctx->waiting_for_peer = false;
+                    ctx->waiting_target[0] = '\0';
+                }
+                
+                printf("Signaling: Received signal from '%s' (%u bytes)\n", ctx->read_sender, payload_len);
+                fflush(stdout);
+                
+                /* 解析信令数据并注入 ICE 状态机 */
+                p2p_signaling_payload_hdr_t p;
+                if (payload_len >= 76 && unpack_signaling_payload_hdr(&p, ctx->read_payload) == 0 &&
+                    payload_len >= (size_t)(76 + p.candidate_count * 32)) {
+                    
+                    /* 添加远端 ICE 候选 */
+                    for (int i = 0; i < p.candidate_count; i++) {
+                        p2p_candidate_t c;
+                        unpack_candidate(&c, ctx->read_payload + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
+                        
+                        /* 排重检查 */
+                        int exists = 0;
+                        for (int j = 0; j < s->remote_cand_cnt; j++) {
+                            if (s->remote_cands[j].addr.sin_addr.s_addr == c.addr.sin_addr.s_addr &&
+                                s->remote_cands[j].addr.sin_port == c.addr.sin_port) {
+                                exists = 1;
+                                break;
+                            }
+                        }
+                        
+                        if (!exists && s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
+                            s->remote_cands[s->remote_cand_cnt++] = c;
+                            printf("[ICE] Added Remote Candidate: %d -> %s:%d\n",
+                                   c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
+                        }
+                    }
+                } else {
+                    /* 解包失败，尝试作为旧版 trickle 候选处理 */
+                    p2p_ice_on_remote_candidates(s, ctx->read_payload, payload_len);
+                }
+                
+                /* 释放 payload 缓冲区 */
+                free(ctx->read_payload);
+                ctx->read_payload = NULL;
+                
+                /* 重置状态机，继续处理下一个消息（如果有） */
+                ctx->read_state = RELAY_READ_IDLE;
             }
-
-            free(payload);
+            /* 继续循环 */
+            break;
         }
+        
+        case RELAY_READ_DISCARD: {
+            /* 丢弃未处理的消息类型 */
+            if (!ctx->read_payload && ctx->read_expected > 0) {
+                ctx->read_payload = (uint8_t*)malloc(ctx->read_expected);
+                if (!ctx->read_payload) {
+                    printf("Signaling: Failed to allocate discard buffer, closing connection\n");
+                    p2p_signal_relay_close(ctx);
+                    return;
+                }
+            }
+            
+            int remaining = ctx->read_expected - ctx->read_offset;
+            char *buf = (char*)ctx->read_payload + ctx->read_offset;
+            
+            int n = recv(ctx->fd, buf, remaining, 0);
+            
+            if (n == 0) {
+                printf("Signaling: Connection closed while discarding\n");
+                p2p_signal_relay_close(ctx);
+                return;
+            }
+            
+            if (n < 0) {
+                int err = p2p_errno();
+                if (err == P2P_EAGAIN || err == P2P_EINPROGRESS) {
+                    /* 缓冲区空了，等待下次 tick */
+                    return;
+                }
+                printf("Signaling: recv error %d while discarding\n", err);
+                p2p_signal_relay_close(ctx);
+                return;
+            }
+            
+            ctx->read_offset += n;
+            
+            if (ctx->read_offset >= ctx->read_expected) {
+                printf("[DEBUG] Discarded %d bytes payload of message type %d\n",
+                       ctx->read_expected, ctx->read_hdr.type);
+                
+                /* 释放缓冲区 */
+                if (ctx->read_payload) {
+                    free(ctx->read_payload);
+                    ctx->read_payload = NULL;
+                }
+                
+                /* 重置状态机，继续处理下一个消息 */
+                ctx->read_state = RELAY_READ_IDLE;
+            }
+            /* 继续循环 */
+            break;
+        }
+        
+        default:
+            /* 不应该到达这里 */
+            printf("Signaling: Invalid read state %d, resetting\n", ctx->read_state);
+            ctx->read_state = RELAY_READ_IDLE;
+            break;
+        }
+    } // for(;;)
 }
 

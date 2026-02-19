@@ -68,6 +68,34 @@ add_executable(test_turn_protocol
 target_link_libraries(test_turn_protocol ${TEST_PLATFORM_LIBS})
 add_test(NAME test_turn_protocol COMMAND test_turn_protocol)
 
+# RELAY 异步 I/O 状态机单元测试（独立运行，模拟完整状态机）
+add_executable(test_relay_async_io
+    test_relay_async_io.c
+)
+target_link_libraries(test_relay_async_io ${TEST_PLATFORM_LIBS})
+add_test(NAME test_relay_async_io COMMAND test_relay_async_io)
+
+# Ring Buffer 单元测试（独立运行，测试环形缓冲区所有操作）
+add_executable(test_ring_buffer
+    test_ring_buffer.c
+)
+target_link_libraries(test_ring_buffer ${TEST_PLATFORM_LIBS})
+add_test(NAME test_ring_buffer COMMAND test_ring_buffer)
+
+# Reliable 传输层单元测试（独立运行，测试 ARQ 滑动窗口机制）
+add_executable(test_reliable
+    test_reliable.c
+)
+target_link_libraries(test_reliable ${TEST_PLATFORM_LIBS})
+add_test(NAME test_reliable COMMAND test_reliable)
+
+# PseudoTCP 拥塞控制单元测试（独立运行，测试 AIMD 拥塞控制算法）
+add_executable(test_pseudotcp
+    test_pseudotcp.c
+)
+target_link_libraries(test_pseudotcp ${TEST_PLATFORM_LIBS})
+add_test(NAME test_pseudotcp COMMAND test_pseudotcp)
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)
