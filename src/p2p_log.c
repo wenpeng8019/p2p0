@@ -18,17 +18,17 @@ static struct {
     int use_timestamp;
     int use_color;
 } log_state = {
-    .level = P2P_LOG_INFO,
+    .level = P2P_LOG_LEVEL_INFO,
     .output = NULL,  /* NULL 代表使用 stdout */
     .use_timestamp = 1,
     .use_color = 1
 };
 
-void p2p_log_set_level(p2p_log_level_t level) {
+void p2p_set_log_level(p2p_log_level_t level) {
     log_state.level = level;
 }
 
-p2p_log_level_t p2p_log_get_level(void) {
+p2p_log_level_t p2p_get_log_level(void) {
     return log_state.level;
 }
 
@@ -46,23 +46,23 @@ void p2p_log_set_color(int enabled) {
 
 static const char *level_to_string(p2p_log_level_t level) {
     switch (level) {
-        case P2P_LOG_ERROR: return "ERROR";
-        case P2P_LOG_WARN:  return "WARN ";
-        case P2P_LOG_INFO:  return "INFO ";
-        case P2P_LOG_DEBUG: return "DEBUG";
-        case P2P_LOG_TRACE: return "TRACE";
-        default:            return "?????";
+        case P2P_LOG_LEVEL_ERROR: return "ERROR";
+        case P2P_LOG_LEVEL_WARN:  return "WARN ";
+        case P2P_LOG_LEVEL_INFO:  return "INFO ";
+        case P2P_LOG_LEVEL_DEBUG: return "DEBUG";
+        case P2P_LOG_LEVEL_TRACE: return "TRACE";
+        default:                  return "?????";
     }
 }
 
 static const char *level_to_color(p2p_log_level_t level) {
     switch (level) {
-        case P2P_LOG_ERROR: return COLOR_RED;
-        case P2P_LOG_WARN:  return COLOR_YELLOW;
-        case P2P_LOG_INFO:  return COLOR_GREEN;
-        case P2P_LOG_DEBUG: return COLOR_CYAN;
-        case P2P_LOG_TRACE: return COLOR_GRAY;
-        default:            return COLOR_RESET;
+        case P2P_LOG_LEVEL_ERROR: return COLOR_RED;
+        case P2P_LOG_LEVEL_WARN:  return COLOR_YELLOW;
+        case P2P_LOG_LEVEL_INFO:  return COLOR_GREEN;
+        case P2P_LOG_LEVEL_DEBUG: return COLOR_CYAN;
+        case P2P_LOG_LEVEL_TRACE: return COLOR_GRAY;
+        default:                  return COLOR_RESET;
     }
 }
 

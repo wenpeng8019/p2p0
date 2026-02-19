@@ -20,6 +20,16 @@ typedef enum {
     P2P_LANG_ZH = 1     /* 简体中文 (需要编译时启用 -DP2P_ENABLE_CHINESE) */
 } p2p_language_t;
 
+/* 日志等级 */
+typedef enum {
+    P2P_LOG_LEVEL_NONE  = 0,  /* 静默，不输出任何日志 */
+    P2P_LOG_LEVEL_ERROR = 1,  /* 错误：不可恢复的异常 */
+    P2P_LOG_LEVEL_WARN  = 2,  /* 警告：可恢复的异常或降级 */
+    P2P_LOG_LEVEL_INFO  = 3,  /* 信息：关键流程节点（默认）*/
+    P2P_LOG_LEVEL_DEBUG = 4,  /* 调试：内部状态变化 */
+    P2P_LOG_LEVEL_TRACE = 5   /* 追踪：高频细节（性能敏感）*/
+} p2p_log_level_t;
+
 /* ---------- 连接模式 ---------- */
 
 enum {
@@ -296,6 +306,17 @@ int  p2p_is_ready(p2p_session_t *sa);
  */
 int p2p_get_nat_type(const p2p_session_t *s);
 
+/*
+ * 设置全局日志等级（线程安全）。
+ * 低于此等级的日志将被忽略，不产生任何输出。
+ * 默认等级为 P2P_LOG_LEVEL_INFO。
+ */
+void p2p_set_log_level(p2p_log_level_t level);
+
+/*
+ * 获取当前全局日志等级。
+ */
+p2p_log_level_t p2p_get_log_level(void);
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus
