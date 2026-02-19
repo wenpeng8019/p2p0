@@ -12,6 +12,7 @@
 #include "p2p_signal_relay.h"
 #include "p2p_signal_pubsub.h"
 #include "p2p_log.h"
+#include "ping_lang.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,19 +22,21 @@
 #include <time.h>
 
 static void print_help(const char *prog) {
-    printf("Usage: %s [options]\n", prog);
-    printf("Options:\n");
-    printf("  --dtls            Enable DTLS (MbedTLS)\n");
-    printf("  --openssl         Enable DTLS (OpenSSL)\n");
-    printf("  --pseudo          Enable PseudoTCP\n");
-    printf("  --server IP       Standard Signaling Server IP\n");
-    printf("  --compact          Use COMPACT mode (UDP signaling, default is ICE/TCP)\n");
-    printf("  --github TOKEN    GitHub Token for Public Signaling\n");
-    printf("  --gist ID         GitHub Gist ID for Public Signaling\n");
-    printf("  --name NAME       Your Peer Name\n");
-    printf("  --to TARGET       Target Peer Name (if specified: active role; if omitted: passive role)\n");
-    printf("  --disable-lan     Disable LAN shortcut (force NAT punch test)\n");
-    printf("  --verbose-punch   Enable verbose NAT punch logging\n");
+    printf(ping_msg(MSG_PING_USAGE), prog);
+    printf("\n");
+    printf("%s\n", ping_msg(MSG_PING_OPTIONS));
+    printf("%s\n", ping_msg(MSG_PING_OPT_DTLS));
+    printf("%s\n", ping_msg(MSG_PING_OPT_OPENSSL));
+    printf("%s\n", ping_msg(MSG_PING_OPT_PSEUDO));
+    printf("%s\n", ping_msg(MSG_PING_OPT_SERVER));
+    printf("%s\n", ping_msg(MSG_PING_OPT_COMPACT));
+    printf("%s\n", ping_msg(MSG_PING_OPT_GITHUB));
+    printf("%s\n", ping_msg(MSG_PING_OPT_GIST));
+    printf("%s\n", ping_msg(MSG_PING_OPT_NAME));
+    printf("%s\n", ping_msg(MSG_PING_OPT_TO));
+    printf("%s\n", ping_msg(MSG_PING_OPT_DISABLE_LAN));
+    printf("%s\n", ping_msg(MSG_PING_OPT_VERBOSE_PUNCH));
+    printf("%s\n", ping_msg(MSG_PING_OPT_CN));
 }
 
 static const char* state_name(int state) {
@@ -53,9 +56,10 @@ static const char* state_name(int state) {
 static void log_state_change(p2p_session_t *s) {
     static int last_state = -1;
     if (s->state != last_state) {
-        printf("[STATE] %s (%d) -> %s (%d)\n", 
+        printf(ping_msg(MSG_PING_STATE_CHANGE), 
                state_name(last_state), last_state, 
                state_name(s->state), s->state);
+        printf("\n");
         last_state = s->state;
         fflush(stdout);
     }
@@ -65,13 +69,13 @@ static void log_state_change(p2p_session_t *s) {
 static void on_connected(p2p_session_t *s, void *userdata) {
     (void)userdata;
     log_state_change(s);   /* 立即打印状态变更，不等主循环 */
-    printf("[EVENT] Connection established!\n");
+    printf("%s\n", ping_msg(MSG_PING_CONNECTED));
     fflush(stdout);
     
     /* 发送初始 PING */
     const char *hello = "P2P_PING_ALIVE";
     p2p_send(s, hello, strlen(hello));
-    printf("[DATA] Sent PING\n");
+    printf("%s\n", ping_msg(MSG_PING_SENT));
     fflush(stdout);
 }
 
@@ -79,15 +83,13 @@ static void on_connected(p2p_session_t *s, void *userdata) {
 static void on_disconnected(p2p_session_t *s, void *userdata) {
     (void)s;
     (void)userdata;
-    printf("[EVENT] Connection closed\n");
+    printf("%s\n", ping_msg(MSG_PING_DISCONNECTED));
     fflush(stdout);
 }
 
 int main(int argc, char *argv[]) {
-    printf("=== P2P Ping Diagnostic Tool ===\n\n");
-
     int use_dtls = 0, use_openssl = 0, use_pseudo = 0, use_compact = 0;
-    int disable_lan = 0, verbose_punch = 0;
+    int disable_lan = 0, verbose_punch = 0, use_chinese = 0, show_help = 0;
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
     const char *my_name = "unnamed", *target_name = NULL;
     int server_port = 8888;
@@ -99,13 +101,27 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--compact") == 0) use_compact = 1;
         else if (strcmp(argv[i], "--disable-lan") == 0) disable_lan = 1;
         else if (strcmp(argv[i], "--verbose-punch") == 0) verbose_punch = 1;
+        else if (strcmp(argv[i], "--cn") == 0) use_chinese = 1;
         else if (strcmp(argv[i], "--server") == 0 && i+1 < argc) server_ip = argv[++i];
         else if (strcmp(argv[i], "--github") == 0 && i+1 < argc) gh_token = argv[++i];
         else if (strcmp(argv[i], "--gist") == 0 && i+1 < argc) gist_id = argv[++i];
         else if (strcmp(argv[i], "--name") == 0 && i+1 < argc) my_name = argv[++i];
         else if (strcmp(argv[i], "--to") == 0 && i+1 < argc) target_name = argv[++i];
-        else if (strcmp(argv[i], "--help") == 0) { print_help(argv[0]); return 0; }
+        else if (strcmp(argv[i], "--help") == 0) show_help = 1;
     }
+
+    // 设置语言
+    if (use_chinese) {
+        ping_set_language(P2P_LANG_ZH);
+    }
+
+    // 处理帮助请求
+    if (show_help) {
+        print_help(argv[0]);
+        return 0;
+    }
+
+    printf("%s\n\n", ping_msg(MSG_PING_TITLE));
 
     // 解析 server_ip 中的端口号（支持 IP:PORT 格式）
     char server_host_buf[256] = {0};
@@ -135,6 +151,7 @@ int main(int argc, char *argv[]) {
     cfg.gh_token = gh_token;
     cfg.gist_id = gist_id;
     cfg.bind_port = 0;
+    cfg.language = use_chinese ? P2P_LANG_ZH : P2P_LANG_EN;  // 设置核心库语言
     strncpy(cfg.local_peer_id, my_name, P2P_PEER_ID_MAX);
     
     // 测试选项
@@ -154,7 +171,7 @@ int main(int argc, char *argv[]) {
     }
 
     p2p_session_t *s = p2p_create(&cfg);
-    if (!s) { printf("Failed to create session\n"); return 1; }
+    if (!s) { printf("%s\n", ping_msg(MSG_PING_CREATE_FAIL)); return 1; }
 
     // 统一的连接流程
     const char *mode_name = NULL;
@@ -163,31 +180,33 @@ int main(int argc, char *argv[]) {
     } else if (gh_token && gist_id) {
         mode_name = "PUBSUB";
     } else {
-        printf("Error: No connection mode specified.\n");
-        printf("Use one of: --server or --github\n");
+        printf("%s\n", ping_msg(MSG_PING_NO_MODE));
+        printf("%s\n", ping_msg(MSG_PING_USE_ONE_OF));
         print_help(argv[0]);
         return 1;
     }
 
     // 如果启用了测试选项，显示信息
     if (disable_lan) {
-        printf("[TEST] LAN shortcut disabled - forcing NAT punch\n");
+        printf("%s\n", ping_msg(MSG_PING_LAN_DISABLED));
     }
     if (verbose_punch) {
-        printf("[TEST] Verbose NAT punch logging enabled\n");
+        printf("%s\n", ping_msg(MSG_PING_VERBOSE_ENABLED));
     }
     
     // 调用 p2p_connect（target_name 为 NULL 表示被动等待）
     if (p2p_connect(s, target_name) < 0) {
-        printf("Failed to initialize connection\n");
+        printf("%s\n", ping_msg(MSG_PING_CONNECT_FAIL));
         return 1;
     }
 
     // 打印运行模式
     if (target_name) {
-        printf("Running in %s mode (connecting to %s)...\n\n", mode_name, target_name);
+        printf(ping_msg(MSG_PING_MODE_CONNECTING), mode_name, target_name);
+        printf("\n\n");
     } else {
-        printf("Running in %s mode (waiting for connection)...\n\n", mode_name);
+        printf(ping_msg(MSG_PING_MODE_WAITING), mode_name);
+        printf("\n\n");
     }
 
     /* 主循环 */
@@ -201,7 +220,8 @@ int main(int argc, char *argv[]) {
             char data[256] = {0};
             int r = p2p_recv(s, data, sizeof(data)-1);
             if (r > 0) {
-                printf("[DATA] Received: %s\n", data);
+                printf(ping_msg(MSG_PING_RECEIVED), data);
+                printf("\n");
                 fflush(stdout);
             }
         }

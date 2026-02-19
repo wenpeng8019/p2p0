@@ -46,7 +46,7 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
     if (!cfg) return NULL;
 
     // 设置语言
-    p2p_set_language((p2p_language_t)cfg->language);
+    p2p_set_language(cfg->language);
 
     // Initialize Winsock on Windows (no-op on POSIX)
     static int net_initialized = 0;

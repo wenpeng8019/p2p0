@@ -14,6 +14,11 @@ extern "C" {
 #endif
 ///////////////////////////////////////////////////////////////////////////////
 
+/* 支持的语言 */
+typedef enum {
+    P2P_LANG_EN = 0,    /* English (默认) */
+    P2P_LANG_ZH = 1     /* 简体中文 (需要编译时启用 -DP2P_ENABLE_CHINESE) */
+} p2p_language_t;
 
 /* ---------- 连接模式 ---------- */
 
@@ -127,7 +132,7 @@ typedef struct {
     bool                    verbose_nat_punch;          // 是否输出详细的 NAT 打洞流程日志
     
     /* 语言选项 */
-    int                     language;                   // 日志语言: 0=English(默认), 1=中文
+    p2p_language_t          language;                   // 日志语言
     
     /* 事件回调 */
     p2p_on_connected_fn     on_connected;               // 连接建立回调 (可选)

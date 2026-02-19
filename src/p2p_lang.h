@@ -10,17 +10,11 @@
 #ifndef P2P_LANG_H
 #define P2P_LANG_H
 
+#include <p2p.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* 支持的语言 */
-typedef enum {
-    P2P_LANG_EN = 0,    /* English (默认) */
-#ifdef P2P_ENABLE_CHINESE
-    P2P_LANG_ZH = 1,    /* 简体中文 (需要编译时启用 -DP2P_ENABLE_CHINESE) */
-#endif
-} p2p_language_t;
 
 /* 消息 ID 枚举 */
 typedef enum {
@@ -270,11 +264,8 @@ typedef enum {
     MSG_COUNT  /* 消息总数 */
 } p2p_msg_id_t;
 
-/* 设置当前语言 */
+/* 内部函数：设置当前语言（通过 p2p_config_t.language 配置） */
 void p2p_set_language(p2p_language_t lang);
-
-/* 获取当前语言 */
-p2p_language_t p2p_get_language(void);
 
 /* 获取消息文本 */
 const char* p2p_msg(p2p_msg_id_t id);
