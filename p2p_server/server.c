@@ -90,6 +90,9 @@ typedef struct relay_client {
     server_socket_t         fd;                                 // 客户端 tcp 套接口描述符
     time_t                  last_active;                        // 最后活跃时间（用于检测死连接）
     
+    // ===== 在线连接跟踪（用于判断 OFFER/FORWARD） =====
+    char                    current_peer[P2P_PEER_ID_MAX];      // 当前正在连接的对端（空字符串表示无活动连接）
+    
     // ===== 离线候选缓存（仅支持单一发送者） =====
     // 注意：客户端仅支持一对一连接，不支持多方同时连接
     // 如果新发送者发起连接，会覆盖旧发送者的缓存
@@ -124,6 +127,7 @@ static void handle_relay_signaling(int idx) {
         printf("[TCP] Peer %s disconnected\n", g_relay_clients[idx].name);
         server_close_socket(fd);
         g_relay_clients[idx].valid = false;
+        g_relay_clients[idx].current_peer[0] = '\0';
         return;
     }
 
@@ -135,6 +139,7 @@ static void handle_relay_signaling(int idx) {
         printf("[TCP] Invalid magic from peer\n");
         server_close_socket(fd);
         g_relay_clients[idx].valid = false;
+        g_relay_clients[idx].current_peer[0] = '\0';
         return;
     }
 
@@ -144,6 +149,7 @@ static void handle_relay_signaling(int idx) {
         recv(fd, (char *)&login, sizeof(login), 0);
         strncpy(g_relay_clients[idx].name, login.name, P2P_PEER_ID_MAX);
         g_relay_clients[idx].valid = true;
+        g_relay_clients[idx].current_peer[0] = '\0';  // 初始化为无连接状态
         printf("[TCP] Peer '%s' logged in\n", g_relay_clients[idx].name);
         fflush(stdout);
 
@@ -175,6 +181,7 @@ static void handle_relay_signaling(int idx) {
 
                 /* Release the offline slot */
                 g_relay_clients[k].valid = false;
+                g_relay_clients[k].current_peer[0] = '\0';
                 g_relay_clients[k].pending_count = 0;
                 g_relay_clients[k].pending_sender[0] = '\0';
                 break;
@@ -278,6 +285,7 @@ static void handle_relay_signaling(int idx) {
             printf("[TCP] Failed to receive target name from %s\n", g_relay_clients[idx].name);
             server_close_socket(fd);
             g_relay_clients[idx].valid = false;
+            g_relay_clients[idx].current_peer[0] = '\0';
             return;
         }
         
@@ -287,6 +295,7 @@ static void handle_relay_signaling(int idx) {
             printf("[TCP] Payload too large (%u bytes) from %s\n", payload_len, g_relay_clients[idx].name);
             server_close_socket(fd);
             g_relay_clients[idx].valid = false;
+            g_relay_clients[idx].current_peer[0] = '\0';
             return;
         }
         
@@ -296,6 +305,7 @@ static void handle_relay_signaling(int idx) {
             free(payload);
             server_close_socket(fd);
             g_relay_clients[idx].valid = false;
+            g_relay_clients[idx].current_peer[0] = '\0';
             return;
         }
 
@@ -320,8 +330,17 @@ static void handle_relay_signaling(int idx) {
             if (g_relay_clients[i].valid && g_relay_clients[i].fd != SERVER_INVALID_SOCKET &&
                 strcmp(g_relay_clients[i].name, target_name) == 0) {
                 
-                /* 目标在线：直接转发 */
-                uint8_t relay_type = (hdr.type == P2P_RLY_CONNECT) ? P2P_RLY_OFFER : P2P_RLY_FORWARD;
+                /* 目标在线：检查是否第一次连接（OFFER）或后续更新（FORWARD） */
+                bool is_first_offer = (g_relay_clients[i].current_peer[0] == '\0' || 
+                                       strcmp(g_relay_clients[i].current_peer, g_relay_clients[idx].name) != 0);
+                
+                uint8_t relay_type = is_first_offer ? P2P_RLY_OFFER : P2P_RLY_FORWARD;
+                
+                // 第一次连接时，记录当前连接的对端
+                if (is_first_offer) {
+                    strncpy(g_relay_clients[i].current_peer, g_relay_clients[idx].name, P2P_PEER_ID_MAX - 1);
+                    g_relay_clients[i].current_peer[P2P_PEER_ID_MAX - 1] = '\0';
+                }
                 
                 p2p_relay_hdr_t relay_hdr = {P2P_RLY_MAGIC, relay_type,
                                               (uint32_t)(P2P_PEER_ID_MAX + payload_len)};
@@ -332,8 +351,9 @@ static void handle_relay_signaling(int idx) {
                 found = true;
                 ack_status = 0;  /* 成功转发 */
                 candidates_acked = candidates_in_payload;
-                printf("[TCP] Forwarded %d candidates to online user '%s'\n",
-                       candidates_in_payload, target_name);
+                printf("[TCP] Sent %s with %d candidates to '%s' (from '%s')\n",
+                       is_first_offer ? "OFFER" : "FORWARD", candidates_in_payload, 
+                       target_name, g_relay_clients[idx].name);
                 fflush(stdout);
                 break;
             }
@@ -503,6 +523,7 @@ static void cleanup_relay_clients(void) {
                 server_close_socket(g_relay_clients[i].fd);
                 g_relay_clients[i].fd = SERVER_INVALID_SOCKET;
                 g_relay_clients[i].valid = false;
+                g_relay_clients[i].current_peer[0] = '\0';
             }
         }
     }

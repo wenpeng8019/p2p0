@@ -86,8 +86,11 @@ static inline int p2p_set_nonblock(p2p_socket_t sock) {
  * 高精度时间戳（毫秒）
  * ============================================================================ */
 #ifdef _WIN32
+#   include <sys/timeb.h>
     static inline uint64_t p2p_time_ms(void) {
-        return (uint64_t)GetTickCount64();
+        struct __timeb64 tb;
+        _ftime64_s(&tb);
+        return (uint64_t)tb.time * 1000 + (uint64_t)tb.millitm;
     }
 #elif defined(__APPLE__)
 #   include <sys/time.h>

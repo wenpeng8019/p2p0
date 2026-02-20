@@ -665,10 +665,16 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                 
                 P2P_LOG_INFO("RELAY", "%s '%s' (%u %s)", MSG(MSG_RELAY_RECEIVED_SIGNAL), ctx->read_sender, payload_len, MSG(MSG_RELAY_BYTES));
                 
-                /* OFFER 表示新的连接请求（可能对端重启或重连），重置 ICE 状态避免残留旧连接状态 */
-                if (ctx->read_hdr.type == P2P_RLY_OFFER) {
-                    if (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_IDLE) {
-                        P2P_LOG_DEBUG("RELAY", "[DEBUG] OFFER received, resetting ICE state and clearing %d stale candidates", s->remote_cand_cnt);
+                /* OFFER/FORWARD 表示新的连接请求或重连，重置 ICE 避免残留 FAILED 状态无法恢复 */
+                if (ctx->read_hdr.type == P2P_RLY_OFFER || ctx->read_hdr.type == P2P_RLY_FORWARD) {
+                    /* OFFER：全新连接，always reset */
+                    /* FORWARD：重连（对端重启），如果 ICE 已超时/失败，需重置才能继续打洞 */
+                    bool should_reset = (ctx->read_hdr.type == P2P_RLY_OFFER) || 
+                                       (s->ice_state == P2P_ICE_STATE_FAILED || s->ice_state == P2P_ICE_STATE_CHECKING);
+                    
+                    if (should_reset && (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_IDLE)) {
+                        P2P_LOG_DEBUG("RELAY", "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates",
+                               ctx->read_hdr.type == P2P_RLY_OFFER ? "OFFER" : "FORWARD", s->ice_state, s->remote_cand_cnt);
                         s->remote_cand_cnt = 0;
                         s->ice_state = P2P_ICE_STATE_GATHERING_DONE;  /* 重置为收集完成，等待新候选 */
                         s->ice_check_count = 0;
