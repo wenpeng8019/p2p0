@@ -781,14 +781,11 @@ int p2p_update(p2p_session_t *s) {
 
                 // 从 next_candidate_index 开始发送剩余候选（断点续传）
                 int start_idx = s->sig_relay_ctx.next_candidate_index;
-                if (start_idx >= s->local_cand_cnt) {
-                    start_idx = 0;  // 重置（可能是全新的候选列表）
-                }
-                
-                // Trickle ICE：每次最多发送 8 个候选（协议规定 1-8 个/批次）
-                #define MAX_CANDIDATES_PER_BATCH 8
-                int remaining = s->local_cand_cnt - start_idx;
-                int batch_size = (remaining > MAX_CANDIDATES_PER_BATCH) ? MAX_CANDIDATES_PER_BATCH : remaining;
+                if (start_idx < s->local_cand_cnt) {
+                    // Trickle ICE：每次最多发送 8 个候选（协议规定 1-8 个/批次）
+                    #define MAX_CANDIDATES_PER_BATCH 8
+                    int remaining = s->local_cand_cnt - start_idx;
+                    int batch_size = (remaining > MAX_CANDIDATES_PER_BATCH) ? MAX_CANDIDATES_PER_BATCH : remaining;
                 
                 uint8_t buf[2048];
                 int n = pack_signaling_payload_hdr(
@@ -836,6 +833,7 @@ int p2p_update(p2p_session_t *s) {
                         P2P_LOG_WARN("P2P", "[SIGNALING] %s (ret=%d)", MSG(MSG_P2P_CANDS_SEND_FAILED), ret);
                     }
                 }
+                }  // 结束 if (start_idx < s->local_cand_cnt)
             }
         }
     }
