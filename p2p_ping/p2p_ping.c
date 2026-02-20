@@ -120,25 +120,31 @@ static void tui_log_callback(p2p_log_level_t level,
 static void tui_init(void) {
     g_rows = tui_get_rows();
 
+#ifdef _WIN32
+    /* Windows：先启用 ANSI VT 输出，再发送 ANSI 序列，否则第一屏乱码 */
+    HANDLE hin  = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE hout = GetStdHandle(STD_OUTPUT_HANDLE);
+    GetConsoleMode(hin,  &g_orig_in_mode);
+    GetConsoleMode(hout, &g_orig_out_mode);
+    SetConsoleMode(hout, (g_orig_out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+                                          | DISABLE_NEWLINE_AUTO_RETURN));
+    /* 保留 ENABLE_PROCESSED_INPUT 使 Ctrl+C 能产生 SIGINT
+     * 去掉 ENABLE_LINE_INPUT + ENABLE_ECHO_INPUT 实现逐字符读取 */
+    SetConsoleMode(hin,  (g_orig_in_mode
+                          | ENABLE_VIRTUAL_TERMINAL_INPUT)
+                          & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
+#endif
+
     /* 将 p2p_log 输出重定向到 TUI 回调 */
     p2p_set_log_output(tui_log_callback);
 
-    /* 设置 ANSI 滚动区域：行 1 ~ rows-1 */
+    /* 设置 ANSI 滚动区域：行 1 ~ rows-1（VT 已启用后再发送）*/
     printf("\033[1;%dr", g_rows - 1);
     /* 清空输入行并显示提示符 */
     printf("\033[%d;1H\033[K> ", g_rows);
     fflush(stdout);
 
-#ifdef _WIN32
-    /* Windows：启用 ANSI VT 输出，禁用 ECHO + 行输入 */
-    HANDLE hin  = GetStdHandle(STD_INPUT_HANDLE);
-    HANDLE hout = GetStdHandle(STD_OUTPUT_HANDLE);
-    GetConsoleMode(hin,  &g_orig_in_mode);
-    GetConsoleMode(hout, &g_orig_out_mode);
-    SetConsoleMode(hin,  ENABLE_VIRTUAL_TERMINAL_INPUT);
-    SetConsoleMode(hout, (g_orig_out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING
-                                          | DISABLE_NEWLINE_AUTO_RETURN));
-#else
+#ifndef _WIN32
     /* stdin：raw 模式（禁用行缓冲 + 回显） + 非阻塞 */
     struct termios t;
     tcgetattr(STDIN_FILENO, &g_orig_term);
@@ -317,6 +323,11 @@ static void on_disconnected(p2p_session_t *s, void *userdata) {
 }
 
 int main(int argc, char *argv[]) {
+#ifdef _WIN32
+    /* UTF-8 输出，支持中文显示 */
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+#endif
     int use_dtls = 0, use_openssl = 0, use_pseudo = 0, use_compact = 0;
     int disable_lan = 0, verbose_punch = 0, use_chinese = 0, show_help = 0;
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
