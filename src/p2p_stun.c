@@ -544,6 +544,10 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
 
 /* 周期性 STUN NAT 检测 tick（仅负责 STUN 路径，COMPACT 路径由 compact_nat_detect_tick 处理） */
 void p2p_stun_nat_detect_tick(struct p2p_session *s) {
+    if (s->cfg.lan_punch) {
+        s->nat_type = P2P_NAT_OPEN;         /* lan_punch：本地直连，无 NAT */
+        return;
+    }
     if (!s->cfg.stun_server) {
         s->nat_type = P2P_NAT_UNSUPPORTED;  /* 未配置 STUN 服务器 */
         return;

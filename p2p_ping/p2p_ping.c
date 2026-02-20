@@ -26,11 +26,14 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
+#include <io.h>       /* _isatty / _fileno */
+#define p2p_isatty(f) _isatty(_fileno(f))
 #else
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#define p2p_isatty(f) isatty(fileno(f))
 #endif
 
 /* ============================================================================
@@ -48,6 +51,7 @@
  * ============================================================================ */
 
 static int            g_tui_active  = 0;          /* TUI 是否已初始化 */
+static int            g_first_connect_done = 0;   /* 首次连接已处理（非交互模式防重复打印）*/
 static int            g_echo_mode   = 0;           /* --echo 模式 */
 static char           g_ibuf[512]   = {0};         /* 当前输入缓冲 */
 static int            g_ilen        = 0;           /* 输入缓冲长度 */
@@ -89,6 +93,12 @@ static int tui_get_rows(void) {
  *   6. 重绘输入行（防止偶发脏屏）
  */
 static void tui_println(const char *line) {
+    if (!g_tui_active) {
+        /* 非交互模式：普通换行输出，不发 ANSI 控制序列 */
+        printf("%s\n", line);
+        fflush(stdout);
+        return;
+    }
     printf("\0337");                               /* save cursor */
     printf("\033[%d;1H", g_rows - 1);             /* 移到滚动区末行 */
     printf("\n\r\033[K%s", line);                  /* 滚动 + 清行 + 写内容 */
@@ -119,6 +129,8 @@ static void tui_log_callback(p2p_log_level_t level,
 
 /* 初始化 TUI（连接建立后调用一次） */
 static void tui_init(void) {
+    /* 非交互终端（stdout 被重定向）时跳过 TUI，避免后台进程触发 SIGTTOU */
+    if (!p2p_isatty(stdout)) return;
     g_rows = tui_get_rows();
 
 #ifdef _WIN32
@@ -191,6 +203,7 @@ static void tui_cleanup(void) {
 
 /* 处理 stdin 按键，维护输入缓冲，回车时发送 */
 static void tui_process_input(p2p_session_t *s) {
+    if (!g_tui_active) return;  /* 非交互模式（重定向/后台）跳过 stdin 读取 */
     for (;;) {
         int ch;
 #ifdef _WIN32
@@ -291,6 +304,7 @@ static void print_help(const char *prog) {
     printf("%s\n", ping_msg(MSG_PING_OPT_NAME));
     printf("%s\n", ping_msg(MSG_PING_OPT_TO));
     printf("%s\n", ping_msg(MSG_PING_OPT_DISABLE_LAN));
+    printf("%s\n", ping_msg(MSG_PING_OPT_LAN_PUNCH));
     printf("%s\n", ping_msg(MSG_PING_OPT_VERBOSE_PUNCH));
     printf("%s\n", ping_msg(MSG_PING_OPT_ECHO));
     printf("%s\n", ping_msg(MSG_PING_OPT_CN));
@@ -348,7 +362,7 @@ int main(int argc, char *argv[]) {
     SetConsoleCP(65001);
 #endif
     int use_dtls = 0, use_openssl = 0, use_pseudo = 0, use_compact = 0;
-    int disable_lan = 0, verbose_punch = 0, use_chinese = 0, show_help = 0;
+    int disable_lan = 0, lan_punch = 0, verbose_punch = 0, use_chinese = 0, show_help = 0;
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
     const char *my_name = "unnamed", *target_name = NULL;
     int server_port = 8888;
@@ -360,6 +374,7 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--pseudo")         == 0) use_pseudo = 1;
         else if (strcmp(argv[i], "--compact")        == 0) use_compact = 1;
         else if (strcmp(argv[i], "--disable-lan")    == 0) disable_lan = 1;
+        else if (strcmp(argv[i], "--lan-punch")      == 0) lan_punch = 1;
         else if (strcmp(argv[i], "--verbose-punch")  == 0) verbose_punch = 1;
         else if (strcmp(argv[i], "--verbose")        == 0) verbose = 1;
         else if (strcmp(argv[i], "--cn")             == 0) use_chinese = 1;
@@ -408,6 +423,7 @@ int main(int argc, char *argv[]) {
     cfg.bind_port      = 0;
     cfg.language       = use_chinese ? P2P_LANG_ZH : P2P_LANG_EN;
     cfg.disable_lan_shortcut = disable_lan;
+    cfg.lan_punch            = lan_punch;
     cfg.verbose_nat_punch    = verbose_punch;
     cfg.on_disconnected      = on_disconnected;
     cfg.userdata             = NULL;
@@ -431,6 +447,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (disable_lan)    printf("%s\n", ping_msg(MSG_PING_LAN_DISABLED));
+    if (lan_punch)      printf("%s\n", ping_msg(MSG_PING_LAN_PUNCH));
     if (verbose_punch)  printf("%s\n", ping_msg(MSG_PING_VERBOSE_ENABLED));
     if (g_echo_mode)    printf("%s\n", ping_msg(MSG_PING_CHAT_ECHO_ON));
 
@@ -455,7 +472,8 @@ int main(int argc, char *argv[]) {
 
         if (p2p_is_ready(s)) {
             /* 首次连接成功：初始化 TUI，降低日志等级 */
-            if (!g_tui_active) {
+            if (!g_first_connect_done) {
+                g_first_connect_done = 1;
                 printf("%s\n", ping_msg(MSG_PING_CHAT_ENTER));
                 fflush(stdout);
                 tui_init();

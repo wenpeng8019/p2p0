@@ -21,6 +21,7 @@ typedef enum {
     MSG_PING_OPT_NAME,           /* --name 选项 */
     MSG_PING_OPT_TO,             /* --to 选项 */
     MSG_PING_OPT_DISABLE_LAN,    /* --disable-lan 选项 */
+    MSG_PING_OPT_LAN_PUNCH,      /* --lan-punch 选项 */
     MSG_PING_OPT_VERBOSE_PUNCH,  /* --verbose-punch 选项 */
     MSG_PING_OPT_CN,             /* --cn 选项 */
     MSG_PING_OPT_ECHO,           /* --echo 选项 */
@@ -36,6 +37,7 @@ typedef enum {
     MSG_PING_MODE_CONNECTING,    /* 连接模式（主动）*/
     MSG_PING_MODE_WAITING,       /* 等待模式（被动）*/
     MSG_PING_LAN_DISABLED,       /* LAN 快捷方式已禁用 */
+    MSG_PING_LAN_PUNCH,          /* LAN punch 模式已启用 */
     MSG_PING_VERBOSE_ENABLED,    /* 详细日志已启用 */
     MSG_PING_CHAT_ENTER,         /* 进入聊天模式 */
     MSG_PING_CHAT_CONNECTED,     /* 聊天模式连接提示 */

@@ -186,7 +186,15 @@ typedef struct {
     const char*             auth_key;                   // 安全握手密钥 (可选)
     
     /* 测试选项 */
-    bool                    disable_lan_shortcut;       // 是否禁止同子网直连优化 (用于测试 NAT 打洞)
+    bool                    disable_lan_shortcut;       // 禁止「连接成功后升级为 LAN 路径」的优化。
+                                                        // Host 候选照常收集，ICE 照常竞争（通常 Host 优先级最高）；
+                                                        // 但连接建立后不发 ROUTE_PROBE，不将 active_addr 切换到私网 IP。
+                                                        // 用途：在同 LAN 环境下强制保持"打洞路径"，测量 hairpin vs LAN 的延迟差异。
+    bool                    lan_punch;                  // 调试：在同 LAN 内验证 NAT 打洞流程（PUNCH→PUNCH_ACK→NAT_CONNECTED）。
+                                                        // 效果1：跳过 STUN/TURN，只收集 Host 候选（LAN IP），无需访问公网。
+                                                        // 效果2：ICE tick 不再自己发 PUNCH，改为调用 nat_start_punch，
+                                                        //        走与跨 NAT 完全相同的打洞状态机（重试/超时/候选轮询）。
+                                                        // 用途：本地两台机器 / 同机两进程之间验证打洞协议逻辑的正确性。
     bool                    verbose_nat_punch;          // 是否输出详细的 NAT 打洞流程日志
     
     /* 语言选项 */

@@ -275,6 +275,11 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
             // 开始信令注册
             p2p_signal_compact_start(s, s->cfg.local_peer_id, remote_peer_id, &server_addr, s->cfg.verbose_nat_punch);
 
+            if (s->cfg.lan_punch) {
+                P2P_LOG_INFO("P2P", "[lan_punch] COMPACT 模式：仅使用 Host 候选 (%d 个)，等待对端 PEER_INFO 后调用 nat_start_punch",
+                             s->local_cand_cnt);
+            }
+
             P2P_LOG_INFO("P2P", "[CONNECT] %s <%s -> %s> %s %d",
                          MSG(MSG_P2P_COMPACT_REGISTERING),
                          s->cfg.local_peer_id, remote_peer_id,
@@ -548,6 +553,10 @@ int p2p_update(p2p_session_t *s) {
                 
                 // PEER_INFO 特殊处理：seq=1 时启动打洞（首次收到服务器转发的候选）
                 if (ret == 0 && hdr.type == SIG_PKT_PEER_INFO && hdr.seq == 1) {
+                    if (s->cfg.lan_punch) {
+                        P2P_LOG_INFO("P2P", "[lan_punch] 收到 PEER_INFO seq=1 (%d 个候选)，启动 nat_start_punch",
+                                     s->remote_cand_cnt);
+                    }
                     nat_start_punch(s, s->cfg.verbose_nat_punch);
                 }
                 break;
@@ -590,9 +599,10 @@ int p2p_update(p2p_session_t *s) {
             }
         }
 
-        // 如果对方内网 IP 和自己属于同一个子网段内（且未禁用优化）
+        // 如果对方内网 IP 和自己属于同一个子网段内
         if (!s->cfg.disable_lan_shortcut && peer_priv &&
             route_check_same_subnet(&s->route, peer_priv)) {
+            // 发送 ROUTE_PROBE，确认后将 active_addr 切换到私网 IP（LAN shortcut）
             struct sockaddr_in priv = *peer_priv;
             priv.sin_port = s->nat.peer_addr.sin_port;
             route_send_probe(&s->route, s->sock, &priv, 0);
@@ -600,13 +610,12 @@ int p2p_update(p2p_session_t *s) {
                 P2P_LOG_INFO("P2P", "[NAT_PUNCH] %s %s:%d",
                        MSG(MSG_P2P_SAME_SUBNET_PROBE),
                        inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
-                fflush(stdout);
             }
         } else if (s->cfg.disable_lan_shortcut && peer_priv &&
                    route_check_same_subnet(&s->route, peer_priv)) {
+            // 同子网但 disable_lan_shortcut=true：跳过升级，仅打印日志
             if (s->cfg.verbose_nat_punch) {
                 P2P_LOG_INFO("P2P", "[NAT_PUNCH] %s", MSG(MSG_P2P_SAME_SUBNET_DISABLED));
-                fflush(stdout);
             }
         }
     }

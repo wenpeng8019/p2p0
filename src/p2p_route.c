@@ -116,7 +116,7 @@ int route_detect_local(route_ctx_t *rt) {
 }
 
 // 探测对方内网 IP 和自己是否属于同一个子网段内
-int route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv) {
+bool route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv) {
 
     uint32_t peer_ip = peer_priv->sin_addr.s_addr;
 
@@ -127,11 +127,11 @@ int route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv
             P2P_LOG_INFO("ROUTE", "%s %s %s %s", MSG(MSG_ROUTE_SAME_SUBNET),
                          inet_ntoa(peer_priv->sin_addr), MSG(MSG_ROUTE_VIA),
                          inet_ntoa(rt->local_addrs[i].sin_addr));
-            return 1;
+            return true;
         }
     }
     P2P_LOG_DEBUG("ROUTE", "%s: %s", MSG(MSG_ROUTE_DIFF_SUBNET), inet_ntoa(peer_priv->sin_addr));
-    return 0;
+    return false;
 }
 
 // 直接向对方内网地址发送 ROUTE_PROBE 消息，用于确认自己可以和对方直接通讯，即处于同一个子网内

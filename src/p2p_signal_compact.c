@@ -270,7 +270,14 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         }
         
         /* 服务器支持 NAT 探测端口：立即发送第一个 NAT_PROBE */
-        if (ctx->probe_port > 0 && !ctx->nat_type_detected) {
+        /* lan_punch 模式：本地测试，无 NAT，跳过探测直接标记为 OPEN */
+        if (s->cfg.lan_punch) {
+            ctx->nat_type_detected = 1;
+            ctx->nat_detected_result = P2P_NAT_OPEN;
+            if (ctx->verbose) {
+                P2P_LOG_INFO("COMPACT", "[lan_punch] 跳过 NAT_PROBE，直接标记 NAT=OPEN");
+            }
+        } else if (ctx->probe_port > 0 && !ctx->nat_type_detected) {
             struct sockaddr_in probe_addr = ctx->server_addr;
             probe_addr.sin_port = htons(ctx->probe_port);
             ctx->nat_probe_request_id = 1;
