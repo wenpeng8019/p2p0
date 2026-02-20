@@ -19,7 +19,32 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
-#include <sys/time.h>
+#ifdef _WIN32
+#  include <winsock2.h>   /* provides struct timeval */
+#  include <windows.h>
+   /* gettimeofday polyfill for MSVC */
+   static int gettimeofday(struct timeval *tv, void *tz) {
+       FILETIME ft;
+       unsigned long long tt;
+       (void)tz;
+       GetSystemTimeAsFileTime(&ft);
+       tt  = (unsigned long long)ft.dwHighDateTime << 32;
+       tt |= (unsigned long long)ft.dwLowDateTime;
+       tt /= 10;                       /* 100-ns → µs */
+       tt -= 11644473600000000ULL;     /* epoch: 1601-01-01 → 1970-01-01 */
+       tv->tv_sec  = (long)(tt / 1000000);
+       tv->tv_usec = (long)(tt % 1000000);
+       return 0;
+   }
+   /* nanosleep polyfill for MSVC (struct timespec is in <time.h> since VS2015) */
+   static int nanosleep(const struct timespec *req, struct timespec *rem) {
+       (void)rem;
+       Sleep((DWORD)(req->tv_sec * 1000 + req->tv_nsec / 1000000));
+       return 0;
+   }
+#else
+#  include <sys/time.h>
+#endif
 
 /* ============================================================================
  * Reliable 层定义（从 p2p_transport.h 和 p2pp.h 提取）

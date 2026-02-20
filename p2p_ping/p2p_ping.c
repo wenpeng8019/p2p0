@@ -21,17 +21,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <time.h>
 #ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
 #else
 #include <unistd.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #endif
-#include <time.h>
 
 /* ============================================================================
  * TUI：固定输入行 + 滚动日志区
