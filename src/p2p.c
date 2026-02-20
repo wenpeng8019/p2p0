@@ -181,16 +181,30 @@ void p2p_destroy(p2p_session_t *s) {
 
     // RELAY 模式：关闭 TCP 长连接
     if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
-
         p2p_signal_relay_close(&s->sig_relay_ctx);
     }
 
     //  COMPACT 模式的 server UDP 套接口和 NAT p2p 是同一个
     if (s->sock != P2P_INVALID_SOCKET) {
 
-        // 发送 FIN 包，断开连接
+        // 发送 FIN 包，断开 P2P 连接
         if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)
             udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
+
+        // COMPACT 模式：主动通知信令服务器释放配对槽位
+        // 不管当前处于哪个状态（连接前/连接后/中继中）均发送；
+        // 服务器收到后即刻释放槽位。如果服务器未实现此包类型的处理，
+        // 将自动降级为 90 秒超时清除机制。
+        if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT &&
+            s->sig_compact_ctx.state != SIGNAL_COMPACT_IDLE) {
+            uint8_t unreg[P2P_PEER_ID_MAX * 2];
+            memset(unreg, 0, sizeof(unreg));
+            memcpy(unreg,                   s->sig_compact_ctx.local_peer_id,  P2P_PEER_ID_MAX);
+            memcpy(unreg + P2P_PEER_ID_MAX, s->sig_compact_ctx.remote_peer_id, P2P_PEER_ID_MAX);
+            udp_send_packet(s->sock, &s->sig_compact_ctx.server_addr,
+                            SIG_PKT_UNREGISTER, 0, 0, unreg, sizeof(unreg));
+        }
+
         p2p_close_socket(s->sock);
     }
 
@@ -481,7 +495,14 @@ int p2p_update(p2p_session_t *s) {
             // --------------------
 
             case P2P_PKT_FIN:
-                s->state = P2P_STATE_CLOSED;
+                // 收到对端主动断开通知
+                if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
+                    s->state = P2P_STATE_CLOSED;
+                    if (s->cfg.on_disconnected)
+                        s->cfg.on_disconnected(s, s->cfg.userdata);
+                } else {
+                    s->state = P2P_STATE_CLOSED;
+                }
                 break;
 
             // --------------------
@@ -603,6 +624,7 @@ int p2p_update(p2p_session_t *s) {
             if (s->sig_compact_ctx.relay_support) {
                 // COMPACT 模式：通过 UDP 信令服务器中继数据
                 // 服务器会将 P2P_PKT_RELAY_DATA 转发给对端
+                // 注意：中继模式下不发 UNREGISTER，服务器槽位仍用于识别对端
                 s->active_addr = s->sig_compact_ctx.server_addr;
                 P2P_LOG_INFO("P2P", "[NAT_PUNCH] %s", MSG(MSG_P2P_NAT_FAIL_RELAY));
             } else {

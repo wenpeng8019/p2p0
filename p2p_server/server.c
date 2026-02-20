@@ -59,7 +59,8 @@
 #define MAX_CANDIDATES              32
 
 // COMPACT 模式配对超时时间（秒）
-#define COMPACT_PAIR_TIMEOUT        30
+// 客户端在 REGISTERED 状态每 20 秒发一次 keepalive REGISTER，此值取 3 倍间隔
+#define COMPACT_PAIR_TIMEOUT        90
 
 // RELAY 模式心跳超时时间（秒）
 // 如果客户端超过此时间未发送任何消息（包括心跳），服务器将主动断开连接
@@ -728,6 +729,35 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, int l
             printf("[UDP] Target pair (%s → %s) not found (waiting for peer registration)\n",
                    remote_peer_id, local_peer_id);
             fflush(stdout);
+        }
+    }
+
+    // SIG_PKT_UNREGISTER: [local_peer_id(32)][remote_peer_id(32)]
+    // 客户端主动断开时发送，请求服务器立即释放配对槽位。
+    // 【服务端可选实现】如果不处理此包类型，客户端自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制。
+    if (hdr->type == SIG_PKT_UNREGISTER && payload_len >= P2P_PEER_ID_MAX * 2) {
+        char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
+        char remote_peer_id[P2P_PEER_ID_MAX + 1] = {0};
+        memcpy(local_peer_id,  payload,                P2P_PEER_ID_MAX);
+        memcpy(remote_peer_id, payload + P2P_PEER_ID_MAX, P2P_PEER_ID_MAX);
+
+        for (int i = 0; i < MAX_PEERS; i++) {
+            if (!g_compact_pairs[i].valid) continue;
+            if (strcmp(g_compact_pairs[i].local_peer_id,  local_peer_id)  != 0) continue;
+            if (strcmp(g_compact_pairs[i].remote_peer_id, remote_peer_id) != 0) continue;
+
+            printf("[UDP] UNREGISTER: releasing slot for '%s' -> '%s'\n",
+                   local_peer_id, remote_peer_id);
+            fflush(stdout);
+
+            // 通知对端槽位，标记配对已断开
+            if (g_compact_pairs[i].peer != NULL &&
+                g_compact_pairs[i].peer != (compact_pair_t*)(void*)-1) {
+                g_compact_pairs[i].peer->peer = (compact_pair_t*)(void*)-1;
+            }
+            g_compact_pairs[i].valid = false;
+            g_compact_pairs[i].peer  = NULL;
+            break;
         }
     }
 }

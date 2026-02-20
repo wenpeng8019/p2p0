@@ -329,6 +329,13 @@
 #define P2P_RELAY_PEER_WAIT_TIMEOUT_MS  60000  /* 60 秒 */
 #endif
 
+/* 心跳发送间隔（毫秒）
+ * 客户端定期向服务器发送 P2P_RLY_HEARTBEAT，防止服务器因超时将其踢下线
+ * 服务器超时阈值为 RELAY_CLIENT_TIMEOUT（60 秒），心跳间隔取其 1/3 */
+#ifndef P2P_RELAY_HEARTBEAT_INTERVAL_MS
+#define P2P_RELAY_HEARTBEAT_INTERVAL_MS  20000  /* 20 秒 */
+#endif
+
 /* LOGIN_ACK 等待超时（毫秒）
  * 登录阶段等待服务器 LOGIN_ACK 响应的超时时间 */
 #ifndef P2P_RELAY_LOGIN_ACK_TIMEOUT_MS
@@ -394,6 +401,7 @@ typedef struct {
     uint8_t *read_payload;                       /* 正在读取的 payload 缓冲区 */
     int read_offset;                             /* 当前已读取的字节数 */
     int read_expected;                           /* 当前阶段期望读取的总字节数 */
+    uint64_t last_heartbeat_ms;                  /* 上次发送心跳的时间（毫秒，0=尚未发送） */
     
     /* 注：
      * - next_candidate_index 初始为 0

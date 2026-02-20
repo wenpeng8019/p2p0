@@ -27,16 +27,15 @@
 #include <string.h>
 #ifndef _WIN32
 #include <arpa/inet.h>
-#endif
-#ifndef _WIN32
 #include <sys/time.h>
 #endif
 
-#define REGISTER_INTERVAL_MS    1000    /* 注册重发间隔 */
-#define PEER_INFO_INTERVAL_MS   2000    /* PEER_INFO 重发间隔 */
-#define MAX_REGISTER_ATTEMPTS   10      /* 最大 REGISTER 重发次数 */
-#define MAX_CANDS_PER_PACKET    10      /* 每个 PEER_INFO 包最大候选数 */
-#define NAT_PROBE_MAX_RETRIES   3       /* NAT_PROBE 最大发送次数 */
+#define REGISTER_INTERVAL_MS            1000    /* 注册重发间隔 */
+#define PEER_INFO_INTERVAL_MS           2000    /* PEER_INFO 重发间隔 */
+#define MAX_REGISTER_ATTEMPTS           10      /* 最大 REGISTER 重发次数 */
+#define REGISTER_KEEPALIVE_INTERVAL_MS  20000   /* REGISTERED 状态保活重注册间隔（防服务器超时清除槽位） */
+#define MAX_CANDS_PER_PACKET            10      /* 每个 PEER_INFO 包最大候选数 */
+#define NAT_PROBE_MAX_RETRIES           3       /* NAT_PROBE 最大发送次数 */
 
 /* 获取当前时间戳（毫秒） */
 static inline uint64_t compact_time_ms(void) {
@@ -561,7 +560,20 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
         return 0;
     }
     
-    /* REGISTERED 状态：等待 PEER_INFO(seq=1)，NAT_PROBE 重试已在顶部处理 */
+    /* REGISTERED 状态：等待 PEER_INFO(seq=1)，同时定期重发 REGISTER 保活服务器槽位
+     * 避免服务器 cleanup 因超过 COMPACT_PAIR_TIMEOUT 而将本端记录清除 */
+    if (now - ctx->last_send_time >= REGISTER_KEEPALIVE_INTERVAL_MS) {
+        uint8_t payload[256];
+        int payload_len = build_register_payload(s, payload, sizeof(payload));
+        if (payload_len > 0) {
+            udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, payload_len);
+            if (ctx->verbose) {
+                P2P_LOG_INFO("COMPACT", "REGISTERED: keepalive REGISTER (%s %s)",
+                       MSG(MSG_COMPACT_PEER_OFFLINE), MSG(MSG_COMPACT_ATTEMPT));
+            }
+        }
+        ctx->last_send_time = now;
+    }
     return 0;
 }
 

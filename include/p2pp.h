@@ -119,6 +119,8 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_PEER_INFO_ACK   0x83        // 候选列表确认（确认指定序列号）
 #define SIG_PKT_NAT_PROBE       0x84        // NAT 类型探测请求（发往探测端口）
 #define SIG_PKT_NAT_PROBE_ACK   0x85        // NAT 类型探测响应（返回第二次映射地址）
+#define SIG_PKT_UNREGISTER      0x86        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
+                                            // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
 
 /* COMPACT 服务器中继扩展协议 - 0xA0-0xBF */
 #define P2P_PKT_RELAY_DATA      0xA0        // 中继服务器转发的数据（P2P 打洞失败后的降级方案）

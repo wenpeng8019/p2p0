@@ -384,6 +384,27 @@ int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *targ
 void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
     if (ctx->fd == P2P_INVALID_SOCKET) return;
 
+    /* P2P 连接已建立（直连或 TURN 中继），信令服务器使命完成，关闭 TCP 连接释放服务器资源 */
+    if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
+        P2P_LOG_INFO("RELAY", "P2P connected, closing signaling TCP connection");
+        p2p_signal_relay_close(ctx);
+        return;
+    }
+
+    /* 发送心跳，刷新服务器的 last_active，防止超时踢下线（仅连接建立前） */
+    {
+        uint64_t now_ms = time_ms();
+        if (ctx->last_heartbeat_ms == 0 ||
+            now_ms - ctx->last_heartbeat_ms >= P2P_RELAY_HEARTBEAT_INTERVAL_MS) {
+            p2p_relay_hdr_t hb;
+            hb.magic  = P2P_RLY_MAGIC;
+            hb.type   = P2P_RLY_HEARTBEAT;
+            hb.length = 0;
+            send(ctx->fd, (const char *)&hb, sizeof(hb), 0);
+            ctx->last_heartbeat_ms = now_ms;
+        }
+    }
+
     /* 检查等待超时 */
     if (ctx->waiting_for_peer) {
         uint64_t elapsed = time_ms() - ctx->waiting_start_time;
