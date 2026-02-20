@@ -600,6 +600,9 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                         P2P_LOG_INFO("RELAY", "%s (status=%d, candidates_acked=%d)",
                                MSG(MSG_RELAY_RECEIVED_ACK), ack->status, ack->candidates_acked);
                         
+                        /* 更新候选索引（避免重复发送） */
+                        ctx->next_candidate_index += ack->candidates_acked;
+                        
                         /* 根据状态处理 */
                         switch (ack->status) {
                             case 0:  // 对端在线
@@ -665,20 +668,23 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                 
                 P2P_LOG_INFO("RELAY", "%s '%s' (%u %s)", MSG(MSG_RELAY_RECEIVED_SIGNAL), ctx->read_sender, payload_len, MSG(MSG_RELAY_BYTES));
                 
-                /* OFFER/FORWARD 表示新的连接请求或重连，重置 ICE 避免残留 FAILED 状态无法恢复 */
+                /* OFFER 表示新连接，FORWARD 如果 ICE 已 FAILED 则重置让其恢复 */
                 if (ctx->read_hdr.type == P2P_RLY_OFFER || ctx->read_hdr.type == P2P_RLY_FORWARD) {
-                    /* OFFER：全新连接，always reset */
-                    /* FORWARD：重连（对端重启），如果 ICE 已超时/失败，需重置才能继续打洞 */
+                    /* OFFER：总是重置（新连接）
+                     * FORWARD：仅当 ICE 已 FAILED 时重置（避免在 CHECKING 时反复重置导致永远无法完成） */
                     bool should_reset = (ctx->read_hdr.type == P2P_RLY_OFFER) || 
-                                       (s->ice_state == P2P_ICE_STATE_FAILED || s->ice_state == P2P_ICE_STATE_CHECKING);
+                                       (s->ice_state == P2P_ICE_STATE_FAILED);
                     
                     if (should_reset && (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_IDLE)) {
                         P2P_LOG_DEBUG("RELAY", "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates",
                                ctx->read_hdr.type == P2P_RLY_OFFER ? "OFFER" : "FORWARD", s->ice_state, s->remote_cand_cnt);
                         s->remote_cand_cnt = 0;
-                        s->ice_state = P2P_ICE_STATE_GATHERING_DONE;  /* 重置为收集完成，等待新候选 */
+                        s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
                         s->ice_check_count = 0;
                         s->ice_check_last_ms = 0;
+                        
+                        /* 重置候选发送索引（对端已清空，需从头重发） */
+                        ctx->next_candidate_index = 0;
                     }
                 }
                 
