@@ -470,6 +470,8 @@ int p2p_update(p2p_session_t *s) {
                                     ((uint32_t)payload[3] << 16) |
                                     ((uint32_t)payload[4] << 8) |
                                     (uint32_t)payload[5];
+                    P2P_LOG_DEBUG("RELIABLE", "recv ACK from %s:%d ack_seq=%u sack=0x%08x",
+                                  inet_ntoa(from.sin_addr), ntohs(from.sin_port), ack_seq, sack);
                     reliable_on_ack(&s->reliable, ack_seq, sack);
                 }
                 break;

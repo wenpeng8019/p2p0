@@ -117,9 +117,10 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
             e->acked = 1;
             r->send_count--;
 
-            // PseudoTCP：在 ACK 时更新窗口
+            // PseudoTCP：在 ACK 时更新窗口（仅当启用拥塞控制时，避免 cwnd=0 除零崩溃）
             struct p2p_session *s = (struct p2p_session *)((char *)r - offsetof(struct p2p_session, reliable));
-            p2p_pseudotcp_on_ack(s, ack_seq);
+            if (s->cfg.use_pseudotcp)
+                p2p_pseudotcp_on_ack(s, ack_seq);
 
             // 更新 RTT 估算（仅针对非重传数据包）
             if (e->retx_count == 0 && e->send_time > 0) {
@@ -140,7 +141,7 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
         }
         r->send_base++;
     }
-    P2P_LOG_TRACE("RELIABLE", "%s ack_seq=%u send_base=%u inflight=%d",
+    P2P_LOG_DEBUG("RELIABLE", "%s ack_seq=%u send_base=%u inflight=%d",
                   MSG(MSG_RELIABLE_ACK_PROCESSED), ack_seq, r->send_base, r->send_count);
 
     // SACK 位图：第 i 位 = ack_seq + 1 + i
@@ -169,10 +170,11 @@ static int build_ack_payload(const reliable_t *r, uint8_t *buf) {
     buf[0] = (uint8_t)(ack_seq >> 8);
     buf[1] = (uint8_t)(ack_seq & 0xFF);
 
-    // SACK 位图：recv_base+0 到 recv_base+31 的位
+    // SACK 位图：第 i 位 = recv_base + 1 + i（与接收方解读一致：ack_seq + 1 + i）
+    // 注：循环上限用 RELIABLE_WINDOW-1 而非 RELIABLE_WINDOW，避免环形缓冲区回绕导致漏报已确认包
     uint32_t sack = 0;
-    for (int i = 0; i < 32 && i < RELIABLE_WINDOW; i++) {
-        int idx = (r->recv_base + i) % RELIABLE_WINDOW;
+    for (int i = 0; i < 32 && i < RELIABLE_WINDOW - 1; i++) {
+        int idx = (r->recv_base + 1 + i) % RELIABLE_WINDOW;
         if (r->recv_bitmap[idx])
             sack |= (1u << i);
     }
@@ -192,6 +194,13 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
     if (r->recv_base > 0 || r->recv_bitmap[r->recv_base % RELIABLE_WINDOW]) {
         uint8_t ack_payload[6];
         build_ack_payload(r, ack_payload);
+        uint16_t ack_seq = ((uint16_t)ack_payload[0] << 8) | ack_payload[1];
+        uint32_t sack = ((uint32_t)ack_payload[2] << 24) | ((uint32_t)ack_payload[3] << 16)
+                      | ((uint32_t)ack_payload[4] << 8)  | (uint32_t)ack_payload[5];
+        P2P_LOG_DEBUG("RELIABLE", "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",
+                      ack_seq, sack, r->recv_base,
+                      addr ? inet_ntoa(addr->sin_addr) : "?",
+                      addr ? ntohs(addr->sin_port) : 0);
         // 中继模式使用 RELAY_ACK，直连P2P使用 ACK
         uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_ACK : P2P_PKT_ACK;
         udp_send_packet(sock, addr, pkt_type, 0, 0, ack_payload, 6);

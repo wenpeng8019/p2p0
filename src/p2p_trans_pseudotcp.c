@@ -47,6 +47,7 @@ static void p2p_pseudotcp_init(struct p2p_session *s) {
  */
 void p2p_pseudotcp_on_ack(struct p2p_session *s, uint16_t ack_seq) {
     (void)ack_seq;
+    if (s->tcp.cwnd == 0) return;  /* not in pseudoTCP mode — avoid div/0 */
     if (s->tcp.cwnd < s->tcp.ssthresh) {
         /* 慢启动：指数增长 */
         s->tcp.cwnd += MSS;

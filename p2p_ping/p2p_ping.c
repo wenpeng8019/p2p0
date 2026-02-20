@@ -55,6 +55,7 @@ static int            g_rows        = 24;          /* 终端行数 */
 #ifdef _WIN32
 static DWORD          g_orig_in_mode  = 0;         /* 原始控制台输入模式 */
 static DWORD          g_orig_out_mode = 0;         /* 原始控制台输出模式 */
+static int            g_win_pty_mode  = 0;         /* 1=ConPTY管道(VS Code)，0=真实控制台 */
 #else
 static struct termios g_orig_term;                 /* 原始终端配置 */
 #endif
@@ -124,15 +125,20 @@ static void tui_init(void) {
     /* Windows：先启用 ANSI VT 输出，再发送 ANSI 序列，否则第一屏乱码 */
     HANDLE hin  = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE hout = GetStdHandle(STD_OUTPUT_HANDLE);
-    GetConsoleMode(hin,  &g_orig_in_mode);
     GetConsoleMode(hout, &g_orig_out_mode);
     SetConsoleMode(hout, (g_orig_out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING
                                           | DISABLE_NEWLINE_AUTO_RETURN));
-    /* 保留 ENABLE_PROCESSED_INPUT 使 Ctrl+C 能产生 SIGINT
-     * 去掉 ENABLE_LINE_INPUT + ENABLE_ECHO_INPUT 实现逐字符读取 */
-    SetConsoleMode(hin,  (g_orig_in_mode
-                          | ENABLE_VIRTUAL_TERMINAL_INPUT)
-                          & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
+    /* 检测是否是管道模式（VS Code ConPTY / 重定向）
+     * ConPTY 的 stdin 是 FILE_TYPE_PIPE，_kbhit() 对管道无效 */
+    g_win_pty_mode = (GetFileType(hin) != FILE_TYPE_CHAR);
+    if (!g_win_pty_mode) {
+        /* 真实控制台：保留 ENABLE_PROCESSED_INPUT 使 Ctrl+C 能产生 SIGINT
+         * 去掉 ENABLE_LINE_INPUT + ENABLE_ECHO_INPUT 实现逐字符读取 */
+        GetConsoleMode(hin, &g_orig_in_mode);
+        SetConsoleMode(hin, (g_orig_in_mode
+                              | ENABLE_VIRTUAL_TERMINAL_INPUT)
+                              & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
+    }
 #endif
 
     /* 将 p2p_log 输出重定向到 TUI 回调 */
@@ -173,7 +179,8 @@ static void tui_cleanup(void) {
     fflush(stdout);
 
 #ifdef _WIN32
-    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE),  g_orig_in_mode);
+    if (!g_win_pty_mode)
+        SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), g_orig_in_mode);
     SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), g_orig_out_mode);
 #else
     /* 恢复终端模式 */
@@ -187,9 +194,20 @@ static void tui_process_input(p2p_session_t *s) {
     for (;;) {
         int ch;
 #ifdef _WIN32
-        if (!_kbhit()) break;
-        ch = _getch();
-        if (ch == 0 || ch == 0xE0) { _getch(); continue; } /* 跳过扩展键 */
+        if (g_win_pty_mode) {
+            /* ConPTY / 管道模式：_kbhit() 对管道无效，改用 PeekNamedPipe */
+            HANDLE hin = GetStdHandle(STD_INPUT_HANDLE);
+            DWORD avail = 0;
+            if (!PeekNamedPipe(hin, NULL, 0, NULL, &avail, NULL) || avail == 0) break;
+            DWORD nr = 0; CHAR raw = 0;
+            if (!ReadFile(hin, &raw, 1, &nr, NULL) || nr == 0) break;
+            ch = (unsigned char)raw;
+        } else {
+            /* 真实控制台：使用 _kbhit / _getch */
+            if (!_kbhit()) break;
+            ch = _getch();
+            if (ch == 0 || ch == 0xE0) { _getch(); continue; } /* 跳过扩展键 */
+        }
 #else
         {
             char tmp;
@@ -222,10 +240,11 @@ static void tui_process_input(p2p_session_t *s) {
             }
         } else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7f
                    && g_ilen < (int)sizeof(g_ibuf) - 1) {
-            /* 可打印 ASCII：直接追加并回显 */
+            /* 可打印 ASCII：追加并完整重绘输入行
+             * 不用 putchar(c)，避免 ConPTY 双重回显 */
             g_ibuf[g_ilen++] = c;
             g_ibuf[g_ilen]   = '\0';
-            putchar(c);
+            printf("\033[%d;1H\033[K> %s", g_rows, g_ibuf);
             fflush(stdout);
         }
         /* 忽略方向键等控制序列 */
@@ -333,6 +352,7 @@ int main(int argc, char *argv[]) {
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
     const char *my_name = "unnamed", *target_name = NULL;
     int server_port = 8888;
+    int verbose = 0;
 
     for (int i = 1; i < argc; i++) {
         if      (strcmp(argv[i], "--dtls")          == 0) use_dtls = 1;
@@ -341,6 +361,7 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--compact")        == 0) use_compact = 1;
         else if (strcmp(argv[i], "--disable-lan")    == 0) disable_lan = 1;
         else if (strcmp(argv[i], "--verbose-punch")  == 0) verbose_punch = 1;
+        else if (strcmp(argv[i], "--verbose")        == 0) verbose = 1;
         else if (strcmp(argv[i], "--cn")             == 0) use_chinese = 1;
         else if (strcmp(argv[i], "--echo")           == 0) g_echo_mode = 1;
         else if (strcmp(argv[i], "--server") == 0 && i+1 < argc) server_ip  = argv[++i];
@@ -438,7 +459,7 @@ int main(int argc, char *argv[]) {
                 printf("%s\n", ping_msg(MSG_PING_CHAT_ENTER));
                 fflush(stdout);
                 tui_init();
-                p2p_set_log_level(P2P_LOG_LEVEL_WARN);
+                p2p_set_log_level(verbose ? P2P_LOG_LEVEL_DEBUG : P2P_LOG_LEVEL_WARN);
                 tui_println(ping_msg(MSG_PING_CHAT_CONNECTED));
             }
 
