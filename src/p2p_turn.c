@@ -210,21 +210,20 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                     memcpy(&relay_addr.sin_addr, buf + offset + 4, 4);
                     
                     /* 将中继地址加入本地 ICE 候选列表 */
-                    if (s->local_cand_cnt < P2P_MAX_CANDIDATES) {
-                        p2p_candidate_entry_t *c = &s->local_cands[s->local_cand_cnt++];
-                        
-                        c->type = P2P_CAND_RELAY;   /* 候选类型: 中继 */
-                        c->addr = relay_addr;
-                        /* RFC 5245: Relay 候选优先级使用标准公式计算 */
-                        c->priority = p2p_ice_calc_priority(P2P_CAND_RELAY, 65535, 1);
-
-                        P2P_LOG_INFO("ICE", "%s %s:%u (%s=%u)",
-                                     MSG(MSG_ICE_GATHERED_RELAY),
-                                     inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                                     MSG(MSG_STUN_PRIORITY), c->priority);
-                        
-                        /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
-                        p2p_ice_send_local_candidate(s, c);
+                    {
+                        p2p_candidate_entry_t *c = p2p_cand_push_local(s);
+                        if (c) {
+                            c->type = P2P_CAND_RELAY;   /* 候选类型: 中继 */
+                            c->addr = relay_addr;
+                            /* RFC 5245: Relay 候选优先级使用标准公式计算 */
+                            c->priority = p2p_ice_calc_priority(P2P_CAND_RELAY, 65535, 1);
+                            P2P_LOG_INFO("ICE", "%s %s:%u (%s=%u)",
+                                         MSG(MSG_ICE_GATHERED_RELAY),
+                                         inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                                         MSG(MSG_STUN_PRIORITY), c->priority);
+                            /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
+                            p2p_ice_send_local_candidate(s, c);
+                        }
                     }
                     
                     /*

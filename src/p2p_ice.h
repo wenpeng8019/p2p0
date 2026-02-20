@@ -158,8 +158,6 @@ typedef struct {
     uint32_t            priority;       // 候选优先级
 } p2p_candidate_entry_t;
 
-#define P2P_MAX_CANDIDATES 8            // 最大候选数量
-
 /* ============================================================================
  * 候选对结构（RFC 5245 Section 5.7）
  * ============================================================================
@@ -188,8 +186,6 @@ typedef struct {
     uint64_t        last_check_time;    // 上次检查时间
     int             check_count;        // 检查次数
 } p2p_candidate_pair_t;
-
-#define P2P_MAX_PAIRS (P2P_MAX_CANDIDATES * P2P_MAX_CANDIDATES)
 
 /* ============================================================================
  * ICE 状态机（RFC 5245 Section 7）

@@ -122,16 +122,16 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
     
     for (int i = 0; i < count && offset + 7 <= len; i++) {
         int idx = base_index + i;
-        if (idx >= P2P_MAX_CANDIDATES) {
-            /* 超出最大容量，忽略剩余候选 */
+        if (p2p_remote_cands_reserve(s, idx + 1) != 0) {
+            /* OOM，忽略剩余候选 */
             break;
         }
-        
-        /* 确保有足够空间 */
+
+        /* 确保计数反映实际使用范围 */
         if (idx >= s->remote_cand_cnt) {
             s->remote_cand_cnt = idx + 1;
         }
-        
+
         p2p_candidate_entry_t *c = &s->remote_cands[idx];
         c->type = (p2p_cand_type_t)payload[offset];
         c->priority = 0;  /* COMPACT 模式不使用优先级 */

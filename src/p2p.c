@@ -158,9 +158,21 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
 
     s->last_update = time_ms();
 
+    // 初始化候选地址数组（动态分配，初始容量 8）
+    s->local_cands  = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
+    s->local_cand_cap = 8;
+    s->remote_cands = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
+    s->remote_cand_cap = 8;
+    if (!s->local_cands || !s->remote_cands) {
+        free(s->local_cands); free(s->remote_cands);
+        p2p_close_socket(s->sock); free(s);
+        return NULL;
+    }
+
 #ifdef P2P_THREADED
     if (cfg->threaded) {
         if (p2p_thread_start(s) < 0) {
+            free(s->local_cands); free(s->remote_cands);
             p2p_close_socket(s->sock);
             free(s);
             return NULL;
@@ -208,6 +220,8 @@ void p2p_destroy(p2p_session_t *s) {
         p2p_close_socket(s->sock);
     }
 
+    free(s->local_cands);
+    free(s->remote_cands);
     free(s);
 }
 
@@ -259,17 +273,16 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
             getsockname(s->sock, (struct sockaddr *)&loc, &len);
 
             // 将 route 中的本地地址转换为候选列表
-            for (int i = 0; i < s->route.addr_count && s->local_cand_cnt < P2P_MAX_CANDIDATES; i++) {
-
-                s->local_cands[s->local_cand_cnt].type = P2P_CAND_HOST;
-                s->local_cands[s->local_cand_cnt].addr = s->route.local_addrs[i];
-                s->local_cands[s->local_cand_cnt].addr.sin_port = loc.sin_port;  // 使用实际绑定端口
-
+            for (int i = 0; i < s->route.addr_count; i++) {
+                p2p_candidate_entry_t *c = p2p_cand_push_local(s);
+                if (!c) break;
+                c->type = P2P_CAND_HOST;
+                c->addr = s->route.local_addrs[i];
+                c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
                 P2P_LOG_INFO("P2P", "[COMPACT] %s: %s:%d",
                        MSG(MSG_P2P_COMPACT_HOST_CAND),
-                       inet_ntoa(s->local_cands[s->local_cand_cnt].addr.sin_addr),
-                       ntohs(s->local_cands[s->local_cand_cnt].addr.sin_port));
-                s->local_cand_cnt++;
+                       inet_ntoa(c->addr.sin_addr),
+                       ntohs(c->addr.sin_port));
             }
 
             // 开始信令注册

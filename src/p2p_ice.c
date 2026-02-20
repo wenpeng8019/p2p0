@@ -441,11 +441,11 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                 if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
                 for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress;
                      ua != NULL; ua = ua->Next) {
-                    if (s->local_cand_cnt >= P2P_MAX_CANDIDATES) break;
                     struct sockaddr_in *sa = (struct sockaddr_in *)ua->Address.lpSockaddr;
                     if (sa->sin_family != AF_INET) continue;
 
-                    p2p_candidate_entry_t *c = &s->local_cands[s->local_cand_cnt++];
+                    p2p_candidate_entry_t *c = p2p_cand_push_local(s);
+                    if (!c) break;
                     c->type = P2P_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
                     c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
@@ -468,8 +468,8 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                 if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET) continue;
                 if (ifa->ifa_flags & IFF_LOOPBACK) continue;
 
-                if (s->local_cand_cnt < P2P_MAX_CANDIDATES) {
-                    p2p_candidate_entry_t *c = &s->local_cands[s->local_cand_cnt++];
+                p2p_candidate_entry_t *c = p2p_cand_push_local(s);
+                if (c) {
                     c->type = P2P_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
                     c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
@@ -532,7 +532,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      */
     if (s->cfg.enable_tcp) {
         for (int i = 0; i < s->local_cand_cnt; i++) {
-            if (s->local_cands[i].type == P2P_CAND_HOST && s->local_cand_cnt < P2P_MAX_CANDIDATES) {
+            if (s->local_cands[i].type == P2P_CAND_HOST) {
                 /* TODO: 建立 TCP 监听端口 */
             }
         }
@@ -559,7 +559,7 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
     int offset = 0;
 
     /* 循环解析所有候选 */
-    while (offset + 7 <= len && s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
+    while (offset + 7 <= len) {
         p2p_cand_type_t ctype = (p2p_cand_type_t)payload[offset++];
 
         struct sockaddr_in caddr;
@@ -579,8 +579,9 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
             }
         }
 
-        if (!exists && s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
-            p2p_candidate_entry_t *c = &s->remote_cands[s->remote_cand_cnt++];
+        if (!exists) {
+            p2p_candidate_entry_t *c = p2p_cand_push_remote(s);
+            if (!c) break;  /* OOM */
             c->type = ctype;
             c->addr = caddr;
             P2P_LOG_INFO("ICE", "%s: %d -> %s:%d", MSG(MSG_ICE_RECEIVED_REMOTE), 
@@ -621,8 +622,8 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
      * 标准 ICE 行为：将其作为 prflx 候选加入列表，仍然视为成功。
      * 只要 IP 与某个已知候选匹配（或任意来源），均接受。 */
     if (matched_idx < 0) {
-        if (s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
-            p2p_candidate_entry_t *c = &s->remote_cands[s->remote_cand_cnt++];
+        p2p_candidate_entry_t *c = p2p_cand_push_remote(s);
+        if (c) {
             c->type     = P2P_CAND_PRFLX;
             c->addr     = *from;
             c->priority = 0;
@@ -631,7 +632,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
                          MSG(MSG_ICE_RECEIVED_REMOTE),
                          inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         } else {
-            /* 候选表已满，直接用该地址建立连接 */
+            /* OOM，直接用该地址建立连接 */
             matched_idx = -2;
         }
     }
@@ -679,7 +680,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 
             /* 被动方：发送 answer 给主动方 */
             if (s->sig_relay_ctx.incoming_peer_name[0] != '\0') {
-                int cand_count = s->local_cand_cnt < P2P_MAX_CANDIDATES ? s->local_cand_cnt : P2P_MAX_CANDIDATES;
+                int cand_count = s->local_cand_cnt;
                 
                 uint8_t answer_buf[2048];
                 int answer_len = pack_signaling_payload_hdr(

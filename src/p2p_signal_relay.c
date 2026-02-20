@@ -685,10 +685,13 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                             }
                         }
                         
-                        if (!exists && s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
-                            s->remote_cands[s->remote_cand_cnt++] = c;  /* entry ← entry */
-                            P2P_LOG_INFO("ICE", "%s: %d -> %s:%d",
-                                   MSG(MSG_ICE_REMOTE_CANDIDATE_ADDED), c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
+                        if (!exists) {
+                            p2p_candidate_entry_t *rc = p2p_cand_push_remote(s);
+                            if (rc) {
+                                *rc = c;  /* entry ← entry */
+                                P2P_LOG_INFO("ICE", "%s: %d -> %s:%d",
+                                       MSG(MSG_ICE_REMOTE_CANDIDATE_ADDED), c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
+                            }
                         }
                     }
                 } else {

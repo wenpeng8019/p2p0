@@ -493,21 +493,22 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
                      inet_ntoa(mapped.sin_addr), ntohs(mapped.sin_port));
         
         /* ★ 添加 Srflx 候选到 ICE 候选列表 */
-        if (s->local_cand_cnt < P2P_MAX_CANDIDATES) {
-            p2p_candidate_entry_t *c = &s->local_cands[s->local_cand_cnt++];
-            c->type = P2P_CAND_SRFLX;
-            /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
-            c->priority = p2p_ice_calc_priority(P2P_CAND_SRFLX, 65535, 1);
-            c->addr = mapped;
-            P2P_LOG_INFO("ICE", "✓ %s %s %s:%d (%s=%u)",
-                         MSG(MSG_ICE_GATHERED_SRFLX), MSG(MSG_ICE_REMOTE_CANDIDATE_ADDED),
-                         inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                         MSG(MSG_STUN_PRIORITY), c->priority);
-            
-            /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
-            p2p_ice_send_local_candidate(s, c);
-        } else {
-            P2P_LOG_WARN("ICE", "✗ %s", MSG(MSG_STUN_SRFLX_ADD_FAILED));
+        {
+            p2p_candidate_entry_t *c = p2p_cand_push_local(s);
+            if (c) {
+                c->type = P2P_CAND_SRFLX;
+                /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
+                c->priority = p2p_ice_calc_priority(P2P_CAND_SRFLX, 65535, 1);
+                c->addr = mapped;
+                P2P_LOG_INFO("ICE", "✓ %s %s %s:%d (%s=%u)",
+                             MSG(MSG_ICE_GATHERED_SRFLX), MSG(MSG_ICE_REMOTE_CANDIDATE_ADDED),
+                             inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                             MSG(MSG_STUN_PRIORITY), c->priority);
+                /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
+                p2p_ice_send_local_candidate(s, c);
+            } else {
+                P2P_LOG_WARN("ICE", "✗ %s", MSG(MSG_STUN_SRFLX_ADD_FAILED));
+            }
         }
         
         break;

@@ -123,10 +123,12 @@ struct p2p_session {
 
     /* ======================== ICE 状态 ======================== */
     p2p_ice_state_t             ice_state;          // ICE 协商状态
-    p2p_candidate_entry_t       local_cands[P2P_MAX_CANDIDATES];   // 本地候选地址
+    p2p_candidate_entry_t      *local_cands;        // 本地候选地址（动态分配）
     int                         local_cand_cnt;     // 本地候选数量
-    p2p_candidate_entry_t       remote_cands[P2P_MAX_CANDIDATES];  // 远端候选地址
+    int                         local_cand_cap;     // 本地候选容量
+    p2p_candidate_entry_t      *remote_cands;       // 远端候选地址（动态分配）
     int                         remote_cand_cnt;    // 远端候选数量
+    int                         remote_cand_cap;    // 远端候选容量
     uint64_t                    ice_check_last_ms;  // 上次连通性检查时间
     int                         ice_check_count;    // 已发送检查轮数
 
@@ -361,8 +363,8 @@ static inline int unpack_signaling_payload_hdr(p2p_signaling_payload_hdr_t *p, c
     p->delay_trigger = ntohl(*(uint32_t*)&buf[n]); n += 4;
     p->candidate_count = (int)ntohl(*(uint32_t*)&buf[n]); n += 4;
     
-    /* 验证候选数量 */
-    if (p->candidate_count < 0 || p->candidate_count > 8) return -1;
+    /* 验证候选数量（防止恶意/畸形包，候选使用动态分配无固定上限）*/
+    if (p->candidate_count < 0 || p->candidate_count > 200) return -1;
     
     return 0;
 }
@@ -394,6 +396,53 @@ static inline int unpack_candidate(p2p_candidate_entry_t *c, const uint8_t *buf)
     p2p_wire_to_sockaddr(&w.base_addr, &c->base_addr);
     c->priority = ntohl(w.priority);
     return (int)sizeof(w);  /* 32 */
+}
+
+/* ============================================================================
+ * 动态候选数组辅助函数
+ *
+ * 向 local_cands / remote_cands 追加新候选，容量不足时自动翻倍扩容。
+ * 返回新候选槽位指针；OOM 时返回 NULL。
+ * ============================================================================ */
+
+static inline p2p_candidate_entry_t *p2p_cand_push_local(p2p_session_t *s) {
+    if (s->local_cand_cnt >= s->local_cand_cap) {
+        int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
+        p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(
+            s->local_cands, nc * sizeof(p2p_candidate_entry_t));
+        if (!p) return NULL;
+        s->local_cands    = p;
+        s->local_cand_cap = nc;
+    }
+    return &s->local_cands[s->local_cand_cnt++];
+}
+
+static inline p2p_candidate_entry_t *p2p_cand_push_remote(p2p_session_t *s) {
+    if (s->remote_cand_cnt >= s->remote_cand_cap) {
+        int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
+        p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(
+            s->remote_cands, nc * sizeof(p2p_candidate_entry_t));
+        if (!p) return NULL;
+        s->remote_cands    = p;
+        s->remote_cand_cap = nc;
+    }
+    return &s->remote_cands[s->remote_cand_cnt++];
+}
+
+/* 确保 remote_cands 能按索引存放 need 个槽位（idx 随机访问时使用）。
+ * 新分配空间清零，返回 0 成功，-1 OOM。 */
+static inline int p2p_remote_cands_reserve(p2p_session_t *s, int need) {
+    if (need <= s->remote_cand_cap) return 0;
+    int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap : 8;
+    while (nc < need) nc *= 2;
+    p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(
+        s->remote_cands, nc * sizeof(p2p_candidate_entry_t));
+    if (!p) return -1;
+    memset(p + s->remote_cand_cap, 0,
+           (nc - s->remote_cand_cap) * sizeof(p2p_candidate_entry_t));
+    s->remote_cands    = p;
+    s->remote_cand_cap = nc;
+    return 0;
 }
 
 #endif /* P2P_INTERNAL_H */

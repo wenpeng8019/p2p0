@@ -200,15 +200,13 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         P2P_LOG_INFO("SIGNAL_PUBSUB", "%s '%s'", MSG(MSG_PUBSUB_RECEIVED_SIGNAL), payload.sender);
         
         /* 添加远端 ICE 候选（步长 = sizeof(p2p_candidate_t) = 32）*/
-        for (int i = 0; i < payload.candidate_count && i < 8; i++) {
-            if (s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
-                p2p_candidate_entry_t c;
-                unpack_candidate(&c, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
-                s->remote_cands[s->remote_cand_cnt++] = c;
-                P2P_LOG_INFO("ICE", "%s: %s=%d, %s=%s:%d",
-                       MSG(MSG_PUBSUB_RECEIVED_REMOTE_CAND), MSG(MSG_PUBSUB_TYPE), c.type,
-                       MSG(MSG_PUBSUB_ADDRESS), inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
-            }
+        for (int i = 0; i < payload.candidate_count; i++) {
+            p2p_candidate_entry_t *c = p2p_cand_push_remote(s);
+            if (!c) break;  /* OOM */
+            unpack_candidate(c, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
+            P2P_LOG_INFO("ICE", "%s: %s=%d, %s=%s:%d",
+                   MSG(MSG_PUBSUB_RECEIVED_REMOTE_CAND), MSG(MSG_PUBSUB_TYPE), c->type,
+                   MSG(MSG_PUBSUB_ADDRESS), inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
         }
         
         /*
