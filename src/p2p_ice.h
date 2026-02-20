@@ -139,19 +139,26 @@
  * 候选地址类型（RFC 5245 Section 4.1.1）
  * ============================================================================ */
 typedef enum {
-    P2P_CAND_HOST = 0,      /* 本地网卡地址（Host Candidate） */
-    P2P_CAND_SRFLX,         /* STUN 反射地址（Server Reflexive Candidate） */
-    P2P_CAND_RELAY,         /* TURN 中继地址（Relayed Candidate） */
-    P2P_CAND_PRFLX          /* 对端反射地址（Peer Reflexive Candidate） */
+    P2P_CAND_HOST = 0,                  // 本地网卡地址（Host Candidate）
+    P2P_CAND_SRFLX,                     // STUN 反射地址（Server Reflexive Candidate）
+    P2P_CAND_RELAY,                     // TURN 中继地址（Relayed Candidate）
+    P2P_CAND_PRFLX                      // 对端反射地址（Peer Reflexive Candidate）
 } p2p_cand_type_t;
 
 /*
- * 注：p2p_candidate_t 已移至 p2pp.h 作为信令协议定义
- * 内部代码可继续使用 p2p_cand_type_t 枚举，但需要显式转换：
- *   cand.type = (int)P2P_CAND_HOST;
+ * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
+ *
+ * 仅用于会话内部运算。网络传输使用 p2p_candidate_t（见 p2pp.h）。
+ * 转换函数：pack_candidate() / unpack_candidate()，见 p2p_internal.h
  */
+typedef struct {
+    int                 type;           // 候选类型 (p2p_cand_type_t) 
+    struct sockaddr_in  addr;           // 传输地址（平台原生 16B）
+    struct sockaddr_in  base_addr;      // 基础地址（平台原生 16B）
+    uint32_t            priority;       // 候选优先级
+} p2p_candidate_entry_t;
 
-#define P2P_MAX_CANDIDATES 8        /* 最大候选数量 */
+#define P2P_MAX_CANDIDATES 8            // 最大候选数量
 
 /* ============================================================================
  * 候选对结构（RFC 5245 Section 5.7）
@@ -165,21 +172,21 @@ typedef enum {
  *   其中 G = controlling 端优先级，D = controlled 端优先级
  */
 typedef enum {
-    P2P_PAIR_FROZEN = 0,            /* 冻结：等待其他检查完成 */
-    P2P_PAIR_WAITING,               /* 等待：可以开始检查 */
-    P2P_PAIR_IN_PROGRESS,           /* 进行中：已发送检查，等待响应 */
-    P2P_PAIR_SUCCEEDED,             /* 成功：检查通过 */
-    P2P_PAIR_FAILED                 /* 失败：检查超时或失败 */
+    P2P_PAIR_FROZEN = 0,                // 冻结：等待其他检查完成
+    P2P_PAIR_WAITING,                   // 等待：可以开始检查
+    P2P_PAIR_IN_PROGRESS,               // 进行中：已发送检查，等待响应
+    P2P_PAIR_SUCCEEDED,                 // 成功：检查通过
+    P2P_PAIR_FAILED                     // 失败：检查超时或失败
 } p2p_pair_state_t;
 
 typedef struct {
-    p2p_candidate_t local;          /* 本地候选 */
-    p2p_candidate_t remote;         /* 远端候选 */
-    uint64_t        pair_priority;  /* 候选对优先级 */
-    p2p_pair_state_t state;         /* 候选对状态 */
-    int             nominated;      /* 是否被提名 */
-    uint64_t        last_check_time;/* 上次检查时间 */
-    int             check_count;    /* 检查次数 */
+    p2p_candidate_entry_t local;        // 本地候选
+    p2p_candidate_entry_t remote;       // 远端候选
+    uint64_t        pair_priority;      // 候选对优先级
+    p2p_pair_state_t state;             // 候选对状态
+    int             nominated;          // 是否被提名
+    uint64_t        last_check_time;    // 上次检查时间
+    int             check_count;        // 检查次数
 } p2p_candidate_pair_t;
 
 #define P2P_MAX_PAIRS (P2P_MAX_CANDIDATES * P2P_MAX_CANDIDATES)
@@ -188,12 +195,12 @@ typedef struct {
  * ICE 状态机（RFC 5245 Section 7）
  * ============================================================================ */
 typedef enum {
-    P2P_ICE_STATE_IDLE = 0,         /* 初始状态 */
-    P2P_ICE_STATE_GATHERING,        /* 正在收集候选地址 */
-    P2P_ICE_STATE_GATHERING_DONE,   /* 候选收集完成 */
-    P2P_ICE_STATE_CHECKING,         /* 正在进行连通性检查 */
-    P2P_ICE_STATE_COMPLETED,        /* 连接建立成功 */
-    P2P_ICE_STATE_FAILED            /* 连接建立失败 */
+    P2P_ICE_STATE_IDLE = 0,             // 初始状态
+    P2P_ICE_STATE_GATHERING,            // 正在收集候选地址
+    P2P_ICE_STATE_GATHERING_DONE,       // 候选收集完成
+    P2P_ICE_STATE_CHECKING,             // 正在进行连通性检查
+    P2P_ICE_STATE_COMPLETED,            // 连接建立成功
+    P2P_ICE_STATE_FAILED                // 连接建立失败
 } p2p_ice_state_t;
 
 /* ============================================================================
@@ -216,7 +223,7 @@ void p2p_ice_on_remote_candidates(struct p2p_session *s, const uint8_t *payload,
 void p2p_ice_on_check_success(struct p2p_session *s, const struct sockaddr_in *from);
 
 /* Trickle ICE: 发送单个本地候选 */
-int  p2p_ice_send_local_candidate(struct p2p_session *s, p2p_candidate_t *c);
+int  p2p_ice_send_local_candidate(struct p2p_session *s, p2p_candidate_entry_t *c);
 
 /* ============================================================================
  * 优先级计算（RFC 5245 Section 4.1.2）
@@ -272,8 +279,8 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  */
 int p2p_ice_form_check_list(
     p2p_candidate_pair_t *pairs, int max_pairs,
-    const p2p_candidate_t *local_cands, int local_cnt,
-    const p2p_candidate_t *remote_cands, int remote_cnt,
+    const p2p_candidate_entry_t *local_cands, int local_cnt,
+    const p2p_candidate_entry_t *remote_cands, int remote_cnt,
     int is_controlling
 );
 

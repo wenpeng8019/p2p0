@@ -12,16 +12,6 @@
 #include <stdint.h>
 #include <p2p.h>
 
-#if defined(_WIN32) || defined(_WIN64)
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
-#else
-#  include <netinet/in.h>
-#endif
-
 /* #pragma pack(push/pop) 受 MSVC / GCC / Clang 三大编译器支持，无需平台宏 */
 
 /* ============================================================================
@@ -225,8 +215,9 @@ typedef enum {
     P2P_RLY_CONNECT_ACK                     // 连接确认: Server -> Client
 } p2p_relay_type_t;
 
-/* RELAY 模式包头 (9 bytes) */
 #pragma pack(push, 1)
+
+/* RELAY 模式包头 (9 bytes) */
 typedef struct {
     uint32_t            magic;
     uint8_t             type;
@@ -263,19 +254,6 @@ typedef struct {
 } p2p_relay_connect_ack_t;
 
 /*
- * ICE 候选地址结构（32 字节）
- *
- * 用于 RELAY 模式信令传输，包含完整的候选信息。
- * type 字段：0=Host, 1=Srflx, 2=Relay, 3=Prflx（见 RFC 5245）
- */
-typedef struct {
-    int                 type;               // 候选类型（0-3）
-    struct sockaddr_in  addr;               // 传输地址（16B）
-    struct sockaddr_in  base_addr;          // 基础地址（16B）
-    uint32_t            priority;           // 候选优先级
-} p2p_candidate_t;
-
-/*
  * RELAY 模式信令负载头部
  *
  * 用于封装 ICE 候选交换的元数据。
@@ -288,6 +266,41 @@ typedef struct {
     uint32_t            delay_trigger;      // 延迟触发打洞（毫秒）
     int                 candidate_count;    // ICE 候选数量
 } p2p_signaling_payload_hdr_t;
+
+/*
+ * 平台无关的 IPv4 地址序列化格式（12 字节）
+ *
+ * struct sockaddr_in 在不同平台上布局不同，不可直接用于网络传输：
+ *   Linux / Windows : sin_family(2B) + sin_port(2B) + sin_addr(4B) + sin_zero[8] = 16B
+ *   macOS / BSD     : sin_len(1B) + sin_family(1B) + sin_port(2B) + sin_addr(4B) + sin_zero[8] = 16B
+ *
+ * 本结构统一序列化为 3×uint32_t（大端），与平台无关。
+ * 转换函数见 p2p_internal.h：p2p_sockaddr_to_wire() / p2p_wire_to_sockaddr()
+ */
+typedef struct {
+    uint32_t            family;             // 地址族   htonl(sin_family)
+    uint32_t            port;               // 端口     htonl((uint32_t)sin_port)
+    uint32_t            ip;                 // IPv4     sin_addr.s_addr
+} p2p_sockaddr_t;
+
+/*
+ * ICE 候选地址序列化格式（32 字节，在 pack(1) 块内 sizeof == 32 在所有平台保证）
+ *
+ * 用于信令协议网络传输，各字段均以大端字节序存储。
+ * 内部会话代码使用 p2p_candidate_entry_t（含 struct sockaddr_in），定义见 p2p_ice.h。
+ * 转换函数：pack_candidate() / unpack_candidate()，见 p2p_internal.h
+ *
+ * 内存布局：
+ *   ┌──────────┬────────────────────┬────────────────────┬──────────┐
+ *   │ type(4B) │    addr (12B)      │  base_addr (12B)   │ prio(4B) │
+ *   └──────────┴────────────────────┴────────────────────┴──────────┘
+ */
+typedef struct {
+    uint32_t            type;               // 候选类型 htonl(0=Host 1=Srflx 2=Relay 3=Prflx)
+    p2p_sockaddr_t      addr;               // 传输地址（12B）
+    p2p_sockaddr_t      base_addr;          // 基础地址（12B）
+    uint32_t            priority;           // 候选优先级 htonl
+} p2p_candidate_t;
 
 #pragma pack(pop)
 

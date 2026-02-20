@@ -98,7 +98,7 @@ typedef struct relay_client {
     // 场景6: MAX_CANDIDATES == 0 (服务器不支持缓存，当前不存在此场景)
     char                    pending_sender[P2P_PEER_ID_MAX];    // 发送者名称（空字符串表示无连接请求）
     int                     pending_count;                      // 候选数量
-    p2p_candidate_t         pending_candidates[MAX_CANDIDATES]; // 候选列表
+    p2p_candidate_t         pending_candidates[MAX_CANDIDATES]; // 候选列表（网络格式，直接收发，无需 sockaddr 转换）
 } relay_client_t;
 
 static compact_pair_t       g_compact_pairs[MAX_PEERS];
@@ -203,7 +203,8 @@ static void handle_relay_signaling(int idx) {
             
             // 打包候选
             for (int j = 0; j < client->pending_count; j++) {
-                n += pack_candidate(&client->pending_candidates[j], offer_buf + n);
+                memcpy(offer_buf + n, &client->pending_candidates[j], sizeof(p2p_candidate_t));
+                n += sizeof(p2p_candidate_t);
             }
             
             // 发送 OFFER
@@ -397,14 +398,13 @@ static void handle_relay_signaling(int idx) {
                         break;
                     }
                     
-                    // 反序列化候选
+                    // 反序列化候选（网络格式直接存储，无需 sockaddr_in 转换）
                     p2p_candidate_t cand;
-                    if (unpack_candidate(&cand, cand_data + i * 32) == 32) {
-                        // 缓存候选
-                        target->pending_candidates[target->pending_count] = cand;
-                        target->pending_count++;
-                        candidates_acked++;
-                    }
+                    memcpy(&cand, cand_data + i * sizeof(p2p_candidate_t), sizeof(p2p_candidate_t));
+                    // 缓存候选
+                    target->pending_candidates[target->pending_count] = cand;
+                    target->pending_count++;
+                    candidates_acked++;
                 }
                 
                 // 检查缓存后是否已满

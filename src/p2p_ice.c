@@ -221,8 +221,8 @@ static int pair_compare(const void *a, const void *b) {
  */
 int p2p_ice_form_check_list(
     p2p_candidate_pair_t *pairs, int max_pairs,
-    const p2p_candidate_t *local_cands, int local_cnt,
-    const p2p_candidate_t *remote_cands, int remote_cnt,
+    const p2p_candidate_entry_t *local_cands, int local_cnt,
+    const p2p_candidate_entry_t *remote_cands, int remote_cnt,
     int is_controlling
 ) {
     int pair_cnt = 0;
@@ -329,7 +329,7 @@ int p2p_ice_form_check_list(
  *            0 对端离线，候选已缓存在服务器（等待对端上线后推送）
  *           -1 TCP 发送失败（连接未建立或网络错误）
  */
-int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_t *c) {
+int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
 
     /* 仅用于 RELAY 模式（TCP 信令） */
     if (s->signaling_mode != P2P_SIGNALING_MODE_RELAY) {
@@ -445,7 +445,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                     struct sockaddr_in *sa = (struct sockaddr_in *)ua->Address.lpSockaddr;
                     if (sa->sin_family != AF_INET) continue;
 
-                    p2p_candidate_t *c = &s->local_cands[s->local_cand_cnt++];
+                    p2p_candidate_entry_t *c = &s->local_cands[s->local_cand_cnt++];
                     c->type = P2P_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
                     c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
@@ -469,7 +469,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                 if (ifa->ifa_flags & IFF_LOOPBACK) continue;
 
                 if (s->local_cand_cnt < P2P_MAX_CANDIDATES) {
-                    p2p_candidate_t *c = &s->local_cands[s->local_cand_cnt++];
+                    p2p_candidate_entry_t *c = &s->local_cands[s->local_cand_cnt++];
                     c->type = P2P_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
                     c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
@@ -578,7 +578,7 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
         }
 
         if (!exists && s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
-            p2p_candidate_t *c = &s->remote_cands[s->remote_cand_cnt++];
+            p2p_candidate_entry_t *c = &s->remote_cands[s->remote_cand_cnt++];
             c->type = ctype;
             c->addr = caddr;
             P2P_LOG_INFO("ICE", "%s: %d -> %s:%d", MSG(MSG_ICE_RECEIVED_REMOTE), 
@@ -727,7 +727,7 @@ void p2p_ice_tick(p2p_session_t *s) {
 
     /* 向所有远端候选发送探测包 */
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        p2p_candidate_t *c = &s->remote_cands[i];
+        p2p_candidate_entry_t *c = &s->remote_cands[i];
         udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
     }
 

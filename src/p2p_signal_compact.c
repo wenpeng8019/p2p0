@@ -132,7 +132,7 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
             s->remote_cand_cnt = idx + 1;
         }
         
-        p2p_candidate_t *c = &s->remote_cands[idx];
+        p2p_candidate_entry_t *c = &s->remote_cands[idx];
         c->type = (p2p_cand_type_t)payload[offset];
         c->priority = 0;  /* COMPACT 模式不使用优先级 */
         memset(&c->addr, 0, sizeof(c->addr));

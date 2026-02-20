@@ -123,9 +123,9 @@ struct p2p_session {
 
     /* ======================== ICE 状态 ======================== */
     p2p_ice_state_t             ice_state;          // ICE 协商状态
-    p2p_candidate_t             local_cands[P2P_MAX_CANDIDATES];   // 本地候选地址
+    p2p_candidate_entry_t       local_cands[P2P_MAX_CANDIDATES];   // 本地候选地址
     int                         local_cand_cnt;     // 本地候选数量
-    p2p_candidate_t             remote_cands[P2P_MAX_CANDIDATES];  // 远端候选地址
+    p2p_candidate_entry_t       remote_cands[P2P_MAX_CANDIDATES];  // 远端候选地址
     int                         remote_cand_cnt;    // 远端候选数量
     uint64_t                    ice_check_last_ms;  // 上次连通性检查时间
     int                         ice_check_count;    // 已发送检查轮数
@@ -259,40 +259,34 @@ static inline int16_t seq_diff(uint16_t a, uint16_t b) {
 }
 
 /*
- * sockaddr2n: sockaddr_in 转网络字节流（序列化）
+ * struct sockaddr_in → p2p_sockaddr_t
  *
- * 格式（12 字节）：[sin_family: 4B] [sin_port: 4B] [sin_addr.s_addr: 4B]
+ * sockaddr_in 各字段含义：
+ *   sin_family : 主机字节序（uint16_t）
+ *   sin_port   : 已是网络字节序（uint16_t，big-endian）
+ *   sin_addr   : 已是网络字节序（uint32_t，big-endian）
  *
- * @param buf   输出缓冲区（至少 12 字节）
- * @param addr  要序列化的地址
- * @return      写入的字节数（12）
+ * 统一用 htonl 写入 uint32_t，使得任意主机字序下字节流相同。
+ * 注：sin_port 本身已是大端，(uint32_t) 零扩展后再 htonl，与 p2p_wire_to_sockaddr 的
+ *     ntohl 对称，round-trip 正确。
  */
-static inline int sockaddr2n(uint8_t *buf, const struct sockaddr_in *addr) {
-    int n = 0;
-    *(uint32_t*)&buf[n] = htonl((uint32_t)addr->sin_family); n += 4;
-    *(uint32_t*)&buf[n] = htonl((uint32_t)addr->sin_port); n += 4;
-    *(uint32_t*)&buf[n] = addr->sin_addr.s_addr; n += 4;
-    return n;
+static inline void p2p_sockaddr_to_wire(const struct sockaddr_in *s, p2p_sockaddr_t *w) {
+    w->family = htonl((uint32_t)s->sin_family);
+    w->port   = htonl((uint32_t)s->sin_port);
+    w->ip     = s->sin_addr.s_addr;     /* 已是网络字节序，直接存储 */
 }
 
 /*
- * n2sockaddr: 网络字节流转 sockaddr_in（反序列化）
+ * p2p_sockaddr_t → struct sockaddr_in
  *
- * 格式（12 字节）：[sin_family: 4B] [sin_port: 4B] [sin_addr.s_addr: 4B]
- *
- * 注意：会清零整个结构体（包括 sin_zero 填充字段，某些系统要求填充字段为 0）
- *
- * @param buf   输入缓冲区（至少 12 字节）
- * @param addr  输出地址结构
- * @return      读取的字节数（12）
+ * 自动清零 sin_zero[8] 填充字段（某些系统要求填充字段为 0）。
+ * 跨平台安全：macOS 额外的 sin_len 字段也被 memset 清零。
  */
-static inline int n2sockaddr(const uint8_t *buf, struct sockaddr_in *addr) {
-    int n = 0;
-    memset(addr, 0, sizeof(*addr));  /* 清零 sin_zero 填充字段（8字节） */
-    addr->sin_family = (sa_family_t)ntohl(*(uint32_t*)&buf[n]); n += 4;
-    addr->sin_port = (in_port_t)ntohl(*(uint32_t*)&buf[n]); n += 4;
-    addr->sin_addr.s_addr = *(uint32_t*)&buf[n]; n += 4;
-    return n;
+static inline void p2p_wire_to_sockaddr(const p2p_sockaddr_t *w, struct sockaddr_in *s) {
+    memset(s, 0, sizeof(*s));
+    s->sin_family      = (sa_family_t)ntohl(w->family);
+    s->sin_port        = (in_port_t)  ntohl(w->port);
+    s->sin_addr.s_addr = w->ip;
 }
 
 /* ============================================================================
@@ -374,39 +368,32 @@ static inline int unpack_signaling_payload_hdr(p2p_signaling_payload_hdr_t *p, c
 }
 
 /*
- * pack_candidate: 序列化单个 ICE 候选到字节流
+ * pack_candidate: p2p_candidate_entry_t（内部平台格式）→ 网络字节流
  *
  * 格式（32 字节）：[type:4B][addr:12B][base_addr:12B][priority:4B]
- *
- * @param c    ICE 候选结构
- * @param buf  输出缓冲区（至少 32 字节）
- * @return     写入的字节数（32）
+ * 通过中间 p2p_candidate_t 完成转换，该类型在 pack(1) 块内定义，sizeof == 32。
  */
-static inline int pack_candidate(const p2p_candidate_t *c, uint8_t *buf) {
-    int n = 0;
-    *(uint32_t*)&buf[n] = htonl((uint32_t)c->type); n += 4;
-    n += sockaddr2n(buf + n, &c->addr);
-    n += sockaddr2n(buf + n, &c->base_addr);
-    *(uint32_t*)&buf[n] = htonl(c->priority); n += 4;
-    return n;
+static inline int pack_candidate(const p2p_candidate_entry_t *c, uint8_t *buf) {
+    p2p_candidate_t w;
+    w.type     = htonl((uint32_t)c->type);
+    p2p_sockaddr_to_wire(&c->addr,      &w.addr);
+    p2p_sockaddr_to_wire(&c->base_addr, &w.base_addr);
+    w.priority = htonl(c->priority);
+    memcpy(buf, &w, sizeof(w));
+    return (int)sizeof(w);  /* 32 */
 }
 
 /*
- * unpack_candidate: 从字节流反序列化单个 ICE 候选
- *
- * 格式（32 字节）：[type:4B][addr:12B][base_addr:12B][priority:4B]
- *
- * @param c    输出：ICE 候选结构
- * @param buf  输入缓冲区（至少 32 字节）
- * @return     读取的字节数（32）
+ * unpack_candidate: 网络字节流 → p2p_candidate_entry_t（内部平台格式）
  */
-static inline int unpack_candidate(p2p_candidate_t *c, const uint8_t *buf) {
-    int n = 0;
-    c->type = (p2p_cand_type_t)ntohl(*(uint32_t*)&buf[n]); n += 4;
-    n += n2sockaddr(buf + n, &c->addr);
-    n += n2sockaddr(buf + n, &c->base_addr);
-    c->priority = ntohl(*(uint32_t*)&buf[n]); n += 4;
-    return n;
+static inline int unpack_candidate(p2p_candidate_entry_t *c, const uint8_t *buf) {
+    p2p_candidate_t w;
+    memcpy(&w, buf, sizeof(w));
+    c->type     = (int)ntohl(w.type);
+    p2p_wire_to_sockaddr(&w.addr,      &c->addr);
+    p2p_wire_to_sockaddr(&w.base_addr, &c->base_addr);
+    c->priority = ntohl(w.priority);
+    return (int)sizeof(w);  /* 32 */
 }
 
 #endif /* P2P_INTERNAL_H */

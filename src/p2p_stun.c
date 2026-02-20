@@ -494,7 +494,7 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         
         /* ★ 添加 Srflx 候选到 ICE 候选列表 */
         if (s->local_cand_cnt < P2P_MAX_CANDIDATES) {
-            p2p_candidate_t *c = &s->local_cands[s->local_cand_cnt++];
+            p2p_candidate_entry_t *c = &s->local_cands[s->local_cand_cnt++];
             c->type = P2P_CAND_SRFLX;
             /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
             c->priority = p2p_ice_calc_priority(P2P_CAND_SRFLX, 65535, 1);

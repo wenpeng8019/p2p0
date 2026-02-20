@@ -211,7 +211,7 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                     
                     /* 将中继地址加入本地 ICE 候选列表 */
                     if (s->local_cand_cnt < P2P_MAX_CANDIDATES) {
-                        p2p_candidate_t *c = &s->local_cands[s->local_cand_cnt++];
+                        p2p_candidate_entry_t *c = &s->local_cands[s->local_cand_cnt++];
                         
                         c->type = P2P_CAND_RELAY;   /* 候选类型: 中继 */
                         c->addr = relay_addr;

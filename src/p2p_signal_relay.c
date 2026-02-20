@@ -670,9 +670,9 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                 if (payload_len >= 76 && unpack_signaling_payload_hdr(&p, ctx->read_payload) == 0 &&
                     payload_len >= (size_t)(76 + p.candidate_count * 32)) {
                     
-                    /* 添加远端 ICE 候选 */
+                    /* 添加远端 ICE 候选（步长 = sizeof(p2p_candidate_t) = 32）*/
                     for (int i = 0; i < p.candidate_count; i++) {
-                        p2p_candidate_t c;
+                        p2p_candidate_entry_t c;
                         unpack_candidate(&c, ctx->read_payload + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
                         
                         /* 排重检查 */
@@ -686,7 +686,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                         }
                         
                         if (!exists && s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
-                            s->remote_cands[s->remote_cand_cnt++] = c;
+                            s->remote_cands[s->remote_cand_cnt++] = c;  /* entry ← entry */
                             P2P_LOG_INFO("ICE", "%s: %d -> %s:%d",
                                    MSG(MSG_ICE_REMOTE_CANDIDATE_ADDED), c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
                         }
