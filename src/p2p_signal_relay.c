@@ -718,7 +718,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                                 /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
                                 if (s->ice_state == P2P_ICE_STATE_CHECKING) {
                                     udp_send_packet(s->sock, &rc->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
-                                    P2P_LOG_DEBUG("ICE", "[Trickle] Immediately probing new candidate %s:%d",
+                                    P2P_LOG_INFO("ICE", "[Trickle] Immediately probing new candidate %s:%d",
                                            inet_ntoa(rc->addr.sin_addr), ntohs(rc->addr.sin_port));
                                 }
                             }
