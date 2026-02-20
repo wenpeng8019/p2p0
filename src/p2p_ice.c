@@ -608,14 +608,39 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     if (s->ice_state == P2P_ICE_STATE_COMPLETED) return;
 
     /* 查找对应的远端候选 */
+    int matched_idx = -1;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         if (s->remote_cands[i].addr.sin_addr.s_addr == from->sin_addr.s_addr &&
             s->remote_cands[i].addr.sin_port == from->sin_port) {
+            matched_idx = i;
+            break;
+        }
+    }
 
-            /* 确定连接类型 */
+    /* Peer Reflexive 候选：响应来自未知端口（对称 NAT / CGNAT）。
+     * 标准 ICE 行为：将其作为 prflx 候选加入列表，仍然视为成功。
+     * 只要 IP 与某个已知候选匹配（或任意来源），均接受。 */
+    if (matched_idx < 0) {
+        if (s->remote_cand_cnt < P2P_MAX_CANDIDATES) {
+            p2p_candidate_entry_t *c = &s->remote_cands[s->remote_cand_cnt++];
+            c->type     = P2P_CAND_PRFLX;
+            c->addr     = *from;
+            c->priority = 0;
+            matched_idx = s->remote_cand_cnt - 1;
+            P2P_LOG_INFO("ICE", "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)",
+                         MSG(MSG_ICE_RECEIVED_REMOTE),
+                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        } else {
+            /* 候选表已满，直接用该地址建立连接 */
+            matched_idx = -2;
+        }
+    }
+
+    {
             const char *cand_type_str = "Unknown";
             const char *connection_desc = "";
-            switch (s->remote_cands[i].type) {
+            p2p_cand_type_t ctype = (matched_idx >= 0) ? s->remote_cands[matched_idx].type : P2P_CAND_PRFLX;
+            switch (ctype) {
                 case P2P_CAND_HOST:
                     cand_type_str = "Host (Local Network)";
                     connection_desc = " - Direct LAN connection";
@@ -630,7 +655,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
                     break;
                 case P2P_CAND_PRFLX:
                     cand_type_str = "Prflx (Peer Reflexive)";
-                    connection_desc = " - Discovered via connectivity check";
+                    connection_desc = " - Symmetric NAT traversal";
                     break;
             }
 
@@ -679,9 +704,6 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
                 udp_send_packet(s->sock, from, P2P_PKT_AUTH, 0, 0, s->cfg.auth_key, strlen(s->cfg.auth_key));
                 P2P_LOG_INFO("AUTH", "%s", MSG(MSG_ICE_AUTH_SENT));
             }
-
-            break;
-        }
     }
 }
 
