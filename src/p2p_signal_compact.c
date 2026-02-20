@@ -102,8 +102,13 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
     uint8_t base_index = payload[0];
     uint8_t count = payload[1];
     
-    /* seq=1 是第一个包（服务器发送），清空列表 */
+    /* seq=1 是新的连接请求（服务器转发或对端重连），重置状态 */
     if (seq == 1) {
+        if (s->remote_cand_cnt > 0 || s->nat.state != NAT_IDLE) {
+            P2P_LOG_DEBUG("COMPACT", "[DEBUG] seq=1 received, resetting NAT state and clearing %d stale candidates", s->remote_cand_cnt);
+            s->nat.state = NAT_IDLE;
+            s->nat.punch_attempts = 0;
+        }
         s->remote_cand_cnt = 0;
     }
     
@@ -140,6 +145,13 @@ static int parse_peer_info(p2p_session_t *s, const uint8_t *payload, int len,
         memcpy(&c->addr.sin_addr.s_addr, payload + offset + 1, 4);
         memcpy(&c->addr.sin_port, payload + offset + 5, 2);
         offset += 7;
+        
+        /* Trickle ICE：如果 NAT 打洞已启动，立即向新候选发送探测包 */
+        if (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_RELAY) {
+            udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+            P2P_LOG_DEBUG("COMPACT", "[Trickle] Immediately probing new candidate %s:%d",
+                   inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+        }
     }
     
     return 0;

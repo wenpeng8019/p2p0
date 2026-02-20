@@ -199,6 +199,17 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         enc_len >= (size_t)(76 + payload.candidate_count * 32)) {
         P2P_LOG_INFO("SIGNAL_PUBSUB", "%s '%s'", MSG(MSG_PUBSUB_RECEIVED_SIGNAL), payload.sender);
         
+        /* SUB 收到首个 offer（或发送者改变），重置 ICE 避免残留旧连接状态 */
+        if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
+            if (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_IDLE) {
+                P2P_LOG_DEBUG("SIGNAL_PUBSUB", "[DEBUG] First offer, resetting ICE and clearing %d stale candidates", s->remote_cand_cnt);
+                s->remote_cand_cnt = 0;
+                s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
+                s->ice_check_count = 0;
+                s->ice_check_last_ms = 0;
+            }
+        }
+        
         /* 添加远端 ICE 候选（步长 = sizeof(p2p_candidate_t) = 32）*/
         for (int i = 0; i < payload.candidate_count; i++) {
             p2p_candidate_entry_t *c = p2p_cand_push_remote(s);
@@ -207,6 +218,13 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             P2P_LOG_INFO("ICE", "%s: %s=%d, %s=%s:%d",
                    MSG(MSG_PUBSUB_RECEIVED_REMOTE_CAND), MSG(MSG_PUBSUB_TYPE), c->type,
                    MSG(MSG_PUBSUB_ADDRESS), inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            
+            /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
+            if (s->ice_state == P2P_ICE_STATE_CHECKING) {
+                udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                P2P_LOG_DEBUG("ICE", "[Trickle] Immediately probing new candidate %s:%d",
+                       inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            }
         }
         
         /*

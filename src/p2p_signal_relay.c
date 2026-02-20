@@ -665,6 +665,17 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                 
                 P2P_LOG_INFO("RELAY", "%s '%s' (%u %s)", MSG(MSG_RELAY_RECEIVED_SIGNAL), ctx->read_sender, payload_len, MSG(MSG_RELAY_BYTES));
                 
+                /* OFFER 表示新的连接请求（可能对端重启或重连），重置 ICE 状态避免残留旧连接状态 */
+                if (ctx->read_hdr.type == P2P_RLY_OFFER) {
+                    if (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_IDLE) {
+                        P2P_LOG_DEBUG("RELAY", "[DEBUG] OFFER received, resetting ICE state and clearing %d stale candidates", s->remote_cand_cnt);
+                        s->remote_cand_cnt = 0;
+                        s->ice_state = P2P_ICE_STATE_GATHERING_DONE;  /* 重置为收集完成，等待新候选 */
+                        s->ice_check_count = 0;
+                        s->ice_check_last_ms = 0;
+                    }
+                }
+                
                 /* 解析信令数据并注入 ICE 状态机 */
                 p2p_signaling_payload_hdr_t p;
                 if (payload_len >= 76 && unpack_signaling_payload_hdr(&p, ctx->read_payload) == 0 &&
@@ -691,6 +702,13 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                                 *rc = c;  /* entry ← entry */
                                 P2P_LOG_INFO("ICE", "%s: %d -> %s:%d",
                                        MSG(MSG_ICE_REMOTE_CANDIDATE_ADDED), c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
+                                
+                                /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
+                                if (s->ice_state == P2P_ICE_STATE_CHECKING) {
+                                    udp_send_packet(s->sock, &rc->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                                    P2P_LOG_DEBUG("ICE", "[Trickle] Immediately probing new candidate %s:%d",
+                                           inet_ntoa(rc->addr.sin_addr), ntohs(rc->addr.sin_port));
+                                }
                             }
                         }
                     }
