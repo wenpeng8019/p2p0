@@ -34,6 +34,9 @@ static const char* messages_en[MSG_SERVER_COUNT] = {
     [MSG_SERVER_PROBE_BIND_FAILED] = "[SERVER] NAT probe disabled (bind failed)",
     [MSG_SERVER_PROBE_LISTENING] = "[SERVER] NAT probe socket listening on port %d",
     [MSG_SERVER_LISTENING]       = "P2P Signaling Server listening on port %d (TCP + UDP)...",
+    [MSG_SERVER_SHUTDOWN_SIGNAL] = "[SERVER] Received shutdown signal, exiting gracefully...",
+    [MSG_SERVER_SHUTTING_DOWN]   = "[SERVER] Shutting down...",
+    [MSG_SERVER_GOODBYE]         = "[SERVER] Goodbye!",
     
     /* TCP/RELAY 日志消息 */
     [MSG_TCP_PEER_DISCONNECTED]   = "[TCP] Peer %s disconnected\n",
@@ -109,6 +112,9 @@ static const char* messages_zh[MSG_SERVER_COUNT] = {
     [MSG_SERVER_PROBE_BIND_FAILED] = "[服务器] NAT 探测已禁用（绑定失败）",
     [MSG_SERVER_PROBE_LISTENING] = "[服务器] NAT 探测端口监听于端口 %d",
     [MSG_SERVER_LISTENING]       = "P2P 信令服务器监听于端口 %d (TCP + UDP)...",
+    [MSG_SERVER_SHUTDOWN_SIGNAL] = "[服务器] 收到关闭信号，正在优雅退出...",
+    [MSG_SERVER_SHUTTING_DOWN]   = "[服务器] 正在关闭...",
+    [MSG_SERVER_GOODBYE]         = "[服务器] 再见！",
     
     /* TCP/RELAY 日志消息 */
     [MSG_TCP_PEER_DISCONNECTED]   = "[TCP] 对端 %s 已断开连接\n",

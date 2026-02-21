@@ -19,6 +19,11 @@
 #include <string.h>
 #include <time.h>
 #include <stdbool.h>
+#ifndef _WIN32
+  #include <signal.h>   /* POSIX 信号处理 */
+  #include <errno.h>    /* errno 用于 select EINTR 检查 */
+#endif
+
 #include <p2p.h>
 #include <p2pp.h>
 #include "server_lang.h"
@@ -56,6 +61,7 @@
   #endif
   #include <winsock2.h>
   #include <ws2tcpip.h>
+  #include <windows.h>
   #pragma comment(lib, "ws2_32.lib")
   typedef SOCKET server_socket_t;
   #define SERVER_INVALID_SOCKET INVALID_SOCKET
@@ -114,6 +120,36 @@ static relay_client_t       g_relay_clients[MAX_PEERS];
 // 服务器配置（运行时参数）
 static int                  g_probe_port = 0;                   // compact 模式 NAT 探测端口（0=不支持探测）
 static bool                 g_relay_enabled = false;            // compact 模式是否支持中继功能
+
+// 全局运行状态标志（用于信号处理）
+static volatile sig_atomic_t g_running = 1;
+
+///////////////////////////////////////////////////////////////////////////////
+
+// 信号处理函数
+#ifdef _WIN32
+BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
+    switch (ctrl_type) {
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT:
+        case CTRL_CLOSE_EVENT:
+            printf("\n%s\n", server_msg(MSG_SERVER_SHUTDOWN_SIGNAL));
+            fflush(stdout);
+            g_running = 0;
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+#else
+void signal_handler(int signum) {
+    if (signum == SIGINT || signum == SIGTERM) {
+        printf("\n%s\n", server_msg(MSG_SERVER_SHUTDOWN_SIGNAL));
+        fflush(stdout);
+        g_running = 0;
+    }
+}
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -517,19 +553,16 @@ static void handle_relay_signaling(int idx) {
 static void cleanup_relay_clients(void) {
     time_t now = time(NULL);
     for (int i = 0; i < MAX_PEERS; i++) {
-        if (g_relay_clients[i].valid) {
-            // 检查是否超时（超过 RELAY_CLIENT_TIMEOUT 秒未收到任何消息）
-            if ((now - g_relay_clients[i].last_active) > RELAY_CLIENT_TIMEOUT) {
-                printf(server_msg(MSG_TCP_CLIENT_TIMEOUT),
-                       g_relay_clients[i].name,
-                       (long)(now - g_relay_clients[i].last_active));
-                
-                server_close_socket(g_relay_clients[i].fd);
-                g_relay_clients[i].fd = SERVER_INVALID_SOCKET;
-                g_relay_clients[i].valid = false;
-                g_relay_clients[i].current_peer[0] = '\0';
-            }
-        }
+        if (!g_relay_clients[i].valid || 
+            (now - g_relay_clients[i].last_active) <= RELAY_CLIENT_TIMEOUT) continue;
+
+        printf(server_msg(MSG_TCP_CLIENT_TIMEOUT), 
+               g_relay_clients[i].name, (long)(now - g_relay_clients[i].last_active));
+        
+        server_close_socket(g_relay_clients[i].fd);
+        g_relay_clients[i].fd = SERVER_INVALID_SOCKET;
+        g_relay_clients[i].current_peer[0] = '\0';
+        g_relay_clients[i].valid = false;
     }
 }
 
@@ -792,18 +825,19 @@ static void cleanup_compact_pairs(void) {
 
     time_t now = time(NULL);
     for (int i = 0; i < MAX_PEERS; i++) {
-        if (g_compact_pairs[i].valid && (now - g_compact_pairs[i].last_active) > COMPACT_PAIR_TIMEOUT) {
-            printf(server_msg(MSG_UDP_PAIR_TIMEOUT), 
-                   g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id);
-            
-            // 如果有配对对端，标记对端的 peer 为 (void*)-1
-            if (g_compact_pairs[i].peer != NULL && g_compact_pairs[i].peer != (compact_pair_t*)(void*)-1) {
-                g_compact_pairs[i].peer->peer = (compact_pair_t*)(void*)-1;
-            }
-            
-            g_compact_pairs[i].valid = false;
-            g_compact_pairs[i].peer = NULL;  // 清空指针
+        if (!g_compact_pairs[i].valid || 
+            (now - g_compact_pairs[i].last_active) <= COMPACT_PAIR_TIMEOUT) continue;
+
+        printf(server_msg(MSG_UDP_PAIR_TIMEOUT), 
+                g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id);
+        
+        // 如果有配对对端，标记对端的 peer 为 (void*)-1
+        if (g_compact_pairs[i].peer != NULL && g_compact_pairs[i].peer != (compact_pair_t*)(void*)-1) {
+            g_compact_pairs[i].peer->peer = (compact_pair_t*)(void*)-1;
         }
+        
+        g_compact_pairs[i].peer = NULL;  // 清空指针
+        g_compact_pairs[i].valid = false;
     }
 }
 
@@ -918,6 +952,16 @@ int main(int argc, char *argv[]) {
     printf("\n");
     fflush(stdout);
 
+    // 注册信号处理
+#ifdef _WIN32
+    if (!SetConsoleCtrlHandler(console_ctrl_handler, TRUE)) {
+        fprintf(stderr, "[SERVER] Failed to set console ctrl handler\n");
+    }
+#else
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+#endif
+
 #ifdef _WIN32
     WSADATA wsa_data;
     if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
@@ -997,7 +1041,8 @@ int main(int argc, char *argv[]) {
 
     // 主循环
     fd_set read_fds;
-    for (time_t last_cleanup = time(NULL);;) {
+    time_t last_cleanup = time(NULL);
+    while (g_running) {
 
         // 周期清理过期的 COMPACT 配对记录和 Relay 客户端连接
         time_t now = time(NULL);
@@ -1031,7 +1076,14 @@ int main(int argc, char *argv[]) {
 
         // 等待套接口数据（超时1秒，用于周期性清理）
         struct timeval tv = {1, 0};
-        if (select(max_fd + 1, &read_fds, NULL, NULL, &tv) < 0) {
+        int sel_ret = select(max_fd + 1, &read_fds, NULL, NULL, &tv);
+        if (sel_ret < 0) {
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err == WSAEINTR) continue;  // 被信号打断，继续循环
+#else
+            if (errno == EINTR) continue;   // 被信号打断，继续循环
+#endif
             perror("select");
             break;
         }
@@ -1117,11 +1169,25 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // 清理资源
+    printf("\n%s\n", server_msg(MSG_SERVER_SHUTTING_DOWN));
+    
+    // 关闭所有客户端连接
+    for (int i = 0; i < MAX_PEERS; i++) {
+        if (g_relay_clients[i].valid && g_relay_clients[i].fd != SERVER_INVALID_SOCKET) {
+            server_close_socket(g_relay_clients[i].fd);
+        }
+    }
+    
+    // 关闭监听套接字
     server_close_socket(listen_fd);
     server_close_socket(udp_fd);
     if (probe_fd != SERVER_INVALID_SOCKET) server_close_socket(probe_fd);
+    
 #ifdef _WIN32
     WSACleanup();
 #endif
+    
+    printf("%s\n", server_msg(MSG_SERVER_GOODBYE));
     return 0;
 }

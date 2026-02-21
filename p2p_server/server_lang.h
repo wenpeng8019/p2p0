@@ -33,6 +33,9 @@ typedef enum {
     MSG_SERVER_PROBE_BIND_FAILED,/* 探测端口绑定失败 */
     MSG_SERVER_PROBE_LISTENING,  /* 探测端口监听中 */
     MSG_SERVER_LISTENING,        /* 服务器监听中 */
+    MSG_SERVER_SHUTDOWN_SIGNAL,  /* 收到关闭信号 */
+    MSG_SERVER_SHUTTING_DOWN,    /* 正在关闭 */
+    MSG_SERVER_GOODBYE,          /* 再见 */
     
     /* TCP/RELAY 日志消息 */
     MSG_TCP_PEER_DISCONNECTED,   /* 客户端断开 */
