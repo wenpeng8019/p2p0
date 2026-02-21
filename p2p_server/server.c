@@ -19,6 +19,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdbool.h>
+#include <inttypes.h>  /* PRIu64 */
 #ifndef _WIN32
   #include <signal.h>   /* POSIX 信号处理 */
   #include <errno.h>    /* errno 用于 select EINTR 检查 */
@@ -28,6 +29,49 @@
 #include <p2pp.h>
 #include "server_lang.h"
 #include "../src/p2p_internal.h"
+#include "uthash.h"
+
+// 64-bit network byte order conversion
+#if defined(__linux__)
+  #include <endian.h>
+  #define htonll(x) htobe64(x)
+  #define ntohll(x) be64toh(x)
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
+  #include <libkern/OSByteOrder.h>
+  // macOS already defines htonll/ntohll in <sys/_endian.h>, no need to redefine
+  #ifndef htonll
+    #define htonll(x) OSSwapHostToBigInt64(x)
+  #endif
+  #ifndef ntohll
+    #define ntohll(x) OSSwapBigToHostInt64(x)
+  #endif
+#elif defined(_WIN32)
+  // Windows: manual implementation
+  static inline uint64_t htonll(uint64_t x) {
+    return ((uint64_t)htonl((uint32_t)x) << 32) | htonl((uint32_t)(x >> 32));
+  }
+  static inline uint64_t ntohll(uint64_t x) {
+    return ((uint64_t)ntohl((uint32_t)x) << 32) | ntohl((uint32_t)(x >> 32));
+  }
+#else
+  // Generic fallback
+  static inline uint64_t htonll(uint64_t x) {
+    #if __BYTE_ORDER == __LITTLE_ENDIAN
+      return ((uint64_t)htonl((uint32_t)x) << 32) | htonl((uint32_t)(x >> 32));
+    #else
+      return x;
+    #endif
+  }
+  static inline uint64_t ntohll(uint64_t x) {
+    #if __BYTE_ORDER == __LITTLE_ENDIAN
+      return ((uint64_t)ntohl((uint32_t)x) << 32) | ntohl((uint32_t)(x >> 32));
+    #else
+      return x;
+    #endif
+  }
+#endif
+
+#define DEFAULT_PORT                9333
 
 // cleanup 过期配对/客户端的时间间隔（秒）
 #define CLEANUP_INTERVAL            10
@@ -85,6 +129,7 @@
  */
 typedef struct compact_pair {
     bool                    valid;                              // 记录是否有效（无效意味着未分配或已回收）
+    uint64_t                session_id;                         // 会话 ID（服务器分配，唯一标识一个配对，64位随机数）
     char                    local_peer_id[P2P_PEER_ID_MAX];     // 本端 ID
     char                    remote_peer_id[P2P_PEER_ID_MAX];    // 目标对端 ID
     struct sockaddr_in      addr;                               // 公网地址（UDP 源地址）
@@ -98,6 +143,10 @@ typedef struct compact_pair {
     int                     info0_retry;                        // 重传次数
     time_t                  info0_sent_time;                    // 首包发送时间（用于重传）
     struct compact_pair*    next_pending;                       // 待确认链表指针
+    
+    // uthash handles（支持多种索引方式）
+    UT_hash_handle          hh;                                 // 按 session_id 索引（主索引，必须命名为 hh）
+    UT_hash_handle          hh_peer;                            // 按 peer_key (local+remote) 索引（辅助索引）
 } compact_pair_t;
 
 // RELAY 模式客户端（TCP 长连接）
@@ -124,13 +173,22 @@ typedef struct relay_client {
 static compact_pair_t       g_compact_pairs[MAX_PEERS];
 static relay_client_t       g_relay_clients[MAX_PEERS];
 
-// 服务器配置（运行时参数）
-static int                  g_probe_port = 0;                   // compact 模式 NAT 探测端口（0=不支持探测）
-static bool                 g_relay_enabled = false;            // compact 模式是否支持中继功能
+// uthash 哈希表（支持两种索引方式）
+static compact_pair_t*      g_pairs_by_session = NULL;         // 按 session_id 索引
+static compact_pair_t*      g_pairs_by_peer = NULL;            // 按 (local_peer_id, remote_peer_id) 索引
 
 // PEER_INFO 待确认链表（仅包含已发送首包但未收到 ACK 的配对）
 static compact_pair_t*      g_pending_connecting_head = NULL;
 static compact_pair_t*      g_pending_connecting_rear = NULL;
+
+// 服务器配置（运行时参数）
+static int                  g_probe_port = 0;                   // compact 模式 NAT 探测端口（0=不支持探测）
+static bool                 g_relay_enabled = false;            // compact 模式是否支持中继功能
+
+// 随机数源（用于生成安全的 session_id）
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
+static FILE*                g_urandom_fp = NULL;                // /dev/urandom 文件句柄（Linux）
+#endif
 
 // 全局运行状态标志（用于信号处理）
 static volatile sig_atomic_t g_running = 1;
@@ -161,6 +219,53 @@ void signal_handler(int signum) {
     }
 }
 #endif
+
+// 生成安全的随机 session_id（64位，加密安全，防止跨会话注入攻击）
+static uint64_t generate_session_id(void) {
+    uint64_t id;
+    
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
+    // macOS/BSD: 使用 arc4random() 生成 64 位
+    id = ((uint64_t)arc4random() << 32) | arc4random();
+    if (id == 0) id = 1;  // 0 保留为无效值
+    
+#elif defined(_WIN32)
+    // Windows: 使用 rand_s 生成 64 位（加密安全）
+    #if defined(_MSC_VER) && _MSC_VER >= 1400
+        uint32_t high, low;
+        while (rand_s(&high) != 0 || rand_s(&low) != 0) {
+            // rand_s 失败，重试
+        }
+        id = ((uint64_t)high << 32) | low;
+        if (id == 0) id = 1;
+    #else
+        // 降级方案：使用 rand()（不推荐用于生产环境）
+        id = ((uint64_t)rand() << 48) ^ ((uint64_t)rand() << 32) ^ 
+             ((uint64_t)rand() << 16) ^ (uint64_t)rand();
+        if (id == 0) id = 1;
+    #endif
+    
+#else
+    // Linux: 使用全局 /dev/urandom 文件句柄读取 64 位
+    if (g_urandom_fp && fread(&id, sizeof(id), 1, g_urandom_fp) == 1) {
+        if (id == 0) id = 1;  // 0 保留为无效值
+    } else {
+        // /dev/urandom 不可用或读取失败，使用降级方案
+        id = ((uint64_t)time(NULL) << 32) ^ ((uint64_t)getpid() << 16) ^ (uint64_t)clock();
+        if (id == 0) id = 1;
+    }
+#endif
+
+    // 冲突检测（虽然概率极低：1/2^64 ≈ 5.4×10^-20）
+    compact_pair_t *existing = NULL;
+    HASH_FIND(hh, g_pairs_by_session, &id, sizeof(uint64_t), existing);
+    if (existing) {
+        // 递归重试
+        return generate_session_id();
+    }
+    
+    return id;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -595,7 +700,7 @@ static void retry_compact_pending(server_socket_t udp_fd, time_t now) {
         if (q->info0_retry >= PEER_INFO0_MAX_RETRY) {
             
             // 超过最大重传次数，从链表移除（放弃）
-            printf("[SERVER] PEER_INFO retransmit timeout for %s <-> %s (gave up after %d tries)\n",
+            printf(server_msg(MSG_UDP_PEER_INFO_RETRANSMIT_FAIL),
                    q->local_peer_id, q->remote_peer_id, q->info0_retry);
 
             q->next_pending = NULL;
@@ -611,17 +716,21 @@ static void retry_compact_pending(server_socket_t udp_fd, time_t now) {
         // 重传
         else { assert(q->peer && q->peer != (compact_pair_t*)(void*)-1);
 
-            // 构造 SIG_PKT_PEER_INFO 响应（序列化传输首包 seq=1）
-            // 格式: [hdr(4)][base_index(1)][candidate_count(1)][candidates(N*7)]
-            uint8_t response[4 + 2 + MAX_CANDIDATES * 7];
+            // 构造 SIG_PKT_PEER_INFO 响应（序列化传输首包 seq=0）
+            // 格式: [hdr(4)][session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
+            uint8_t response[4 + 8 + 2 + MAX_CANDIDATES * 7];
             p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)response;
             resp_hdr->type = SIG_PKT_PEER_INFO;
             resp_hdr->flags = 0;
-            resp_hdr->seq = htons(1);  // seq=1 表示服务器发送的首包
+            resp_hdr->seq = htons(0);  // seq=0 表示服务器发送的首包
 
-            response[4] = 0;  // base_index = 0 (从第一个候选开始)
-            response[5] = (uint8_t)q->peer->candidate_count;
-            int resp_len = 6;
+            // session_id (网络字节序)
+            uint64_t session_id_net = htonll(q->session_id);
+            memcpy(response + 4, &session_id_net, 8);
+
+            response[12] = 0;  // base_index = 0 (从第一个候选开始)
+            response[13] = (uint8_t)q->peer->candidate_count;
+            int resp_len = 14;
             for (int i = 0; i < q->peer->candidate_count; i++) {
                 response[resp_len] = q->peer->candidates[i].type;
                 memcpy(response + resp_len + 1, &q->peer->candidates[i].ip, 4);
@@ -646,8 +755,8 @@ static void retry_compact_pending(server_socket_t udp_fd, time_t now) {
                 g_pending_connecting_rear = q;
             }
 
-            printf("[SERVER] Retransmit PEER_INFO to %s <-> %s (attempt %d/%d)\n",
-                   q->local_peer_id, q->remote_peer_id,
+            printf(server_msg(MSG_UDP_PEER_INFO_RETRANSMIT),
+                   q->session_id, q->local_peer_id, q->remote_peer_id,
                    q->info0_retry, PEER_INFO0_MAX_RETRY);
             fflush(stdout);
 
@@ -741,22 +850,25 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
         }
         fflush(stdout);
         
-        // 查找本端槽位
-        // + 注意，允许同时连接多个对端，所以要同时匹配 local_peer_id 和 remote_peer_id 来找到正确的配对记录
+        // 查找本端槽位：直接用 hash 查找（O(1)），payload 前 64 字节是 [local_peer_id(32)][remote_peer_id(32)]
+        compact_pair_t *existing = NULL;
+        HASH_FIND(hh_peer, g_pairs_by_peer, payload, P2P_PEER_ID_MAX * 2, existing);
+        
         int local_idx = -1;
-        for (int i = 0; i < MAX_PEERS; i++) {
-            if (g_compact_pairs[i].valid && 
-                strcmp(g_compact_pairs[i].local_peer_id, local_peer_id) == 0 &&
-                strcmp(g_compact_pairs[i].remote_peer_id, remote_peer_id) == 0) {
-                local_idx = i;
-                break;
-            }
+        if (existing) {
+            local_idx = (int)(existing - g_compact_pairs);  // 计算数组下标
         }
+        
         // 如果配对不存在，分配一个空位
         if (local_idx == -1) {
             for (int i = 0; i < MAX_PEERS; i++) {
-                if (!g_compact_pairs[i].valid) { g_compact_pairs[i].valid = true;
+                if (!g_compact_pairs[i].valid) { 
+                    g_compact_pairs[i].valid = true;
                     local_idx = i;
+                    
+                    // 注意：session_id 在首次匹配成功时才分配，此时为 0
+                    g_compact_pairs[i].session_id = 0;
+                    
                     strncpy(g_compact_pairs[i].local_peer_id, local_peer_id, P2P_PEER_ID_MAX);
                     strncpy(g_compact_pairs[i].remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX);
                     g_compact_pairs[i].peer = NULL;
@@ -764,6 +876,9 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
                     g_compact_pairs[i].info0_sent_time = 0;
                     g_compact_pairs[i].info0_retry = 0;
                     g_compact_pairs[i].next_pending = NULL;
+                    
+                    // 添加到 peer_key 索引（session_id 索引在首次匹配时添加）
+                    HASH_ADD(hh_peer, g_pairs_by_peer, local_peer_id, P2P_PEER_ID_MAX * 2, &g_compact_pairs[i]);
                     break;
                 }
             }
@@ -861,20 +976,39 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
                 // 建立双向关联
                 local->peer = remote; remote->peer = local;
 
-                // 构造 SIG_PKT_PEER_INFO 响应（序列化传输首包 seq=1）
-                // + 格式: [hdr(4)][base_index(1)][candidate_count(1)][candidates(N*7)]
-                uint8_t response[4 + 2 + MAX_CANDIDATES * 7];
+                // 为双方生成 session_id 并添加到 session_id 索引（peer_key 索引已在 REGISTER 时添加）
+                if (local->session_id == 0) {
+                    local->session_id = generate_session_id();
+                    HASH_ADD(hh, g_pairs_by_session, session_id, sizeof(uint64_t), local);
+                    printf(server_msg(MSG_UDP_SESSION_ASSIGNED),
+                           local->session_id, local->local_peer_id, local->remote_peer_id);
+                    fflush(stdout);
+                }
+                if (remote->session_id == 0) {
+                    remote->session_id = generate_session_id();
+                    HASH_ADD(hh, g_pairs_by_session, session_id, sizeof(uint64_t), remote);
+                    printf(server_msg(MSG_UDP_SESSION_ASSIGNED),
+                           remote->session_id, remote->local_peer_id, remote->remote_peer_id);
+                    fflush(stdout);
+                }
+
+                // 构造 SIG_PKT_PEER_INFO 响应（序列化传输首包 seq=0）
+                // 格式: [hdr(4)][session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
+                uint8_t response[4 + 8 + 2 + MAX_CANDIDATES * 7];
                 p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)response;
                 resp_hdr->type = SIG_PKT_PEER_INFO;
                 resp_hdr->flags = 0;
-                resp_hdr->seq = htons(1);  /* seq=1 表示服务器发送的首包 */
+                resp_hdr->seq = htons(0);  /* seq=0 表示服务器发送的首包 */
 
                 //-------------
 
-                // 向当前请求方发送对方的候选列表
-                response[4] = 0;  /* base_index = 0 (从第一个候选开始) */
-                response[5] = (uint8_t)remote->candidate_count;
-                int resp_len = 6;
+                // 向当前请求方发送对方的候选列表（包含 local 的 session_id）
+                uint64_t session_id_net = htonll(local->session_id);
+                memcpy(response + 4, &session_id_net, 8);
+                
+                response[12] = 0;  /* base_index = 0 (从第一个候选开始) */
+                response[13] = (uint8_t)remote->candidate_count;
+                int resp_len = 14;
                 for (int i = 0; i < remote->candidate_count; i++) {
                     response[resp_len] = remote->candidates[i].type;
                     memcpy(response + resp_len + 1, &remote->candidates[i].ip, 4);
@@ -897,9 +1031,13 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
 
                 //-------------
 
-                response[4] = 0;  /* base_index = 0 (从第一个候选开始) */
-                response[5] = (uint8_t)local->candidate_count;
-                resp_len = 6;
+                // 向对端发送当前请求方的候选列表（包含 remote 的 session_id）
+                session_id_net = htonll(remote->session_id);
+                memcpy(response + 4, &session_id_net, 8);
+                
+                response[12] = 0;  /* base_index = 0 (从第一个候选开始) */
+                response[13] = (uint8_t)local->candidate_count;
+                resp_len = 14;
                 for (int i = 0; i < local->candidate_count; i++) {
                     response[resp_len] = local->candidates[i].type;
                     memcpy(response + resp_len + 1, &local->candidates[i].ip, 4);
@@ -923,8 +1061,8 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
                 //-------------
 
                 printf(server_msg(MSG_UDP_SENT_PEER_INFO),
-                       from_str, ntohs(remote->addr.sin_port),
-                       remote_peer_id, local->candidate_count, " [BILATERAL]");
+                       local_peer_id, remote->candidate_count,
+                       remote_peer_id, local->candidate_count);
                 fflush(stdout);
             }
             else { assert(local->peer == remote && remote->peer == local);
@@ -956,89 +1094,191 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
 
         if (payload_len < P2P_PEER_ID_MAX * 2) {
             printf(server_msg(MSG_UDP_UNREGISTER_INVALID), from_str);
+            fflush(stdout);
             return;
         }
 
-        char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
-        char remote_peer_id[P2P_PEER_ID_MAX + 1] = {0};
-        memcpy(local_peer_id,  payload,                P2P_PEER_ID_MAX);
-        memcpy(remote_peer_id, payload + P2P_PEER_ID_MAX, P2P_PEER_ID_MAX);
-
-        for (int i = 0; i < MAX_PEERS; i++) {
-            if (!g_compact_pairs[i].valid) continue;
-            if (strcmp(g_compact_pairs[i].local_peer_id,  local_peer_id)  != 0) continue;
-            if (strcmp(g_compact_pairs[i].remote_peer_id, remote_peer_id) != 0) continue;
+        // 直接用 hash 查找（O(1)）
+        compact_pair_t *pair = NULL;
+        HASH_FIND(hh_peer, g_pairs_by_peer, payload, P2P_PEER_ID_MAX * 2, pair);
+        
+        if (pair && pair->valid) {
+            char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
+            char remote_peer_id[P2P_PEER_ID_MAX + 1] = {0};
+            memcpy(local_peer_id, pair->local_peer_id, P2P_PEER_ID_MAX);
+            memcpy(remote_peer_id, pair->remote_peer_id, P2P_PEER_ID_MAX);
 
             printf(server_msg(MSG_UDP_UNREGISTER), local_peer_id, remote_peer_id);
             fflush(stdout);
 
-            // 通知对端槽位，标记配对已断开
-            if (g_compact_pairs[i].peer != NULL &&
-                g_compact_pairs[i].peer != (compact_pair_t*)(void*)-1) {
-                g_compact_pairs[i].peer->peer = (compact_pair_t*)(void*)-1;
+            // 向对端发送 PEER_OFF 通知（如果对端在线且有 session_id）
+            if (pair->peer != NULL && pair->peer != (compact_pair_t*)(void*)-1 && pair->peer->session_id != 0) {
+
+                uint8_t notify[4 + 8];  // 包头 + session_id
+                p2p_packet_hdr_t *notify_hdr = (p2p_packet_hdr_t *)notify;
+                notify_hdr->type = SIG_PKT_PEER_OFF;
+                notify_hdr->flags = 0;
+                notify_hdr->seq = htons(0);
+                
+                uint64_t peer_session_id_net = htonll(pair->peer->session_id);
+                memcpy(notify + 4, &peer_session_id_net, 8);
+                
+                sendto(udp_fd, (const char *)notify, 12, 0, (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
+                
+                printf(server_msg(MSG_UDP_PEER_OFF_SENT), pair->peer->local_peer_id, pair->peer->session_id, " [unregister]");
+                fflush(stdout);
+                
+                // 标记对端槽位已断开
+                pair->peer->peer = (compact_pair_t*)(void*)-1;
             }
             
             // 从待确认链表移除
-            if (g_compact_pairs[i].next_pending) {
-                remove_compact_pending(&g_compact_pairs[i]);
+            if (pair->next_pending) {
+                remove_compact_pending(pair);
             }
 
-            g_compact_pairs[i].valid = false;
-            g_compact_pairs[i].peer  = NULL;
-            break;
+            // 从哈希表删除
+            if (pair->session_id != 0) {
+                HASH_DELETE(hh, g_pairs_by_session, pair);
+            }
+            HASH_DELETE(hh_peer, g_pairs_by_peer, pair);
+
+            pair->valid = false;
+            pair->session_id = 0;
+            pair->peer = NULL;
         }
     }
-    // SIG_PKT_PEER_INFO_ACK: ACK 确认收到服务器发送的首个 PEER_INFO 包
-    // 格式: [hdr(4)][local_peer_id(32)][remote_peer_id(32)]
+    // SIG_PKT_ALIVE: [local_peer_id(32)][remote_peer_id(32)]
+    // 客户端定期发送以保持槽位活跃，更新 last_active 时间
+    else if (hdr->type == SIG_PKT_ALIVE) {
+
+        if (payload_len < P2P_PEER_ID_MAX * 2) return;
+
+        // 直接用 hash 查找（O(1)）
+        compact_pair_t *pair = NULL;
+        HASH_FIND(hh_peer, g_pairs_by_peer, payload, P2P_PEER_ID_MAX * 2, pair);
+        
+        if (pair && pair->valid) {
+            pair->last_active = time(NULL);
+
+            // 发送 ALIVE_ACK（仅包头，无 payload）
+            uint8_t ack[4];
+            p2p_pkt_hdr_encode(ack, SIG_PKT_ALIVE_ACK, 0, 0);
+            sendto(udp_fd, (const char *)ack, 4, 0, (struct sockaddr *)from, sizeof(*from));
+        }
+    }
+
+    // SIG_PKT_PEER_INFO_ACK: ACK 确认收到 PEER_INFO 包
+    // 格式: [hdr(4)][session_id(8)][ack_seq(2)]
     else if (hdr->type == SIG_PKT_PEER_INFO_ACK) {
 
-        if (payload_len < P2P_PEER_ID_MAX * 2) {
-            printf("[SERVER] Invalid PEER_INFO_ACK from %s (size %zu)\n", from_str, payload_len);
+        if (payload_len < 10) {
+            printf(server_msg(MSG_UDP_PEER_INFO_ACK_INVALID), from_str, payload_len);
+            fflush(stdout);
             return;
         }
 
-        char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
-        char remote_peer_id[P2P_PEER_ID_MAX + 1] = {0};
-        memcpy(local_peer_id, payload, P2P_PEER_ID_MAX);
-        memcpy(remote_peer_id, payload + P2P_PEER_ID_MAX, P2P_PEER_ID_MAX);
+        uint64_t session_id = ntohll(*(uint64_t*)payload);
+        uint16_t ack_seq = ntohs(*(uint16_t*)(payload + 8));
 
-        // 查找对应的配对记录
-        for (int i = 0; i < MAX_PEERS; i++) {
-            if (g_compact_pairs[i].valid &&
-                strcmp(g_compact_pairs[i].local_peer_id, local_peer_id) == 0 &&
-                strcmp(g_compact_pairs[i].remote_peer_id, remote_peer_id) == 0) {
-                
+        // ack_seq=0 的 ACK 是对服务器发送的首个 PEER_INFO 的确认，服务器需要处理
+        if (ack_seq == 0) {
+            // 通过 session_id 查找对应的配对记录
+            compact_pair_t *pair = NULL;
+            HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), pair);
+            if (pair && pair->valid) {
                 // 标记为已确认，从待确认链表移除
-                if (!g_compact_pairs[i].info0_acked) { g_compact_pairs[i].info0_acked = true;
+                if (!pair->info0_acked) {
+                    pair->info0_acked = true;
 
                     // 从待确认链表移除
-                    if (g_compact_pairs[i].next_pending) {
-                        remove_compact_pending(&g_compact_pairs[i]);
+                    if (pair->next_pending) {
+                        remove_compact_pending(pair);
                     }
                     
-                    printf("[SERVER] Received PEER_INFO_ACK from %s <-> %s (confirmed after %d retransmits)\n",
-                           local_peer_id, remote_peer_id, g_compact_pairs[i].info0_retry);
-                    fflush(stdout);
+                    printf(server_msg(MSG_UDP_PEER_INFO_ACK_CONFIRMED),
+                           session_id, pair->local_peer_id, pair->remote_peer_id, pair->info0_retry);
                 }
-                break;
             }
+            else printf(server_msg(MSG_UDP_PEER_INFO_ACK_UNKNOWN), session_id, from_str);
         }
+        // ack_seq≠0 的 ACK 是客户端之间的确认，服务器只负责 relay 转发
+        else {
+            compact_pair_t *pair = NULL;
+            HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), pair);
+            if (pair && pair->valid && pair->peer && pair->peer != (compact_pair_t*)(void*)-1) {
+                // 转发给对方
+                sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
+                       (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
+                
+                printf(server_msg(MSG_UDP_PEER_INFO_ACK_RELAYED),
+                       ack_seq, session_id, pair->local_peer_id, pair->remote_peer_id);
+            }
+            else printf(server_msg(MSG_UDP_PEER_INFO_ACK_RELAY_FAIL), session_id);
+        }
+        fflush(stdout);
     }
+    // SIG_PKT_PEER_INFO/P2P_PKT_RELAY_DATA/P2P_PKT_RELAY_ACK: relay 转发给对方
+    // 格式：所有包都包含 session_id(4) 在 payload 开头
     else if (hdr->type == SIG_PKT_PEER_INFO ||
              hdr->type == P2P_PKT_RELAY_DATA || hdr->type == P2P_PKT_RELAY_ACK) {
 
-    }
-    else if (hdr->type == SIG_PKT_ALIVE) {
+        // SIG_PKT_PEER_INFO 特殊处理：seq=0 是服务器维护的包，不应该出现在这里
+        if (hdr->type == SIG_PKT_PEER_INFO && hdr->seq == 0) {
+            printf(server_msg(MSG_UDP_RELAY_INVALID_SRC), from_str);
+            fflush(stdout);
+            return;
+        }
 
+        // 所有需要 relay 的包格式都是 [session_id(8)][...]
+        if (payload_len < 8) {
+            printf(server_msg(MSG_UDP_RELAY_PKT_INVALID), hdr->type, from_str, payload_len);
+            fflush(stdout);
+            return;
+        }
+
+        uint64_t session_id = ntohll(*(uint64_t*)payload);
+
+        // 根据 session_id 查找配对记录
+        compact_pair_t *pair = NULL;
+        HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), pair);
+        if (!pair || !pair->valid) {
+            printf(server_msg(MSG_UDP_RELAY_UNKNOWN_SESSION), hdr->type, session_id, from_str);
+            fflush(stdout);
+            return;
+        }
+
+        // 对方不存在，丢弃
+        if (!pair->peer || pair->peer == (compact_pair_t*)(void*)-1) {
+            printf(server_msg(MSG_UDP_RELAY_NO_PEER), hdr->type, session_id);
+            fflush(stdout);
+            return;
+        }
+
+        // 转发给对方
+        sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
+               (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
+
+        if (hdr->type == SIG_PKT_PEER_INFO) {
+            printf(server_msg(MSG_UDP_RELAY_PEER_INFO),
+                   ntohs(hdr->seq), session_id, pair->local_peer_id, pair->remote_peer_id);
+        } else if (hdr->type == P2P_PKT_RELAY_DATA) {
+            printf(server_msg(MSG_UDP_RELAY_DATA),
+                   ntohs(hdr->seq), session_id, pair->local_peer_id, pair->remote_peer_id);
+        } else {
+            printf(server_msg(MSG_UDP_RELAY_ACK),
+                   session_id, pair->local_peer_id, pair->remote_peer_id);
+        }
+        fflush(stdout);
     }
     else {
-
         printf(server_msg(MSG_UDP_UNKNOWN_SIG), from_str, hdr->type);
+        fflush(stdout);
     }
 }
 
 // 清理过期的 COMPACT 模式配对记录
-static void cleanup_compact_pairs(void) {
+static void cleanup_compact_pairs(server_socket_t udp_fd) {
 
     time_t now = time(NULL);
     for (int i = 0; i < MAX_PEERS; i++) {
@@ -1046,10 +1286,31 @@ static void cleanup_compact_pairs(void) {
             (now - g_compact_pairs[i].last_active) <= COMPACT_PAIR_TIMEOUT) continue;
 
         printf(server_msg(MSG_UDP_PAIR_TIMEOUT), 
-                g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id);
+               g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id);
         
-        // 如果有配对对端，标记对端的 peer 为 (void*)-1
-        if (g_compact_pairs[i].peer != NULL && g_compact_pairs[i].peer != (compact_pair_t*)(void*)-1) {
+        // 向对端发送 PEER_OFF 通知（如果对端在线且有 session_id）
+        if (g_compact_pairs[i].peer != NULL && 
+            g_compact_pairs[i].peer != (compact_pair_t*)(void*)-1 && 
+            g_compact_pairs[i].peer->session_id != 0) {
+            
+            uint8_t notify[4 + 8];  // 包头 + session_id
+            p2p_packet_hdr_t *notify_hdr = (p2p_packet_hdr_t *)notify;
+            notify_hdr->type = SIG_PKT_PEER_OFF;
+            notify_hdr->flags = 0;
+            notify_hdr->seq = htons(0);
+            
+            uint64_t peer_session_id_net = htonll(g_compact_pairs[i].peer->session_id);
+            memcpy(notify + 4, &peer_session_id_net, 8);
+            
+            sendto(udp_fd, (const char *)notify, 12, 0,
+                   (struct sockaddr *)&g_compact_pairs[i].peer->addr, 
+                   sizeof(g_compact_pairs[i].peer->addr));
+            
+            printf(server_msg(MSG_UDP_PEER_OFF_SENT),
+                   g_compact_pairs[i].peer->local_peer_id, g_compact_pairs[i].peer->session_id, " [timeout]");
+            fflush(stdout);
+            
+            // 标记对端槽位已断开
             g_compact_pairs[i].peer->peer = (compact_pair_t*)(void*)-1;
         }
         
@@ -1058,7 +1319,14 @@ static void cleanup_compact_pairs(void) {
             remove_compact_pending(&g_compact_pairs[i]);
         }
 
+        // 从哈希表删除
+        if (g_compact_pairs[i].session_id != 0) {
+            HASH_DELETE(hh, g_pairs_by_session, &g_compact_pairs[i]);
+        }
+        HASH_DELETE(hh_peer, g_pairs_by_peer, &g_compact_pairs[i]);
+
         g_compact_pairs[i].peer = NULL;  // 清空指针
+        g_compact_pairs[i].session_id = 0;
         g_compact_pairs[i].valid = false;
     }
 }
@@ -1119,8 +1387,8 @@ int main(int argc, char *argv[]) {
 
     // 解析参数
 
-    // 第二个位置参数：监听端口（TCP 和 UDP 共用，默认 8888）
-    int port = 8888;
+    // 第二个位置参数：监听端口（TCP 和 UDP 共用，默认 DEFAULT_PORT）
+    int port = DEFAULT_PORT;
     if (argc > 1) {
         char *p = NULL;
         long val = strtol(argv[1], &p, 10);
@@ -1177,17 +1445,26 @@ int main(int argc, char *argv[]) {
     // 注册信号处理
 #ifdef _WIN32
     if (!SetConsoleCtrlHandler(console_ctrl_handler, TRUE)) {
-        fprintf(stderr, "[SERVER] Failed to set console ctrl handler\n");
+        fprintf(stderr, "%s", server_msg(MSG_SERVER_WIN_CTRL_HANDLER_ERR));
     }
 #else
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 #endif
 
+    // 初始化随机数源（用于生成安全的 session_id）
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
+    // Linux: 打开 /dev/urandom 文件句柄（保持打开，避免重复 open/close）
+    g_urandom_fp = fopen("/dev/urandom", "rb");
+    if (!g_urandom_fp) {
+        fprintf(stderr, "%s", server_msg(MSG_SERVER_URANDOM_WARN));
+    }
+#endif
+
 #ifdef _WIN32
     WSADATA wsa_data;
     if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-        fprintf(stderr, "[SERVER] WSAStartup failed\n");
+        fprintf(stderr, "%s", server_msg(MSG_SERVER_WINSOCK_ERR));
         return 1;
     }
 #endif
@@ -1270,7 +1547,7 @@ int main(int argc, char *argv[]) {
 
         // 周期清理过期的 COMPACT 配对记录和 Relay 客户端连接
         if (now - last_cleanup >= CLEANUP_INTERVAL) {
-            cleanup_compact_pairs();
+            cleanup_compact_pairs(udp_fd);
             cleanup_relay_clients();
             last_cleanup = now;
         }
@@ -1363,26 +1640,24 @@ int main(int argc, char *argv[]) {
             uint8_t buf[64]; struct sockaddr_in from; socklen_t from_len = sizeof(from);
             size_t n = recvfrom(probe_fd, (char *)buf, sizeof(buf), 0, (struct sockaddr *)&from, &from_len);
 
-            // NAT_PROBE: [hdr(4)][request_id(2)][reserved(2)] = 8 bytes
-            if (n >= 8 && buf[0] == SIG_PKT_NAT_PROBE) {
+            // NAT_PROBE: [hdr(4)] = 4 bytes
+            if (n >= 4 && buf[0] == SIG_PKT_NAT_PROBE) {
 
-                uint16_t req_id = ((uint16_t)buf[4] << 8) | buf[5];
+                uint16_t req_seq = ((uint16_t)buf[2] << 8) | buf[3];  // 从包头读取 seq
 
                 // 构造应答包（NAT_PROBE_ACK）
-                // + [hdr(4)][request_id(2)][probe_ip(4)][probe_port(2)] = 12 bytes
+                // [hdr(4)][probe_ip(4)][probe_port(2)] = 10 bytes
                 buf[0] = SIG_PKT_NAT_PROBE_ACK;
                 buf[1] = 0;                                     /* flags */
-                buf[2] = 0;                                     /* seq hi */
-                buf[3] = 0;                                     /* seq lo */
-                buf[4] = (uint8_t)(req_id >> 8);                /* request_id hi */
-                buf[5] = (uint8_t)(req_id & 0xFF);              /* request_id lo */
-                memcpy(buf + 6,  &from.sin_addr.s_addr, 4);     /* probe_ip   */
-                memcpy(buf + 10, &from.sin_port, 2);            /* probe_port */
-                sendto(probe_fd, (const char *)buf, 12, 0, (struct sockaddr *)&from, sizeof(from));
+                buf[2] = (uint8_t)(req_seq >> 8);               /* seq hi (复制请求的 seq) */
+                buf[3] = (uint8_t)(req_seq & 0xFF);             /* seq lo */
+                memcpy(buf + 4, &from.sin_addr.s_addr, 4);      /* probe_ip   */
+                memcpy(buf + 8, &from.sin_port, 2);             /* probe_port */
+                sendto(probe_fd, (const char *)buf, 10, 0, (struct sockaddr *)&from, sizeof(from));
 
                 printf(server_msg(MSG_PROBE_ACK),
                        inet_ntoa(from.sin_addr), ntohs(from.sin_port),
-                       req_id,
+                       req_seq,
                        inet_ntoa(from.sin_addr), ntohs(from.sin_port));
                 fflush(stdout);
             }
@@ -1415,6 +1690,13 @@ int main(int argc, char *argv[]) {
     
 #ifdef _WIN32
     WSACleanup();
+#endif
+
+    // 关闭随机数源
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
+    if (g_urandom_fp) {
+        fclose(g_urandom_fp);
+    }
 #endif
     
     printf("%s\n", server_msg(MSG_SERVER_GOODBYE));

@@ -70,6 +70,7 @@ typedef enum {
     
     /* UDP/COMPACT 日志消息 */
     MSG_UDP_REGISTER,            /* REGISTER消息 */
+    MSG_UDP_REGISTER_INVALID,    /* 无效的REGISTER消息 */
     MSG_UDP_CANDIDATE_INFO,      /* 候选信息 */
     MSG_UDP_REGISTER_ACK_ERROR,  /* REGISTER_ACK错误 */
     MSG_UDP_REGISTER_ACK_OK,     /* REGISTER_ACK成功 */
@@ -77,12 +78,37 @@ typedef enum {
     MSG_UDP_SENT_PEER_INFO_ADDR, /* 已发送PEER_INFO(含地址) */
     MSG_UDP_TARGET_NOT_FOUND,    /* 目标未找到 */
     MSG_UDP_UNREGISTER,          /* UNREGISTER */
+    MSG_UDP_UNREGISTER_INVALID,  /* 无效的UNREGISTER消息 */
     MSG_UDP_PAIR_TIMEOUT,        /* 配对超时 */
+    MSG_UDP_UNKNOWN_SIG,         /* 未知信令类型 */
     
     /* DEBUG 和 PROBE 日志 */
     MSG_DEBUG_RECEIVED_BYTES,    /* 接收字节(调试) */
     MSG_PROBE_ACK,               /* NAT探测响应 */
-    
+
+    /* UDP/COMPACT 新增日志消息 */
+    MSG_UDP_PEER_INFO_RETRANSMIT,      /* PEER_INFO 重传 */
+    MSG_UDP_PEER_INFO_RETRANSMIT_FAIL, /* PEER_INFO 重传超时放弃 */
+    MSG_UDP_SESSION_ASSIGNED,          /* 分配 session_id */
+    MSG_UDP_PEER_OFF_SENT,             /* 发送 PEER_OFF 通知 */
+    MSG_UDP_PEER_INFO_ACK_INVALID,     /* 无效 PEER_INFO_ACK */
+    MSG_UDP_PEER_INFO_ACK_CONFIRMED,   /* 确认 PEER_INFO_ACK seq=0 */
+    MSG_UDP_PEER_INFO_ACK_UNKNOWN,     /* 未知 session_id 的 ACK */
+    MSG_UDP_PEER_INFO_ACK_RELAYED,     /* 中继 PEER_INFO_ACK */
+    MSG_UDP_PEER_INFO_ACK_RELAY_FAIL,  /* 无法中继 ACK */
+    MSG_UDP_RELAY_INVALID_SRC,         /* PEER_INFO seq=0 来自客户端（非法） */
+    MSG_UDP_RELAY_PKT_INVALID,         /* relay 包过短 */
+    MSG_UDP_RELAY_UNKNOWN_SESSION,     /* 未知 session_id 的 relay 包 */
+    MSG_UDP_RELAY_NO_PEER,             /* relay session 对端不可用 */
+    MSG_UDP_RELAY_PEER_INFO,           /* 中继 PEER_INFO */
+    MSG_UDP_RELAY_DATA,                /* 中继 DATA */
+    MSG_UDP_RELAY_ACK,                 /* 中继 ACK */
+
+    /* 平台/初始化错误消息 */
+    MSG_SERVER_WIN_CTRL_HANDLER_ERR,   /* Windows: SetConsoleCtrlHandler 失败 */
+    MSG_SERVER_URANDOM_WARN,           /* Linux: /dev/urandom 打开失败 */
+    MSG_SERVER_WINSOCK_ERR,            /* Windows: WSAStartup 失败 */
+
     MSG_SERVER_COUNT             /* 消息总数 */
 } server_msg_id_t;
 

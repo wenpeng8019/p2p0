@@ -192,6 +192,44 @@ static inline void p2p_sleep_ms(int ms) {
 #endif
 
 /* ============================================================================
+ * 64-bit 字节序转换（htonll / ntohll）
+ * ============================================================================ */
+#ifdef _WIN32
+  /* Windows: ntohl 来自 winsock2.h，手动实现 64-bit 版本 */
+  static inline uint64_t htonll(uint64_t x) {
+      return (((uint64_t)htonl((uint32_t)(x & 0xFFFFFFFFULL))) << 32) |
+              (uint64_t)htonl((uint32_t)(x >> 32));
+  }
+  static inline uint64_t ntohll(uint64_t x) { return htonll(x); }
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+  /* Linux/BSD: <endian.h> 提供 htobe64/be64toh */
+# include <endian.h>
+# ifndef htonll
+#   define htonll(x) htobe64(x)
+# endif
+# ifndef ntohll
+#   define ntohll(x) be64toh(x)
+# endif
+#elif defined(__APPLE__)
+  /* macOS: 系统头已定义 htonll/ntohll，用 #ifndef 保护以免重定义 */
+# include <libkern/OSByteOrder.h>
+# ifndef htonll
+#   define htonll(x) OSSwapHostToBigInt64(x)
+# endif
+# ifndef ntohll
+#   define ntohll(x) OSSwapBigToHostInt64(x)
+# endif
+#else
+  /* 通用 fallback */
+  static inline uint64_t htonll(uint64_t x) {
+      const uint32_t hi = htonl((uint32_t)(x >> 32));
+      const uint32_t lo = htonl((uint32_t)(x & 0xFFFFFFFFULL));
+      return ((uint64_t)lo << 32) | hi;
+  }
+  static inline uint64_t ntohll(uint64_t x) { return htonll(x); }
+#endif
+
+/* ============================================================================
  * Winsock 初始化助手（在 main() 或库初始化时调用一次）
  * ============================================================================ */
 #ifdef _WIN32

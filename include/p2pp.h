@@ -94,7 +94,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 1. 客户端发送 REGISTER（含 UDP 包可容纳的最大候选列表）
  * 2. 服务器回复 REGISTER_ACK（告知远程缓存的候选数量限制、公网地址、探测端口、是否支持中继）
  * 3. 服务器配置：若支持 NAT 探测，则在 REGISTER_ACK 中设置 probe_port > 0；客户端收到后可发送 NAT_PROBE
- * 4. 双方上线后，服务器向双方发送 PEER_INFO(seq=1)，包含服务器缓存的对端候选
+ * 4. 双方上线后，服务器向双方发送 PEER_INFO(seq=0)，包含服务器缓存的对端候选
  * 5. 双方通过 PEER_INFO(seq=2,3,...)继续向对方同步剩余候选列表
  * 6. 每个 PEER_INFO 需要 PEER_INFO_ACK 确认，未确认则重发
  * 7. 如果 P2P 打洞失败且服务器支持中继，可通过 RELAY_DATA 转发数据
@@ -105,12 +105,16 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 /* COMPACT 信令协议 (客户端 <-> 信令服务器) - 0x80-0x9F */
 #define SIG_PKT_REGISTER        0x80        // 注册到信令服务器（含本地候选列表）
 #define SIG_PKT_REGISTER_ACK    0x81        // 注册确认（告知缓存能力、公网地址、探测端口、中继支持）
-#define SIG_PKT_PEER_INFO       0x82        // 候选列表同步包（序列化传输）
-#define SIG_PKT_PEER_INFO_ACK   0x83        // 候选列表确认（确认指定序列号）
-#define SIG_PKT_NAT_PROBE       0x84        // NAT 类型探测请求（发往探测端口）
-#define SIG_PKT_NAT_PROBE_ACK   0x85        // NAT 类型探测响应（返回第二次映射地址）
-#define SIG_PKT_UNREGISTER      0x86        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
+#define SIG_PKT_ALIVE           0x82        // 保活包（可选，客户端定期发送以维持注册状态）
+#define SIG_PKT_ALIVE_ACK       0x83        // 保活确认（服务器回复以确认注册状态）
+#define SIG_PKT_PEER_INFO       0x84        // 候选列表同步包（序列化传输）
+#define SIG_PKT_PEER_INFO_ACK   0x85        // 候选列表确认（确认指定序列号）
+#define SIG_PKT_NAT_PROBE       0x86        // NAT 类型探测请求（发往探测端口）
+#define SIG_PKT_NAT_PROBE_ACK   0x87        // NAT 类型探测响应（返回第二次映射地址）
+#define SIG_PKT_UNREGISTER      0x88        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
                                             // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
+#define SIG_PKT_PEER_OFF        0x89        // 服务器下行通知：对端已离线/断开
+
 
 /* COMPACT 服务器中继扩展协议 - 0xA0-0xBF */
 #define P2P_PKT_RELAY_DATA      0xA0        // 中继服务器转发的数据（P2P 打洞失败后的降级方案）
@@ -159,38 +163,69 @@ typedef struct {
  *   - flags: 包头的 flags 字段可设置 SIG_REGACK_FLAG_RELAY (0x01) 表示服务器支持中继
  *   总大小: 4(包头) + 10(payload) = 14 字节
  *
+ * ALIVE:
+ *   payload: [local_peer_id(32)][remote_peer_id(32)]
+ *   包头: type=0x82, flags=0, seq=0
+ *   用于客户端在 REGISTERED 状态定期发送，保持服务器槽位活跃
+ *
+ * ALIVE_ACK:
+ *   payload: 空（仅包头）
+ *   包头: type=0x83, flags=0, seq=0
+ *   服务器回复确认，表示槽位仍然有效
+ *
  * PEER_INFO:
- *   payload: [base_index(1)][candidate_count(1)][candidates(N*7)]
- *   包头: type=0x82, flags=见下, seq=序列号
+ *   payload: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
+ *   包头: type=0x84, flags=见下, seq=序列号
+ *   - session_id: 会话 ID（网络字节序，64位，服务器在 seq=0 时分配，客户端在 seq>0 时使用收到的值）
  *   - base_index: 本批候选的起始索引（0-based）
  *   - candidate_count: 本批候选数量，0 表示结束标识（配合 FIN 标志）
- *   - seq=1: 服务器发送，base_index=0，包含缓存的对端候选
- *   - seq>1: 客户端发送，base_index 递增，继续同步剩余候选
+ *   - seq=0: 服务器发送，base_index=0，包含缓存的对端候选，**首次分配 session_id**
+ *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用服务器分配的 session_id
  *   - flags: 包头的 flags 字段可设置 SIG_PEER_INFO_FIN (0x01) 表示候选列表发送完毕
  *
- * NAT_PROBE:
- *   payload: [request_id(2)][reserved(2)]
- *   包头: type=0x84, flags=0, seq=0
- *   - request_id: 请求标识符，用于匹配响应
- *
- * NAT_PROBE_ACK:
- *   payload: [request_id(2)][probe_ip(4)][probe_port(2)]
- *   包头: type=0x85, flags=0, seq=0
- *   - request_id: 对应的请求标识符
- *   - probe_ip/port: 服务器在探测端口观察到的客户端源地址（第二次映射）
- *
  * PEER_INFO_ACK:
- *   payload: [ack_seq(2)][reserved(2)]
- *   包头: type=0x83, flags=0, seq=0
+ *   payload: [session_id(8)][ack_seq(2)]
+ *   包头: type=0x85, flags=0, seq=0
+ *   - session_id: 会话 ID（网络字节序，64位）
  *   - ack_seq: 确认的 PEER_INFO 序列号
  *
+ * NAT_PROBE:
+ *   payload: 空（无需额外字段）
+ *   包头: type=0x86, flags=0, seq=客户端分配的请求号
+ *   - seq 可用于匹配响应，客户端可递增或随机分配
+ *
+ * NAT_PROBE_ACK:
+ *   payload: [probe_ip(4)][probe_port(2)]
+ *   包头: type=0x87, flags=0, seq=对应的 NAT_PROBE 请求 seq
+ *   - probe_ip/port: 服务器在探测端口观察到的客户端源地址（第二次映射）
+ *   - seq: 复制请求包的 seq，用于客户端匹配响应
+ *
+ * UNREGISTER:
+ *   payload: [local_peer_id(32)][remote_peer_id(32)]
+ *   包头: type=0x88, flags=0, seq=0
+ *   客户端主动断开时发送，请求服务器立即释放配对槽位
+ *   服务器收到后会向对端发送 PEER_OFF 通知
+ *
+ * PEER_OFF:
+ *   payload: [session_id(8)]
+ *   包头: type=0x89, flags=0, seq=0
+ *   服务器下行通知：对端已离线/断开连接
+ *   - session_id: 已断开的会话 ID（网络字节序，64位）
+ *   客户端收到此包后应停止该会话的所有传输和重传
+ *
  * RELAY_DATA:
- *   payload: [target_peer_id(32)][data_len(2)][data(N)]
+ *   payload: [session_id(8)][data_len(2)][data(N)]
  *   包头: type=0xA0, flags=0, seq=数据序列号
- *   - target_peer_id: 目标对端 ID
- *   - data_len: 数据长度
+ *   - session_id: 会话 ID（网络字节序，64位，用于服务器查找目标对端）
+ *   - data_len: 数据长度（网络字节序）
  *   - data: 实际数据内容
  *   用于在 P2P 打洞失败后，通过服务器中继转发数据
+ *
+ * RELAY_ACK:
+ *   payload: [session_id(8)][ack_seq(2)]
+ *   包头: type=0xA1, flags=0, seq=0
+ *   - session_id: 会话 ID（网络字节序，64位）
+ *   - ack_seq: 确认的 RELAY_DATA 序列号（网络字节序）
  */
 
 /* ============================================================================

@@ -3,6 +3,7 @@
  */
 #include "server_lang.h"
 #include <stddef.h>
+#include <inttypes.h>
 
 /* 当前语言 */
 static p2p_language_t current_language = P2P_LANG_EN;
@@ -71,18 +72,44 @@ static const char* messages_en[MSG_SERVER_COUNT] = {
     
     /* UDP/COMPACT 日志消息 */
     [MSG_UDP_REGISTER]            = "[UDP] REGISTER from %s: local='%s', remote='%s', candidates=%d\n",
+    [MSG_UDP_REGISTER_INVALID]    = "[UDP] Invalid REGISTER from %s (payload too short)\n",
     [MSG_UDP_CANDIDATE_INFO]      = "      [%d] type=%d, %s:%d\n",
     [MSG_UDP_REGISTER_ACK_ERROR]  = "[UDP] REGISTER_ACK to %s: error (no slot available)\n",
     [MSG_UDP_REGISTER_ACK_OK]     = "[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n",
-    [MSG_UDP_SENT_PEER_INFO]      = "[UDP] Sent PEER_INFO(seq=1, base=0) to %s (local='%s') with %d candidates%s\n",
-    [MSG_UDP_SENT_PEER_INFO_ADDR] = "[UDP] Sent PEER_INFO(seq=1, base=0) to %s:%d (local='%s') with %d candidates%s\n",
+    [MSG_UDP_SENT_PEER_INFO]      = "[UDP] PEER_INFO(seq=0) bilateral: %s(%d cands) <-> %s(%d cands)\n",
+    [MSG_UDP_SENT_PEER_INFO_ADDR] = "[UDP] Sent PEER_INFO(seq=0) to %s:%d (peer='%s') with %d cands%s\n",
     [MSG_UDP_TARGET_NOT_FOUND]    = "[UDP] Target pair (%s → %s) not found (waiting for peer registration)\n",
     [MSG_UDP_UNREGISTER]          = "[UDP] UNREGISTER: releasing slot for '%s' -> '%s'\n",
+    [MSG_UDP_UNREGISTER_INVALID]  = "[UDP] Invalid UNREGISTER from %s (payload too short)\n",
     [MSG_UDP_PAIR_TIMEOUT]        = "[UDP] Peer pair (%s → %s) timed out\n",
+    [MSG_UDP_UNKNOWN_SIG]         = "[UDP] Unknown signaling packet type %d from %s\n",
     
     /* DEBUG 和 PROBE 日志 */
     [MSG_DEBUG_RECEIVED_BYTES]    = "[DEBUG] Received %d bytes: magic=0x%08X, type=%d, length=%d (expected magic=0x%08X)\n",
-    [MSG_PROBE_ACK]               = "[PROBE] NAT_PROBE_ACK -> %s:%d (req_id=%u, mapped=%s:%d)\n",
+    [MSG_PROBE_ACK]               = "[PROBE] NAT_PROBE_ACK -> %s:%d (seq=%u, mapped=%s:%d)\n",
+
+    /* UDP/COMPACT 新增日志消息 */
+    [MSG_UDP_PEER_INFO_RETRANSMIT]     = "[UDP] Retransmit PEER_INFO (sid=%" PRIu64 "): %s <-> %s (attempt %d/%d)\n",
+    [MSG_UDP_PEER_INFO_RETRANSMIT_FAIL]= "[UDP] PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",
+    [MSG_UDP_SESSION_ASSIGNED]         = "[UDP] Assigned session_id=%" PRIu64 " for %s -> %s\n",
+    [MSG_UDP_PEER_OFF_SENT]            = "[UDP] PEER_OFF sent to %s (sid=%" PRIu64 ")%s\n",
+    [MSG_UDP_PEER_INFO_ACK_INVALID]    = "[UDP] Invalid PEER_INFO_ACK from %s (size %zu)\n",
+    [MSG_UDP_PEER_INFO_ACK_CONFIRMED]  = "[UDP] PEER_INFO_ACK(seq=0) confirmed: sid=%" PRIu64 " (%s <-> %s, %d retransmits)\n",
+    [MSG_UDP_PEER_INFO_ACK_UNKNOWN]    = "[UDP] PEER_INFO_ACK for unknown sid=%" PRIu64 " from %s\n",
+    [MSG_UDP_PEER_INFO_ACK_RELAYED]    = "[UDP] Relay PEER_INFO_ACK seq=%u: sid=%" PRIu64 " (%s -> %s)\n",
+    [MSG_UDP_PEER_INFO_ACK_RELAY_FAIL] = "[UDP] Cannot relay PEER_INFO_ACK: sid=%" PRIu64 " (peer unavailable)\n",
+    [MSG_UDP_RELAY_INVALID_SRC]        = "[UDP] PEER_INFO seq=0 from client %s (server-only, dropped)\n",
+    [MSG_UDP_RELAY_PKT_INVALID]        = "[UDP] Relay packet too short: type=0x%02x from %s (size %zu)\n",
+    [MSG_UDP_RELAY_UNKNOWN_SESSION]    = "[UDP] Relay 0x%02x for unknown sid=%" PRIu64 " from %s (dropped)\n",
+    [MSG_UDP_RELAY_NO_PEER]            = "[UDP] Relay 0x%02x for sid=%" PRIu64 ": peer unavailable (dropped)\n",
+    [MSG_UDP_RELAY_PEER_INFO]          = "[UDP] Relay PEER_INFO seq=%u: sid=%" PRIu64 " (%s -> %s)\n",
+    [MSG_UDP_RELAY_DATA]               = "[UDP] Relay DATA seq=%u: sid=%" PRIu64 " (%s -> %s)\n",
+    [MSG_UDP_RELAY_ACK]                = "[UDP] Relay ACK: sid=%" PRIu64 " (%s -> %s)\n",
+
+    /* 平台/初始化错误消息 */
+    [MSG_SERVER_WIN_CTRL_HANDLER_ERR]  = "[SERVER] Failed to set console ctrl handler\n",
+    [MSG_SERVER_URANDOM_WARN]          = "[SERVER] Warning: Cannot open /dev/urandom, using fallback RNG\n",
+    [MSG_SERVER_WINSOCK_ERR]           = "[SERVER] WSAStartup failed\n",
 };
 
 /* 中文词表 */
@@ -149,18 +176,44 @@ static const char* messages_zh[MSG_SERVER_COUNT] = {
     
     /* UDP/COMPACT 日志消息 */
     [MSG_UDP_REGISTER]            = "[UDP] 收到 REGISTER 从 %s: local='%s', remote='%s', candidates=%d\n",
+    [MSG_UDP_REGISTER_INVALID]    = "[UDP] 无效的 REGISTER 从 %s（负载过短）\n",
     [MSG_UDP_CANDIDATE_INFO]      = "      [%d] type=%d, %s:%d\n",
-    [MSG_UDP_REGISTER_ACK_ERROR]  = "[UDP] REGISTER_ACK 到 %s: 错误 (无可用槽位)\n",
-    [MSG_UDP_REGISTER_ACK_OK]     = "[UDP] REGISTER_ACK 到 %s: ok, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n",
-    [MSG_UDP_SENT_PEER_INFO]      = "[UDP] 已发送 PEER_INFO(seq=1, base=0) 到 %s (local='%s') 含 %d 个候选%s\n",
-    [MSG_UDP_SENT_PEER_INFO_ADDR] = "[UDP] 已发送 PEER_INFO(seq=1, base=0) 到 %s:%d (local='%s') 含 %d 个候选%s\n",
-    [MSG_UDP_TARGET_NOT_FOUND]    = "[UDP] 目标配对 (%s → %s) 未找到 (等待对端注册)\n",
+    [MSG_UDP_REGISTER_ACK_ERROR]  = "[UDP] REGISTER_ACK 至 %s: 错误（无可用槽位）\n",
+    [MSG_UDP_REGISTER_ACK_OK]     = "[UDP] REGISTER_ACK 至 %s: 成功, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n",
+    [MSG_UDP_SENT_PEER_INFO]      = "[UDP] PEER_INFO(seq=0) 双向发送: %s(%d候选) <-> %s(%d候选)\n",
+    [MSG_UDP_SENT_PEER_INFO_ADDR] = "[UDP] 已发送 PEER_INFO(seq=0) 至 %s:%d (对端='%s')，候选数=%d%s\n",
+    [MSG_UDP_TARGET_NOT_FOUND]    = "[UDP] 目标配对 (%s → %s) 未找到（等待对端注册）\n",
     [MSG_UDP_UNREGISTER]          = "[UDP] UNREGISTER: 释放槽位 '%s' -> '%s'\n",
-    [MSG_UDP_PAIR_TIMEOUT]        = "[UDP] 对端配对 (%s → %s) 超时\n",
+    [MSG_UDP_UNREGISTER_INVALID]  = "[UDP] 无效的 UNREGISTER 从 %s（负载过短）\n",
+    [MSG_UDP_PAIR_TIMEOUT]        = "[UDP] 配对超时 (%s → %s)\n",
+    [MSG_UDP_UNKNOWN_SIG]         = "[UDP] 未知信令包类型 %d 从 %s\n",
     
     /* DEBUG 和 PROBE 日志 */
     [MSG_DEBUG_RECEIVED_BYTES]    = "[DEBUG] 接收 %d 字节: magic=0x%08X, type=%d, length=%d (期望magic=0x%08X)\n",
-    [MSG_PROBE_ACK]               = "[PROBE] NAT_PROBE_ACK -> %s:%d (req_id=%u, mapped=%s:%d)\n",
+    [MSG_PROBE_ACK]               = "[PROBE] NAT_PROBE_ACK -> %s:%d (seq=%u, mapped=%s:%d)\n",
+
+    /* UDP/COMPACT 新增日志消息 */
+    [MSG_UDP_PEER_INFO_RETRANSMIT]     = "[UDP] 重传 PEER_INFO (sid=%" PRIu64 "): %s <-> %s（第 %d/%d 次）\n",
+    [MSG_UDP_PEER_INFO_RETRANSMIT_FAIL]= "[UDP] PEER_INFO 重传放弃: %s <-> %s（尝试 %d 次后放弃）\n",
+    [MSG_UDP_SESSION_ASSIGNED]         = "[UDP] 已分配 session_id=%" PRIu64 " 给 %s -> %s\n",
+    [MSG_UDP_PEER_OFF_SENT]            = "[UDP] 已向 %s 发送 PEER_OFF（sid=%" PRIu64 "）%s\n",
+    [MSG_UDP_PEER_INFO_ACK_INVALID]    = "[UDP] 无效的 PEER_INFO_ACK，来自 %s（大小 %zu）\n",
+    [MSG_UDP_PEER_INFO_ACK_CONFIRMED]  = "[UDP] PEER_INFO_ACK(seq=0) 已确认: sid=%" PRIu64 "（%s <-> %s，重传 %d 次）\n",
+    [MSG_UDP_PEER_INFO_ACK_UNKNOWN]    = "[UDP] 未知 sid=%" PRIu64 " 的 PEER_INFO_ACK，来自 %s\n",
+    [MSG_UDP_PEER_INFO_ACK_RELAYED]    = "[UDP] 中继 PEER_INFO_ACK seq=%u: sid=%" PRIu64 "（%s -> %s）\n",
+    [MSG_UDP_PEER_INFO_ACK_RELAY_FAIL] = "[UDP] 无法中继 PEER_INFO_ACK: sid=%" PRIu64 "（对端不可用）\n",
+    [MSG_UDP_RELAY_INVALID_SRC]        = "[UDP] 客户端 %s 发送了 PEER_INFO seq=0（仅服务器可发，已丢弃）\n",
+    [MSG_UDP_RELAY_PKT_INVALID]        = "[UDP] 中继包过短: type=0x%02x，来自 %s（大小 %zu）\n",
+    [MSG_UDP_RELAY_UNKNOWN_SESSION]    = "[UDP] 中继包 0x%02x 找不到 sid=%" PRIu64 "，来自 %s（已丢弃）\n",
+    [MSG_UDP_RELAY_NO_PEER]            = "[UDP] 中继包 0x%02x，sid=%" PRIu64 "：对端不可用（已丢弃）\n",
+    [MSG_UDP_RELAY_PEER_INFO]          = "[UDP] 中继 PEER_INFO seq=%u: sid=%" PRIu64 "（%s -> %s）\n",
+    [MSG_UDP_RELAY_DATA]               = "[UDP] 中继数据 seq=%u: sid=%" PRIu64 "（%s -> %s）\n",
+    [MSG_UDP_RELAY_ACK]                = "[UDP] 中继 ACK: sid=%" PRIu64 "（%s -> %s）\n",
+
+    /* 平台/初始化错误消息 */
+    [MSG_SERVER_WIN_CTRL_HANDLER_ERR]  = "[服务器] 设置控制台信号处理器失败\n",
+    [MSG_SERVER_URANDOM_WARN]          = "[服务器] 警告：无法打开 /dev/urandom，使用备用随机数\n",
+    [MSG_SERVER_WINSOCK_ERR]           = "[服务器] WSAStartup 初始化失败\n",
 };
 
 /* 设置当前语言 */
