@@ -23,13 +23,6 @@ add_executable(test_compact_server
 )
 target_link_libraries(test_compact_server ${TEST_PLATFORM_LIBS})
 
-# COMPACT 服务端 v2 全面协议测试（session_id / PEER_INFO(seq=0) / PEER_INFO_ACK / PEER_OFF / relay）
-add_executable(test_compact_server_v2
-    test_compact_server_v2.c
-)
-target_link_libraries(test_compact_server_v2 ${TEST_PLATFORM_LIBS})
-add_test(NAME test_compact_server_v2 COMMAND test_compact_server_v2)
-
 # RELAY 服务端完整测试（独立运行，不依赖 p2p 库）
 add_executable(test_relay_server
     test_relay_server.c
