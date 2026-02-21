@@ -1,8 +1,7 @@
 #ifndef P2P_TRANSPORT_H
 #define P2P_TRANSPORT_H
 
-#include <stdint.h>
-#include "p2p_udp.h"
+#include "p2p_platform.h"
 
 /* ============================================================================
  * 可靠传输层 (Reliable Transport Layer)
@@ -121,7 +120,6 @@ void p2p_pseudotcp_on_ack(struct p2p_session *s, uint16_t ack_seq);
 
 // 前置声明
 struct p2p_session;
-struct sockaddr_in;
 
 // 传输层操作接口 (vtable)
 typedef struct p2p_transport_ops {

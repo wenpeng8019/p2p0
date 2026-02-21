@@ -64,31 +64,32 @@
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
-#include <p2p.h>
-#include <p2pp.h>           /* 协议定义 */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>           /* PRIu64 */
 
-/* 跨平台兼容层（socket / 线程 / 时钟 / sleep） */
-#include "p2p_platform.h"
-#include "p2p_lang.h"          /* 多语言消息 / p2p_nat_type_str 依赖 */
+#include <p2p.h>
+#include <p2pp.h>               /* 协议定义 */
 
-#include "p2p_nat.h"           /* NAT 穿透与类型检测 */
-#include "p2p_route.h"         /* 路由表管理 */
-#include "p2p_stream.h"        /* 流式数据传输 */
-#include "p2p_transport.h"     /* 传输层抽象接口 */
-#include "p2p_udp.h"           /* UDP 传输层常量 (P2P_MTU, P2P_MAX_PAYLOAD) */
-#include "p2p_stun.h"          /* STUN 协议实现 */
-#include "p2p_crypto.h"        /* 加密功能 */
-#include "p2p_ice.h"           /* ICE 协议 */
-#include "p2p_turn.h"          /* TURN 中继 */
-#include "p2p_tcp_punch.h"     /* TCP 打洞 */
-#include "p2p_signal_relay.h"  /* 中继模式信令 */
-#include "p2p_signal_pubsub.h" /* 发布/订阅模式信令 */
+#include "p2p_platform.h"       /* 跨平台兼容层（socket / 线程 / 时钟 / sleep） */
+#include "p2p_lang.h"           /* 多语言消息 / p2p_nat_type_str 依赖 */
+
+#include "p2p_nat.h"            /* NAT 穿透与类型检测 */
+#include "p2p_route.h"          /* 路由表管理 */
+#include "p2p_stream.h"         /* 流式数据传输 */
+#include "p2p_transport.h"      /* 传输层抽象接口 */
+#include "p2p_udp.h"            /* UDP 传输层常量 (P2P_MTU, P2P_MAX_PAYLOAD) */
+#include "p2p_stun.h"           /* STUN 协议实现 */
+#include "p2p_crypto.h"         /* 加密功能 */
+#include "p2p_ice.h"            /* ICE 协议 */
+#include "p2p_turn.h"           /* TURN 中继 */
+#include "p2p_tcp_punch.h"      /* TCP 打洞 */
+#include "p2p_signal_relay.h"   /* 中继模式信令 */
+#include "p2p_signal_pubsub.h"  /* 发布/订阅模式信令 */
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
+#include "p2p_log.h"
 
 /* ============================================================================
  * p2p_session: P2P 会话主结构体

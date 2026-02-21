@@ -103,14 +103,7 @@
  *   p2p_signal_relay_close(&ctx);
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "p2p_signal_relay.h"
 #include "p2p_internal.h"
-#include "p2p_platform.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
 
 void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx) {
 

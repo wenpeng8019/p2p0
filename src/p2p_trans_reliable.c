@@ -2,12 +2,7 @@
  * 基于滑动窗口和 SACK 的数据包级 ARQ
  */
 
-#include "p2p_udp.h"
 #include "p2p_internal.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
-
-#include <string.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 // Implementation

@@ -1,11 +1,5 @@
 
 #include "p2p_internal.h"
-#include "p2p_udp.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
-
-/* 前向声明 */
-struct p2p_session;
 
 ///////////////////////////////////////////////////////////////////////////////
 

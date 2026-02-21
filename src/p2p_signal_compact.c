@@ -19,16 +19,8 @@
  */
 
 #include "p2p_internal.h"
-#include "p2p_signal_compact.h"
-#include "p2p_udp.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
-
-#include <string.h>
-#include <inttypes.h>   /* PRIu64 */
 #ifndef _WIN32
 #include <arpa/inet.h>
-#include <sys/time.h>
 #endif
 
 #define REGISTER_INTERVAL_MS            1000    /* 注册重发间隔 */

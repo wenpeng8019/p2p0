@@ -7,17 +7,6 @@
  */
 
 #include "p2p_internal.h"
-#include "p2p_nat.h"
-#include "p2p_udp.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
-
-#include <string.h>
-#ifndef _WIN32
-#include <arpa/inet.h>
-#endif
-#include <stddef.h>
-#include <stdio.h>
 
 #define PUNCH_INTERVAL_MS       500         /* 打洞间隔 */
 #define PUNCH_TIMEOUT_MS        5000        /* 打洞超时 */

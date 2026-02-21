@@ -5,9 +5,8 @@
 #ifndef P2P_UDP_H
 #define P2P_UDP_H
 
-#include <p2p.h>
-#include <p2pp.h>              /* p2p_packet_hdr_t 定义 */
-#include "p2p_platform.h"   /* cross-platform socket headers */
+#include <p2pp.h>               /* p2p_packet_hdr_t 定义 */
+#include "p2p_platform.h"       /* cross-platform socket headers */
 
 /* UDP 传输层常量 */
 #define P2P_HDR_SIZE      4                 /* 包头大小 */

@@ -4,10 +4,10 @@
 
 #ifdef P2P_THREADED
 
-#include "p2p_internal.h"
+struct p2p_session;
 
-int  p2p_thread_start(p2p_session_t *s);
-void p2p_thread_stop(p2p_session_t *s);
+int  p2p_thread_start(struct p2p_session *s);
+void p2p_thread_stop(struct p2p_session *s);
 
 #endif /* P2P_THREADED */
 

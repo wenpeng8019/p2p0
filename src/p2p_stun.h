@@ -80,9 +80,7 @@
 #ifndef P2P_STUN_H
 #define P2P_STUN_H
 
-#include <stdint.h>
 #include <p2p.h>            /* p2p_nat_type_t */
-#include "p2p_platform.h"   /* cross-platform socket headers */
 
 /*
  * STUN Magic Cookie (RFC 5389)

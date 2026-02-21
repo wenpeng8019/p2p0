@@ -1,8 +1,5 @@
 
 #include "p2p_internal.h"
-#include "p2p_udp.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
 
 /* ----------------------------------------------------------------------------
  * TURN 消息类型定义（RFC 5766）

@@ -2,9 +2,8 @@
 #ifndef P2P_LOG_H
 #define P2P_LOG_H
 
-#include <p2p.h>    /* p2p_log_level_t */
+#include <p2p.h>
 #include <stdio.h>
-#include <stdarg.h>
 
 #ifdef __cplusplus
 extern "C" {

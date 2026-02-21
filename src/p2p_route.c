@@ -3,13 +3,16 @@
  * 路由检测
  */
 
-#include "p2p_route.h"
-#include "p2p_udp.h"
 #include "p2p_internal.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
-
-#include <string.h>
+#ifdef _WIN32
+#   include <winsock2.h>
+#   include <ws2tcpip.h>
+#   include <iphlpapi.h>
+#   pragma comment(lib, "iphlpapi.lib")
+#else
+#   include <ifaddrs.h>
+#   include <net/if.h>
+#endif
 
 /* 子网掩码前缀长度计算：GCC/Clang 使用内建指令，其他编译器使用位运算 */
 #if defined(__GNUC__) || defined(__clang__)
@@ -21,16 +24,6 @@ static int mask_to_prefix(uint32_t mask_net) {
     while (m & 0x80000000u) { n++; m <<= 1; }
     return n;
 }
-#endif
-
-#ifdef _WIN32
-#   include <winsock2.h>
-#   include <ws2tcpip.h>
-#   include <iphlpapi.h>
-#   pragma comment(lib, "iphlpapi.lib")
-#else
-#   include <ifaddrs.h>
-#   include <net/if.h>
 #endif
 
 void route_init(route_ctx_t *rt) {

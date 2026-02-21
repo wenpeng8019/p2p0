@@ -1,7 +1,6 @@
 
 #ifdef P2P_THREADED
 
-#include "p2p_thread.h"
 #include "p2p_internal.h"
 
 #ifdef _WIN32

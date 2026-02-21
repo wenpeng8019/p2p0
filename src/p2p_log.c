@@ -1,9 +1,6 @@
 
-#include "p2p_log.h"
-#include "p2p_platform.h"
-#include <stdio.h>
-#include <string.h>
-#include <time.h>
+#include "p2p_internal.h"
+#include <stdarg.h>
 
 #define COLOR_RESET   P2P_COLOR_RESET
 #define COLOR_RED     P2P_COLOR_RED

@@ -56,15 +56,9 @@
  *   - candidates[8]:  ICE 候选数组
  */
 
-#include "p2p_signal_pubsub.h"
+#include "p2p_internal.h"
 #include "p2p_http.h"
 #include "p2p_crypto_extra.h"
-#include "p2p_internal.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <ctype.h>
 #ifndef _WIN32
 #include <arpa/inet.h>

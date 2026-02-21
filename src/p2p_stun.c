@@ -22,9 +22,6 @@
  */
 
 #include "p2p_internal.h"
-#include "p2p_udp.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <sys/socket.h>

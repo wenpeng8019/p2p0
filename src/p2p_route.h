@@ -2,8 +2,6 @@
 #ifndef P2P_ROUTE_H
 #define P2P_ROUTE_H
 
-#include <stdint.h>
-#include <stdbool.h>
 #include "p2p_platform.h"   /* cross-platform socket headers */
 
 typedef struct {

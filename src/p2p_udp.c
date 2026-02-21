@@ -1,6 +1,5 @@
 
-#include "p2p_udp.h"
-#include "p2p_platform.h"
+#include "p2p_internal.h"
 
 #include <string.h>
 

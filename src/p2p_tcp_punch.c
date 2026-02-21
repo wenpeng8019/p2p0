@@ -1,8 +1,5 @@
 
 #include "p2p_internal.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
-/* fcntl/errno 已由 p2p_platform.h 通过 p2p_internal.h 引入 */
 
 /* 
  * 尝试 TCP 同时发起 (Simultaneous Open)

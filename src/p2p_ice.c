@@ -32,18 +32,13 @@
  */
 
 #include "p2p_internal.h"
-#include "p2p_signal_relay.h"
-#include "p2p_udp.h"
-#include "p2p_log.h"
-#include "p2p_lang.h"
-#ifndef _WIN32
-#   include <ifaddrs.h>
-#   include <net/if.h>
-#   include <netdb.h>
-#endif
 #ifdef _WIN32
 #   include <iphlpapi.h>
 #   pragma comment(lib, "iphlpapi.lib")
+#else
+#   include <ifaddrs.h>
+#   include <net/if.h>
+#   include <netdb.h>
 #endif
 
 /* ============================================================================
