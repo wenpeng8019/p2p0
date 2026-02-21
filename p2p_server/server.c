@@ -20,33 +20,21 @@
 #include <time.h>
 #include <stdbool.h>
 #include <inttypes.h>  /* PRIu64 */
-#ifndef _WIN32
-  #include <signal.h>   /* POSIX 信号处理 */
-  #include <errno.h>    /* errno 用于 select EINTR 检查 */
-#endif
 
-#include <p2p.h>
-#include <p2pp.h>
-#include "server_lang.h"
-#include "../src/p2p_internal.h"
-#include "uthash.h"
+#ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #include <windows.h>
+  #pragma comment(lib, "ws2_32.lib")
+  typedef SOCKET server_socket_t;
+  #define SERVER_INVALID_SOCKET INVALID_SOCKET
 
-// 64-bit network byte order conversion
-#if defined(__linux__)
-  #include <endian.h>
-  #define htonll(x) htobe64(x)
-  #define ntohll(x) be64toh(x)
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
-  #include <libkern/OSByteOrder.h>
-  // macOS already defines htonll/ntohll in <sys/_endian.h>, no need to redefine
-  #ifndef htonll
-    #define htonll(x) OSSwapHostToBigInt64(x)
-  #endif
-  #ifndef ntohll
-    #define ntohll(x) OSSwapBigToHostInt64(x)
-  #endif
-#elif defined(_WIN32)
-  // Windows: manual implementation
+  #define server_close_socket(s) closesocket(s)
+
+  // 64-bit network byte order conversion
   static inline uint64_t htonll(uint64_t x) {
     return ((uint64_t)htonl((uint32_t)x) << 32) | htonl((uint32_t)(x >> 32));
   }
@@ -54,22 +42,54 @@
     return ((uint64_t)ntohl((uint32_t)x) << 32) | ntohl((uint32_t)(x >> 32));
   }
 #else
+  #include <unistd.h>
+  #include <signal.h>       /* POSIX 信号处理 */
+  #include <errno.h>        /* errno 用于 select EINTR 检查 */
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+  typedef int server_socket_t;
+  #define SERVER_INVALID_SOCKET (-1)
+  #define server_close_socket(s) close(s)
+  
+  // 64-bit network byte order conversion
+  #if defined(__linux__)
+    #include <endian.h>
+    #define htonll(x) htobe64(x)
+    #define ntohll(x) be64toh(x)
+  #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
+    #include <libkern/OSByteOrder.h>
+    // macOS already defines htonll/ntohll in <sys/_endian.h>, no need to redefine
+    #ifndef htonll
+      #define htonll(x) OSSwapHostToBigInt64(x)
+    #endif
+    #ifndef ntohll
+      #define ntohll(x) OSSwapBigToHostInt64(x)
+    #endif
   // Generic fallback
-  static inline uint64_t htonll(uint64_t x) {
-    #if __BYTE_ORDER == __LITTLE_ENDIAN
-      return ((uint64_t)htonl((uint32_t)x) << 32) | htonl((uint32_t)(x >> 32));
-    #else
-      return x;
-    #endif
-  }
-  static inline uint64_t ntohll(uint64_t x) {
-    #if __BYTE_ORDER == __LITTLE_ENDIAN
-      return ((uint64_t)ntohl((uint32_t)x) << 32) | ntohl((uint32_t)(x >> 32));
-    #else
-      return x;
-    #endif
-  }
+  #else
+    static inline uint64_t htonll(uint64_t x) {
+      #if __BYTE_ORDER == __LITTLE_ENDIAN
+        return ((uint64_t)htonl((uint32_t)x) << 32) | htonl((uint32_t)(x >> 32));
+      #else
+        return x;
+      #endif
+    }
+    static inline uint64_t ntohll(uint64_t x) {
+      #if __BYTE_ORDER == __LITTLE_ENDIAN
+        return ((uint64_t)ntohl((uint32_t)x) << 32) | ntohl((uint32_t)(x >> 32));
+      #else
+        return x;
+      #endif
+    }
+  #endif
 #endif
+
+#include <p2p.h>
+#include <p2pp.h>
+#include "../src/p2p_internal.h"
+#include "server_lang.h"
+#include "uthash.h"
 
 #define DEFAULT_PORT                9333
 
@@ -99,27 +119,26 @@
 #define PEER_INFO0_RETRY_INTERVAL   2       // 重传间隔（秒）
 #define PEER_INFO0_MAX_RETRY        5       // 最大重传次数
 
-
-#ifdef _WIN32
-  #ifndef WIN32_LEAN_AND_MEAN
-  #define WIN32_LEAN_AND_MEAN
-  #endif
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  #include <windows.h>
-  #pragma comment(lib, "ws2_32.lib")
-  typedef SOCKET server_socket_t;
-  #define SERVER_INVALID_SOCKET INVALID_SOCKET
-  #define server_close_socket(s) closesocket(s)
-#else
-  #include <unistd.h>
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
-  typedef int server_socket_t;
-  #define SERVER_INVALID_SOCKET (-1)
-  #define server_close_socket(s) close(s)
-#endif
+// RELAY 模式客户端（TCP 长连接）
+typedef struct relay_client {
+    bool                    valid;                              // 客户端是否有效（无效意味着未分配或已回收）
+    char                    name[P2P_PEER_ID_MAX];              // 客户端名称（登录时提供）
+    server_socket_t         fd;                                 // 客户端 tcp 套接口描述符
+    time_t                  last_active;                        // 最后活跃时间（用于检测死连接）
+    
+    // ===== 在线连接跟踪（用于判断 OFFER/FORWARD） =====
+    char                    current_peer[P2P_PEER_ID_MAX];      // 当前正在连接的对端（空字符串表示无活动连接）
+    
+    // ===== 离线候选缓存（仅支持单一发送者） =====
+    // 注意：客户端仅支持一对一连接，不支持多方同时连接
+    // 如果新发送者发起连接，会覆盖旧发送者的缓存
+    // 场景4: 0 < pending_count < MAX_CANDIDATES (有候选缓存)
+    // 场景5: pending_count == MAX_CANDIDATES (缓存满，发送空 OFFER)
+    // 场景6: MAX_CANDIDATES == 0 (服务器不支持缓存，当前不存在此场景)
+    char                    pending_sender[P2P_PEER_ID_MAX];    // 发送者名称（空字符串表示无连接请求）
+    int                     pending_count;                      // 候选数量
+    p2p_candidate_t         pending_candidates[MAX_CANDIDATES]; // 候选列表（网络格式，直接收发，无需 sockaddr 转换）
+} relay_client_t;
 
 // COMPACT 模式配对记录（UDP 无状态）
 /* 注意：COMPACT 模式采用"配对缓存"机制：
@@ -149,29 +168,8 @@ typedef struct compact_pair {
     UT_hash_handle          hh_peer;                            // 按 peer_key (local+remote) 索引（辅助索引）
 } compact_pair_t;
 
-// RELAY 模式客户端（TCP 长连接）
-typedef struct relay_client {
-    bool                    valid;                              // 客户端是否有效（无效意味着未分配或已回收）
-    char                    name[P2P_PEER_ID_MAX];              // 客户端名称（登录时提供）
-    server_socket_t         fd;                                 // 客户端 tcp 套接口描述符
-    time_t                  last_active;                        // 最后活跃时间（用于检测死连接）
-    
-    // ===== 在线连接跟踪（用于判断 OFFER/FORWARD） =====
-    char                    current_peer[P2P_PEER_ID_MAX];      // 当前正在连接的对端（空字符串表示无活动连接）
-    
-    // ===== 离线候选缓存（仅支持单一发送者） =====
-    // 注意：客户端仅支持一对一连接，不支持多方同时连接
-    // 如果新发送者发起连接，会覆盖旧发送者的缓存
-    // 场景4: 0 < pending_count < MAX_CANDIDATES (有候选缓存)
-    // 场景5: pending_count == MAX_CANDIDATES (缓存满，发送空 OFFER)
-    // 场景6: MAX_CANDIDATES == 0 (服务器不支持缓存，当前不存在此场景)
-    char                    pending_sender[P2P_PEER_ID_MAX];    // 发送者名称（空字符串表示无连接请求）
-    int                     pending_count;                      // 候选数量
-    p2p_candidate_t         pending_candidates[MAX_CANDIDATES]; // 候选列表（网络格式，直接收发，无需 sockaddr 转换）
-} relay_client_t;
-
-static compact_pair_t       g_compact_pairs[MAX_PEERS];
 static relay_client_t       g_relay_clients[MAX_PEERS];
+static compact_pair_t       g_compact_pairs[MAX_PEERS];
 
 // uthash 哈希表（支持两种索引方式）
 static compact_pair_t*      g_pairs_by_session = NULL;         // 按 session_id 索引
@@ -1431,6 +1429,24 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
+    // 初始化随机数源（用于生成安全的 session_id）
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
+    // Linux: 打开 /dev/urandom 文件句柄（保持打开，避免重复 open/close）
+    g_urandom_fp = fopen("/dev/urandom", "rb");
+    if (!g_urandom_fp) {
+        fprintf(stderr, "%s", server_msg(MSG_SERVER_URANDOM_WARN));
+    }
+#endif
+
+#ifdef _WIN32
+    WSADATA wsa_data;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+        fprintf(stderr, "%s", server_msg(MSG_SERVER_WINSOCK_ERR));
+        return 1;
+    }
+#endif
+
+    // 打印服务器配置信息
     printf(server_msg(MSG_SERVER_STARTING), port);
     printf("\n");
     printf(server_msg(MSG_SERVER_NAT_PROBE), 
@@ -1450,23 +1466,6 @@ int main(int argc, char *argv[]) {
 #else
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
-#endif
-
-    // 初始化随机数源（用于生成安全的 session_id）
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
-    // Linux: 打开 /dev/urandom 文件句柄（保持打开，避免重复 open/close）
-    g_urandom_fp = fopen("/dev/urandom", "rb");
-    if (!g_urandom_fp) {
-        fprintf(stderr, "%s", server_msg(MSG_SERVER_URANDOM_WARN));
-    }
-#endif
-
-#ifdef _WIN32
-    WSADATA wsa_data;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-        fprintf(stderr, "%s", server_msg(MSG_SERVER_WINSOCK_ERR));
-        return 1;
-    }
 #endif
 
     // 创建 TCP 监听套接字（用于 Relay 信令模式）
@@ -1502,12 +1501,10 @@ int main(int argc, char *argv[]) {
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons((unsigned short)port);
-
     if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("TCP bind");
         return 1;
     }
-    
     if (bind(udp_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("UDP bind");
         return 1;
@@ -1671,7 +1668,8 @@ int main(int argc, char *argv[]) {
                 handle_relay_signaling(i);
             }
         }
-    }
+
+    } // while (g_running)
 
     // 清理资源
     printf("\n%s\n", server_msg(MSG_SERVER_SHUTTING_DOWN));

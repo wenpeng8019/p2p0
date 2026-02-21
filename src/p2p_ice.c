@@ -639,74 +639,72 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
         }
     }
 
-    {
-            const char *cand_type_str = "Unknown";
-            const char *connection_desc = "";
-            p2p_cand_type_t ctype = (matched_idx >= 0) ? s->remote_cands[matched_idx].type : P2P_CAND_PRFLX;
-            switch (ctype) {
-                case P2P_CAND_HOST:
-                    cand_type_str = "Host (Local Network)";
-                    connection_desc = " - Direct LAN connection";
-                    break;
-                case P2P_CAND_SRFLX:
-                    cand_type_str = "Srflx (Internet P2P)";
-                    connection_desc = " - NAT traversal via STUN";
-                    break;
-                case P2P_CAND_RELAY:
-                    cand_type_str = "Relay (TURN)";
-                    connection_desc = " - Relayed through TURN server";
-                    break;
-                case P2P_CAND_PRFLX:
-                    cand_type_str = "Prflx (Peer Reflexive)";
-                    connection_desc = " - Symmetric NAT traversal";
-                    break;
-            }
+    const char *cand_type_str = "Unknown";
+    const char *connection_desc = "";
+    p2p_cand_type_t ctype = (matched_idx >= 0) ? s->remote_cands[matched_idx].type : P2P_CAND_PRFLX;
+    switch (ctype) {
+        case P2P_CAND_HOST:
+            cand_type_str = "Host (Local Network)";
+            connection_desc = " - Direct LAN connection";
+            break;
+        case P2P_CAND_SRFLX:
+            cand_type_str = "Srflx (Internet P2P)";
+            connection_desc = " - NAT traversal via STUN";
+            break;
+        case P2P_CAND_RELAY:
+            cand_type_str = "Relay (TURN)";
+            connection_desc = " - Relayed through TURN server";
+            break;
+        case P2P_CAND_PRFLX:
+            cand_type_str = "Prflx (Peer Reflexive)";
+            connection_desc = " - Symmetric NAT traversal";
+            break;
+    }
 
-            P2P_LOG_INFO("ICE", "%s! %s %s %s %s:%d%s",
-                   MSG(MSG_ICE_NOMINATION_SUCCESS), MSG(MSG_ICE_USING), cand_type_str, MSG(MSG_ICE_PATH),
-                   inet_ntoa(from->sin_addr), ntohs(from->sin_port),
-                   connection_desc);
-            
-            /* 设置活动地址 */
-            s->active_addr = *from;
+    P2P_LOG_INFO("ICE", "%s! %s %s %s %s:%d%s",
+            MSG(MSG_ICE_NOMINATION_SUCCESS), MSG(MSG_ICE_USING), cand_type_str, MSG(MSG_ICE_PATH),
+            inet_ntoa(from->sin_addr), ntohs(from->sin_port),
+            connection_desc);
+    
+    /* 设置活动地址 */
+    s->active_addr = *from;
 
-            /* 更新状态 */
-            s->ice_state = P2P_ICE_STATE_COMPLETED;
-            s->state = P2P_STATE_CONNECTED;
-            s->path = P2P_PATH_PUNCH; 
+    /* 更新状态 */
+    s->ice_state = P2P_ICE_STATE_COMPLETED;
+    s->state = P2P_STATE_CONNECTED;
+    s->path = P2P_PATH_PUNCH; 
 
-            /* 触发连接建立回调 */
-            if (s->cfg.on_connected) {
-                s->cfg.on_connected(s, s->cfg.userdata);
-            }
+    /* 触发连接建立回调 */
+    if (s->cfg.on_connected) {
+        s->cfg.on_connected(s, s->cfg.userdata);
+    }
 
-            /* 被动方：发送 answer 给主动方 */
-            if (s->sig_relay_ctx.incoming_peer_name[0] != '\0') {
-                int cand_count = s->local_cand_cnt;
-                
-                uint8_t answer_buf[2048];
-                int answer_len = pack_signaling_payload_hdr(
-                    s->sig_relay_ctx.my_name,
-                    "",  /* target */
-                    0,   /* timestamp */
-                    0,   /* delay_trigger */
-                    cand_count,
-                    answer_buf
-                );
-                for (int i = 0; i < cand_count; i++) {
-                    answer_len += pack_candidate(&s->local_cands[i], answer_buf + answer_len);
-                }
-                if (answer_len > 0) {
-                    p2p_signal_relay_reply_connect(&s->sig_relay_ctx, s->sig_relay_ctx.incoming_peer_name, answer_buf, answer_len);
-                    P2P_LOG_INFO("ICE", "%s '%s'", MSG(MSG_ICE_SENT_ANSWER), s->sig_relay_ctx.incoming_peer_name);
-                }
-            }
+    /* 被动方：发送 answer 给主动方 */
+    if (s->sig_relay_ctx.incoming_peer_name[0] != '\0') {
+        int cand_count = s->local_cand_cnt;
+        
+        uint8_t answer_buf[2048];
+        int answer_len = pack_signaling_payload_hdr(
+            s->sig_relay_ctx.my_name,
+            "",  /* target */
+            0,   /* timestamp */
+            0,   /* delay_trigger */
+            cand_count,
+            answer_buf
+        );
+        for (int i = 0; i < cand_count; i++) {
+            answer_len += pack_candidate(&s->local_cands[i], answer_buf + answer_len);
+        }
+        if (answer_len > 0) {
+            p2p_signal_relay_reply_connect(&s->sig_relay_ctx, s->sig_relay_ctx.incoming_peer_name, answer_buf, answer_len);
+            P2P_LOG_INFO("ICE", "%s '%s'", MSG(MSG_ICE_SENT_ANSWER), s->sig_relay_ctx.incoming_peer_name);
+        }
+    }
 
-            /* 认证握手 */
-            if (s->cfg.auth_key) {
-                udp_send_packet(s->sock, from, P2P_PKT_AUTH, 0, 0, s->cfg.auth_key, (int)strlen(s->cfg.auth_key));
-                P2P_LOG_INFO("AUTH", "%s", MSG(MSG_ICE_AUTH_SENT));
-            }
+    /* 认证握手 */
+    if (s->cfg.auth_key) {
+        udp_send_packet(s->sock, from, P2P_PKT_AUTH, 0, 0, s->cfg.auth_key, (int)strlen(s->cfg.auth_key));
+        P2P_LOG_INFO("AUTH", "%s", MSG(MSG_ICE_AUTH_SENT));
     }
 }
 

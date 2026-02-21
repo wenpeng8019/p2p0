@@ -38,11 +38,6 @@
 #define MAX_CANDS_PER_PACKET            10      /* 每个 PEER_INFO 包最大候选数 */
 #define NAT_PROBE_MAX_RETRIES           3       /* NAT_PROBE 最大发送次数 */
 
-/* 获取当前时间戳（毫秒） */
-static inline uint64_t compact_time_ms(void) {
-    return p2p_time_ms();
-}
-
 /*
  * 初始化信令上下文
  */
@@ -184,7 +179,7 @@ int p2p_signal_compact_start(struct p2p_session *s, const char *local_peer_id,
     ctx->register_attempts = 0;
 
     ctx->state = SIGNAL_COMPACT_REGISTERING;
-    ctx->last_send_time = compact_time_ms();
+    ctx->last_send_time = p2p_time_ms();
 
     if (ctx->verbose) {
         P2P_LOG_INFO("COMPACT", "START: %s '%s' -> '%s' %s %s:%d (%d %s)",
@@ -314,7 +309,7 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             ctx->nat_detected_result = P2P_NAT_UNKNOWN;
             /* NAT_PROBE: payload 为空，使用包头 seq 字段匹配响应 */
             udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ctx->nat_probe_request_seq, NULL, 0);
-            ctx->nat_probe_send_time = compact_time_ms();
+            ctx->nat_probe_send_time = p2p_time_ms();
             if (ctx->verbose) {
                 P2P_LOG_INFO("COMPACT", "NAT_PROBE: %s %s:%d (1/%d)",
                        MSG(MSG_COMPACT_NAT_PROBE_SENT),
@@ -509,7 +504,7 @@ static void nat_probe_tick(p2p_signal_compact_ctx_t *ctx,
 int p2p_signal_compact_tick(struct p2p_session *s) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
-    uint64_t now = compact_time_ms();
+    uint64_t now = p2p_time_ms();
 
     /* NAT_PROBE 重试/超时：无论当前处于哪个信令状态都需要处理 */
     nat_probe_tick(ctx, s, now);
