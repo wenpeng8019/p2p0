@@ -21,27 +21,11 @@
 #include <stdbool.h>
 #include <p2p.h>
 #include <p2pp.h>
+#include "server_lang.h"
 #include "../src/p2p_internal.h"
 
-#ifdef _WIN32
-  #ifndef WIN32_LEAN_AND_MEAN
-  #define WIN32_LEAN_AND_MEAN
-  #endif
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  #pragma comment(lib, "ws2_32.lib")
-  typedef SOCKET server_socket_t;
-  #define SERVER_INVALID_SOCKET INVALID_SOCKET
-  #define server_close_socket(s) closesocket(s)
-#else
-  #include <unistd.h>
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
-  typedef int server_socket_t;
-  #define SERVER_INVALID_SOCKET (-1)
-  #define server_close_socket(s) close(s)
-#endif
+// cleanup 过期配对/客户端的时间间隔（秒）
+#define CLEANUP_INTERVAL            10
 
 // 允许最大同时在线客户端数量
 #define MAX_PEERS                   128
@@ -64,6 +48,27 @@
 // RELAY 模式心跳超时时间（秒）
 // 如果客户端超过此时间未发送任何消息（包括心跳），服务器将主动断开连接
 #define RELAY_CLIENT_TIMEOUT        60
+
+
+#ifdef _WIN32
+  #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+  #endif
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #pragma comment(lib, "ws2_32.lib")
+  typedef SOCKET server_socket_t;
+  #define SERVER_INVALID_SOCKET INVALID_SOCKET
+  #define server_close_socket(s) closesocket(s)
+#else
+  #include <unistd.h>
+  #include <sys/socket.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+  typedef int server_socket_t;
+  #define SERVER_INVALID_SOCKET (-1)
+  #define server_close_socket(s) close(s)
+#endif
 
 // COMPACT 模式配对记录（UDP 无状态）
 /* 注意：COMPACT 模式采用"配对缓存"机制：
@@ -123,7 +128,7 @@ static void handle_relay_signaling(int idx) {
 
     size_t n = recv(fd, (char *)&hdr, sizeof(hdr), 0);
     if (n <= 0) {
-        printf("[TCP] Peer %s disconnected\n", g_relay_clients[idx].name);
+        printf(server_msg(MSG_TCP_PEER_DISCONNECTED), g_relay_clients[idx].name);
         server_close_socket(fd);
         g_relay_clients[idx].valid = false;
         g_relay_clients[idx].current_peer[0] = '\0';
@@ -131,11 +136,11 @@ static void handle_relay_signaling(int idx) {
     }
 
     // Debug: print received bytes
-    printf("[DEBUG] Received %d bytes: magic=0x%08X, type=%d, length=%d (expected magic=0x%08X)\n",
+    printf(server_msg(MSG_DEBUG_RECEIVED_BYTES),
            (int)n, hdr.magic, hdr.type, hdr.length, P2P_RLY_MAGIC);
 
     if (hdr.magic != P2P_RLY_MAGIC) {
-        printf("[TCP] Invalid magic from peer\n");
+        printf("%s", server_msg(MSG_TCP_INVALID_MAGIC));
         server_close_socket(fd);
         g_relay_clients[idx].valid = false;
         g_relay_clients[idx].current_peer[0] = '\0';
@@ -149,7 +154,7 @@ static void handle_relay_signaling(int idx) {
         strncpy(g_relay_clients[idx].name, login.name, P2P_PEER_ID_MAX);
         g_relay_clients[idx].valid = true;
         g_relay_clients[idx].current_peer[0] = '\0';  // 初始化为无连接状态
-        printf("[TCP] Peer '%s' logged in\n", g_relay_clients[idx].name);
+        printf(server_msg(MSG_TCP_PEER_LOGIN), g_relay_clients[idx].name);
         fflush(stdout);
 
         // 发送登录确认
@@ -174,7 +179,7 @@ static void handle_relay_signaling(int idx) {
                 strncpy(g_relay_clients[idx].pending_sender,
                         g_relay_clients[k].pending_sender, P2P_PEER_ID_MAX);
 
-                printf("[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n",
+                printf(server_msg(MSG_TCP_MERGED_PENDING),
                        g_relay_clients[k].pending_count, g_relay_clients[k].pending_sender, login.name);
                 fflush(stdout);
 
@@ -192,7 +197,7 @@ static void handle_relay_signaling(int idx) {
             relay_client_t *client = &g_relay_clients[idx];
             const char *sender = client->pending_sender;
             
-            printf("[TCP] Flushing %d pending candidates from '%s' to '%s'...\n", 
+            printf(server_msg(MSG_TCP_FLUSHING_PENDING), 
                    client->pending_count, sender, client->name);
             fflush(stdout);
             
@@ -224,14 +229,14 @@ static void handle_relay_signaling(int idx) {
             send(fd, sender, P2P_PEER_ID_MAX, 0);
             send(fd, (const char *)offer_buf, n, 0);
             
-            printf("[TCP]   → Forwarded OFFER from '%s' (%d candidates, %d bytes)\n",
+            printf(server_msg(MSG_TCP_FORWARDED_OFFER),
                    sender, client->pending_count, (int)n);
             fflush(stdout);
             
             // 清空缓存
             client->pending_count = 0;
             client->pending_sender[0] = '\0';
-            printf("[TCP] All pending candidates flushed to '%s'\n", client->name);
+            printf(server_msg(MSG_TCP_PENDING_FLUSHED), client->name);
             fflush(stdout);
         }
         // 检查是否缓存已满（场景5：发送空 OFFER，让对端反向连接）
@@ -239,7 +244,7 @@ static void handle_relay_signaling(int idx) {
             relay_client_t *client = &g_relay_clients[idx];
             const char *sender = client->pending_sender;
             
-            printf("[TCP] Storage full, flushing connection intent from '%s' to '%s' (sending empty OFFER)...\n",
+            printf(server_msg(MSG_TCP_STORAGE_FULL_FLUSH),
                    sender, client->name);
             fflush(stdout);
             
@@ -265,13 +270,13 @@ static void handle_relay_signaling(int idx) {
             send(fd, sender, P2P_PEER_ID_MAX, 0);
             send(fd, (const char *)offer_buf, n, 0);
             
-            printf("[TCP]   → Sent empty OFFER from '%s' (storage full, reverse connect)\n", sender);
+            printf(server_msg(MSG_TCP_SENT_EMPTY_OFFER), sender);
             fflush(stdout);
             
             // 清空缓存满标识
             client->pending_count = 0;
             client->pending_sender[0] = '\0';
-            printf("[TCP] Storage full indication flushed to '%s'\n", client->name);
+            printf(server_msg(MSG_TCP_STORAGE_FULL_FLUSHED), client->name);
             fflush(stdout);
         }
     }
@@ -281,7 +286,7 @@ static void handle_relay_signaling(int idx) {
         // 接收目标对端名称
         char target_name[P2P_PEER_ID_MAX];
         if (recv(fd, target_name, P2P_PEER_ID_MAX, 0) != P2P_PEER_ID_MAX) {
-            printf("[TCP] Failed to receive target name from %s\n", g_relay_clients[idx].name);
+            printf(server_msg(MSG_TCP_RECV_TARGET_FAILED), g_relay_clients[idx].name);
             server_close_socket(fd);
             g_relay_clients[idx].valid = false;
             g_relay_clients[idx].current_peer[0] = '\0';
@@ -291,7 +296,7 @@ static void handle_relay_signaling(int idx) {
         // 接收信令负载数据
         uint32_t payload_len = hdr.length - P2P_PEER_ID_MAX;
         if (payload_len > 65536) {  // 防止过大的负载
-            printf("[TCP] Payload too large (%u bytes) from %s\n", payload_len, g_relay_clients[idx].name);
+            printf(server_msg(MSG_TCP_PAYLOAD_TOO_LARGE), payload_len, g_relay_clients[idx].name);
             server_close_socket(fd);
             g_relay_clients[idx].valid = false;
             g_relay_clients[idx].current_peer[0] = '\0';
@@ -300,7 +305,7 @@ static void handle_relay_signaling(int idx) {
         
         uint8_t *payload = malloc(payload_len);
         if (recv(fd, (char *)payload, payload_len, 0) != (int)payload_len) {
-            printf("[TCP] Failed to receive payload from %s\n", g_relay_clients[idx].name);
+            printf(server_msg(MSG_TCP_RECV_PAYLOAD_FAILED), g_relay_clients[idx].name);
             free(payload);
             server_close_socket(fd);
             g_relay_clients[idx].valid = false;
@@ -308,7 +313,7 @@ static void handle_relay_signaling(int idx) {
             return;
         }
 
-        printf("[TCP] Relaying %s from %s to %s (%u bytes)\n", 
+        printf(server_msg(MSG_TCP_RELAYING), 
                hdr.type == P2P_RLY_CONNECT ? "CONNECT" : "ANSWER",
                g_relay_clients[idx].name, target_name, payload_len);
         fflush(stdout);
@@ -350,7 +355,7 @@ static void handle_relay_signaling(int idx) {
                 found = true;
                 ack_status = 0;  /* 成功转发 */
                 candidates_acked = candidates_in_payload;
-                printf("[TCP] Sent %s with %d candidates to '%s' (from '%s')\n",
+                printf(server_msg(MSG_TCP_SENT_WITH_CANDS),
                        is_first_offer ? "OFFER" : "FORWARD", candidates_in_payload, 
                        target_name, g_relay_clients[idx].name);
                 fflush(stdout);
@@ -360,7 +365,7 @@ static void handle_relay_signaling(int idx) {
         
         if (!found) {
             /* 目标离线：缓存候选 */
-            printf("[TCP] Target %s offline, caching candidates...\n", target_name);
+            printf(server_msg(MSG_TCP_TARGET_OFFLINE), target_name);
             
             // 查找或创建目标用户槽位
             int target_idx = -1;
@@ -397,7 +402,7 @@ static void handle_relay_signaling(int idx) {
                                    strcmp(target->pending_sender, g_relay_clients[idx].name) != 0);
                 if (new_sender) {
                     if (target->pending_count > 0) {
-                        printf("[TCP] New sender '%s' replaces old sender '%s' (discarding %d old candidates)\n",
+                        printf(server_msg(MSG_TCP_NEW_SENDER_REPLACE),
                                g_relay_clients[idx].name, target->pending_sender, target->pending_count);
                     }
                     target->pending_count = 0;
@@ -407,12 +412,12 @@ static void handle_relay_signaling(int idx) {
                 for (int i = 0; i < candidates_in_payload; i++) {
                     if (target->pending_count >= MAX_CANDIDATES) {
                         ack_status = 2;  /* 缓存已满 */
-                        printf("[TCP] Storage full for '%s' (cached=%d, dropped=%d)\n",
+                        printf(server_msg(MSG_TCP_STORAGE_FULL_DROP),
                                target_name, candidates_acked, candidates_in_payload - candidates_acked);
                         
                         // 缓存已满时，pending_sender 本身就表示连接意图（不需要额外字段）
                         // 此时 pending_count 保持为 MAX_CANDIDATES，pending_sender 已经记录了发送者
-                        printf("[TCP] Storage full, connection intent from '%s' to '%s' noted\n",
+                        printf(server_msg(MSG_TCP_STORAGE_INTENT_NOTED),
                                g_relay_clients[idx].name, target_name);
                         break;
                     }
@@ -430,11 +435,11 @@ static void handle_relay_signaling(int idx) {
                 if (candidates_acked > 0) {
                     if (target->pending_count >= MAX_CANDIDATES) {
                         ack_status = 2;  /* 缓存后已满（包括刚好满的情况） */
-                        printf("[TCP] Cached %d candidates for offline user '%s', storage now FULL (%d/%d)\n",
+                        printf(server_msg(MSG_TCP_CACHED_FULL),
                                candidates_acked, target_name, target->pending_count, MAX_CANDIDATES);
                     } else {
                         ack_status = 1;  /* 已缓存，还有剩余空间 */
-                        printf("[TCP] Cached %d candidates for offline user '%s' (total=%d/%d)\n",
+                        printf(server_msg(MSG_TCP_CACHED_PARTIAL),
                                candidates_acked, target_name, target->pending_count, MAX_CANDIDATES);
                     }
                     fflush(stdout);
@@ -442,7 +447,7 @@ static void handle_relay_signaling(int idx) {
             } else {
                 ack_status = 2;  /* 无法分配槽位 */
                 candidates_acked = 0;
-                printf("[TCP] Cannot allocate slot for offline user '%s'\n", target_name);
+                printf(server_msg(MSG_TCP_CANNOT_ALLOC_SLOT), target_name);
                 fflush(stdout);
             }
         }
@@ -454,10 +459,10 @@ static void handle_relay_signaling(int idx) {
             size_t sent1 = send(fd, (const char *)&ack_hdr, sizeof(ack_hdr), 0);
             size_t sent2 = send(fd, (const char *)&ack_payload, sizeof(ack_payload), 0);
             if (sent1 != sizeof(ack_hdr) || sent2 != sizeof(ack_payload)) {
-                printf("[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n",
+                printf(server_msg(MSG_TCP_SEND_ACK_FAILED),
                        g_relay_clients[idx].name, (int)sent1, (int)sent2);
             } else {
-                printf("[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n", 
+                printf(server_msg(MSG_TCP_SENT_CONNECT_ACK), 
                        g_relay_clients[idx].name, ack_status, candidates_acked);
             }
         }
@@ -474,7 +479,7 @@ static void handle_relay_signaling(int idx) {
             if (g_relay_clients[i].valid && g_relay_clients[i].fd != fd) {
                 size_t remaining = sizeof(list_buf) - offset;
                 if (remaining < P2P_PEER_ID_MAX + 2) {  // 确保有足够空间
-                    printf("[TCP] User list truncated (too many users)\n");
+                    printf("%s", server_msg(MSG_TCP_LIST_TRUNCATED));
                     break;
                 }
                 n = snprintf(list_buf + offset, remaining, "%s,", g_relay_clients[i].name);
@@ -504,7 +509,7 @@ static void handle_relay_signaling(int idx) {
     }
     // 未知消息类型
     else {
-        printf("[TCP] Unknown message type %d from %s\n", hdr.type, g_relay_clients[idx].name);
+        printf(server_msg(MSG_TCP_UNKNOWN_MSG_TYPE), hdr.type, g_relay_clients[idx].name);
     }
 }
 
@@ -515,7 +520,7 @@ static void cleanup_relay_clients(void) {
         if (g_relay_clients[i].valid) {
             // 检查是否超时（超过 RELAY_CLIENT_TIMEOUT 秒未收到任何消息）
             if ((now - g_relay_clients[i].last_active) > RELAY_CLIENT_TIMEOUT) {
-                printf("[TCP] Client '%s' timed out (no activity for %ld seconds)\n",
+                printf(server_msg(MSG_TCP_CLIENT_TIMEOUT),
                        g_relay_clients[i].name,
                        (long)(now - g_relay_clients[i].last_active));
                 
@@ -576,12 +581,12 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
             }
         }
         
-        printf("[UDP] REGISTER from %s: local='%s', remote='%s', candidates=%d\n", 
+        printf(server_msg(MSG_UDP_REGISTER), 
                from_str, local_peer_id, remote_peer_id, candidate_count);
         for (int i = 0; i < candidate_count; i++) {
             struct in_addr ip;
             ip.s_addr = candidates[i].ip;
-            printf("      [%d] type=%d, %s:%d\n", i, candidates[i].type, 
+            printf(server_msg(MSG_UDP_CANDIDATE_INFO), i, candidates[i].type, 
                    inet_ntoa(ip), ntohs(candidates[i].port));
         }
         fflush(stdout);
@@ -637,7 +642,7 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
             ack_response[4] = 2;  /* status = error */
             memset(ack_response + 5, 0, 9);  /* 其余字段全部置 0 */
             sendto(udp_fd, (const char *)ack_response, 14, 0, (struct sockaddr *)from, sizeof(*from));
-            printf("[UDP] REGISTER_ACK to %s: error (no slot available)\n", from_str);
+            printf(server_msg(MSG_UDP_REGISTER_ACK_ERROR), from_str);
             fflush(stdout);
             return;
         }
@@ -679,7 +684,7 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
             
             sendto(udp_fd, (const char *)ack_response, 14, 0, (struct sockaddr *)from, sizeof(*from));
             
-            printf("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n", 
+            printf(server_msg(MSG_UDP_REGISTER_ACK_OK), 
                    from_str, (remote_idx >= 0) ? 1 : 0, max_cands,
                    g_relay_enabled ? "yes" : "no",
                    inet_ntoa(from->sin_addr), ntohs(from->sin_port), g_probe_port);
@@ -719,7 +724,7 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
             sendto(udp_fd, (const char *)response, resp_len, 0, 
                    (struct sockaddr *)from, sizeof(*from));
             
-            printf("[UDP] Sent PEER_INFO(seq=1, base=0) to %s (local='%s') with %d candidates%s\n", 
+            printf(server_msg(MSG_UDP_SENT_PEER_INFO), 
                    from_str, local_peer_id, remote->candidate_count,
                    first_match ? " [FIRST MATCH]" : "");
             fflush(stdout);
@@ -739,14 +744,14 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
                 sendto(udp_fd, (const char *)response, resp_len, 0,
                        (struct sockaddr *)&remote->addr, sizeof(remote->addr));
                 
-                printf("[UDP] Sent PEER_INFO(seq=1, base=0) to %s:%d (local='%s') with %d candidates%s\n",
+                printf(server_msg(MSG_UDP_SENT_PEER_INFO_ADDR),
                        inet_ntoa(remote->addr.sin_addr), ntohs(remote->addr.sin_port),
                        remote_peer_id, local->candidate_count,
                        first_match ? " [BILATERAL]" : " [ADDR_CHANGED]");
                 fflush(stdout);
             }
         } else {
-            printf("[UDP] Target pair (%s → %s) not found (waiting for peer registration)\n",
+            printf(server_msg(MSG_UDP_TARGET_NOT_FOUND),
                    remote_peer_id, local_peer_id);
             fflush(stdout);
         }
@@ -766,7 +771,7 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
             if (strcmp(g_compact_pairs[i].local_peer_id,  local_peer_id)  != 0) continue;
             if (strcmp(g_compact_pairs[i].remote_peer_id, remote_peer_id) != 0) continue;
 
-            printf("[UDP] UNREGISTER: releasing slot for '%s' -> '%s'\n",
+            printf(server_msg(MSG_UDP_UNREGISTER),
                    local_peer_id, remote_peer_id);
             fflush(stdout);
 
@@ -788,7 +793,7 @@ static void cleanup_compact_pairs(void) {
     time_t now = time(NULL);
     for (int i = 0; i < MAX_PEERS; i++) {
         if (g_compact_pairs[i].valid && (now - g_compact_pairs[i].last_active) > COMPACT_PAIR_TIMEOUT) {
-            printf("[UDP] Peer pair (%s → %s) timed out\n", 
+            printf(server_msg(MSG_UDP_PAIR_TIMEOUT), 
                    g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id);
             
             // 如果有配对对端，标记对端的 peer 为 (void*)-1
@@ -804,16 +809,113 @@ static void cleanup_compact_pairs(void) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static void print_usage(const char *prog) {
+    printf(server_msg(MSG_SERVER_USAGE), prog);
+    printf("\n\n");
+    printf("%s\n", server_msg(MSG_SERVER_PARAMS));
+    printf("%s\n", server_msg(MSG_SERVER_PARAM_PORT));
+    printf("%s\n", server_msg(MSG_SERVER_PARAM_PORT_TCP));
+    printf("%s\n", server_msg(MSG_SERVER_PARAM_PORT_UDP));
+    printf("%s\n", server_msg(MSG_SERVER_PARAM_PROBE));
+    printf("%s\n", server_msg(MSG_SERVER_PARAM_PROBE_DESC));
+    printf("%s\n", server_msg(MSG_SERVER_PARAM_RELAY));
+    printf("\n%s\n", server_msg(MSG_SERVER_EXAMPLES));
+    printf(server_msg(MSG_SERVER_EXAMPLE_DEFAULT), prog);
+    printf("\n");
+    printf(server_msg(MSG_SERVER_EXAMPLE_PORT), prog);
+    printf("\n");
+    printf(server_msg(MSG_SERVER_EXAMPLE_PROBE), prog);
+    printf("\n");
+    printf(server_msg(MSG_SERVER_EXAMPLE_RELAY), prog);
+    printf("\n\n");
+}
+
 int main(int argc, char *argv[]) {
 
+    // 中文语言支持（需要在--help检查之前处理）
+    bool help = false; int opt = 0;
+    for (int i = 1; i < argc;) {
+
+        if (strcmp(argv[i], "--cn") == 0) {
+            server_set_language(P2P_LANG_ZH);
+
+            // 移除--cn参数（为了最终的位置参数调整位置
+            for (int j = i; j < argc - 1; j++) argv[j] = argv[j + 1];
+            argc--;
+            continue;
+        }
+
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) help = true;
+        else if (*argv[i] ==  '-' && !opt) opt = i;
+        ++i;
+    }
+    if (opt) {
+        fprintf(stderr, server_msg(MSG_SERVER_ERR_UNKNOWN_OPT), argv[1]);
+        fprintf(stderr, "\n\n");
+        print_usage(argv[0]);
+        return -1;
+    }
+    // 显示帮助
+    if (help) {
+        print_usage(argv[0]);
+        return 0;
+    }
+
+    // 解析参数
+
+    // 第二个位置参数：监听端口（TCP 和 UDP 共用，默认 8888）
     int port = 8888;
-    if (argc > 1) port = (int)strtol(argv[1], NULL, 0);
-    if (argc > 2) g_probe_port = (int)strtol(argv[2], NULL, 0);
-    if (argc > 3 && strcmp(argv[3], "relay") == 0) g_relay_enabled = true;
+    if (argc > 1) {
+        char *p = NULL;
+        long val = strtol(argv[1], &p, 10);
+        if (p == argv[1] || *p != '\0' || val <= 0 || val > 65535) {
+            fprintf(stderr, server_msg(MSG_SERVER_ERR_INVALID_PORT), argv[1]);
+            fprintf(stderr, "\n\n");
+            print_usage(argv[0]);
+            return 1;
+        }
+        port = (int)val;
+    }
+
+    // 第三个位置参数：NAT 探测端口（独立端口，默认禁用）
+    if (argc > 2) {
+        char *p = NULL;
+        long val = strtol(argv[2], &p, 10);
+        if (p == argv[2] || *p != '\0' || val < 0 || val > 65535) {
+            fprintf(stderr, server_msg(MSG_SERVER_ERR_INVALID_PROBE), argv[2]);
+            fprintf(stderr, "\n\n");
+            print_usage(argv[0]);
+            return 1;
+        }
+        g_probe_port = (int)val;
+    }
+
+    // 第四个位置参数：是否启用数据 Relay（中继）模式
+    if (argc > 3) {
+        if (strcmp(argv[3], "relay") != 0) {
+            fprintf(stderr, server_msg(MSG_SERVER_ERR_UNKNOWN_OPT), argv[3]);
+            fprintf(stderr, "\n\n");
+            print_usage(argv[0]);
+            return 1;
+        }
+        g_relay_enabled = true;
+    }
     
-    printf("[SERVER] Starting P2P signal server on port %d\n", port);
-    printf("[SERVER] NAT probe: %s (port %d)\n", g_probe_port > 0 ? "enabled" : "disabled", g_probe_port);
-    printf("[SERVER] Relay support: %s\n", g_relay_enabled ? "enabled" : "disabled");
+    if (argc > 4) {
+        fprintf(stderr, "%s\n\n", server_msg(MSG_SERVER_ERR_TOO_MANY));
+        print_usage(argv[0]);
+        return 1;
+    }
+    
+    printf(server_msg(MSG_SERVER_STARTING), port);
+    printf("\n");
+    printf(server_msg(MSG_SERVER_NAT_PROBE), 
+           g_probe_port > 0 ? server_msg(MSG_SERVER_ENABLED) : server_msg(MSG_SERVER_DISABLED), 
+           g_probe_port);
+    printf("\n");
+    printf(server_msg(MSG_SERVER_RELAY_SUPPORT), 
+           g_relay_enabled ? server_msg(MSG_SERVER_ENABLED) : server_msg(MSG_SERVER_DISABLED));
+    printf("\n");
     fflush(stdout);
 
 #ifdef _WIN32
@@ -824,16 +926,16 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    // Create TCP listen socket (Relay mode)
+    // 创建 TCP 监听套接字（用于 Relay 信令模式）
     server_socket_t listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd == SERVER_INVALID_SOCKET) {
         perror("TCP socket");
         return 1;
     }
-    int opt = 1;
+    opt = 1;
     setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
-    // Create UDP socket (COMPACT mode)
+    // 创建 UDP 套接字（用于 COMPACT 信令模式）
     server_socket_t udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (udp_fd == SERVER_INVALID_SOCKET) {
         perror("UDP socket");
@@ -841,7 +943,7 @@ int main(int argc, char *argv[]) {
     }
     setsockopt(udp_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
-    // Create NAT probe UDP socket (optional, only if probe_port configured)
+    // 创建 NAT 探测 UDP 套接字（可选，仅当配置了 probe_port 时）
     server_socket_t probe_fd = SERVER_INVALID_SOCKET;
     if (g_probe_port > 0) {
         probe_fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -857,7 +959,7 @@ int main(int argc, char *argv[]) {
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons((unsigned short)port);
-    
+
     if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("TCP bind");
         return 1;
@@ -879,130 +981,125 @@ int main(int argc, char *argv[]) {
             server_close_socket(probe_fd);
             probe_fd = SERVER_INVALID_SOCKET;
             g_probe_port = 0;  /* 绑定失败，禁用探测功能 */
-            printf("[SERVER] NAT probe disabled (bind failed)\n");
+            printf("%s\n", server_msg(MSG_SERVER_PROBE_BIND_FAILED));
         } else {
-            printf("[SERVER] NAT probe socket listening on port %d\n", g_probe_port);
+            printf(server_msg(MSG_SERVER_PROBE_LISTENING), g_probe_port);
+            printf("\n");
         }
         fflush(stdout);
     }
 
-    // Start TCP listen
+    // 启动 TCP 监听（用于 Relay 模式与客户端连接）
     listen(listen_fd, 10);
-    printf("P2P Signaling Server listening on port %d (TCP + UDP)...\n", port);
+    printf(server_msg(MSG_SERVER_LISTENING), port);
+    printf("\n");
     fflush(stdout);
 
-    // Main event loop
+    // 主循环
     fd_set read_fds;
-    time_t last_cleanup = time(NULL);
-    
-    while (1) {
+    for (time_t last_cleanup = time(NULL);;) {
 
-        // Periodic cleanup of stale records
+        // 周期清理过期的 COMPACT 配对记录和 Relay 客户端连接
         time_t now = time(NULL);
-        if (now - last_cleanup >= 10) {
+        if (now - last_cleanup >= CLEANUP_INTERVAL) {
             cleanup_compact_pairs();
             cleanup_relay_clients();
             last_cleanup = now;
         }
 
-        // Build fd_set: TCP listen + TCP clients + UDP + probe UDP
+        // 设置要监听的套接口 fd
+        // + TCP listen + TCP clients + UDP + probe UDP + 客户端...
+        // + max_fd 必须是所有监听套接字中数值最大的那个（Windows 不使用此值，但 POSIX 需要正确设置）
+        int max_fd = 0;
         FD_ZERO(&read_fds);
         FD_SET(listen_fd, &read_fds);
         FD_SET(udp_fd, &read_fds);
         if (probe_fd != SERVER_INVALID_SOCKET) FD_SET(probe_fd, &read_fds);
-        /* max_fd is only meaningful on POSIX; ignored by Windows select() */
-        int max_fd = 0;
 #ifndef _WIN32
         max_fd = (int)((listen_fd > udp_fd) ? listen_fd : udp_fd);
-        if (probe_fd != SERVER_INVALID_SOCKET && (int)probe_fd > max_fd)
-            max_fd = (int)probe_fd;
+        if (probe_fd != SERVER_INVALID_SOCKET && (int)probe_fd > max_fd) max_fd = (int)probe_fd;
 #endif
-
+        // 添加有效的 TCP 客户端套接字到监听集合中
         for (int i = 0; i < MAX_PEERS; i++) {
-            if (g_relay_clients[i].valid &&
-                g_relay_clients[i].fd != SERVER_INVALID_SOCKET) {
+            if (g_relay_clients[i].valid && g_relay_clients[i].fd != SERVER_INVALID_SOCKET) {
                 FD_SET(g_relay_clients[i].fd, &read_fds);
 #ifndef _WIN32
-                if ((int)g_relay_clients[i].fd > max_fd)
-                    max_fd = (int)g_relay_clients[i].fd;
+                if ((int)g_relay_clients[i].fd > max_fd) max_fd = (int)g_relay_clients[i].fd;
 #endif
             }
         }
 
-        // Wait for activity (1-second timeout for periodic cleanup)
+        // 等待套接口数据（超时1秒，用于周期性清理）
         struct timeval tv = {1, 0};
         if (select(max_fd + 1, &read_fds, NULL, NULL, &tv) < 0) {
             perror("select");
             break;
         }
 
-        // New TCP connection
+        //-------------------------------
+
+        // 如果存在新的 TCP 连接请求，accept 并将其添加到客户端列表中
         if (FD_ISSET(listen_fd, &read_fds)) {
-            struct sockaddr_in client_addr;
-            socklen_t client_len = sizeof(client_addr);
-            server_socket_t client_fd = accept(listen_fd,
-                                               (struct sockaddr *)&client_addr,
-                                               &client_len);
+
+            struct sockaddr_in client_addr; socklen_t client_len = sizeof(client_addr);
+            server_socket_t client_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_len);
             
             int i = 0;
             for (i = 0; i < MAX_PEERS; i++) {
 
-                // Find a free slot for this new connection
-                if (!g_relay_clients[i].valid) {
+                // 查找一个空闲槽位来存储这个新的连接
+                if (!g_relay_clients[i].valid) { g_relay_clients[i].valid = true;
                     g_relay_clients[i].fd = client_fd;
-                    g_relay_clients[i].valid = true;
                     g_relay_clients[i].last_active = time(NULL);
                     g_relay_clients[i].pending_count = 0;
                     g_relay_clients[i].pending_sender[0] = '\0';
                     strncpy(g_relay_clients[i].name, "unknown", P2P_PEER_ID_MAX);
-                    printf("[TCP] New connection from %s:%d\n", 
+                    printf(server_msg(MSG_TCP_NEW_CONNECTION), 
                            inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
                     fflush(stdout);
                     break;
                 }
             }
             if (i == MAX_PEERS) {
-                printf("[TCP] Max peers reached, rejecting connection\n");
+                printf("%s", server_msg(MSG_TCP_MAX_PEERS));
                 server_close_socket(client_fd);
             }
         }
         
-        // UDP packet received (COMPACT signaling)
+        // UDP 监听端口收到数据包（COMPACT 模式的信令交互）
         if (FD_ISSET(udp_fd, &read_fds)) {
-            uint8_t buf[2048];
-            struct sockaddr_in from;
-            socklen_t from_len = sizeof(from);
-            
-            size_t n = recvfrom(udp_fd, (char *)buf, sizeof(buf), 0,
-                            (struct sockaddr *)&from, &from_len);
+
+            uint8_t buf[P2P_MTU]; struct sockaddr_in from; socklen_t from_len = sizeof(from);
+            size_t n = recvfrom(udp_fd, (char *)buf, sizeof(buf), 0, (struct sockaddr *)&from, &from_len);
             if (n > 0) {
                 handle_compact_signaling(udp_fd, buf, n, &from);
             }
         }
 
-        // NAT probe UDP packet received
+        // NAT 探测 UDP 收到数据包（也是 COMPACT 模式的信令交互）
         if (probe_fd != SERVER_INVALID_SOCKET && FD_ISSET(probe_fd, &read_fds)) {
-            uint8_t buf[64];
-            struct sockaddr_in from;
-            socklen_t from_len = sizeof(from);
-            size_t n = recvfrom(probe_fd, (char *)buf, sizeof(buf), 0,
-                             (struct sockaddr *)&from, &from_len);
+
+            uint8_t buf[64]; struct sockaddr_in from; socklen_t from_len = sizeof(from);
+            size_t n = recvfrom(probe_fd, (char *)buf, sizeof(buf), 0, (struct sockaddr *)&from, &from_len);
+
             // NAT_PROBE: [hdr(4)][request_id(2)][reserved(2)] = 8 bytes
             if (n >= 8 && buf[0] == SIG_PKT_NAT_PROBE) {
+
                 uint16_t req_id = ((uint16_t)buf[4] << 8) | buf[5];
-                // NAT_PROBE_ACK: [hdr(4)][request_id(2)][probe_ip(4)][probe_port(2)] = 12 bytes
-                uint8_t ack[12];
-                ack[0] = SIG_PKT_NAT_PROBE_ACK;
-                ack[1] = 0;  /* flags */
-                ack[2] = 0;  /* seq hi */
-                ack[3] = 0;  /* seq lo */
-                ack[4] = (uint8_t)(req_id >> 8);
-                ack[5] = (uint8_t)(req_id & 0xFF);
-                memcpy(ack + 6,  &from.sin_addr.s_addr, 4);  /* probe_ip   */
-                memcpy(ack + 10, &from.sin_port,         2);  /* probe_port */
-                sendto(probe_fd, (const char *)ack, 12, 0,
-                       (struct sockaddr *)&from, sizeof(from));
-                printf("[PROBE] NAT_PROBE_ACK -> %s:%d (req_id=%u, mapped=%s:%d)\n",
+
+                // 构造应答包（NAT_PROBE_ACK）
+                // + [hdr(4)][request_id(2)][probe_ip(4)][probe_port(2)] = 12 bytes
+                buf[0] = SIG_PKT_NAT_PROBE_ACK;
+                buf[1] = 0;                                     /* flags */
+                buf[2] = 0;                                     /* seq hi */
+                buf[3] = 0;                                     /* seq lo */
+                buf[4] = (uint8_t)(req_id >> 8);                /* request_id hi */
+                buf[5] = (uint8_t)(req_id & 0xFF);              /* request_id lo */
+                memcpy(buf + 6,  &from.sin_addr.s_addr, 4);     /* probe_ip   */
+                memcpy(buf + 10, &from.sin_port, 2);            /* probe_port */
+                sendto(probe_fd, (const char *)buf, 12, 0, (struct sockaddr *)&from, sizeof(from));
+
+                printf(server_msg(MSG_PROBE_ACK),
                        inet_ntoa(from.sin_addr), ntohs(from.sin_port),
                        req_id,
                        inet_ntoa(from.sin_addr), ntohs(from.sin_port));
@@ -1010,7 +1107,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Handle Relay mode signaling from connected TCP clients
+        // 处理 Relay 模式的信令交互（TCP 连接），包括连接请求、候选交换、在线列表查询等
         for (int i = 0; i < MAX_PEERS; i++) {
             if (g_relay_clients[i].valid &&
                 g_relay_clients[i].fd != SERVER_INVALID_SOCKET &&

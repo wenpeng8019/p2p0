@@ -10,7 +10,6 @@
 #include "p2p_platform.h"   /* cross-platform socket headers */
 
 /* UDP 传输层常量 */
-#define P2P_MTU           1200              /* 安全的 UDP 负载 */
 #define P2P_HDR_SIZE      4                 /* 包头大小 */
 #define P2P_MAX_PAYLOAD   (P2P_MTU - P2P_HDR_SIZE)  /* 1196 */
 

@@ -140,6 +140,8 @@ typedef struct {
 } p2p_compact_candidate_t;
 #pragma pack(pop)
 
+#define P2P_MTU           1200              /* 安全的 UDP 负载 */
+
 /*
  * COMPACT 模式消息格式（以下均为 payload 部分，前面需加 4 字节包头）:
  *

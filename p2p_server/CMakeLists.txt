@@ -11,7 +11,10 @@ else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unknown-pragmas")
 endif()
 
-add_executable(p2p_server server.c)
+add_executable(p2p_server 
+    server.c
+    server_lang.c
+)
 target_include_directories(p2p_server PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
