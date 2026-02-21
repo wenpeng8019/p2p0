@@ -7,9 +7,6 @@
 /* 前向声明 */
 struct p2p_session;
 
-
-void p2p_pseudotcp_on_ack(struct p2p_session *s, uint16_t ack_seq);
-
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -132,11 +129,6 @@ static void pseudotcp_tick(struct p2p_session *s) {
     p2p_pseudotcp_tick(s);
     int is_relay_mode = (s->path == P2P_PATH_RELAY);
     reliable_tick_ack(&s->reliable, s->sock, &s->active_addr, is_relay_mode);
-}
-
-static void pseudotcp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {
-    (void)s; (void)type; (void)payload; (void)len; (void)from;
-    /* 目前逻辑依然在 p2p.c 中硬编码分发，后续可完全迁移至此 */
 }
 
 const p2p_transport_ops_t p2p_trans_pseudotcp = {

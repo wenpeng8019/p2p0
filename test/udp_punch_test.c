@@ -1,17 +1,19 @@
 /*
- * UDP打洞测试工具
+ * UDP打洞测试工具（带STUN探测）
  * 
- * 用法：
- *   ./udp_punch_test <本地端口> <目标IP> <目标端口> [模式]
+ * 用法：./udp_punch_test [本地端口]
  * 
- * 模式：
- *   send  - 只发送（主动打洞）
- *   recv  - 只接收（被动等待）
- *   both  - 双向（默认）
+ * 功能：
+ *   1. 向STUN服务器探测，获取NAT映射的公网IP:Port
+ *   2. 打印映射地址，手动告知对方
+ *   3. 输入对方的映射地址
+ *   4. 开始双向UDP打洞测试
  * 
  * 示例（Alice和Bob同时运行）：
- *   Alice: ./udp_punch_test 38113 175.18.158.132 20341
- *   Bob:   ./udp_punch_test 20341 139.214.247.234 38113
+ *   Alice: ./udp_punch_test
+ *   Bob:   ./udp_punch_test
+ * 
+ *   双方看到各自的映射后，交换并输入对方地址
  */
 
 #include <stdio.h>
@@ -32,7 +34,22 @@ typedef int socklen_t;
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <netdb.h>
 #endif
+
+/* STUN协议常量 */
+#define STUN_MAGIC 0x2112A442
+#define STUN_BINDING_REQUEST  0x0001
+#define STUN_BINDING_RESPONSE 0x0101
+#define STUN_ATTR_XOR_MAPPED_ADDR 0x0020
+
+/* STUN消息头（20字节） */
+typedef struct {
+    uint16_t type;
+    uint16_t length;
+    uint32_t magic;
+    uint8_t  tsx_id[12];
+} __attribute__((packed)) stun_hdr_t;
 
 void print_time() {
     time_t now = time(NULL);

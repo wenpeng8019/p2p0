@@ -4,6 +4,9 @@
 
 #ifndef P2P_H
 #define P2P_H
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
 #include <stddef.h>     // IWYU pragma: keep
 #include <stdint.h>     // IWYU pragma: keep
@@ -16,18 +19,18 @@ extern "C" {
 
 /* 支持的语言 */
 typedef enum {
-    P2P_LANG_EN = 0,    /* English (默认) */
-    P2P_LANG_ZH = 1     /* 简体中文 (需要编译时启用 -DP2P_ENABLE_CHINESE) */
+    P2P_LANG_EN = 0,                            // English (默认)
+    P2P_LANG_ZH = 1                             // 简体中文 (需要编译时启用 -DP2P_ENABLE_CHINESE)
 } p2p_language_t;
 
 /* 日志等级 */
 typedef enum {
-    P2P_LOG_LEVEL_NONE  = 0,  /* 静默，不输出任何日志 */
-    P2P_LOG_LEVEL_ERROR = 1,  /* 错误：不可恢复的异常 */
-    P2P_LOG_LEVEL_WARN  = 2,  /* 警告：可恢复的异常或降级 */
-    P2P_LOG_LEVEL_INFO  = 3,  /* 信息：关键流程节点（默认）*/
-    P2P_LOG_LEVEL_DEBUG = 4,  /* 调试：内部状态变化 */
-    P2P_LOG_LEVEL_TRACE = 5   /* 追踪：高频细节（性能敏感）*/
+    P2P_LOG_LEVEL_NONE  = 0,                    // 静默，不输出任何日志
+    P2P_LOG_LEVEL_ERROR = 1,                    // 错误：不可恢复的异常
+    P2P_LOG_LEVEL_WARN  = 2,                    // 警告：可恢复的异常或降级
+    P2P_LOG_LEVEL_INFO  = 3,                    // 信息：关键流程节点（默认）
+    P2P_LOG_LEVEL_DEBUG = 4,                    // 调试：内部状态变化
+    P2P_LOG_LEVEL_TRACE = 5                     // 追踪：高频细节（性能敏感
 } p2p_log_level_t;
 
 /*
@@ -42,15 +45,15 @@ typedef void (*p2p_log_callback_t)(p2p_log_level_t level,
 
 /* ---------- 连接模式 ---------- */
 
-enum {
+typedef enum {
     P2P_SIGNALING_MODE_COMPACT = 0,             // 简单无状态信令（UDP，无登录，无需 STUN 服务）
-    P2P_SIGNALING_MODE_RELAY,                     // ICE 有状态信令（TCP，需登录，基于 STUN/ICE 协议）
+    P2P_SIGNALING_MODE_RELAY,                   // ICE 有状态信令（TCP，需登录，基于 STUN/ICE 协议）
     P2P_SIGNALING_MODE_PUBSUB                   // 发布/订阅模式（Gist 交换信令，无登录，需 STUN 服务）
-};
+} p2p_signaling_t;
 
 /* ---------- 连接状态 ---------- */
 
-enum {
+typedef enum {
     P2P_STATE_IDLE = 0,                         // 初始状态
     P2P_STATE_REGISTERING,                      // 注册到信令服务器
     P2P_STATE_PUNCHING,                         // NAT 打洞中
@@ -59,16 +62,16 @@ enum {
     P2P_STATE_CLOSING,                          // 关闭中
     P2P_STATE_CLOSED,                           // 已关闭
     P2P_STATE_ERROR                             // 错误状态
-};
+} p2p_state_t;
 
 /* ---------- 连接路径 (如何通信) ---------- */
 
-enum {
+typedef enum {
     P2P_PATH_NONE = 0,
     P2P_PATH_LAN,                               // 同一子网，直连
     P2P_PATH_PUNCH,                             // NAT 打洞
     P2P_PATH_RELAY                              // 服务器中继（fallback）
-};
+} p2p_path_t;
 
 /* ---------- NAT 类型（STUN 检测结果） ---------- */
 
@@ -114,35 +117,35 @@ typedef enum {
 #define P2P_PEER_ID_MAX  32
 
 /* 前向声明 */
-typedef struct p2p_session p2p_session_t;
+typedef const void* p2p_handle_t;
 
 /* ---------- 事件回调类型 ---------- */
 
 /*
  * 连接建立回调
  * 参数：
- *   session: 会话对象
+ *   hdl: 会话对象
  *   userdata: 用户自定义数据
  */
-typedef void (*p2p_on_connected_fn)(p2p_session_t *session, void *userdata);
+typedef void (*p2p_on_connected_fn)(p2p_handle_t hdl, void *userdata);
 
 /*
  * 连接断开回调
  * 参数：
- *   session: 会话对象
+ *   hdl: 会话对象
  *   userdata: 用户自定义数据
  */
-typedef void (*p2p_on_disconnected_fn)(p2p_session_t *session, void *userdata);
+typedef void (*p2p_on_disconnected_fn)(p2p_handle_t hdl, void *userdata);
 
 /*
  * 数据到达回调（可选，如果未设置则需要主动调用 p2p_recv）
  * 参数：
- *   session: 会话对象
+ *   hdl: 会话对象
  *   data: 数据缓冲区
  *   len: 数据长度
  *   userdata: 用户自定义数据
  */
-typedef void (*p2p_on_data_fn)(p2p_session_t *session, const void *data, int len, void *userdata);
+typedef void (*p2p_on_data_fn)(p2p_handle_t hdl, const void *data, int len, void *userdata);
 
 /* ---------- 配置结构 ---------- */
 
@@ -195,6 +198,9 @@ typedef struct {
                                                         // 效果2：ICE tick 不再自己发 PUNCH，改为调用 nat_start_punch，
                                                         //        走与跨 NAT 完全相同的打洞状态机（重试/超时/候选轮询）。
                                                         // 用途：本地两台机器 / 同机两进程之间验证打洞协议逻辑的正确性。
+    bool                    skip_host_candidates;       // 调试：跳过本地Host候选收集，只使用公网候选（Srflx/Relay）。
+                                                        // 用途：COMPACT模式快速测试UDP打洞，避免发送大量本地地址，加快配对速度。
+                                                        // 配合STUN使用，直接在服务器完成公网地址交换后立即开始打洞测试。
     bool                    verbose_nat_punch;          // 是否输出详细的 NAT 打洞流程日志
     
     /* 语言选项 */
@@ -209,23 +215,50 @@ typedef struct {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-/*
+/**
  * 创建一个新的 P2P 会话。
  * 如果失败则返回 NULL。
  */
-p2p_session_t *p2p_create(const p2p_config_t *cfg);
+p2p_handle_t
+p2p_create(const p2p_config_t *cfg);
 
-/*
+/**
  * 销毁会话并释放所有资源。
  * 如果运行中则停止内部线程。
  */
-void p2p_destroy(p2p_session_t *s);
+void
+p2p_destroy(p2p_handle_t hdl);
 
-/*
+/**
+ * 设置全局日志等级（线程安全）。
+ * 低于此等级的日志将被忽略，不产生任何输出。
+ * 默认等级为 P2P_LOG_LEVEL_INFO。
+ */
+void
+p2p_set_log_level(p2p_log_level_t level);
+
+/**
+ * 获取当前全局日志等级。
+ */
+p2p_log_level_t
+p2p_get_log_level(void);
+
+/**
+ * 设置日志输出回调。
+ * 设置后，每条通过等级过滤的日志将调用 cb(level, module, message)。
+ * message 不含时间戳与 ANSI 颜色转义序列。
+ * 传 NULL 可清除回调，恢复默认 FILE 输出行为。
+ */
+void
+p2p_set_log_output(p2p_log_callback_t cb);
+
+//-----------------------------------------------------------------------------
+
+/**
  * 向远程对等体发起连接
  * 
  * 参数：
- *   s: session 会话对象
+ *   hdl 会话对象
  *   remote_peer_id: 远程对等体标识（可为 NULL，取决于模式）
  * 
  * 信令模式由 cfg.signaling_mode 决定，remote_peer_id 的使用规则如下：
@@ -258,52 +291,31 @@ void p2p_destroy(p2p_session_t *s);
  * 
  * 返回：0 = 成功，-1 = 失败
  */
-int p2p_connect(p2p_session_t *s, const char *remote_peer_id);
+int
+p2p_connect(p2p_handle_t hdl, const char *remote_peer_id);
 
-/*
+/**
  * 发起优雅关闭。
  */
-void p2p_close(p2p_session_t *s);
+void
+p2p_close(p2p_handle_t hdl);
 
-/*
+/**
  * 驱动会话状态机 (单线程模式)
  * 必须周期性调用（例如每 10 毫秒一次）从应用程序事件循环
  * 在线程模式下，这将被内部调用
  * 如果成功则返回 0，失败则返回 -1。
  */
-int p2p_update(p2p_session_t *s);
-
-///////////////////////////////////////////////////////////////////////////////
-
-/*
- * 发送数据 (字节流语义，类似于 TCP send)。
- * 数据被缓冲、分片并可靠地发送。
- * 返回接受的字节数（可能小于 len），或 -1 表示错误。
- */
-int p2p_send(p2p_session_t *s, const void *buf, int len);
-
-/*
- * 接收数据 (字节流语义，类似于 TCP recv)。
- * 返回读取的字节数（如果无数据则为 0），或 -1 表示错误。
- */
-int p2p_recv(p2p_session_t *s, void *buf, int len);
+int
+p2p_update(p2p_handle_t hdl);
 
 /*
  * 获取当前连接状态 (P2P_STATE_* 枚举)。
  */
-int p2p_state(const p2p_session_t *s);
+p2p_state_t
+p2p_state(p2p_handle_t hdl);
 
-/*
- * 获取当前连接路径 (P2P_PATH_* 枚举)。
- */
-int p2p_path(const p2p_session_t *s);
-
-/*
- * 判断会话是否已经建立，即确定建立连接，允许进行 I/O 操作
- */
-int  p2p_is_ready(p2p_session_t *sa);
-
-/*
+/**
  * 获取本地 NAT 类型（由 STUN 检测得出，仅在 use_ice=true 时自动检测）。
  *
  * 返回值含义：
@@ -322,31 +334,44 @@ int  p2p_is_ready(p2p_session_t *sa);
  *     P2P_NAT_BLOCKED        (6)  UDP 不可达（STUN 服务器无响应）
  *     P2P_NAT_UNSUPPORTED    (7)  不支持检测（无STUN配置 / 信令模式不支持）
  */
-int p2p_get_nat_type(const p2p_session_t *s);
+int
+p2p_nat_type(p2p_handle_t hdl);
+
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * 判断会话是否已经建立，即确定建立连接，允许进行 I/O 操作
+ */
+bool
+p2p_is_ready(p2p_handle_t hdl);
+
 
 /*
- * 设置全局日志等级（线程安全）。
- * 低于此等级的日志将被忽略，不产生任何输出。
- * 默认等级为 P2P_LOG_LEVEL_INFO。
+ * 获取当前连接路径 (P2P_PATH_* 枚举)。
  */
-void p2p_set_log_level(p2p_log_level_t level);
+int
+p2p_path(p2p_handle_t hdl);
 
 /*
- * 获取当前全局日志等级。
+ * 发送数据 (字节流语义，类似于 TCP send)。
+ * 数据被缓冲、分片并可靠地发送。
+ * 返回接受的字节数（可能小于 len），或 -1 表示错误。
  */
-p2p_log_level_t p2p_get_log_level(void);
+int
+p2p_send(p2p_handle_t hdl, const void *buf, int len);
 
 /*
- * 设置日志输出回调。
- * 设置后，每条通过等级过滤的日志将调用 cb(level, module, message)。
- * message 不含时间戳与 ANSI 颜色转义序列。
- * 传 NULL 可清除回调，恢复默认 FILE 输出行为。
+ * 接收数据 (字节流语义，类似于 TCP recv)。
+ * 返回读取的字节数（如果无数据则为 0），或 -1 表示错误。
  */
-void p2p_set_log_output(p2p_log_callback_t cb);
+int
+p2p_recv(p2p_handle_t hdl, void *buf, int len);
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus
 }
 #endif
 
+#pragma clang diagnostic pop
 #endif /* P2P_H */
+

@@ -60,6 +60,9 @@
 
 #ifndef P2P_INTERNAL_H
 #define P2P_INTERNAL_H
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
 #include <p2p.h>
 #include <p2pp.h>           /* 协议定义 */
@@ -83,7 +86,6 @@
 #include "p2p_ice.h"           /* ICE 协议 */
 #include "p2p_turn.h"          /* TURN 中继 */
 #include "p2p_tcp_punch.h"     /* TCP 打洞 */
-#include "p2p_thread.h"        /* 线程工具 */
 #include "p2p_signal_relay.h"  /* 中继模式信令 */
 #include "p2p_signal_pubsub.h" /* 发布/订阅模式信令 */
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
@@ -104,10 +106,10 @@
  *
  * 生命周期：p2p_init() → p2p_connect() → p2p_send/recv() → p2p_close()
  */
-struct p2p_session {
+typedef struct p2p_session {
     /* ======================== 配置与状态 ======================== */
     p2p_config_t                cfg;                // 用户配置（STUN 服务器、模式等）
-    int                         state;              // 连接状态 P2P_STATE_*
+    p2p_state_t                 state;              // 连接状态 P2P_STATE_*
     int                         path;               // 连接路径 P2P_PATH_*
 
     /* ======================== Socket 资源 ======================== */
@@ -199,7 +201,7 @@ struct p2p_session {
     int                         thread_running;     // 线程是否运行中
     int                         quit;               // 退出标志
 #endif
-};
+} p2p_session_t;
 
 /*
  * NAT 类型转可读字符串（支持多语言）
@@ -445,4 +447,5 @@ static inline int p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     return 0;
 }
 
+#pragma clang diagnostic pop
 #endif /* P2P_INTERNAL_H */

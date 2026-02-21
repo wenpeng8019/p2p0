@@ -21,7 +21,6 @@
 #include <stdbool.h>
 #include <p2p.h>
 #include <p2pp.h>
-#include "../src/p2p_platform.h"
 #include "../src/p2p_internal.h"
 
 #ifdef _WIN32
@@ -122,7 +121,7 @@ static void handle_relay_signaling(int idx) {
     // 更新最后活跃时间（收到任何数据都表示连接活跃）
     g_relay_clients[idx].last_active = time(NULL);
 
-    int n = recv(fd, (char *)&hdr, sizeof(hdr), 0);
+    size_t n = recv(fd, (char *)&hdr, sizeof(hdr), 0);
     if (n <= 0) {
         printf("[TCP] Peer %s disconnected\n", g_relay_clients[idx].name);
         server_close_socket(fd);
@@ -133,7 +132,7 @@ static void handle_relay_signaling(int idx) {
 
     // Debug: print received bytes
     printf("[DEBUG] Received %d bytes: magic=0x%08X, type=%d, length=%d (expected magic=0x%08X)\n",
-           n, hdr.magic, hdr.type, hdr.length, P2P_RLY_MAGIC);
+           (int)n, hdr.magic, hdr.type, hdr.length, P2P_RLY_MAGIC);
 
     if (hdr.magic != P2P_RLY_MAGIC) {
         printf("[TCP] Invalid magic from peer\n");
@@ -199,7 +198,7 @@ static void handle_relay_signaling(int idx) {
             
             // 构建 OFFER 包（含 hdr + count × candidate）
             uint8_t offer_buf[2048];
-            int n = pack_signaling_payload_hdr(
+            n = pack_signaling_payload_hdr(
                 sender,                    // sender
                 client->name,              // target
                 0,                         // timestamp
@@ -226,7 +225,7 @@ static void handle_relay_signaling(int idx) {
             send(fd, (const char *)offer_buf, n, 0);
             
             printf("[TCP]   → Forwarded OFFER from '%s' (%d candidates, %d bytes)\n",
-                   sender, client->pending_count, n);
+                   sender, client->pending_count, (int)n);
             fflush(stdout);
             
             // 清空缓存
@@ -246,7 +245,7 @@ static void handle_relay_signaling(int idx) {
             
             // 构建空 OFFER（candidate_count=0）
             uint8_t offer_buf[76];  // 仅包含 hdr，无候选数据
-            int n = pack_signaling_payload_hdr(
+            n = pack_signaling_payload_hdr(
                 sender,                    // sender
                 client->name,              // target
                 0,                         // timestamp
@@ -452,11 +451,11 @@ static void handle_relay_signaling(int idx) {
         if (hdr.type == P2P_RLY_CONNECT) {
             p2p_relay_hdr_t ack_hdr = {P2P_RLY_MAGIC, P2P_RLY_CONNECT_ACK, sizeof(p2p_relay_connect_ack_t)};
             p2p_relay_connect_ack_t ack_payload = {ack_status, candidates_acked, {0, 0}};
-            int sent1 = send(fd, (const char *)&ack_hdr, sizeof(ack_hdr), 0);
-            int sent2 = send(fd, (const char *)&ack_payload, sizeof(ack_payload), 0);
-            if (sent1 != (int)sizeof(ack_hdr) || sent2 != (int)sizeof(ack_payload)) {
-                printf("[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n", 
-                       g_relay_clients[idx].name, sent1, sent2);
+            size_t sent1 = send(fd, (const char *)&ack_hdr, sizeof(ack_hdr), 0);
+            size_t sent2 = send(fd, (const char *)&ack_payload, sizeof(ack_payload), 0);
+            if (sent1 != sizeof(ack_hdr) || sent2 != sizeof(ack_payload)) {
+                printf("[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n",
+                       g_relay_clients[idx].name, (int)sent1, (int)sent2);
             } else {
                 printf("[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n", 
                        g_relay_clients[idx].name, ack_status, candidates_acked);
@@ -470,15 +469,15 @@ static void handle_relay_signaling(int idx) {
 
         // 构造在线用户列表（逗号分隔）
         char list_buf[1024] = {0};
-        int offset = 0;
+        size_t offset = 0;
         for (int i = 0; i < MAX_PEERS; i++) {
             if (g_relay_clients[i].valid && g_relay_clients[i].fd != fd) {
-                int remaining = sizeof(list_buf) - offset;
+                size_t remaining = sizeof(list_buf) - offset;
                 if (remaining < P2P_PEER_ID_MAX + 2) {  // 确保有足够空间
                     printf("[TCP] User list truncated (too many users)\n");
                     break;
                 }
-                int n = snprintf(list_buf + offset, remaining, "%s,", g_relay_clients[i].name);
+                n = snprintf(list_buf + offset, remaining, "%s,", g_relay_clients[i].name);
                 if (n >= remaining) {  // 检查是否被截断
                     break;
                 }
@@ -530,13 +529,13 @@ static void cleanup_relay_clients(void) {
 }
 
 // 处理 COMPACT 模式信令（UDP 无状态，对应 p2p_signal_compact 模块）
-static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, int len, struct sockaddr_in *from) {
+static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_t  len, struct sockaddr_in *from) {
     
     if (len < 4) return;  // 至少需要包头
     
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)buf;
     uint8_t *payload = buf + 4;
-    int payload_len = len - 4;
+    size_t payload_len = len - 4;
     
     char from_str[64];
     snprintf(from_str, sizeof(from_str), "%s:%d", 
@@ -560,7 +559,7 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, int l
         p2p_compact_candidate_t candidates[MAX_CANDIDATES];
         memset(candidates, 0, sizeof(candidates));
         
-        int cand_offset = P2P_PEER_ID_MAX * 2;
+        size_t cand_offset = P2P_PEER_ID_MAX * 2;
         if (payload_len > cand_offset) {
             candidate_count = payload[cand_offset];
             if (candidate_count > MAX_CANDIDATES) {
@@ -808,8 +807,8 @@ static void cleanup_compact_pairs(void) {
 int main(int argc, char *argv[]) {
 
     int port = 8888;
-    if (argc > 1) port = atoi(argv[1]);
-    if (argc > 2) g_probe_port = atoi(argv[2]);
+    if (argc > 1) port = (int)strtol(argv[1], NULL, 0);
+    if (argc > 2) g_probe_port = (int)strtol(argv[2], NULL, 0);
     if (argc > 3 && strcmp(argv[3], "relay") == 0) g_relay_enabled = true;
     
     printf("[SERVER] Starting P2P signal server on port %d\n", port);
@@ -974,7 +973,7 @@ int main(int argc, char *argv[]) {
             struct sockaddr_in from;
             socklen_t from_len = sizeof(from);
             
-            int n = recvfrom(udp_fd, (char *)buf, sizeof(buf), 0, 
+            size_t n = recvfrom(udp_fd, (char *)buf, sizeof(buf), 0,
                             (struct sockaddr *)&from, &from_len);
             if (n > 0) {
                 handle_compact_signaling(udp_fd, buf, n, &from);
@@ -986,7 +985,7 @@ int main(int argc, char *argv[]) {
             uint8_t buf[64];
             struct sockaddr_in from;
             socklen_t from_len = sizeof(from);
-            int n = recvfrom(probe_fd, (char *)buf, sizeof(buf), 0,
+            size_t n = recvfrom(probe_fd, (char *)buf, sizeof(buf), 0,
                              (struct sockaddr *)&from, &from_len);
             // NAT_PROBE: [hdr(4)][request_id(2)][reserved(2)] = 8 bytes
             if (n >= 8 && buf[0] == SIG_PKT_NAT_PROBE) {

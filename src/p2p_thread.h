@@ -4,7 +4,7 @@
 
 #ifdef P2P_THREADED
 
-#include <p2p.h>
+#include "p2p_internal.h"
 
 int  p2p_thread_start(p2p_session_t *s);
 void p2p_thread_stop(p2p_session_t *s);

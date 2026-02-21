@@ -37,11 +37,16 @@ void route_init(route_ctx_t *rt) {
     memset(rt, 0, sizeof(*rt));
 }
 
+void route_final(route_ctx_t *rt) {
+    if (rt->local_addrs) free(rt->local_addrs);
+}
+
 // 检测获取本地所有有效的网络地址
 int route_detect_local(route_ctx_t *rt) {
 
-    rt->addr_count = 0;
     P2P_LOG_DEBUG("ROUTE", "%s", MSG(MSG_ROUTE_DETECT_START));
+
+    rt->addr_count = 0;
 
 #ifdef _WIN32
     /* Windows: 使用 GetAdaptersAddresses 枚举 IPv4 地址 */
@@ -62,54 +67,60 @@ int route_detect_local(route_ctx_t *rt) {
     if (ret != NO_ERROR) { free(pAddrs); return -1; }
 
     for (PIP_ADAPTER_ADDRESSES a = pAddrs; a != NULL; a = a->Next) {
-        if (rt->addr_count >= 8) break;
-        if (a->OperStatus != IfOperStatusUp) continue;          /* 接口未启动 */
-        if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;   /* 跳过 localhost */
-
-        for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress;
-             ua != NULL; ua = ua->Next) {
-            if (rt->addr_count >= 8) break;
-            struct sockaddr_in *sa = (struct sockaddr_in *)ua->Address.lpSockaddr;
-            if (sa->sin_family != AF_INET) continue;
-
-            /* 计算子网掩码 */
-            ULONG prefixLen = ua->OnLinkPrefixLength;
-            uint32_t mask = prefixLen ? htonl(~((1u << (32 - prefixLen)) - 1)) : 0;
-
-            rt->local_addrs[rt->addr_count] = *sa;
-            rt->local_masks[rt->addr_count] = mask;
-            rt->addr_count++;
+        if (a->OperStatus != IfOperStatusUp) continue;                                              /* 接口未启动 */
+        if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;                                       /* 跳过 localhost */
+        for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress; ua != NULL; ua = ua->Next) {
+            if (((struct sockaddr_in *)ua->Address.lpSockaddr)->sin_family != AF_INET) continue;    /* 协议无效 */
+            ++rt->addr_count;
         }
     }
-    free(pAddrs);
 
+    int i=0;
+    for (PIP_ADAPTER_ADDRESSES a = pAddrs; a != NULL; a = a->Next) {
+        if (a->OperStatus != IfOperStatusUp) continue;
+        if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+        for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress; ua != NULL; ua = ua->Next) {
+            if (((struct sockaddr_in *)ua->Address.lpSockaddr)->sin_family != AF_INET) continue;
+
+            rt->local_addrs[i] = *(struct sockaddr_in *)ua->Address.lpSockaddr;
+            rt->local_masks[i++] = ua->OnLinkPrefixLength ? htonl(~((1u << (32 - ua->OnLinkPrefixLength)) - 1)) : 0;    // 计算子网掩码
+        }
+    }
+
+    free(pAddrs);
 #else
     /* POSIX: 使用 getifaddrs */
     struct ifaddrs *ifa_list, *ifa;
     if (getifaddrs(&ifa_list) < 0) return -1;
 
     for (ifa = ifa_list; ifa != NULL; ifa = ifa->ifa_next) {
-        if (rt->addr_count >= 8) break;
         if (!ifa->ifa_addr) continue;
-        if (ifa->ifa_addr->sa_family != AF_INET) continue;      /* 协议无效 */
-        if (ifa->ifa_flags & IFF_LOOPBACK) continue;            /* 跳过 localhost */
         if (!(ifa->ifa_flags & IFF_UP)) continue;               /* 接口未启动 */
+        if (ifa->ifa_flags & IFF_LOOPBACK) continue;            /* 跳过 localhost */
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;      /* 协议无效 */
+        ++rt->addr_count;
+    }
 
-        struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
-        struct sockaddr_in *mask = (struct sockaddr_in *)ifa->ifa_netmask;
+    rt->local_addrs = malloc((sizeof(struct sockaddr_in) + sizeof(uint32_t)) * rt->addr_count);
+    if (!rt->local_addrs) return -1;
+    rt->local_masks = (uint32_t *)(rt->local_addrs + rt->addr_count);
 
-        rt->local_addrs[rt->addr_count] = *sa;
-        rt->local_masks[rt->addr_count] = mask->sin_addr.s_addr;
-        rt->addr_count++;
+    int i=0;
+    for (ifa = ifa_list; ifa != NULL; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr) continue;
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;
+        if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+        if (!(ifa->ifa_flags & IFF_UP)) continue;
+
+        rt->local_addrs[i] = *(struct sockaddr_in *)ifa->ifa_addr;
+        rt->local_masks[i++] = ((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr.s_addr;   // 计算子网掩码
     }
 
     freeifaddrs(ifa_list);
 #endif
 
-    for (int i = 0; i < rt->addr_count; i++) {
-        P2P_LOG_DEBUG("ROUTE", "  [%d] %s/%d", i,
-                      inet_ntoa(rt->local_addrs[i].sin_addr),
-                      mask_to_prefix(rt->local_masks[i]));
+    for (i = 0; i < rt->addr_count; i++) {
+        P2P_LOG_DEBUG("ROUTE", "  [%d] %s/%d", i, inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
     }
     P2P_LOG_INFO("ROUTE", "%s: %d %s", MSG(MSG_ROUTE_DETECT_DONE), rt->addr_count, MSG(MSG_ROUTE_ADDRS));
     return rt->addr_count;

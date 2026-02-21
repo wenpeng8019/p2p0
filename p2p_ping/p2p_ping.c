@@ -13,9 +13,6 @@
  */
 
 #include <p2p.h>
-#include "p2p_internal.h"
-#include "p2p_signal_relay.h"
-#include "p2p_signal_pubsub.h"
 #include "p2p_log.h"
 #include "ping_lang.h"
 #include <stdio.h>
@@ -50,20 +47,20 @@
  *   - p2p_log 输出重定向到管道，主循环轮询读取并通过 tui_println 打印
  * ============================================================================ */
 
-static int            g_tui_active  = 0;          /* TUI 是否已初始化 */
-static int            g_first_connect_done = 0;   /* 首次连接已处理（非交互模式防重复打印）*/
-static int            g_echo_mode   = 0;           /* --echo 模式 */
-static char           g_ibuf[512]   = {0};         /* 当前输入缓冲 */
-static int            g_ilen        = 0;           /* 输入缓冲长度 */
-static int            g_rows        = 24;          /* 终端行数 */
+static int              g_tui_active  = 0;          /* TUI 是否已初始化 */
+static int              g_first_connect_done = 0;   /* 首次连接已处理（非交互模式防重复打印）*/
+static int              g_echo_mode   = 0;          /* --echo 模式 */
+static char             g_buf_in[512] = {0};        /* 当前输入缓冲 */
+static int              g_len_in      = 0;          /* 输入缓冲长度 */
+static int              g_rows        = 24;         /* 终端行数 */
 #ifdef _WIN32
-static DWORD          g_orig_in_mode  = 0;         /* 原始控制台输入模式 */
-static DWORD          g_orig_out_mode = 0;         /* 原始控制台输出模式 */
-static int            g_win_pty_mode  = 0;         /* 1=ConPTY管道(VS Code)，0=真实控制台 */
+static DWORD            g_orig_in_mode  = 0;        /* 原始控制台输入模式 */
+static DWORD            g_orig_out_mode = 0;        /* 原始控制台输出模式 */
+static int              g_win_pty_mode  = 0;        /* 1=ConPTY管道(VS Code)，0=真实控制台 */
 #else
-static struct termios g_orig_term;                 /* 原始终端配置 */
+static struct termios   g_orig_term;                /* 原始终端配置 */
 #endif
-static const char    *g_my_name     = "me";        /* 本端显示名 */
+static const char*      g_my_name = "me";           /* 本端显示名 */
 
 /* 获取终端行数 */
 static int tui_get_rows(void) {
@@ -103,7 +100,7 @@ static void tui_println(const char *line) {
     printf("\033[%d;1H", g_rows - 1);             /* 移到滚动区末行 */
     printf("\n\r\033[K%s", line);                  /* 滚动 + 清行 + 写内容 */
     printf("\0338");                               /* restore cursor */
-    printf("\033[%d;1H\033[K> %s", g_rows, g_ibuf); /* 重绘输入行 */
+    printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in); /* 重绘输入行 */
     fflush(stdout);
 }
 
@@ -202,7 +199,7 @@ static void tui_cleanup(void) {
 }
 
 /* 处理 stdin 按键，维护输入缓冲，回车时发送 */
-static void tui_process_input(p2p_session_t *s) {
+static void tui_process_input(p2p_handle_t hdl) {
     if (!g_tui_active) return;  /* 非交互模式（重定向/后台）跳过 stdin 读取 */
     for (;;) {
         int ch;
@@ -230,34 +227,34 @@ static void tui_process_input(p2p_session_t *s) {
 #endif
         char c = (char)ch;
         if (c == '\r' || c == '\n') {
-            if (g_ilen > 0) {
-                g_ibuf[g_ilen] = '\0';
+            if (g_len_in > 0) {
+                g_buf_in[g_len_in] = '\0';
                 /* 在滚动区显示自己发出的消息 */
                 char line[576];
-                snprintf(line, sizeof(line), "%s: %s", g_my_name, g_ibuf);
+                snprintf(line, sizeof(line), "%s: %s", g_my_name, g_buf_in);
                 tui_println(line);
                 /* 发送 */
-                p2p_send(s, g_ibuf, g_ilen);
+                p2p_send(hdl, g_buf_in, g_len_in);
                 /* 清空输入行 */
-                g_ilen = 0;
-                g_ibuf[0] = '\0';
+                g_len_in = 0;
+                g_buf_in[0] = '\0';
                 printf("\033[%d;1H\033[K> ", g_rows);
                 fflush(stdout);
             }
         } else if (c == 0x7f || c == '\b') {   /* Backspace / DEL */
-            if (g_ilen > 0) {
-                g_ilen--;
-                g_ibuf[g_ilen] = '\0';
-                printf("\033[%d;1H\033[K> %s", g_rows, g_ibuf);
+            if (g_len_in > 0) {
+                g_len_in--;
+                g_buf_in[g_len_in] = '\0';
+                printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
                 fflush(stdout);
             }
         } else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7f
-                   && g_ilen < (int)sizeof(g_ibuf) - 1) {
+                   && g_len_in < (int)sizeof(g_buf_in) - 1) {
             /* 可打印 ASCII：追加并完整重绘输入行
              * 不用 putchar(c)，避免 ConPTY 双重回显 */
-            g_ibuf[g_ilen++] = c;
-            g_ibuf[g_ilen]   = '\0';
-            printf("\033[%d;1H\033[K> %s", g_rows, g_ibuf);
+            g_buf_in[g_len_in++] = c;
+            g_buf_in[g_len_in]   = '\0';
+            printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
             fflush(stdout);
         }
         /* 忽略方向键等控制序列 */
@@ -280,7 +277,7 @@ static void on_sigwinch(int sig) {
     if (new_rows != g_rows) {
         g_rows = new_rows;
         printf("\033[1;%dr", g_rows - 1);
-        printf("\033[%d;1H\033[K> %s", g_rows, g_ibuf);
+        printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
         fflush(stdout);
     }
 }
@@ -310,7 +307,7 @@ static void print_help(const char *prog) {
     printf("%s\n", ping_msg(MSG_PING_OPT_CN));
 }
 
-static const char* state_name(int state) {
+static const char* state_name(p2p_state_t state) {
     switch (state) {
         case P2P_STATE_IDLE:        return "IDLE";
         case P2P_STATE_REGISTERING: return "REGISTERING";
@@ -324,28 +321,29 @@ static const char* state_name(int state) {
     }
 }
 
-static void log_state_change(p2p_session_t *s) {
+static void log_state_change(p2p_handle_t s) {
     static int last_state = -1;
-    if (s->state != last_state) {
+    int state = p2p_state(s);
+    if (state != last_state) {
         if (g_tui_active) {
             char line[128];
             snprintf(line, sizeof(line), ping_msg(MSG_PING_STATE_CHANGE),
                      state_name(last_state), last_state,
-                     state_name(s->state), s->state);
+                     state_name(state), state);
             tui_println(line);
         } else {
             printf(ping_msg(MSG_PING_STATE_CHANGE),
                    state_name(last_state), last_state,
-                   state_name(s->state), s->state);
+                   state_name(state), state);
             printf("\n");
             fflush(stdout);
         }
-        last_state = s->state;
+        last_state = state;
     }
 }
 
 /* 连接断开回调 */
-static void on_disconnected(p2p_session_t *s, void *userdata) {
+static void on_disconnected(p2p_handle_t s, void *userdata) {
     (void)s; (void)userdata;
     if (g_tui_active) {
         tui_println(ping_msg(MSG_PING_CHAT_DISCONNECT));
@@ -362,9 +360,10 @@ int main(int argc, char *argv[]) {
     SetConsoleCP(65001);
 #endif
     int use_dtls = 0, use_openssl = 0, use_pseudo = 0, use_compact = 0;
-    int disable_lan = 0, lan_punch = 0, verbose_punch = 0, use_chinese = 0, show_help = 0;
+    int disable_lan = 0, lan_punch = 0, skip_host = 0, verbose_punch = 0, use_chinese = 0, show_help = 0;
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
     const char *my_name = "unnamed", *target_name = NULL;
+    const char *turn_server = NULL, *turn_user = NULL, *turn_pass = NULL;
     int server_port = 8888;
     int verbose = 0;
 
@@ -375,6 +374,7 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--compact")        == 0) use_compact = 1;
         else if (strcmp(argv[i], "--disable-lan")    == 0) disable_lan = 1;
         else if (strcmp(argv[i], "--lan-punch")      == 0) lan_punch = 1;
+        else if (strcmp(argv[i], "--public-only")    == 0) skip_host = 1;
         else if (strcmp(argv[i], "--verbose-punch")  == 0) verbose_punch = 1;
         else if (strcmp(argv[i], "--verbose")        == 0) verbose = 1;
         else if (strcmp(argv[i], "--cn")             == 0) use_chinese = 1;
@@ -384,6 +384,9 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--gist")   == 0 && i+1 < argc) gist_id    = argv[++i];
         else if (strcmp(argv[i], "--name")   == 0 && i+1 < argc) my_name    = argv[++i];
         else if (strcmp(argv[i], "--to")     == 0 && i+1 < argc) target_name = argv[++i];
+        else if (strcmp(argv[i], "--turn")      == 0 && i+1 < argc) turn_server = argv[++i];
+        else if (strcmp(argv[i], "--turn-user") == 0 && i+1 < argc) turn_user   = argv[++i];
+        else if (strcmp(argv[i], "--turn-pass") == 0 && i+1 < argc) turn_pass   = argv[++i];
         else if (strcmp(argv[i], "--help")   == 0) show_help = 1;
     }
     g_my_name = my_name;
@@ -404,7 +407,7 @@ int main(int argc, char *argv[]) {
                 memcpy(server_host_buf, server_ip, len);
                 server_host_buf[len] = '\0';
                 server_host  = server_host_buf;
-                server_port  = atoi(colon + 1);
+                server_port  = (int)strtol(colon + 1, NULL, 10);
             }
         }
     }
@@ -416,6 +419,10 @@ int main(int argc, char *argv[]) {
     cfg.use_ice        = !use_compact;
     cfg.stun_server    = "stun.l.google.com";
     cfg.stun_port      = 3478;
+    cfg.turn_server    = turn_server;
+    cfg.turn_port      = turn_server ? 3478 : 0;
+    cfg.turn_user      = turn_user;
+    cfg.turn_pass      = turn_pass;
     cfg.server_host    = server_host;
     cfg.server_port    = server_port;
     cfg.gh_token       = gh_token;
@@ -424,6 +431,7 @@ int main(int argc, char *argv[]) {
     cfg.language       = use_chinese ? P2P_LANG_ZH : P2P_LANG_EN;
     cfg.disable_lan_shortcut = disable_lan;
     cfg.lan_punch            = lan_punch;
+    cfg.skip_host_candidates = skip_host;
     cfg.verbose_nat_punch    = verbose_punch;
     cfg.on_disconnected      = on_disconnected;
     cfg.userdata             = NULL;
@@ -434,8 +442,8 @@ int main(int argc, char *argv[]) {
     else if (gh_token && gist_id)
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 
-    p2p_session_t *s = p2p_create(&cfg);
-    if (!s) { printf("%s\n", ping_msg(MSG_PING_CREATE_FAIL)); return 1; }
+    p2p_handle_t hdl = p2p_create(&cfg);
+    if (!hdl) { printf("%s\n", ping_msg(MSG_PING_CREATE_FAIL)); return 1; }
 
     const char *mode_name = NULL;
     if      (server_ip)         mode_name = cfg.use_ice ? "ICE" : "COMPACT";
@@ -451,7 +459,7 @@ int main(int argc, char *argv[]) {
     if (verbose_punch)  printf("%s\n", ping_msg(MSG_PING_VERBOSE_ENABLED));
     if (g_echo_mode)    printf("%s\n", ping_msg(MSG_PING_CHAT_ECHO_ON));
 
-    if (p2p_connect(s, target_name) < 0) {
+    if (p2p_connect(hdl, target_name) < 0) {
         printf("%s\n", ping_msg(MSG_PING_CONNECT_FAIL));
         return 1;
     }
@@ -466,11 +474,12 @@ int main(int argc, char *argv[]) {
 #endif
 
     /* ---- 主循环 ---- */
-    while (1) {
-        p2p_update(s);
-        log_state_change(s);
+    for(;;) {
 
-        if (p2p_is_ready(s)) {
+        p2p_update(hdl);
+        log_state_change(hdl);
+
+        if (p2p_is_ready(hdl)) {
             /* 首次连接成功：初始化 TUI，降低日志等级 */
             if (!g_first_connect_done) {
                 g_first_connect_done = 1;
@@ -483,7 +492,7 @@ int main(int argc, char *argv[]) {
 
             /* 接收对端消息 */
             char data[512] = {0};
-            int r = p2p_recv(s, data, (int)sizeof(data) - 1);
+            int r = p2p_recv(hdl, data, (int)sizeof(data) - 1);
             if (r > 0) {
                 data[r] = '\0';
                 char line[576];
@@ -495,15 +504,20 @@ int main(int argc, char *argv[]) {
                 if (g_echo_mode && strncmp(data, "[echo] ", 7) != 0) {
                     char echo_msg[520];
                     snprintf(echo_msg, sizeof(echo_msg), "[echo] %s", data);
-                    p2p_send(s, echo_msg, (int)strlen(echo_msg));
+                    p2p_send(hdl, echo_msg, (int)strlen(echo_msg));
                 }
             }
 
             /* 处理键盘输入 */
-            tui_process_input(s);
+            tui_process_input(hdl);
         }
 
-        p2p_sleep_ms(10);
+        // 间隔 ms
+#ifdef _WIN32
+        Sleep((DWORD)10);
+#else
+        usleep((unsigned int)10 * 1000);
+#endif
     }
 
     tui_cleanup();

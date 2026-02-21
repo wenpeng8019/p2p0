@@ -7,16 +7,23 @@
 #include "p2p_platform.h"   /* cross-platform socket headers */
 
 typedef struct {
-    struct sockaddr_in local_addrs[8];
-    uint32_t           local_masks[8];
-    int                addr_count;
-    struct sockaddr_in lan_peer_addr;   /* confirmed LAN addr */
-    int                lan_confirmed;
-    uint64_t           probe_time;
+    struct sockaddr_in* local_addrs;
+    uint32_t*           local_masks;
+    int                 addr_count;
+    struct sockaddr_in  lan_peer_addr;   /* confirmed LAN addr */
+    int                 lan_confirmed;
+    uint64_t            probe_time;
 } route_ctx_t;
 
 void route_init(route_ctx_t *rt);
+void route_final(route_ctx_t *rt);
 
+/**
+ * 检测获取本地所有有效的网络地址
+ * 返回:
+ * <0: 检测失败
+ * >=0: 检测到的地址数量
+ */
 int  route_detect_local(route_ctx_t *rt);
 
 bool  route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv);

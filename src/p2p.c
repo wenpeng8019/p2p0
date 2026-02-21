@@ -1,8 +1,12 @@
 
 #include "p2p_internal.h"
+#include "p2p_thread.h"
 #include "p2p_udp.h"
 #include "p2p_log.h"
 #include "p2p_lang.h"
+
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -42,11 +46,9 @@ static int resolve_host(const char *host, uint16_t port, struct sockaddr_in *out
 
 ///////////////////////////////////////////////////////////////////////////////
 
-p2p_session_t* p2p_create(const p2p_config_t *cfg) {
+p2p_handle_t
+p2p_create(const p2p_config_t *cfg) {
     if (!cfg) return NULL;
-
-    // 设置语言
-    p2p_set_language(cfg->language);
 
     // Initialize Winsock on Windows (no-op on POSIX)
     static int net_initialized = 0;
@@ -54,6 +56,9 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
         p2p_net_init();
         net_initialized = 1;
     }
+
+    // 设置语言
+    p2p_set_language(cfg->language);
 
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
 
@@ -74,53 +79,61 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
         return NULL;
     }
 
-
-    // bind_port = 0 means let the OS assign a random port (valid)
-    // 创建 UDP 套接字
+    // 创建 UDP 套接字，port 0 为有效值，表示由操作系统分配随机端口
     p2p_socket_t sock = udp_create_socket(cfg->bind_port);
     if (sock == P2P_INVALID_SOCKET) {
         P2P_LOG_ERROR("P2P", "%s %d", MSG(MSG_P2P_UDP_SOCKET_FAILED), cfg->bind_port);
         return NULL;
     }
 
-    p2p_session_t *s = (p2p_session_t *)calloc(1, sizeof(*s));
+    p2p_session_t *s = (p2p_session_t*)calloc(1, sizeof(*s));
     if (!s) return NULL;
 
     // 初始化信令服务模式
-    s->signaling_mode = cfg->signaling_mode;
-    s->signal_sent = false;
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_init(&s->sig_compact_ctx);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_init(&s->sig_relay_ctx);
     else if (p2p_signal_pubsub_init(&s->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id) != 0) {
         free(s); p2p_close_socket(sock);
         return NULL;
     } else if (cfg->auth_key) {
-        strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1);
+        strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1); // todo 用 strdup
+    }
+
+    // 初始化路由层（用于检测是否处于同一子网）
+    route_init(&s->route);
+
+    // 获取本地所有有效的网络地址
+    if (route_detect_local(&s->route) < 0) {
+        free(s); p2p_close_socket(sock);
+        return NULL;
+    }
+
+    // 初始化候选地址数组（动态分配，初始容量 8）
+    s->local_cands  = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
+    s->local_cand_cap = 8;
+    s->remote_cands = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
+    s->remote_cand_cap = 8;
+    if (!s->local_cands || !s->remote_cands) {
+        if (s->local_cands) free(s->local_cands);
+        if (s->remote_cands) free(s->remote_cands);
+        free(s); p2p_close_socket(s->sock);
+        return NULL;
     }
 
     s->cfg = *cfg;
     if (s->cfg.update_interval_ms <= 0) s->cfg.update_interval_ms = 10;
     s->sock = sock;
     s->tcp_sock = P2P_INVALID_SOCKET;
-    s->state = P2P_STATE_IDLE;
-    s->path = P2P_PATH_NONE;
 
-    // 初始化链路层（基于 NAT 穿透的 P2P）
+    // 初始化虚拟链路层（基于 NAT 穿透的 P2P）
     nat_init(&s->nat);
-    
-    // 初始化路由层（检测是否处于同一子网）
-    route_init(&s->route);
 
     // 初始化基础传输层（reliable ARQ）
     reliable_init(&s->reliable);
 
-    // 初始化基础传输层（reliable）
-    reliable_init(&s->reliable);
-
     // 初始化传输层（可选的高级传输模块）
-    // 注：reliable 是基础传输层，始终存在于 s->reliable
-    //     这里的 s->trans 只用于高级传输模块（DTLS/OpenSSL/SCTP/PseudoTCP）
-    s->trans = NULL;  // 默认无高级传输层
+    // + 这里的 s->trans 只用于高级传输模块（DTLS/OpenSSL/SCTP/PseudoTCP）
+    s->trans = NULL;
     
     if (cfg->use_dtls) {
 #ifdef WITH_DTLS
@@ -143,9 +156,7 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
         P2P_LOG_WARN("P2P", "%s", MSG(MSG_P2P_SCTP_NOT_LINKED));
 #endif
     }
-    else if (cfg->use_pseudotcp) {
-        s->trans = &p2p_trans_pseudotcp;
-    }
+    else if (cfg->use_pseudotcp) s->trans = &p2p_trans_pseudotcp;
 
     // 执行传输模块的初始化处理
     if (s->trans && s->trans->init) s->trans->init(s);
@@ -153,21 +164,15 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
     // 初始化数据流层
     stream_init(&s->stream, cfg->nagle);
 
-    // 获取本地所有有效的网络地址
-    route_detect_local(&s->route);
+    //----------------------------
+
+    s->signaling_mode = cfg->signaling_mode;
+    s->signal_sent = false;
+
+    s->state = P2P_STATE_IDLE;
+    s->path = P2P_PATH_NONE;
 
     s->last_update = time_ms();
-
-    // 初始化候选地址数组（动态分配，初始容量 8）
-    s->local_cands  = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
-    s->local_cand_cap = 8;
-    s->remote_cands = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
-    s->remote_cand_cap = 8;
-    if (!s->local_cands || !s->remote_cands) {
-        free(s->local_cands); free(s->remote_cands);
-        p2p_close_socket(s->sock); free(s);
-        return NULL;
-    }
 
 #ifdef P2P_THREADED
     if (cfg->threaded) {
@@ -180,11 +185,14 @@ p2p_session_t* p2p_create(const p2p_config_t *cfg) {
     }
 #endif
 
-    return s;
+    return (p2p_handle_t)s;
 }
 
-void p2p_destroy(p2p_session_t *s) {
-    if (!s) return;
+void
+p2p_destroy(p2p_handle_t hdl) {
+    if (!hdl) return;
+
+    p2p_session_t *s = (p2p_session_t*)hdl;
 
 #ifdef P2P_THREADED
     if (s->cfg.threaded)
@@ -225,9 +233,14 @@ void p2p_destroy(p2p_session_t *s) {
     free(s);
 }
 
-int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
+///////////////////////////////////////////////////////////////////////////////
 
-    if (!s) return -1;
+int
+p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
+
+    if (!hdl) return -1;
+
+    p2p_session_t *s = (p2p_session_t*)hdl;
     if (s->state != P2P_STATE_IDLE) return -1;
 
     if (remote_peer_id && !*remote_peer_id) remote_peer_id = NULL;
@@ -272,17 +285,23 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
             struct sockaddr_in loc; socklen_t len = sizeof(loc);
             getsockname(s->sock, (struct sockaddr *)&loc, &len);
 
-            // 将 route 中的本地地址转换为候选列表
-            for (int i = 0; i < s->route.addr_count; i++) {
-                p2p_candidate_entry_t *c = p2p_cand_push_local(s);
-                if (!c) break;
-                c->type = P2P_CAND_HOST;
-                c->addr = s->route.local_addrs[i];
-                c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
-                P2P_LOG_INFO("P2P", "[COMPACT] %s: %s:%d",
-                       MSG(MSG_P2P_COMPACT_HOST_CAND),
-                       inet_ntoa(c->addr.sin_addr),
-                       ntohs(c->addr.sin_port));
+            // 将 route 中的本地地址转换为候选列表（skip_host_candidates 时跳过）
+            if (!s->cfg.skip_host_candidates) {
+                for (int i = 0; i < s->route.addr_count; i++) {
+                    p2p_candidate_entry_t *c = p2p_cand_push_local(s);
+                    if (!c) break;
+                    c->type = P2P_CAND_HOST;
+                    c->addr = s->route.local_addrs[i];
+                    c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
+                    P2P_LOG_INFO("P2P", "[COMPACT] %s: %s:%d",
+                           MSG(MSG_P2P_COMPACT_HOST_CAND),
+                           inet_ntoa(c->addr.sin_addr),
+                           ntohs(c->addr.sin_port));
+                }
+            } else {
+                P2P_LOG_INFO("P2P", "[COMPACT] --public-only: %s, %s REGISTER_ACK",
+                       MSG(MSG_P2P_COMPACT_SKIP_HOST),
+                       MSG(MSG_P2P_WAITING_FOR));
             }
 
             // 开始信令注册
@@ -397,9 +416,12 @@ int p2p_connect(p2p_session_t *s, const char *remote_peer_id) {
     return 0;
 }
 
-void p2p_close(p2p_session_t *s) {
+void
+p2p_close(p2p_handle_t hdl) {
 
-    if (!s) return;
+    if (!hdl) return;
+
+    p2p_session_t *s = (p2p_session_t*)hdl;
 
     LOCK(s);
 
@@ -419,15 +441,17 @@ void p2p_close(p2p_session_t *s) {
     UNLOCK(s);
 }
 
-///////////////////////////////////////////////////////////////////////////////
-
 /*
  * 主更新循环 — 驱动所有状态机。
  * > 在单线程模式下，应用程序调用此函数
  * > 在多线程模式下，内部线程在锁下调用此函数
  */
-int p2p_update(p2p_session_t *s) {
-    if (!s) return -1;
+int
+p2p_update(p2p_handle_t hdl) {
+
+    if (!hdl) return -1;
+
+    p2p_session_t *s = (p2p_session_t*)hdl;
 
     uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; int n;
 
@@ -684,10 +708,9 @@ int p2p_update(p2p_session_t *s) {
         // 如果使用高级传输层（DTLS、SCTP、PseudoTCP）
         if (s->trans && s->trans->send_data) {
             // 由高级传输模块自行处理流的数据
-            uint8_t tmp[P2P_MTU];
-            int n = ring_read(&s->stream.send_ring, tmp, sizeof(tmp));
+            n = ring_read(&s->stream.send_ring, buf, sizeof(buf));
             if (n > 0) {
-                s->trans->send_data(s, tmp, n);
+                s->trans->send_data(s, buf, n);
                 s->stream.pending_bytes -= n;
                 s->stream.send_offset += n;
             }
@@ -733,26 +756,20 @@ int p2p_update(p2p_session_t *s) {
     // 周期维护 NAT/信令 状态机（按信令模式分组）
     // --------------------
 
+    // NAT 层维护（打洞、保活）
+    if (s->nat.state != NAT_IDLE) nat_tick(s);
+
     if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-        
+
         // 信令层维护（注册、等待、候选同步）
         if (s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERING ||
             s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERED ||
             s->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
             p2p_signal_compact_tick(s);
         }
-        
-        // NAT 层维护（打洞、保活）
-        // 注：READY 状态时两者需要同时执行
-        if (s->nat.state != NAT_IDLE) {
-            nat_tick(s);
-        }
     }
     else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
-        
-        // NAT 层维护
-        nat_tick(s);
-        
+
         // 信令层维护
         p2p_signal_relay_tick(&s->sig_relay_ctx, s);
         
@@ -782,65 +799,63 @@ int p2p_update(p2p_session_t *s) {
                 // 从 next_candidate_index 开始发送剩余候选（断点续传）
                 int start_idx = s->sig_relay_ctx.next_candidate_index;
                 if (start_idx < s->local_cand_cnt) {
+
                     // Trickle ICE：每次最多发送 8 个候选（协议规定 1-8 个/批次）
                     #define MAX_CANDIDATES_PER_BATCH 8
                     int remaining = s->local_cand_cnt - start_idx;
                     int batch_size = (remaining > MAX_CANDIDATES_PER_BATCH) ? MAX_CANDIDATES_PER_BATCH : remaining;
                 
-                uint8_t buf[2048];
-                int n = pack_signaling_payload_hdr(
-                    s->cfg.local_peer_id,
-                    s->remote_peer_id,
-                    0,  /* timestamp */
-                    0,  /* delay_trigger */
-                    batch_size,
-                    buf
-                );
-                for (int i = 0; i < batch_size; i++) {
-                    n += pack_candidate(&s->local_cands[start_idx + i], buf + n);
-                }
-                if (n > 0) {
-                    int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
-                    /*
-                     * 返回值：
-                     *   >0: 成功转发的候选数量
-                     *    0: 目标不在线（已存储等待转发）
-                     *   <0: 失败（-1=超时, -2=容量不足, -3=服务器错误）
-                     */
-                    if (ret >= 0) {
-                        s->signal_sent = true;
-                        s->last_signal_time = now;
-                        s->last_cand_cnt_sent = s->local_cand_cnt;
-                        s->cands_pending_send = false;  /* 清除待发送标志 */
-                        
-                        if (ret > 0) {
-                            P2P_LOG_INFO("P2P", "[SIGNALING] %s [%d-%d] %s %s (%s=%d)",
-                                         MSG(MSG_P2P_CANDS_SENT_FWD),
-                                         start_idx, start_idx + batch_size - 1,
-                                         MSG(MSG_STUN_TO), s->remote_peer_id,
-                                         MSG(MSG_RELAY_FORWARDED), ret);
-                        } else {
-                            P2P_LOG_INFO("P2P", "[SIGNALING] %s %d %s %s",
-                                         MSG(MSG_P2P_CANDS_SENT_CACHED),
-                                         batch_size, MSG(MSG_STUN_TO), s->remote_peer_id);
-                        }
-                    } else if (ret == -2) {
-                        /* 服务器缓存满（status=2）：停止发送，等待对端上线后收到 FORWARD */
-                        /* waiting_for_peer 已在 send_connect() 中设置为 true */
-                        P2P_LOG_WARN("P2P", "[SIGNALING] %s", MSG(MSG_P2P_SERVER_FULL_WAIT));
-                    } else {
-                        s->cands_pending_send = true;  /* TCP 发送失败（-1/-3），标记待重发 */
-                        P2P_LOG_WARN("P2P", "[SIGNALING] %s (ret=%d)", MSG(MSG_P2P_CANDS_SEND_FAILED), ret);
+                    uint8_t pkt[2048];
+                    n = pack_signaling_payload_hdr(
+                        s->cfg.local_peer_id,
+                        s->remote_peer_id,
+                        0,  /* timestamp */
+                        0,  /* delay_trigger */
+                        batch_size,
+                        pkt
+                    );
+                    for (int i = 0; i < batch_size; i++) {
+                        n += pack_candidate(&s->local_cands[start_idx + i], pkt + n);
                     }
-                }
+                    if (n > 0) {
+                        int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, pkt, n);
+                        /*
+                         * 返回值：
+                         *   >0: 成功转发的候选数量
+                         *    0: 目标不在线（已存储等待转发）
+                         *   <0: 失败（-1=超时, -2=容量不足, -3=服务器错误）
+                         */
+                        if (ret >= 0) {
+                            s->signal_sent = true;
+                            s->last_signal_time = now;
+                            s->last_cand_cnt_sent = s->local_cand_cnt;
+                            s->cands_pending_send = false;  /* 清除待发送标志 */
+
+                            if (ret > 0) {
+                                P2P_LOG_INFO("P2P", "[SIGNALING] %s [%d-%d] %s %s (%s=%d)",
+                                             MSG(MSG_P2P_CANDS_SENT_FWD),
+                                             start_idx, start_idx + batch_size - 1,
+                                             MSG(MSG_STUN_TO), s->remote_peer_id,
+                                             MSG(MSG_RELAY_FORWARDED), ret);
+                            } else {
+                                P2P_LOG_INFO("P2P", "[SIGNALING] %s %d %s %s",
+                                             MSG(MSG_P2P_CANDS_SENT_CACHED),
+                                             batch_size, MSG(MSG_STUN_TO), s->remote_peer_id);
+                            }
+                        } else if (ret == -2) {
+                            /* 服务器缓存满（status=2）：停止发送，等待对端上线后收到 FORWARD */
+                            /* waiting_for_peer 已在 send_connect() 中设置为 true */
+                            P2P_LOG_WARN("P2P", "[SIGNALING] %s", MSG(MSG_P2P_SERVER_FULL_WAIT));
+                        } else {
+                            s->cands_pending_send = true;  /* TCP 发送失败（-1/-3），标记待重发 */
+                            P2P_LOG_WARN("P2P", "[SIGNALING] %s (ret=%d)", MSG(MSG_P2P_CANDS_SEND_FAILED), ret);
+                        }
+                    }
                 }  // 结束 if (start_idx < s->local_cand_cnt)
             }
         }
     }
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
-        
-        // NAT 层维护
-        nat_tick(s);
+    else { assert(s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
         
         // 信令层维护
         p2p_signal_pubsub_tick(&s->sig_pubsub_ctx, s);
@@ -872,20 +887,20 @@ int p2p_update(p2p_session_t *s) {
                     (s->local_cand_cnt > s->last_cand_cnt_sent)
                 ) {
 
-                    uint8_t buf[2048];
-                    int n = pack_signaling_payload_hdr(
+                    uint8_t pkt[2048];
+                    n = pack_signaling_payload_hdr(
                         s->cfg.local_peer_id,
                         s->remote_peer_id,
                         0,  /* timestamp */
                         0,  /* delay_trigger */
                         s->local_cand_cnt,
-                        buf
+                        pkt
                     );
                     for (int i = 0; i < s->local_cand_cnt; i++) {
-                        n += pack_candidate(&s->local_cands[i], buf + n);
+                        n += pack_candidate(&s->local_cands[i], pkt + n);
                     }
                     if (n > 0) {
-                        p2p_signal_pubsub_send(&s->sig_pubsub_ctx, s->remote_peer_id, buf, n);
+                        p2p_signal_pubsub_send(&s->sig_pubsub_ctx, s->remote_peer_id, pkt, n);
                         s->signal_sent = true;
                         s->last_signal_time = now;
                         s->last_cand_cnt_sent = s->local_cand_cnt;
@@ -913,13 +928,42 @@ int p2p_update(p2p_session_t *s) {
     return 0;
 }
 
+p2p_state_t
+p2p_state(const p2p_handle_t hdl) {
+    return hdl ? ((p2p_session_t*)hdl)->state : P2P_STATE_ERROR;
+}
+
+int
+p2p_nat_type(const p2p_handle_t hdl) {
+    return hdl ? ((p2p_session_t*)hdl)->nat_type : P2P_NAT_UNKNOWN;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
-int p2p_send(p2p_session_t *s, const void *buf, int len) {
+int
+p2p_path(const p2p_handle_t hdl) {
+    return hdl ? ((p2p_session_t*)hdl)->path : P2P_PATH_NONE;
+}
 
-    if (!s || !buf || len <= 0) return -1;
-    if (s->state != P2P_STATE_CONNECTED && s->state != P2P_STATE_RELAY)
-        return -1;
+bool
+p2p_is_ready(p2p_handle_t hdl) {
+    if (!hdl) return false;
+
+    p2p_session_t *s = (p2p_session_t*)hdl;
+    if (s->state != P2P_STATE_CONNECTED && s->state != P2P_STATE_RELAY) return false;
+    if (s->trans && s->trans->is_ready) {
+        return s->trans->is_ready(s);
+    }
+    return true; // 默认准备好，如果不需要传输特定检查
+}
+
+int
+p2p_send(p2p_handle_t hdl, const void *buf, int len) {
+
+    if (!hdl || !buf || len <= 0) return -1;
+
+    p2p_session_t *s = (p2p_session_t*)hdl;
+    if (s->state != P2P_STATE_CONNECTED && s->state != P2P_STATE_RELAY) return -1;
 
     LOCK(s);
     int ret = stream_write(&s->stream, buf, len);
@@ -927,8 +971,12 @@ int p2p_send(p2p_session_t *s, const void *buf, int len) {
     return ret;
 }
 
-int p2p_recv(p2p_session_t *s, void *buf, int len) {
-    if (!s || !buf || len <= 0) return -1;
+int
+p2p_recv(p2p_handle_t hdl, void *buf, int len) {
+
+    if (!hdl || !buf || len <= 0) return -1;
+
+    p2p_session_t *s = (p2p_session_t*)hdl;
 
     LOCK(s);
     int ret = stream_read(&s->stream, buf, len);
@@ -936,23 +984,6 @@ int p2p_recv(p2p_session_t *s, void *buf, int len) {
     return ret;
 }
 
-int p2p_state(const p2p_session_t *s) {
-    return s ? s->state : P2P_STATE_ERROR;
-}
+///////////////////////////////////////////////////////////////////////////////
 
-int p2p_path(const p2p_session_t *s) {
-    return s ? s->path : P2P_PATH_NONE;
-}
-
-int p2p_get_nat_type(const p2p_session_t *s) {
-    return s ? s->nat_type : P2P_NAT_UNKNOWN;
-}
-
-int p2p_is_ready(p2p_session_t *s) {
-    if (!s) return 0;
-    if (s->state != P2P_STATE_CONNECTED && s->state != P2P_STATE_RELAY) return 0;
-    if (s->trans && s->trans->is_ready) {
-        return s->trans->is_ready(s);
-    }
-    return 1; // 默认准备好，如果不需要传输特定检查
-}
+#pragma clang diagnostic pop

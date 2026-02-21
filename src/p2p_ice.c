@@ -412,7 +412,9 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
     /*
      * Host Candidate 是本地网卡的 IP 地址。
      * 在同一局域网内的对端可以直接使用此地址通信。
+     * skip_host_candidates 模式下跳过（用于快速公网打洞测试）。
      */
+    if (!s->cfg.skip_host_candidates)
     {
         /* 获取本地端口 */
         struct sockaddr_in loc;
@@ -702,7 +704,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 
             /* 认证握手 */
             if (s->cfg.auth_key) {
-                udp_send_packet(s->sock, from, P2P_PKT_AUTH, 0, 0, s->cfg.auth_key, strlen(s->cfg.auth_key));
+                udp_send_packet(s->sock, from, P2P_PKT_AUTH, 0, 0, s->cfg.auth_key, (int)strlen(s->cfg.auth_key));
                 P2P_LOG_INFO("AUTH", "%s", MSG(MSG_ICE_AUTH_SENT));
             }
     }

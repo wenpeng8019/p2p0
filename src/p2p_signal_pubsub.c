@@ -65,7 +65,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <ctype.h>
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -84,9 +83,10 @@
  * @param key_out   输出：8 字节 DES 密钥
  * @param key_len   密钥长度（应为 8）
  */
-static void derive_key(const char *auth_key, uint8_t *key_out, size_t key_len) {
+static void derive_key(const char *auth_key, uint8_t key_out[8]) {
+    const size_t key_len = 8;
     memset(key_out, 0, key_len);
-    if (auth_key && auth_key[0]) {
+    if (auth_key[0]) {
         size_t auth_len = strlen(auth_key);
         for (size_t i = 0; i < key_len && i < auth_len; i++) {
             key_out[i] = auth_key[i];
@@ -173,11 +173,11 @@ void p2p_signal_pubsub_set_role(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t 
 static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s, const char *b64_data) {
     /* 派生解密密钥 */
     uint8_t key[8];
-    derive_key(ctx->auth_key, key, sizeof(key));
+    derive_key(ctx->auth_key, key);
     
     /* Base64 解码 */
     uint8_t enc_buf[1024];
-    int enc_len = p2p_base64_decode(b64_data, strlen(b64_data), enc_buf, sizeof(enc_buf));
+    size_t enc_len = p2p_base64_decode(b64_data, strlen(b64_data), enc_buf, sizeof(enc_buf));
     if (enc_len <= 0) {
         P2P_LOG_WARN("SIGNAL_PUBSUB", "%s", MSG(MSG_PUBSUB_BASE64_FAILED));
         return;
@@ -195,8 +195,8 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
     
     /* 反序列化信令数据 */
     p2p_signaling_payload_hdr_t payload;
-    if (enc_len >= 76 && unpack_signaling_payload_hdr(&payload, dec_buf) == 0 &&
-        enc_len >= (size_t)(76 + payload.candidate_count * 32)) {
+    if (enc_len >= sizeof(p2p_signaling_payload_hdr_t) && unpack_signaling_payload_hdr(&payload, dec_buf) == 0 &&
+        enc_len >= (size_t)(sizeof(p2p_signaling_payload_hdr_t) + payload.candidate_count * sizeof(p2p_candidate_t))) {
         P2P_LOG_INFO("SIGNAL_PUBSUB", "%s '%s'", MSG(MSG_PUBSUB_RECEIVED_SIGNAL), payload.sender);
         
         /* SUB 收到首个 offer（或发送者改变），重置 ICE 避免残留旧连接状态 */
@@ -303,7 +303,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     
     /* 派生加密密钥 */
     uint8_t key[8];
-    derive_key(ctx->auth_key, key, sizeof(key));
+    derive_key(ctx->auth_key, key);
     
     /* DES 加密需要 8 字节对齐 */
     int padded_len = (len + 7) & ~7;

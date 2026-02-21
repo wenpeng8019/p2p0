@@ -260,6 +260,19 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
                    ctx->probe_port);
         }
         
+        /* skip_host_candidates 模式：添加public_addr作为唯一候选（公网地址） */
+        if (s->cfg.skip_host_candidates && s->local_cand_cnt == 0) {
+            p2p_candidate_entry_t *c = p2p_cand_push_local(s);
+            if (c) {
+                c->type = P2P_CAND_SRFLX;  /* 公网反射地址 */
+                c->addr = ctx->public_addr;
+                c->priority = 0;
+                P2P_LOG_INFO("COMPACT", "[--public-only] %s Srflx: %s:%d",
+                       MSG(MSG_ICE_GATHERED),
+                       inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            }
+        }
+        
         /* 如果已经收到 PEER_INFO 进入 READY 状态，忽略延迟到达的 ACK */
         if (ctx->state == SIGNAL_COMPACT_READY) {
             if (ctx->verbose) {
