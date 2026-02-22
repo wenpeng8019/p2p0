@@ -63,6 +63,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
+#pragma ide diagnostic ignored "UnreachableCallsOfFunction"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,10 +127,10 @@ typedef struct p2p_session {
 
     /* ======================== ICE 状态 ======================== */
     p2p_ice_state_t             ice_state;          // ICE 协商状态
-    p2p_candidate_entry_t      *local_cands;        // 本地候选地址（动态分配）
+    p2p_candidate_entry_t*      local_cands;        // 本地候选地址（动态分配）
     int                         local_cand_cnt;     // 本地候选数量
     int                         local_cand_cap;     // 本地候选容量
-    p2p_candidate_entry_t      *remote_cands;       // 远端候选地址（动态分配）
+    p2p_candidate_entry_t*      remote_cands;       // 远端候选地址（动态分配）
     int                         remote_cand_cnt;    // 远端候选数量
     int                         remote_cand_cap;    // 远端候选容量
     uint64_t                    ice_check_last_ms;  // 上次连通性检查时间
@@ -364,7 +365,7 @@ static inline int unpack_signaling_payload_hdr(p2p_signaling_payload_hdr_t *p, c
     /* timestamp, delay_trigger, candidate_count */
     p->timestamp = ntohl(*(uint32_t*)&buf[n]); n += 4;
     p->delay_trigger = ntohl(*(uint32_t*)&buf[n]); n += 4;
-    p->candidate_count = (int)ntohl(*(uint32_t*)&buf[n]); n += 4;
+    p->candidate_count = (int)ntohl(*(uint32_t*)&buf[n]); //n += 4;
     
     /* 验证候选数量（防止恶意/畸形包，候选使用动态分配无固定上限）*/
     if (p->candidate_count < 0 || p->candidate_count > 200) return -1;

@@ -191,7 +191,7 @@ typedef struct {
  * ICE 状态机（RFC 5245 Section 7）
  * ============================================================================ */
 typedef enum {
-    P2P_ICE_STATE_IDLE = 0,             // 初始状态
+    P2P_ICE_STATE_INIT = 0,             // 初始状态
     P2P_ICE_STATE_GATHERING,            // 正在收集候选地址
     P2P_ICE_STATE_GATHERING_DONE,       // 候选收集完成
     P2P_ICE_STATE_CHECKING,             // 正在进行连通性检查

@@ -169,8 +169,11 @@ p2p_create(const p2p_config_t *cfg) {
     s->signaling_mode = cfg->signaling_mode;
     s->signal_sent = false;
 
-    s->state = P2P_STATE_IDLE;
+    s->state = P2P_STATE_INIT;
     s->path = P2P_PATH_NONE;
+
+    s->nat_type = P2P_NAT_UNKNOWN;
+    s->ice_state = P2P_ICE_STATE_INIT;
 
     s->last_update = time_ms();
 
@@ -216,7 +219,7 @@ p2p_destroy(p2p_handle_t hdl) {
         // 服务器收到后即刻释放槽位。如果服务器未实现此包类型的处理，
         // 将自动降级为 90 秒超时清除机制。
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT &&
-            s->sig_compact_ctx.state != SIGNAL_COMPACT_IDLE) {
+            s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
             uint8_t unreg[P2P_PEER_ID_MAX * 2];
             memset(unreg, 0, sizeof(unreg));
             memcpy(unreg,                   s->sig_compact_ctx.local_peer_id,  P2P_PEER_ID_MAX);
@@ -241,7 +244,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     if (!hdl) return -1;
 
     p2p_session_t *s = (p2p_session_t*)hdl;
-    if (s->state != P2P_STATE_IDLE) return -1;
+    if (s->state != P2P_STATE_INIT) return -1;
 
     if (remote_peer_id && !*remote_peer_id) remote_peer_id = NULL;
 
@@ -305,7 +308,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             }
 
             // 开始信令注册
-            p2p_signal_compact_start(s, s->cfg.local_peer_id, remote_peer_id, &server_addr, s->cfg.verbose_nat_punch);
+            p2p_signal_compact_connect(s, s->cfg.local_peer_id, remote_peer_id, &server_addr, s->cfg.verbose_nat_punch);
 
             if (s->cfg.lan_punch) {
                 P2P_LOG_INFO("P2P", "[lan_punch] COMPACT 模式：仅使用 Host 候选 (%d 个)，等待对端 PEER_INFO 后调用 nat_start_punch",
@@ -588,10 +591,10 @@ p2p_update(p2p_handle_t hdl) {
                 // 处理信令包
                 int ret = p2p_signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
                 
-                // PEER_INFO 特殊处理：seq=1 时启动打洞（首次收到服务器转发的候选）
-                if (ret == 0 && hdr.type == SIG_PKT_PEER_INFO && hdr.seq == 1) {
+                // PEER_INFO 特殊处理：seq=0 时启动打洞（首次收到服务器下发候选）
+                if (ret == 0 && hdr.type == SIG_PKT_PEER_INFO && hdr.seq == 0) {
                     if (s->cfg.lan_punch) {
-                        P2P_LOG_INFO("P2P", "[lan_punch] 收到 PEER_INFO seq=1 (%d 个候选)，启动 nat_start_punch",
+                        P2P_LOG_INFO("P2P", "[lan_punch] 收到 PEER_INFO seq=0 (%d 个候选)，启动 nat_start_punch",
                                      s->remote_cand_cnt);
                     }
                     nat_start_punch(s, s->cfg.verbose_nat_punch);
@@ -757,7 +760,7 @@ p2p_update(p2p_handle_t hdl) {
     // --------------------
 
     // NAT 层维护（打洞、保活）
-    if (s->nat.state != NAT_IDLE) nat_tick(s);
+    if (s->nat.state != NAT_INIT) nat_tick(s);
 
     if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
@@ -918,7 +921,7 @@ p2p_update(p2p_handle_t hdl) {
     // 检测 NAT 断开连接（仅当使用 NAT 时）
     // --------------------
 
-    if (s->nat.state == NAT_IDLE && s->nat.last_send_time > 0
+    if (s->nat.state == NAT_INIT && s->nat.last_send_time > 0
         && (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)) {
 
         s->state = P2P_STATE_ERROR;

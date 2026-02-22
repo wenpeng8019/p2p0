@@ -195,7 +195,7 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         
         /* SUB 收到首个 offer（或发送者改变），重置 ICE 避免残留旧连接状态 */
         if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
-            if (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_IDLE) {
+            if (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_INIT) {
                 P2P_LOG_DEBUG("SIGNAL_PUBSUB", "[DEBUG] First offer, resetting ICE and clearing %d stale candidates", s->remote_cand_cnt);
                 s->remote_cand_cnt = 0;
                 s->ice_state = P2P_ICE_STATE_GATHERING_DONE;

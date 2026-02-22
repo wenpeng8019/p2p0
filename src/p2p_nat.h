@@ -20,7 +20,7 @@ struct p2p_session;
 
 /* 打洞状态 */
 enum {
-    NAT_IDLE = 0,       /* 未启动 */
+    NAT_INIT = 0,       /* 未启动 */
     NAT_PUNCHING,       /* 打洞中 */
     NAT_CONNECTED,      /* 已连接 */
     NAT_RELAY           /* 中继模式 */

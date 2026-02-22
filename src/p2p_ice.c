@@ -717,7 +717,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 #define P2P_ICE_CHECK_INTERVAL_MS 500
 
 void p2p_ice_tick(p2p_session_t *s) {
-    if (s->ice_state == P2P_ICE_STATE_IDLE ||
+    if (s->ice_state == P2P_ICE_STATE_INIT ||
         s->ice_state == P2P_ICE_STATE_COMPLETED ||
         s->ice_state == P2P_ICE_STATE_FAILED) return;
 
@@ -728,7 +728,7 @@ void p2p_ice_tick(p2p_session_t *s) {
      * nat_start_punch 会走完整的打洞状态机（重试/超时/候选轮询），
      * 与跨 NAT 场景完全相同，只是目标地址是 LAN 私网 IP。 */
     if (s->cfg.lan_punch) {
-        if (s->nat.state == NAT_IDLE) {
+        if (s->nat.state == NAT_INIT) {
             P2P_LOG_INFO("ICE", "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)",
                          s->remote_cand_cnt);
             nat_start_punch(s, s->cfg.verbose_nat_punch);

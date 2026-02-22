@@ -293,7 +293,7 @@ typedef struct {
 ```c
 typedef struct {
     uint8_t  status;
-    uint8_t  candidates_sent;     // 客户端发送数量（校验用）
+    uint8_t  candidates_cached;     // 客户端发送数量（校验用）
     uint32_t ack_bitmap;          // 位图：bit[i]=1 表示候选 i 成功
     uint8_t  reserved;
 } p2p_relay_connect_ack_t;  // 7 字节

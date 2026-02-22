@@ -20,7 +20,7 @@
  */
 void nat_init(nat_ctx_t *n) {
     memset(n, 0, sizeof(*n));
-    n->state = NAT_IDLE;
+    n->state = NAT_INIT;
 }
 
 /*
@@ -190,7 +190,7 @@ int nat_tick(p2p_session_t *s) {
                     P2P_LOG_WARN("NAT", "%s (%s %d ms)", MSG(MSG_NAT_PUNCH_CONN_LOST),
                                  MSG(MSG_NAT_PUNCH_NO_PONG), PONG_TIMEOUT_MS);
                 }
-                n->state = NAT_IDLE;
+                n->state = NAT_INIT;
                 return -1;
             }
             break;

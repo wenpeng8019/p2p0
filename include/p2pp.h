@@ -28,6 +28,9 @@
  *     0x30-0x3F: 路由探测协议
  *   0x80-0xFF: COMPACT 信令协议（本节）
 */
+
+#define P2P_HDR_SIZE    4                   /* 包头大小 */
+
 typedef struct {
     uint8_t             type;               // 包类型（0x01-0x7F: P2P协议, 0x80-0xFF: 信令协议）
     uint8_t             flags;              // 标志位（具体含义由 type 决定，见各协议定义）
@@ -145,6 +148,7 @@ typedef struct {
 #pragma pack(pop)
 
 #define P2P_MTU           1200              /* 安全的 UDP 负载 */
+#define P2P_MAX_PAYLOAD   (P2P_MTU - P2P_HDR_SIZE)  /* 1196 */
 
 /*
  * COMPACT 模式消息格式（以下均为 payload 部分，前面需加 4 字节包头）:

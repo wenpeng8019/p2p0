@@ -279,71 +279,56 @@ struct p2p_session;
 #define SIG_PEER_INFO_FIN  0x01     /* 候选列表发送完毕 */
 
 /* 信令状态 */
-enum {
-    SIGNAL_COMPACT_IDLE = 0,         /* 未启动 */
-    SIGNAL_COMPACT_REGISTERING,      /* 等待 REGISTER_ACK */
+typedef enum {
+    SIGNAL_COMPACT_INIT = 0,        /* 未启动 */
+    SIGNAL_COMPACT_REGISTERING,     /* 等待 REGISTER_ACK */
     SIGNAL_COMPACT_REGISTERED,      /* 已注册，等待 PEER_INFO(seq=0) */
-    SIGNAL_COMPACT_READY             /* 已收到 PEER_INFO，开始打洞并同步剩余候选 */
-};
+    SIGNAL_COMPACT_ICE,             /* 向对方发送后续候选队列、和 FIN */
+    SIGNAL_COMPACT_READY            /* 如果已经完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
+} p2p_signal_compact_state_t;
 
 /* COMPACT 信令上下文 */
 typedef struct {
-    int                 state;                              /* 信令状态 */
+    p2p_signal_compact_state_t state;                       /* 信令状态 */
     struct sockaddr_in  server_addr;                        /* 信令服务器地址 */
     char                local_peer_id[P2P_PEER_ID_MAX];     /* 本端 ID */
     char                remote_peer_id[P2P_PEER_ID_MAX];    /* 对端 ID */
     uint64_t            last_send_time;                     /* 上次发送时间 */
+    uint64_t            last_recv_time;                     /* 上次收到时间 */
     int                 verbose;                            /* 是否输出详细日志 */
-    
-    /* REGISTER_ACK 返回的信息 */
-    uint8_t             peer_online;                        /* 对端是否在线 */
-    uint8_t             max_remote_candidates;              /* 服务器为对端缓存的最大候选数（0=不支持） */
-    uint8_t             relay_support;                      /* 服务器是否支持中继（0=不支持, 1=支持）*/
-    struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器主端口探测到的）*/
-    uint16_t            probe_port;                         /* NAT 探测端口（0=不支持探测）*/
-    
-    /* 会话标识（服务器在首次 PEER_INFO(seq=0) 时分配） */
-    uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配）*/
-    
-    /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
-    struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */
-    uint8_t             nat_type_detected;                  /* NAT 类型是否已探测 */
-    uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
-    uint16_t            nat_probe_request_seq;              /* NAT_PROBE 请求序列号（使用包头 seq 字段）*/
-    uint8_t             nat_probe_retries;                  /* NAT_PROBE 已发次数（0=尚未发送，最多 3 次）*/
-    int                 nat_detected_result;                /* NAT 类型探测结论（p2p_nat_type_t，0=未探测）*/
-    uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 PEER_INFO 重传定时器）*/
-    
+
     /* REGISTER 重发控制（仅 REGISTERING 状态） */
     int                 register_attempts;                  /* REGISTER 重发次数 */
-    
+
+    /* REGISTER_ACK 返回的信息 */
+    int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量 */
+    struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器主端口探测到的）*/
+    bool                relay_support;                      /* 服务器是否支持中继（0=不支持, 1=支持）*/
+    uint16_t            probe_port;                         /* NAT 探测端口（0=不支持探测）*/
+
+    /* 和对方的会话 */
+    bool                peer_online;                        /* 对端是否在线；REGISTER_ACK 和 PEER_INFO 都会导致 online 为 true */
+    uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配），在 PEER_INFO(seq=0) 中首次获得 */
+
     /* PEER_INFO 序列化同步控制 */
-    int                 candidates_per_packet;              /* 每个 PEER_INFO 包的候选数量 */
-    int                 candidates_sent;                    /* 已发送的候选总数（base_index） */
-    uint16_t            next_send_seq;                      /* 下一个要发送的 PEER_INFO 序列号 */
-    uint16_t            last_acked_seq;                     /* 对方已确认的最大序列号 */
-    uint8_t             remote_recv_complete;               /* 对端已接收完所有候选 */
-    uint16_t            last_recv_seq;                      /* 已收到的最大 PEER_INFO 序列号 */
-    uint8_t             local_send_complete;                /* 本端已发送完所有候选 */
+    uint16_t            candidates_mask;                    /* 后续候选队列对方确认的窗口 mask，用于全部完成确认 */
+    uint16_t            candidates_acked;                   /* 后续候选队列对方确认的窗口，同时意味着最多发 16 个包 */
+    bool                remote_candidates_0;
+    uint16_t            remote_candidates_mask;
+    uint16_t            remote_candidates_done;
+
+    /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
+    struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */
+    int16_t             nat_probe_retries;                  /* NAT_PROBE 已发次数（0=尚未发送，最多 3 次）*/
+    uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
+    uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 PEER_INFO 重传定时器）*/
+
 } p2p_signal_compact_ctx_t;
 
 /*
  * 初始化信令上下文
  */
 void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx);
-
-/*
- * 开始信令交换（发送 REGISTER）
- *
- * @param s             会话对象（包含候选列表）
- * @param local_peer_id 本端 ID
- * @param remote_peer_id 对端 ID
- * @param server        服务器地址
- * @param verbose       是否输出详细日志
- * @return              0 成功，-1 失败
- */
-int p2p_signal_compact_start(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
-                             const struct sockaddr_in *server, int verbose);
 
 /*
  * 周期调用，处理重发和候选同步
@@ -355,6 +340,23 @@ int p2p_signal_compact_start(struct p2p_session *s, const char *local_peer_id, c
  * @return    0 正常，-1 错误
  */
 int p2p_signal_compact_tick(struct p2p_session *s);
+
+/*
+ * 开始信令交换（发送 REGISTER）
+ *
+ * @param s             会话对象（包含候选列表）
+ * @param local_peer_id 本端 ID
+ * @param remote_peer_id 对端 ID
+ * @param server        服务器地址
+ * @param verbose       是否输出详细日志
+ * @return              0 成功，-1 失败
+ */
+int p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
+                               const struct sockaddr_in *server, int verbose);
+
+int p2p_signal_compact_disconnect(struct p2p_session *s);
+
+int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t size);
 
 /*
  * 处理收到的信令包

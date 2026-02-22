@@ -54,7 +54,7 @@ typedef enum {
 /* ---------- 连接状态 ---------- */
 
 typedef enum {
-    P2P_STATE_IDLE = 0,                         // 初始状态
+    P2P_STATE_INIT = 0,                         // 初始状态
     P2P_STATE_REGISTERING,                      // 注册到信令服务器
     P2P_STATE_PUNCHING,                         // NAT 打洞中
     P2P_STATE_CONNECTED,                        // 已连接

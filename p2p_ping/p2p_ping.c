@@ -309,7 +309,7 @@ static void print_help(const char *prog) {
 
 static const char* state_name(p2p_state_t state) {
     switch (state) {
-        case P2P_STATE_IDLE:        return "IDLE";
+        case P2P_STATE_INIT:        return "IDLE";
         case P2P_STATE_REGISTERING: return "REGISTERING";
         case P2P_STATE_PUNCHING:    return "PUNCHING";
         case P2P_STATE_CONNECTED:   return "CONNECTED";

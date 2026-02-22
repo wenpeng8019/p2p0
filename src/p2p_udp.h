@@ -8,10 +8,6 @@
 #include <p2pp.h>               /* p2p_packet_hdr_t 定义 */
 #include "p2p_platform.h"       /* cross-platform socket headers */
 
-/* UDP 传输层常量 */
-#define P2P_HDR_SIZE      4                 /* 包头大小 */
-#define P2P_MAX_PAYLOAD   (P2P_MTU - P2P_HDR_SIZE)  /* 1196 */
-
 p2p_socket_t  udp_create_socket(uint16_t port);
 int  udp_send_to(p2p_socket_t sock, const struct sockaddr_in *addr,
                  const void *buf, int len);

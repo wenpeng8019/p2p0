@@ -432,6 +432,19 @@ typedef struct {
 void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx);
 
 /*
+ * 周期调用，处理信令状态和消息
+ *
+ * 应在主循环中定期调用（如每 100ms），负责：
+ * - CONNECTING 状态：检查连接是否完成，发送 LOGIN
+ * - CONNECTED 状态：接收并处理服务器消息（OFFER/FORWARD/CONNECT_ACK 等）
+ * - 连接断开时自动重连（间隔 3 秒）
+ *
+ * @param ctx  信令上下文
+ * @param s    会话对象（用于处理收到的候选）
+ */
+void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
+
+/*
  * 登录到信令服务器
  *
  * 建立 TCP 连接并发送 LOGIN 消息。连接是非阻塞的，
@@ -444,19 +457,6 @@ void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx);
  * @return          0 成功发起连接，-1 失败（参数错误或 socket 创建失败）
  */
 int  p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, int port, const char *my_name);
-
-/*
- * 周期调用，处理信令状态和消息
- *
- * 应在主循环中定期调用（如每 100ms），负责：
- * - CONNECTING 状态：检查连接是否完成，发送 LOGIN
- * - CONNECTED 状态：接收并处理服务器消息（OFFER/FORWARD/CONNECT_ACK 等）
- * - 连接断开时自动重连（间隔 3 秒）
- *
- * @param ctx  信令上下文
- * @param s    会话对象（用于处理收到的候选）
- */
-void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
 
 /*
  * 发送 CONNECT 消息（发起连接）
