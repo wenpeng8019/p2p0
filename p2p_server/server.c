@@ -1167,17 +1167,17 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
     }
 
     // SIG_PKT_PEER_INFO_ACK: ACK 确认收到 PEER_INFO 包
-    // 格式: [hdr(4)][session_id(8)][ack_seq(2)]
+    // 格式: [hdr(4)][session_id(8)]，确认序号使用 hdr->seq
     else if (hdr->type == SIG_PKT_PEER_INFO_ACK) {
 
-        if (payload_len < 10) {
+        if (payload_len < 8) {
             printf(server_msg(MSG_UDP_PEER_INFO_ACK_INVALID), from_str, payload_len);
             fflush(stdout);
             return;
         }
 
         uint64_t session_id = ntohll(*(uint64_t*)payload);
-        uint16_t ack_seq = ntohs(*(uint16_t*)(payload + 8));
+        uint16_t ack_seq = ntohs(hdr->seq);
 
         // ack_seq=0 的 ACK 是对服务器发送的首个 PEER_INFO 的确认，服务器需要处理
         if (ack_seq == 0) {

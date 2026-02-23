@@ -188,10 +188,10 @@ typedef struct {
  *   - flags: 包头的 flags 字段可设置 SIG_PEER_INFO_FIN (0x01) 表示候选列表发送完毕
  *
  * PEER_INFO_ACK:
- *   payload: [session_id(8)][ack_seq(2)]
- *   包头: type=0x85, flags=0, seq=0
+ *   payload: [session_id(8)]
+ *   包头: type=0x85, flags=0, seq=确认的 PEER_INFO 序列号
  *   - session_id: 会话 ID（网络字节序，64位）
- *   - ack_seq: 确认的 PEER_INFO 序列号
+ *   - seq: 确认的 PEER_INFO 序列号（0 表示确认服务器下发的 PEER_INFO(seq=0)）
  *
  * NAT_PROBE:
  *   payload: 空（无需额外字段）

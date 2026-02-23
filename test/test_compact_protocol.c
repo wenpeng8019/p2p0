@@ -61,8 +61,7 @@ typedef struct {
 } test_peer_info_t;
 
 typedef struct {
-    uint16_t ack_seq;        // 确认的序列号
-    uint16_t reserved;
+    uint64_t session_id;     // 会话 ID
 } test_peer_info_ack_t;
 
 /* ============================================================================
@@ -301,14 +300,14 @@ TEST(peer_info_ack_basic) {
     test_pkt_hdr_t hdr;
     hdr.type = SIG_PKT_PEER_INFO_ACK;
     hdr.flags = 0;
-    hdr.seq = 0;
+    hdr.seq = htons(1);  // 确认 seq=1
     
     test_peer_info_ack_t ack;
-    ack.ack_seq = htons(1);  // 确认 seq=1
-    ack.reserved = 0;
+    ack.session_id = htonll(0x1122334455667788ULL);
     
     ASSERT_EQ(hdr.type, SIG_PKT_PEER_INFO_ACK);
-    ASSERT_EQ(ntohs(ack.ack_seq), 1);
+    ASSERT_EQ(ntohs(hdr.seq), 1);
+    ASSERT_EQ(ntohll(ack.session_id), 0x1122334455667788ULL);
     TEST_LOG("  ✓ PEER_INFO_ACK(seq=1) format correct");
 }
 
@@ -317,11 +316,15 @@ TEST(peer_info_ack_sequence) {
     
     // 模拟确认序列: 1 -> 2 -> 3 -> 4
     for (uint16_t seq = 1; seq <= 4; seq++) {
+        test_pkt_hdr_t hdr;
+        hdr.type = SIG_PKT_PEER_INFO_ACK;
+        hdr.flags = 0;
+        hdr.seq = htons(seq);
+
         test_peer_info_ack_t ack;
-        ack.ack_seq = htons(seq);
-        ack.reserved = 0;
+        ack.session_id = htonll(0x1122334455667788ULL);
         
-        ASSERT_EQ(ntohs(ack.ack_seq), seq);
+        ASSERT_EQ(ntohs(hdr.seq), seq);
         TEST_LOG("  Confirmed seq=%d", seq);
     }
     TEST_LOG("  ✓ ACK sequence 1-4 completed");
@@ -350,8 +353,12 @@ TEST(flow_both_online) {
     TEST_LOG("  [Server->Alice] PEER_INFO(seq=1, base=0, count=5)");
     
     // Phase 4: Alice -> Server PEER_INFO_ACK(seq=1)
+    test_pkt_hdr_t peerack_hdr1;
+    peerack_hdr1.type = SIG_PKT_PEER_INFO_ACK;
+    peerack_hdr1.flags = 0;
+    peerack_hdr1.seq = htons(1);
     test_peer_info_ack_t peerack1;
-    peerack1.ack_seq = htons(1);
+    peerack1.session_id = htonll(0x1122334455667788ULL);
     TEST_LOG("  [Alice->Server] PEER_INFO_ACK(seq=1)");
     
     // Phase 5: Alice 开始打洞，同时发送剩余候选
@@ -362,8 +369,12 @@ TEST(flow_both_online) {
     TEST_LOG("  [Alice->Bob] PEER_INFO(seq=2, base=5, count=5) P2P直连");
     
     // Phase 6: Bob -> Alice PEER_INFO_ACK(seq=2)
+    test_pkt_hdr_t peerack_hdr2;
+    peerack_hdr2.type = SIG_PKT_PEER_INFO_ACK;
+    peerack_hdr2.flags = 0;
+    peerack_hdr2.seq = htons(2);
     test_peer_info_ack_t peerack2;
-    peerack2.ack_seq = htons(2);
+    peerack2.session_id = htonll(0x1122334455667788ULL);
     TEST_LOG("  [Bob->Alice] PEER_INFO_ACK(seq=2)");
     
     // Phase 7: Alice -> Bob PEER_INFO(seq=3, FIN)
@@ -376,8 +387,12 @@ TEST(flow_both_online) {
     TEST_LOG("  [Alice->Bob] PEER_INFO(seq=3, base=10, count=0, FIN)");
     
     // Phase 8: Bob -> Alice PEER_INFO_ACK(seq=3)
+    test_pkt_hdr_t peerack_hdr3;
+    peerack_hdr3.type = SIG_PKT_PEER_INFO_ACK;
+    peerack_hdr3.flags = 0;
+    peerack_hdr3.seq = htons(3);
     test_peer_info_ack_t peerack3;
-    peerack3.ack_seq = htons(3);
+    peerack3.session_id = htonll(0x1122334455667788ULL);
     TEST_LOG("  [Bob->Alice] PEER_INFO_ACK(seq=3)");
     
     TEST_LOG("  ✓ Complete flow finished, both sides synced");
@@ -481,8 +496,12 @@ TEST(retransmission_on_packet_loss) {
     TEST_LOG("  [Alice] Timeout, retransmit PEER_INFO(seq=2, base=5)");
     
     // 收到 ACK
+    test_pkt_hdr_t ack_hdr;
+    ack_hdr.type = SIG_PKT_PEER_INFO_ACK;
+    ack_hdr.flags = 0;
+    ack_hdr.seq = htons(2);
     test_peer_info_ack_t ack;
-    ack.ack_seq = htons(2);
+    ack.session_id = htonll(0x1122334455667788ULL);
     TEST_LOG("  [Bob->Alice] PEER_INFO_ACK(seq=2) received");
     TEST_LOG("  [Alice] Stop retransmitting seq=2, move to seq=3");
     

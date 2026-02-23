@@ -1004,6 +1004,10 @@ p2p_signaling_payload_t (76B header + N×32B candidates)
 | 0xA0 | P2P_PKT_RELAY_DATA | 中继服务器转发的数据 |
 | 0xA1 | P2P_PKT_RELAY_ACK | 中继服务器转发的 ACK |
 
+PEER_INFO_ACK（0x83）格式：
+- 包头：`seq=确认的 PEER_INFO 序列号`（`seq=0` 表示确认服务器下发的 `PEER_INFO(seq=0)`）
+- 负载：`[session_id(8)]`
+
 ### RELAY 信令协议 (TCP)
 
 | 值 | 名称 | 说明 |

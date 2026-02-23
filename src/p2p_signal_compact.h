@@ -256,9 +256,10 @@ struct p2p_session;
  *    - 通过 session_id 快速定位转发目标（无需遍历）
  *
  * PEER_INFO_ACK:
- *   [session_id(8)][ack_seq(2)]
+ *   [session_id(8)]
+ *   包头: type=0x85, flags=0, seq=确认的 PEER_INFO 序列号
  *   - session_id: 会话 ID（网络字节序，64位，与对应的 PEER_INFO 一致）
- *   - ack_seq: 确认的 PEER_INFO 序列号（网络字节序）
+ *   - seq: 确认的 PEER_INFO 序列号（seq=0 表示确认服务器下发的 PEER_INFO(seq=0)）
  *
  * RELAY_DATA（P2P 打洞失败后的中继转发）:
  *   [session_id(8)][data_len(2)][data(N)]

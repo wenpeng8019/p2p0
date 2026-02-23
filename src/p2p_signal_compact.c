@@ -530,14 +530,12 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             }
         }
 
-        /* 发送 PEER_INFO_ACK: [session_id(8)][ack_seq(2)] */
+        /* 发送 PEER_INFO_ACK: [session_id(8)]，确认序号在包头 seq */
         {
-            uint8_t ack_payload[10];
+            uint8_t ack_payload[8];
             uint64_t sid_net = htonll(ctx->session_id);
             memcpy(ack_payload, &sid_net, 8);
-            uint16_t ack_seq = htons(seq);
-            memcpy(ack_payload + 8, &ack_seq, 2);
-            udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO_ACK, 0, 0, ack_payload, sizeof(ack_payload));
+            udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO_ACK, 0, seq, ack_payload, sizeof(ack_payload));
         }
 
         if (ctx->verbose) {
@@ -546,10 +544,10 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
 
     } break;
 
-    /* 解析 PEER_INFO_ACK: [session_id(8)][ack_seq(2)] */
+    /* 解析 PEER_INFO_ACK: [session_id(8)]，确认序号在包头 seq */
     case SIG_PKT_PEER_INFO_ACK: {
 
-        if (len < 10) {
+        if (len < 8) {
             P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO_ACK len=%d", len);
             return -1;
         }
@@ -565,9 +563,7 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             return -1;
         }
 
-        uint16_t ack_seq;
-        memcpy(&ack_seq, payload + 8, 2);
-        ack_seq = ntohs(ack_seq);
+        uint16_t ack_seq = seq;
         if (ack_seq == 0 || ack_seq > 16) {
             P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO_ACK ack_seq=%u", ack_seq);
             return -1;
