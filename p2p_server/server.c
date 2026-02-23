@@ -1178,6 +1178,11 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
 
         uint64_t session_id = ntohll(*(uint64_t*)payload);
         uint16_t ack_seq = ntohs(hdr->seq);
+        if (ack_seq > 16) {
+            printf(server_msg(MSG_UDP_PEER_INFO_ACK_INVALID), from_str, payload_len);
+            fflush(stdout);
+            return;
+        }
 
         // ack_seq=0 的 ACK 是对服务器发送的首个 PEER_INFO 的确认，服务器需要处理
         if (ack_seq == 0) {

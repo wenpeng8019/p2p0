@@ -1008,6 +1008,11 @@ PEER_INFO_ACK（0x83）格式：
 - 包头：`seq=确认的 PEER_INFO 序列号`（`seq=0` 表示确认服务器下发的 `PEER_INFO(seq=0)`）
 - 负载：`[session_id(8)]`
 
+PEER_INFO / PEER_INFO_ACK 序列规则：
+- `PEER_INFO.seq` 有效窗口：`0..16`（`0` 为服务器首包，`1..16` 为后续候选批次）
+- `PEER_INFO_ACK.seq` 有效窗口：`0..16`（客户端接收端仅接受 `1..16`）
+- 允许乱序：`PEER_INFO(seq>0)` 可先于 `seq=0` 到达；接收端按序号位图去重，重复包可 ACK 但不重复入表
+
 ### RELAY 信令协议 (TCP)
 
 | 值 | 名称 | 说明 |

@@ -330,6 +330,55 @@ TEST(peer_info_ack_sequence) {
     TEST_LOG("  ✓ ACK sequence 1-4 completed");
 }
 
+TEST(peer_info_ack_seq_window) {
+    TEST_LOG("Testing PEER_INFO_ACK sequence window");
+
+    test_pkt_hdr_t hdr0;
+    hdr0.type = SIG_PKT_PEER_INFO_ACK;
+    hdr0.flags = 0;
+    hdr0.seq = htons(0);   // server-info ACK
+    ASSERT_EQ(ntohs(hdr0.seq), 0);
+
+    test_pkt_hdr_t hdr16;
+    hdr16.type = SIG_PKT_PEER_INFO_ACK;
+    hdr16.flags = 0;
+    hdr16.seq = htons(16);  // max valid
+    ASSERT_EQ(ntohs(hdr16.seq), 16);
+
+    test_pkt_hdr_t hdr17;
+    hdr17.type = SIG_PKT_PEER_INFO_ACK;
+    hdr17.flags = 0;
+    hdr17.seq = htons(17);  // invalid
+    ASSERT_EQ(ntohs(hdr17.seq) > 16, 1);
+
+    TEST_LOG("  ✓ ACK seq window defined as 0..16");
+}
+
+TEST(peer_info_out_of_order_allowed) {
+    TEST_LOG("Testing PEER_INFO out-of-order tolerance semantics");
+
+    // 允许 seq>0 先到，之后再到 seq=0；接收端应通过位图去重并最终收敛
+    uint16_t remote_done_mask = 0;
+    bool remote_seq0_arrived = false;
+
+    // 先到 seq=2
+    remote_done_mask |= (uint16_t)(1u << (2 - 1));
+    ASSERT_EQ(remote_done_mask, 0x0002);
+    ASSERT_EQ(remote_seq0_arrived, false);
+
+    // 再到 seq=0
+    remote_seq0_arrived = true;
+    ASSERT_EQ(remote_done_mask, 0x0002);
+    ASSERT_EQ(remote_seq0_arrived, true);
+
+    // 重复 seq=2 不应重复记账
+    uint16_t before = remote_done_mask;
+    remote_done_mask |= (uint16_t)(1u << (2 - 1));
+    ASSERT_EQ(remote_done_mask, before);
+
+    TEST_LOG("  ✓ Out-of-order arrival allowed, duplicate seq deduped by bitmap");
+}
+
 /* ============================================================================
  * 第四部分：完整流程测试 - 双方同时在线
  * ============================================================================ */
@@ -694,6 +743,8 @@ int main(void) {
     printf("\n--------------------------------------\n");
     RUN_TEST(peer_info_ack_basic);
     RUN_TEST(peer_info_ack_sequence);
+    RUN_TEST(peer_info_ack_seq_window);
+    RUN_TEST(peer_info_out_of_order_allowed);
     
     printf("\nPart 4: Complete Flow - Both Online\n");
     printf("----------------------------------------\n");

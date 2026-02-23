@@ -186,12 +186,15 @@ typedef struct {
  *   - seq=0: 服务器发送，base_index=0，包含缓存的对端候选，**首次分配 session_id**
  *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用服务器分配的 session_id
  *   - flags: 包头的 flags 字段可设置 SIG_PEER_INFO_FIN (0x01) 表示候选列表发送完毕
+ *   - seq 窗口: 0..16（0 为服务器首包，1..16 为后续候选批次）
+ *   - 乱序处理: 允许 seq>0 先于 seq=0 到达；接收端按序号位图去重，重复包仅 ACK 不重复入表
  *
  * PEER_INFO_ACK:
  *   payload: [session_id(8)]
  *   包头: type=0x85, flags=0, seq=确认的 PEER_INFO 序列号
  *   - session_id: 会话 ID（网络字节序，64位）
  *   - seq: 确认的 PEER_INFO 序列号（0 表示确认服务器下发的 PEER_INFO(seq=0)）
+ *   - seq 窗口: 0..16（客户端接收端仅接受 1..16）
  *
  * NAT_PROBE:
  *   payload: 空（无需额外字段）

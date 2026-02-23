@@ -433,6 +433,10 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO: state=%d len=%d", (int)ctx->state, len);
             return -1;
         }
+        if (seq > 16) {
+            P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO seq=%u", seq);
+            return -1;
+        }
 
         int cand_cnt = payload[9];
         if (len < 10 + (int)sizeof(p2p_compact_candidate_t) * cand_cnt) {
@@ -494,12 +498,12 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         // seq!=0 说明是对方发来的 PEER_INFO 包
         else {
 
-            if ((new_seq = (ctx->remote_candidates_done & (1 << (seq - 1))) == 0)) {
+            if ((new_seq = (ctx->remote_candidates_done & (1u << (seq - 1))) == 0)) {
 
                 // 对于 FIN 包，计算对方候选地址集合序列掩码（即计算全集区间）
                 if ((flags & SIG_PEER_INFO_FIN) || !cand_cnt) {
 
-                    ctx->remote_candidates_mask = (1 << seq) - 1;
+                    ctx->remote_candidates_mask = (1u << seq) - 1u;
                 }
 
                 // 维护分配远端候选列表的空间
@@ -511,7 +515,7 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
 
                 parse_peer_info(s, payload, cand_cnt);
 
-                ctx->remote_candidates_done |= 1 << (seq - 1);
+                ctx->remote_candidates_done |= 1u << (seq - 1);
             }
         }
 

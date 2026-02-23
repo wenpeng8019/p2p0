@@ -34,6 +34,7 @@
  *      - 客户端收到后发送 PEER_INFO_ACK（携带 session_id） 确认
  *      - 客户端通过 PEER_INFO(seq=1,2,3,...) 继续同步剩余候选（携带 session_id）
  *      - 对端通过 PEER_INFO_ACK 确认，未确认则重发
+ *      - 允许乱序：seq>0 可能先于 seq=0 到达，接收端按 seq 位图去重并最终收敛
  *
  *   3. 离线缓存流程（含 session_id 分配）：
  *
@@ -260,6 +261,7 @@ struct p2p_session;
  *   包头: type=0x85, flags=0, seq=确认的 PEER_INFO 序列号
  *   - session_id: 会话 ID（网络字节序，64位，与对应的 PEER_INFO 一致）
  *   - seq: 确认的 PEER_INFO 序列号（seq=0 表示确认服务器下发的 PEER_INFO(seq=0)）
+ *   - seq 窗口: 0..16（客户端接收端仅接受 1..16）
  *
  * RELAY_DATA（P2P 打洞失败后的中继转发）:
  *   [session_id(8)][data_len(2)][data(N)]
