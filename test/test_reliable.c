@@ -13,95 +13,38 @@
  */
 
 #include "test_framework.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <time.h>
+#include "p2p_internal.h"
+
 #ifdef _WIN32
-#  include <winsock2.h>   /* provides struct timeval */
-#  include <windows.h>
-   /* gettimeofday polyfill for MSVC */
-   static int gettimeofday(struct timeval *tv, void *tz) {
-       FILETIME ft;
-       unsigned long long tt;
-       (void)tz;
-       GetSystemTimeAsFileTime(&ft);
-       tt  = (unsigned long long)ft.dwHighDateTime << 32;
-       tt |= (unsigned long long)ft.dwLowDateTime;
-       tt /= 10;                       /* 100-ns → µs */
-       tt -= 11644473600000000ULL;     /* epoch: 1601-01-01 → 1970-01-01 */
-       tv->tv_sec  = (long)(tt / 1000000);
-       tv->tv_usec = (long)(tt % 1000000);
-       return 0;
-   }
-   /* nanosleep polyfill for MSVC (struct timespec is in <time.h> since VS2015) */
-   static int nanosleep(const struct timespec *req, struct timespec *rem) {
-       (void)rem;
-       Sleep((DWORD)(req->tv_sec * 1000 + req->tv_nsec / 1000000));
-       return 0;
-   }
+#include <windows.h>
+#ifndef nanosleep
+static int p2p_test_nanosleep(const struct timespec *req, struct timespec *rem) {
+    (void)rem;
+    Sleep((DWORD)(req->tv_sec * 1000 + req->tv_nsec / 1000000));
+    return 0;
+}
+#define nanosleep p2p_test_nanosleep
+#endif
 #else
-#  include <sys/time.h>
+#include <unistd.h>
 #endif
 
 /* ============================================================================
  * Reliable 层定义（从 p2p_transport.h 和 p2pp.h 提取）
  * ============================================================================ */
 
+#ifndef P2P_MAX_PAYLOAD
 #define P2P_MAX_PAYLOAD 1200      /* UDP payload 最大长度 */
+#endif
 #define RELIABLE_WINDOW 32        /* 滑动窗口大小 */
 #define RELIABLE_RTO_INIT 200     /* 初始 RTO (ms) */
 #define RELIABLE_RTO_MAX 2000     /* 最大 RTO (ms) */
-
-/* 时间函数 */
-static inline uint64_t time_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000;
-}
-
-/* 序列号差值计算（处理回绕） */
-static inline int16_t seq_diff(uint16_t a, uint16_t b) {
-    return (int16_t)(a - b);
-}
 
 /* 检查序列号是否在窗口内 */
 static inline int seq_in_window(uint16_t seq, uint16_t base, int window) {
     int16_t d = seq_diff(seq, base);
     return d >= 0 && d < window;
 }
-
-/* 重传队列条目 */
-typedef struct {
-    uint8_t  data[P2P_MAX_PAYLOAD];
-    int      len;
-    uint16_t seq;
-    uint64_t send_time;
-    int      retx_count;
-    int      acked;
-} retx_entry_t;
-
-/* Reliable 传输层状态 */
-typedef struct {
-    /* 发送端 */
-    uint16_t     send_seq;
-    uint16_t     send_base;
-    retx_entry_t send_buf[RELIABLE_WINDOW];
-    int          send_count;
-
-    /* 接收端 */
-    uint16_t     recv_base;
-    uint8_t      recv_bitmap[RELIABLE_WINDOW];
-    uint8_t      recv_data[RELIABLE_WINDOW][P2P_MAX_PAYLOAD];
-    int          recv_lens[RELIABLE_WINDOW];
-
-    /* RTT 估计 */
-    int          srtt;
-    int          rttvar;
-    int          rto;
-} reliable_t;
 
 /* ============================================================================
  * Reliable 层实现（从 p2p_trans_reliable.c 提取并简化）

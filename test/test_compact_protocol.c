@@ -11,16 +11,30 @@
  * 7. 重传机制
  */
 
-#include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
-#ifndef _WIN32
+#include <stdbool.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #endif
-#include <p2pp.h>
 
-// 测试日志开关
+#include "test_framework.h"
+#include "p2p_internal.h"
+
+#ifdef _WIN32
+#ifndef htonll
+#define htonll(x) (((uint64_t)htonl((uint32_t)(x)) << 32) | htonl((uint32_t)((x) >> 32)))
+#endif
+#ifndef ntohll
+#define ntohll(x) (((uint64_t)ntohl((uint32_t)(x)) << 32) | ntohl((uint32_t)((x) >> 32)))
+#endif
+#endif
+
+// 模拟的上下文和回调
 static bool g_verbose = true;
 
 #define TEST_LOG(fmt, ...) \

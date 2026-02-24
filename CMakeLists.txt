@@ -13,7 +13,7 @@ if(WIN32)
     message(STATUS "Platform: Windows")
     # Winsock2 is linked via #pragma comment in p2p_platform.h (MSVC),
     # but we also add it explicitly for MinGW / cross-compilers.
-    set(PLATFORM_LIBS ws2_32 winhttp)
+    set(PLATFORM_LIBS ws2_32 winhttp iphlpapi)
 elseif(APPLE)
     message(STATUS "Platform: macOS")
     set(PLATFORM_LIBS "")

@@ -20,6 +20,7 @@
 #include <time.h>
 #include <stdbool.h>
 #include <inttypes.h>  /* PRIu64 */
+#include <signal.h>    /* sig_atomic_t */
 
 #ifdef _WIN32
   #ifndef WIN32_LEAN_AND_MEAN
@@ -35,12 +36,12 @@
   #define server_close_socket(s) closesocket(s)
 
   // 64-bit network byte order conversion
-  static inline uint64_t htonll(uint64_t x) {
-    return ((uint64_t)htonl((uint32_t)x) << 32) | htonl((uint32_t)(x >> 32));
-  }
-  static inline uint64_t ntohll(uint64_t x) {
-    return ((uint64_t)ntohl((uint32_t)x) << 32) | ntohl((uint32_t)(x >> 32));
-  }
+#ifndef htonll
+#define htonll(x) (((uint64_t)htonl((uint32_t)(x)) << 32) | htonl((uint32_t)((x) >> 32)))
+#endif
+#ifndef ntohll
+#define ntohll(x) (((uint64_t)ntohl((uint32_t)(x)) << 32) | ntohl((uint32_t)((x) >> 32)))
+#endif
 #else
   #include <unistd.h>
   #include <signal.h>       /* POSIX 信号处理 */
@@ -1519,7 +1520,8 @@ int main(int argc, char *argv[]) {
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons((unsigned short)port);
-    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+       if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+       
         perror("TCP bind");
         return 1;
     }
