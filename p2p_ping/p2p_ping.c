@@ -113,7 +113,7 @@ static void tui_log_callback(p2p_log_level_t level,
         case P2P_LOG_LEVEL_WARN:  lvl = "WARN "; break;
         case P2P_LOG_LEVEL_INFO:  lvl = "INFO "; break;
         case P2P_LOG_LEVEL_DEBUG: lvl = "DEBUG"; break;
-        case P2P_LOG_LEVEL_VERBOSE: lvl = "TRACE"; break;
+        case P2P_LOG_LEVEL_VERBOSE: lvl = "VERBOSE"; break;
         default: break;
     }
     char line[P2P_LOG_MSG_MAX + 64];

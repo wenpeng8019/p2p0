@@ -590,6 +590,7 @@ p2p_update(p2p_handle_t hdl) {
             case SIG_PKT_ALIVE_ACK:
             case SIG_PKT_PEER_INFO:
             case SIG_PKT_PEER_INFO_ACK:
+            case SIG_PKT_PEER_OFF:
             case SIG_PKT_NAT_PROBE_ACK:
 
                 if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {

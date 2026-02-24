@@ -734,7 +734,16 @@ static void send_peer_info_seq0(server_socket_t udp_fd, compact_pair_t *pair, ui
     int resp_len = 14;
     if (base_index == 0) {
 
-        pkt[13] = (uint8_t)pair->peer->candidate_count;
+        // 首包：候选数量 = 对端公网地址(1) + 对端注册的候选列表(candidate_count)
+        pkt[13] = (uint8_t)(1 + pair->peer->candidate_count);
+        
+        // 第一个候选：对端的公网地址（服务器观察到的 UDP 源地址）
+        pkt[resp_len] = 1; // srflx
+        memcpy(pkt + resp_len + 1, &pair->peer->addr.sin_addr.s_addr, 4);
+        memcpy(pkt + resp_len + 5, &pair->peer->addr.sin_port, 2);
+        resp_len += sizeof(p2p_compact_candidate_t);
+        
+        // 后续候选：对端注册时提供的候选列表
         for (int i = 0; i < pair->peer->candidate_count; i++) {
             pkt[resp_len] = pair->peer->candidates[i].type;
             memcpy(pkt + resp_len + 1, &pair->peer->candidates[i].ip, 4);
@@ -896,11 +905,7 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
         // 查找本端槽位：直接用 hash 查找（O(1)），payload 前 64 字节是 [local_peer_id(32)][remote_peer_id(32)]
         compact_pair_t *existing = NULL;
         HASH_FIND(hh_peer, g_pairs_by_peer, payload, P2P_PEER_ID_MAX * 2, existing);
-        
-        int local_idx = -1;
-        if (existing) {
-            local_idx = (int)(existing - g_compact_pairs);  // 计算数组下标
-        }
+        int local_idx = existing ? (int)(existing - g_compact_pairs) : -1;  
         
         // 如果配对不存在，分配一个空位
         if (local_idx == -1) {
@@ -948,12 +953,9 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
 
         compact_pair_t *local = &g_compact_pairs[local_idx];
 
-        // 检测地址是否变化(todo 首次分配，不应该检查地址变换)
-        bool addr_changed = false;
-        if (local->valid) {
-            addr_changed = memcmp(&local->addr, from, sizeof(*from)) != 0;
-            local->addr = *from;
-        }
+        // 检测地址是否变化，并记录最新地址
+        bool addr_changed = memcmp(&local->addr, from, sizeof(*from)) != 0;
+        local->addr = *from;
 
         // 记录本端的候选列表
         local->candidate_count = candidate_count;
@@ -961,16 +963,13 @@ static void handle_compact_signaling(server_socket_t udp_fd, uint8_t *buf, size_
             memcpy(local->candidates, candidates, sizeof(p2p_compact_candidate_t) * candidate_count);
         }
 
-        // 查找反向配对（todo 用 hash 快速定位）
-        int remote_idx = -1;
-        for (int i = 0; i < MAX_PEERS; i++) {
-            if (g_compact_pairs[i].valid &&
-                strcmp(g_compact_pairs[i].local_peer_id, remote_peer_id) == 0 &&
-                strcmp(g_compact_pairs[i].remote_peer_id, local_peer_id) == 0) {
-                remote_idx = i;
-                break;
-            }
-        }
+        // 查找反向配对：构造反向 peer_key [remote_peer_id][local_peer_id]
+        char reverse_key[P2P_PEER_ID_MAX * 2];
+        memcpy(reverse_key, remote_peer_id, P2P_PEER_ID_MAX);
+        memcpy(reverse_key + P2P_PEER_ID_MAX, local_peer_id, P2P_PEER_ID_MAX);
+        compact_pair_t* remote = NULL;
+        HASH_FIND(hh_peer, g_pairs_by_peer, reverse_key, P2P_PEER_ID_MAX * 2, remote);
+        int remote_idx = remote ? (int)(remote - g_compact_pairs) : -1;
 
         // 如果之前是（自己之前是已连接过的）对端断开连接，重新连接时重置对端状态
         if (local->peer == (compact_pair_t*)(void*)-1) {
