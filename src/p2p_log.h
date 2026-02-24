@@ -9,20 +9,24 @@
 extern "C" {
 #endif
 
+/* 回调路径中格式化缓冲区的最大长度（含终止符）*/
+#define P2P_LOG_MSG_MAX 1024
+
 void p2p_log_set_output(FILE *fp);
 void p2p_log_set_timestamp(int enabled);
 void p2p_log_set_color(int enabled);
-
-/* 回调路径中格式化缓冲区的最大长度（含终止符）*/
-#define P2P_LOG_MSG_MAX 1024
 
 void p2p_log(p2p_log_level_t level, const char *module, const char *fmt, ...);
 
 #define P2P_LOG_ERROR(module, ...) p2p_log(P2P_LOG_LEVEL_ERROR, module, __VA_ARGS__)
 #define P2P_LOG_WARN(module, ...)  p2p_log(P2P_LOG_LEVEL_WARN,  module, __VA_ARGS__)
 #define P2P_LOG_INFO(module, ...)  p2p_log(P2P_LOG_LEVEL_INFO,  module, __VA_ARGS__)
+#ifdef NDEBUG
+#define P2P_LOG_DEBUG(module, ...) ((void)0)
+#else
 #define P2P_LOG_DEBUG(module, ...) p2p_log(P2P_LOG_LEVEL_DEBUG, module, __VA_ARGS__)
-#define P2P_LOG_TRACE(module, ...) p2p_log(P2P_LOG_LEVEL_TRACE, module, __VA_ARGS__)
+#endif
+#define P2P_LOG_VERBOSE(module, ...) p2p_log(P2P_LOG_LEVEL_VERBOSE, module, __VA_ARGS__)
 
 #ifdef __cplusplus
 }

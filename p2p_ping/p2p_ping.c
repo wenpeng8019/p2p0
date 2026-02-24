@@ -113,7 +113,7 @@ static void tui_log_callback(p2p_log_level_t level,
         case P2P_LOG_LEVEL_WARN:  lvl = "WARN "; break;
         case P2P_LOG_LEVEL_INFO:  lvl = "INFO "; break;
         case P2P_LOG_LEVEL_DEBUG: lvl = "DEBUG"; break;
-        case P2P_LOG_LEVEL_TRACE: lvl = "TRACE"; break;
+        case P2P_LOG_LEVEL_VERBOSE: lvl = "TRACE"; break;
         default: break;
     }
     char line[P2P_LOG_MSG_MAX + 64];
@@ -360,12 +360,11 @@ int main(int argc, char *argv[]) {
     SetConsoleCP(65001);
 #endif
     int use_dtls = 0, use_openssl = 0, use_pseudo = 0, use_compact = 0;
-    int disable_lan = 0, lan_punch = 0, skip_host = 0, verbose_punch = 0, use_chinese = 0, show_help = 0;
+    int disable_lan = 0, lan_punch = 0, skip_host = 0, use_chinese = 0, show_help = 0;
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
     const char *my_name = "unnamed", *target_name = NULL;
     const char *turn_server = NULL, *turn_user = NULL, *turn_pass = NULL;
-    int server_port = 8888;
-    int verbose = 0;
+    int server_port = 9333;
 
     for (int i = 1; i < argc; i++) {
         if      (strcmp(argv[i], "--dtls")          == 0) use_dtls = 1;
@@ -375,8 +374,6 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--disable-lan")    == 0) disable_lan = 1;
         else if (strcmp(argv[i], "--lan-punch")      == 0) lan_punch = 1;
         else if (strcmp(argv[i], "--public-only")    == 0) skip_host = 1;
-        else if (strcmp(argv[i], "--verbose-punch")  == 0) verbose_punch = 1;
-        else if (strcmp(argv[i], "--verbose")        == 0) verbose = 1;
         else if (strcmp(argv[i], "--cn")             == 0) use_chinese = 1;
         else if (strcmp(argv[i], "--echo")           == 0) g_echo_mode = 1;
         else if (strcmp(argv[i], "--server") == 0 && i+1 < argc) server_ip  = argv[++i];
@@ -387,6 +384,7 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--turn")      == 0 && i+1 < argc) turn_server = argv[++i];
         else if (strcmp(argv[i], "--turn-user") == 0 && i+1 < argc) turn_user   = argv[++i];
         else if (strcmp(argv[i], "--turn-pass") == 0 && i+1 < argc) turn_pass   = argv[++i];
+        else if (strcmp(argv[i], "--log") == 0 && i+1 < argc) p2p_set_log_level(strtol(argv[++i], NULL, 10));
         else if (strcmp(argv[i], "--help")   == 0) show_help = 1;
     }
     g_my_name = my_name;
@@ -432,21 +430,19 @@ int main(int argc, char *argv[]) {
     cfg.disable_lan_shortcut = disable_lan;
     cfg.lan_punch            = lan_punch;
     cfg.skip_host_candidates = skip_host;
-    cfg.verbose_nat_punch    = verbose_punch;
     cfg.on_disconnected      = on_disconnected;
     cfg.userdata             = NULL;
-    strncpy(cfg.local_peer_id, my_name, P2P_PEER_ID_MAX - 1);
 
     if (server_ip)
         cfg.signaling_mode = cfg.use_ice ? P2P_SIGNALING_MODE_RELAY : P2P_SIGNALING_MODE_COMPACT;
     else if (gh_token && gist_id)
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 
-    p2p_handle_t hdl = p2p_create(&cfg);
+    p2p_handle_t hdl = p2p_create(my_name, &cfg);
     if (!hdl) { printf("%s\n", ping_msg(MSG_PING_CREATE_FAIL)); return 1; }
 
     const char *mode_name = NULL;
-    if      (server_ip)         mode_name = cfg.use_ice ? "ICE" : "COMPACT";
+    if (server_ip) mode_name = cfg.use_ice ? "ICE RELAY" : "COMPACT";
     else if (gh_token && gist_id) mode_name = "PUBSUB";
     else {
         printf("%s\n%s\n", ping_msg(MSG_PING_NO_MODE), ping_msg(MSG_PING_USE_ONE_OF));
@@ -456,7 +452,6 @@ int main(int argc, char *argv[]) {
 
     if (disable_lan)    printf("%s\n", ping_msg(MSG_PING_LAN_DISABLED));
     if (lan_punch)      printf("%s\n", ping_msg(MSG_PING_LAN_PUNCH));
-    if (verbose_punch)  printf("%s\n", ping_msg(MSG_PING_VERBOSE_ENABLED));
     if (g_echo_mode)    printf("%s\n", ping_msg(MSG_PING_CHAT_ECHO_ON));
 
     if (p2p_connect(hdl, target_name) < 0) {
@@ -486,7 +481,6 @@ int main(int argc, char *argv[]) {
                 printf("%s\n", ping_msg(MSG_PING_CHAT_ENTER));
                 fflush(stdout);
                 tui_init();
-                p2p_set_log_level(verbose ? P2P_LOG_LEVEL_DEBUG : P2P_LOG_LEVEL_WARN);
                 tui_println(ping_msg(MSG_PING_CHAT_CONNECTED));
             }
 

@@ -53,8 +53,8 @@ int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
 
     r->send_seq++;
     r->send_count++;
-    P2P_LOG_TRACE("RELIABLE", "%s seq=%u len=%d inflight=%d",
-                  MSG(MSG_RELIABLE_PKT_QUEUED), e->seq, len, r->send_count);
+    P2P_LOG_VERBOSE("RELIABLE", "%s seq=%u len=%d inflight=%d",
+                    MSG(MSG_RELIABLE_PKT_QUEUED), e->seq, len, r->send_count);
     return 0;
 }
 
@@ -88,8 +88,8 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
         memcpy(r->recv_data[idx], payload, len);
         r->recv_lens[idx] = len;
         r->recv_bitmap[idx] = 1;
-        P2P_LOG_TRACE("RELIABLE", "%s seq=%u len=%d base=%u",
-                      MSG(MSG_RELIABLE_DATA_STORED), seq, len, r->recv_base);
+        P2P_LOG_VERBOSE("RELIABLE", "%s seq=%u len=%d base=%u",
+                        MSG(MSG_RELIABLE_DATA_STORED), seq, len, r->recv_base);
     }
 
     return 1;  // 应当发送 ACK

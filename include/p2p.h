@@ -25,16 +25,16 @@ typedef enum {
 
 /* 日志等级 */
 typedef enum {
-    P2P_LOG_LEVEL_NONE  = 0,                    // 静默，不输出任何日志
+    P2P_LOG_LEVEL_FATAL  = 0,                   // 致命
     P2P_LOG_LEVEL_ERROR = 1,                    // 错误：不可恢复的异常
     P2P_LOG_LEVEL_WARN  = 2,                    // 警告：可恢复的异常或降级
     P2P_LOG_LEVEL_INFO  = 3,                    // 信息：关键流程节点（默认）
     P2P_LOG_LEVEL_DEBUG = 4,                    // 调试：内部状态变化
-    P2P_LOG_LEVEL_TRACE = 5                     // 追踪：高频细节（性能敏感
+    P2P_LOG_LEVEL_VERBOSE = 5,                  // 详细：极其详细的调试信息（性能敏感）
+    P2P_LOG_LEVEL_NONE = 6                      // 无日志输出
 } p2p_log_level_t;
 
-/*
- * 日志回调类型。
+/* 日志回调接口
  * level   — 日志等级
  * module  — 模块名（可为 NULL/空）
  * message — 已格式化的日志正文（不含时间戳，不含 ANSI 颜色）
@@ -43,7 +43,7 @@ typedef void (*p2p_log_callback_t)(p2p_log_level_t level,
                                    const char *module,
                                    const char *message);
 
-/* ---------- 连接模式 ---------- */
+/* ---------- 信令模式 ---------- */
 
 typedef enum {
     P2P_SIGNALING_MODE_COMPACT = 0,             // 简单无状态信令（UDP，无登录，无需 STUN 服务）
@@ -64,7 +64,7 @@ typedef enum {
     P2P_STATE_ERROR                             // 错误状态
 } p2p_state_t;
 
-/* ---------- 连接路径 (如何通信) ---------- */
+/* ---------- 连接路径 ---------- */
 
 typedef enum {
     P2P_PATH_NONE = 0,
@@ -73,50 +73,39 @@ typedef enum {
     P2P_PATH_RELAY                              // 服务器中继（fallback）
 } p2p_path_t;
 
-/* ---------- NAT 类型（STUN 检测结果） ---------- */
-
+/* ---------- NAT 类型 ---------- */
 /*
- * NAT 类型（由 RFC 3489 Classic STUN 检测）
- *
- * 当前实现通过向单个 STUN 服务器依次发送 Test I / Test II / Test III 识别以下类型：
- *
  * P2P 穿透难度（从易到难）：
  *   OPEN < FULL_CONE < RESTRICTED < PORT_RESTRICTED < BLOCKED
  *
- * 注：对称型 NAT (Symmetric NAT) 无法通过 STUN 单服务器检测，但 COMPACT 信令
- *     模式在服务器配置了 probe_port 时可通过两次映射对比检测出来。
+ * 注：对称型 NAT (Symmetric NAT) 无法通过 STUN 单服务器检测，
+ *     但 COMPACT 信令模式在服务器配置了 probe_port 时可通过两次映射对比检测出来
  * 以下类型需要两个独立 STUN 服务器对比，STUN 检测不支持：
  *   - 对称型 UDP 防火墙 (Symmetric UDP Firewall)：有公网 IP 但过滤出站方向
  */
 typedef enum {
-    P2P_NAT_UNKNOWN = 0,        /* 未知：检测尚未完成或未启动 */
-    P2P_NAT_OPEN,               /* 无 NAT：有公网 IP，映射地址 == 本地地址 */
-    P2P_NAT_FULL_CONE,          /* 完全锥形：最容易穿透（Test II 成功） */
-    P2P_NAT_RESTRICTED,         /* 受限锥形（Test III 成功，Test II 失败） */
-    P2P_NAT_PORT_RESTRICTED,    /* 端口受限锥形（Test I 成功，II/III 均失败） */
-    P2P_NAT_SYMMETRIC,          /* 对称型 NAT：不同目标端口映射到不同外部端口;
-                                 * 仅 COMPACT 模式（服务器有 probe_port）可检测 */
-    P2P_NAT_BLOCKED,            /* UDP 不可达：无法联系 STUN 服务器（Test I 超时） */
-    P2P_NAT_UNSUPPORTED,        /* 不支持检测：未配置 STUN 服务器；
-                                 * 或使用 COMPACT 信令但服务器返回检测端口为 0；
-                                 * 此时 NAT 类型无法确定，但不影响连接功能 */
+    P2P_NAT_UNKNOWN = 0,                        // 未知：检测尚未完成或未启动
+    P2P_NAT_OPEN,                               // 无 NAT：有公网 IP，映射地址 == 本地地址
+    P2P_NAT_FULL_CONE,                          // 完全锥形：最容易穿透（Test II 成功）
+    P2P_NAT_RESTRICTED,                         // 受限锥形（Test III 成功，Test II 失败）
+    P2P_NAT_PORT_RESTRICTED,                    // 端口受限锥形（Test I 成功，II/III 均失败）
+    P2P_NAT_SYMMETRIC,                          // 对称型 NAT：不同目标端口映射到不同外部端口;
+                                                // 仅 COMPACT 模式（服务器有 probe_port）可检测
+    P2P_NAT_BLOCKED,                            // UDP 不可达：无法联系 STUN 服务器（Test I 超时）
+    P2P_NAT_UNSUPPORTED,                        // 不支持检测：未配置 STUN 服务器；或使用 COMPACT 信令但服务器返回检测端口为 0
 } p2p_nat_type_t;
 
 /*
- * p2p_get_nat_type() 的负值返回状态（检测尚在进行中时使用）
+ * p2p_nat_type() 的负值返回状态（检测尚在进行中时使用）
  *
  * 当返回值 < 0 时，表示检测处于瞬态，尚未得出最终结果；
- * 当返回值 >= 0 时，可直接强转为 p2p_nat_type_t 读取检测结论。
+ * 当返回值 >= 0 时，可直接强转为 p2p_nat_type_t 读取检测结论
  */
-#define P2P_NAT_DETECTING    (-1)   /* 检测进行中：已发出请求，等待服务器响应 */
-#define P2P_NAT_TIMEOUT      (-2)   /* 检测超时：注册或探测无响应，服务器不可达 */
+#define P2P_NAT_DETECTING    (-1)               // 检测进行中：已发出请求，等待服务器响应
+#define P2P_NAT_TIMEOUT      (-2)               // 检测超时：注册或探测无响应，服务器不可达
 
-/* ---------- 配置 ---------- */
+/* ---------- p2p 句柄定义 ---------- */
 
-/* 最大 peer ID 长度 */
-#define P2P_PEER_ID_MAX  32
-
-/* 前向声明 */
 typedef const void* p2p_handle_t;
 
 /* ---------- 事件回调类型 ---------- */
@@ -151,7 +140,6 @@ typedef void (*p2p_on_data_fn)(p2p_handle_t hdl, const void *data, int len, void
 
 typedef struct {
     uint16_t                bind_port;                  // 本地 UDP 端口 (0 = any)
-    char                    local_peer_id[P2P_PEER_ID_MAX];   // 本端身份
     
     /* 信令配置 */
     int                     signaling_mode;             // P2P_SIGNALING_MODE_* (连接时使用的信令模式)
@@ -201,8 +189,7 @@ typedef struct {
     bool                    skip_host_candidates;       // 调试：跳过本地Host候选收集，只使用公网候选（Srflx/Relay）。
                                                         // 用途：COMPACT模式快速测试UDP打洞，避免发送大量本地地址，加快配对速度。
                                                         // 配合STUN使用，直接在服务器完成公网地址交换后立即开始打洞测试。
-    bool                    verbose_nat_punch;          // 是否输出详细的 NAT 打洞流程日志
-    
+
     /* 语言选项 */
     p2p_language_t          language;                   // 日志语言
     
@@ -217,10 +204,12 @@ typedef struct {
 
 /**
  * 创建一个新的 P2P 会话。
- * 如果失败则返回 NULL。
+ * @param local_peer_id 本端身份标识
+ * @param cfg 配置参数
+ * @return 会话句柄，失败则返回 NULL
  */
 p2p_handle_t
-p2p_create(const p2p_config_t *cfg);
+p2p_create(const char *local_peer_id, const p2p_config_t *cfg);
 
 /**
  * 销毁会话并释放所有资源。
@@ -344,7 +333,6 @@ p2p_nat_type(p2p_handle_t hdl);
  */
 bool
 p2p_is_ready(p2p_handle_t hdl);
-
 
 /*
  * 获取当前连接路径 (P2P_PATH_* 枚举)。

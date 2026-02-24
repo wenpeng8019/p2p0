@@ -159,6 +159,7 @@ typedef struct mock_pair_s {
     time_t              last_active;
     bool                info0_acked;
     bool                in_pending;
+    uint8_t             addr_notify_seq;    // 地址变更通知序号（1-255 循环）
 } mock_pair_t;
 
 static mock_pair_t g_mock_pairs[MOCK_MAX_PEERS];
@@ -223,6 +224,21 @@ static void mock_send_peer_info0(mock_pair_t *to_pair, mock_pair_t *from_pair) {
     to_pair->last_active = time(NULL);
 }
 
+static void mock_send_addr_change_notify(mock_pair_t *to_pair, mock_pair_t *from_pair, uint8_t base_index) {
+    uint8_t buf[4 + 8 + 2 + 7];  // 包头(4) + session_id(8) + base_index(1) + count(1) + candidate(7)
+    buf[0]=SIG_PKT_PEER_INFO; buf[1]=0; buf[2]=0; buf[3]=0;  // seq=0
+    uint64_t sid_net = test_htonll(to_pair->session_id);
+    memcpy(buf+4, &sid_net, 8);
+    buf[12] = base_index;  // base_index!=0 表示地址变更通知
+    buf[13] = 1;           // candidate_count 必须为 1
+    // 候选地址：from_pair 的新公网地址
+    buf[14] = 1;  // type = Srflx
+    memcpy(buf+15, &from_pair->addr_ip,   4);
+    memcpy(buf+19, &from_pair->addr_port, 2);
+    mock_sendto(buf, 21, to_pair->addr_ip, to_pair->addr_port);
+    to_pair->in_pending = true;  // 加入待确认队列
+}
+
 typedef struct {
     uint8_t  status;
     uint8_t  max_candidates;
@@ -255,6 +271,10 @@ static mock_register_ack_t mock_handle_register(
         strncpy(lo->remote_id, remote, P2P_PEER_ID_MAX - 1);
         lo->peer = NULL;
     }
+    
+    // 检测地址是否变化
+    bool addr_changed = (lo->addr_ip != from_ip || lo->addr_port != from_port);
+    
     if (lo->peer == (mock_pair_t*)(void*)-1) lo->peer = NULL;
     lo->addr_ip = from_ip; lo->addr_port = from_port;
     int cap = (cand_count > MOCK_MAX_CANDIDATES) ? MOCK_MAX_CANDIDATES : cand_count;
@@ -278,12 +298,21 @@ static mock_register_ack_t mock_handle_register(
         memcpy(buf+12, &ack.probe_port, 2);
         mock_sendto(buf, 14, from_ip, from_port);
     }
+    
     if (re && (lo->peer == NULL || re->peer == NULL)) {
+        // 首次配对
         lo->peer = re; re->peer = lo;
         if (!lo->session_id) lo->session_id = mock_generate_sid();
         if (!re->session_id) re->session_id = mock_generate_sid();
         mock_send_peer_info0(lo, re);
         mock_send_peer_info0(re, lo);
+    } else if (re && lo->peer == re && addr_changed) {
+        // 已配对但地址变化：向对端发送地址变更通知
+        if (re->info0_acked) {
+            re->addr_notify_seq = (uint8_t)(re->addr_notify_seq + 1);
+            if (re->addr_notify_seq == 0) re->addr_notify_seq = 1;  // 0 保留给首包
+            mock_send_addr_change_notify(re, lo, re->addr_notify_seq);
+        }
     }
     return ack;
 }
@@ -1092,6 +1121,156 @@ TEST(address_change_updates_slot) {
     ASSERT_EQ(alice->addr_port, port2);
 }
 
+TEST(address_change_sends_notify_to_peer) {
+    TEST_LOG("Address change sends PEER_INFO(seq=0, base_index!=0) to peer");
+    mock_server_init();
+    mock_cand_t c = {0, 0, 0};
+    
+    /* Step 1: Alice 和 Bob 配对 */
+    uint32_t alice_ip1 = htonl(0x0A000001);
+    uint16_t alice_port1 = htons(5001);
+    mock_handle_register("alice","bob", alice_ip1, alice_port1, &c, 1);
+    mock_handle_register("bob","alice",  htonl(0x0A000002), htons(5002), &c, 1);
+    
+    mock_pair_t *alice = mock_find_by_peer("alice","bob");
+    mock_pair_t *bob = mock_find_by_peer("bob","alice");
+    ASSERT_NOT_NULL(alice);
+    ASSERT_NOT_NULL(bob);
+    ASSERT_EQ(alice->peer, bob);
+    
+    /* Step 2: 模拟 Bob 确认收到首个 PEER_INFO(seq=0) */
+    mock_clear_sent();
+    bob->info0_acked = true;
+    
+    /* Step 3: Alice 地址变化，重新注册 */
+    uint32_t alice_ip2 = htonl(0x0A000099);  // 新 IP
+    uint16_t alice_port2 = htons(9999);      // 新端口
+    mock_handle_register("alice","bob", alice_ip2, alice_port2, &c, 1);
+    
+    /* Step 4: 验证服务器向 Bob 发送了地址变更通知 */
+    sent_packet_t *notify = mock_find_sent(bob->addr_ip, bob->addr_port, SIG_PKT_PEER_INFO);
+    ASSERT_NOT_NULL(notify);
+    ASSERT_GE(notify->len, 14);  // 至少有包头(4) + session_id(8) + base_index(1) + count(1)
+    
+    /* 验证包格式：seq=0 */
+    ASSERT_EQ(notify->buf[0], SIG_PKT_PEER_INFO);
+    uint16_t seq = (uint16_t)(notify->buf[2] << 8) | notify->buf[3];
+    ASSERT_EQ(seq, 0);
+    
+    /* 验证 base_index != 0（地址变更通知） */
+    uint8_t base_index = notify->buf[12];
+    ASSERT_NEQ(base_index, 0);
+    ASSERT_EQ(base_index, 1);  // 首次地址变更，序号为 1
+    
+    /* 验证 candidate_count = 1 */
+    uint8_t cand_count = notify->buf[13];
+    ASSERT_EQ(cand_count, 1);
+    
+    /* 验证候选地址是 Alice 的新公网地址 */
+    ASSERT_EQ(notify->len, 14 + 7);  // 包头(4) + session_id(8) + base_index(1) + count(1) + candidate(7)
+    uint8_t cand_type = notify->buf[14];
+    ASSERT_EQ(cand_type, 1);  // Srflx
+    
+    uint32_t cand_ip;
+    memcpy(&cand_ip, notify->buf + 15, 4);
+    ASSERT_EQ(cand_ip, alice_ip2);
+    
+    uint16_t cand_port;
+    memcpy(&cand_port, notify->buf + 19, 2);
+    ASSERT_EQ(cand_port, alice_port2);
+    
+    TEST_LOG("  ✓ Server sent PEER_INFO(seq=0, base_index=1, count=1) to Bob");
+    TEST_LOG("  ✓ Notified Alice's new address: type=1(Srflx)");
+}
+
+TEST(address_change_notify_seq_increment) {
+    TEST_LOG("Multiple address changes increment base_index (1->2->3)");
+    mock_server_init();
+    mock_cand_t c = {0, 0, 0};
+    
+    /* 配对并确认首包 */
+    mock_handle_register("alice","bob", htonl(0x0A000001), htons(5001), &c, 1);
+    mock_handle_register("bob","alice", htonl(0x0A000002), htons(5002), &c, 1);
+    mock_pair_t *bob = mock_find_by_peer("bob","alice");
+    bob->info0_acked = true;
+    
+    /* 第一次地址变更 */
+    mock_clear_sent();
+    mock_handle_register("alice","bob", htonl(0x0A000010), htons(6001), &c, 1);
+    sent_packet_t *notify1 = mock_find_sent(bob->addr_ip, bob->addr_port, SIG_PKT_PEER_INFO);
+    ASSERT_NOT_NULL(notify1);
+    ASSERT_EQ(notify1->buf[12], 1);  // base_index = 1
+    
+    /* 模拟 Bob 确认收到 */
+    mock_pair_t *alice = mock_find_by_peer("alice","bob");
+    alice->info0_acked = true;
+    
+    /* 第二次地址变更 */
+    mock_clear_sent();
+    mock_handle_register("alice","bob", htonl(0x0A000020), htons(7001), &c, 1);
+    sent_packet_t *notify2 = mock_find_sent(bob->addr_ip, bob->addr_port, SIG_PKT_PEER_INFO);
+    ASSERT_NOT_NULL(notify2);
+    ASSERT_EQ(notify2->buf[12], 2);  // base_index = 2
+    
+    alice->info0_acked = true;
+    
+    /* 第三次地址变更 */
+    mock_clear_sent();
+    mock_handle_register("alice","bob", htonl(0x0A000030), htons(8001), &c, 1);
+    sent_packet_t *notify3 = mock_find_sent(bob->addr_ip, bob->addr_port, SIG_PKT_PEER_INFO);
+    ASSERT_NOT_NULL(notify3);
+    ASSERT_EQ(notify3->buf[12], 3);  // base_index = 3
+    
+    TEST_LOG("  ✓ base_index increments: 1 -> 2 -> 3");
+}
+
+TEST(address_change_notify_not_sent_before_info0_ack) {
+    TEST_LOG("Address change notify NOT sent if peer hasn't ACKed PEER_INFO(seq=0)");
+    mock_server_init();
+    mock_cand_t c = {0, 0, 0};
+    
+    /* 配对但未确认首包 */
+    mock_handle_register("alice","bob", htonl(0x0A000001), htons(5001), &c, 1);
+    mock_handle_register("bob","alice", htonl(0x0A000002), htons(5002), &c, 1);
+    mock_pair_t *bob = mock_find_by_peer("bob","alice");
+    bob->info0_acked = false;  // 关键：未确认首包
+    
+    /* Alice 地址变化 */
+    mock_clear_sent();
+    mock_handle_register("alice","bob", htonl(0x0A000099), htons(9999), &c, 1);
+    
+    /* 验证：不应该向 Bob 发送地址变更通知 */
+    sent_packet_t *notify = mock_find_sent(bob->addr_ip, bob->addr_port, SIG_PKT_PEER_INFO);
+    ASSERT_NULL(notify);  // 没有发送通知
+    
+    TEST_LOG("  ✓ Notify blocked until peer ACKs PEER_INFO(seq=0)");
+}
+
+TEST(address_change_no_notify_if_same_address) {
+    TEST_LOG("No notify sent if address unchanged");
+    mock_server_init();
+    mock_cand_t c = {0, 0, 0};
+    
+    uint32_t alice_ip = htonl(0x0A000001);
+    uint16_t alice_port = htons(5001);
+    
+    /* 配对并确认 */
+    mock_handle_register("alice","bob", alice_ip, alice_port, &c, 1);
+    mock_handle_register("bob","alice", htonl(0x0A000002), htons(5002), &c, 1);
+    mock_pair_t *bob = mock_find_by_peer("bob","alice");
+    bob->info0_acked = true;
+    
+    /* Alice 重新注册但地址不变 */
+    mock_clear_sent();
+    mock_handle_register("alice","bob", alice_ip, alice_port, &c, 1);  // 相同地址
+    
+    /* 验证：不应该发送地址变更通知 */
+    sent_packet_t *notify = mock_find_sent(bob->addr_ip, bob->addr_port, SIG_PKT_PEER_INFO);
+    ASSERT_NULL(notify);
+    
+    TEST_LOG("  ✓ No notify when address unchanged");
+}
+
 TEST(reconnect_after_timeout) {
     TEST_LOG("Re-register after timeout: new slot with peer=NULL");
     mock_server_init();
@@ -1306,6 +1485,10 @@ int main(void) {
     printf("\nPart 14: Address change & reconnect\n");
     printf("----------------------------------------\n");
     RUN_TEST(address_change_updates_slot);
+    RUN_TEST(address_change_sends_notify_to_peer);
+    RUN_TEST(address_change_notify_seq_increment);
+    RUN_TEST(address_change_notify_not_sent_before_info0_ack);
+    RUN_TEST(address_change_no_notify_if_same_address);
     RUN_TEST(reconnect_after_timeout);
 
     printf("\nPart 15: Peer pointer state machine\n");

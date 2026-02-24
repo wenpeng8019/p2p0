@@ -92,6 +92,32 @@
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
 #include "p2p_log.h"
 
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
+ *
+ * 仅用于会话内部运算。网络传输使用 p2p_candidate_t（见 p2pp.h）。
+ * 转换函数：pack_candidate() / unpack_candidate()，见下文。
+ */
+struct p2p_candidate_entry {
+    int                type;            /* 候选类型（信令模式相关：RELAY/ICE=p2p_ice_cand_type_t，COMPACT=p2p_compact_cand_type_t） */
+    struct sockaddr_in addr;            /* 传输地址（平台原生 16B） */
+    struct sockaddr_in base_addr;       /* 基础地址（平台原生 16B） */
+    uint32_t           priority;        /* 候选优先级 */
+};
+
+/*
+ * 远端候选地址（扩展类型）
+ *
+ * 以 p2p_candidate_entry_t 作为首成员，保持与 pack_candidate()/unpack_candidate()
+ * 共享同一基础序列化字段；额外运行时状态仅用于本地调度，不参与线协议。
+ */
+struct p2p_remote_candidate_entry {
+    p2p_candidate_entry_t cand;               /* 可序列化基础候选字段 */
+    uint64_t              last_punch_send_ms; /* 最近一次发送 PUNCH 的时间（调度状态） */
+};
+
 /* ============================================================================
  * p2p_session: P2P 会话主结构体
  * ============================================================================
@@ -130,7 +156,7 @@ typedef struct p2p_session {
     p2p_candidate_entry_t*      local_cands;        // 本地候选地址（动态分配）
     int                         local_cand_cnt;     // 本地候选数量
     int                         local_cand_cap;     // 本地候选容量
-    p2p_candidate_entry_t*      remote_cands;       // 远端候选地址（动态分配）
+    p2p_remote_candidate_entry_t* remote_cands;     // 远端候选地址（动态分配，含运行时状态）
     int                         remote_cand_cnt;    // 远端候选数量
     int                         remote_cand_cap;    // 远端候选容量
     uint64_t                    ice_check_last_ms;  // 上次连通性检查时间
@@ -144,11 +170,12 @@ typedef struct p2p_session {
      *   - sig_relay_ctx:  ICE模式，TCP 中继信令
      *   - sig_pubsub_ctx: PUBSUB模式，通过 GitHub Gist
      */
+    char                        local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识
+    char                        remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
     p2p_signal_compact_ctx_t    sig_compact_ctx;    // COMPACT 模式信令上下文
     p2p_signal_relay_ctx_t      sig_relay_ctx;      // RELAY 模式信令上下文
     p2p_signal_pubsub_ctx_t     sig_pubsub_ctx;     // PUB/SUB 模式信令上下文
     int                         signaling_mode;     // 信令模式 P2P_CONNECT_MODE_*
-    char                        remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
     bool                        signal_sent;        // 是否已发送初始信令
     uint64_t                    last_signal_time;   // 上次发送信令的时间戳 (ms)
     int                         last_cand_cnt_sent; // 上次发送时的候选数量
@@ -421,29 +448,36 @@ static inline p2p_candidate_entry_t *p2p_cand_push_local(p2p_session_t *s) {
     return &s->local_cands[s->local_cand_cnt++];
 }
 
-static inline p2p_candidate_entry_t *p2p_cand_push_remote(p2p_session_t *s) {
+static inline p2p_remote_candidate_entry_t *p2p_cand_push_remote(p2p_session_t *s) {
     if (s->remote_cand_cnt >= s->remote_cand_cap) {
         int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
-        p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(
-            s->remote_cands, nc * sizeof(p2p_candidate_entry_t));
+        p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(
+            s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
         if (!p) return NULL;
+
+        if (nc > s->remote_cand_cap) {
+            memset(p + s->remote_cand_cap, 0,
+                   (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));
+        }
+
         s->remote_cands    = p;
         s->remote_cand_cap = nc;
     }
     return &s->remote_cands[s->remote_cand_cnt++];
 }
 
-/* 确保 remote_cands 能按索引存放 need 个槽位（idx 随机访问时使用）。
- * 新分配空间清零，返回 0 成功，-1 OOM。 */
+// 为 remote_cands 保留目标（need）个槽位。（新分配空间会被置 0，返回 0 成功，-1 OOM）
 static inline int p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     if (need <= s->remote_cand_cap) return 0;
     int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap : 8;
     while (nc < need) nc *= 2;
-    p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(
-        s->remote_cands, nc * sizeof(p2p_candidate_entry_t));
+    p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(
+        s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
     if (!p) return -1;
+
     memset(p + s->remote_cand_cap, 0,
-           (nc - s->remote_cand_cap) * sizeof(p2p_candidate_entry_t));
+           (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));
+
     s->remote_cands    = p;
     s->remote_cand_cap = nc;
     return 0;

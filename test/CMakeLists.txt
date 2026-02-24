@@ -96,6 +96,20 @@ add_executable(test_pseudotcp
 target_link_libraries(test_pseudotcp ${TEST_PLATFORM_LIBS})
 add_test(NAME test_pseudotcp COMMAND test_pseudotcp)
 
+# Candidate Type System 单元测试（独立运行，测试类型分离、枚举、first-member embedding）
+add_executable(test_candidate_types
+    test_candidate_types.c
+)
+target_link_libraries(test_candidate_types p2p_static)
+add_test(NAME test_candidate_types COMMAND test_candidate_types)
+
+# NAT API 统一单元测试（独立运行，测试批量/单候选模式、状态转换）
+add_executable(test_nat_api
+    test_nat_api.c
+)
+target_link_libraries(test_nat_api p2p_static)
+add_test(NAME test_nat_api COMMAND test_nat_api)
+
 # UDP 打洞测试工具（独立运行，诊断NAT穿透）
 add_executable(udp_punch_test
     udp_punch_test.c

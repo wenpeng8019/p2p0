@@ -13,6 +13,17 @@
 #define PING_INTERVAL_MS        15000       /* 心跳间隔 */
 #define PONG_TIMEOUT_MS         30000       /* 心跳超时 */
 
+static int nat_find_remote_candidate_index(p2p_session_t *s, const struct sockaddr_in *to) {
+
+    for (int i = 0; i < s->remote_cand_cnt; i++) {
+        if (s->remote_cands[i].cand.addr.sin_addr.s_addr == to->sin_addr.s_addr &&
+            s->remote_cands[i].cand.addr.sin_port == to->sin_port) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -24,46 +35,108 @@ void nat_init(nat_ctx_t *n) {
 }
 
 /*
- * 开始打洞（从 session 的 remote_cands[] 读取目标）
+ * NAT 打洞（统一接口，支持批量启动和单候选追加）
+ *
+ * @param s        会话对象
+ * @param addr     目标地址（NULL=批量启动所有候选，非NULL=单个候选打洞）
+ * @param verbose  详细日志开关（仅批量启动时有效）
+ * @return         0=成功，-1=失败（无候选）
+ *
+ * 用法：
+ *   - nat_punch(s, NULL, verbose)  批量启动所有 remote_cands 的打洞
+ *   - nat_punch(s, &addr, 0)       向单个候选追加打洞（Trickle ICE）
  */
-int nat_start_punch(p2p_session_t *s, int verbose) {
+int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
+    if (!s) return -1;
+    
     nat_ctx_t *n = &s->nat;
+    uint64_t now = time_ms();
     
-    if (s->remote_cand_cnt == 0) {
-        if (verbose) {
-            P2P_LOG_ERROR("NAT", "%s", MSG(MSG_NAT_PUNCH_ERROR_NO_CAND));
-        }
-        return -1;
-    }
-    
-    n->state = NAT_PUNCHING;
-    n->punch_start = time_ms();
-    
-    if ((n->verbose = verbose)) {
+    /* ========== 首次批量或重新启动模式：addr == NULL ========== */
 
-        P2P_LOG_INFO("NAT", "%s %d %s", MSG(MSG_NAT_PUNCH_START), s->remote_cand_cnt, MSG(MSG_NAT_PUNCH_CANDIDATES));
-        for (int i = 0; i < s->remote_cand_cnt; i++) {
-            const char *type_str = "Unknown";
-            switch (s->remote_cands[i].type) {
-                case P2P_CAND_HOST: type_str = "Host"; break;
-                case P2P_CAND_SRFLX: type_str = "Srflx"; break;
-                case P2P_CAND_PRFLX: type_str = "Prflx"; break;
-                case P2P_CAND_RELAY: type_str = "Relay"; break;
+    if (addr == NULL) {
+        if (s->remote_cand_cnt == 0) {
+            P2P_LOG_ERROR("NAT", "%s", MSG(MSG_NAT_PUNCH_ERROR_NO_CAND));
+            return -1;
+        }
+        
+        // 启动 PUNCHING 状态
+        n->state = NAT_PUNCHING;
+        n->punch_start = now;
+        n->peer_addr = s->remote_cands[0].cand.addr;  /* 默认值，收到 ACK 时会更新 */
+
+        // 打印详细日志
+        if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
+
+            P2P_LOG_VERBOSE("NAT", "%s %d %s", MSG(MSG_NAT_PUNCH_START),
+                            s->remote_cand_cnt, MSG(MSG_NAT_PUNCH_CANDIDATES));
+
+            for (int i = 0; i < s->remote_cand_cnt; i++) {
+                const char *type_str = "Unknown";
+
+                /* cand.type 语义根据信令模式解读 */
+                if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+                    switch (s->remote_cands[i].cand.type) {
+                        case P2P_COMPACT_CAND_HOST: type_str = "Host"; break;
+                        case P2P_COMPACT_CAND_SRFLX: type_str = "Srflx"; break;
+                        case P2P_COMPACT_CAND_PRFLX: type_str = "Prflx"; break;
+                        case P2P_COMPACT_CAND_RELAY: type_str = "Relay"; break;
+                    }
+                } else {  /* RELAY or PUBSUB mode */
+                    switch (s->remote_cands[i].cand.type) {
+                        case P2P_ICE_CAND_HOST: type_str = "Host"; break;
+                        case P2P_ICE_CAND_SRFLX: type_str = "Srflx"; break;
+                        case P2P_ICE_CAND_PRFLX: type_str = "Prflx"; break;
+                        case P2P_ICE_CAND_RELAY: type_str = "Relay"; break;
+                    }
+                }
+
+                P2P_LOG_VERBOSE("NAT", "  [%d] %s: %s:%d", i, type_str,
+                                inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
+                                ntohs(s->remote_cands[i].cand.addr.sin_port));
             }
-            P2P_LOG_INFO("NAT", "  [%d] %s: %s:%d", i, type_str,
-                         inet_ntoa(s->remote_cands[i].addr.sin_addr),
-                         ntohs(s->remote_cands[i].addr.sin_port));
+        }
+
+        // 立即向所有候选并行发送打洞包
+        for (int i = 0; i < s->remote_cand_cnt; i++) {
+            udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+            s->remote_cands[i].last_punch_send_ms = now;
+        }
+        n->last_send_time = now;
+        
+        return 0;
+    }
+    
+    /* ========== Trickle 单候选打洞模式：addr != NULL ========== */
+    
+    // RELAY 模式下收到新候选时，重启打洞窗口（Trickle ICE 触发）
+    if (n->state != NAT_CONNECTED) {
+
+        if (n->state == NAT_INIT)
+            n->peer_addr = s->remote_cands[0].cand.addr;
+
+        n->state = NAT_PUNCHING;
+        n->punch_start = now;
+
+        P2P_LOG_VERBOSE("NAT", "Restart punching from RELAY on new candidate %s:%d",
+                        inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
+
+        // 发送打洞包
+        udp_send_packet(s->sock, addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+        n->last_send_time = now;
+
+        // 更新候选的时间戳
+        int idx = nat_find_remote_candidate_index(s, addr);
+        if (idx >= 0 && idx < s->remote_cand_cnt) {
+            s->remote_cands[idx].last_punch_send_ms = now;
         }
     }
-    
-    // 立即向所有候选并行发送打洞包
-    for (int i = 0; i < s->remote_cand_cnt; i++) {
-        udp_send_packet(s->sock, &s->remote_cands[i].addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+    else {
+
+        P2P_LOG_VERBOSE("NAT", "Ignore punch request to %s:%d since already connected",
+                        inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
     }
-    n->peer_addr = s->remote_cands[0].addr;  /* 默认值，收到 ACK 时会更新 */
-    n->last_send_time = time_ms();
-    n->punch_attempts = 1;
-    
+
     return 0;
 }
 
@@ -82,11 +155,6 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
 
     case P2P_PKT_PUNCH:
 
-        if (n->verbose) {
-            P2P_LOG_INFO("NAT", "%s %s:%d", MSG(MSG_NAT_PUNCH_RECEIVED),
-                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-        }
-
         // 回复应答包
         udp_send_packet(s->sock, from, P2P_PKT_PUNCH_ACK, 0, 0, NULL, 0);
 
@@ -94,13 +162,12 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
 
     case P2P_PKT_PUNCH_ACK:
 
-        if (n->verbose && type == P2P_PKT_PUNCH_ACK) {
-            P2P_LOG_INFO("NAT", "%s %s:%d", MSG(MSG_NAT_PUNCH_ACK_RECEIVED),
-                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-        }
-        
-        /* 通知 ICE 层（如果启用） */
+        P2P_LOG_VERBOSE("NAT", "%s %s:%d", type == P2P_PKT_PUNCH ? MSG(MSG_NAT_PUNCH_RECEIVED) : MSG(MSG_NAT_PUNCH_ACK_RECEIVED),
+                        inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
+        // 通知 ICE 层（如果启用）
         if (s->cfg.use_ice) {
+
             p2p_ice_on_check_success(s, from);
         }
 
@@ -110,12 +177,10 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
             n->state = NAT_CONNECTED;
             n->last_recv_time = now;
             
-            if (n->verbose) {
-                P2P_LOG_INFO("NAT", "%s %s:%d", MSG(MSG_NAT_PUNCH_SUCCESS),
-                             inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-                P2P_LOG_INFO("NAT", "  %s %d, %s %llu ms", MSG(MSG_NAT_PUNCH_ATTEMPTS),
-                             n->punch_attempts, MSG(MSG_NAT_PUNCH_TIME), now - n->punch_start);
-            }
+            P2P_LOG_INFO("NAT", "%s %s:%d", MSG(MSG_NAT_PUNCH_SUCCESS),
+                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
+            P2P_LOG_INFO("NAT", "  %s %llu ms", MSG(MSG_NAT_PUNCH_TIME), now - n->punch_start);
         }
         return 0;
 
@@ -127,11 +192,16 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
         /* fall through */
 
     case P2P_PKT_PONG:
+
         n->last_recv_time = now;
+
+        P2P_LOG_VERBOSE("NAT", "%s %s:%d", type == P2P_PKT_PONG ? "received PONG from" : "received PING from",
+                        inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
         return 0;
 
     default:
-        return 0;
+        return 1;  /* 未处理 */
     }
 }
 
@@ -142,8 +212,8 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
  */
 int nat_tick(p2p_session_t *s) {
     nat_ctx_t *n = &s->nat;
-    uint64_t now = time_ms();
 
+    uint64_t now = time_ms();
     switch (n->state) {
 
         case NAT_PUNCHING:
@@ -151,28 +221,43 @@ int nat_tick(p2p_session_t *s) {
             // 超时判断
             if (now - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 
-                if (n->verbose) {
-                    P2P_LOG_WARN("NAT", "%s %d %s", MSG(MSG_NAT_PUNCH_TIMEOUT),
-                                 n->punch_attempts, MSG(MSG_NAT_PUNCH_SWITCH_RELAY));
-                }
+                P2P_LOG_WARN("NAT", "%s (%llu ms), %s", MSG(MSG_NAT_PUNCH_TIMEOUT),
+                             now - n->punch_start, MSG(MSG_NAT_PUNCH_SWITCH_RELAY));
+
                 n->state = NAT_RELAY;
                 return 0;
             }
 
-            // 定期发送打洞包
-            if (now - n->last_send_time >= PUNCH_INTERVAL_MS) {
+            int sent_cnt = 0;
+            for (int i = 0; i < s->remote_cand_cnt; i++) {
 
-                // 向所有远端候选发送打洞包（并行打洞）
-                for (int i = 0; i < s->remote_cand_cnt; i++) {
-                    udp_send_packet(s->sock, &s->remote_cands[i].addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                bool should_send = false;
+                if (s->remote_cands[i].last_punch_send_ms == 0 ||
+                    now - s->remote_cands[i].last_punch_send_ms >= PUNCH_INTERVAL_MS) {
+                    should_send = true;
+                    s->remote_cands[i].last_punch_send_ms = now;
                 }
-                n->punch_attempts++;
+
+                if (should_send) {
+
+                    P2P_LOG_DEBUG("NAT", "%s %s:%d (candidate %d)", "",
+                                  inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
+                                  ntohs(s->remote_cands[i].cand.addr.sin_port), i);
+
+                    nat_punch(s, &s->remote_cands[i].cand.addr);
+                    sent_cnt++;
+                }
+            }
+
+            // 如果存在未完成的 nat 打洞
+            if (sent_cnt > 0) {
+
                 n->last_send_time = now;
 
-                if (n->verbose) {
-                    P2P_LOG_INFO("NAT", "%s #%d %s %d %s", MSG(MSG_NAT_PUNCH_PUNCHING),
-                                 n->punch_attempts, MSG(MSG_NAT_PUNCH_TO), s->remote_cand_cnt, MSG(MSG_NAT_PUNCH_CANDIDATES));
-                }
+                P2P_LOG_VERBOSE("NAT", "%s %s %d/%d %s (elapsed: %llu ms)", MSG(MSG_NAT_PUNCH_PUNCHING),
+                                MSG(MSG_NAT_PUNCH_TO), sent_cnt,
+                                s->remote_cand_cnt, MSG(MSG_NAT_PUNCH_CANDIDATES),
+                                now - n->punch_start);
             }
             break;
 
@@ -180,16 +265,20 @@ int nat_tick(p2p_session_t *s) {
 
             // 发送心跳保活包
             if (now - n->last_send_time >= PING_INTERVAL_MS) {
+
+                P2P_LOG_VERBOSE("NAT", "%s %s:%d", "",
+                                inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port));
+
                 udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PING, 0, 0, NULL, 0);
                 n->last_send_time = now;
             }
 
             // 超时检查
             if (n->last_recv_time > 0 && now - n->last_recv_time >= PONG_TIMEOUT_MS) {
-                if (n->verbose) {
-                    P2P_LOG_WARN("NAT", "%s (%s %d ms)", MSG(MSG_NAT_PUNCH_CONN_LOST),
-                                 MSG(MSG_NAT_PUNCH_NO_PONG), PONG_TIMEOUT_MS);
-                }
+
+                P2P_LOG_WARN("NAT", "%s (%s %d ms)", MSG(MSG_NAT_PUNCH_CONN_LOST),
+                             MSG(MSG_NAT_PUNCH_NO_PONG), PONG_TIMEOUT_MS);
+
                 n->state = NAT_INIT;
                 return -1;
             }
@@ -200,7 +289,8 @@ int nat_tick(p2p_session_t *s) {
             // 中继模式下周期性尝试直连
             if (now - n->last_send_time >= PUNCH_INTERVAL_MS * 4) {
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
-                    udp_send_packet(s->sock, &s->remote_cands[i].addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                    udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                    s->remote_cands[i].last_punch_send_ms = now;
                 }
                 n->last_send_time = now;
             }

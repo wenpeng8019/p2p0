@@ -493,9 +493,9 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         {
             p2p_candidate_entry_t *c = p2p_cand_push_local(s);
             if (c) {
-                c->type = P2P_CAND_SRFLX;
+                c->type = P2P_ICE_CAND_SRFLX;
                 /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
-                c->priority = p2p_ice_calc_priority(P2P_CAND_SRFLX, 65535, 1);
+                c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 c->addr = mapped;
                 P2P_LOG_INFO("ICE", "✓ %s %s %s:%d (%s=%u)",
                              MSG(MSG_ICE_GATHERED_SRFLX), MSG(MSG_ICE_REMOTE_CANDIDATE_ADDED),

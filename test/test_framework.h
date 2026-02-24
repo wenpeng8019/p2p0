@@ -72,6 +72,54 @@ static const char *current_test = NULL;
         } \
     } while(0)
 
+#define ASSERT_GT(a, b) \
+    do { \
+        if ((a) <= (b)) { \
+            printf(COLOR_RED "FAIL" COLOR_RESET "\n"); \
+            printf("    Expected %s > %s\n", #a, #b); \
+            printf("    Got %ld <= %ld\n", (long)(a), (long)(b)); \
+            printf("    at %s:%d\n", __FILE__, __LINE__); \
+            test_failed++; \
+            return; \
+        } \
+    } while(0)
+
+#define ASSERT_GE(a, b) \
+    do { \
+        if ((a) < (b)) { \
+            printf(COLOR_RED "FAIL" COLOR_RESET "\n"); \
+            printf("    Expected %s >= %s\n", #a, #b); \
+            printf("    Got %ld < %ld\n", (long)(a), (long)(b)); \
+            printf("    at %s:%d\n", __FILE__, __LINE__); \
+            test_failed++; \
+            return; \
+        } \
+    } while(0)
+
+#define ASSERT_LT(a, b) \
+    do { \
+        if ((a) >= (b)) { \
+            printf(COLOR_RED "FAIL" COLOR_RESET "\n"); \
+            printf("    Expected %s < %s\n", #a, #b); \
+            printf("    Got %ld >= %ld\n", (long)(a), (long)(b)); \
+            printf("    at %s:%d\n", __FILE__, __LINE__); \
+            test_failed++; \
+            return; \
+        } \
+    } while(0)
+
+#define ASSERT_LE(a, b) \
+    do { \
+        if ((a) > (b)) { \
+            printf(COLOR_RED "FAIL" COLOR_RESET "\n"); \
+            printf("    Expected %s <= %s\n", #a, #b); \
+            printf("    Got %ld > %ld\n", (long)(a), (long)(b)); \
+            printf("    at %s:%d\n", __FILE__, __LINE__); \
+            test_failed++; \
+            return; \
+        } \
+    } while(0)
+
 #define ASSERT_NULL(ptr) ASSERT((ptr) == NULL)
 #define ASSERT_NOT_NULL(ptr) ASSERT((ptr) != NULL)
 

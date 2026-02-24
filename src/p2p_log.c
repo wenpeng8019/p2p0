@@ -50,11 +50,11 @@ void p2p_log_set_color(int enabled) {
 static const char *level_to_string(p2p_log_level_t level) {
     switch (level) {
         case P2P_LOG_LEVEL_ERROR: return "ERROR";
-        case P2P_LOG_LEVEL_WARN:  return "WARN ";
-        case P2P_LOG_LEVEL_INFO:  return "INFO ";
+        case P2P_LOG_LEVEL_WARN:  return "WARN";
+        case P2P_LOG_LEVEL_INFO:  return "INFO";
         case P2P_LOG_LEVEL_DEBUG: return "DEBUG";
-        case P2P_LOG_LEVEL_TRACE: return "TRACE";
-        default:                  return "?????";
+        case P2P_LOG_LEVEL_VERBOSE: return "VERBOSE";
+        default: return "UNDEF";
     }
 }
 
@@ -64,8 +64,8 @@ static const char *level_to_color(p2p_log_level_t level) {
         case P2P_LOG_LEVEL_WARN:  return COLOR_YELLOW;
         case P2P_LOG_LEVEL_INFO:  return COLOR_GREEN;
         case P2P_LOG_LEVEL_DEBUG: return COLOR_CYAN;
-        case P2P_LOG_LEVEL_TRACE: return COLOR_GRAY;
-        default:                  return COLOR_RESET;
+        case P2P_LOG_LEVEL_VERBOSE: return COLOR_GRAY;
+        default: return COLOR_RESET;
     }
 }
 

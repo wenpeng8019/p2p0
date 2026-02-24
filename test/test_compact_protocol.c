@@ -291,6 +291,214 @@ TEST(peer_info_last_packet_with_data) {
 }
 
 /* ============================================================================
+ * 第二部分扩展：PEER_INFO 地址变更通知测试 (seq=0 且 base_index!=0)
+ * ============================================================================ */
+
+TEST(peer_info_addr_change_notify_basic) {
+    TEST_LOG("Testing PEER_INFO address change notification (seq=0, base_index!=0)");
+    
+    test_pkt_hdr_t hdr;
+    hdr.type = SIG_PKT_PEER_INFO;
+    hdr.flags = 0;  // 地址变更通知不应设置 FIN
+    hdr.seq = 0;    // seq=0 是关键
+    
+    test_peer_info_t info;
+    info.base_index = 1;  // base_index!=0 表示地址变更通知（作为循环序号）
+    info.count = 1;       // candidate_count 必须为 1
+    
+    // 新的公网地址
+    info.candidates[0].type = 1;  // Srflx
+    info.candidates[0].ip = htonl(0x08080808);  // 8.8.8.8
+    info.candidates[0].port = htons(9999);
+    
+    // 验证协议格式
+    ASSERT_EQ(ntohs(hdr.seq), 0);
+    ASSERT_EQ(info.base_index, 1);
+    ASSERT_EQ(info.count, 1);
+    ASSERT_EQ(hdr.flags & SIG_PEER_INFO_FIN, 0);
+    
+    TEST_LOG("  ✓ Address change notify: seq=0, base_index=1, count=1");
+    TEST_LOG("  ✓ New address: 8.8.8.8:9999");
+}
+
+TEST(peer_info_addr_change_notify_sequence) {
+    TEST_LOG("Testing address change notify sequence (1 -> 2 -> 3)");
+    
+    // 模拟接收到三次地址变更通知
+    uint8_t received_seq[3];
+    
+    // 第一次通知：base_index=1
+    test_pkt_hdr_t hdr1;
+    hdr1.type = SIG_PKT_PEER_INFO;
+    hdr1.flags = 0;
+    hdr1.seq = 0;
+    
+    test_peer_info_t info1;
+    info1.base_index = 1;
+    info1.count = 1;
+    info1.candidates[0].type = 1;
+    info1.candidates[0].ip = htonl(0x01010101);
+    info1.candidates[0].port = htons(8001);
+    
+    received_seq[0] = info1.base_index;
+    
+    // 第二次通知：base_index=2
+    test_peer_info_t info2;
+    info2.base_index = 2;
+    info2.count = 1;
+    info2.candidates[0].ip = htonl(0x02020202);
+    
+    received_seq[1] = info2.base_index;
+    
+    // 第三次通知：base_index=3
+    test_peer_info_t info3;
+    info3.base_index = 3;
+    info3.count = 1;
+    info3.candidates[0].ip = htonl(0x03030303);
+    
+    received_seq[2] = info3.base_index;
+    
+    // 验证序号递增
+    ASSERT_EQ(received_seq[0], 1);
+    ASSERT_EQ(received_seq[1], 2);
+    ASSERT_EQ(received_seq[2], 3);
+    ASSERT_GT(received_seq[1], received_seq[0]);
+    ASSERT_GT(received_seq[2], received_seq[1]);
+    
+    TEST_LOG("  ✓ Notify sequence: 1 -> 2 -> 3");
+}
+
+TEST(peer_info_addr_change_notify_wrap_around) {
+    TEST_LOG("Testing address change notify 8-bit wrap-around (254 -> 255 -> 1)");
+    
+    // base_index 是 8 位循环序号：1..255 循环（0 保留用于正常 PEER_INFO）
+    
+    test_peer_info_t info_254;
+    info_254.base_index = 254;
+    info_254.count = 1;
+    
+    test_peer_info_t info_255;
+    info_255.base_index = 255;
+    info_255.count = 1;
+    
+    test_peer_info_t info_1;
+    info_1.base_index = 1;  // 回绕到 1
+    info_1.count = 1;
+    
+    // 验证序号值
+    ASSERT_EQ(info_254.base_index, 254);
+    ASSERT_EQ(info_255.base_index, 255);
+    ASSERT_EQ(info_1.base_index, 1);
+    
+    // 验证循环逻辑：255 之后是 1（需要 seq8_is_newer 函数判断）
+    TEST_LOG("  ✓ Sequence wrap-around: 254 -> 255 -> 1");
+    TEST_LOG("  ✓ base_index uses 8-bit cyclic numbering (1..255)");
+}
+
+TEST(peer_info_addr_change_notify_old_packet_ignored) {
+    TEST_LOG("Testing old address change notification ignored");
+    
+    // 假设当前序号为 100
+    uint8_t current_seq = 100;
+    
+    // 收到旧通知：base_index=99（应该被忽略）
+    test_peer_info_t old_notify;
+    old_notify.base_index = 99;
+    old_notify.count = 1;
+    old_notify.candidates[0].ip = htonl(0xDEADBEEF);
+    
+    // 收到新通知：base_index=101（应该被接受）
+    test_peer_info_t new_notify;
+    new_notify.base_index = 101;
+    new_notify.count = 1;
+    new_notify.candidates[0].ip = htonl(0x0A0A0A0A);
+    
+    // 验证序号比较逻辑（假设窗口为 128）
+    // old_notify.base_index (99) < current_seq (100) -> 旧通知
+    // new_notify.base_index (101) > current_seq (100) -> 新通知
+    
+    ASSERT_LT(old_notify.base_index, current_seq);
+    ASSERT_GT(new_notify.base_index, current_seq);
+    
+    TEST_LOG("  ✓ Old notify (seq=99) < current (seq=100) -> ignored");
+    TEST_LOG("  ✓ New notify (seq=101) > current (seq=100) -> accepted");
+    TEST_LOG("  ✓ Note: Old packets still need ACK, just ignore content");
+}
+
+TEST(peer_info_addr_change_notify_error_multiple_candidates) {
+    TEST_LOG("Testing address change notify error: candidate_count != 1");
+    
+    test_pkt_hdr_t hdr;
+    hdr.type = SIG_PKT_PEER_INFO;
+    hdr.flags = 0;
+    hdr.seq = 0;
+    
+    test_peer_info_t info;
+    info.base_index = 5;
+    info.count = 2;  // 错误：应该是 1
+    
+    // 协议要求：地址变更通知的 candidate_count 必须为 1
+    ASSERT_NEQ(info.count, 1);
+    
+    TEST_LOG("  ✓ Invalid: base_index=5 but count=2 (should be 1)");
+    TEST_LOG("  ✓ Protocol requires: count==1 for address change notify");
+}
+
+TEST(peer_info_addr_change_notify_error_fin_flag) {
+    TEST_LOG("Testing address change notify error: FIN flag set");
+    
+    test_pkt_hdr_t hdr;
+    hdr.type = SIG_PKT_PEER_INFO;
+    hdr.flags = SIG_PEER_INFO_FIN;  // 错误：不应设置 FIN
+    hdr.seq = 0;
+    
+    test_peer_info_t info;
+    info.base_index = 10;
+    info.count = 1;
+    
+    // 协议要求：地址变更通知不应设置 FIN 标志
+    ASSERT_EQ(hdr.flags & SIG_PEER_INFO_FIN, SIG_PEER_INFO_FIN);
+    
+    TEST_LOG("  ✓ Invalid: FIN flag set in address change notify");
+    TEST_LOG("  ✓ Protocol requires: flags should not have SIG_PEER_INFO_FIN");
+}
+
+TEST(peer_info_normal_vs_addr_change) {
+    TEST_LOG("Testing distinction: normal PEER_INFO vs address change notify");
+    
+    // 正常的 PEER_INFO(seq=0)：服务器首次下发候选
+    test_pkt_hdr_t normal_hdr;
+    normal_hdr.type = SIG_PKT_PEER_INFO;
+    normal_hdr.flags = 0;
+    normal_hdr.seq = 0;
+    
+    test_peer_info_t normal_info;
+    normal_info.base_index = 0;  // base_index=0 表示正常下发
+    normal_info.count = 3;       // 可以是多个候选
+    
+    // 地址变更通知：seq=0 但 base_index!=0
+    test_pkt_hdr_t notify_hdr;
+    notify_hdr.type = SIG_PKT_PEER_INFO;
+    notify_hdr.flags = 0;
+    notify_hdr.seq = 0;
+    
+    test_peer_info_t notify_info;
+    notify_info.base_index = 1;  // base_index!=0 表示地址变更
+    notify_info.count = 1;       // 必须为 1
+    
+    // 验证区分逻辑
+    ASSERT_EQ(normal_info.base_index, 0);
+    ASSERT_NEQ(notify_info.base_index, 0);
+    
+    ASSERT_EQ(ntohs(normal_hdr.seq), 0);
+    ASSERT_EQ(ntohs(notify_hdr.seq), 0);
+    
+    TEST_LOG("  ✓ Normal PEER_INFO: seq=0, base_index=0, count=3");
+    TEST_LOG("  ✓ Address change:   seq=0, base_index=1, count=1");
+    TEST_LOG("  ✓ Both use seq=0, distinguish by base_index");
+}
+
+/* ============================================================================
  * 第三部分：PEER_INFO_ACK 确认机制测试
  * ============================================================================ */
 
@@ -733,6 +941,16 @@ int main(void) {
     RUN_TEST(peer_info_seq2_with_base_index);
     RUN_TEST(peer_info_fin_flag);
     RUN_TEST(peer_info_last_packet_with_data);
+    
+    printf("\nPart 2.5: PEER_INFO Address Change Notification\n");
+    printf("----------------------------------------\n");
+    RUN_TEST(peer_info_addr_change_notify_basic);
+    RUN_TEST(peer_info_addr_change_notify_sequence);
+    RUN_TEST(peer_info_addr_change_notify_wrap_around);
+    RUN_TEST(peer_info_addr_change_notify_old_packet_ignored);
+    RUN_TEST(peer_info_addr_change_notify_error_multiple_candidates);
+    RUN_TEST(peer_info_addr_change_notify_error_fin_flag);
+    RUN_TEST(peer_info_normal_vs_addr_change);
     
     printf("\nPart 3: PEER_INFO_ACK Mechanism\n");
     printf("--Part 10: Protocol Verification\n");

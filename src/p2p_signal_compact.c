@@ -72,11 +72,8 @@ static void send_register(p2p_session_t *s) {
 
     udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, n);
 
-
-    if (ctx->verbose) {
-        P2P_LOG_INFO("COMPACT", "REGISTERING: %s #%d (%d %s)...",
-                     MSG(MSG_COMPACT_ATTEMPT), ctx->register_attempts, s->local_cand_cnt, MSG(MSG_ICE_CANDIDATE_PAIRS));
-    }
+    P2P_LOG_INFO("COMPACT", "REGISTERING: %s #%d (%d %s)...",
+                 MSG(MSG_COMPACT_ATTEMPT), ctx->register_attempts, s->local_cand_cnt, MSG(MSG_ICE_CANDIDATE_PAIRS));
 }
 
 /*
@@ -88,27 +85,62 @@ static void send_register(p2p_session_t *s) {
  */
 static void parse_peer_info(p2p_session_t *s, const uint8_t *payload, int cand_cnt) {
 
-    int offset = 10; // 负载头：[session_id(8)][base_index(1)][candidate_count(1)]
+    int offset = sizeof(uint64_t) + 2; // 负载头：[session_id(8)][base_index(1)][candidate_count(1)]
     for (int i = 0; i < cand_cnt; i++) {
-        p2p_candidate_entry_t *c = &s->remote_cands[s->remote_cand_cnt++];
+        p2p_remote_candidate_entry_t *c = &s->remote_cands[s->remote_cand_cnt++];
 
-        c->type = (p2p_cand_type_t)payload[offset];
-        c->priority = 0;                            // COMPACT 模式不使用优先级
-        memset(&c->addr, 0, sizeof(c->addr));
-        c->addr.sin_family = AF_INET;
-        memcpy(&c->addr.sin_addr.s_addr, payload + offset + 1, 4);
-        memcpy(&c->addr.sin_port, payload + offset + 5, 2);
+        c->cand.type = (p2p_compact_cand_type_t)payload[offset];
+        c->cand.priority = 0;                            // COMPACT 模式不使用优先级
+        memset(&c->cand.addr, 0, sizeof(c->cand.addr));
+        c->cand.addr.sin_family = AF_INET;
+        memcpy(&c->cand.addr.sin_addr.s_addr, payload + offset + 1, 4);
+        memcpy(&c->cand.addr.sin_port, payload + offset + 5, 2);
+        c->last_punch_send_ms = 0;
         offset += (int)sizeof(p2p_compact_candidate_t);
 
-        // Trickle ICE：如果 NAT 打洞已启动，立即向新候选发送探测包
-        if (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_RELAY) {
+        P2P_LOG_INFO("COMPACT", "[Trickle] Immediately probing new candidate %s:%d",
+                     inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
 
-            udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
-
-            P2P_LOG_DEBUG("COMPACT", "[Trickle] Immediately probing new candidate %s:%d",
-                          inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
-        }
+        nat_punch(s, &c->cand.addr);
     }
+}
+
+// 8 位循环序比较：判断 seq 是否比 prev 更新（1..255 循环）
+static bool seq8_is_newer(uint8_t seq, uint8_t prev) {
+
+    uint8_t diff = (uint8_t)(seq - prev);
+    return diff != 0 && diff < 128;
+}
+
+// 应用地址变更通知中的单个公网候选地址（覆盖 remote_cands[0]）
+static int apply_addr_update_candidate(p2p_session_t *s, const uint8_t *payload) {
+
+    if (p2p_remote_cands_reserve(s, 1) != 0) {
+        return -1;
+    }
+
+    p2p_remote_candidate_entry_t *c = &s->remote_cands[0];
+    c->cand.type = (p2p_compact_cand_type_t)payload[sizeof(uint64_t)+2];
+    c->cand.priority = 0;
+    memset(&c->cand.addr, 0, sizeof(c->cand.addr));
+    c->cand.addr.sin_family = AF_INET;
+    memcpy(&c->cand.addr.sin_addr.s_addr, payload + sizeof(uint64_t)+3, 4);
+    memcpy(&c->cand.addr.sin_port, payload + sizeof(uint64_t)+7, 2);
+    c->last_punch_send_ms = 0;
+    if (s->remote_cand_cnt == 0) {
+        s->remote_cand_cnt = 1;
+    }
+
+    // Trickle ICE：NAT 打洞已启动时，立即探测最新地址
+    if (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_RELAY) {
+
+        P2P_LOG_INFO("COMPACT", "[Trickle] Probing updated candidate %s:%d",
+                     inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
+
+        nat_punch(s, &c->cand.addr);
+    }
+
+    return 0;
 }
 
 /* 一个 PEER_INFO 包所承载的候选数量（单位）
@@ -116,8 +148,8 @@ static void parse_peer_info(p2p_session_t *s, const uint8_t *payload, int cand_c
  *   负载头后面的剩余空间就是候选列表，通过预定义、和 MTU 上限共同限制计算得出该单位大小
  */
 #define PEER_INFO_CAND_UNIT \
-    (((P2P_MAX_PAYLOAD - 10) / (int)sizeof(p2p_compact_candidate_t)) < MAX_CANDS_PER_PACKET \
-     ? ((P2P_MAX_PAYLOAD - 10) / (int)sizeof(p2p_compact_candidate_t)) \
+    (((P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2) / (int)sizeof(p2p_compact_candidate_t)) < MAX_CANDS_PER_PACKET \
+     ? ((P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2) / (int)sizeof(p2p_compact_candidate_t)) \
      : MAX_CANDS_PER_PACKET)
 
 // 构建 PEER_INFO 的候选队列，返回 payload 总长度
@@ -135,10 +167,10 @@ static int build_peer_info_candidates(p2p_session_t *s, uint16_t seq, uint8_t *p
         *r_flags |= SIG_PEER_INFO_FIN;
     }
 
-    payload[8] = (uint8_t)start;
-    payload[9] = (uint8_t)cnt;
+    payload[sizeof(uint64_t)] = (uint8_t)start;
+    payload[sizeof(uint64_t) + 1] = (uint8_t)cnt;
 
-    int offset = 10; // 负载头：[session_id(8)][base_index(1)][candidate_count(1)]
+    int offset = sizeof(uint64_t) + 2; // 负载头：[session_id(8)][base_index(1)][candidate_count(1)]
     for (int i = 0; i < cnt; i++) {
         int idx = start + i;
         payload[offset] = (uint8_t)s->local_cands[idx].type;
@@ -175,7 +207,7 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
     // session_id 所有包相同，只写一次
     uint8_t payload[P2P_MAX_PAYLOAD];
     uint64_t sid_net = htonll(ctx->session_id);
-    memcpy(payload, &sid_net, 8);
+    memcpy(payload, &sid_net, sizeof(uint64_t));
 
     for (uint16_t seq = 1; seq <= (uint16_t)pkt_cnt; seq++) { uint8_t flags = 0;
         int payload_len = build_peer_info_candidates(s, seq, payload, &flags);
@@ -193,7 +225,7 @@ static void resend_rest_candidates_and_fin(p2p_session_t *s) {
     // session_id 所有包相同，只写一次
     uint8_t payload[P2P_MAX_PAYLOAD];
     uint64_t sid_net = htonll(ctx->session_id);
-    memcpy(payload, &sid_net, 8);   
+    memcpy(payload, &sid_net, sizeof(uint64_t));
 
     for (uint16_t seq = 1; seq <= 16; seq++) {
         uint16_t bit = (uint16_t)(1u << (seq - 1));
@@ -221,13 +253,12 @@ void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx) {
  */
 int p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id,
                                const char *remote_peer_id,
-                               const struct sockaddr_in *server, int verbose) {
+                               const struct sockaddr_in *server) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     if (ctx->state != SIGNAL_COMPACT_INIT) return -1;
 
     ctx->server_addr = *server;
-    ctx->verbose = verbose;
 
     ctx->state = SIGNAL_COMPACT_REGISTERING;
     ctx->last_send_time = p2p_time_ms();
@@ -241,12 +272,10 @@ int p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id,
     ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
     ctx->peer_online = false;
 
-    if (ctx->verbose) {
-        P2P_LOG_INFO("COMPACT", "START: %s '%s' -> '%s' %s %s:%d (%d %s)",
-               MSG(MSG_COMPACT_REGISTERING), local_peer_id, remote_peer_id,
-               MSG(MSG_COMPACT_WITH_SERVER), inet_ntoa(server->sin_addr), ntohs(server->sin_port),
-               s->local_cand_cnt, MSG(MSG_ICE_CANDIDATE_PAIRS));
-    }
+    P2P_LOG_INFO("COMPACT", "START: %s '%s' -> '%s' %s %s:%d (%d %s)",
+                 MSG(MSG_COMPACT_REGISTERING), local_peer_id, remote_peer_id,
+                 MSG(MSG_COMPACT_WITH_SERVER), inet_ntoa(server->sin_addr), ntohs(server->sin_port),
+                 s->local_cand_cnt, MSG(MSG_ICE_CANDIDATE_PAIRS));
 
     // 构造并发送带候选列表的注册包
     send_register(s);
@@ -274,18 +303,18 @@ int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t si
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     if (!ctx->relay_support || !ctx->session_id || !data || size == 0) return -1;
 
-    if (size > (uint32_t)(P2P_MAX_PAYLOAD - 8 - 2)) {
-        size = (uint32_t)(P2P_MAX_PAYLOAD - 8 - 2);
+    if (size > (uint32_t)(P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2)) {
+        size = (uint32_t)(P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2);
     }
 
     uint8_t payload[P2P_MAX_PAYLOAD];
     uint64_t sid_net = htonll(ctx->session_id);
-    memcpy(payload, &sid_net, 8);
+    memcpy(payload, &sid_net, sizeof(uint64_t));
     uint16_t nsize = htons((uint16_t)size);
-    memcpy(payload + 8, &nsize, 2);
-    memcpy(payload + 10, data, size);
+    memcpy(payload + sizeof(uint64_t), &nsize, 2);
+    memcpy(payload + sizeof(uint64_t) + 2, data, size);
 
-    udp_send_packet(s->sock, &ctx->server_addr, P2P_PKT_RELAY_DATA, 0, 0, payload, (int)(10 + size));
+    udp_send_packet(s->sock, &ctx->server_addr, P2P_PKT_RELAY_DATA, 0, 0, payload, (int)(sizeof(uint64_t) + 2 + size));
     return 0;
 }
 
@@ -299,7 +328,7 @@ int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t si
  * - PEER_INFO: 对端候选列表（序列化）
  * - PEER_INFO_ACK: 对端确认
  */
-int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
+void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
                                  const uint8_t *payload, int len,
                                  const struct sockaddr_in *from) { (void)from;
 
@@ -310,24 +339,20 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
     /* 解析 REGISTER_ACK: [status(1)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] */
     case SIG_PKT_REGISTER_ACK: {
 
-        if (len < 10) {
-            P2P_LOG_ERROR("COMPACT", "REGISTER_ACK payload too short: %d", len);
-            return -1;
+        if (ctx->state != SIGNAL_COMPACT_REGISTERING) {
+            P2P_LOG_WARN("COMPACT", "Ignore REGISTER_ACK in state=%d", (int)ctx->state);
+            return;
         }
 
-        if (ctx->state != SIGNAL_COMPACT_REGISTERING) {
-            if (ctx->verbose) {
-                P2P_LOG_WARN("COMPACT", "Ignore REGISTER_ACK in state=%d", (int)ctx->state);
-            }
-            return -1;
+        if (len < 10) {
+            P2P_LOG_ERROR("COMPACT", "REGISTER_ACK payload too short: %d", len);
+            return;
         }
 
         uint8_t status = payload[0];
         if (status >= 2) {
-            if (ctx->verbose) {
-                P2P_LOG_WARN("COMPACT", "REGISTER_ACK error: %s (status=%d)", MSG(MSG_COMPACT_SERVER_ERROR), status);
-            }
-            return -1;
+            P2P_LOG_ERROR("COMPACT", "REGISTER_ACK error: %s (status=%d)", MSG(MSG_COMPACT_SERVER_ERROR), status);
+            return;
         }
 
         ctx->relay_support = (flags & SIG_REGACK_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
@@ -344,13 +369,11 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         memcpy(&ctx->probe_port, payload + 8, 2);
         ctx->probe_port = ntohs(ctx->probe_port);
 
-        if (ctx->verbose) {
-            P2P_LOG_INFO("COMPACT", "REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d",
-                   ctx->peer_online, payload[1], MSG(MSG_COMPACT_CACHE), payload[1] > 0 ? MSG(MSG_ICE_YES) : MSG(MSG_ICE_NO_CACHED),
-                   MSG(MSG_COMPACT_RELAY), ctx->relay_support ? MSG(MSG_ICE_YES) : MSG(MSG_ICE_NO_CACHED),
-                   inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
-                   ctx->probe_port);
-        }
+        P2P_LOG_VERBOSE("COMPACT", "REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d",
+                        ctx->peer_online, payload[1], MSG(MSG_COMPACT_CACHE), payload[1] > 0 ? MSG(MSG_ICE_YES) : MSG(MSG_ICE_NO_CACHED),
+                        MSG(MSG_COMPACT_RELAY), ctx->relay_support ? MSG(MSG_ICE_YES) : MSG(MSG_ICE_NO_CACHED),
+                        inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
+                        ctx->probe_port);
 
         // 标记进入 REGISTERED 状态（该状态将停止周期发送 REGISTER）
         ctx->state = SIGNAL_COMPACT_REGISTERED;
@@ -368,8 +391,10 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         // + ICE 阶段同时依赖 SIG_PKT_REGISTER_ACK 和 SIG_PKT_PEER_INFO 包：
         //   SIG_PKT_REGISTER_ACK 提供后续候选队列基准; SIG_PKT_PEER_INFO 提供 session_id 作为双方连接的唯一标识
         if (ctx->session_id) {
-
             ctx->state = SIGNAL_COMPACT_ICE;
+
+            P2P_LOG_INFO("COMPACT", "Received REGISTER_ACK with session_id already set, directly enter ICE phase");
+
             send_rest_candidates_and_fin(s);
             ctx->last_send_time = p2p_time_ms();
         }
@@ -386,9 +411,8 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
 
                 s->nat_type = P2P_NAT_OPEN;
                 ctx->nat_probe_retries = -1/* 探测完成 */;
-                if (ctx->verbose) {
-                    P2P_LOG_INFO("COMPACT", "[lan_punch] 跳过 NAT_PROBE，直接标记 NAT=OPEN");
-                }
+
+                P2P_LOG_INFO("COMPACT", "[lan_punch] 跳过 NAT_PROBE，直接标记 NAT=OPEN");
             }
             else {
 
@@ -402,14 +426,13 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
                 probe_addr.sin_port = htons(ctx->probe_port);
                 udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ctx->nat_probe_retries, NULL, 0);
 
-                if (ctx->verbose) {
-                    P2P_LOG_INFO("COMPACT", "NAT_PROBE: %s %s:%d (1/%d)",
-                                 MSG(MSG_COMPACT_NAT_PROBE_SENT),
-                                 inet_ntoa(probe_addr.sin_addr), ctx->probe_port,
-                                 NAT_PROBE_MAX_RETRIES);
-                }
+                P2P_LOG_INFO("COMPACT", "NAT_PROBE: %s %s:%d (1/%d)",
+                             MSG(MSG_COMPACT_NAT_PROBE_SENT),
+                             inet_ntoa(probe_addr.sin_addr), ctx->probe_port,
+                             NAT_PROBE_MAX_RETRIES);
             }
         }
+        else s->nat_type = P2P_NAT_UNSUPPORTED;
 
     } break;
 
@@ -418,8 +441,10 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
 
         if (ctx->state <= SIGNAL_COMPACT_REGISTERING) {
             P2P_LOG_WARN("COMPACT", "Ignore ALIVE_ACK in state=%d", (int)ctx->state);
-            return -1;
+            return;
         }
+
+        P2P_LOG_VERBOSE("COMPACT", "Received ALIVE_ACK from server");
 
         // 确认服务器未掉线
         ctx->last_recv_time = p2p_time_ms();
@@ -429,33 +454,35 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
     /* 解析 [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)] */
     case SIG_PKT_PEER_INFO: {
 
-        if (ctx->state < SIGNAL_COMPACT_REGISTERING || len < 10) {
+        if (ctx->state < SIGNAL_COMPACT_REGISTERING) {
             P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO: state=%d len=%d", (int)ctx->state, len);
-            return -1;
-        }
-        if (seq > 16) {
-            P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO seq=%u", seq);
-            return -1;
+            return;
         }
 
-        int cand_cnt = payload[9];
-        if (len < 10 + (int)sizeof(p2p_compact_candidate_t) * cand_cnt) {
-            P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO payload: len=%d cand_cnt=%d", len, cand_cnt);
-            return -1;
+        if (len < (int)sizeof(uint64_t) + 2 || seq > 16) {
+            P2P_LOG_ERROR("COMPACT", "Invalid PEER_INFO seq=%u", seq);
+            return;
+        }
+
+        int cand_cnt = payload[sizeof(uint64_t) + 1];
+        if (len < (int)sizeof(uint64_t) + 2 + (int)sizeof(p2p_compact_candidate_t) * cand_cnt) {
+            P2P_LOG_ERROR("COMPACT", "Invalid PEER_INFO payload: len=%d cand_cnt=%d", len, cand_cnt);
+            return;
         }
 
         // 服务器发送的第一个 PEER_INFO，至少有一个对方公网的候选地址，且肯定不带 FIN 标识
         if (seq == 0 && (!cand_cnt || (flags & SIG_PEER_INFO_FIN))) {
-            P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO seq=0: cand_cnt=%d flags=0x%02x", cand_cnt, flags);
-            return -1;
+            P2P_LOG_ERROR("COMPACT", "Invalid PEER_INFO seq=0: cand_cnt=%d flags=0x%02x", cand_cnt, flags);
+            return;
         }
 
         // 初始化获取、或验证 session_id，作为双方连接的唯一标识（后续双方基于连接的通讯以此作为标识）
         uint64_t sid;
-        memcpy(&sid, payload, 8);
+        memcpy(&sid, payload, sizeof(uint64_t));
+        sid = ntohll(sid);
         if (!ctx->session_id) {
 
-            ctx->session_id = ntohll(sid);
+            ctx->session_id = sid;
 
             s->remote_cand_cnt = 0;     // 初始化清空对端候选列表
 
@@ -463,31 +490,57 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             // + ICE 阶段同时依赖 SIG_PKT_REGISTER_ACK 和 SIG_PKT_PEER_INFO 包：
             //   SIG_PKT_REGISTER_ACK 提供后续候选队列基准; SIG_PKT_PEER_INFO 提供 session_id 作为双方连接的唯一标识
             if (ctx->state == SIGNAL_COMPACT_REGISTERED) {
-
                 ctx->state = SIGNAL_COMPACT_ICE;
+
+                P2P_LOG_INFO("COMPACT", "Received first PEER_INFO with session_id, enter ICE phase");
+
                 send_rest_candidates_and_fin(s);
                 ctx->last_send_time = p2p_time_ms();
             }
         }
-        else if (ctx->session_id != ntohll(sid)) {
+        else if (ctx->session_id != sid) {
 
-            P2P_LOG_WARN("COMPACT", "Session mismatch in PEER_INFO: local=%" PRIu64 " pkt=%" PRIu64,
-                         ctx->session_id, ntohll(sid));
-            return -1;
+            P2P_LOG_ERROR("COMPACT", "Session mismatch in PEER_INFO: local=%" PRIu64 " pkt=%" PRIu64,
+                          ctx->session_id, sid);
+            return;
         }
+
+        P2P_LOG_VERBOSE("COMPACT", "Received PEER_INFO(seq=%u, cand_cnt=%d, flags=0x%02x)", seq, cand_cnt, flags);
 
         bool new_seq = false;
 
-        // seq=0: 服务器维护的首个 PEER_INFO 包
+        // seq=0: 服务器维护的首个 PEER_INFO 包，或地址变更通知
         if (seq == 0) {
 
-            if (!ctx->remote_candidates_0) {
+            uint8_t base_index = payload[sizeof(uint64_t)];
+
+            // base_index!=0 表示地址变更通知，candidate_count 必须为 1
+            if (base_index != 0) {
+
+                if (cand_cnt != 1 || (flags & SIG_PEER_INFO_FIN)) {
+                    P2P_LOG_ERROR("COMPACT", "Invalid PEER_INFO notify: base=%u cand_cnt=%d flags=0x%02x",
+                                  base_index, cand_cnt, flags);
+                    return;
+                }
+
+                if (ctx->remote_addr_notify_seq == 0 || seq8_is_newer(base_index, ctx->remote_addr_notify_seq)) {
+
+                    if (apply_addr_update_candidate(s, payload) != 0) {
+                        P2P_LOG_ERROR("COMPACT", "Failed to apply addr update candidate");
+                        return;
+                    }
+
+                    ctx->remote_addr_notify_seq = base_index;
+                    new_seq = true;
+                }
+            }
+            else if (!ctx->remote_candidates_0) {
 
                 // 维护分配远端候选列表的空间（作为首个 PEER_INFO 包，候选队列基准 base_index 肯定是 0）
                 // + 注意，seq=0 的 PEER_INFO 包的 base_index 字段值可以不为 0（协议上 base_index !=0 说明是对方公网地址发生变更的通知）
                 if (p2p_remote_cands_reserve(s, cand_cnt) != 0) {
                     P2P_LOG_ERROR("COMPACT", "Failed to reserve remote candidates (cnt=%d)", cand_cnt);
-                    return -1;
+                    return;
                 }
 
                 parse_peer_info(s, payload, cand_cnt);
@@ -508,9 +561,9 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
 
                 // 维护分配远端候选列表的空间
                 // + 这里 payload[8](base_index) + cand_cnt，表示该包至少需要的远端候选数量; 1 为至少包含一个对方的公网地址
-                if (p2p_remote_cands_reserve(s, 1 + payload[8] + cand_cnt) != 0) {
-                    P2P_LOG_ERROR("COMPACT", "Failed to reserve remote candidates (base=%u cnt=%d)", payload[8], cand_cnt);
-                    return -1;
+                if (p2p_remote_cands_reserve(s, 1 + payload[sizeof(uint64_t)] + cand_cnt) != 0) {
+                    P2P_LOG_ERROR("COMPACT", "Failed to reserve remote candidates (base=%u cnt=%d)", payload[sizeof(uint64_t)], cand_cnt);
+                    return;
                 }
 
                 parse_peer_info(s, payload, cand_cnt);
@@ -527,23 +580,20 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             // 如果对方所有的候选队列都已经接收完成（todo 打洞超时失败，应该和这个状态有关）
             if (ctx->remote_candidates_0 && ctx->remote_candidates_mask &&
                 (ctx->remote_candidates_done & ctx->remote_candidates_mask) == ctx->remote_candidates_mask) {
-                if (ctx->verbose) {
-                    P2P_LOG_INFO("COMPACT", "Remote candidate sync complete (mask=0x%04x)",
-                                 (unsigned)ctx->remote_candidates_mask);
-                }
+
+                P2P_LOG_INFO("COMPACT", "Remote candidate sync complete (mask=0x%04x)",
+                             (unsigned)ctx->remote_candidates_mask);
             }
         }
 
         /* 发送 PEER_INFO_ACK: [session_id(8)]，确认序号在包头 seq */
         {
-            uint8_t ack_payload[8];
-            uint64_t sid_net = htonll(ctx->session_id);
-            memcpy(ack_payload, &sid_net, 8);
-            udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO_ACK, 0, seq, ack_payload, sizeof(ack_payload));
-        }
+            P2P_LOG_VERBOSE("COMPACT", "%s PEER_INFO_ACK(seq=%u)", MSG(MSG_RELAY_ANSWER_SENT), seq);
 
-        if (ctx->verbose) {
-            P2P_LOG_INFO("COMPACT", "%s PEER_INFO_ACK(seq=%u)", MSG(MSG_RELAY_ANSWER_SENT), seq);
+            uint8_t ack_payload[sizeof(uint64_t)];
+            uint64_t sid_net = htonll(ctx->session_id);
+            memcpy(ack_payload, &sid_net, sizeof(uint64_t));
+            udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO_ACK, 0, seq, ack_payload, sizeof(ack_payload));
         }
 
     } break;
@@ -551,39 +601,36 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
     /* 解析 PEER_INFO_ACK: [session_id(8)]，确认序号在包头 seq */
     case SIG_PKT_PEER_INFO_ACK: {
 
-        if (len < 8) {
-            P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO_ACK len=%d", len);
-            return -1;
+        if (len < (int)sizeof(uint64_t)) {
+            P2P_LOG_ERROR("COMPACT", "Invalid PEER_INFO_ACK len=%d", len);
+            return;
         }
 
         uint64_t sid;
-        memcpy(&sid, payload, 8);
+        memcpy(&sid, payload, sizeof(uint64_t));
         sid = ntohll(sid);
         if (sid != ctx->session_id) {
-            if (ctx->verbose) {
-                P2P_LOG_WARN("COMPACT", "Ignore PEER_INFO_ACK for sid=%" PRIu64 " (local sid=%" PRIu64 ")",
-                             sid, ctx->session_id);
-            }
-            return -1;
+            P2P_LOG_ERROR("COMPACT", "Ignore PEER_INFO_ACK for sid=%" PRIu64 " (local sid=%" PRIu64 ")",
+                          sid, ctx->session_id);
+            return;
         }
 
         uint16_t ack_seq = seq;
         if (ack_seq == 0 || ack_seq > 16) {
-            P2P_LOG_WARN("COMPACT", "Invalid PEER_INFO_ACK ack_seq=%u", ack_seq);
-            return -1;
+            P2P_LOG_ERROR("COMPACT", "Invalid PEER_INFO_ACK ack_seq=%u", ack_seq);
+            return;
         }
 
         uint16_t bit = (uint16_t)(1u << (ack_seq - 1));
         if ((ctx->candidates_mask & bit) == 0) {
-
-            if (ctx->verbose) {
-                P2P_LOG_WARN("COMPACT", "Unexpected PEER_INFO_ACK ack_seq=%u mask=0x%04x",
-                             ack_seq, (unsigned)ctx->candidates_mask);
-            }
-            return -1;
+            P2P_LOG_ERROR("COMPACT", "Unexpected PEER_INFO_ACK ack_seq=%u mask=0x%04x",
+                          ack_seq, (unsigned)ctx->candidates_mask);
+            return;
         }
 
         if ((ctx->candidates_acked & bit) == 0) {
+
+            P2P_LOG_VERBOSE("COMPACT", "Received PEER_INFO_ACK for seq=%u", ack_seq);
 
             ctx->candidates_acked |= bit;
 
@@ -592,27 +639,28 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
 
                 ctx->state = SIGNAL_COMPACT_READY;
 
-                if (ctx->verbose) {
-                    P2P_LOG_INFO("COMPACT", "%s (sid=%" PRIu64 ")", MSG(MSG_COMPACT_ENTERED_READY), ctx->session_id);
-                }
+                P2P_LOG_INFO("COMPACT", "%s (sid=%" PRIu64 ")", MSG(MSG_COMPACT_ENTERED_READY), ctx->session_id);
             }
         }
+        else P2P_LOG_WARN("COMPACT", "Received PEER_INFO_ACK for seq=%u", ack_seq);
 
     } break;
 
     /* 服务器通知：对端已离线。格式: [session_id(8)] */
     case SIG_PKT_PEER_OFF: {
 
-        if (len < 8) {
-            P2P_LOG_WARN("COMPACT", "Invalid PEER_OFF len=%d", len);
-            return -1;
+        if (len < (int)sizeof(uint64_t)) {
+            P2P_LOG_ERROR("COMPACT", "Invalid PEER_OFF len=%d", len);
+            return;
         }
 
         uint64_t off_sid;
-        memcpy(&off_sid, payload, 8);
+        memcpy(&off_sid, payload, sizeof(uint64_t));
         off_sid = ntohll(off_sid);
 
         if (ctx->session_id != 0 && ctx->session_id == off_sid) {
+
+            P2P_LOG_VERBOSE("COMPACT", "Received PEER_OFF for sid=%" PRIu64, off_sid);
 
             // 重置到 REGISTERED 状态，等待对端重新注册
             ctx->state = SIGNAL_COMPACT_REGISTERED;
@@ -624,50 +672,55 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
             ctx->remote_candidates_mask = 0;
             ctx->remote_candidates_done = 0;
             ctx->remote_candidates_0 = false;
+            ctx->remote_addr_notify_seq = 0;
 
             s->remote_cand_cnt = 0;
 
-            if (ctx->verbose) {
-                P2P_LOG_WARN("COMPACT", "PEER_OFF: sid=%" PRIu64 " peer disconnected, reset to REGISTERED", off_sid);
-            }
+            P2P_LOG_WARN("COMPACT", "PEER_OFF: sid=%" PRIu64 " peer disconnected, reset to REGISTERED", off_sid);
         }
+        else P2P_LOG_WARN("COMPACT", "Received PEER_OFF for sid=%" PRIu64, off_sid);
 
     } break;
 
     /* 服务器中转：[session_id(8)][data_len(2)][data(N)] / [session_id(8)] */
+    // todo data 回复 ack
     case P2P_PKT_RELAY_DATA:
     case P2P_PKT_RELAY_ACK: {
 
         if (!ctx->relay_support) {
-            P2P_LOG_WARN("COMPACT", "Relay packet received but relay not enabled");
-            return -1;
+            P2P_LOG_ERROR("COMPACT", "Relay packet received but relay not enabled");
+            return;
         }
 
-        if (len < 8) {
-            return -1;
+        if (len < (int)sizeof(uint64_t)) {
+            return;
         }
 
         uint64_t off_sid;
-        memcpy(&off_sid, payload, 8);
+        memcpy(&off_sid, payload, sizeof(uint64_t));
         off_sid = ntohll(off_sid);
 
         if (off_sid != ctx->session_id) {
-            P2P_LOG_WARN("COMPACT", "Relay sid mismatch: local=%" PRIu64 " pkt=%" PRIu64,
+            P2P_LOG_ERROR("COMPACT", "Relay sid mismatch: local=%" PRIu64 " pkt=%" PRIu64,
                          ctx->session_id, off_sid);
-            return -1;
+            return;
         }
+
+        P2P_LOG_VERBOSE("COMPACT", "Received %s for sid=%" PRIu64 ", len=%d",
+                        type == P2P_PKT_RELAY_DATA ? "RELAY_DATA" : "RELAY_ACK", off_sid, len);
 
     } break;
 
     /* 解析 NAT_PROBE_ACK: [probe_ip(4)][probe_port(2)] 共6字节，使用包头 seq 匹配请求 */
     case SIG_PKT_NAT_PROBE_ACK: {
 
-        if (len < 6) return -1;
+        if (len < 6) {
+            P2P_LOG_ERROR("COMPACT", "Invalid NAT_PROBE_ACK len=%d", len);
+            return;
+        }
         if (seq != ctx->nat_probe_retries) {
-            if (ctx->verbose) {
-                P2P_LOG_DEBUG("COMPACT", "Ignore NAT_PROBE_ACK seq=%u (expect=%d)", seq, (int)ctx->nat_probe_retries);
-            }
-            return 1;  // 忽略非本次请求的响应
+            P2P_LOG_WARN("COMPACT", "Ignore NAT_PROBE_ACK seq=%u (expect=%d)", seq, (int)ctx->nat_probe_retries);
+            return;
         }
         
         struct sockaddr_in probe_mapped;
@@ -675,10 +728,11 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         probe_mapped.sin_family = AF_INET;
         memcpy(&probe_mapped.sin_addr.s_addr, payload, 4);
         memcpy(&probe_mapped.sin_port,        payload + 4, 2);
+
+        P2P_LOG_VERBOSE("COMPACT", "Received NAT_PROBE_ACK: probe_mapped=%s:%d", inet_ntoa(probe_mapped.sin_addr), ntohs(probe_mapped.sin_port));
         
         // 端口一致性：主端口映射端口 == 探测端口映射端口 → 锥形，否则 → 对称
-        ctx->nat_is_port_consistent =
-            (probe_mapped.sin_port == ctx->public_addr.sin_port) ? 1 : 0;
+        ctx->nat_is_port_consistent = (probe_mapped.sin_port == ctx->public_addr.sin_port) ? 1 : 0;
         
         // 检测 OPEN：公网地址 IP 与任意本地地址相同（无 NAT）
         int is_open = 0;
@@ -695,23 +749,17 @@ int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t s
         else s->nat_type = P2P_NAT_SYMMETRIC;
         ctx->nat_probe_retries = -1/* 探测完成 */;
         
-        if (ctx->verbose) {
-            const char *result_str = p2p_nat_type_str(s->nat_type, s->cfg.language);
-            P2P_LOG_INFO("COMPACT", "%s %s %s:%d probe=%s:%d -> %s",
-                   MSG(MSG_NAT_DETECTION_COMPLETED),
-                   MSG(MSG_STUN_MAPPED_ADDRESS),
-                   inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
-                   inet_ntoa(probe_mapped.sin_addr),     ntohs(probe_mapped.sin_port),
-                   result_str);
-        }
+        P2P_LOG_INFO("COMPACT", "%s %s %s:%d probe=%s:%d -> %s",
+                     MSG(MSG_NAT_DETECTION_COMPLETED),
+                     MSG(MSG_STUN_MAPPED_ADDRESS),
+                     inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
+                     inet_ntoa(probe_mapped.sin_addr),     ntohs(probe_mapped.sin_port),
+                     p2p_nat_type_str(s->nat_type, s->cfg.language));
 
     } break;
 
-    default:
-        return 1;  /* 未处理 */
+    default: P2P_LOG_ERROR("COMPACT", "Unknown packet type: %u", type);
     }
-
-    return 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -733,24 +781,27 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
         if (now - ctx->last_send_time < REGISTER_INTERVAL_MS) return 0;
         
         // 超时检查
+        if (ctx->register_attempts > MAX_REGISTER_ATTEMPTS) return -1;
         if (++ctx->register_attempts > MAX_REGISTER_ATTEMPTS) {
-            if (ctx->verbose) {
-                P2P_LOG_ERROR("COMPACT", "TIMEOUT: %s (%d)",
-                       MSG(MSG_COMPACT_MAX_ATTEMPTS), MAX_REGISTER_ATTEMPTS);
-            }
+
+            P2P_LOG_WARN("COMPACT", "TIMEOUT: %s (%d)",
+                   MSG(MSG_COMPACT_MAX_ATTEMPTS), MAX_REGISTER_ATTEMPTS);
+
             return -1;
         }
         
-        /* 构建并发送 REGISTER 包 */
+        P2P_LOG_VERBOSE("COMPACT", "Resend REGISTER (attempt %d)", ctx->register_attempts);
+
         send_register(s);
 
         ctx->last_send_time = now;
-        return 0;
     }
     // 进入 READY 之前，定期向对方重发剩余候选、以及 FIN
     else if (ctx->state == SIGNAL_COMPACT_ICE) {
 
         if (now - ctx->last_send_time < PEER_INFO_INTERVAL_MS) return 0;
+
+        P2P_LOG_VERBOSE("COMPACT", "Resend remaining candidates and FIN to peer");
 
         resend_rest_candidates_and_fin(s);
 
@@ -769,12 +820,11 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
         // 发送 keep-alive 包
         udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_ALIVE, 0, 0, payload, (int)sizeof(payload));
 
-        if (ctx->verbose) {
-            P2P_LOG_INFO("COMPACT", "REGISTERED: keepalive ALIVE sent to %s:%d",
-                         inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port));
-        }
-
         ctx->last_send_time = now;
+
+        P2P_LOG_VERBOSE("COMPACT", "%s: keepalive ALIVE sent to %s:%d",
+                        ctx->state == SIGNAL_COMPACT_REGISTERED ? "REGISTERED" : "READY",
+                        inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port));
     }
 
     return 0;
@@ -814,23 +864,20 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
         probe_addr.sin_port = htons(ctx->probe_port);
         udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ++ctx->nat_probe_retries, NULL, 0);
 
-        if (ctx->verbose) {
-            P2P_LOG_INFO("COMPACT", "NAT_PROBE: %s %d/%d %s %s:%d",
-                         MSG(MSG_COMPACT_NAT_PROBE_RETRY),
-                         (int)ctx->nat_probe_retries, NAT_PROBE_MAX_RETRIES,
-                         MSG(MSG_STUN_TO),
-                         inet_ntoa(probe_addr.sin_addr), ctx->probe_port);
-        }
+        P2P_LOG_VERBOSE("COMPACT", "NAT_PROBE: %s %d/%d %s %s:%d",
+                        MSG(MSG_COMPACT_NAT_PROBE_RETRY),
+                        (int)ctx->nat_probe_retries, NAT_PROBE_MAX_RETRIES,
+                        MSG(MSG_STUN_TO),
+                        inet_ntoa(probe_addr.sin_addr), ctx->probe_port);
     }
-        // 最大重试失败，探测端口无应答，无法确定 NAT 类型
-    else {
+    // 最大重试失败，探测端口无应答，无法确定 NAT 类型
+    else if (ctx->nat_probe_retries > NAT_PROBE_MAX_RETRIES) return;
+    else { ++ctx->nat_probe_retries;
 
         ctx->nat_probe_retries = -2/* 探测超时 */;
         s->nat_type = P2P_NAT_TIMEOUT;
 
-        if (ctx->verbose) {
-            P2P_LOG_WARN("COMPACT", "NAT_PROBE: %s", MSG(MSG_COMPACT_NAT_PROBE_TIMEOUT));
-        }
+        P2P_LOG_WARN("COMPACT", "NAT_PROBE: %s", MSG(MSG_COMPACT_NAT_PROBE_TIMEOUT));
     }
 }
 

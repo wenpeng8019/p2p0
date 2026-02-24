@@ -11,12 +11,11 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 /* ---- 信令重发配置 ---- */
-#define SIGNAL_RESEND_INTERVAL_MS       5000   /* 信令重发间隔 (5秒，relay/compact/等) */
-#define SIGNAL_RESEND_INTERVAL_PUBSUB_MS 15000  /* PUBSUB 重发间隔 (15秒，给对方充足时间回复) */
-#define SIGNAL_MAX_RESEND_COUNT    12     /* 最大重发次数 (共约60秒) */
+#define SIGNAL_RESEND_INTERVAL_MS           5000   /* 信令重发间隔 (5秒，relay/compact/等) */
+#define SIGNAL_RESEND_INTERVAL_PUBSUB_MS    15000  /* PUBSUB 重发间隔 (15秒，给对方充足时间回复) */
+#define SIGNAL_MAX_RESEND_COUNT             12     /* 最大重发次数 (共约60秒) */
 
 /* ---- 锁辅助函数（单线程模式下为空操作） ---- */
-
 #ifdef P2P_THREADED
 #define LOCK(s)   do { if ((s)->cfg.threaded) p2p_mutex_lock(&(s)->mtx); } while(0)
 #define UNLOCK(s) do { if ((s)->cfg.threaded) p2p_mutex_unlock(&(s)->mtx); } while(0)
@@ -47,8 +46,8 @@ static int resolve_host(const char *host, uint16_t port, struct sockaddr_in *out
 ///////////////////////////////////////////////////////////////////////////////
 
 p2p_handle_t
-p2p_create(const p2p_config_t *cfg) {
-    if (!cfg) return NULL;
+p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
+    if (!cfg || !local_peer_id) return NULL;
 
     // Initialize Winsock on Windows (no-op on POSIX)
     static int net_initialized = 0;
@@ -111,7 +110,7 @@ p2p_create(const p2p_config_t *cfg) {
     // 初始化候选地址数组（动态分配，初始容量 8）
     s->local_cands  = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
     s->local_cand_cap = 8;
-    s->remote_cands = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
+    s->remote_cands = (p2p_remote_candidate_entry_t *)calloc(8, sizeof(p2p_remote_candidate_entry_t));
     s->remote_cand_cap = 8;
     if (!s->local_cands || !s->remote_cands) {
         if (s->local_cands) free(s->local_cands);
@@ -122,6 +121,11 @@ p2p_create(const p2p_config_t *cfg) {
 
     s->cfg = *cfg;
     if (s->cfg.update_interval_ms <= 0) s->cfg.update_interval_ms = 10;
+    
+    // 初始化本端身份标识
+    memset(s->local_peer_id, 0, sizeof(s->local_peer_id));
+    strncpy(s->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
+
     s->sock = sock;
     s->tcp_sock = P2P_INVALID_SOCKET;
 
@@ -259,8 +263,8 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
     // 设置对方 id
     if (remote_peer_id) {
+        memset(s->remote_peer_id, 0, sizeof(s->remote_peer_id));
         strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
-        s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
     } else {
         s->remote_peer_id[0] = '\0';
     }
@@ -293,7 +297,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 for (int i = 0; i < s->route.addr_count; i++) {
                     p2p_candidate_entry_t *c = p2p_cand_push_local(s);
                     if (!c) break;
-                    c->type = P2P_CAND_HOST;
+                    c->type = P2P_ICE_CAND_HOST;
                     c->addr = s->route.local_addrs[i];
                     c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
                     P2P_LOG_INFO("P2P", "[COMPACT] %s: %s:%d",
@@ -308,16 +312,16 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             }
 
             // 开始信令注册
-            p2p_signal_compact_connect(s, s->cfg.local_peer_id, remote_peer_id, &server_addr, s->cfg.verbose_nat_punch);
+            p2p_signal_compact_connect(s, s->local_peer_id, remote_peer_id, &server_addr);
 
             if (s->cfg.lan_punch) {
-                P2P_LOG_INFO("P2P", "[lan_punch] COMPACT 模式：仅使用 Host 候选 (%d 个)，等待对端 PEER_INFO 后调用 nat_start_punch",
+                P2P_LOG_INFO("P2P", "[lan_punch] COMPACT 模式：仅使用 Host 候选 (%d 个)，等待对端 PEER_INFO 后调用 nat_punch",
                              s->local_cand_cnt);
             }
 
             P2P_LOG_INFO("P2P", "[CONNECT] %s <%s -> %s> %s %d",
                          MSG(MSG_P2P_COMPACT_REGISTERING),
-                         s->cfg.local_peer_id, remote_peer_id,
+                         s->local_peer_id, remote_peer_id,
                          MSG(MSG_P2P_WITH_N_CANDS), s->local_cand_cnt);
             break;
         }
@@ -330,7 +334,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             // 首次连接：自动登录信令服务器（只执行一次）
             if (s->sig_relay_ctx.state != SIGNAL_CONNECTED
                 && p2p_signal_relay_login(&s->sig_relay_ctx, s->cfg.server_host, s->cfg.server_port,
-                                          s->cfg.local_peer_id) < 0) {
+                                          s->local_peer_id) < 0) {
 
                 P2P_LOG_ERROR("P2P", "%s", MSG(MSG_P2P_RELAY_SERVER_FAILED));
                 s->state = P2P_STATE_ERROR;
@@ -349,7 +353,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             if (remote_peer_id && s->local_cand_cnt > 0) {
                 uint8_t buf[2048];
                 int n = pack_signaling_payload_hdr(
-                    s->cfg.local_peer_id,
+                    s->local_peer_id,
                     remote_peer_id,
                     0,  /* timestamp */
                     0,  /* delay_trigger */
@@ -583,22 +587,20 @@ p2p_update(p2p_handle_t hdl) {
             // --------------------
 
             case SIG_PKT_REGISTER_ACK:
+            case SIG_PKT_ALIVE_ACK:
             case SIG_PKT_PEER_INFO:
             case SIG_PKT_PEER_INFO_ACK:
             case SIG_PKT_NAT_PROBE_ACK:
-                if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) break;
+
+                if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
+                    P2P_LOG_ERROR("P2P", "%s: received signaling packet type 0x%02X in non-COMPACT mode",
+                                 "", hdr.type);
+                    break;
+                }
 
                 // 处理信令包
-                int ret = p2p_signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
+                p2p_signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
                 
-                // PEER_INFO 特殊处理：seq=0 时启动打洞（首次收到服务器下发候选）
-                if (ret == 0 && hdr.type == SIG_PKT_PEER_INFO && hdr.seq == 0) {
-                    if (s->cfg.lan_punch) {
-                        P2P_LOG_INFO("P2P", "[lan_punch] 收到 PEER_INFO seq=0 (%d 个候选)，启动 nat_start_punch",
-                                     s->remote_cand_cnt);
-                    }
-                    nat_start_punch(s, s->cfg.verbose_nat_punch);
-                }
                 break;
 
             default:
@@ -633,8 +635,8 @@ p2p_update(p2p_handle_t hdl) {
         // 查找远端 Host 候选（用于同子网检测）
         struct sockaddr_in *peer_priv = NULL;
         for (int i = 0; i < s->remote_cand_cnt; i++) {
-            if (s->remote_cands[i].type == P2P_CAND_HOST) {
-                peer_priv = &s->remote_cands[i].addr;
+            if (s->remote_cands[i].cand.type == P2P_ICE_CAND_HOST) {
+                peer_priv = &s->remote_cands[i].cand.addr;
                 break;
             }
         }
@@ -646,17 +648,13 @@ p2p_update(p2p_handle_t hdl) {
             struct sockaddr_in priv = *peer_priv;
             priv.sin_port = s->nat.peer_addr.sin_port;
             route_send_probe(&s->route, s->sock, &priv, 0);
-            if (s->cfg.verbose_nat_punch) {
-                P2P_LOG_INFO("P2P", "[NAT_PUNCH] %s %s:%d",
-                       MSG(MSG_P2P_SAME_SUBNET_PROBE),
-                       inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
-            }
+            P2P_LOG_VERBOSE("P2P", "[NAT_PUNCH] %s %s:%d",
+                   MSG(MSG_P2P_SAME_SUBNET_PROBE),
+                   inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
         } else if (s->cfg.disable_lan_shortcut && peer_priv &&
                    route_check_same_subnet(&s->route, peer_priv)) {
             // 同子网但 disable_lan_shortcut=true：跳过升级，仅打印日志
-            if (s->cfg.verbose_nat_punch) {
-                P2P_LOG_INFO("P2P", "[NAT_PUNCH] %s", MSG(MSG_P2P_SAME_SUBNET_DISABLED));
-            }
+            P2P_LOG_VERBOSE("P2P", "[NAT_PUNCH] %s", MSG(MSG_P2P_SAME_SUBNET_DISABLED));
         }
     }
 
@@ -810,7 +808,7 @@ p2p_update(p2p_handle_t hdl) {
                 
                     uint8_t pkt[2048];
                     n = pack_signaling_payload_hdr(
-                        s->cfg.local_peer_id,
+                        s->local_peer_id,
                         s->remote_peer_id,
                         0,  /* timestamp */
                         0,  /* delay_trigger */
@@ -872,7 +870,7 @@ p2p_update(p2p_handle_t hdl) {
             // 检查是否已收集到 Srflx 候选地址（公网反射地址）
             int has_srflx = 0;
             for (int i = 0; i < s->local_cand_cnt; i++) {
-                if (s->local_cands[i].type == P2P_CAND_SRFLX) {
+                if (s->local_cands[i].type == P2P_ICE_CAND_SRFLX) {
                     has_srflx = 1;
                     break;
                 }
@@ -892,7 +890,7 @@ p2p_update(p2p_handle_t hdl) {
 
                     uint8_t pkt[2048];
                     n = pack_signaling_payload_hdr(
-                        s->cfg.local_peer_id,
+                        s->local_peer_id,
                         s->remote_peer_id,
                         0,  /* timestamp */
                         0,  /* delay_trigger */

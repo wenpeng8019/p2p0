@@ -139,53 +139,14 @@
  * 候选地址类型（RFC 5245 Section 4.1.1）
  * ============================================================================ */
 typedef enum {
-    P2P_CAND_HOST = 0,                  // 本地网卡地址（Host Candidate）
-    P2P_CAND_SRFLX,                     // STUN 反射地址（Server Reflexive Candidate）
-    P2P_CAND_RELAY,                     // TURN 中继地址（Relayed Candidate）
-    P2P_CAND_PRFLX                      // 对端反射地址（Peer Reflexive Candidate）
-} p2p_cand_type_t;
+    P2P_ICE_CAND_HOST = 0,              // 本地网卡地址（Host Candidate）
+    P2P_ICE_CAND_SRFLX,                 // STUN 反射地址（Server Reflexive Candidate）
+    P2P_ICE_CAND_RELAY,                 // TURN 中继地址（Relayed Candidate）
+    P2P_ICE_CAND_PRFLX                  // 对端反射地址（Peer Reflexive Candidate）
+} p2p_ice_cand_type_t;
 
-/*
- * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
- *
- * 仅用于会话内部运算。网络传输使用 p2p_candidate_t（见 p2pp.h）。
- * 转换函数：pack_candidate() / unpack_candidate()，见 p2p_internal.h
- */
-typedef struct {
-    int                 type;           // 候选类型 (p2p_cand_type_t) 
-    struct sockaddr_in  addr;           // 传输地址（平台原生 16B）
-    struct sockaddr_in  base_addr;      // 基础地址（平台原生 16B）
-    uint32_t            priority;       // 候选优先级
-} p2p_candidate_entry_t;
-
-/* ============================================================================
- * 候选对结构（RFC 5245 Section 5.7）
- * ============================================================================
- *
- * 候选对由一个本地候选和一个远端候选组成。
- * 连通性检查在候选对上进行，而不是单独的候选。
- *
- * 候选对优先级计算（RFC 5245 Section 5.7.2）：
- *   pair_priority = 2^32 * MIN(G, D) + 2 * MAX(G, D) + (G > D ? 1 : 0)
- *   其中 G = controlling 端优先级，D = controlled 端优先级
- */
-typedef enum {
-    P2P_PAIR_FROZEN = 0,                // 冻结：等待其他检查完成
-    P2P_PAIR_WAITING,                   // 等待：可以开始检查
-    P2P_PAIR_IN_PROGRESS,               // 进行中：已发送检查，等待响应
-    P2P_PAIR_SUCCEEDED,                 // 成功：检查通过
-    P2P_PAIR_FAILED                     // 失败：检查超时或失败
-} p2p_pair_state_t;
-
-typedef struct {
-    p2p_candidate_entry_t local;        // 本地候选
-    p2p_candidate_entry_t remote;       // 远端候选
-    uint64_t        pair_priority;      // 候选对优先级
-    p2p_pair_state_t state;             // 候选对状态
-    int             nominated;          // 是否被提名
-    uint64_t        last_check_time;    // 上次检查时间
-    int             check_count;        // 检查次数
-} p2p_candidate_pair_t;
+typedef struct p2p_candidate_entry        p2p_candidate_entry_t;
+typedef struct p2p_remote_candidate_entry p2p_remote_candidate_entry_t;
 
 /* ============================================================================
  * ICE 状态机（RFC 5245 Section 7）
@@ -244,7 +205,7 @@ int  p2p_ice_send_local_candidate(struct p2p_session *s, p2p_candidate_entry_t *
  * @param component   组件 ID (RTP=1, RTCP=2)
  * @return            32 位优先级值
  */
-uint32_t p2p_ice_calc_priority(p2p_cand_type_t type, uint16_t local_pref, uint8_t component);
+uint32_t p2p_ice_calc_priority(p2p_ice_cand_type_t type, uint16_t local_pref, uint8_t component);
 
 /*
  * 计算候选对优先级
@@ -258,26 +219,5 @@ uint32_t p2p_ice_calc_priority(p2p_cand_type_t type, uint16_t local_pref, uint8_
  * @return                  64 位候选对优先级
  */
 uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controlled_prio, int is_controlling);
-
-/*
- * 生成候选对检查列表
- *
- * 将本地候选和远端候选组合成候选对，按优先级排序。
- *
- * @param pairs         输出：候选对数组
- * @param max_pairs     数组最大容量
- * @param local_cands   本地候选数组
- * @param local_cnt     本地候选数量
- * @param remote_cands  远端候选数组
- * @param remote_cnt    远端候选数量
- * @param is_controlling 本端是否为 controlling
- * @return              生成的候选对数量
- */
-int p2p_ice_form_check_list(
-    p2p_candidate_pair_t *pairs, int max_pairs,
-    const p2p_candidate_entry_t *local_cands, int local_cnt,
-    const p2p_candidate_entry_t *remote_cands, int remote_cnt,
-    int is_controlling
-);
 
 #endif /* P2P_ICE_H */

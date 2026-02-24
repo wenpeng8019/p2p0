@@ -30,6 +30,9 @@
  * 注：本实现支持对端离线时的候选缓存，详见 p2p_ice.h 中
  *    "与标准 ICE 的差异：离线候选缓存"章节。
  */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
 #include "p2p_internal.h"
 #ifdef _WIN32
@@ -40,6 +43,28 @@
 #   include <net/if.h>
 #   include <netdb.h>
 #endif
+
+/* ============================================================================
+ * 候选对结构（仅 p2p_ice.c 内部使用，RFC 5245 Section 5.7）
+ * ============================================================================ */
+
+typedef enum {
+    P2P_PAIR_FROZEN = 0,                /* 冻结：等待其他检查完成 */
+    P2P_PAIR_WAITING,                   /* 等待：可以开始检查 */
+    P2P_PAIR_IN_PROGRESS,               /* 进行中：已发送检查，等待响应 */
+    P2P_PAIR_SUCCEEDED,                 /* 成功：检查通过 */
+    P2P_PAIR_FAILED                     /* 失败：检查超时或失败 */
+} p2p_pair_state_t;
+
+typedef struct {
+    p2p_candidate_entry_t local;        /* 本地候选 */
+    p2p_candidate_entry_t remote;       /* 远端候选 */
+    uint64_t        pair_priority;      /* 候选对优先级 */
+    p2p_pair_state_t state;             /* 候选对状态 */
+    int             nominated;          /* 是否被提名 */
+    uint64_t        last_check_time;    /* 上次检查时间 */
+    int             check_count;        /* 检查次数 */
+} p2p_candidate_pair_t;
 
 /* ============================================================================
  * 优先级计算（RFC 5245 Section 4.1.2）
@@ -79,21 +104,21 @@
  * @param component   组件 ID（通常为 1）
  * @return            32 位优先级值
  */
-uint32_t p2p_ice_calc_priority(p2p_cand_type_t type, uint16_t local_pref, uint8_t component) {
+uint32_t p2p_ice_calc_priority(p2p_ice_cand_type_t type, uint16_t local_pref, uint8_t component) {
     uint32_t type_pref;
     
     /* 根据候选类型确定类型偏好值 */
     switch (type) {
-        case P2P_CAND_HOST:
+        case P2P_ICE_CAND_HOST:
             type_pref = ICE_TYPE_PREF_HOST;
             break;
-        case P2P_CAND_PRFLX:
+        case P2P_ICE_CAND_PRFLX:
             type_pref = ICE_TYPE_PREF_PRFLX;
             break;
-        case P2P_CAND_SRFLX:
+        case P2P_ICE_CAND_SRFLX:
             type_pref = ICE_TYPE_PREF_SRFLX;
             break;
-        case P2P_CAND_RELAY:
+        case P2P_ICE_CAND_RELAY:
             type_pref = ICE_TYPE_PREF_RELAY;
             break;
         default:
@@ -214,7 +239,7 @@ static int pair_compare(const void *a, const void *b) {
  * @param is_controlling 本端是否为 controlling 角色
  * @return               生成的候选对数量
  */
-int p2p_ice_form_check_list(
+static int p2p_ice_form_check_list(
     p2p_candidate_pair_t *pairs, int max_pairs,
     const p2p_candidate_entry_t *local_cands, int local_cnt,
     const p2p_candidate_entry_t *remote_cands, int remote_cnt,
@@ -354,7 +379,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
     /* 构建负载：Trickle ICE 模式（单个候选） */
     uint8_t buf[sizeof(p2p_signaling_payload_hdr_t) + sizeof(p2p_candidate_t)];
     int n = pack_signaling_payload_hdr(
-        s->cfg.local_peer_id,
+        s->local_peer_id,
         s->remote_peer_id,
         0,  /* timestamp */
         0,  /* delay_trigger */
@@ -443,9 +468,9 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
 
                     p2p_candidate_entry_t *c = p2p_cand_push_local(s);
                     if (!c) break;
-                    c->type = P2P_CAND_HOST;
+                    c->type = P2P_ICE_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
-                    c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
+                    c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
                     host_index++;
                     memcpy(&c->addr, sa, sizeof(struct sockaddr_in));
                     c->addr.sin_port = loc.sin_port;
@@ -467,9 +492,9 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
 
                 p2p_candidate_entry_t *c = p2p_cand_push_local(s);
                 if (c) {
-                    c->type = P2P_CAND_HOST;
+                    c->type = P2P_ICE_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
-                    c->priority = p2p_ice_calc_priority(P2P_CAND_HOST, local_pref, 1);
+                    c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
                     host_index++;
                     memcpy(&c->addr, ifa->ifa_addr, sizeof(struct sockaddr_in));
                     c->addr.sin_port = loc.sin_port;
@@ -529,7 +554,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      */
     if (s->cfg.enable_tcp) {
         for (int i = 0; i < s->local_cand_cnt; i++) {
-            if (s->local_cands[i].type == P2P_CAND_HOST) {
+            if (s->local_cands[i].type == P2P_ICE_CAND_HOST) {
                 /* TODO: 建立 TCP 监听端口 */
             }
         }
@@ -557,7 +582,7 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
 
     /* 循环解析所有候选 */
     while (offset + 7 <= len) {
-        p2p_cand_type_t ctype = (p2p_cand_type_t)payload[offset++];
+        p2p_ice_cand_type_t ctype = (p2p_ice_cand_type_t)payload[offset++];
 
         struct sockaddr_in caddr;
         memset(&caddr, 0, sizeof(caddr));
@@ -569,20 +594,22 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
         /* 排重检测 */
         int exists = 0;
         for (int i = 0; i < s->remote_cand_cnt; i++) {
-            if (s->remote_cands[i].addr.sin_addr.s_addr == caddr.sin_addr.s_addr &&
-                s->remote_cands[i].addr.sin_port == caddr.sin_port) {
+            if (s->remote_cands[i].cand.addr.sin_addr.s_addr == caddr.sin_addr.s_addr &&
+                s->remote_cands[i].cand.addr.sin_port == caddr.sin_port) {
                 exists = 1;
                 break;
             }
         }
 
         if (!exists) {
-            p2p_candidate_entry_t *c = p2p_cand_push_remote(s);
+            p2p_remote_candidate_entry_t *c = p2p_cand_push_remote(s);
             if (!c) break;  /* OOM */
-            c->type = ctype;
-            c->addr = caddr;
+            c->cand.type = ctype;
+            c->cand.addr = caddr;
+            c->cand.priority = 0;
+            c->last_punch_send_ms = 0;
             P2P_LOG_INFO("ICE", "%s: %d -> %s:%d", MSG(MSG_ICE_RECEIVED_REMOTE), 
-                   c->type, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                   c->cand.type, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
         }
     }
 }
@@ -608,8 +635,8 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     /* 查找对应的远端候选 */
     int matched_idx = -1;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        if (s->remote_cands[i].addr.sin_addr.s_addr == from->sin_addr.s_addr &&
-            s->remote_cands[i].addr.sin_port == from->sin_port) {
+        if (s->remote_cands[i].cand.addr.sin_addr.s_addr == from->sin_addr.s_addr &&
+            s->remote_cands[i].cand.addr.sin_port == from->sin_port) {
             matched_idx = i;
             break;
         }
@@ -619,11 +646,12 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
      * 标准 ICE 行为：将其作为 prflx 候选加入列表，仍然视为成功。
      * 只要 IP 与某个已知候选匹配（或任意来源），均接受。 */
     if (matched_idx < 0) {
-        p2p_candidate_entry_t *c = p2p_cand_push_remote(s);
+        p2p_remote_candidate_entry_t *c = p2p_cand_push_remote(s);
         if (c) {
-            c->type     = P2P_CAND_PRFLX;
-            c->addr     = *from;
-            c->priority = 0;
+            c->cand.type     = P2P_ICE_CAND_PRFLX;
+            c->cand.addr     = *from;
+            c->cand.priority = 0;
+            c->last_punch_send_ms = 0;
             matched_idx = s->remote_cand_cnt - 1;
             P2P_LOG_INFO("ICE", "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)",
                          MSG(MSG_ICE_RECEIVED_REMOTE),
@@ -636,21 +664,21 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 
     const char *cand_type_str = "Unknown";
     const char *connection_desc = "";
-    p2p_cand_type_t ctype = (matched_idx >= 0) ? s->remote_cands[matched_idx].type : P2P_CAND_PRFLX;
+    p2p_ice_cand_type_t ctype = (matched_idx >= 0) ? s->remote_cands[matched_idx].cand.type : P2P_ICE_CAND_PRFLX;
     switch (ctype) {
-        case P2P_CAND_HOST:
+        case P2P_ICE_CAND_HOST:
             cand_type_str = "Host (Local Network)";
             connection_desc = " - Direct LAN connection";
             break;
-        case P2P_CAND_SRFLX:
+        case P2P_ICE_CAND_SRFLX:
             cand_type_str = "Srflx (Internet P2P)";
             connection_desc = " - NAT traversal via STUN";
             break;
-        case P2P_CAND_RELAY:
+        case P2P_ICE_CAND_RELAY:
             cand_type_str = "Relay (TURN)";
             connection_desc = " - Relayed through TURN server";
             break;
-        case P2P_CAND_PRFLX:
+        case P2P_ICE_CAND_PRFLX:
             cand_type_str = "Prflx (Peer Reflexive)";
             connection_desc = " - Symmetric NAT traversal";
             break;
@@ -724,14 +752,14 @@ void p2p_ice_tick(p2p_session_t *s) {
     /* 等待有远端候选再开始 */
     if (s->remote_cand_cnt <= 0) return;
 
-    /* lan_punch 模式：不走 ICE STUN 检查，移交给 nat_start_punch + nat_tick。
-     * nat_start_punch 会走完整的打洞状态机（重试/超时/候选轮询），
+    /* lan_punch 模式：不走 ICE STUN 检查，移交给 nat_punch + nat_tick。
+     * nat_punch 会走完整的打洞状态机（重试/超时/候选轮询），
      * 与跨 NAT 场景完全相同，只是目标地址是 LAN 私网 IP。 */
     if (s->cfg.lan_punch) {
         if (s->nat.state == NAT_INIT) {
             P2P_LOG_INFO("ICE", "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)",
                          s->remote_cand_cnt);
-            nat_start_punch(s, s->cfg.verbose_nat_punch);
+            nat_punch(s, NULL);
         }
         s->ice_state = P2P_ICE_STATE_COMPLETED;  /* ICE 阶段结束，由 nat_tick 接管 */
         return;
@@ -758,10 +786,94 @@ void p2p_ice_tick(p2p_session_t *s) {
     s->ice_check_last_ms = now;
     s->ice_check_count++;
 
-    /* 向所有远端候选发送探测包 */
+    /*
+     * TODO: 标准 ICE 检查列表实现（当前为简化版）
+     *
+     * 当前实现：直接遍历所有 remote_cands，向每个候选发送 PUNCH。
+     *          这种方式适用于大部分场景，但不符合 RFC 5245 的优先级机制。
+     *
+     * 标准实现（使用 p2p_ice_form_check_list）：
+     *
+     *   1. 添加会话字段（p2p_internal.h - p2p_session_t）：
+     *      p2p_candidate_pair_t* check_list;      // ICE 检查列表（动态分配）
+     *      int                   check_list_cnt;  // 候选对数量
+     *      int                   check_list_cap;  // 列表容量
+     *
+     *   2. 进入 CHECKING 状态时生成检查列表（首次）：
+     *      if (s->check_list == NULL && s->local_cand_cnt > 0 && s->remote_cand_cnt > 0) {
+     *          int max_pairs = s->local_cand_cnt * s->remote_cand_cnt;
+     *          s->check_list = calloc(max_pairs, sizeof(p2p_candidate_pair_t));
+     *          if (s->check_list) {
+     *              // 提取 remote_cands 中的基础候选（去掉 last_punch_send_ms）
+     *              p2p_candidate_entry_t *base_cands = calloc(s->remote_cand_cnt, sizeof(p2p_candidate_entry_t));
+     *              for (int i = 0; i < s->remote_cand_cnt; i++) {
+     *                  base_cands[i] = s->remote_cands[i].cand;
+     *              }
+     *              s->check_list_cnt = p2p_ice_form_check_list(
+     *                  s->check_list, max_pairs,
+     *                  s->local_cands, s->local_cand_cnt,
+     *                  base_cands, s->remote_cand_cnt,
+     *                  1  // is_controlling: 假设主动方为 controlling
+     *              );
+     *              free(base_cands);
+     *              s->check_list_cap = max_pairs;
+     *          }
+     *      }
+     *
+     *   3. 按 pair 状态驱动检查（替换下面的简单遍历）：
+     *      for (int i = 0; i < s->check_list_cnt; i++) {
+     *          p2p_candidate_pair_t *pair = &s->check_list[i];
+     *
+     *          // 跳过已成功或已失败的 pair
+     *          if (pair->state == P2P_PAIR_SUCCEEDED || pair->state == P2P_PAIR_FAILED)
+     *              continue;
+     *
+     *          // WAITING 或 IN_PROGRESS 的 pair 才发送检查
+     *          if (pair->state == P2P_PAIR_WAITING || pair->state == P2P_PAIR_IN_PROGRESS) {
+     *              nat_punch(s, &pair->remote.addr, 0);
+     *              pair->state = P2P_PAIR_IN_PROGRESS;
+     *              pair->last_check_time = now;
+     *              pair->check_count++;
+     *
+     *              // 超时检测（例如 3 次检查后标记为 FAILED）
+     *              if (pair->check_count > 3) {
+     *                  pair->state = P2P_PAIR_FAILED;
+     *              }
+     *
+     *              // 控制并发检查数量（例如最多同时检查 5 个 pair）
+     *              // 这里简化为串行检查（发送所有 WAITING/IN_PROGRESS）
+     *          }
+     *
+     *          // 解冻下一个 pair（简单策略：前一个失败后，解冻下一个）
+     *          if (i + 1 < s->check_list_cnt && s->check_list[i+1].state == P2P_PAIR_FROZEN) {
+     *              if (pair->state == P2P_PAIR_FAILED || pair->state == P2P_PAIR_SUCCEEDED) {
+     *                  s->check_list[i+1].state = P2P_PAIR_WAITING;
+     *              }
+     *          }
+     *      }
+     *
+     *   4. p2p_ice_on_check_success 中标记 pair 为 SUCCEEDED：
+     *      找到匹配的 pair（local + remote 地址都匹配），设置 pair->state = P2P_PAIR_SUCCEEDED。
+     *
+     *   5. 资源清理（p2p.c - p2p_close）：
+     *      if (s->check_list) {
+     *          free(s->check_list);
+     *          s->check_list = NULL;
+     *      }
+     *
+     * 优势：
+     *   - 严格按优先级检查（Host > Srflx > Relay），减少不必要的中继尝试
+     *   - 支持多网卡场景的最优路径选择（例如有线 > Wi-Fi）
+     *   - 符合 RFC 5245 标准，便于与 WebRTC 互通
+     *
+     * 当前简化版已能满足大部分场景（LAN + 公网单网卡），
+     * 等需要多网卡优先级或严格标准兼容时再升级。
+     */
+
+    /* 当前简化实现：向所有远端候选发送探测包 */
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        p2p_candidate_entry_t *c = &s->remote_cands[i];
-        udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+        p2p_remote_candidate_entry_t *c = &s->remote_cands[i];
+        nat_punch(s, &c->cand.addr);
     }
 
     /* 第 1 轮打 INFO，此后每隔 1s（2 轮）打一次 DEBUG */
@@ -775,3 +887,5 @@ void p2p_ice_tick(p2p_session_t *s) {
                s->ice_check_count, P2P_ICE_MAX_CHECKS);
     }
 }
+
+#pragma clang diagnostic pop

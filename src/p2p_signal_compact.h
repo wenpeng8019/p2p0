@@ -263,6 +263,12 @@ struct p2p_session;
  *   - seq: 确认的 PEER_INFO 序列号（seq=0 表示确认服务器下发的 PEER_INFO(seq=0)）
  *   - seq 窗口: 0..16（客户端接收端仅接受 1..16）
  *
+ * PEER_INFO(seq=0) 的两种语义：
+ *   - base_index=0: 服务器下发的首个候选列表（candidate_count>=1）
+ *   - base_index!=0: 对端公网地址变更通知（candidate_count=1）
+ *     - base_index 作为 8 位循环通知序号（1..255 循环）
+ *     - 接收端按循环序比较，仅应用更新的通知；旧通知可忽略但仍需 ACK
+ *
  * RELAY_DATA（P2P 打洞失败后的中继转发）:
  *   [session_id(8)][data_len(2)][data(N)]
  *   包头: type=0xA0, flags=0, seq=数据序列号
@@ -281,6 +287,17 @@ struct p2p_session;
 /* PEER_INFO flags */
 #define SIG_PEER_INFO_FIN  0x01     /* 候选列表发送完毕 */
 
+/*
+ * COMPACT 模式候选类型枚举
+ * 与 ICE 的 p2p_ice_cand_type_t 数值对齐，用于 COMPACT 模式内部解析
+ */
+typedef enum {
+    P2P_COMPACT_CAND_HOST  = 0,             // 本地网卡地址
+    P2P_COMPACT_CAND_SRFLX = 1,             // STUN 反射地址
+    P2P_COMPACT_CAND_RELAY = 2,             // TURN 中继地址
+    P2P_COMPACT_CAND_PRFLX = 3              // 对端反射地址
+} p2p_compact_cand_type_t;
+
 /* 信令状态 */
 typedef enum {
     SIGNAL_COMPACT_INIT = 0,        /* 未启动 */
@@ -298,7 +315,6 @@ typedef struct {
     char                remote_peer_id[P2P_PEER_ID_MAX];    /* 对端 ID */
     uint64_t            last_send_time;                     /* 上次发送时间 */
     uint64_t            last_recv_time;                     /* 上次收到时间 */
-    int                 verbose;                            /* 是否输出详细日志 */
 
     /* REGISTER 重发控制（仅 REGISTERING 状态） */
     int                 register_attempts;                  /* REGISTER 重发次数 */
@@ -319,6 +335,7 @@ typedef struct {
     bool                remote_candidates_0;
     uint16_t            remote_candidates_mask;
     uint16_t            remote_candidates_done;
+    uint8_t             remote_addr_notify_seq;              /* 最近一次已应用的地址变更通知序号（base_index，1..255） */
 
     /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
     struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */
@@ -355,7 +372,7 @@ int p2p_signal_compact_tick(struct p2p_session *s);
  * @return              0 成功，-1 失败
  */
 int p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
-                               const struct sockaddr_in *server, int verbose);
+                               const struct sockaddr_in *server);
 
 int p2p_signal_compact_disconnect(struct p2p_session *s);
 
@@ -379,7 +396,7 @@ int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t si
  * @param from    发送方地址
  * @return        0 成功处理，-1 解析失败，1 未处理
  */
-int p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
+void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
                                  const uint8_t *payload, int len,
                                  const struct sockaddr_in *from);
 

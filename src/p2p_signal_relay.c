@@ -694,25 +694,29 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                         /* 排重检查 */
                         int exists = 0;
                         for (int j = 0; j < s->remote_cand_cnt; j++) {
-                            if (s->remote_cands[j].addr.sin_addr.s_addr == c.addr.sin_addr.s_addr &&
-                                s->remote_cands[j].addr.sin_port == c.addr.sin_port) {
+                            if (s->remote_cands[j].cand.addr.sin_addr.s_addr == c.addr.sin_addr.s_addr &&
+                                s->remote_cands[j].cand.addr.sin_port == c.addr.sin_port) {
                                 exists = 1;
                                 break;
                             }
                         }
                         
                         if (!exists) {
-                            p2p_candidate_entry_t *rc = p2p_cand_push_remote(s);
+                            p2p_remote_candidate_entry_t *rc = p2p_cand_push_remote(s);
                             if (rc) {
-                                *rc = c;  /* entry ← entry */
+
+                                rc->cand = c;  /* entry ← base entry */
+                                rc->last_punch_send_ms = 0;
                                 P2P_LOG_INFO("ICE", "%s: %d -> %s:%d",
                                        MSG(MSG_ICE_REMOTE_CANDIDATE_ADDED), c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
                                 
                                 /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
                                 if (s->ice_state == P2P_ICE_STATE_CHECKING) {
-                                    udp_send_packet(s->sock, &rc->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+
                                     P2P_LOG_INFO("ICE", "[Trickle] Immediately probing new candidate %s:%d",
-                                           inet_ntoa(rc->addr.sin_addr), ntohs(rc->addr.sin_port));
+                                                 inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
+
+                                    nat_punch(s, &rc->cand.addr);
                                 }
                             }
                         }

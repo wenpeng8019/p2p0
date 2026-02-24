@@ -14,6 +14,9 @@
 
 /* #pragma pack(push/pop) 受 MSVC / GCC / Clang 三大编译器支持，无需平台宏 */
 
+/* Peer ID 最大长度 */
+#define P2P_PEER_ID_MAX  32
+
 /* ============================================================================
  * NAT UDP 包定义
  * ============================================================================
@@ -29,7 +32,10 @@
  *   0x80-0xFF: COMPACT 信令协议（本节）
 */
 
-#define P2P_HDR_SIZE    4                   /* 包头大小 */
+/* 安全的 P2P UDP 负载 */
+#define P2P_MTU         1200              
+#define P2P_HDR_SIZE    4                           /* 包头大小 */
+#define P2P_MAX_PAYLOAD (P2P_MTU - P2P_HDR_SIZE)    /* 1196 */
 
 typedef struct {
     uint8_t             type;               // 包类型（0x01-0x7F: P2P协议, 0x80-0xFF: 信令协议）
@@ -141,14 +147,11 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 #pragma pack(push, 1)
 typedef struct {
-    uint8_t             type;               // 候选类型 (0=Host, 1=Srflx, 2=Relay, 3=Prflx)
+    uint8_t             type;               // 候选类型 (由客户端内部定义，见 p2p_signal_compact.h::p2p_compact_cand_type_t)
     uint32_t            ip;                 // IP 地址（网络字节序）
     uint16_t            port;               // 端口（网络字节序）
 } p2p_compact_candidate_t;
 #pragma pack(pop)
-
-#define P2P_MTU           1200              /* 安全的 UDP 负载 */
-#define P2P_MAX_PAYLOAD   (P2P_MTU - P2P_HDR_SIZE)  /* 1196 */
 
 /*
  * COMPACT 模式消息格式（以下均为 payload 部分，前面需加 4 字节包头）:
@@ -184,6 +187,9 @@ typedef struct {
  *   - base_index: 本批候选的起始索引（0-based）
  *   - candidate_count: 本批候选数量，0 表示结束标识（配合 FIN 标志）
  *   - seq=0: 服务器发送，base_index=0，包含缓存的对端候选，**首次分配 session_id**
+ *   - seq=0 且 base_index!=0: 地址变更通知（candidate_count=1）
+ *       * base_index 作为 8 位循环通知序号（1..255 循环）
+ *       * 接收端按循环序比较新旧，旧通知可忽略但仍需 ACK
  *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用服务器分配的 session_id
  *   - flags: 包头的 flags 字段可设置 SIG_PEER_INFO_FIN (0x01) 表示候选列表发送完毕
  *   - seq 窗口: 0..16（0 为服务器首包，1..16 为后续候选批次）
@@ -304,11 +310,11 @@ typedef struct {
  * 序列化格式（76字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
  */
 typedef struct {
-    char                sender[32];         // 发送方 peer_id
-    char                target[32];         // 目标方 peer_id
-    uint32_t            timestamp;          // 时间戳（用于排序和去重）
-    uint32_t            delay_trigger;      // 延迟触发打洞（毫秒）
-    int                 candidate_count;    // ICE 候选数量
+    char                sender[P2P_PEER_ID_MAX];    // 发送方 peer_id
+    char                target[P2P_PEER_ID_MAX];    // 目标方 peer_id
+    uint32_t            timestamp;                  // 时间戳（用于排序和去重）
+    uint32_t            delay_trigger;              // 延迟触发打洞（毫秒）
+    int                 candidate_count;            // ICE 候选数量
 } p2p_signaling_payload_hdr_t;
 
 /*

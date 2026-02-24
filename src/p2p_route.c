@@ -160,6 +160,7 @@ int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, p2p_socket_t
     P2P_LOG_INFO("ROUTE", "%s %s:%d, %s", MSG(MSG_ROUTE_PROBE_RECV),
                  inet_ntoa(from->sin_addr), ntohs(from->sin_port),
                  MSG(MSG_ROUTE_PROBE_ACK_SENT));
+
     // ROUTE_PROBE 回复应答消息
     return udp_send_packet(sock, from, P2P_PKT_ROUTE_PROBE_ACK, 0, 0, NULL, 0);
 }

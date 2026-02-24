@@ -206,18 +206,20 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         
         /* 添加远端 ICE 候选（步长 = sizeof(p2p_candidate_t) = 32）*/
         for (int i = 0; i < payload.candidate_count; i++) {
-            p2p_candidate_entry_t *c = p2p_cand_push_remote(s);
+             p2p_remote_candidate_entry_t *c = p2p_cand_push_remote(s);
             if (!c) break;  /* OOM */
-            unpack_candidate(c, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
+             unpack_candidate(&c->cand, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
+             c->last_punch_send_ms = 0;
             P2P_LOG_INFO("ICE", "%s: %s=%d, %s=%s:%d",
-                   MSG(MSG_PUBSUB_RECEIVED_REMOTE_CAND), MSG(MSG_PUBSUB_TYPE), c->type,
-                   MSG(MSG_PUBSUB_ADDRESS), inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                 MSG(MSG_PUBSUB_RECEIVED_REMOTE_CAND), MSG(MSG_PUBSUB_TYPE), c->cand.type,
+                 MSG(MSG_PUBSUB_ADDRESS), inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
             
             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
             if (s->ice_state == P2P_ICE_STATE_CHECKING) {
-                udp_send_packet(s->sock, &c->addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+
                 P2P_LOG_DEBUG("ICE", "[Trickle] Immediately probing new candidate %s:%d",
-                       inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                              inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
+                nat_punch(s, &c->cand.addr);
             }
         }
         
@@ -234,7 +236,7 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             /* 构建并发送 answer */
             uint8_t buf[2048];
             int n = pack_signaling_payload_hdr(
-                s->cfg.local_peer_id,
+                s->local_peer_id,
                 payload.sender,
                 0,  /* timestamp */
                 0,  /* delay_trigger */
