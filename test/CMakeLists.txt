@@ -110,12 +110,6 @@ add_executable(test_nat_api
 target_link_libraries(test_nat_api p2p_static)
 add_test(NAME test_nat_api COMMAND test_nat_api)
 
-# UDP 打洞测试工具（独立运行，诊断NAT穿透）
-add_executable(udp_punch_test
-    udp_punch_test.c
-)
-target_link_libraries(udp_punch_test ${TEST_PLATFORM_LIBS})
-
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)

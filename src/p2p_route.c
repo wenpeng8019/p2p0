@@ -68,6 +68,10 @@ int route_detect_local(route_ctx_t *rt) {
         }
     }
 
+    rt->local_addrs = malloc((sizeof(struct sockaddr_in) + sizeof(uint32_t)) * rt->addr_count);
+    if (!rt->local_addrs) { free(pAddrs); return -1; }
+    rt->local_masks = (uint32_t *)(rt->local_addrs + rt->addr_count);
+
     int i=0;
     for (PIP_ADAPTER_ADDRESSES a = pAddrs; a != NULL; a = a->Next) {
         if (a->OperStatus != IfOperStatusUp) continue;

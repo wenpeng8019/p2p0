@@ -194,13 +194,9 @@ static inline void p2p_sleep_ms(int ms) {
 /* ============================================================================
  * 64-bit 字节序转换（htonll / ntohll）
  * ============================================================================ */
-#ifdef _WIN32
-  /* Windows: ntohl 来自 winsock2.h，手动实现 64-bit 版本 */
-  static inline uint64_t htonll(uint64_t x) {
-      return (((uint64_t)htonl((uint32_t)(x & 0xFFFFFFFFULL))) << 32) |
-              (uint64_t)htonl((uint32_t)(x >> 32));
-  }
-  static inline uint64_t ntohll(uint64_t x) { return htonll(x); }
+#if defined(_WIN32)
+  /* Windows: 现代 SDK (Windows 10+) 已在 winsock2.h 中提供 htonll/ntohll */
+  /* 无需额外定义，直接使用系统提供的版本 */
 #elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
   /* Linux/BSD: <endian.h> 提供 htobe64/be64toh */
 # include <endian.h>
