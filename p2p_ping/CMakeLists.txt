@@ -10,9 +10,22 @@ else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unknown-pragmas")
 endif()
 
+# Run i18n.sh before building to (re)generate .LANG.h and .LANG.c
+add_custom_command(
+    OUTPUT
+        ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
+    COMMAND ${CMAKE_SOURCE_DIR}/i18n/i18n.sh ${CMAKE_CURRENT_SOURCE_DIR}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/p2p_ping.c
+        ${CMAKE_SOURCE_DIR}/i18n/i18n.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Generating i18n language files for p2p_ping"
+)
+
 add_executable(p2p_ping 
     p2p_ping.c 
-    .LANG.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
     ${CMAKE_SOURCE_DIR}/i18n/i18n.c
 )
 target_include_directories(p2p_ping PRIVATE 
