@@ -6,8 +6,8 @@
 typedef enum {
     /* 预定义字符串 ID（在此添加项目特定的预定义字符串）*/
     /* 示例：
-    SID_CUSTOM0,
-    SID_CUSTOM1,
+    LA_CUSTOM0,
+    LA_CUSTOM1,
     */
     
     PRED_NUM,
@@ -20,14 +20,14 @@ typedef enum {
 */
 
 /* 设置预定义基础 ID（自动生成的 ID 从此值+1 开始）*/
-#define SID_PREDEFINED (PRED_NUM - 1)
+#define LA_PREDEFINED (PRED_NUM - 1)
 
-/* 包含自动生成的语言 ID 定义（必须在 SID_PREDEFINED 之后）*/
+/* 包含自动生成的语言 ID 定义（必须在 LA_PREDEFINED 之后）*/
 #include ".LANG.h"
 
 /* 语言初始化函数（自动生成，请勿修改）*/
 static inline void lang_init(void) {
-    lang_def(lang_en, sizeof(lang_en) / sizeof(lang_en[0]), SID_F);
+    lang_def(lang_en, sizeof(lang_en) / sizeof(lang_en[0]), LA_FMT_START);
 }
 
 #endif /* LANG_H_ */

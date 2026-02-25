@@ -11,31 +11,31 @@
 #
 # LA_W(str, id) - Words 词汇
 #   用于单个词或短语，常用于状态名、按钮文本等
-#   示例：LA_W("CONNECTED", SID_W2)
+#   示例：LA_W("CONNECTED", LA_W2)
 #
 # LA_S(str, id) - Strings 字符串
 #   用于完整句子或长文本
-#   示例：LA_S("Connection established", SID_S0)
+#   示例：LA_S("Connection established", LA_S0)
 #
 # LA_F(str, id, ...) - Formats 格式化字符串
 #   用于包含 printf 格式符的字符串
-#   示例：LA_F("State: %s (%d)", SID_F0, state, code)
+#   示例：LA_F("State: %s (%d)", LA_F0, state, code)
 #
 # ============================================================================
 # ID 命名规则（按字母顺序排列）
 # ============================================================================
 #
-# SID_PREDEFINED - 预定义基础 ID（默认 -1，可通过编译选项重定义）
-# SID_PRED       - 枚举基础 ID（= SID_PREDEFINED），后续 ID 从此递增
+# LA_PREDEFINED - 预定义基础 ID（默认 -1，可通过编译选项重定义）
+# LA_PRED       - 枚举基础 ID（= LA_PREDEFINED），后续 ID 从此递增
 #
-# SID_W0~W8   - Words 词汇 ID
-# SID_F0~F3   - Formats 格式化字符串 ID
-# SID_S0~S26  - Strings 普通字符串 ID
+# LA_W0~W8   - Words 词汇 ID
+# LA_F0~F3   - Formats 格式化字符串 ID
+# LA_S0~S26  - Strings 普通字符串 ID
 #
 # 各类型独立编号，增强代码可读性
 #
-# 说明：通过设置 SID_PREDEFINED 可以调整所有 ID 的起始值
-#       例如：-DSID_PREDEFINED=100 可让所有 ID 从 100 开始
+# 说明：通过设置 LA_PREDEFINED 可以调整所有 ID 的起始值
+#       例如：-DLA_PREDEFINED=100 可让所有 ID 从 100 开始
 #
 # ============================================================================
 # 归并规则（去重机制）
@@ -59,21 +59,21 @@
 #    排序命令：sort -u -t'|' -k2,2
 #    - 相同 key 的多个变体只保留第一个
 #    - 按 key 字母序排列：closed < closing < connected < error < init...
-#    - ID 编号：SID_W0=CLOSED, SID_W1=CLOSING, SID_W2=CONNECTED...
+#    - ID 编号：LA_W0=CLOSED, LA_W1=CLOSING, LA_W2=CONNECTED...
 #
 # 4. 源码保留原样：源文件中保留原始字符串（包括空格和大小写）
-#    代码：LA_W(" CLOSING", SID_W1)   // 保留前导空格
-#    映射：" CLOSING" -> trim+lc -> "closing" -> SID_W1
+#    代码：LA_W(" CLOSING", LA_W1)   // 保留前导空格
+#    映射：" CLOSING" -> trim+lc -> "closing" -> LA_W1
 #    输出：LANG.c 中统一存储规范化版本 "CLOSING"
 #
 # 归并示例：
-#   LA_W("CLOSING", SID_W1)      // 原始标准版本
-#   LA_W(" CLOSING", SID_W1)     // 前导空格 -> 归并
-#   LA_W("CLOsiNG", SID_W1)      // 大小写混合 -> 归并
-#   LA_W("closing ", SID_W1)     // 小写+尾随空格 -> 归并
+#   LA_W("CLOSING", LA_W1)      // 原始标准版本
+#   LA_W(" CLOSING", LA_W1)     // 前导空格 -> 归并
+#   LA_W("CLOsiNG", LA_W1)      // 大小写混合 -> 归并
+#   LA_W("closing ", LA_W1)     // 小写+尾随空格 -> 归并
 #
-# 所有变体都指向同一个 SID_W1，LANG.c 中只存储一份 "CLOSING"
-# （SID_W1 是因为 "closing" 在字母表中排序到第2位，从0开始编号）
+# 所有变体都指向同一个 LA_W1，LANG.c 中只存储一份 "CLOSING"
+# （LA_W1 是因为 "closing" 在字母表中排序到第2位，从0开始编号）
 #
 # 【LA_S - Strings 字符串】
 #
@@ -96,7 +96,7 @@
 # 1. 扫描源文件，提取所有 LA_W/LA_S/LA_F 宏中的字符串
 # 2. 对每个字符串生成归并 key（trim + lowercase）
 # 3. 按 key 去重（sort -u -t'|' -k2,2），保留首次出现的原始字符串
-# 4. 按 key 字母顺序排序，生成连续的 SID_W/F/S 编号
+# 4. 按 key 字母顺序排序，生成连续的 LA_W/F/S 编号
 #    - Words 按小写字母序：closed, closing, connected, error, init...
 #    - Formats 按小写字母序
 #    - Strings 按小写字母序
@@ -170,14 +170,14 @@ typedef enum {
 */
 
 /* 设置预定义基础 ID（自动生成的 ID 从此值+1 开始）*/
-#define SID_PREDEFINED (PRED_NUM - 1)
+#define LA_PREDEFINED (PRED_NUM - 1)
 
-/* 包含自动生成的语言 ID 定义（必须在 SID_PREDEFINED 之后）*/
+/* 包含自动生成的语言 ID 定义（必须在 LA_PREDEFINED 之后）*/
 #include ".LANG.h"
 
 /* 语言初始化函数（自动生成，请勿修改）*/
 static inline void lang_init(void) {
-    lang_def(lang_en, sizeof(lang_en) / sizeof(lang_en[0]), SID_F);
+    lang_def(lang_en, sizeof(lang_en) / sizeof(lang_en[0]), LA_FMT_START);
 }
 
 #endif /* LANG_H_ */
@@ -259,12 +259,12 @@ cat > "$OUTPUT_H" <<EOF
 #ifndef LANG_H__
 #define LANG_H__
 
-#ifndef SID_PREDEFINED
-#   define SID_PREDEFINED -1
+#ifndef LA_PREDEFINED
+#   define LA_PREDEFINED -1
 #endif
 
 enum {
-    SID_PRED = SID_PREDEFINED,  /* 基础 ID，后续 ID 从此开始递增 */
+    LA_PRED = LA_PREDEFINED,  /* 基础 ID，后续 ID 从此开始递增 */
     
 EOF
 
@@ -275,8 +275,8 @@ if [ "$word_count" -gt 0 ]; then
     echo "    /* Words (LA_W) */" >> "$OUTPUT_H"
     wid=0
     while IFS='|' read -r type key str; do
-        echo "    SID_W${wid},  /* \"$str\" */" >> "$OUTPUT_H"
-        echo "W|$key|SID_W${wid}" >> "$TEMP_MAP"
+        echo "    LA_W${wid},  /* \"$str\" */" >> "$OUTPUT_H"
+        echo "W|$key|LA_W${wid}" >> "$TEMP_MAP"
         wid=$((wid + 1))
         sid=$((sid + 1))
     done < "$TEMP_WORDS"
@@ -288,8 +288,8 @@ if [ "$string_count" -gt 0 ]; then
     echo "    /* Strings (LA_S) */" >> "$OUTPUT_H"
     strid=0
     while IFS='|' read -r type key str; do
-        echo "    SID_S${strid},  /* \"$str\" */" >> "$OUTPUT_H"
-        echo "S|$key|SID_S${strid}" >> "$TEMP_MAP"
+        echo "    LA_S${strid},  /* \"$str\" */" >> "$OUTPUT_H"
+        echo "S|$key|LA_S${strid}" >> "$TEMP_MAP"
         strid=$((strid + 1))
         sid=$((sid + 1))
     done < "$TEMP_STRINGS"
@@ -303,11 +303,11 @@ if [ "$format_count" -gt 0 ]; then
     while IFS='|' read -r type key str; do
         params=$(echo "$str" | grep -o '%[sdifuxXc]' | tr '\n' ',' | sed 's/,$//')
         if [ -n "$params" ]; then
-            echo "    SID_F${fid},  /* \"$str\" ($params) */" >> "$OUTPUT_H"
+            echo "    LA_F${fid},  /* \"$str\" ($params) */" >> "$OUTPUT_H"
         else
-            echo "    SID_F${fid},  /* \"$str\" */" >> "$OUTPUT_H"
+            echo "    LA_F${fid},  /* \"$str\" */" >> "$OUTPUT_H"
         fi
-        echo "F|$key|SID_F${fid}" >> "$TEMP_MAP"
+        echo "F|$key|LA_F${fid}" >> "$TEMP_MAP"
         fid=$((fid + 1))
         sid=$((sid + 1))
     done < "$TEMP_FORMATS"
@@ -315,29 +315,29 @@ if [ "$format_count" -gt 0 ]; then
 fi
 
 cat >> "$OUTPUT_H" <<EOF
-    SID_NUM = $sid
+    LA_NUM = $sid
 };
 
 EOF
 
-# 添加 SID_F 定义（格式字符串起始位置标记）
+# 添加 LA_F 定义（格式字符串起始位置标记）
 if [ "$format_count" -gt 0 ]; then
     cat >> "$OUTPUT_H" <<'EOF'
 /* 格式字符串起始位置（用于验证） */
-#define SID_F SID_F0
+#define LA_FMT_START LA_F0
 
 EOF
 else
     cat >> "$OUTPUT_H" <<'EOF'
 /* 无格式字符串 */
-#define SID_F SID_NUM
+#define LA_FMT_START LA_NUM
 
 EOF
 fi
 
 cat >> "$OUTPUT_H" <<'EOF'
 /* 字符串表 */
-extern const char* lang_en[SID_NUM];
+extern const char* lang_en[LA_NUM];
 
 #endif /* LANG_H__ */
 EOF
@@ -352,7 +352,7 @@ cat > "$OUTPUT_C" <<EOF
 #include ".LANG.h"
 
 /* 字符串表 */
-const char* lang_en[SID_NUM] = {
+const char* lang_en[LA_NUM] = {
 EOF
 
 # 提取 LANG.h 中的预定义项（如果存在）
@@ -393,7 +393,7 @@ if [ "$word_count" -gt 0 ]; then
     while IFS='|' read -r type key str; do
         # 转义字符串
         escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
-        echo "    [SID_W${wid}] = \"$escaped\"," >> "$OUTPUT_C"
+        echo "    [LA_W${wid}] = \"$escaped\"," >> "$OUTPUT_C"
         wid=$((wid + 1))
     done < "$TEMP_WORDS"
 fi
@@ -403,7 +403,7 @@ if [ "$string_count" -gt 0 ]; then
     strid=0
     while IFS='|' read -r type key str; do
         escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
-        echo "    [SID_S${strid}] = \"$escaped\"," >> "$OUTPUT_C"
+        echo "    [LA_S${strid}] = \"$escaped\"," >> "$OUTPUT_C"
         strid=$((strid + 1))
     done < "$TEMP_STRINGS"
 fi
@@ -413,7 +413,7 @@ if [ "$format_count" -gt 0 ]; then
     fid=0
     while IFS='|' read -r type key str; do
         escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
-        echo "    [SID_F${fid}] = \"$escaped\"," >> "$OUTPUT_C"
+        echo "    [LA_F${fid}] = \"$escaped\"," >> "$OUTPUT_C"
         fid=$((fid + 1))
     done < "$TEMP_FORMATS"
 fi
@@ -553,5 +553,5 @@ find "$SOURCE_DIR" -name "*.c" -o -name "*.h" | while read -r file; do
 done
 
 echo
-echo "Done! Source files updated with correct SID_W/F/Sxxx IDs"
+echo "Done! Source files updated with correct LA_W/F/Sxxx IDs"
 echo "Next: Rebuild with updated LANG.c"
