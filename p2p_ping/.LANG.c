@@ -1,6 +1,5 @@
 /*
  * Auto-generated language strings
- * Generated: 2026-02-25 18:55:53
  */
 
 #include ".LANG.h"

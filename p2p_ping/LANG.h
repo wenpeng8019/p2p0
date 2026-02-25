@@ -27,7 +27,7 @@ typedef enum {
 
 /* 语言初始化函数（自动生成，请勿修改）*/
 static inline void lang_init(void) {
-    lang_def(lang_en, sizeof(lang_en) / sizeof(lang_en[0]), LA_FMT_START);
+    lang_def(lang_en, LA_NUM, LA_FMT_START);
 }
 
 #endif /* LANG_H_ */

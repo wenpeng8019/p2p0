@@ -110,15 +110,17 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <source_dir> [--export]"
+    echo "Usage: $0 <source_dir> [--export] [--import SUFFIX]"
     echo "Example: $0 p2p_ping"
     echo "Options:"
-    echo "  --export    Export lang.en template file for translations"
+    echo "  --export          Export lang.en template file for translations"
+    echo "  --import SUFFIX   Generate LANG.SUFFIX.h with embedded language table from lang.SUFFIX"
     exit 1
 fi
 
 SOURCE_DIR="$1"
 EXPORT_LANG_EN=0
+IMPORT_SUFFIX=""
 
 # 解析选项
 shift
@@ -126,6 +128,14 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --export)
             EXPORT_LANG_EN=1
+            ;;
+        --import)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Error: --import requires a SUFFIX argument"
+                exit 1
+            fi
+            IMPORT_SUFFIX="$1"
             ;;
         *)
             echo "Unknown option: $1"
@@ -203,32 +213,69 @@ trap cleanup EXIT
 
 # 提取所有 LA_W/LA_S/LA_F
 find "$SOURCE_DIR" -name "*.c" -o -name "*.h" | while read -r file; do
+    basename_file=$(basename "$file")
     perl -ne '
+        BEGIN { $file = "'"$basename_file"'"; }
         # 提取 LA_W
         while (/LA_W\s*\(\s*"((?:[^"\\]|\\.)*)"/g) {
             my $s = $1;
             $s =~ s/^\s+|\s+$//g;  # trim
             my $key = lc($s);
-            print "W|$key|$s\n";
+            print "W|$key|$s|$file\n";
         }
         # 提取 LA_S  
         while (/LA_S\s*\(\s*"((?:[^"\\]|\\.)*)"/g) {
             my $s = $1;
             my $key = lc($s);
-            print "S|$key|$s\n";
+            print "S|$key|$s|$file\n";
         }
         # 提取 LA_F (完全一致，不做转换)
         while (/LA_F\s*\(\s*"((?:[^"\\]|\\.)*)"/g) {
             my $s = $1;
-            print "F|$s|$s\n";
+            print "F|$s|$s|$file\n";
         }
     ' "$file"
 done > "$TEMP_ALL"
 
-# 分类并去重
-grep "^W|" "$TEMP_ALL" | sort -u -t'|' -k2,2 > "$TEMP_WORDS" || true
-grep "^F|" "$TEMP_ALL" | sort -u -t'|' -k2,2 > "$TEMP_FORMATS" || true
-grep "^S|" "$TEMP_ALL" | sort -u -t'|' -k2,2 > "$TEMP_STRINGS" || true
+# 分类并聚合文件名（去重 key，合并文件列表）
+grep "^W|" "$TEMP_ALL" | awk -F'|' '{
+    key=$2; str=$3; file=$4;
+    if (seen[key]) {
+        if (index(files[key], file) == 0) files[key] = files[key] "," file;
+    } else {
+        seen[key]=1; strs[key]=str; files[key]=file; order[++n]=key;
+    }
+} END {
+    for (i=1; i<=n; i++) {
+        k=order[i]; print "W|" k "|" strs[k] "|" files[k];
+    }
+}' | sort -t'|' -k2,2 > "$TEMP_WORDS" || true
+
+grep "^F|" "$TEMP_ALL" | awk -F'|' '{
+    key=$2; str=$3; file=$4;
+    if (seen[key]) {
+        if (index(files[key], file) == 0) files[key] = files[key] "," file;
+    } else {
+        seen[key]=1; strs[key]=str; files[key]=file; order[++n]=key;
+    }
+} END {
+    for (i=1; i<=n; i++) {
+        k=order[i]; print "F|" k "|" strs[k] "|" files[k];
+    }
+}' | sort -t'|' -k2,2 > "$TEMP_FORMATS" || true
+
+grep "^S|" "$TEMP_ALL" | awk -F'|' '{
+    key=$2; str=$3; file=$4;
+    if (seen[key]) {
+        if (index(files[key], file) == 0) files[key] = files[key] "," file;
+    } else {
+        seen[key]=1; strs[key]=str; files[key]=file; order[++n]=key;
+    }
+} END {
+    for (i=1; i<=n; i++) {
+        k=order[i]; print "S|" k "|" strs[k] "|" files[k];
+    }
+}' | sort -t'|' -k2,2 > "$TEMP_STRINGS" || true
 
 # 统计
 word_count=$(wc -l < "$TEMP_WORDS" | tr -d ' ')
@@ -251,7 +298,6 @@ fi
 cat > "$OUTPUT_H" <<EOF
 /*
  * Auto-generated language IDs
- * Generated: $(date '+%Y-%m-%d %H:%M:%S')
  * 
  * DO NOT EDIT - Regenerate with: ./i18n/i18n.sh
  */
@@ -274,9 +320,12 @@ sid=0
 if [ "$word_count" -gt 0 ]; then
     echo "    /* Words (LA_W) */" >> "$OUTPUT_H"
     wid=0
-    while IFS='|' read -r type key str; do
-        echo "    LA_W${wid},  /* \"$str\" */" >> "$OUTPUT_H"
-        echo "W|$key|LA_W${wid}" >> "$TEMP_MAP"
+    while IFS='|' read -r type key str files; do
+        id_name="LA_W${wid}"
+        # 将逗号分隔的文件改为逗号+空格分隔
+        files_formatted=$(echo "$files" | sed 's/,/, /g')
+        echo "    ${id_name},  /* \"$str\"  [$files_formatted] */" >> "$OUTPUT_H"
+        echo "W|$key|$id_name" >> "$TEMP_MAP"
         wid=$((wid + 1))
         sid=$((sid + 1))
     done < "$TEMP_WORDS"
@@ -287,9 +336,11 @@ fi
 if [ "$string_count" -gt 0 ]; then
     echo "    /* Strings (LA_S) */" >> "$OUTPUT_H"
     strid=0
-    while IFS='|' read -r type key str; do
-        echo "    LA_S${strid},  /* \"$str\" */" >> "$OUTPUT_H"
-        echo "S|$key|LA_S${strid}" >> "$TEMP_MAP"
+    while IFS='|' read -r type key str files; do
+        id_name="LA_S${strid}"
+        files_formatted=$(echo "$files" | sed 's/,/, /g')
+        echo "    ${id_name},  /* \"$str\"  [$files_formatted] */" >> "$OUTPUT_H"
+        echo "S|$key|$id_name" >> "$TEMP_MAP"
         strid=$((strid + 1))
         sid=$((sid + 1))
     done < "$TEMP_STRINGS"
@@ -300,14 +351,16 @@ fi
 if [ "$format_count" -gt 0 ]; then
     echo "    /* Formats (LA_F) - Format strings for validation */" >> "$OUTPUT_H"
     fid=0
-    while IFS='|' read -r type key str; do
+    while IFS='|' read -r type key str files; do
+        id_name="LA_F${fid}"
+        files_formatted=$(echo "$files" | sed 's/,/, /g')
         params=$(echo "$str" | grep -o '%[sdifuxXc]' | tr '\n' ',' | sed 's/,$//')
         if [ -n "$params" ]; then
-            echo "    LA_F${fid},  /* \"$str\" ($params) */" >> "$OUTPUT_H"
+            echo "    ${id_name},  /* \"$str\" ($params)  [$files_formatted] */" >> "$OUTPUT_H"
         else
-            echo "    LA_F${fid},  /* \"$str\" */" >> "$OUTPUT_H"
+            echo "    ${id_name},  /* \"$str\"  [$files_formatted] */" >> "$OUTPUT_H"
         fi
-        echo "F|$key|LA_F${fid}" >> "$TEMP_MAP"
+        echo "F|$key|$id_name" >> "$TEMP_MAP"
         fid=$((fid + 1))
         sid=$((sid + 1))
     done < "$TEMP_FORMATS"
@@ -346,7 +399,6 @@ EOF
 cat > "$OUTPUT_C" <<EOF
 /*
  * Auto-generated language strings
- * Generated: $(date '+%Y-%m-%d %H:%M:%S')
  */
 
 #include ".LANG.h"
@@ -390,7 +442,7 @@ fi
 # 词
 if [ "$word_count" -gt 0 ]; then
     wid=0
-    while IFS='|' read -r type key str; do
+    while IFS='|' read -r type key str files; do
         # 转义字符串
         escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
         echo "    [LA_W${wid}] = \"$escaped\"," >> "$OUTPUT_C"
@@ -401,7 +453,7 @@ fi
 # 字符串
 if [ "$string_count" -gt 0 ]; then
     strid=0
-    while IFS='|' read -r type key str; do
+    while IFS='|' read -r type key str files; do
         escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
         echo "    [LA_S${strid}] = \"$escaped\"," >> "$OUTPUT_C"
         strid=$((strid + 1))
@@ -411,7 +463,7 @@ fi
 # 格式化
 if [ "$format_count" -gt 0 ]; then
     fid=0
-    while IFS='|' read -r type key str; do
+    while IFS='|' read -r type key str files; do
         escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
         echo "    [LA_F${fid}] = \"$escaped\"," >> "$OUTPUT_C"
         fid=$((fid + 1))
@@ -472,22 +524,83 @@ EOF
 
     # 输出自动提取的字符串（按 W, S, F 顺序）
     if [ "$word_count" -gt 0 ]; then
-        while IFS='|' read -r type key str; do
+        while IFS='|' read -r type key str files; do
             echo "$str" >> "$OUTPUT_LANG_EN"
         done < "$TEMP_WORDS"
     fi
 
     if [ "$string_count" -gt 0 ]; then
-        while IFS='|' read -r type key str; do
+        while IFS='|' read -r type key str files; do
             echo "$str" >> "$OUTPUT_LANG_EN"
         done < "$TEMP_STRINGS"
     fi
 
     if [ "$format_count" -gt 0 ]; then
-        while IFS='|' read -r type key str; do
+        while IFS='|' read -r type key str files; do
             echo "$str" >> "$OUTPUT_LANG_EN"
         done < "$TEMP_FORMATS"
     fi
+fi
+
+# 生成 LANG.${SUFFIX}.h 内嵌语言表头文件（仅在指定 --import 选项时）
+# 从 .LANG.c 读取已有字符串作为翻译模板
+if [ -n "$IMPORT_SUFFIX" ]; then
+    OUTPUT_IMPORT_H="$SOURCE_DIR/LANG.$IMPORT_SUFFIX.h"
+    
+    # 备份已存在的文件
+    if [ -f "$OUTPUT_IMPORT_H" ]; then
+        BACKUP_FILE="${OUTPUT_IMPORT_H}.bak"
+        mv "$OUTPUT_IMPORT_H" "$BACKUP_FILE"
+        echo "Backed up existing file: $BACKUP_FILE"
+    fi
+    
+    # 生成头文件头部
+    cat > "$OUTPUT_IMPORT_H" <<EOF
+/*
+ * Auto-generated language strings
+ */
+
+#include ".LANG.h"
+
+/* Embedded ${IMPORT_SUFFIX} language table */
+static const char* lang_${IMPORT_SUFFIX}[LA_NUM] = {
+EOF
+    
+    # 从 .LANG.c 读取已生成的字符串（作为翻译模板）
+    # 词
+    if [ "$word_count" -gt 0 ]; then
+        wid=0
+        while IFS='|' read -r type key str files; do
+            escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            echo "    [LA_W${wid}] = \"$escaped\"," >> "$OUTPUT_IMPORT_H"
+            wid=$((wid + 1))
+        done < "$TEMP_WORDS"
+    fi
+    
+    # 字符串
+    if [ "$string_count" -gt 0 ]; then
+        strid=0
+        while IFS='|' read -r type key str files; do
+            escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            echo "    [LA_S${strid}] = \"$escaped\"," >> "$OUTPUT_IMPORT_H"
+            strid=$((strid + 1))
+        done < "$TEMP_STRINGS"
+    fi
+    
+    # 格式化
+    if [ "$format_count" -gt 0 ]; then
+        fid=0
+        while IFS='|' read -r type key str files; do
+            escaped=$(echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            echo "    [LA_F${fid}] = \"$escaped\"," >> "$OUTPUT_IMPORT_H"
+            fid=$((fid + 1))
+        done < "$TEMP_FORMATS"
+    fi
+    
+    # 生成尾部
+    cat >> "$OUTPUT_IMPORT_H" <<EOF
+};
+EOF
 fi
 
 echo "Generated:"
@@ -495,6 +608,9 @@ echo "  $OUTPUT_H ($sid IDs)"
 echo "  $OUTPUT_C"
 if [ "$EXPORT_LANG_EN" -eq 1 ]; then
     echo "  $OUTPUT_LANG_EN"
+fi
+if [ -n "$IMPORT_SUFFIX" ]; then
+    echo "  $OUTPUT_IMPORT_H"
 fi
 echo
 
@@ -535,9 +651,7 @@ find "$SOURCE_DIR" -name "*.c" -o -name "*.h" | while read -r file; do
         s{(LA_S\s*\(\s*"((?:[^"\\\\]|\\\\.)*?)"\s*,\s*)(?:0|SID_[WFS]\d+)}{
             my $prefix = $1;
             my $str = $2;
-            my $key = $str;
-            $key =~ s/^\s+|\s+$//g;
-            $key = lc($key);
+            my $key = lc($str);  # 只 lowercase，不 trim（与提取阶段一致）
             my $sid = $map{"S"}{$key} || "0";
             $prefix . $sid;
         }ge;

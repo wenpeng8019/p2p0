@@ -8,7 +8,7 @@
 #include <stdbool.h>
 
 /* 多语言宏定义 */
-#ifdef LANG_ENABLED
+#ifdef I18N_ENABLED
 #   define LA_ID(ID, ...) lang_str(ID)
 #   define LA_W(WD, ID) lang_str(ID)
 #   define LA_S(STR, ID) lang_str(ID)

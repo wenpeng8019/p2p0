@@ -33,6 +33,15 @@ target_include_directories(p2p_ping PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/i18n
 )
+
+# Enable i18n multi-language support
+if(I18N_ENABLED)
+    target_compile_definitions(p2p_ping PRIVATE I18N_ENABLED)
+    message(STATUS "p2p_ping: i18n multi-language support ENABLED")
+else()
+    message(STATUS "p2p_ping: i18n multi-language support DISABLED (using string literals)")
+endif()
+
 target_link_libraries(p2p_ping PRIVATE 
     p2p_static 
     ${DTLS_LIBRARIES} 

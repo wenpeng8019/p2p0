@@ -22,6 +22,7 @@
 #include "../src/p2p_platform.h"  /* 跨平台兼容层 */
 #include "p2p_log.h"
 #include "LANG.h"
+#include "LANG.cn.h"
 
 /*
  * TUI 专有头文件（不适合移植到 p2p_platform.h，原因见下）：
@@ -289,20 +290,20 @@ static void print_help(const char *prog) {
     printf(LA_F("Usage: %s [options]", LA_F3), prog);
     printf("\n");
     printf("%s\n", LA_S("Options:", LA_S25));
-    printf("%s\n", LA_S("  --dtls            Enable DTLS (MbedTLS)", 0));
-    printf("%s\n", LA_S("  --openssl         Enable DTLS (OpenSSL)", 0));
-    printf("%s\n", LA_S("  --pseudo          Enable PseudoTCP", 0));
-    printf("%s\n", LA_S("  --server IP       Standard Signaling Server IP", 0));
-    printf("%s\n", LA_S("  --compact         Use COMPACT mode (UDP signaling, default is ICE/TCP)", 0));
-    printf("%s\n", LA_S("  --github TOKEN    GitHub Token for Public Signaling", 0));
-    printf("%s\n", LA_S("  --gist ID         GitHub Gist ID for Public Signaling", 0));
-    printf("%s\n", LA_S("  --name NAME       Your Peer Name", 0));
-    printf("%s\n", LA_S("  --to TARGET       Target Peer Name (if specified: active role; if omitted: passive role)", 0));
-    printf("%s\n", LA_S("  --disable-lan     Disable LAN shortcut (force NAT punch test)", 0));
-    printf("%s\n", LA_S("  --lan-punch       Test PUNCH/PUNCH_ACK state machine over LAN (skips STUN/TURN, uses nat_start_punch)", 0));
-    printf("%s\n", LA_S("  --verbose-punch   Enable verbose NAT punch logging", 0));
-    printf("%s\n", LA_S("  --echo             Auto-echo received messages back to sender", 0));
-    printf("%s\n", LA_S("  --cn              Use Chinese language", 0));
+    printf("%s\n", LA_S("  --dtls            Enable DTLS (MbedTLS)", LA_S3));
+    printf("%s\n", LA_S("  --openssl         Enable DTLS (OpenSSL)", LA_S9));
+    printf("%s\n", LA_S("  --pseudo          Enable PseudoTCP", LA_S10));
+    printf("%s\n", LA_S("  --server IP       Standard Signaling Server IP", LA_S11));
+    printf("%s\n", LA_S("  --compact         Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S1));
+    printf("%s\n", LA_S("  --github TOKEN    GitHub Token for Public Signaling", LA_S6));
+    printf("%s\n", LA_S("  --gist ID         GitHub Gist ID for Public Signaling", LA_S5));
+    printf("%s\n", LA_S("  --name NAME       Your Peer Name", LA_S8));
+    printf("%s\n", LA_S("  --to TARGET       Target Peer Name (if specified: active role; if omitted: passive role)", LA_S12));
+    printf("%s\n", LA_S("  --disable-lan     Disable LAN shortcut (force NAT punch test)", LA_S2));
+    printf("%s\n", LA_S("  --lan-punch       Test PUNCH/PUNCH_ACK state machine over LAN (skips STUN/TURN, uses nat_start_punch)", LA_S7));
+    printf("%s\n", LA_S("  --verbose-punch   Enable verbose NAT punch logging", LA_S13));
+    printf("%s\n", LA_S("  --echo             Auto-echo received messages back to sender", LA_S4));
+    printf("%s\n", LA_S("  --cn              Use Chinese language", LA_S0));
 }
 
 static const char* state_name(p2p_state_t state) {
@@ -390,13 +391,11 @@ int main(int argc, char *argv[]) {
     /* 初始化语言系统 */
     lang_init();
     
-    /* 加载语言文件 */
+    /* 加载中文语言表 */
     if (use_chinese) {
-        FILE* lf = fopen("lang.zh", "r");
-        if (!lf || !lang_load_fp(lf)) {
-            fprintf(stderr, "Warning: Failed to load language file 'lang.zh'\n");
+        if (!lang_load(lang_cn, LA_NUM)) {
+            fprintf(stderr, "Warning: Failed to load Chinese language table\n");
         }
-        if (lf) fclose(lf);
     }
     
     if (show_help)  { print_help(argv[0]); return 0; }
@@ -469,7 +468,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (target_name) { printf(LA_F("Running in %s mode (connecting to %s)...", LA_F1), mode_name, target_name); printf("\n\n"); }
-    else             { printf(LA_F("Running in %s mode (waiting for connection)...", LA_F2), mode_name);              printf("\n\n"); }
+    else             { printf(LA_F("Running in %s mode (waiting for connection)...", LA_F2), mode_name); printf("\n\n"); }
 
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
