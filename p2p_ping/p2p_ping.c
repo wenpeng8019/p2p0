@@ -21,7 +21,7 @@
 #include <p2p.h>
 #include "../src/p2p_platform.h"  /* 跨平台兼容层 */
 #include "p2p_log.h"
-#include "ping_lang.h"
+#include "LANG.h"
 
 /*
  * TUI 专有头文件（不适合移植到 p2p_platform.h，原因见下）：
@@ -108,8 +108,8 @@ static void tui_log_callback(p2p_log_level_t level,
     const char *lvl = "?????";
     switch (level) {
         case P2P_LOG_LEVEL_ERROR: lvl = "ERROR"; break;
-        case P2P_LOG_LEVEL_WARN:  lvl = "WARN "; break;
-        case P2P_LOG_LEVEL_INFO:  lvl = "INFO "; break;
+        case P2P_LOG_LEVEL_WARN:  lvl = "WARN"; break;
+        case P2P_LOG_LEVEL_INFO:  lvl = "INFO"; break;
         case P2P_LOG_LEVEL_DEBUG: lvl = "DEBUG"; break;
         case P2P_LOG_LEVEL_VERBOSE: lvl = "VERBOSE"; break;
         default: break;
@@ -286,36 +286,36 @@ static void on_sigwinch(int sig) {
  * ============================================================================ */
 
 static void print_help(const char *prog) {
-    printf(ping_msg(MSG_PING_USAGE), prog);
+    printf(LA_F("Usage: %s [options]", SID_F3), prog);
     printf("\n");
-    printf("%s\n", ping_msg(MSG_PING_OPTIONS));
-    printf("%s\n", ping_msg(MSG_PING_OPT_DTLS));
-    printf("%s\n", ping_msg(MSG_PING_OPT_OPENSSL));
-    printf("%s\n", ping_msg(MSG_PING_OPT_PSEUDO));
-    printf("%s\n", ping_msg(MSG_PING_OPT_SERVER));
-    printf("%s\n", ping_msg(MSG_PING_OPT_COMPACT));
-    printf("%s\n", ping_msg(MSG_PING_OPT_GITHUB));
-    printf("%s\n", ping_msg(MSG_PING_OPT_GIST));
-    printf("%s\n", ping_msg(MSG_PING_OPT_NAME));
-    printf("%s\n", ping_msg(MSG_PING_OPT_TO));
-    printf("%s\n", ping_msg(MSG_PING_OPT_DISABLE_LAN));
-    printf("%s\n", ping_msg(MSG_PING_OPT_LAN_PUNCH));
-    printf("%s\n", ping_msg(MSG_PING_OPT_VERBOSE_PUNCH));
-    printf("%s\n", ping_msg(MSG_PING_OPT_ECHO));
-    printf("%s\n", ping_msg(MSG_PING_OPT_CN));
+    printf("%s\n", LA_S("Options:", SID_S25));
+    printf("%s\n", LA_S("  --dtls            Enable DTLS (MbedTLS)", 0));
+    printf("%s\n", LA_S("  --openssl         Enable DTLS (OpenSSL)", 0));
+    printf("%s\n", LA_S("  --pseudo          Enable PseudoTCP", 0));
+    printf("%s\n", LA_S("  --server IP       Standard Signaling Server IP", 0));
+    printf("%s\n", LA_S("  --compact         Use COMPACT mode (UDP signaling, default is ICE/TCP)", 0));
+    printf("%s\n", LA_S("  --github TOKEN    GitHub Token for Public Signaling", 0));
+    printf("%s\n", LA_S("  --gist ID         GitHub Gist ID for Public Signaling", 0));
+    printf("%s\n", LA_S("  --name NAME       Your Peer Name", 0));
+    printf("%s\n", LA_S("  --to TARGET       Target Peer Name (if specified: active role; if omitted: passive role)", 0));
+    printf("%s\n", LA_S("  --disable-lan     Disable LAN shortcut (force NAT punch test)", 0));
+    printf("%s\n", LA_S("  --lan-punch       Test PUNCH/PUNCH_ACK state machine over LAN (skips STUN/TURN, uses nat_start_punch)", 0));
+    printf("%s\n", LA_S("  --verbose-punch   Enable verbose NAT punch logging", 0));
+    printf("%s\n", LA_S("  --echo             Auto-echo received messages back to sender", 0));
+    printf("%s\n", LA_S("  --cn              Use Chinese language", 0));
 }
 
 static const char* state_name(p2p_state_t state) {
     switch (state) {
-        case P2P_STATE_INIT:        return "IDLE";
-        case P2P_STATE_REGISTERING: return "REGISTERING";
-        case P2P_STATE_PUNCHING:    return "PUNCHING";
-        case P2P_STATE_CONNECTED:   return "CONNECTED";
-        case P2P_STATE_RELAY:       return "RELAY";
-        case P2P_STATE_CLOSING:     return "CLOSING";
-        case P2P_STATE_CLOSED:      return "CLOSED";
-        case P2P_STATE_ERROR:       return "ERROR";
-        default:                    return "UNKNOWN";
+        case P2P_STATE_INIT:        return LA_W("INIT", SID_W4);
+        case P2P_STATE_REGISTERING: return LA_W("REGISTERING", SID_W6);
+        case P2P_STATE_PUNCHING:    return LA_W("PUNCHING", SID_W5);
+        case P2P_STATE_CONNECTED:   return LA_W("CONNECTED", SID_W2);
+        case P2P_STATE_RELAY:       return LA_W("RELAY", SID_W7);
+        case P2P_STATE_CLOSING:     return LA_W("CLOSING", SID_W1);
+        case P2P_STATE_CLOSED:      return LA_W("CLOSED", SID_W0);
+        case P2P_STATE_ERROR:       return LA_W("ERROR", SID_W3);
+        default:                    return LA_W("UNKNOWN", SID_W8);
     }
 }
 
@@ -325,12 +325,12 @@ static void log_state_change(p2p_handle_t s) {
     if (state != last_state) {
         if (g_tui_active) {
             char line[128];
-            snprintf(line, sizeof(line), ping_msg(MSG_PING_STATE_CHANGE),
+            snprintf(line, sizeof(line), LA_F("[STATE] %s (%d) -> %s (%d)", SID_F0),
                      state_name(last_state), last_state,
                      state_name(state), state);
             tui_println(line);
         } else {
-            printf(ping_msg(MSG_PING_STATE_CHANGE),
+            printf(LA_F("[STATE] %s (%d) -> %s (%d)", SID_F0),
                    state_name(last_state), last_state,
                    state_name(state), state);
             printf("\n");
@@ -344,9 +344,9 @@ static void log_state_change(p2p_handle_t s) {
 static void on_disconnected(p2p_handle_t s, void *userdata) {
     (void)s; (void)userdata;
     if (g_tui_active) {
-        tui_println(ping_msg(MSG_PING_CHAT_DISCONNECT));
+        tui_println(LA_S("--- Peer disconnected ---", SID_S15));
     } else {
-        printf("%s\n", ping_msg(MSG_PING_DISCONNECTED));
+        printf("%s\n", LA_S("[EVENT] Connection closed", SID_S18));
         fflush(stdout);
     }
 }
@@ -387,10 +387,21 @@ int main(int argc, char *argv[]) {
     }
     g_my_name = my_name;
 
-    if (use_chinese) ping_set_language(P2P_LANG_ZH);
+    /* 初始化语言系统 */
+    lang_init();
+    
+    /* 加载语言文件 */
+    if (use_chinese) {
+        FILE* lf = fopen("lang.zh", "r");
+        if (!lf || !lang_load_fp(lf)) {
+            fprintf(stderr, "Warning: Failed to load language file 'lang.zh'\n");
+        }
+        if (lf) fclose(lf);
+    }
+    
     if (show_help)  { print_help(argv[0]); return 0; }
 
-    printf("%s\n\n", ping_msg(MSG_PING_TITLE));
+    printf("%s\n\n", LA_S("=== P2P Ping Diagnostic Tool ===", SID_S21));
 
     /* 解析 IP:PORT 格式 */
     char server_host_buf[256] = {0};
@@ -437,28 +448,28 @@ int main(int argc, char *argv[]) {
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 
     p2p_handle_t hdl = p2p_create(my_name, &cfg);
-    if (!hdl) { printf("%s\n", ping_msg(MSG_PING_CREATE_FAIL)); return 1; }
+    if (!hdl) { printf("%s\n", LA_S("Failed to create session", SID_S23)); return 1; }
 
     const char *mode_name = NULL;
     if (server_ip) mode_name = cfg.use_ice ? "ICE RELAY" : "COMPACT";
     else if (gh_token && gist_id) mode_name = "PUBSUB";
     else {
-        printf("%s\n%s\n", ping_msg(MSG_PING_NO_MODE), ping_msg(MSG_PING_USE_ONE_OF));
+        printf("%s\n%s\n", LA_S("Error: No connection mode specified.", SID_S22), LA_S("Use one of: --server or --github", SID_S26));
         print_help(argv[0]);
         return 1;
     }
 
-    if (disable_lan)    printf("%s\n", ping_msg(MSG_PING_LAN_DISABLED));
-    if (lan_punch)      printf("%s\n", ping_msg(MSG_PING_LAN_PUNCH));
-    if (g_echo_mode)    printf("%s\n", ping_msg(MSG_PING_CHAT_ECHO_ON));
+    if (disable_lan)    printf("%s\n", LA_S("[TEST] LAN shortcut disabled - forcing NAT punch", SID_S20));
+    if (lan_punch)      printf("%s\n", LA_S("[TEST] LAN punch mode: PUNCH/PUNCH_ACK over Host candidates (nat_start_punch)", SID_S19));
+    if (g_echo_mode)    printf("%s\n", LA_S("[Chat] Echo mode enabled: received messages will be echoed back.", SID_S16));
 
     if (p2p_connect(hdl, target_name) < 0) {
-        printf("%s\n", ping_msg(MSG_PING_CONNECT_FAIL));
+        printf("%s\n", LA_S("Failed to initialize connection", SID_S24));
         return 1;
     }
 
-    if (target_name) { printf(ping_msg(MSG_PING_MODE_CONNECTING), mode_name, target_name); printf("\n\n"); }
-    else             { printf(ping_msg(MSG_PING_MODE_WAITING),    mode_name);              printf("\n\n"); }
+    if (target_name) { printf(LA_F("Running in %s mode (connecting to %s)...", SID_F1), mode_name, target_name); printf("\n\n"); }
+    else             { printf(LA_F("Running in %s mode (waiting for connection)...", SID_F2), mode_name);              printf("\n\n"); }
 
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
@@ -476,10 +487,10 @@ int main(int argc, char *argv[]) {
             /* 首次连接成功：初始化 TUI，降低日志等级 */
             if (!g_first_connect_done) {
                 g_first_connect_done = 1;
-                printf("%s\n", ping_msg(MSG_PING_CHAT_ENTER));
+                printf("%s\n", LA_S("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.", SID_S17));
                 fflush(stdout);
                 tui_init();
-                tui_println(ping_msg(MSG_PING_CHAT_CONNECTED));
+                tui_println(LA_S("--- Connected ---", SID_S14));
             }
 
             /* 接收对端消息 */
