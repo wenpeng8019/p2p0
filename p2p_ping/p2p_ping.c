@@ -12,25 +12,37 @@
  *   - --echo 选项可自动回复收到的消息
  */
 
-#include <p2p.h>
-#include "p2p_log.h"
-#include "ping_lang.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <time.h>
+
+#include <p2p.h>
+#include "../src/p2p_platform.h"  /* 跨平台兼容层 */
+#include "p2p_log.h"
+#include "ping_lang.h"
+
+/*
+ * TUI 专有头文件（不适合移植到 p2p_platform.h，原因见下）：
+ *
+ * 【Windows】<conio.h>
+ *   - _kbhit():  非阻塞键盘输入检测（仅真实控制台有效，ConPTY 需用 PeekNamedPipe）
+ *   - _getch():  逐字符读取（无回显）
+ *   用途：TUI 输入循环中检测和读取按键
+ *
+ * 【POSIX】<termios.h>
+ *   - tcgetattr() / tcsetattr():  终端模式控制（设置 raw 模式，禁用 ICANON 和 ECHO）
+ *   - termios 结构体:  包含 c_lflag, c_cc 等多字段配置
+ *   用途：TUI 初始化时将 stdin 切换为逐字符输入模式
+ *
+ * 【结论】这些 API 高度应用相关，平台间语义差异大，不适合通用封装
+ *         （终端尺寸获取已统一封装为 p2p_get_terminal_rows/cols）
+ */
 #ifdef _WIN32
-#include <windows.h>
-#include <conio.h>
-#include <io.h>       /* _isatty / _fileno */
-#define p2p_isatty(f) _isatty(_fileno(f))
+#include <conio.h>     /* _kbhit, _getch */
 #else
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <termios.h>
-#define p2p_isatty(f) isatty(fileno(f))
+#include <termios.h>    /* termios, tcgetattr, tcsetattr */
 #endif
 
 /* ============================================================================
@@ -62,21 +74,7 @@ static struct termios   g_orig_term;                /* 原始终端配置 */
 #endif
 static const char*      g_my_name = "me";           /* 本端显示名 */
 
-/* 获取终端行数 */
-static int tui_get_rows(void) {
-#ifdef _WIN32
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
-        int rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
-        if (rows > 4) return rows;
-    }
-#else
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 4)
-        return (int)ws.ws_row;
-#endif
-    return 24;
-}
+/* 注：终端尺寸获取已移植到 p2p_platform.h，使用 p2p_get_terminal_rows() */
 
 /*
  * 在滚动区域打印一行（不破坏输入行）
@@ -128,7 +126,7 @@ static void tui_log_callback(p2p_log_level_t level,
 static void tui_init(void) {
     /* 非交互终端（stdout 被重定向）时跳过 TUI，避免后台进程触发 SIGTTOU */
     if (!p2p_isatty(stdout)) return;
-    g_rows = tui_get_rows();
+    g_rows = p2p_get_terminal_rows();
 
 #ifdef _WIN32
     /* Windows：先启用 ANSI VT 输出，再发送 ANSI 序列，否则第一屏乱码 */
@@ -273,7 +271,7 @@ static void on_signal(int sig) {
 static void on_sigwinch(int sig) {
     (void)sig;
     if (!g_tui_active) return;
-    int new_rows = tui_get_rows();
+    int new_rows = p2p_get_terminal_rows();
     if (new_rows != g_rows) {
         g_rows = new_rows;
         printf("\033[1;%dr", g_rows - 1);
