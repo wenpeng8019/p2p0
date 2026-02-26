@@ -73,7 +73,7 @@ static void send_register(p2p_session_t *s) {
     udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, n);
 
     P2P_LOG_INFO("COMPACT", "REGISTERING: %s #%d (%d %s)...",
-                 LA_W("Attempt", LA_W9), ctx->register_attempts, s->local_cand_cnt, LA_W("candidate pairs", LA_W19));
+                 LA_W("Attempt", LA_W9, 10), ctx->register_attempts, s->local_cand_cnt, LA_W("candidate pairs", LA_W19, 20));
 }
 
 /*
@@ -273,9 +273,9 @@ int p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id,
     ctx->peer_online = false;
 
     P2P_LOG_INFO("COMPACT", "START: %s '%s' -> '%s' %s %s:%d (%d %s)",
-                 LA_W("Registering", LA_W97), local_peer_id, remote_peer_id,
-                 LA_W("with server", LA_W148), inet_ntoa(server->sin_addr), ntohs(server->sin_port),
-                 s->local_cand_cnt, LA_W("candidate pairs", LA_W19));
+                 LA_W("Registering", LA_W97, 98), local_peer_id, remote_peer_id,
+                 LA_W("with server", LA_W148, 149), inet_ntoa(server->sin_addr), ntohs(server->sin_port),
+                 s->local_cand_cnt, LA_W("candidate pairs", LA_W19, 20));
 
     // 构造并发送带候选列表的注册包
     send_register(s);
@@ -351,7 +351,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
 
         uint8_t status = payload[0];
         if (status >= 2) {
-            P2P_LOG_ERROR("COMPACT", "REGISTER_ACK error: %s (status=%d)", LA_W("Server error", LA_W118), status);
+            P2P_LOG_ERROR("COMPACT", "REGISTER_ACK error: %s (status=%d)", LA_W("Server error", LA_W118, 119), status);
             return;
         }
 
@@ -370,16 +370,16 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
         ctx->probe_port = ntohs(ctx->probe_port);
 
         P2P_LOG_VERBOSE("COMPACT", "REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d",
-                        ctx->peer_online, payload[1], LA_W("cache", LA_W18), payload[1] > 0 ? LA_W("yes", LA_W149) : LA_W("no (cached)", LA_W62),
-                        LA_S("relay", LA_S46), ctx->relay_support ? LA_W("yes", LA_W149) : LA_W("no (cached)", LA_W62),
+                        ctx->peer_online, payload[1], LA_W("cache", LA_W18, 19), payload[1] > 0 ? LA_W("yes", LA_W149, 150) : LA_W("no (cached)", LA_W62, 63),
+                        LA_S("relay", LA_S46, 197), ctx->relay_support ? LA_W("yes", LA_W149, 150) : LA_W("no (cached)", LA_W62, 63),
                         inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
                         ctx->probe_port);
 
         // 标记进入 REGISTERED 状态（该状态将停止周期发送 REGISTER）
         ctx->state = SIGNAL_COMPACT_REGISTERED;
 
-        P2P_LOG_INFO("COMPACT", "%s: %s", LA_W("Entered REGISTERED state", LA_W29),
-                     ctx->peer_online ? LA_W("Peer online, waiting for PEER_INFO(seq=1)", LA_W77) : LA_W("Peer offline, waiting for peer to come online", LA_W75));
+        P2P_LOG_INFO("COMPACT", "%s: %s", LA_W("Entered REGISTERED state", LA_W29, 30),
+                     ctx->peer_online ? LA_W("Peer online, waiting for PEER_INFO(seq=1)", LA_W77, 78) : LA_W("Peer offline, waiting for peer to come online", LA_W75, 76));
 
         // 如果对方在线
         // + 注意，此时对方可能已经是在线状态，也就是 SIG_PKT_PEER_INFO 可能先于 SIG_PKT_REGISTER_ACK 到达
@@ -427,7 +427,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
                 udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ctx->nat_probe_retries, NULL, 0);
 
                 P2P_LOG_INFO("COMPACT", "NAT_PROBE: %s %s:%d (1/%d)",
-                             LA_W("NAT probe sent to", LA_W57),
+                             LA_W("NAT probe sent to", LA_W57, 58),
                              inet_ntoa(probe_addr.sin_addr), ctx->probe_port,
                              NAT_PROBE_MAX_RETRIES);
             }
@@ -588,7 +588,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
 
         /* 发送 PEER_INFO_ACK: [session_id(8)]，确认序号在包头 seq */
         {
-            P2P_LOG_VERBOSE("COMPACT", "%s PEER_INFO_ACK(seq=%u)", LA_W("Sent ANSWER", LA_W112), seq);
+            P2P_LOG_VERBOSE("COMPACT", "%s PEER_INFO_ACK(seq=%u)", LA_W("Sent ANSWER", LA_W112, 113), seq);
 
             uint8_t ack_payload[sizeof(uint64_t)];
             uint64_t sid_net = htonll(ctx->session_id);
@@ -639,7 +639,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
 
                 ctx->state = SIGNAL_COMPACT_READY;
 
-                P2P_LOG_INFO("COMPACT", "%s (sid=%" PRIu64 ")", LA_W("Entered READY state, starting NAT punch and candidate sync", LA_W28), ctx->session_id);
+                P2P_LOG_INFO("COMPACT", "%s (sid=%" PRIu64 ")", LA_W("Entered READY state, starting NAT punch and candidate sync", LA_W28, 29), ctx->session_id);
             }
         }
         else P2P_LOG_WARN("COMPACT", "Received PEER_INFO_ACK for seq=%u", ack_seq);
@@ -750,8 +750,8 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
         ctx->nat_probe_retries = -1/* 探测完成 */;
         
         P2P_LOG_INFO("COMPACT", "%s %s %s:%d probe=%s:%d -> %s",
-                     LA_W("Detection completed", LA_W26),
-                     LA_S("Mapped address", LA_S35),
+                     LA_W("Detection completed", LA_W26, 27),
+                     LA_S("Mapped address", LA_S35, 186),
                      inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
                      inet_ntoa(probe_mapped.sin_addr),     ntohs(probe_mapped.sin_port),
                      p2p_nat_type_str(s->nat_type));
@@ -785,7 +785,7 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
         if (++ctx->register_attempts > MAX_REGISTER_ATTEMPTS) {
 
             P2P_LOG_WARN("COMPACT", "TIMEOUT: %s (%d)",
-                   LA_W("Max register attempts reached", LA_W54), MAX_REGISTER_ATTEMPTS);
+                   LA_W("Max register attempts reached", LA_W54, 55), MAX_REGISTER_ATTEMPTS);
 
             return -1;
         }
@@ -865,9 +865,9 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
         udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ++ctx->nat_probe_retries, NULL, 0);
 
         P2P_LOG_VERBOSE("COMPACT", "NAT_PROBE: %s %d/%d %s %s:%d",
-                        LA_W("NAT probe retry", LA_W56),
+                        LA_W("NAT probe retry", LA_W56, 57),
                         (int)ctx->nat_probe_retries, NAT_PROBE_MAX_RETRIES,
-                        LA_W("to", LA_W134),
+                        LA_W("to", LA_W134, 135),
                         inet_ntoa(probe_addr.sin_addr), ctx->probe_port);
     }
     // 最大重试失败，探测端口无应答，无法确定 NAT 类型
@@ -877,7 +877,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
         ctx->nat_probe_retries = -2/* 探测超时 */;
         s->nat_type = P2P_NAT_TIMEOUT;
 
-        P2P_LOG_WARN("COMPACT", "NAT_PROBE: %s", LA_W("NAT probe timeout, type unknown", LA_W58));
+        P2P_LOG_WARN("COMPACT", "NAT_PROBE: %s", LA_W("NAT probe timeout, type unknown", LA_W58, 59));
     }
 }
 

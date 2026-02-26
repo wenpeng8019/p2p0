@@ -337,7 +337,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret;
     if ((ret = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        P2P_LOG_ERROR("dtls", LA_F("[DTLS] ssl_setup failed: -0x%x", LA_F1), -ret);
+        P2P_LOG_ERROR("dtls", LA_F("[DTLS] ssl_setup failed: -0x%x", LA_F1, 218), -ret);
         return -1;
     }
     
@@ -399,11 +399,11 @@ static void dtls_tick(p2p_session_t *s) {
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            P2P_LOG_INFO("dtls", "%s", LA_S("[DTLS] Handshake complete", LA_S1));
+            P2P_LOG_INFO("dtls", "%s", LA_S("[DTLS] Handshake complete", LA_S1, 152));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));
-            P2P_LOG_ERROR("dtls", LA_F("[DTLS] Handshake failed: %s (-0x%04x)", LA_F0), ebuf, -ret);
+            P2P_LOG_ERROR("dtls", LA_F("[DTLS] Handshake failed: %s (-0x%04x)", LA_F0, 217), ebuf, -ret);
             s->state = P2P_STATE_ERROR;
         }
     }

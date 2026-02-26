@@ -19,7 +19,7 @@ void reliable_init(reliable_t *r) {
     r->srtt = 0;
     r->rttvar = 0;
     P2P_LOG_DEBUG("RELIABLE", "%s rto=%d win=%d",
-                  LA_W("Reliable transport initialized", LA_W100), RELIABLE_RTO_INIT, RELIABLE_WINDOW);
+                  LA_W("Reliable transport initialized", LA_W100, 101), RELIABLE_RTO_INIT, RELIABLE_WINDOW);
 }
 
 int reliable_window_avail(const reliable_t *r) {
@@ -34,11 +34,11 @@ int reliable_window_avail(const reliable_t *r) {
  */
 int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
     if (r->send_count >= RELIABLE_WINDOW) {
-        P2P_LOG_WARN("RELIABLE", "%s send_count=%d", LA_W("Send window full, dropping packet", LA_W109), r->send_count);
+        P2P_LOG_WARN("RELIABLE", "%s send_count=%d", LA_W("Send window full, dropping packet", LA_W109, 110), r->send_count);
         return -1;
     }
     if (len > P2P_MAX_PAYLOAD) {
-        P2P_LOG_WARN("RELIABLE", "%s len=%d max=%d", LA_W("Packet too large", LA_W68), len, P2P_MAX_PAYLOAD);
+        P2P_LOG_WARN("RELIABLE", "%s len=%d max=%d", LA_W("Packet too large", LA_W68, 69), len, P2P_MAX_PAYLOAD);
         return -1;
     }
 
@@ -54,7 +54,7 @@ int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
     r->send_seq++;
     r->send_count++;
     P2P_LOG_VERBOSE("RELIABLE", "%s seq=%u len=%d inflight=%d",
-                    LA_W("Packet queued", LA_W67), e->seq, len, r->send_count);
+                    LA_W("Packet queued", LA_W67, 68), e->seq, len, r->send_count);
     return 0;
 }
 
@@ -79,7 +79,7 @@ int reliable_recv_pkt(reliable_t *r, uint8_t *buf, int *out_len) {
 int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int len) {
     if (!seq_in_window(seq, r->recv_base, RELIABLE_WINDOW)) {
         P2P_LOG_DEBUG("RELIABLE", "%s seq=%u base=%u",
-                      LA_W("Out-of-window packet discarded", LA_W66), seq, r->recv_base);
+                      LA_W("Out-of-window packet discarded", LA_W66, 67), seq, r->recv_base);
         return 0;  // 超出窗口，忽略
     }
 
@@ -89,7 +89,7 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
         r->recv_lens[idx] = len;
         r->recv_bitmap[idx] = 1;
         P2P_LOG_VERBOSE("RELIABLE", "%s seq=%u len=%d base=%u",
-                        LA_W("Data stored in recv buffer", LA_W24), seq, len, r->recv_base);
+                        LA_W("Data stored in recv buffer", LA_W24, 25), seq, len, r->recv_base);
     }
 
     return 1;  // 应当发送 ACK
@@ -131,13 +131,13 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
                 if (r->rto < 50) r->rto = 50;
                 if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
                 P2P_LOG_DEBUG("RELIABLE", "%s rtt=%dms srtt=%d rttvar=%d rto=%d",
-                              LA_W("RTT updated", LA_W106), rtt, r->srtt, r->rttvar, r->rto);
+                              LA_W("RTT updated", LA_W106, 107), rtt, r->srtt, r->rttvar, r->rto);
             }
         }
         r->send_base++;
     }
     P2P_LOG_DEBUG("RELIABLE", "%s ack_seq=%u send_base=%u inflight=%d",
-                  LA_W("ACK processed", LA_W2), ack_seq, r->send_base, r->send_count);
+                  LA_W("ACK processed", LA_W2, 3), ack_seq, r->send_base, r->send_count);
 
     // SACK 位图：第 i 位 = ack_seq + 1 + i
     for (int i = 0; i < 32; i++) {
