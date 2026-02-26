@@ -72,10 +72,9 @@
 #include <inttypes.h>           /* PRIu64 */
 
 #include <p2p.h>
-#include <p2pp.h>               /* 协议定义 */
 
-#include "p2p_platform.h"       /* 跨平台兼容层（socket / 线程 / 时钟 / sleep） */
-#include "p2p_lang.h"           /* 多语言消息 / p2p_nat_type_str 依赖 */
+#include "p2p_common.h"         /* pack/unpack_signaling_payload_hdr（服务端也可包含此头） */
+#include "LANG.h"               /* 多语言支持 */
 
 #include "p2p_nat.h"            /* NAT 穿透与类型检测 */
 #include "p2p_route.h"          /* 路由表管理 */
@@ -93,30 +92,6 @@
 #include "p2p_log.h"
 
 ///////////////////////////////////////////////////////////////////////////////
-
-/*
- * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
- *
- * 仅用于会话内部运算。网络传输使用 p2p_candidate_t（见 p2pp.h）。
- * 转换函数：pack_candidate() / unpack_candidate()，见下文。
- */
-struct p2p_candidate_entry {
-    int                type;            /* 候选类型（信令模式相关：RELAY/ICE=p2p_ice_cand_type_t，COMPACT=p2p_compact_cand_type_t） */
-    struct sockaddr_in addr;            /* 传输地址（平台原生 16B） */
-    struct sockaddr_in base_addr;       /* 基础地址（平台原生 16B） */
-    uint32_t           priority;        /* 候选优先级 */
-};
-
-/*
- * 远端候选地址（扩展类型）
- *
- * 以 p2p_candidate_entry_t 作为首成员，保持与 pack_candidate()/unpack_candidate()
- * 共享同一基础序列化字段；额外运行时状态仅用于本地调度，不参与线协议。
- */
-struct p2p_remote_candidate_entry {
-    p2p_candidate_entry_t cand;               /* 可序列化基础候选字段 */
-    uint64_t              last_punch_send_ms; /* 最近一次发送 PUNCH 的时间（调度状态） */
-};
 
 /* ============================================================================
  * p2p_session: P2P 会话主结构体
@@ -233,178 +208,64 @@ typedef struct p2p_session {
 } p2p_session_t;
 
 /*
- * NAT 类型转可读字符串（支持多语言）
+ * NAT 类型转可读字符串
  *
  * 覆盖所有负值（检测中/超时）和 p2p_nat_type_t 枚举值。
- * 通常传入 s->cfg.language 以匹配当前会话语言配置。
+ * 语言由全局 lang_init() / lang_load_fp() 控制。
  */
-static inline const char* p2p_nat_type_str(int type, p2p_language_t lang) {
+static inline const char* p2p_nat_type_str(int type) {
     switch (type) {
-        case P2P_NAT_DETECTING:        return p2p_msg_lang(MSG_NAT_TYPE_DETECTING,       lang);
-        case P2P_NAT_TIMEOUT:          return p2p_msg_lang(MSG_NAT_TYPE_TIMEOUT,         lang);
-        case P2P_NAT_UNKNOWN:          return p2p_msg_lang(MSG_NAT_TYPE_UNKNOWN,         lang);
-        case P2P_NAT_OPEN:             return p2p_msg_lang(MSG_NAT_TYPE_OPEN,            lang);
-        case P2P_NAT_FULL_CONE:        return p2p_msg_lang(MSG_NAT_TYPE_FULL_CONE,       lang);
-        case P2P_NAT_RESTRICTED:       return p2p_msg_lang(MSG_NAT_TYPE_RESTRICTED,      lang);
-        case P2P_NAT_PORT_RESTRICTED:  return p2p_msg_lang(MSG_NAT_TYPE_PORT_RESTRICTED, lang);
-        case P2P_NAT_SYMMETRIC:        return p2p_msg_lang(MSG_NAT_TYPE_SYMMETRIC,       lang);
-        case P2P_NAT_BLOCKED:          return p2p_msg_lang(MSG_NAT_TYPE_BLOCKED,         lang);
-        case P2P_NAT_UNSUPPORTED:      return p2p_msg_lang(MSG_NAT_TYPE_UNSUPPORTED,     lang);
-        default:                       return p2p_msg_lang(MSG_NAT_TYPE_UNKNOWN,         lang);
+        case P2P_NAT_DETECTING:        return LA_W("Detecting...", LA_W25);
+        case P2P_NAT_TIMEOUT:          return LA_W("Timeout (no response)", LA_W131);
+        case P2P_NAT_UNKNOWN:          return LA_W("Unknown", LA_W137);
+        case P2P_NAT_OPEN:             return LA_W("Open Internet (No NAT)", LA_W65);
+        case P2P_NAT_FULL_CONE:        return LA_W("Full Cone NAT", LA_W40);
+        case P2P_NAT_RESTRICTED:       return LA_W("Restricted Cone NAT", LA_W104);
+        case P2P_NAT_PORT_RESTRICTED:  return LA_W("Port Restricted Cone NAT", LA_W79);
+        case P2P_NAT_SYMMETRIC:        return LA_W("Symmetric NAT (port-random)", LA_W126);
+        case P2P_NAT_BLOCKED:          return LA_W("UDP Blocked (STUN unreachable)", LA_W135);
+        case P2P_NAT_UNSUPPORTED:      return LA_W("Unsupported (no STUN/probe configured)", LA_W140);
+        default:                       return LA_W("Unknown", LA_W137);
     }
 }
 
 /* ============================================================================
- * 内联工具函数
+ * 内部候选地址定义
  * ============================================================================ */
 
 /*
- * time_ms: 获取当前时间戳（毫秒）
+ * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
  *
- * 使用 gettimeofday() 获取高精度时间，用于：
- *   - RTO 计时
- *   - RTT 测量
- *   - 心跳间隔
- *
- * @return 自 1970-01-01 00:00:00 UTC 以来的毫秒数
+ * 仅用于会话内部运算。网络传输使用 p2p_candidate_t（见 p2pp.h）。
+ * 转换函数：pack_candidate() / unpack_candidate()，见下文。
  */
-static inline uint64_t time_ms(void) {
-    return p2p_time_ms();
-}
+struct p2p_candidate_entry {
+    int                type;                    // 候选类型（信令模式相关：RELAY/ICE=p2p_ice_cand_type_t，COMPACT=p2p_compact_cand_type_t）
+    struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
+    struct sockaddr_in base_addr;               // 基础地址（平台原生 16B）
+    uint32_t           priority;                // 候选优先级
+};
 
 /*
- * seq_diff: 计算序列号差值（处理回绕）
+ * 远端候选地址（扩展类型）
  *
- * 使用有符号 16 位差值处理序列号回绕问题。
- *
- * 示例：
- *   seq_diff(5, 3)     = 2   (正常情况)
- *   seq_diff(3, 5)     = -2  (正常情况)
- *   seq_diff(1, 65535) = 2   (回绕情况：1 比 65535 新)
- *   seq_diff(65535, 1) = -2  (回绕情况：65535 比 1 旧)
- *
- * @param a  序列号 A
- * @param b  序列号 B
- * @return   a - b（考虑回绕）
+ * 以 p2p_candidate_entry_t 作为首成员，保持与 pack_candidate()/unpack_candidate()
+ * 共享同一基础序列化字段；额外运行时状态仅用于本地调度，不参与线协议。
  */
-static inline int16_t seq_diff(uint16_t a, uint16_t b) {
-    return (int16_t)(a - b);
-}
+struct p2p_remote_candidate_entry {
+    p2p_candidate_entry_t cand;                 // 可序列化基础候选字段
+    uint64_t              last_punch_send_ms;   // 最近一次发送 PUNCH 的时间（调度状态）
+};
 
-/*
- * struct sockaddr_in → p2p_sockaddr_t
- *
- * sockaddr_in 各字段含义：
- *   sin_family : 主机字节序（uint16_t）
- *   sin_port   : 已是网络字节序（uint16_t，big-endian）
- *   sin_addr   : 已是网络字节序（uint32_t，big-endian）
- *
- * 统一用 htonl 写入 uint32_t，使得任意主机字序下字节流相同。
- * 注：sin_port 本身已是大端，(uint32_t) 零扩展后再 htonl，与 p2p_wire_to_sockaddr 的
- *     ntohl 对称，round-trip 正确。
- */
-static inline void p2p_sockaddr_to_wire(const struct sockaddr_in *s, p2p_sockaddr_t *w) {
-    w->family = htonl((uint32_t)s->sin_family);
-    w->port   = htonl((uint32_t)s->sin_port);
-    w->ip     = s->sin_addr.s_addr;     /* 已是网络字节序，直接存储 */
-}
-
-/*
- * p2p_sockaddr_t → struct sockaddr_in
- *
- * 自动清零 sin_zero[8] 填充字段（某些系统要求填充字段为 0）。
- * 跨平台安全：macOS 额外的 sin_len 字段也被 memset 清零。
- */
-static inline void p2p_wire_to_sockaddr(const p2p_sockaddr_t *w, struct sockaddr_in *s) {
-    memset(s, 0, sizeof(*s));
-    s->sin_family      = (sa_family_t)ntohl(w->family);
-    s->sin_port        = (in_port_t)  ntohl(w->port);
-    s->sin_addr.s_addr = w->ip;
-}
 
 /* ============================================================================
- * 信令协议序列化函数
- * ============================================================================
- *
- * p2p_signaling_payload_hdr_t 定义在 p2pp.h 中
- * 这里仅提供序列化/反序列化的静态内联实现
- */
-
-/*
- * pack_signaling_payload_hdr: 序列化信令负载头部到字节流
- *
- * 格式（76 字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
- *
- * @param sender          发送方 peer_id
- * @param target          目标方 peer_id
- * @param timestamp       时间戳
- * @param delay_trigger   延迟触发（毫秒）
- * @param candidate_count 候选数量
- * @param buf             输出缓冲区（至少 76 字节）
- * @return                写入的字节数（76）
- */
-static inline int pack_signaling_payload_hdr(
-    const char *sender,
-    const char *target,
-    uint32_t timestamp,
-    uint32_t delay_trigger,
-    int candidate_count,
-    uint8_t *buf
-) {
-    int n = 0, m;
-    
-    /* sender (32字节) */
-    m = sizeof(((p2p_signaling_payload_hdr_t*)0)->sender) - 1;
-    strncpy((char*)buf, sender, m); 
-    buf[m] = '\0';
-    n = m + 1;
-    
-    /* target (32字节) */
-    m = sizeof(((p2p_signaling_payload_hdr_t*)0)->target) - 1;
-    strncpy((char*)(buf + n), target, m); 
-    buf[n + m] = '\0';
-    n += m + 1;
-    
-    /* timestamp, delay_trigger, candidate_count */
-    *(uint32_t*)&buf[n] = htonl(timestamp); n += 4;
-    *(uint32_t*)&buf[n] = htonl(delay_trigger); n += 4;
-    *(uint32_t*)&buf[n] = htonl((uint32_t)candidate_count); n += 4;
-    
-    return n;  /* 76 */
-}
-
-/*
- * unpack_signaling_payload_hdr: 从字节流反序列化信令负载头部
- *
- * 格式（76 字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
- *
- * @param p    输出：信令负载结构（仅写入头部字段）
- * @param buf  输入缓冲区（至少 76 字节）
- * @return     0=成功，-1=失败
- */
-static inline int unpack_signaling_payload_hdr(p2p_signaling_payload_hdr_t *p, const uint8_t *buf) {
-    int n = 0;
-    
-    /* sender, target */
-    memcpy(p->sender, buf + n, 32); n += 32;
-    memcpy(p->target, buf + n, 32); n += 32;
-    
-    /* timestamp, delay_trigger, candidate_count */
-    p->timestamp = ntohl(*(uint32_t*)&buf[n]); n += 4;
-    p->delay_trigger = ntohl(*(uint32_t*)&buf[n]); n += 4;
-    p->candidate_count = (int)ntohl(*(uint32_t*)&buf[n]); //n += 4;
-    
-    /* 验证候选数量（防止恶意/畸形包，候选使用动态分配无固定上限）*/
-    if (p->candidate_count < 0 || p->candidate_count > 200) return -1;
-    
-    return 0;
-}
+ * 候选地址序列化 / 反序列化
+ * ============================================================================ */
 
 /*
  * pack_candidate: p2p_candidate_entry_t（内部平台格式）→ 网络字节流
  *
  * 格式（32 字节）：[type:4B][addr:12B][base_addr:12B][priority:4B]
- * 通过中间 p2p_candidate_t 完成转换，该类型在 pack(1) 块内定义，sizeof == 32。
  */
 static inline int pack_candidate(const p2p_candidate_entry_t *c, uint8_t *buf) {
     p2p_candidate_t w;
@@ -482,6 +343,8 @@ static inline int p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     s->remote_cand_cap = nc;
     return 0;
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 #pragma clang diagnostic pop
 #endif /* P2P_INTERNAL_H */

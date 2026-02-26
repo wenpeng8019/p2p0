@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <time.h>
 #include <stdbool.h>
 #include <inttypes.h>  /* PRIu64 */
@@ -24,8 +25,7 @@
 
 #include <p2p.h>
 #include <p2pp.h>
-#include "../src/p2p_platform.h"  /* 跨平台兼容层 */
-#include "../src/p2p_internal.h"
+#include "../src/p2p_common.h"
 #include "LANG.h"
 #include "uthash.h"
 

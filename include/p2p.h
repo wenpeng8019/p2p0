@@ -17,10 +17,11 @@ extern "C" {
 #endif
 ///////////////////////////////////////////////////////////////////////////////
 
-/* 支持的语言 */
+/* 支持的语言（已废弃，保留以兼容旧 API）
+ * 新代码请使用 lang_load_fp() / lang_load_tx() 设置语言 */
 typedef enum {
     P2P_LANG_EN = 0,                            // English (默认)
-    P2P_LANG_ZH = 1                             // 简体中文 (需要编译时启用 -DP2P_ENABLE_CHINESE)
+    P2P_LANG_ZH = 1                             // 简体中文
 } p2p_language_t;
 
 /* 日志等级 */
@@ -190,8 +191,8 @@ typedef struct {
                                                         // 用途：COMPACT模式快速测试UDP打洞，避免发送大量本地地址，加快配对速度。
                                                         // 配合STUN使用，直接在服务器完成公网地址交换后立即开始打洞测试。
 
-    /* 语言选项 */
-    p2p_language_t          language;                   // 日志语言
+    /* 语言选项（已废弃，保留字段以兼容旧 API） */
+    p2p_language_t          language;                   // 旧系统语言选项，已无效；请用 lang_load_fp() 控制语言
     
     /* 事件回调 */
     p2p_on_connected_fn     on_connected;               // 连接建立回调 (可选)

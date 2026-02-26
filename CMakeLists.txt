@@ -6,7 +6,6 @@ option(WITH_DTLS    "Enable MbedTLS DTLS support" OFF)
 option(WITH_OPENSSL "Enable OpenSSL DTLS support" OFF)
 option(WITH_SCTP    "Enable usrsctp support" OFF)
 option(THREADED     "Enable internal threading" ON)
-option(ENABLE_CHINESE "Enable Chinese language support" ON)
 option(I18N_ENABLED "Enable i18n multi-language support" ON)
 
 # --- Platform Detection ---
@@ -43,7 +42,6 @@ endif()
 
 # --- Include Directories ---
 include_directories(include)
-include_directories(src)
 
 # --- i18n submodule check ---
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/i18n/i18n.h")
@@ -74,21 +72,42 @@ set(LIB_SRCS
     src/p2p_signal_compact.c
     src/p2p_log.c
     src/p2p_http.c
-    src/p2p_lang.c
 )
+
+# --- i18n code generation for p2p core library ---
+add_custom_command(
+    OUTPUT
+        ${CMAKE_SOURCE_DIR}/src/.LANG.h
+        ${CMAKE_SOURCE_DIR}/src/.LANG.c
+    COMMAND ${CMAKE_SOURCE_DIR}/i18n/i18n.sh ${CMAKE_SOURCE_DIR}/src
+    DEPENDS
+        ${LIB_SRCS}
+        ${CMAKE_SOURCE_DIR}/i18n/i18n.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Generating i18n language files for p2p core library"
+)
+
+# When I18N_ENABLED, compile the generated table + runtime into the library
+#
+# ARCHITECTURE NOTE: p2p_static itself does NOT link i18n.c
+# (p2p_ping / p2p_server each supply their own independent i18n instance).
+# The library sources use LA_W/LA_S/LA_F markers that expand to string literals
+# by default; with I18N_ENABLED they call lang_str() which is resolved at
+# link time by the consuming executable's i18n.c.
+#
+# To enable runtime translation for library logs, set I18N_ENABLED=ON and
+# ensure the consuming executable supplies a unified lang table that covers
+# both its own strings and the library's IDs (future architecture work).
+if(I18N_ENABLED)
+    message(STATUS "p2p core: I18N_ENABLED — library strings use LA_X markers (ID-based lookup at link time)")
+else()
+    message(STATUS "p2p core: API markers only — LA_X expands to string literals")
+endif()
 
 if(THREADED)
     add_definitions(-DP2P_THREADED)
     list(APPEND LIB_SRCS src/p2p_thread.c)
     find_package(Threads REQUIRED)
-endif()
-
-# --- Chinese Language Support ---
-if(ENABLE_CHINESE)
-    add_definitions(-DP2P_ENABLE_CHINESE)
-    message(STATUS "Chinese language support: ENABLED")
-else()
-    message(STATUS "Chinese language support: DISABLED (use -DENABLE_CHINESE=ON to enable)")
 endif()
 
 # --- MbedTLS Integration ---
@@ -138,10 +157,21 @@ endif()
 
 # --- Target Definition ---
 add_library(p2p_static STATIC ${LIB_SRCS})
+target_include_directories(p2p_static PRIVATE src)
 target_link_libraries(p2p_static ${PLATFORM_LIBS})
 if(THREADED)
     target_link_libraries(p2p_static Threads::Threads)
 endif()
+
+# Run i18n.sh on src/ to assign IDs in source files and generate src/.LANG.h/.LANG.c.
+# p2p_static depends on this target so i18n.sh runs before any source is compiled.
+# (src/.LANG.h is only #include'd when I18N_ENABLED, so it is only mandatory then,
+#  but running i18n.sh unconditionally keeps source IDs fresh.)
+add_custom_target(p2p_core_i18n_gen DEPENDS
+    ${CMAKE_SOURCE_DIR}/src/.LANG.h
+    ${CMAKE_SOURCE_DIR}/src/.LANG.c
+)
+add_dependencies(p2p_static p2p_core_i18n_gen)
 
 # --- Signaling Server ---
 add_subdirectory(p2p_server)

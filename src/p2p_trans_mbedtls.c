@@ -152,7 +152,7 @@ static void p2p_dtls_set_timer(void *ctx, uint32_t int_ms, uint32_t fin_ms) {
     p2p_dtls_timer_t *timer = (p2p_dtls_timer_t *)ctx;
     timer->int_ms = int_ms;
     timer->fin_ms = fin_ms;
-    if (fin_ms != 0) timer->snapshot = time_ms();
+    if (fin_ms != 0) timer->snapshot = p2p_time_ms();
 }
 
 /*
@@ -161,7 +161,7 @@ static void p2p_dtls_set_timer(void *ctx, uint32_t int_ms, uint32_t fin_ms) {
 static int p2p_dtls_get_timer(void *ctx) {
     p2p_dtls_timer_t *timer = (p2p_dtls_timer_t *)ctx;
     if (timer->fin_ms == 0) return -1;  /* 定时器已取消 */
-    uint64_t elapsed = time_ms() - timer->snapshot;
+    uint64_t elapsed = p2p_time_ms() - timer->snapshot;
     if (elapsed >= timer->fin_ms) return 2;  /* 最终超时 → 需重传 */
     if (elapsed >= timer->int_ms) return 1;  /* 中间超时 */
     return 0;  /* 未超时 */
@@ -337,7 +337,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret;
     if ((ret = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        P2P_LOG_ERROR("dtls", MSG(MSG_DTLS_SETUP_FAIL), -ret);
+        P2P_LOG_ERROR("dtls", LA_F("[DTLS] ssl_setup failed: -0x%x", LA_F1), -ret);
         return -1;
     }
     
@@ -399,11 +399,11 @@ static void dtls_tick(p2p_session_t *s) {
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            P2P_LOG_INFO("dtls", "%s", MSG(MSG_DTLS_HANDSHAKE_DONE));
+            P2P_LOG_INFO("dtls", "%s", LA_S("[DTLS] Handshake complete", LA_S1));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));
-            P2P_LOG_ERROR("dtls", MSG(MSG_DTLS_HANDSHAKE_FAIL), ebuf, -ret);
+            P2P_LOG_ERROR("dtls", LA_F("[DTLS] Handshake failed: %s (-0x%04x)", LA_F0), ebuf, -ret);
             s->state = P2P_STATE_ERROR;
         }
     }

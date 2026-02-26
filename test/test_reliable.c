@@ -13,7 +13,7 @@
  */
 
 #include "test_framework.h"
-#include "p2p_internal.h"
+#include "../src/p2p_internal.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -105,7 +105,7 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
 }
 
 int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
-    uint64_t now = time_ms();
+    uint64_t now = p2p_time_ms();
 
     /* 累积 ACK */
     while (seq_diff(ack_seq, r->send_base) > 0) {
@@ -184,7 +184,7 @@ static bool verify_packet(const uint8_t *buf, int len, uint8_t pattern) {
 static void simulate_send(reliable_t *from, reliable_t *to, uint16_t seq) {
     int idx = seq % RELIABLE_WINDOW;
     retx_entry_t *e = &from->send_buf[idx];
-    e->send_time = time_ms();
+    e->send_time = p2p_time_ms();
     e->retx_count = 0;
     
     /* 模拟传输 */
@@ -434,7 +434,7 @@ TEST(rtt_estimation) {
     /* 发送数据包 */
     reliable_send_pkt(&sender, data, 100);
     
-    uint64_t start_time = time_ms();
+    uint64_t start_time = p2p_time_ms();
     sender.send_buf[0].send_time = start_time;
     sender.send_buf[0].retx_count = 0;
     

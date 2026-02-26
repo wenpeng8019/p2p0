@@ -23,7 +23,7 @@
 #endif
 
 #include "test_framework.h"
-#include "p2p_internal.h"
+#include "../src/p2p_internal.h"
 
 #ifdef _WIN32
 #ifndef htonll
