@@ -371,7 +371,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
 
         P2P_LOG_VERBOSE("COMPACT", "REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d",
                         ctx->peer_online, payload[1], LA_W("cache", LA_W18, 19), payload[1] > 0 ? LA_W("yes", LA_W149, 150) : LA_W("no (cached)", LA_W62, 63),
-                        LA_S("relay", LA_S46, 197), ctx->relay_support ? LA_W("yes", LA_W149, 150) : LA_W("no (cached)", LA_W62, 63),
+                        LA_S("relay", LA_S44, 197), ctx->relay_support ? LA_W("yes", LA_W149, 150) : LA_W("no (cached)", LA_W62, 63),
                         inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
                         ctx->probe_port);
 
@@ -751,7 +751,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
         
         P2P_LOG_INFO("COMPACT", "%s %s %s:%d probe=%s:%d -> %s",
                      LA_W("Detection completed", LA_W26, 27),
-                     LA_S("Mapped address", LA_S35, 186),
+                     LA_S("Mapped address", LA_S34, 186),
                      inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
                      inet_ntoa(probe_mapped.sin_addr),     ntohs(probe_mapped.sin_port),
                      p2p_nat_type_str(s->nat_type));

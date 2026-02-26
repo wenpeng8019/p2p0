@@ -499,7 +499,7 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
                 P2P_LOG_INFO("ICE", "✓ %s %s %s:%d (%s=%u)",
                              LA_W("Gathered Srflx Candidate", LA_W43, 44), LA_S("Added Remote Candidate", LA_S5, 156),
                              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                             LA_S("priority", LA_S43, 194), c->priority);
+                             LA_S("priority", LA_S41, 194), c->priority);
                 /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
                 p2p_ice_send_local_candidate(s, c);
             } else {
@@ -578,7 +578,7 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
             
             case NAT_TEST_II_SENT:
                 P2P_LOG_WARN("NAT", "%s %s %s (%s %s %s)", LA_W("Test", LA_W127, 128), "II:", LA_W("Timeout", LA_W130, 131),
-                             LA_S("need", LA_S36, 187), LA_S("Test", LA_S57, 208), "III");
+                             LA_S("need", LA_S35, 187), LA_S("Test", LA_S55, 208), "III");
                 ctx->test_ii_success = 0;
                 ctx->state = NAT_TEST_II_DONE;
                 break;
@@ -613,7 +613,7 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
         //        s->cfg.stun_server, s->cfg.stun_port);
         
         if (resolve_host(s->cfg.stun_server, s->cfg.stun_port, &stun_addr) < 0) {
-            P2P_LOG_ERROR("NAT", "%s %s %s", LA_W("Failed to resolve", LA_W33, 34), LA_S("STUN server", LA_S56, 207), s->cfg.stun_server);
+            P2P_LOG_ERROR("NAT", "%s %s %s", LA_W("Failed to resolve", LA_W33, 34), LA_S("STUN server", LA_S54, 207), s->cfg.stun_server);
             ctx->state = NAT_TEST_COMPLETED;
             return;
         }
@@ -649,10 +649,10 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
             ctx->last_send_time = now;
             ctx->state = NAT_TEST_I_SENT;
             /* 不要在这里重置 retry_count，保留重试计数 */
-            P2P_LOG_INFO("NAT", "%s %s %s %s %s:%d (%s=%d)", LA_W("Sending", LA_W110, 111), LA_S("Test", LA_S57, 208), "I",
+            P2P_LOG_INFO("NAT", "%s %s %s %s %s:%d (%s=%d)", LA_W("Sending", LA_W110, 111), LA_S("Test", LA_S55, 208), "I",
                          LA_W("to", LA_W134, 135), s->cfg.stun_server, s->cfg.stun_port, LA_W("len", LA_W51, 52), len);
         } else {
-            P2P_LOG_ERROR("NAT", "%s", LA_S("Failed to build STUN request", LA_S24, 175));
+            P2P_LOG_ERROR("NAT", "%s", LA_S("Failed to build STUN request", LA_S23, 175));
         }
         break;
     }

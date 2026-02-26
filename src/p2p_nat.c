@@ -56,7 +56,7 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
 
     if (addr == NULL) {
         if (s->remote_cand_cnt == 0) {
-            P2P_LOG_ERROR("NAT", "%s", LA_S("ERROR: No remote candidates to punch", LA_S20, 171));
+            P2P_LOG_ERROR("NAT", "%s", LA_S("ERROR: No remote candidates to punch", LA_S19, 171));
             return -1;
         }
         
@@ -255,7 +255,7 @@ int nat_tick(p2p_session_t *s) {
                 n->last_send_time = now;
 
                 P2P_LOG_VERBOSE("NAT", "%s %s %d/%d %s (elapsed: %llu ms)", LA_W("PUNCHING: Attempt", LA_W88, 89),
-                                LA_S("to", LA_S58, 209), sent_cnt,
+                                LA_S("to", LA_S56, 209), sent_cnt,
                                 s->remote_cand_cnt, LA_W("candidates", LA_W20, 21),
                                 now - n->punch_start);
             }
@@ -277,7 +277,7 @@ int nat_tick(p2p_session_t *s) {
             if (n->last_recv_time > 0 && now - n->last_recv_time >= PONG_TIMEOUT_MS) {
 
                 P2P_LOG_WARN("NAT", "%s (%s %d ms)", LA_W("TIMEOUT: Connection lost", LA_W132, 133),
-                             LA_S("no pong for", LA_S38, 189), PONG_TIMEOUT_MS);
+                             LA_S("no pong for", LA_S37, 189), PONG_TIMEOUT_MS);
 
                 n->state = NAT_INIT;
                 return -1;

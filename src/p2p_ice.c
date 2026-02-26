@@ -354,7 +354,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
     /* 仅用于 RELAY 模式（TCP 信令） */
     if (s->signaling_mode != P2P_SIGNALING_MODE_RELAY) {
         /* COMPACT 模式不应调用此函数，候选通过 p2p_signal_compact 模块发送 */
-        P2P_LOG_ERROR("RELAY", "%s", LA_S("Error: p2p_ice_send_local_candidate called in non-RELAY mode", LA_S21, 172));
+        P2P_LOG_ERROR("RELAY", "%s", LA_S("Error: p2p_ice_send_local_candidate called in non-RELAY mode", LA_S20, 172));
         return -1;
     }
 
@@ -475,7 +475,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                     memcpy(&c->addr, sa, sizeof(struct sockaddr_in));
                     c->addr.sin_port = loc.sin_port;
                     P2P_LOG_INFO("ICE", "%s %s: %s:%d (priority=0x%08x)",
-                           LA_W("Gathered", LA_W41, 42), LA_S("Host Candidate", LA_S32, 183),
+                           LA_W("Gathered", LA_W41, 42), LA_S("Host Candidate", LA_S31, 183),
                            inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                     p2p_ice_send_local_candidate(s, c);
                 }
@@ -499,7 +499,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                     memcpy(&c->addr, ifa->ifa_addr, sizeof(struct sockaddr_in));
                     c->addr.sin_port = loc.sin_port;
                     P2P_LOG_INFO("ICE", "%s %s: %s:%d (priority=0x%08x)",
-                           LA_W("Gathered", LA_W41, 42), LA_S("Host Candidate", LA_S32, 183),
+                           LA_W("Gathered", LA_W41, 42), LA_S("Host Candidate", LA_S31, 183),
                            inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                     p2p_ice_send_local_candidate(s, c);
                 }
@@ -530,7 +530,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
             if (he) {
                 memcpy(&stun_addr.sin_addr, he->h_addr_list[0], he->h_length);
                 udp_send_to(s->sock, &stun_addr, stun_buf, slen);
-                P2P_LOG_INFO("ICE", "%s %s %s %s", LA_W("Requested", LA_W101, 102), LA_S("Srflx Candidate", LA_S55, 206), LA_S("from", LA_S30, 181), s->cfg.stun_server);
+                P2P_LOG_INFO("ICE", "%s %s %s %s", LA_W("Requested", LA_W101, 102), LA_S("Srflx Candidate", LA_S53, 206), LA_S("from", LA_S29, 181), s->cfg.stun_server);
             }
         }
     }
@@ -543,7 +543,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      */
     if (!s->cfg.lan_punch && s->cfg.turn_server) {
         if (p2p_turn_allocate(s) == 0) {
-            P2P_LOG_INFO("ICE", "%s %s %s %s", LA_W("Requested", LA_W101, 102), LA_S("Relay Candidate", LA_S47, 198), LA_S("from", LA_S30, 181), s->cfg.turn_server);
+            P2P_LOG_INFO("ICE", "%s %s %s %s", LA_W("Requested", LA_W101, 102), LA_S("Relay Candidate", LA_S45, 198), LA_S("from", LA_S29, 181), s->cfg.turn_server);
         }
     }
 
@@ -685,7 +685,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     }
 
     P2P_LOG_INFO("ICE", "%s! %s %s %s %s:%d%s",
-            LA_W("Nomination successful! Using", LA_W63, 64), LA_S("Using", LA_S61, 212), cand_type_str, LA_W("path", LA_W70, 71),
+            LA_W("Nomination successful! Using", LA_W63, 64), LA_S("Using", LA_S59, 212), cand_type_str, LA_W("path", LA_W70, 71),
             inet_ntoa(from->sin_addr), ntohs(from->sin_port),
             connection_desc);
     
@@ -727,7 +727,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     /* 认证握手 */
     if (s->cfg.auth_key) {
         udp_send_packet(s->sock, from, P2P_PKT_AUTH, 0, 0, s->cfg.auth_key, (int)strlen(s->cfg.auth_key));
-        P2P_LOG_INFO("AUTH", "%s", LA_S("Sent authentication request to peer", LA_S53, 204));
+        P2P_LOG_INFO("AUTH", "%s", LA_S("Sent authentication request to peer", LA_S51, 204));
     }
 }
 

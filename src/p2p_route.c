@@ -133,7 +133,7 @@ bool route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_pri
         uint32_t mask = rt->local_masks[i];
         if ((local_ip & mask) == (peer_ip & mask)) {
             P2P_LOG_INFO("ROUTE", "%s %s %s %s", LA_W("Peer is on the same subnet as", LA_W73, 74),
-                         inet_ntoa(peer_priv->sin_addr), LA_S("via local", LA_S62, 213),
+                         inet_ntoa(peer_priv->sin_addr), LA_S("via local", LA_S60, 213),
                          inet_ntoa(rt->local_addrs[i].sin_addr));
             return true;
         }
@@ -163,7 +163,7 @@ int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, p2p_socket_t
 
     P2P_LOG_INFO("ROUTE", "%s %s:%d, %s", LA_W("Received route probe from", LA_W92, 93),
                  inet_ntoa(from->sin_addr), ntohs(from->sin_port),
-                 LA_S("sending ACK", LA_S52, 203));
+                 LA_S("sending ACK", LA_S50, 203));
 
     // ROUTE_PROBE 回复应答消息
     return udp_send_packet(sock, from, P2P_PKT_ROUTE_PROBE_ACK, 0, 0, NULL, 0);

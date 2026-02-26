@@ -27,7 +27,7 @@ int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
     if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
         /* 如果端口被占用，尝试随机端口并更新配置 */
         P2P_LOG_DEBUG("TCP", "%s %s %d, %s", LA_W("Bind failed", LA_W15, 16),
-                      LA_S("to", LA_S58, 209), s->cfg.tcp_port, LA_W("port busy, trying random port", LA_W78, 79));
+                      LA_S("to", LA_S56, 209), s->cfg.tcp_port, LA_W("port busy, trying random port", LA_W78, 79));
         loc.sin_port = 0;
         if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
             P2P_LOG_ERROR("TCP", "%s", LA_S("Bind failed", LA_S9, 160));

@@ -71,9 +71,3 @@ config.local.*
 
 # Gist temporary files
 .gist*.json
-
-# i18n auto-generated files
-.LANG.h
-.LANG.c
-.i18n
-LANG.*.h

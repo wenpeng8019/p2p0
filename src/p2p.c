@@ -58,19 +58,19 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
 
         if (!cfg->gh_token || !cfg->gist_id) {
-            P2P_LOG_ERROR("P2P", "%s", LA_S("PUBSUB mode requires gh_token and gist_id", LA_S44, 195));
+            P2P_LOG_ERROR("P2P", "%s", LA_S("PUBSUB mode requires gh_token and gist_id", LA_S42, 195));
             return NULL;
         }
     }
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT || cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
 
         if (!cfg->server_host) {
-            P2P_LOG_ERROR("P2P", "%s", LA_S("RELAY/COMPACT mode requires server_host", LA_S48, 199));
+            P2P_LOG_ERROR("P2P", "%s", LA_S("RELAY/COMPACT mode requires server_host", LA_S46, 199));
             return NULL;
         }
     }
     else {
-        P2P_LOG_ERROR("P2P", "%s", LA_S("Invalid signaling mode in configuration", LA_S34, 185));
+        P2P_LOG_ERROR("P2P", "%s", LA_S("Invalid signaling mode in configuration", LA_S33, 185));
         return NULL;
     }
 
@@ -153,7 +153,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 #ifdef WITH_SCTP
         s->trans = &p2p_trans_sctp;
 #else
-        P2P_LOG_WARN("P2P", "%s", LA_S("SCTP (usrsctp) requested but library not linked", LA_S51, 202));
+        P2P_LOG_WARN("P2P", "%s", LA_S("SCTP (usrsctp) requested but library not linked", LA_S49, 202));
 #endif
     }
     else if (cfg->use_pseudotcp) s->trans = &p2p_trans_pseudotcp;
@@ -304,7 +304,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             } else {
                 P2P_LOG_INFO("P2P", "[COMPACT] --public-only: %s, %s REGISTER_ACK",
                        LA_W("Skipping local Host candidates", LA_W120, 121),
-                       LA_S("waiting for", LA_S63, 214));
+                       LA_S("waiting for", LA_S61, 214));
             }
 
             // 开始信令注册
@@ -332,7 +332,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 && p2p_signal_relay_login(&s->sig_relay_ctx, s->cfg.server_host, s->cfg.server_port,
                                           s->local_peer_id) < 0) {
 
-                P2P_LOG_ERROR("P2P", "%s", LA_S("Failed to connect to signaling server", LA_S25, 176));
+                P2P_LOG_ERROR("P2P", "%s", LA_S("Failed to connect to signaling server", LA_S24, 176));
                 s->state = P2P_STATE_ERROR;
                 UNLOCK(s);
                 return -1;
@@ -904,7 +904,7 @@ p2p_update(p2p_handle_t hdl) {
                         s->last_cand_cnt_sent = s->local_cand_cnt;
                         P2P_LOG_INFO("P2P", "[SIGNALING] %s %s %d %s %s",
                                      s->last_cand_cnt_sent > 0 ? LA_W("Resent", LA_W102, 103) : LA_W("Published", LA_W83, 84),
-                                     LA_S("offer with", LA_S39, 190),
+                                     LA_S("offer with", LA_S38, 190),
                                      s->local_cand_cnt, LA_W("to", LA_W134, 135), s->remote_peer_id);
                     }
                 }

@@ -294,19 +294,19 @@ int p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *targe
     strncpy(target, target_name, P2P_PEER_ID_MAX);
 
     if (send(ctx->fd, (const char *)&hdr, sizeof(hdr), 0) != sizeof(hdr)) {
-        P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to send header", LA_S26, 177));
+        P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to send header", LA_S25, 177));
         return -1;
     }
     if (send(ctx->fd, target, P2P_PEER_ID_MAX, 0) != P2P_PEER_ID_MAX) {
-        P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to send target name", LA_S28, 179));
+        P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to send target name", LA_S27, 179));
         return -1;
     }
     if (send(ctx->fd, (const char *)data, len, 0) != len) {
-        P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to send payload", LA_S27, 178));
+        P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to send payload", LA_S26, 178));
         return -1;
     }
     
-    P2P_LOG_INFO("RELAY", "%s %s '%s' (%d %s)", LA_W("Sent connect", LA_W116, 117), LA_S("request to", LA_S49, 200), target_name, len, LA_W("bytes", LA_W17, 18));
+    P2P_LOG_INFO("RELAY", "%s %s '%s' (%d %s)", LA_W("Sent connect", LA_W116, 117), LA_S("request to", LA_S47, 200), target_name, len, LA_W("bytes", LA_W17, 18));
     
     /* 发送成功，ACK 将在状态机中异步接收 */
     return 0;
@@ -478,7 +478,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                     if (ctx->read_hdr.length > 0) {
                         ctx->read_payload = (uint8_t*)malloc(ctx->read_hdr.length);
                         if (!ctx->read_payload) {
-                            P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to allocate ACK payload buffer", LA_S22, 173));
+                            P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to allocate ACK payload buffer", LA_S21, 173));
                             ctx->read_state = RELAY_READ_IDLE;
                             return;
                         }
@@ -600,7 +600,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                         switch (ack->status) {
                             case 0:  // 对端在线
                                 P2P_LOG_INFO("RELAY", "%s, %s %d %s",
-                                       LA_W("Peer online", LA_W76, 77), LA_S("forwarded", LA_S29, 180), ack->candidates_acked, LA_W("candidates", LA_W20, 21));
+                                       LA_W("Peer online", LA_W76, 77), LA_S("forwarded", LA_S28, 180), ack->candidates_acked, LA_W("candidates", LA_W20, 21));
                                 ctx->waiting_for_peer = false;
                                 break;
                             case 1:  // 对端离线，已缓存
@@ -610,7 +610,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                                 break;
                             case 2:  // 缓存已满
                                 P2P_LOG_INFO("RELAY", "%s, %s",
-                                       LA_W("Storage full", LA_W122, 123), LA_S("waiting for peer to come online", LA_S64, 215));
+                                       LA_W("Storage full", LA_W122, 123), LA_S("waiting for peer to come online", LA_S62, 215));
                                 ctx->waiting_for_peer = true;
                                 ctx->waiting_start_time = p2p_time_ms();
                                 break;
@@ -654,7 +654,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
                     strcmp(ctx->waiting_target, ctx->read_sender) == 0) {
                     P2P_LOG_INFO("RELAY", "%s '%s' %s (%s FORWARD), %s",
                            LA_W("Peer", LA_W71, 72), ctx->read_sender, LA_W("is now online", LA_W49, 50),
-                           LA_S("received", LA_S45, 196), LA_S("resuming", LA_S50, 201));
+                           LA_S("received", LA_S43, 196), LA_S("resuming", LA_S48, 201));
                     ctx->waiting_for_peer = false;
                     ctx->waiting_target[0] = '\0';
                 }
@@ -742,7 +742,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
             if (!ctx->read_payload && ctx->read_expected > 0) {
                 ctx->read_payload = (uint8_t*)malloc(ctx->read_expected);
                 if (!ctx->read_payload) {
-                    P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to allocate discard buffer, closing connection", LA_S23, 174));
+                    P2P_LOG_ERROR("RELAY", "%s", LA_S("Failed to allocate discard buffer, closing connection", LA_S22, 174));
                     p2p_signal_relay_close(ctx);
                     return;
                 }
@@ -775,7 +775,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s) {
             if (ctx->read_offset >= ctx->read_expected) {
                 P2P_LOG_DEBUG("RELAY", "[DEBUG] %s %d %s %s %d",
                        LA_W("Discarded", LA_W27, 28), ctx->read_expected, LA_W("bytes", LA_W17, 18),
-                       LA_S("payload of message type", LA_S42, 193), ctx->read_hdr.type);
+                       LA_S("payload of message type", LA_S40, 193), ctx->read_hdr.type);
                 
                 /* 释放缓冲区 */
                 if (ctx->read_payload) {
