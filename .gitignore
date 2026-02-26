@@ -71,3 +71,5 @@ config.local.*
 
 # Gist temporary files
 .gist*.json
+.LANG.h
+.LANG.c
