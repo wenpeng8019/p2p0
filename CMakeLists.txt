@@ -45,6 +45,15 @@ endif()
 include_directories(include)
 include_directories(src)
 
+# --- i18n submodule check ---
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/i18n/i18n.h")
+    message(FATAL_ERROR
+        "i18n submodule not found. Please run:\n"
+        "  git submodule update --init\n"
+        "then re-run cmake.")
+endif()
+include_directories(i18n)
+
 # --- Source Files ---
 set(LIB_SRCS
     src/p2p_udp.c
