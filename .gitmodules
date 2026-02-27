@@ -1,3 +1,6 @@
 [submodule "i18n"]
 	path = i18n
 	url = git@github.com:wenpeng8019/i18nC.git
+[submodule "stdc"]
+	path = stdc
+	url = git@github.com:wenpeng8019/stdc.git
