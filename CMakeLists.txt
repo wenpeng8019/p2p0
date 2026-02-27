@@ -52,6 +52,15 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/i18n/i18n.h")
 endif()
 include_directories(i18n)
 
+# --- stdc submodule check ---
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/stdc/stdc.h")
+    message(FATAL_ERROR
+        "stdc submodule not found. Please run:\n"
+        "  git submodule update --init\n"
+        "then re-run cmake.")
+endif()
+add_subdirectory(stdc)
+
 # --- Source Files ---
 set(LIB_SRCS
     src/p2p_udp.c
@@ -158,7 +167,7 @@ endif()
 # --- Target Definition ---
 add_library(p2p_static STATIC ${LIB_SRCS})
 target_include_directories(p2p_static PRIVATE src)
-target_link_libraries(p2p_static ${PLATFORM_LIBS})
+target_link_libraries(p2p_static stdc ${PLATFORM_LIBS})
 if(THREADED)
     target_link_libraries(p2p_static Threads::Threads)
 endif()

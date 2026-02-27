@@ -33,6 +33,7 @@ target_include_directories(p2p_server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_SOURCE_DIR}/i18n
+    ${CMAKE_SOURCE_DIR}/stdc
 )
 
 # Enable i18n multi-language support
@@ -43,7 +44,7 @@ else()
     message(STATUS "p2p_server: i18n multi-language support DISABLED (using string literals)")
 endif()
 
-target_link_libraries(p2p_server PRIVATE ${PLATFORM_LIBS})
+target_link_libraries(p2p_server PRIVATE stdc ${PLATFORM_LIBS})
 if(WIN32)
     target_link_libraries(p2p_server PRIVATE ws2_32)
 endif()

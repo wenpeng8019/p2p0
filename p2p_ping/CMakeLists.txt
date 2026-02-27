@@ -32,6 +32,7 @@ target_include_directories(p2p_ping PRIVATE
     ${CMAKE_SOURCE_DIR} 
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/i18n
+    ${CMAKE_SOURCE_DIR}/stdc
 )
 
 # Enable i18n multi-language support
@@ -44,6 +45,7 @@ endif()
 
 target_link_libraries(p2p_ping PRIVATE 
     p2p_static 
+    stdc
     ${DTLS_LIBRARIES} 
     ${OPENSSL_LIBRARIES} 
     ${SCTP_LIBRARIES}
