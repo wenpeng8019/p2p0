@@ -1,4 +1,6 @@
 
+#define MOD_TAG "PseudoTCP"
+
 #include "p2p_internal.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -47,7 +49,8 @@ void p2p_pseudotcp_on_ack(struct p2p_session *s, uint16_t ack_seq) {
         s->tcp.cwnd += (MSS * MSS) / s->tcp.cwnd;
     }
     s->tcp.dup_acks = 0;
-    s->tcp.last_ack = p2p_time_ms();
+    P_clock _clk; P_clock_now(&_clk);
+    s->tcp.last_ack = clock_ms(_clk);
 }
 
 /* 
@@ -62,7 +65,7 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
     if (s->tcp.ssthresh < MIN_CWND) s->tcp.ssthresh = MIN_CWND;
     s->tcp.cwnd = MIN_CWND;
     s->tcp.dup_acks = 0;
-    P2P_LOG_WARN("ptcp", LA_F("[PseudoTCP] congestion detected, new ssthresh: %u, cwnd: %u", LA_F2, 219), s->tcp.ssthresh, s->tcp.cwnd);
+    printf("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F125, 219), s->tcp.ssthresh, s->tcp.cwnd);
 }
 
 /*
@@ -73,7 +76,8 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
  */
 static void p2p_pseudotcp_tick(struct p2p_session *s) {
     reliable_t *r = &s->reliable;
-    uint64_t now = p2p_time_ms();
+    P_clock _clk; P_clock_now(&_clk);
+    uint64_t now = clock_ms(_clk);
 
     /* 
      * 在 PseudoTCP 模式下，根据 cwnd 限制在途数据包数量

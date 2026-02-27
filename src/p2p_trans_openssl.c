@@ -1,4 +1,6 @@
 
+#define MOD_TAG "OPENSSL"
+
 #include "p2p_internal.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -96,7 +98,7 @@ static void openssl_tick(p2p_session_t *s) {
         int ret = SSL_do_handshake(os->ssl);
         if (ret == 1) {
             os->handshake_done = 1;
-            P2P_LOG_INFO("openssl", "%s", LA_S("[OpenSSL] DTLS handshake completed", LA_S2, 153));
+            printf("I: %s", LA_S("[OpenSSL] DTLS handshake completed", LA_S2, 153));
         }
     }
 

@@ -89,7 +89,6 @@
 #include "p2p_signal_relay.h"   /* 中继模式信令 */
 #include "p2p_signal_pubsub.h"  /* 发布/订阅模式信令 */
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
-#include "p2p_log.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -116,8 +115,8 @@ typedef struct p2p_session {
     int                         path;               // 连接路径 P2P_PATH_*
 
     /* ======================== Socket 资源 ======================== */
-    p2p_socket_t                sock;               // UDP 套接字描述符
-    p2p_socket_t                tcp_sock;           // TCP 套接字（打洞/回退用）
+    sock_t                      sock;               // UDP 套接字描述符
+    sock_t                      tcp_sock;           // TCP 套接字（打洞/回退用）
     struct sockaddr_in          active_addr;        // 当前通信目标地址
 
     /* ======================== NAT 检测 ======================== */
@@ -198,10 +197,10 @@ typedef struct p2p_session {
     /*
      * 启用 P2P_THREADED 时，会话在独立线程中运行。
      * 需要互斥锁保护共享状态。
-     * 类型由 p2p_platform.h 定义（pthread_t / HANDLE）。
+     * 类型由 stdc 模块定义（pthread_t / HANDLE）。
      */
-    p2p_thread_t                thread;             // 工作线程
-    p2p_mutex_t                 mtx;                // 互斥锁
+    thd_t                       thread;             // 工作线程
+    P_mutex_t                   mtx;                // 互斥锁
     int                         thread_running;     // 线程是否运行中
     int                         quit;               // 退出标志
 #endif
@@ -215,17 +214,17 @@ typedef struct p2p_session {
  */
 static inline const char* p2p_nat_type_str(int type) {
     switch (type) {
-        case P2P_NAT_DETECTING:        return LA_W("Detecting...", LA_W25, 26);
-        case P2P_NAT_TIMEOUT:          return LA_W("Timeout (no response)", LA_W131, 132);
-        case P2P_NAT_UNKNOWN:          return LA_W("Unknown", LA_W137, 138);
-        case P2P_NAT_OPEN:             return LA_W("Open Internet (No NAT)", LA_W65, 66);
-        case P2P_NAT_FULL_CONE:        return LA_W("Full Cone NAT", LA_W40, 41);
-        case P2P_NAT_RESTRICTED:       return LA_W("Restricted Cone NAT", LA_W104, 105);
-        case P2P_NAT_PORT_RESTRICTED:  return LA_W("Port Restricted Cone NAT", LA_W79, 80);
-        case P2P_NAT_SYMMETRIC:        return LA_W("Symmetric NAT (port-random)", LA_W126, 127);
-        case P2P_NAT_BLOCKED:          return LA_W("UDP Blocked (STUN unreachable)", LA_W135, 136);
-        case P2P_NAT_UNSUPPORTED:      return LA_W("Unsupported (no STUN/probe configured)", LA_W140, 141);
-        default:                       return LA_W("Unknown", LA_W137, 138);
+        case P2P_NAT_DETECTING:        return LA_W("Detecting...", LA_W21, 26);
+        case P2P_NAT_TIMEOUT:          return LA_W("Timeout (no response)", LA_W116, 132);
+        case P2P_NAT_UNKNOWN:          return LA_W("Unknown", LA_W122, 138);
+        case P2P_NAT_OPEN:             return LA_W("Open Internet (No NAT)", LA_W58, 66);
+        case P2P_NAT_FULL_CONE:        return LA_W("Full Cone NAT", LA_W35, 41);
+        case P2P_NAT_RESTRICTED:       return LA_W("Restricted Cone NAT", LA_W91, 105);
+        case P2P_NAT_PORT_RESTRICTED:  return LA_W("Port Restricted Cone NAT", LA_W72, 80);
+        case P2P_NAT_SYMMETRIC:        return LA_W("Symmetric NAT (port-random)", LA_W111, 127);
+        case P2P_NAT_BLOCKED:          return LA_W("UDP Blocked (STUN unreachable)", LA_W120, 136);
+        case P2P_NAT_UNSUPPORTED:      return LA_W("Unsupported (no STUN/probe configured)", LA_W124, 141);
+        default:                       return LA_W("Unknown", LA_W122, 138);
     }
 }
 
@@ -270,8 +269,8 @@ struct p2p_remote_candidate_entry {
 static inline int pack_candidate(const p2p_candidate_entry_t *c, uint8_t *buf) {
     p2p_candidate_t w;
     w.type     = htonl((uint32_t)c->type);
-    p2p_sockaddr_to_wire(&c->addr,      &w.addr);
-    p2p_sockaddr_to_wire(&c->base_addr, &w.base_addr);
+    sockaddr_to_p2p_wire(&c->addr, &w.addr);
+    sockaddr_to_p2p_wire(&c->base_addr, &w.base_addr);
     w.priority = htonl(c->priority);
     memcpy(buf, &w, sizeof(w));
     return (int)sizeof(w);  /* 32 */
@@ -284,8 +283,8 @@ static inline int unpack_candidate(p2p_candidate_entry_t *c, const uint8_t *buf)
     p2p_candidate_t w;
     memcpy(&w, buf, sizeof(w));
     c->type     = (int)ntohl(w.type);
-    p2p_wire_to_sockaddr(&w.addr,      &c->addr);
-    p2p_wire_to_sockaddr(&w.base_addr, &c->base_addr);
+    sockaddr_from_p2p_wire(&w.addr, &c->addr);
+    sockaddr_from_p2p_wire(&w.base_addr, &c->base_addr);
     c->priority = ntohl(w.priority);
     return (int)sizeof(w);  /* 32 */
 }
@@ -300,9 +299,11 @@ static inline int unpack_candidate(p2p_candidate_entry_t *c, const uint8_t *buf)
 static inline p2p_candidate_entry_t *p2p_cand_push_local(p2p_session_t *s) {
     if (s->local_cand_cnt >= s->local_cand_cap) {
         int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
-        p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(
-            s->local_cands, nc * sizeof(p2p_candidate_entry_t));
-        if (!p) return NULL;
+        p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_candidate_entry_t));
+        if (!p) {
+            printf("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F64, 241), nc);
+            return NULL;
+        }
         s->local_cands    = p;
         s->local_cand_cap = nc;
     }
@@ -312,15 +313,14 @@ static inline p2p_candidate_entry_t *p2p_cand_push_local(p2p_session_t *s) {
 static inline p2p_remote_candidate_entry_t *p2p_cand_push_remote(p2p_session_t *s) {
     if (s->remote_cand_cnt >= s->remote_cand_cap) {
         int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
-        p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(
-            s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
-        if (!p) return NULL;
-
-        if (nc > s->remote_cand_cap) {
-            memset(p + s->remote_cand_cap, 0,
-                   (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));
+        p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
+        if (!p) {
+            printf("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F65, 242), nc);
+            return NULL;
         }
-
+        if (nc > s->remote_cand_cap) {
+            memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));
+        }
         s->remote_cands    = p;
         s->remote_cand_cap = nc;
     }
@@ -332,13 +332,12 @@ static inline int p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     if (need <= s->remote_cand_cap) return 0;
     int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap : 8;
     while (nc < need) nc *= 2;
-    p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(
-        s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
-    if (!p) return -1;
-
-    memset(p + s->remote_cand_cap, 0,
-           (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));
-
+    p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
+    if (!p) {
+        printf("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F65, 242), nc);
+        return -1;
+    }
+    memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));
     s->remote_cands    = p;
     s->remote_cand_cap = nc;
     return 0;

@@ -1,5 +1,5 @@
 /*
- * p2p_common.h — 共享序列化工具（供库内部及 p2p_server 使用）
+ * 共享序列化工具（供库内部及 p2p_server 使用）
  *
  * 包含不依赖 LANG/i18n 宏和 p2p_session_t 的轻量工具：
  *   - ICE 候选地址基础结构体 p2p_candidate_entry_t
@@ -15,11 +15,8 @@
 #ifndef P2P_COMMON_H
 #define P2P_COMMON_H
 
-#include <stdint.h>
-#include <string.h>             /* strncpy, memcpy */
-
-#include <p2pp.h>               /* p2p_signaling_payload_hdr_t, p2p_candidate_t, p2p_sockaddr_t */
-#include "p2p_platform.h"       /* htonl/ntohl、struct sockaddr_in、sa_family_t 等 */
+#include <stdc.h>
+#include <p2pp.h>
 
 /*
  * seq_diff: 计算序列号差值（处理回绕）
@@ -40,13 +37,34 @@ static inline int16_t seq_diff(uint16_t a, uint16_t b) {
  * sockaddr ↔ wire 格式转换
  * ============================================================================ */
 
+static inline void sockaddr_init_with_ip(struct sockaddr_in *s, const char *ip, uint16_t host_port) {
+    memset(s, 0, sizeof(struct sockaddr_in));
+    s->sin_family = AF_INET;
+    inet_pton(AF_INET, ip, &s->sin_addr);
+    s->sin_port = htons(host_port);
+}
+
+static inline void sockaddr_init_with_host(struct sockaddr_in *s, uint32_t host_ip, uint16_t host_port) {
+    memset(s, 0, sizeof(struct sockaddr_in));
+    s->sin_family = AF_INET;
+    s->sin_addr.s_addr = htonl(host_ip);
+    s->sin_port = htons(host_port);
+}
+
+static inline void sockaddr_init_with_net(struct sockaddr_in *s, uint32_t* net_ip, uint16_t* net_port) {
+    memset(s, 0, sizeof(struct sockaddr_in));
+    s->sin_family = AF_INET;
+    memcpy(&s->sin_addr.s_addr, (void*)net_ip, 4);
+    memcpy(&s->sin_port, (void*)net_port, 2);
+}
+
 /*
  * struct sockaddr_in → p2p_sockaddr_t
  *
  * sin_port/sin_addr 已是网络字节序；统一用 htonl 写入确保跨平台一致性。
- * sin_port（uint16_t，大端）零扩展后再 htonl，与 p2p_wire_to_sockaddr 对称。
+ * sin_port（uint16_t，大端）零扩展后再 htonl，与 sockaddr_from_p2p_wire 对称。
  */
-static inline void p2p_sockaddr_to_wire(const struct sockaddr_in *s, p2p_sockaddr_t *w) {
+static inline void sockaddr_to_p2p_wire(const struct sockaddr_in *s, p2p_sockaddr_t *w) {
     w->family = htonl((uint32_t)s->sin_family);
     w->port   = htonl((uint32_t)s->sin_port);
     w->ip     = s->sin_addr.s_addr;     /* 已是网络字节序，直接存储 */
@@ -57,7 +75,7 @@ static inline void p2p_sockaddr_to_wire(const struct sockaddr_in *s, p2p_sockadd
  *
  * 自动清零 sin_zero[8] 及 macOS 上的 sin_len 字段。
  */
-static inline void p2p_wire_to_sockaddr(const p2p_sockaddr_t *w, struct sockaddr_in *s) {
+static inline void sockaddr_from_p2p_wire(const p2p_sockaddr_t *w, struct sockaddr_in *s) {
     memset(s, 0, sizeof(*s));
     s->sin_family      = (sa_family_t)ntohl(w->family);
     s->sin_port        = (in_port_t)  ntohl(w->port);

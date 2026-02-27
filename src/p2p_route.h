@@ -2,7 +2,7 @@
 #ifndef P2P_ROUTE_H
 #define P2P_ROUTE_H
 
-#include "p2p_platform.h"   /* cross-platform socket headers */
+#include "../stdc/stdc.h"   /* cross-platform utilities */
 
 typedef struct {
     struct sockaddr_in* local_addrs;
@@ -26,8 +26,8 @@ int  route_detect_local(route_ctx_t *rt);
 
 bool  route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv);
 
-int  route_send_probe(route_ctx_t *rt, p2p_socket_t sock, const struct sockaddr_in *peer_priv, uint16_t local_port);
-int  route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, p2p_socket_t sock);
+int  route_send_probe(route_ctx_t *rt, sock_t sock, const struct sockaddr_in *peer_priv, uint16_t local_port);
+int  route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, sock_t sock);
 int  route_on_probe_ack(route_ctx_t *rt, const struct sockaddr_in *from);
 
 #endif /* P2P_ROUTE_H */

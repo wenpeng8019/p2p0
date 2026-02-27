@@ -130,6 +130,8 @@
  *   4. 处理接收和发送
  */
 
+#define MOD_TAG "SCTP"
+
 #include "p2p_internal.h"
 
 /*
@@ -206,7 +208,7 @@ static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, ui
  */
 static int sctp_init(p2p_session_t *s) {
     (void)s;
-    P2P_LOG_INFO("sctp", "%s", LA_S("[SCTP] usrsctp wrapper initialized (skeleton)", LA_S3, 154));
+    printf("I:", LA_S("[SCTP] usrsctp wrapper initialized (skeleton)", LA_S3, 154));
     
     /*
      * 完整实现示例：
@@ -262,7 +264,7 @@ static int sctp_init(p2p_session_t *s) {
  */
 static int sctp_send(p2p_session_t *s, const void *buf, int len) {
     (void)s; (void)buf;
-    P2P_LOG_TRACE("sctp", LA_F("[SCTP] sending %d bytes", LA_F4, 221), len);
+    printf("V:", LA_F("[SCTP] sending %d bytes", LA_F120, 221), len);
     
     /* 
      * 完整实现：
@@ -315,7 +317,7 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
     if (type != P2P_PKT_DATA) return;
     (void)from; (void)s; (void)payload;
     
-    P2P_LOG_TRACE("sctp", LA_F("[SCTP] received encapsulated packet, length %d", LA_F3, 220), len);
+    printf("V:", LA_F("[SCTP] received encapsulated packet, length %d", LA_F119, 220), len);
     
     /*
      * 完整实现：

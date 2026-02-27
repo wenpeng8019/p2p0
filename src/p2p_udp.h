@@ -6,14 +6,14 @@
 #define P2P_UDP_H
 
 #include <p2pp.h>               /* p2p_packet_hdr_t 定义 */
-#include "p2p_platform.h"       /* cross-platform socket headers */
+#include "../stdc/stdc.h"       /* cross-platform utilities */
 
-p2p_socket_t  udp_create_socket(uint16_t port);
-int  udp_send_to(p2p_socket_t sock, const struct sockaddr_in *addr,
-                 const void *buf, int len);
-int  udp_recv_from(p2p_socket_t sock, struct sockaddr_in *from,
-                   void *buf, int max_len);
-int  udp_send_packet(p2p_socket_t sock, const struct sockaddr_in *addr,
+sock_t  udp_open_socket(uint16_t port);
+int  udp_send_to(sock_t sock, const struct sockaddr_in *addr,
+                 const void *data, int len);
+int  udp_recv_from(sock_t sock, struct sockaddr_in *from,
+                   void *buf, int buf_size);
+int  udp_send_packet(sock_t sock, const struct sockaddr_in *addr,
                      uint8_t type, uint8_t flags, uint16_t seq,
                      const void *payload, int payload_len);
 

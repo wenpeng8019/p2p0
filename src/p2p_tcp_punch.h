@@ -4,7 +4,7 @@
 #ifndef P2P_TCP_PUNCH_H
 #define P2P_TCP_PUNCH_H
 
-#include "p2p_platform.h"   /* cross-platform socket headers */
+#include "../stdc/stdc.h"   /* cross-platform utilities */
 
 struct p2p_session;
 

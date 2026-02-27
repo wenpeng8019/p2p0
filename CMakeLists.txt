@@ -79,7 +79,6 @@ set(LIB_SRCS
     src/p2p_crypto_extra.c
     src/p2p_signal_pubsub.c
     src/p2p_signal_compact.c
-    src/p2p_log.c
     src/p2p_http.c
 )
 
@@ -168,6 +167,9 @@ endif()
 add_library(p2p_static STATIC ${LIB_SRCS})
 target_include_directories(p2p_static PRIVATE src)
 target_link_libraries(p2p_static stdc ${PLATFORM_LIBS})
+if(I18N_ENABLED)
+    target_compile_definitions(p2p_static PRIVATE I18N_ENABLED)
+endif()
 if(THREADED)
     target_link_libraries(p2p_static Threads::Threads)
 endif()

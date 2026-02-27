@@ -316,7 +316,7 @@
 
 #include <p2p.h>
 #include <p2pp.h>           /* RELAY 模式协议定义 */
-#include "p2p_platform.h"   /* cross-platform socket headers */
+#include "../stdc/stdc.h"   /* cross-platform utilities */
 
 /* ============================================================================
  * 配置参数
@@ -377,7 +377,7 @@ typedef enum {
  * 保存与信令服务器的连接状态和相关信息。
  */
 typedef struct {
-    p2p_socket_t fd;                             /* TCP socket 描述符 */
+    sock_t fd;                                   /* TCP socket 描述符 */
     char my_name[P2P_PEER_ID_MAX];               /* 本地 peer 名称 */
     char incoming_peer_name[P2P_PEER_ID_MAX];    /* 收到请求时的对端名称 */
     struct sockaddr_in server_addr;              /* 服务器地址 */

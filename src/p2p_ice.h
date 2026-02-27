@@ -132,7 +132,7 @@
 #define P2P_ICE_H
 
 #include <stdint.h>
-#include "p2p_platform.h"   /* cross-platform socket headers */
+#include "../stdc/stdc.h"   /* cross-platform utilities */
 #include "p2pp.h"
 
 /* ============================================================================

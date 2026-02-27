@@ -3,6 +3,8 @@
  * 路由检测
  */
 
+#define MOD_TAG "ROUTE"
+
 #include "p2p_internal.h"
 #ifdef _WIN32
 #   include <winsock2.h>
@@ -37,7 +39,7 @@ void route_final(route_ctx_t *rt) {
 // 检测获取本地所有有效的网络地址
 int route_detect_local(route_ctx_t *rt) {
 
-    P2P_LOG_DEBUG("ROUTE", "%s", LA_S("Detecting local network addresses", LA_S17, 168));
+    printf("D: %s", LA_S("Detecting local network addresses", LA_S19, 168));
 
     rt->addr_count = 0;
 
@@ -117,9 +119,9 @@ int route_detect_local(route_ctx_t *rt) {
 #endif
 
     for (i = 0; i < rt->addr_count; i++) {
-        P2P_LOG_DEBUG("ROUTE", "  [%d] %s/%d", i, inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
+        printf("D:", LA_F("  [%d] %s/%d", LA_F2, 257), i, inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
     }
-    P2P_LOG_INFO("ROUTE", "%s: %d %s", LA_W("Local address detection done", LA_W52, 53), rt->addr_count, LA_W("address(es)", LA_W6, 7));
+    printf("I:", LA_F("%s: %d %s", LA_F54, 309), LA_W("Local address detection done", LA_W46, 53), rt->addr_count, LA_W("address(es)", LA_W5, 7));
     return rt->addr_count;
 }
 
@@ -132,18 +134,18 @@ bool route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_pri
         uint32_t local_ip = rt->local_addrs[i].sin_addr.s_addr;
         uint32_t mask = rt->local_masks[i];
         if ((local_ip & mask) == (peer_ip & mask)) {
-            P2P_LOG_INFO("ROUTE", "%s %s %s %s", LA_W("Peer is on the same subnet as", LA_W73, 74),
-                         inet_ntoa(peer_priv->sin_addr), LA_S("via local", LA_S60, 213),
+            printf("I:", LA_F("%s %s %s %s", LA_F12, 267), LA_W("Peer is on the same subnet as", LA_W66, 74),
+                         inet_ntoa(peer_priv->sin_addr), LA_S("via local", LA_S90, 213),
                          inet_ntoa(rt->local_addrs[i].sin_addr));
             return true;
         }
     }
-    P2P_LOG_DEBUG("ROUTE", "%s: %s", LA_W("Peer is on a different subnet", LA_W72, 73), inet_ntoa(peer_priv->sin_addr));
+    printf("D:", LA_F("%s: %s", LA_F56, 311), LA_W("Peer is on a different subnet", LA_W65, 73), inet_ntoa(peer_priv->sin_addr));
     return false;
 }
 
 // 直接向对方内网地址发送 ROUTE_PROBE 消息，用于确认自己可以和对方直接通讯，即处于同一个子网内
-int route_send_probe(route_ctx_t *rt, p2p_socket_t sock,
+int route_send_probe(route_ctx_t *rt, sock_t sock,
                      const struct sockaddr_in *peer_priv,
                      uint16_t local_port) {
 
@@ -152,18 +154,19 @@ int route_send_probe(route_ctx_t *rt, p2p_socket_t sock,
     payload[0] = (uint8_t)(local_port >> 8);
     payload[1] = (uint8_t)(local_port & 0xFF);
 
-    P2P_LOG_INFO("ROUTE", "%s %s:%d", LA_W("Sent route probe to", LA_W117, 118),
+    printf("I:", LA_F("%s %s:%d", LA_F21, 276), LA_W("Sent route probe to", LA_W103, 118),
                  inet_ntoa(peer_priv->sin_addr), ntohs(peer_priv->sin_port));
-    rt->probe_time = p2p_time_ms();
+    P_clock _clk; P_clock_now(&_clk);
+    rt->probe_time = clock_ms(_clk);
     return udp_send_packet(sock, peer_priv, P2P_PKT_ROUTE_PROBE, 0, 0, payload, 2);
 }
 
 // 处理对方直接发过来的 ROUTE_PROBE 消息，说明对方和自己处于同一个子网内
-int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, p2p_socket_t sock) { (void)rt;
+int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, sock_t sock) { (void)rt;
 
-    P2P_LOG_INFO("ROUTE", "%s %s:%d, %s", LA_W("Received route probe from", LA_W92, 93),
+    printf("I:", LA_F("%s %s:%d, %s", LA_F24, 279), LA_W("Received route probe from", LA_W82, 93),
                  inet_ntoa(from->sin_addr), ntohs(from->sin_port),
-                 LA_S("sending ACK", LA_S50, 203));
+                 LA_S("sending ACK", LA_S75, 203));
 
     // ROUTE_PROBE 回复应答消息
     return udp_send_packet(sock, from, P2P_PKT_ROUTE_PROBE_ACK, 0, 0, NULL, 0);
@@ -173,7 +176,7 @@ int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, p2p_socket_t
 int route_on_probe_ack(route_ctx_t *rt, const struct sockaddr_in *from) {
     rt->lan_peer_addr = *from;
     rt->lan_confirmed = 1;
-    P2P_LOG_INFO("ROUTE", "%s %s:%d", LA_W("LAN peer confirmed", LA_W50, 51),
+    printf("I:", LA_F("%s %s:%d", LA_F21, 276), LA_W("LAN peer confirmed", LA_W44, 51),
                  inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     return 0;
 }

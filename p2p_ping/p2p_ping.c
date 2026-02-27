@@ -19,7 +19,7 @@
 #include <time.h>
 
 #include <p2p.h>
-#include "../src/p2p_platform.h"  /* 跨平台兼容层 */
+#include "../stdc/stdc.h"  /* 跨平台兼容层 */
 #include "LANG.h"
 #include "LANG.cn.h"
 
@@ -125,8 +125,8 @@ static void tui_log_callback(p2p_log_level_t level,
 /* 初始化 TUI（连接建立后调用一次） */
 static void tui_init(void) {
     /* 非交互终端（stdout 被重定向）时跳过 TUI，避免后台进程触发 SIGTTOU */
-    if (!p2p_isatty(stdout)) return;
-    g_rows = p2p_get_terminal_rows();
+    if (!P_isatty(stdout)) return;
+    g_rows = P_term_rows();
 
 #ifdef _WIN32
     /* Windows：先启用 ANSI VT 输出，再发送 ANSI 序列，否则第一屏乱码 */
@@ -271,7 +271,7 @@ static void on_signal(int sig) {
 static void on_sigwinch(int sig) {
     (void)sig;
     if (!g_tui_active) return;
-    int new_rows = p2p_get_terminal_rows();
+    int new_rows = P_term_rows();
     if (new_rows != g_rows) {
         g_rows = new_rows;
         printf("\033[1;%dr", g_rows - 1);

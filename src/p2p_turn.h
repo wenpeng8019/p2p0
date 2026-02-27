@@ -121,7 +121,7 @@
 #ifndef P2P_TURN_H
 #define P2P_TURN_H
 
-#include "p2p_platform.h"   /* cross-platform socket headers */
+#include "../stdc/stdc.h"   /* cross-platform utilities */
 
 struct p2p_session;
 

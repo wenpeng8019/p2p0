@@ -1,10 +1,11 @@
-
 /*
  * NAT 穿透实现（纯打洞逻辑）
  *
  * 只负责 PUNCH/ACK/PING/PONG 的发送和接收。
  * 候选列表统一存储在 p2p_session 中，本模块从 session 读取远端候选进行打洞。
  */
+
+#define MOD_TAG "NAT"
 
 #include "p2p_internal.h"
 
@@ -50,13 +51,14 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
     if (!s) return -1;
     
     nat_ctx_t *n = &s->nat;
-    uint64_t now = p2p_time_ms();
+    P_clock _clk; P_clock_now(&_clk);
+    uint64_t now = clock_ms(_clk);
     
     /* ========== 首次批量或重新启动模式：addr == NULL ========== */
 
     if (addr == NULL) {
         if (s->remote_cand_cnt == 0) {
-            P2P_LOG_ERROR("NAT", "%s", LA_S("ERROR: No remote candidates to punch", LA_S19, 171));
+            printf("E: %s", LA_S("ERROR: No remote candidates to punch", LA_S22, 171));
             return -1;
         }
         
@@ -68,8 +70,8 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
         // 打印详细日志
         if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
 
-            P2P_LOG_VERBOSE("NAT", "%s %d %s", LA_W("START: Punching to", LA_W121, 122),
-                            s->remote_cand_cnt, LA_W("candidates", LA_W20, 21));
+            printf("V:", LA_F("%s %d %s", LA_F6, 261), LA_W("START: Punching to", LA_W106, 122),
+                            s->remote_cand_cnt, LA_W("candidates", LA_W17, 21));
 
             for (int i = 0; i < s->remote_cand_cnt; i++) {
                 const char *type_str = "Unknown";
@@ -91,7 +93,7 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
                     }
                 }
 
-                P2P_LOG_VERBOSE("NAT", "  [%d] %s: %s:%d", i, type_str,
+                printf("V:", LA_F("  [%d] %s: %s:%d", LA_F3, 258), i, type_str,
                                 inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
                                 ntohs(s->remote_cands[i].cand.addr.sin_port));
             }
@@ -118,7 +120,7 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
         n->state = NAT_PUNCHING;
         n->punch_start = now;
 
-        P2P_LOG_VERBOSE("NAT", "Restart punching from RELAY on new candidate %s:%d",
+        printf("V:", LA_F("Restart punching from RELAY on new candidate %s:%d", LA_F105, 353),
                         inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
 
         // 发送打洞包
@@ -133,7 +135,7 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
     }
     else {
 
-        P2P_LOG_VERBOSE("NAT", "Ignore punch request to %s:%d since already connected",
+        printf("V:", LA_F("Ignore punch request to %s:%d since already connected", LA_F74, 324),
                         inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
     }
 
@@ -148,8 +150,9 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
 int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {
     (void)payload; (void)len;
 
-    nat_ctx_t *n = &s->nat;    
-    uint64_t now = p2p_time_ms();
+    nat_ctx_t *n = &s->nat;
+    P_clock _clk; P_clock_now(&_clk);
+    uint64_t now = clock_ms(_clk);
 
     switch (type) {
 
@@ -162,7 +165,7 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
 
     case P2P_PKT_PUNCH_ACK:
 
-        P2P_LOG_VERBOSE("NAT", "%s %s:%d", type == P2P_PKT_PUNCH ? LA_W("PUNCH: Received from", LA_W86, 87) : LA_W("PUNCH_ACK: Received from", LA_W87, 88),
+        printf("V:", LA_F("%s %s:%d", LA_F21, 276), type == P2P_PKT_PUNCH ? LA_W("PUNCH: Received from", LA_W76, 87) : LA_W("PUNCH_ACK: Received from", LA_W77, 88),
                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
         // 通知 ICE 层（如果启用）
@@ -177,10 +180,11 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
             n->state = NAT_CONNECTED;
             n->last_recv_time = now;
             
-            P2P_LOG_INFO("NAT", "%s %s:%d", LA_W("SUCCESS: Hole punched! Connected to", LA_W125, 126),
-                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+            printf("I:", LA_F("%s %s:%d", LA_F21, 276),
+                   LA_W("SUCCESS: Hole punched! Connected to", LA_W110, 126),
+                   inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
-            P2P_LOG_INFO("NAT", "  %s %llu ms", LA_W("Time:", LA_W128, 129), now - n->punch_start);
+            printf("I:", LA_F("  %s %llu ms", LA_F0, 255), LA_W("Time:", LA_W113, 129), now - n->punch_start);
         }
         return 0;
 
@@ -195,7 +199,7 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
 
         n->last_recv_time = now;
 
-        P2P_LOG_VERBOSE("NAT", "%s %s:%d", type == P2P_PKT_PONG ? "received PONG from" : "received PING from",
+        printf("V:", LA_F("%s %s:%d", LA_F21, 276), type == P2P_PKT_PONG ? "received PONG from" : "received PING from",
                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
         return 0;
@@ -213,7 +217,8 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
 int nat_tick(p2p_session_t *s) {
     nat_ctx_t *n = &s->nat;
 
-    uint64_t now = p2p_time_ms();
+    P_clock _clk; P_clock_now(&_clk);
+    uint64_t now = clock_ms(_clk);
     switch (n->state) {
 
         case NAT_PUNCHING:
@@ -221,8 +226,9 @@ int nat_tick(p2p_session_t *s) {
             // 超时判断
             if (now - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 
-                P2P_LOG_WARN("NAT", "%s (%llu ms), %s", LA_W("TIMEOUT: Punch failed after", LA_W133, 134),
-                             now - n->punch_start, LA_W("attempts, switching to RELAY", LA_W11, 12));
+                printf("W:", LA_F("%s (%llu ms), %s", LA_F34, 289),
+                       LA_W("TIMEOUT: Punch failed after", LA_W118, 134),
+                       now - n->punch_start, LA_W("attempts, switching to RELAY", LA_W9, 12));
 
                 n->state = NAT_RELAY;
                 return 0;
@@ -240,7 +246,7 @@ int nat_tick(p2p_session_t *s) {
 
                 if (should_send) {
 
-                    P2P_LOG_DEBUG("NAT", "%s %s:%d (candidate %d)", "",
+                    printf("D:", LA_F("%s %s:%d (candidate %d)", LA_F23, 278), "",
                                   inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
                                   ntohs(s->remote_cands[i].cand.addr.sin_port), i);
 
@@ -254,9 +260,9 @@ int nat_tick(p2p_session_t *s) {
 
                 n->last_send_time = now;
 
-                P2P_LOG_VERBOSE("NAT", "%s %s %d/%d %s (elapsed: %llu ms)", LA_W("PUNCHING: Attempt", LA_W88, 89),
-                                LA_S("to", LA_S56, 209), sent_cnt,
-                                s->remote_cand_cnt, LA_W("candidates", LA_W20, 21),
+                printf("V:", LA_F("%s %s %d/%d %s (elapsed: %llu ms)", LA_F10, 265), LA_W("PUNCHING: Attempt", LA_W78, 89),
+                                LA_S("to", LA_S87, 209), sent_cnt,
+                                s->remote_cand_cnt, LA_W("candidates", LA_W17, 21),
                                 now - n->punch_start);
             }
             break;
@@ -266,7 +272,7 @@ int nat_tick(p2p_session_t *s) {
             // 发送心跳保活包
             if (now - n->last_send_time >= PING_INTERVAL_MS) {
 
-                P2P_LOG_VERBOSE("NAT", "%s %s:%d", "",
+                printf("V:", LA_F("%s %s:%d", LA_F21, 276), "",
                                 inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port));
 
                 udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PING, 0, 0, NULL, 0);
@@ -276,8 +282,10 @@ int nat_tick(p2p_session_t *s) {
             // 超时检查
             if (n->last_recv_time > 0 && now - n->last_recv_time >= PONG_TIMEOUT_MS) {
 
-                P2P_LOG_WARN("NAT", "%s (%s %d ms)", LA_W("TIMEOUT: Connection lost", LA_W132, 133),
-                             LA_S("no pong for", LA_S37, 189), PONG_TIMEOUT_MS);
+                printf("W:", LA_F("%s (%s %d ms)", LA_F35, 290),
+                       LA_W("TIMEOUT: Connection lost", LA_W117, 133),
+                       LA_S("no pong for", LA_S51, 189),
+                       PONG_TIMEOUT_MS);
 
                 n->state = NAT_INIT;
                 return -1;

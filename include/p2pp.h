@@ -325,7 +325,7 @@ typedef struct {
  *   macOS / BSD     : sin_len(1B) + sin_family(1B) + sin_port(2B) + sin_addr(4B) + sin_zero[8] = 16B
  *
  * 本结构统一序列化为 3×uint32_t（大端），与平台无关。
- * 转换函数见 p2p_internal.h：p2p_sockaddr_to_wire() / p2p_wire_to_sockaddr()
+ * 转换函数见 p2p_internal.h：sockaddr_to_p2p_wire() / sockaddr_from_p2p_wire()
  */
 typedef struct {
     uint32_t            family;             // 地址族   htonl(sin_family)

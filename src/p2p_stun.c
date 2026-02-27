@@ -21,6 +21,8 @@
  *   即 NAT 设备映射后的 IP:Port，称为 Server Reflexive (Srflx) 地址。
  */
 
+#define MOD_TAG "STUN"
+
 #include "p2p_internal.h"
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -416,7 +418,7 @@ static nat_detect_ctx_t g_nat_detect_ctx = {0};
 /*
  * 获取本地 socket 绑定的地址
  */
-static int get_local_address(p2p_socket_t sock, struct sockaddr_in *addr) {
+static int get_local_address(sock_t sock, struct sockaddr_in *addr) {
     socklen_t len = sizeof(*addr);
     if (getsockname(sock, (struct sockaddr *)addr, &len) < 0) {
         return -1;
@@ -477,7 +479,7 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
                 ctx->detected_type = P2P_NAT_OPEN;
                 ctx->state = NAT_TEST_COMPLETED;
                 s->nat_type = (int)ctx->detected_type;
-                P2P_LOG_INFO("NAT", "%s %s", LA_W("Detection completed", LA_W26, 27), p2p_nat_type_str(ctx->detected_type));
+                printf("I:", LA_F("%s %s", LA_F8, 263), LA_W("Detection completed", LA_W22, 27), p2p_nat_type_str(ctx->detected_type));
                 return;
             }
         }
@@ -485,7 +487,7 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         /* 解析 CHANGED-ADDRESS（如果有） */
         /* TODO: 解析 alt_addr */
         
-        P2P_LOG_INFO("NAT", "%s %s %s: %s:%d", LA_W("Test", LA_W127, 128), "I:", LA_W("Mapped address", LA_W53, 54),
+        printf("I:", LA_F("%s %s %s: %s:%d", LA_F17, 272), LA_W("Test", LA_W112, 128), "I:", LA_W("Mapped address", LA_W47, 54),
                      inet_ntoa(mapped.sin_addr), ntohs(mapped.sin_port));
         
         /* ★ 添加 Srflx 候选到 ICE 候选列表 */
@@ -496,14 +498,14 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
                 /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 c->addr = mapped;
-                P2P_LOG_INFO("ICE", "✓ %s %s %s:%d (%s=%u)",
-                             LA_W("Gathered Srflx Candidate", LA_W43, 44), LA_S("Added Remote Candidate", LA_S5, 156),
+                printf("I:", LA_F("✓ %s %s %s:%d (%s=%u)", LA_F129, 369),
+                             LA_W("Gathered Srflx Candidate", LA_W38, 44), LA_S("Added Remote Candidate", LA_S5, 156),
                              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                             LA_S("priority", LA_S41, 194), c->priority);
+                             LA_S("priority", LA_S58, 194), c->priority);
                 /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
                 p2p_ice_send_local_candidate(s, c);
             } else {
-                P2P_LOG_WARN("ICE", "✗ %s", LA_W("Cannot add Srflx candidate: realloc failed (OOM)", LA_W21, 22));
+                printf("W:", LA_F("✗ %s", LA_F130, 370), LA_W("Cannot add Srflx candidate: realloc failed (OOM)", LA_W18, 22));
             }
         }
         
@@ -517,8 +519,8 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         ctx->detected_type = P2P_NAT_FULL_CONE;
         ctx->state = NAT_TEST_COMPLETED;
         s->nat_type = (int)ctx->detected_type;
-        P2P_LOG_INFO("NAT", "%s %s %s! %s %s", LA_W("Test", LA_W127, 128), "II:", LA_W("Success", LA_W124, 125),
-                     LA_S("Detection completed", LA_S18, 169), p2p_nat_type_str(ctx->detected_type));
+        printf("I:", LA_F("%s %s %s! %s %s", LA_F16, 271), LA_W("Test", LA_W112, 128), "II:", LA_W("Success", LA_W109, 125),
+                     LA_S("Detection completed", LA_S20, 169), p2p_nat_type_str(ctx->detected_type));
         break;
     }
     
@@ -529,8 +531,8 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
         ctx->detected_type = P2P_NAT_RESTRICTED;
         ctx->state = NAT_TEST_COMPLETED;
         s->nat_type = (int)ctx->detected_type;
-        P2P_LOG_INFO("NAT", "%s %s %s! %s %s", LA_W("Test", LA_W127, 128), "III:", LA_W("Success", LA_W124, 125),
-                     LA_S("Detection completed", LA_S18, 169), p2p_nat_type_str(ctx->detected_type));
+        printf("I:", LA_F("%s %s %s! %s %s", LA_F16, 271), LA_W("Test", LA_W112, 128), "III:", LA_W("Success", LA_W109, 125),
+                     LA_S("Detection completed", LA_S20, 169), p2p_nat_type_str(ctx->detected_type));
         break;
     }
     
@@ -551,7 +553,8 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
     }
     
     nat_detect_ctx_t *ctx = &g_nat_detect_ctx;
-    uint64_t now = p2p_time_ms();
+    P_clock _clk; P_clock_now(&_clk);
+    uint64_t now = clock_ms(_clk);
 
     /* 如果已完成检测，写回最终结果后返回 */
     if (ctx->state == NAT_TEST_COMPLETED) {
@@ -570,27 +573,27 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
             /* 超时失败，进入下一个测试 */
             switch (ctx->state) {
             case NAT_TEST_I_SENT:
-                P2P_LOG_WARN("NAT", "%s %s %s", LA_W("Test", LA_W127, 128), "I:", LA_W("Timeout", LA_W130, 131));
+                printf("W:", LA_F("%s %s %s", LA_F11, 266), LA_W("Test", LA_W112, 128), "I:", LA_W("Timeout", LA_W115, 131));
                 ctx->detected_type = P2P_NAT_BLOCKED;  /* 无法联系 STUN 服务器 */
                 ctx->state = NAT_TEST_COMPLETED;
                 s->nat_type = (int)ctx->detected_type;
                 return;
             
             case NAT_TEST_II_SENT:
-                P2P_LOG_WARN("NAT", "%s %s %s (%s %s %s)", LA_W("Test", LA_W127, 128), "II:", LA_W("Timeout", LA_W130, 131),
-                             LA_S("need", LA_S35, 187), LA_S("Test", LA_S55, 208), "III");
+                printf("W:", LA_F("%s %s %s (%s %s %s)", LA_F14, 269), LA_W("Test", LA_W112, 128), "II:", LA_W("Timeout", LA_W115, 131),
+                             LA_S("need", LA_S48, 187), LA_S("Test", LA_S86, 208), "III");
                 ctx->test_ii_success = 0;
                 ctx->state = NAT_TEST_II_DONE;
                 break;
             
             case NAT_TEST_III_SENT:
-                P2P_LOG_WARN("NAT", "%s %s %s", LA_W("Test", LA_W127, 128), "III:", LA_W("Timeout", LA_W130, 131));
+                printf("W:", LA_F("%s %s %s", LA_F11, 266), LA_W("Test", LA_W112, 128), "III:", LA_W("Timeout", LA_W115, 131));
                 ctx->test_iii_success = 0;
                 ctx->state = NAT_TEST_III_DONE;
                 ctx->detected_type = P2P_NAT_PORT_RESTRICTED;
                 ctx->state = NAT_TEST_COMPLETED;
                 s->nat_type = (int)ctx->detected_type;
-                P2P_LOG_INFO("NAT", "%s %s", LA_W("Detection completed", LA_W26, 27), p2p_nat_type_str(ctx->detected_type));
+                printf("I:", LA_F("%s %s", LA_F8, 263), LA_W("Detection completed", LA_W22, 27), p2p_nat_type_str(ctx->detected_type));
                 return;
             
             default:
@@ -613,7 +616,7 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
         //        s->cfg.stun_server, s->cfg.stun_port);
         
         if (resolve_host(s->cfg.stun_server, s->cfg.stun_port, &stun_addr) < 0) {
-            P2P_LOG_ERROR("NAT", "%s %s %s", LA_W("Failed to resolve", LA_W33, 34), LA_S("STUN server", LA_S54, 207), s->cfg.stun_server);
+            printf("E:", LA_F("%s %s %s", LA_F11, 266), LA_W("Failed to resolve", LA_W29, 34), LA_S("STUN server", LA_S85, 207), s->cfg.stun_server);
             ctx->state = NAT_TEST_COMPLETED;
             return;
         }
@@ -649,10 +652,10 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
             ctx->last_send_time = now;
             ctx->state = NAT_TEST_I_SENT;
             /* 不要在这里重置 retry_count，保留重试计数 */
-            P2P_LOG_INFO("NAT", "%s %s %s %s %s:%d (%s=%d)", LA_W("Sending", LA_W110, 111), LA_S("Test", LA_S55, 208), "I",
-                         LA_W("to", LA_W134, 135), s->cfg.stun_server, s->cfg.stun_port, LA_W("len", LA_W51, 52), len);
+            printf("I:", LA_F("%s %s %s %s %s:%d (%s=%d)", LA_F13, 268), LA_W("Sending", LA_W96, 111), LA_S("Test", LA_S86, 208), "I",
+                         LA_W("to", LA_W119, 135), s->cfg.stun_server, s->cfg.stun_port, LA_W("len", LA_W45, 52), len);
         } else {
-            P2P_LOG_ERROR("NAT", "%s", LA_S("Failed to build STUN request", LA_S23, 175));
+            printf("E: %s", LA_S("Failed to build STUN request", LA_S29, 175));
         }
         break;
     }
@@ -687,7 +690,7 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
         }
         ctx->state = NAT_TEST_COMPLETED;
         s->nat_type = (int)ctx->detected_type;
-        P2P_LOG_INFO("NAT", "%s %s", LA_W("Detection completed", LA_W26, 27),
+        printf("I:", LA_F("%s %s", LA_F8, 263), LA_W("Detection completed", LA_W22, 27),
                      p2p_nat_type_str(ctx->detected_type));
         break;
     }

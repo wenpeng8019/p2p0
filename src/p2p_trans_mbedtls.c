@@ -106,6 +106,8 @@
  *   - 完整实现 DTLS 1.0/1.2
  */
 
+#define MOD_TAG "MBEDTLS"
+
 #include "p2p_internal.h"
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
@@ -119,7 +121,7 @@
  */
 static void p2p_dtls_debug(void *ctx, int level, const char *file, int line, const char *str) {
     (void)ctx; (void)level;
-    P2P_LOG_DEBUG("dtls", "[MBEDTLS] %s:%04d: %s", file, line, str);
+    printf("D:", LA_F("%s:%04d: %s", LA_F59, 314), file, line, str);
 }
 
 /*
@@ -152,7 +154,10 @@ static void p2p_dtls_set_timer(void *ctx, uint32_t int_ms, uint32_t fin_ms) {
     p2p_dtls_timer_t *timer = (p2p_dtls_timer_t *)ctx;
     timer->int_ms = int_ms;
     timer->fin_ms = fin_ms;
-    if (fin_ms != 0) timer->snapshot = p2p_time_ms();
+    if (fin_ms != 0) {
+        P_clock _clk; P_clock_now(&_clk);
+        timer->snapshot = clock_ms(_clk);
+    }
 }
 
 /*
@@ -161,7 +166,8 @@ static void p2p_dtls_set_timer(void *ctx, uint32_t int_ms, uint32_t fin_ms) {
 static int p2p_dtls_get_timer(void *ctx) {
     p2p_dtls_timer_t *timer = (p2p_dtls_timer_t *)ctx;
     if (timer->fin_ms == 0) return -1;  /* 定时器已取消 */
-    uint64_t elapsed = p2p_time_ms() - timer->snapshot;
+    P_clock _clk; P_clock_now(&_clk);
+    uint64_t elapsed = clock_ms(_clk) - timer->snapshot;
     if (elapsed >= timer->fin_ms) return 2;  /* 最终超时 → 需重传 */
     if (elapsed >= timer->int_ms) return 1;  /* 中间超时 */
     return 0;  /* 未超时 */
@@ -337,7 +343,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret;
     if ((ret = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        P2P_LOG_ERROR("dtls", LA_F("[DTLS] ssl_setup failed: -0x%x", LA_F1, 218), -ret);
+        printf("E:", LA_F("ssl_setup failed: -0x%x", LA_F128, 218), -ret);
         return -1;
     }
     
@@ -399,11 +405,11 @@ static void dtls_tick(p2p_session_t *s) {
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            P2P_LOG_INFO("dtls", "%s", LA_S("[DTLS] Handshake complete", LA_S1, 152));
+            printf("I: %s", LA_S("Handshake complete", LA_S42, 152));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));
-            P2P_LOG_ERROR("dtls", LA_F("[DTLS] Handshake failed: %s (-0x%04x)", LA_F0, 217), ebuf, -ret);
+            printf("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F69, 217), ebuf, -ret);
             s->state = P2P_STATE_ERROR;
         }
     }

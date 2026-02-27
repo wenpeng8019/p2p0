@@ -2,6 +2,8 @@
  * 基于滑动窗口和 SACK 的数据包级 ARQ
  */
 
+#define MOD_TAG "RELIABLE"
+
 #include "p2p_internal.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -18,8 +20,8 @@ void reliable_init(reliable_t *r) {
     r->rto = RELIABLE_RTO_INIT;
     r->srtt = 0;
     r->rttvar = 0;
-    P2P_LOG_DEBUG("RELIABLE", "%s rto=%d win=%d",
-                  LA_W("Reliable transport initialized", LA_W100, 101), RELIABLE_RTO_INIT, RELIABLE_WINDOW);
+    printf("D:", LA_F("%s rto=%d win=%d", LA_F45, 300),
+                  LA_W("Reliable transport initialized", LA_W87, 101), RELIABLE_RTO_INIT, RELIABLE_WINDOW);
 }
 
 int reliable_window_avail(const reliable_t *r) {
@@ -34,11 +36,11 @@ int reliable_window_avail(const reliable_t *r) {
  */
 int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
     if (r->send_count >= RELIABLE_WINDOW) {
-        P2P_LOG_WARN("RELIABLE", "%s send_count=%d", LA_W("Send window full, dropping packet", LA_W109, 110), r->send_count);
+        printf("W:", LA_F("%s send_count=%d", LA_F47, 302), LA_W("Send window full, dropping packet", LA_W95, 110), r->send_count);
         return -1;
     }
     if (len > P2P_MAX_PAYLOAD) {
-        P2P_LOG_WARN("RELIABLE", "%s len=%d max=%d", LA_W("Packet too large", LA_W68, 69), len, P2P_MAX_PAYLOAD);
+        printf("W:", LA_F("%s len=%d max=%d", LA_F43, 298), LA_W("Packet too large", LA_W61, 69), len, P2P_MAX_PAYLOAD);
         return -1;
     }
 
@@ -53,8 +55,8 @@ int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
 
     r->send_seq++;
     r->send_count++;
-    P2P_LOG_VERBOSE("RELIABLE", "%s seq=%u len=%d inflight=%d",
-                    LA_W("Packet queued", LA_W67, 68), e->seq, len, r->send_count);
+    printf("V:", LA_F("%s seq=%u len=%d inflight=%d", LA_F50, 305),
+                    LA_W("Packet queued", LA_W60, 68), e->seq, len, r->send_count);
     return 0;
 }
 
@@ -78,8 +80,8 @@ int reliable_recv_pkt(reliable_t *r, uint8_t *buf, int *out_len) {
  */
 int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int len) {
     if (!seq_in_window(seq, r->recv_base, RELIABLE_WINDOW)) {
-        P2P_LOG_DEBUG("RELIABLE", "%s seq=%u base=%u",
-                      LA_W("Out-of-window packet discarded", LA_W66, 67), seq, r->recv_base);
+        printf("D:", LA_F("%s seq=%u base=%u", LA_F48, 303),
+                      LA_W("Out-of-window packet discarded", LA_W59, 67), seq, r->recv_base);
         return 0;  // 超出窗口，忽略
     }
 
@@ -88,8 +90,8 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
         memcpy(r->recv_data[idx], payload, len);
         r->recv_lens[idx] = len;
         r->recv_bitmap[idx] = 1;
-        P2P_LOG_VERBOSE("RELIABLE", "%s seq=%u len=%d base=%u",
-                        LA_W("Data stored in recv buffer", LA_W24, 25), seq, len, r->recv_base);
+        printf("V:", LA_F("%s seq=%u len=%d base=%u", LA_F49, 304),
+                        LA_W("Data stored in recv buffer", LA_W20, 25), seq, len, r->recv_base);
     }
 
     return 1;  // 应当发送 ACK
@@ -102,7 +104,8 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
  * sack_bits = ack_seq 之后的选择性确认位图
  */
 int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
-    uint64_t now = p2p_time_ms();
+    P_clock _clk; P_clock_now(&_clk);
+    uint64_t now = clock_ms(_clk);
 
     // 根据累积 ACK 推进 send_base
     while (seq_diff(ack_seq, r->send_base) > 0) {
@@ -130,13 +133,13 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
                 r->rto = r->srtt + 4 * r->rttvar;
                 if (r->rto < 50) r->rto = 50;
                 if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-                P2P_LOG_DEBUG("RELIABLE", "%s rtt=%dms srtt=%d rttvar=%d rto=%d",
-                              LA_W("RTT updated", LA_W106, 107), rtt, r->srtt, r->rttvar, r->rto);
+                printf("D:", LA_F("%s rtt=%dms srtt=%d rttvar=%d rto=%d", LA_F46, 301),
+                              LA_W("RTT updated", LA_W92, 107), rtt, r->srtt, r->rttvar, r->rto);
             }
         }
         r->send_base++;
     }
-    P2P_LOG_DEBUG("RELIABLE", "%s ack_seq=%u send_base=%u inflight=%d",
+    printf("D:", LA_F("%s ack_seq=%u send_base=%u inflight=%d", LA_F42, 297),
                   LA_W("ACK processed", LA_W2, 3), ack_seq, r->send_base, r->send_count);
 
     // SACK 位图：第 i 位 = ack_seq + 1 + i
@@ -192,7 +195,7 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
         uint16_t ack_seq = ((uint16_t)ack_payload[0] << 8) | ack_payload[1];
         uint32_t sack = ((uint32_t)ack_payload[2] << 24) | ((uint32_t)ack_payload[3] << 16)
                       | ((uint32_t)ack_payload[4] << 8)  | (uint32_t)ack_payload[5];
-        P2P_LOG_DEBUG("RELIABLE", "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",
+        printf("D:", LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F127, 368),
                       ack_seq, sack, r->recv_base,
                       addr ? inet_ntoa(addr->sin_addr) : "?",
                       addr ? ntohs(addr->sin_port) : 0);
@@ -212,7 +215,8 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
  */
 void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode) {
     if (!addr) return;
-    uint64_t now = p2p_time_ms();
+    P_clock _clk; P_clock_now(&_clk);
+    uint64_t now = clock_ms(_clk);
     uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_DATA : P2P_PKT_DATA;
 
     /* 遍历所有未确认的发送条目 */
@@ -234,7 +238,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
             e->retx_count++;
             r->rto = r->rto * 2;
             if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-            P2P_LOG_WARN("RELIABLE", "重传 seq=%u retx=%d rto=%d",
+            printf("W:", LA_F("重传 seq=%u retx=%d rto=%d", LA_F132, 372),
                          e->seq, e->retx_count, r->rto);
         }
     }
