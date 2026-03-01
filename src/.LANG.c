@@ -87,51 +87,48 @@ const char* lang_en[LA_NUM] = {
     [LA_W78] = "Received remote candidate",  /* SID:92 */
     [LA_W79] = "Received route probe from",  /* SID:93 */
     [LA_W80] = "Received signal from",  /* SID:94 */
-    [LA_W81] = "Received unknown packet type",  /* SID:95 */
-    [LA_W82] = "recv error",  /* SID:97 */
-    [LA_W83] = "Registering",  /* SID:98 */
-    [LA_W84] = "Reliable transport initialized",  /* SID:101 */
-    [LA_W85] = "Requested",  /* SID:102 */
-    [LA_W86] = "Resent",  /* SID:103 */
-    [LA_W87] = "resetting",  /* SID:104 */
-    [LA_W88] = "Restricted Cone NAT",  /* SID:105 */
-    [LA_W89] = "RTT updated",  /* SID:107 */
-    [LA_W90] = "Same subnet detected but LAN shortcut disabled",  /* SID:108 */
-    [LA_W91] = "Same subnet detected, sent ROUTE_PROBE to",  /* SID:109 */
-    [LA_W92] = "Send window full, dropping packet",  /* SID:110 */
-    [LA_W93] = "Sending",  /* SID:111 */
-    [LA_W94] = "Sending Allocate Request to",  /* SID:112 */
-    [LA_W95] = "Sent ANSWER",  /* SID:113 */
-    [LA_W96] = "Sent answer to",  /* SID:114 */
-    [LA_W97] = "Sent candidates (cached, peer offline)",  /* SID:115 */
-    [LA_W98] = "Sent candidates, forwarded",  /* SID:116 */
-    [LA_W99] = "Sent connect",  /* SID:117 */
-    [LA_W100] = "Sent route probe to",  /* SID:118 */
-    [LA_W101] = "Server error",  /* SID:119 */
-    [LA_W102] = "Server storage full, waiting for peer to come online",  /* SID:120 */
-    [LA_W103] = "Storage full",  /* SID:123 */
-    [LA_W104] = "SUB",  /* SID:124 */
-    [LA_W105] = "Success",  /* SID:125 */
-    [LA_W106] = "Symmetric NAT (port-random)",  /* SID:127 */
-    [LA_W107] = "Test",  /* SID:128 */
-    [LA_W108] = "timed out",  /* SID:130 */
-    [LA_W109] = "Timeout",  /* SID:131 */
-    [LA_W110] = "Timeout (no response)",  /* SID:132 */
-    [LA_W111] = "TIMEOUT: Punch failed after",  /* SID:134 */
-    [LA_W112] = "to",  /* SID:135 */
-    [LA_W113] = "UDP Blocked (STUN unreachable)",  /* SID:136 */
-    [LA_W114] = "UDP hole-punch probing remote candidates",  /* SID:137 */
-    [LA_W115] = "Unknown",  /* SID:138 */
-    [LA_W116] = "Unknown ACK status",  /* SID:139 */
-    [LA_W117] = "Unsupported (no STUN/probe configured)",  /* SID:141 */
-    [LA_W118] = "Waiting for incoming offer from any peer",  /* SID:100 */
-    [LA_W119] = "Waiting for peer",  /* SID:143 */
-    [LA_W120] = "while discarding",  /* SID:144 */
-    [LA_W121] = "while reading payload",  /* SID:145 */
-    [LA_W122] = "while reading sender",  /* SID:146 */
-    [LA_W123] = "will be retried by p2p_update()",  /* SID:147 */
-    [LA_W124] = "with server",  /* SID:149 */
-    [LA_W125] = "yes",  /* SID:150 */
+    [LA_W81] = "recv error",  /* SID:97 */
+    [LA_W82] = "Registering",  /* SID:98 */
+    [LA_W83] = "Reliable transport initialized",  /* SID:101 */
+    [LA_W84] = "Requested",  /* SID:102 */
+    [LA_W85] = "Resent",  /* SID:103 */
+    [LA_W86] = "resetting",  /* SID:104 */
+    [LA_W87] = "Restricted Cone NAT",  /* SID:105 */
+    [LA_W88] = "RTT updated",  /* SID:107 */
+    [LA_W89] = "Send window full, dropping packet",  /* SID:110 */
+    [LA_W90] = "Sending",  /* SID:111 */
+    [LA_W91] = "Sending Allocate Request to",  /* SID:112 */
+    [LA_W92] = "Sent ANSWER",  /* SID:113 */
+    [LA_W93] = "Sent answer to",  /* SID:114 */
+    [LA_W94] = "Sent candidates (cached, peer offline)",  /* SID:115 */
+    [LA_W95] = "Sent candidates, forwarded",  /* SID:116 */
+    [LA_W96] = "Sent connect",  /* SID:117 */
+    [LA_W97] = "Sent route probe to",  /* SID:118 */
+    [LA_W98] = "Server error",  /* SID:119 */
+    [LA_W99] = "Server storage full, waiting for peer to come online",  /* SID:120 */
+    [LA_W100] = "Storage full",  /* SID:123 */
+    [LA_W101] = "SUB",  /* SID:124 */
+    [LA_W102] = "Success",  /* SID:125 */
+    [LA_W103] = "Symmetric NAT (port-random)",  /* SID:127 */
+    [LA_W104] = "Test",  /* SID:128 */
+    [LA_W105] = "timed out",  /* SID:130 */
+    [LA_W106] = "Timeout",  /* SID:131 */
+    [LA_W107] = "Timeout (no response)",  /* SID:132 */
+    [LA_W108] = "TIMEOUT: Punch failed after",  /* SID:134 */
+    [LA_W109] = "to",  /* SID:135 */
+    [LA_W110] = "UDP Blocked (STUN unreachable)",  /* SID:136 */
+    [LA_W111] = "UDP hole-punch probing remote candidates",  /* SID:137 */
+    [LA_W112] = "Unknown",  /* SID:138 */
+    [LA_W113] = "Unknown ACK status",  /* SID:139 */
+    [LA_W114] = "Unsupported (no STUN/probe configured)",  /* SID:141 */
+    [LA_W115] = "Waiting for incoming offer from any peer",  /* SID:100 */
+    [LA_W116] = "Waiting for peer",  /* SID:143 */
+    [LA_W117] = "while discarding",  /* SID:144 */
+    [LA_W118] = "while reading payload",  /* SID:145 */
+    [LA_W119] = "while reading sender",  /* SID:146 */
+    [LA_W120] = "will be retried by p2p_update()",  /* SID:147 */
+    [LA_W121] = "with server",  /* SID:149 */
+    [LA_W122] = "yes",  /* SID:150 */
     [LA_S0] = "1 candidate to",  /* SID:151 */
     [LA_S1] = "[lan_punch] 跳过 NAT_PROBE，直接标记 NAT=OPEN",  /* SID:246 */
     [LA_S2] = "[OpenSSL] DTLS handshake completed",  /* SID:153 */
@@ -145,7 +142,7 @@ const char* lang_en[LA_NUM] = {
     [LA_S10] = "cached",  /* SID:161 */
     [LA_S11] = "Channel ID validation failed",  /* SID:162 */
     [LA_S12] = "Close P2P UDP socket",  /* SID:222 */
-    [LA_S13] = "Closing TCP connection to Relay signaling server",  /* SID:223 */
+    [LA_S13] = "Closing TCP connection to RELAY signaling server",  /* SID:223 */
     [LA_S14] = "COMPACT mode requires explicit remote_peer_id",  /* SID:163 */
     [LA_S15] = "Connection closed by server",  /* SID:164 */
     [LA_S16] = "Connection closed while discarding",  /* SID:165 */
@@ -174,48 +171,54 @@ const char* lang_en[LA_NUM] = {
     [LA_S39] = "Invalid signaling mode in configuration",  /* SID:185 */
     [LA_S40] = "Local candidates:",  /* SID:248 */
     [LA_S41] = "Mapped address",  /* SID:186 */
-    [LA_S42] = "need",  /* SID:187 */
-    [LA_S43] = "No advanced transport layer enabled, using simple reliable layer",  /* SID:231 */
-    [LA_S44] = "No auth_key provided, using default key (insecure)",  /* SID:188 */
-    [LA_S45] = "offer with",  /* SID:190 */
-    [LA_S46] = "OpenSSL requested but library not linked",  /* SID:191 */
-    [LA_S47] = "Out of memory",  /* SID:192 */
-    [LA_S48] = "P2P connected, closing signaling TCP connection",  /* SID:249 */
-    [LA_S49] = "payload of message type",  /* SID:193 */
-    [LA_S50] = "priority",  /* SID:194 */
-    [LA_S51] = "PseudoTCP enabled as transport layer",  /* SID:233 */
-    [LA_S52] = "PUBSUB (PUB): gathering candidates, waiting for STUN before publishing",  /* SID:85 */
-    [LA_S53] = "PUBSUB (SUB): waiting for offer from any peer",  /* SID:86 */
-    [LA_S54] = "PUBSUB mode requires gh_token and gist_id",  /* SID:195 */
-    [LA_S55] = "received",  /* SID:196 */
-    [LA_S56] = "Received ALIVE_ACK from server",  /* SID:250 */
-    [LA_S57] = "Received first PEER_INFO with session_id, enter ICE phase",  /* SID:251 */
-    [LA_S58] = "Received REGISTER_ACK with session_id already set, directly enter ICE phase",  /* SID:252 */
-    [LA_S59] = "relay",  /* SID:197 */
-    [LA_S60] = "Relay Candidate",  /* SID:198 */
-    [LA_S61] = "Relay packet received but relay not enabled",  /* SID:253 */
-    [LA_S62] = "RELAY/COMPACT mode requires server_host",  /* SID:199 */
-    [LA_S63] = "request to",  /* SID:200 */
-    [LA_S64] = "Resend remaining candidates and FIN to peer",  /* SID:254 */
-    [LA_S65] = "resuming",  /* SID:201 */
-    [LA_S66] = "SCTP (usrsctp) requested but library not linked",  /* SID:202 */
-    [LA_S67] = "sending ACK",  /* SID:203 */
-    [LA_S68] = "Sending FIN packet to peer",  /* SID:234 */
-    [LA_S69] = "Sending FIN packet to peer before closing",  /* SID:235 */
-    [LA_S70] = "Sending UNREGISTER packet to Compact signaling server",  /* SID:236 */
-    [LA_S71] = "Sent authentication request to peer",  /* SID:204 */
-    [LA_S72] = "Signal payload deserialization failed",  /* SID:205 */
-    [LA_S73] = "Skipping local Host candidates on --public-only",  /* SID:121 */
-    [LA_S74] = "Srflx Candidate",  /* SID:206 */
-    [LA_S75] = "Starting internal thread",  /* SID:237 */
-    [LA_S76] = "Stopping internal thread",  /* SID:238 */
-    [LA_S77] = "STUN server",  /* SID:207 */
-    [LA_S78] = "Test",  /* SID:208 */
-    [LA_S79] = "to",  /* SID:209 */
-    [LA_S80] = "type",  /* SID:211 */
-    [LA_S81] = "Using",  /* SID:212 */
-    [LA_S82] = "via local",  /* SID:213 */
-    [LA_S83] = "waiting for peer to come online",  /* SID:215 */
+    [LA_S42] = "NAT connection timeout, downgrading to relay mode",  /* SID:620 */
+    [LA_S43] = "need",  /* SID:187 */
+    [LA_S44] = "No advanced transport layer enabled, using simple reliable layer",  /* SID:231 */
+    [LA_S45] = "No auth_key provided, using default key (insecure)",  /* SID:188 */
+    [LA_S46] = "offer with",  /* SID:190 */
+    [LA_S47] = "OpenSSL requested but library not linked",  /* SID:191 */
+    [LA_S48] = "Out of memory",  /* SID:192 */
+    [LA_S49] = "P2P connected, closing signaling TCP connection",  /* SID:249 */
+    [LA_S50] = "P2P connection established",  /* SID:621 */
+    [LA_S51] = "P2P punch failed, switching to relay mode",  /* SID:622 */
+    [LA_S52] = "P2P punching in progress ...",  /* SID:623 */
+    [LA_S53] = "payload of message type",  /* SID:193 */
+    [LA_S54] = "priority",  /* SID:194 */
+    [LA_S55] = "PseudoTCP enabled as transport layer",  /* SID:233 */
+    [LA_S56] = "PUBSUB (PUB): gathering candidates, waiting for STUN before publishing",  /* SID:85 */
+    [LA_S57] = "PUBSUB (SUB): waiting for offer from any peer",  /* SID:86 */
+    [LA_S58] = "PUBSUB mode requires gh_token and gist_id",  /* SID:195 */
+    [LA_S59] = "received",  /* SID:196 */
+    [LA_S60] = "Received ALIVE_ACK from server",  /* SID:250 */
+    [LA_S61] = "Received first PEER_INFO with session_id, enter ICE phase",  /* SID:251 */
+    [LA_S62] = "Received REGISTER_ACK with session_id already set, directly enter ICE phase",  /* SID:252 */
+    [LA_S63] = "relay",  /* SID:197 */
+    [LA_S64] = "Relay Candidate",  /* SID:198 */
+    [LA_S65] = "Relay packet received but relay not enabled",  /* SID:253 */
+    [LA_S66] = "RELAY/COMPACT mode requires server_host",  /* SID:199 */
+    [LA_S67] = "request to",  /* SID:200 */
+    [LA_S68] = "Resend remaining candidates and FIN to peer",  /* SID:254 */
+    [LA_S69] = "resuming",  /* SID:201 */
+    [LA_S70] = "Same subnet confirmed, switching to LAN path",  /* SID:624 */
+    [LA_S71] = "SCTP (usrsctp) requested but library not linked",  /* SID:202 */
+    [LA_S72] = "sending ACK",  /* SID:203 */
+    [LA_S73] = "Sending FIN packet to peer",  /* SID:234 */
+    [LA_S74] = "Sending FIN packet to peer before closing",  /* SID:235 */
+    [LA_S75] = "Sending UNREGISTER packet to COMPACT signaling server",  /* SID:236 */
+    [LA_S76] = "Sent authentication request to peer",  /* SID:204 */
+    [LA_S77] = "Signal payload deserialization failed",  /* SID:205 */
+    [LA_S78] = "Skipping LAN shortcut on --disable-lan-shortcut",  /* SID:122 */
+    [LA_S79] = "Skipping local Host candidates on --public-only",  /* SID:121 */
+    [LA_S80] = "Srflx Candidate",  /* SID:206 */
+    [LA_S81] = "Starting internal thread",  /* SID:237 */
+    [LA_S82] = "Stopping internal thread",  /* SID:238 */
+    [LA_S83] = "STUN server",  /* SID:207 */
+    [LA_S84] = "Test",  /* SID:208 */
+    [LA_S85] = "to",  /* SID:209 */
+    [LA_S86] = "type",  /* SID:211 */
+    [LA_S87] = "Using",  /* SID:212 */
+    [LA_S88] = "via local",  /* SID:213 */
+    [LA_S89] = "waiting for peer to come online",  /* SID:215 */
     [LA_F0] = "  ... %s %d %s",  /* SID:256 */
     [LA_F1] = "  [%d] %s/%d",  /* SID:257 */
     [LA_F2] = "  [%d] L=%s:%d -> R=%s:%d, pri=0x%016llx",  /* SID:259 */
@@ -250,7 +253,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F31] = "%s (%d %s)",  /* SID:288 */
     [LA_F32] = "%s (%llu ms), %s",  /* SID:289 */
     [LA_F33] = "%s (ret=%d), %s",  /* SID:291 */
-    [LA_F34] = "%s (sid=%llu)",  /* SID:613 */
+    [LA_F34] = "%s (sid=%llu)",  /* SID:633 */
     [LA_F35] = "%s (status=%d, candidates_acked=%d)",  /* SID:293 */
     [LA_F36] = "%s 0x%x (%s 0x%x), %s",  /* SID:294 */
     [LA_F37] = "%s :%d",  /* SID:295 */
@@ -276,9 +279,9 @@ const char* lang_en[LA_NUM] = {
     [LA_F57] = "Append Host candidate: %s:%d",  /* SID:4 */
     [LA_F58] = "Attempting Simultaneous Open to %s:%d",  /* SID:315 */
     [LA_F59] = "Auto-send answer (with %d candidates) total sent %s",  /* SID:316 */
-    [LA_F60] = "Connect to Compact signaling server failed(%d)",  /* SID:226 */
-    [LA_F61] = "Connect to Relay signaling server failed(%d)",  /* SID:176 */
-    [LA_F62] = "Connecting to Relay signaling server at %s:%d",  /* SID:239 */
+    [LA_F60] = "Connect to COMPACT signaling server failed(%d)",  /* SID:226 */
+    [LA_F61] = "Connect to RELAY signaling server failed(%d)",  /* SID:176 */
+    [LA_F62] = "Connecting to RELAY signaling server at %s:%d",  /* SID:239 */
     [LA_F63] = "Detect local network interfaces failed(%d)",  /* SID:227 */
     [LA_F64] = "Failed to realloc memory for local candidates (capacity: %d)",  /* SID:241 */
     [LA_F65] = "Failed to realloc memory for remote candidates (capacity: %d)",  /* SID:242 */
@@ -288,7 +291,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F69] = "Handshake failed: %s (-0x%04x)",  /* SID:217 */
     [LA_F70] = "Ignore ALIVE_ACK in state=%d",  /* SID:320 */
     [LA_F71] = "Ignore NAT_PROBE_ACK seq=%u (expect=%d)",  /* SID:321 */
-    [LA_F72] = "Ignore PEER_INFO_ACK for sid=%llu (local sid=%llu)",  /* SID:614 */
+    [LA_F72] = "Ignore PEER_INFO_ACK for sid=%llu (local sid=%llu)",  /* SID:634 */
     [LA_F73] = "Ignore REGISTER_ACK in state=%d",  /* SID:323 */
     [LA_F74] = "Initialize PUBSUB signaling context failed(%d)",  /* SID:229 */
     [LA_F75] = "Initialize signaling mode: %d",  /* SID:243 */
@@ -307,50 +310,52 @@ const char* lang_en[LA_NUM] = {
     [LA_F88] = "NAT_PROBE: %s %s:%d (1/%d)",  /* SID:337 */
     [LA_F89] = "Open P2P UDP socket on port %d",  /* SID:232 */
     [LA_F90] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:33 */
-    [LA_F91] = "PEER_OFF: sid=%llu peer disconnected, reset to REGISTERED",  /* SID:615 */
+    [LA_F91] = "PEER_OFF: sid=%llu peer disconnected, reset to REGISTERED",  /* SID:635 */
     [LA_F92] = "Processing (role=%s)",  /* SID:339 */
     [LA_F93] = "REGISTERING: %s #%d (%d %s)...",  /* SID:340 */
     [LA_F94] = "REGISTER_ACK error: %s (status=%d)",  /* SID:341 */
     [LA_F95] = "REGISTER_ACK payload too short: %d",  /* SID:342 */
     [LA_F96] = "REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d",  /* SID:343 */
-    [LA_F97] = "Received %s for sid=%llu, len=%d",  /* SID:616 */
-    [LA_F98] = "Received NAT_PROBE_ACK: probe_mapped=%s:%d",  /* SID:345 */
-    [LA_F99] = "Received PEER_INFO(seq=%u, cand_cnt=%d, flags=0x%02x)",  /* SID:346 */
-    [LA_F100] = "Received PEER_INFO_ACK for seq=%u",  /* SID:347 */
-    [LA_F101] = "Received PEER_OFF for sid=%llu",  /* SID:617 */
-    [LA_F102] = "Received valid signal from '%s'",  /* SID:349 */
-    [LA_F103] = "Register to Compact signaling server at %s:%d",  /* SID:244 */
-    [LA_F104] = "Relay sid mismatch: local=%llu pkt=%llu",  /* SID:618 */
-    [LA_F105] = "Remote candidate sync complete (mask=0x%04x)",  /* SID:351 */
-    [LA_F106] = "Resend REGISTER (attempt %d)",  /* SID:352 */
-    [LA_F107] = "Resolve Compact signaling server address: %s:%d failed(%d)",  /* SID:230 */
-    [LA_F108] = "START: %s '%s' -> '%s' %s %s:%d (%d %s)",  /* SID:354 */
-    [LA_F109] = "Send offer to Relay signaling server failed(%d)",  /* SID:568 */
-    [LA_F110] = "Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s",  /* SID:240 */
-    [LA_F111] = "Sent initial offer(%d) to %s)",  /* SID:245 */
-    [LA_F112] = "Session mismatch in PEER_INFO: local=%llu pkt=%llu",  /* SID:619 */
-    [LA_F113] = "Start internal thread failed(%d)",  /* SID:570 */
-    [LA_F114] = "TIMEOUT: Max register attempts reached (%d)",  /* SID:55 */
-    [LA_F115] = "Unexpected PEER_INFO_ACK ack_seq=%u mask=0x%04x",  /* SID:356 */
-    [LA_F116] = "Unknown packet type: %u",  /* SID:357 */
-    [LA_F117] = "Unknown signaling mode: %d",  /* SID:140 */
-    [LA_F118] = "Updating Gist field '%s'...",  /* SID:358 */
-    [LA_F119] = "[DEBUG] %s %d %s %s %d",  /* SID:359 */
-    [LA_F120] = "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates",  /* SID:360 */
-    [LA_F121] = "[DEBUG] First offer, resetting ICE and clearing %d stale candidates",  /* SID:361 */
-    [LA_F122] = "[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u",  /* SID:362 */
-    [LA_F123] = "[SCTP] received encapsulated packet, length %d",  /* SID:220 */
-    [LA_F124] = "[SCTP] sending %d bytes",  /* SID:221 */
-    [LA_F125] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:363 */
-    [LA_F126] = "[Trickle] Probing updated candidate %s:%d",  /* SID:364 */
-    [LA_F127] = "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)",  /* SID:365 */
-    [LA_F128] = "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)",  /* SID:366 */
-    [LA_F129] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:219 */
-    [LA_F130] = "recv ACK from %s:%d ack_seq=%u sack=0x%08x",  /* SID:367 */
-    [LA_F131] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:368 */
-    [LA_F132] = "ssl_setup failed: -0x%x",  /* SID:218 */
-    [LA_F133] = "✓ %s %s %s:%d (%s=%u)",  /* SID:369 */
-    [LA_F134] = "✗ %s",  /* SID:370 */
-    [LA_F135] = "连通性检查超时（已发送 %d 轮），放弃",  /* SID:371 */
-    [LA_F136] = "重传 seq=%u retx=%d rto=%d",  /* SID:372 */
+    [LA_F97] = "Received %s for sid=%llu, len=%d",  /* SID:636 */
+    [LA_F98] = "Received COMPACT signaling packet type 0x%02X in non-COMPACT mode",  /* SID:629 */
+    [LA_F99] = "Received NAT_PROBE_ACK: probe_mapped=%s:%d",  /* SID:345 */
+    [LA_F100] = "Received PEER_INFO(seq=%u, cand_cnt=%d, flags=0x%02x)",  /* SID:346 */
+    [LA_F101] = "Received PEER_INFO_ACK for seq=%u",  /* SID:347 */
+    [LA_F102] = "Received PEER_OFF for sid=%llu",  /* SID:637 */
+    [LA_F103] = "Received unknown packet type: 0x%02X",  /* SID:95 */
+    [LA_F104] = "Received valid signal from '%s'",  /* SID:349 */
+    [LA_F105] = "Register to COMPACT signaling server at %s:%d",  /* SID:244 */
+    [LA_F106] = "Relay sid mismatch: local=%llu pkt=%llu",  /* SID:638 */
+    [LA_F107] = "Remote candidate sync complete (mask=0x%04x)",  /* SID:351 */
+    [LA_F108] = "Resend REGISTER (attempt %d)",  /* SID:352 */
+    [LA_F109] = "Resolve COMPACT signaling server address: %s:%d failed(%d)",  /* SID:230 */
+    [LA_F110] = "START: %s '%s' -> '%s' %s %s:%d (%d %s)",  /* SID:354 */
+    [LA_F111] = "Same subnet detecting, sent ROUTE_PROBE to %s:%d",  /* SID:109 */
+    [LA_F112] = "Send offer to RELAY signaling server failed(%d)",  /* SID:568 */
+    [LA_F113] = "Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s",  /* SID:240 */
+    [LA_F114] = "Sent initial offer(%d) to %s)",  /* SID:245 */
+    [LA_F115] = "Session mismatch in PEER_INFO: local=%llu pkt=%llu",  /* SID:639 */
+    [LA_F116] = "Start internal thread failed(%d)",  /* SID:570 */
+    [LA_F117] = "TIMEOUT: Max register attempts reached (%d)",  /* SID:55 */
+    [LA_F118] = "Unexpected PEER_INFO_ACK ack_seq=%u mask=0x%04x",  /* SID:356 */
+    [LA_F119] = "Unknown packet type: %u",  /* SID:357 */
+    [LA_F120] = "Unknown signaling mode: %d",  /* SID:140 */
+    [LA_F121] = "Updating Gist field '%s'...",  /* SID:358 */
+    [LA_F122] = "[DEBUG] %s %d %s %s %d",  /* SID:359 */
+    [LA_F123] = "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates",  /* SID:360 */
+    [LA_F124] = "[DEBUG] First offer, resetting ICE and clearing %d stale candidates",  /* SID:361 */
+    [LA_F125] = "[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u",  /* SID:362 */
+    [LA_F126] = "[SCTP] received encapsulated packet, length %d",  /* SID:220 */
+    [LA_F127] = "[SCTP] sending %d bytes",  /* SID:221 */
+    [LA_F128] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:363 */
+    [LA_F129] = "[Trickle] Probing updated candidate %s:%d",  /* SID:364 */
+    [LA_F130] = "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)",  /* SID:365 */
+    [LA_F131] = "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)",  /* SID:366 */
+    [LA_F132] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:219 */
+    [LA_F133] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:368 */
+    [LA_F134] = "ssl_setup failed: -0x%x",  /* SID:218 */
+    [LA_F135] = "✓ %s %s %s:%d (%s=%u)",  /* SID:369 */
+    [LA_F136] = "✗ %s",  /* SID:370 */
+    [LA_F137] = "连通性检查超时（已发送 %d 轮），放弃",  /* SID:371 */
+    [LA_F138] = "重传 seq=%u retx=%d rto=%d",  /* SID:372 */
 };

@@ -60,7 +60,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
     if (!s->cfg.turn_server) return -1;
     
     printf("I:", LA_F("%s %s:%d", LA_F19, 276),
-                 LA_W("Sending Allocate Request to", LA_W94, 112), s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
+                 LA_W("Sending Allocate Request to", LA_W91, 112), s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
     
     uint8_t buf[256];
 

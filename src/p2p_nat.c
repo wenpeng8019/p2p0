@@ -225,7 +225,7 @@ int nat_tick(p2p_session_t *s) {
             if (now - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 
                 printf("W:", LA_F("%s (%llu ms), %s", LA_F32, 289),
-                       LA_W("TIMEOUT: Punch failed after", LA_W111, 134),
+                       LA_W("TIMEOUT: Punch failed after", LA_W108, 134),
                        now - n->punch_start, LA_W("attempts, switching to RELAY", LA_W9, 12));
 
                 n->state = NAT_RELAY;
@@ -259,7 +259,7 @@ int nat_tick(p2p_session_t *s) {
                 n->last_send_time = now;
 
                 printf("V:", LA_F("%s %s %d/%d %s (elapsed: %llu ms)", LA_F8, 265), LA_W("PUNCHING: Attempt", LA_W75, 89),
-                                LA_S("to", LA_S79, 209), sent_cnt,
+                                LA_S("to", LA_S85, 209), sent_cnt,
                                 s->remote_cand_cnt, LA_W("candidates", LA_W17, 21),
                                 now - n->punch_start);
             }

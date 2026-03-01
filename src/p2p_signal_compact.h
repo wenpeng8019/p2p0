@@ -351,15 +351,32 @@ typedef struct {
 void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx);
 
 /*
- * 周期调用，处理重发和候选同步
- *
- * - REGISTERING 状态：重发 REGISTER（直到收到 ACK）
- * - READY 状态：序列化发送剩余候选（PEER_INFO seq>1），处理重传
- *
- * @param s   会话对象
+ * 信令服务周期维护（拉取阶段）— 注册重试、保活
+ * 
+ * 处理 REGISTERING/REGISTERED/READY 状态下的信令维护：
+ * - REGISTERING：定期重发 REGISTER 包
+ * - REGISTERED/READY：定期发送 keepalive 保持槽位
+ * 
+ * 在 p2p_update() 的阶段 2（信令拉取）中调用。
+ * 
+ * @param s   P2P 会话
  * @return    0 正常，-1 错误
  */
-int p2p_signal_compact_tick(struct p2p_session *s);
+int p2p_signal_compact_tick_recv(struct p2p_session *s);
+
+/*
+ * 信令输出（推送阶段）— 向对端发送候选地址
+ * 
+ * 处理 ICE/READY 状态下向对端推送本地候选：
+ * - ICE：定期重发剩余候选和 FIN
+ * - READY：发送新收集到的候选（如果有）
+ * 
+ * 在 p2p_update() 的阶段 7（信令推送）中调用。
+ * 
+ * @param s   P2P 会话
+ * @return    0 正常，-1 错误
+ */
+int p2p_signal_compact_tick_send(struct p2p_session *s);
 
 /*
  * 开始信令交换（发送 REGISTER）

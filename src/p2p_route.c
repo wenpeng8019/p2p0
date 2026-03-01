@@ -135,7 +135,7 @@ bool route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_pri
         uint32_t mask = rt->local_masks[i];
         if ((local_ip & mask) == (peer_ip & mask)) {
             printf("I:", LA_F("%s %s %s %s", LA_F10, 267), LA_W("Peer is on the same subnet as", LA_W65, 74),
-                         inet_ntoa(peer_priv->sin_addr), LA_S("via local", LA_S82, 213),
+                         inet_ntoa(peer_priv->sin_addr), LA_S("via local", LA_S88, 213),
                          inet_ntoa(rt->local_addrs[i].sin_addr));
             return true;
         }
@@ -154,7 +154,7 @@ int route_send_probe(route_ctx_t *rt, sock_t sock,
     payload[0] = (uint8_t)(local_port >> 8);
     payload[1] = (uint8_t)(local_port & 0xFF);
 
-    printf("I:", LA_F("%s %s:%d", LA_F19, 276), LA_W("Sent route probe to", LA_W100, 118),
+    printf("I:", LA_F("%s %s:%d", LA_F19, 276), LA_W("Sent route probe to", LA_W97, 118),
                  inet_ntoa(peer_priv->sin_addr), ntohs(peer_priv->sin_port));
     P_clock _clk; P_clock_now(&_clk);
     rt->probe_time = clock_ms(_clk);
@@ -166,7 +166,7 @@ int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, sock_t sock)
 
     printf("I:", LA_F("%s %s:%d, %s", LA_F22, 279), LA_W("Received route probe from", LA_W79, 93),
                  inet_ntoa(from->sin_addr), ntohs(from->sin_port),
-                 LA_S("sending ACK", LA_S67, 203));
+                 LA_S("sending ACK", LA_S72, 203));
 
     // ROUTE_PROBE 回复应答消息
     return udp_send_packet(sock, from, P2P_PKT_ROUTE_PROBE_ACK, 0, 0, NULL, 0);

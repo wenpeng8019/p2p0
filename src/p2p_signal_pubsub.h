@@ -84,9 +84,9 @@
  *
  * 步骤说明：
  *   [1] PUB 调用 p2p_signal_pubsub_send() 将加密候选写入 "offer" 字段
- *   [2] SUB 通过 p2p_signal_pubsub_tick() 轮询检测 offer 更新，
+ *   [2] SUB 通过 p2p_signal_pubsub_tick_recv() 轮询检测 offer 更新，
  *       解密后自动调用 p2p_signal_pubsub_send() 写入 "answer"（仅一次）
- *   [3] PUB 通过 p2p_signal_pubsub_tick() 轮询检测 answer 更新，
+ *   [3] PUB 通过 p2p_signal_pubsub_tick_recv() 轮询检测 answer 更新，
  *       解密后将候选注入 p2p_session
  *
  * ETag 轮询优化：
@@ -233,7 +233,7 @@ ret_t p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, co
 /*
  * 设置本端角色（PUB / SUB）
  *
- * 必须在 p2p_signal_pubsub_tick() / p2p_signal_pubsub_send() 之前调用。
+ * 必须在 p2p_signal_pubsub_tick_recv() / p2p_signal_pubsub_tick_send() 之前调用。
  *
  * @param ctx   信令上下文
  * @param role  P2P_SIGNAL_ROLE_PUB 或 P2P_SIGNAL_ROLE_SUB
@@ -241,7 +241,9 @@ ret_t p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, co
 void p2p_signal_pubsub_set_role(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t role);
 
 /*
- * 周期调用：轮询 Gist，处理接收到的信令数据
+ * 周期调用（接收）：轮询 Gist，处理接收到的信令数据
+ *
+ * Phase 2: Signal Pull - 从 Gist 获取远端候选
  *
  * 应由主循环频繁调用（建议 ≤P2P_PUBSUB_PUB_POLL_MS）。内部通过 last_poll 控制实际轮询频率：
  *   - PUB 端：间隔 P2P_PUBSUB_PUB_POLL_MS ms（尽快获取 answer，缩短建连延迟）
@@ -257,7 +259,20 @@ void p2p_signal_pubsub_set_role(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t 
  * @param ctx  信令上下文
  * @param s    P2P 会话对象（候选存储目标）
  */
-void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s);
+void p2p_signal_pubsub_tick_recv(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s);
+
+/*
+ * 周期调用（发送）：PUB 角色发布 offer 到 Gist
+ *
+ * Phase 7: Signal Push - 将本端候选推送到 Gist
+ *
+ * 仅 PUB 角色使用，SUB 角色在 tick_recv 中自动回应 answer。
+ * PUB 端在收集到 Srflx 候选后，定期发送 offer 直到收到对方的 answer。
+ *
+ * @param ctx  信令上下文
+ * @param s    P2P 会话对象（本端候选来源）
+ */
+void p2p_signal_pubsub_tick_send(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s);
 
 /*
  * 发送本端 ICE 候选到 Gist

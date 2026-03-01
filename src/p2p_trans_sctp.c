@@ -264,7 +264,7 @@ static int sctp_init(p2p_session_t *s) {
  */
 static int sctp_send(p2p_session_t *s, const void *buf, int len) {
     (void)s; (void)buf;
-    printf("V:", LA_F("[SCTP] sending %d bytes", LA_F124, 221), len);
+    printf("V:", LA_F("[SCTP] sending %d bytes", LA_F127, 221), len);
     
     /* 
      * 完整实现：
@@ -317,7 +317,7 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
     if (type != P2P_PKT_DATA) return;
     (void)from; (void)s; (void)payload;
     
-    printf("V:", LA_F("[SCTP] received encapsulated packet, length %d", LA_F123, 220), len);
+    printf("V:", LA_F("[SCTP] received encapsulated packet, length %d", LA_F126, 220), len);
     
     /*
      * 完整实现：

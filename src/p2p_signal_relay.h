@@ -432,23 +432,43 @@ typedef struct {
 void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx);
 
 /*
- * 周期调用，处理信令状态和消息
+
+ * 信令服务周期维护（拉取阶段）— 接收并处理来自服务器的消息
  *
- * 应在主循环中定期调用（如每 100ms），负责：
- * - CONNECTING 状态：检查连接是否完成，发送 LOGIN
- * - CONNECTED 状态：接收并处理服务器消息（OFFER/FORWARD/CONNECT_ACK 等）
- * - 连接断开时自动重连（间隔 3 秒）
+ * 处理 TCP 接收、心跳、超时检测：
+ * - 循环读取 TCP 缓冲区中的所有消息（OFFER/FORWARD/CONNECT_ACK等）
+ * - 发送心跳包保持连接
+ * - 检测对端上线等待超时
+ * - 连接建立后自动关闭信令连接
+ *
+ * 在 p2p_update() 的阶段 2（信令拉取）中调用。
  *
  * @param ctx  信令上下文
  * @param s    会话对象（用于处理收到的候选）
  */
-void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
+void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
+
+/*
+ * 信令输出（推送阶段）— 向对端发送本地候选地址
+ *
+ * 处理 Trickle ICE 增量发送：
+ * - 从 next_candidate_index 开始断点续传剩余候选
+ * - 每批次最多发送 8 个候选（协议限制）
+ * - 处理对端离线、缓存满等状态
+ * - 自动重发未确认或有新候选时
+ *
+ * 在 p2p_update() 的阶段 7（信令推送）中调用。
+ *
+ * @param ctx  信令上下文
+ * @param s    会话对象
+ */
+void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
 
 /*
  * 登录到信令服务器
  *
  * 建立 TCP 连接并发送 LOGIN 消息。连接是非阻塞的，
- * 需要调用 p2p_signal_relay_tick() 完成握手。
+ * 需要调用 p2p_signal_relay_tick_recv() 完成握手。
  *
  * @param ctx       信令上下文
  * @param server_ip 服务器 IP 地址（字符串）
