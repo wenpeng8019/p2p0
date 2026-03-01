@@ -43,7 +43,7 @@ void p2p_set_log_output(p2p_log_callback_t cb) {
 #endif
 
 // 解析主机名
-static int resolve_host(const char *host, uint16_t port, struct sockaddr_in *out) {
+static ret_t resolve_host(const char *host, uint16_t port, struct sockaddr_in *out) {
 
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
@@ -58,53 +58,58 @@ static int resolve_host(const char *host, uint16_t port, struct sockaddr_in *out
 
     memcpy(out, res->ai_addr, sizeof(*out));
     freeaddrinfo(res);
-    return 0;
+    return E_NONE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 p2p_handle_t
 p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
-    if (!cfg || !local_peer_id) return NULL;
 
-    // Initialize Winsock on Windows (no-op on POSIX)
+    P_check(cfg && local_peer_id, return NULL;)
+
+    ret_t ret;
+
     static int net_initialized = 0;
     if (!net_initialized) {
-        if (P_net_init() != E_NONE) {
-            printf("E: %s", LA_S("Failed to initialize network subsystem", LA_S33, 228));
+#if P_WIN
+        // Initialize Winsock on Windows (no-op on POSIX)
+        if ((ret = P_net_init()) != E_NONE) {
+            printf("E:", LA_F("Initialize network subsystem failed(%d)", LA_S33, 228), ret);
             return NULL;
         }
+#endif
         net_initialized = 1;
     }
 
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         if (!cfg->gh_token || !cfg->gist_id) {
-            printf("E: %s", LA_S("PUBSUB mode requires gh_token and gist_id", LA_S62, 195));
+            printf("E: %s", LA_S("PUBSUB mode requires gh_token and gist_id", LA_S54, 195));
             return NULL;
         }
     }
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT || cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
         if (!cfg->server_host) {
-            printf("E: %s", LA_S("RELAY/COMPACT mode requires server_host", LA_S70, 199));
+            printf("E: %s", LA_S("RELAY/COMPACT mode requires server_host", LA_S62, 199));
             return NULL;
         }
     } else {
-        printf("E: %s", LA_S("Invalid signaling mode in configuration", LA_S45, 185));
+        printf("E: %s", LA_S("Invalid signaling mode in configuration", LA_S39, 185));
         return NULL;
     }
 
     // 创建 UDP 套接字，port 0 为有效值，表示由操作系统分配随机端口
-    printf("I: %s", LA_S("Open P2P UDP socket on port", LA_S53, 232));
+    printf("I:", LA_F("Open P2P UDP socket on port %d", LA_F89, 232), cfg->bind_port);
     sock_t sock = udp_open_socket(cfg->bind_port);
     if (sock == P_INVALID_SOCKET) {
-        printf("E: %s %d", LA_W("Failed to Open P2P UDP socket on port", LA_W28, 33), cfg->bind_port);
+        printf("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F90, 33), cfg->bind_port, P_sock_errno());
         return NULL;
     }
 
     p2p_session_t *s = (p2p_session_t*)calloc(1, sizeof(*s));
     if (!s) {
-        P_sock_close(sock);
         printf("E: %s", LA_S("Failed to allocate memory for session", LA_S27, 225));
+        P_sock_close(sock);
         return NULL;
     }
 
@@ -112,10 +117,9 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     printf("I:", LA_F("Initialize signaling mode: %d", LA_F75, 243), (int)cfg->signaling_mode);
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_init(&s->sig_compact_ctx);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_init(&s->sig_relay_ctx);
-    else if (p2p_signal_pubsub_init(&s->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id) != 0) {
-        printf("E: %s", LA_S("Failed to initialize PUBSUB signaling context", LA_S34, 229));
-        free(s);
-        P_sock_close(sock);
+    else if ((ret = p2p_signal_pubsub_init(&s->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id)) != E_NONE) {
+        printf("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F74, 229), ret);
+        free(s); P_sock_close(sock);
         return NULL;
     } else if (cfg->auth_key) {
         strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1); // todo 用 strdup
@@ -125,26 +129,24 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     route_init(&s->route);
 
     // 获取本地所有有效的网络地址
-    if (route_detect_local(&s->route) < 0) {
-        printf("E: %s", LA_S("Failed to detect local network interfaces", LA_S32, 227));
-        free(s);
-        P_sock_close(sock);
+    if ((ret = route_detect_local(&s->route)) < 0) {
+        printf("E:", LA_F("Detect local network interfaces failed(%d)", LA_F63, 227), ret);
+        free(s); P_sock_close(sock);
         return NULL;
     }
 
     // 初始化候选地址数组（动态分配，初始容量 8）
-    s->local_cands  = (p2p_candidate_entry_t *)calloc(8, sizeof(p2p_candidate_entry_t));
-    s->remote_cands = (p2p_remote_candidate_entry_t *)calloc(8, sizeof(p2p_remote_candidate_entry_t));
+    const int initial_cand_cap = 8;
+    s->local_cands  = (p2p_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_candidate_entry_t));
+    s->remote_cands = (p2p_remote_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_remote_candidate_entry_t));
     if (!s->local_cands || !s->remote_cands) {
         printf("E: %s", LA_S("Failed to allocate memory for candidate lists", LA_S26, 224));
         if (s->local_cands) free(s->local_cands);
         if (s->remote_cands) free(s->remote_cands);
-        free(s);
-        P_sock_close(s->sock);
+        free(s); P_sock_close(sock);
         return NULL;
     }
-    s->local_cand_cap = 8;
-    s->remote_cand_cap = 8;
+    s->local_cand_cap = s->remote_cand_cap = initial_cand_cap;
 
     s->cfg = *cfg;
     if (s->cfg.update_interval_ms <= 0) s->cfg.update_interval_ms = 10;
@@ -179,7 +181,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         printf("I: %s", LA_S("OpenSSL DTLS enabled as transport layer", 0, 0));
         s->trans = &p2p_trans_openssl;
 #else
-        printf("W: %s", LA_S("OpenSSL requested but library not linked", LA_S54, 191));
+        printf("W: %s", LA_S("OpenSSL requested but library not linked", LA_S46, 191));
 #endif
     }
     else if (cfg->use_sctp) {
@@ -187,14 +189,14 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         printf("I: %s", LA_S("SCTP (usrsctp) enabled as transport layer", 0, 0));
         s->trans = &p2p_trans_sctp;
 #else
-        printf("W: %s", LA_S("SCTP (usrsctp) requested but library not linked", LA_S74, 202));
+        printf("W: %s", LA_S("SCTP (usrsctp) requested but library not linked", LA_S66, 202));
 #endif
     }
     else if (cfg->use_pseudotcp) {
-        printf("I: %s", LA_S("PseudoTCP enabled as transport layer", LA_S59, 233));
+        printf("I: %s", LA_S("PseudoTCP enabled as transport layer", LA_S51, 233));
         s->trans = &p2p_trans_pseudotcp;
     }
-    else printf("I: %s", LA_S("No advanced transport layer enabled, using simple reliable layer", LA_S49, 231));
+    else printf("I: %s", LA_S("No advanced transport layer enabled, using simple reliable layer", LA_S43, 231));
 
     // 执行传输模块的初始化处理
     if (s->trans && s->trans->init) s->trans->init(s);
@@ -216,13 +218,15 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     P_clock _clk; P_clock_now(&_clk);
     s->last_update = clock_ms(_clk);
 
+    //----------------------------
+
 #ifdef P2P_THREADED
     if (cfg->threaded) {
-        printf("I: %s", LA_S("Starting internal thread", LA_S83, 237));
-        if (p2p_thread_start(s) < 0) {
-            free(s->local_cands); free(s->remote_cands);
+        printf("I: %s", LA_S("Starting internal thread", LA_S75, 237));
+        if ((ret = p2p_thread_start(s)) != E_NONE) {
+            printf("E:", LA_F("Start internal thread failed(%d)", LA_F113, 570), ret);
             P_sock_close(s->sock);
-            free(s);
+            free(s->local_cands); free(s->remote_cands); free(s);
             return NULL;
         }
     }
@@ -239,7 +243,7 @@ p2p_destroy(p2p_handle_t hdl) {
 
 #ifdef P2P_THREADED
     if (s->cfg.threaded) {
-        printf("I: %s", LA_S("Stopping internal thread", LA_S84, 238));
+        printf("I: %s", LA_S("Stopping internal thread", LA_S76, 238));
         p2p_thread_stop(s);
     }
 #endif
@@ -250,7 +254,7 @@ p2p_destroy(p2p_handle_t hdl) {
         // 发送 FIN 包，断开 P2P 连接
         if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
 
-            printf("I: %s", LA_S("Sending FIN packet to peer", LA_S76, 234));
+            printf("I: %s", LA_S("Sending FIN packet to peer", LA_S68, 234));
             udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
         }
 
@@ -261,7 +265,7 @@ p2p_destroy(p2p_handle_t hdl) {
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT &&
             s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
 
-            printf("I: %s", LA_S("Sending UNREGISTER packet to Compact signaling server", LA_S78, 236));
+            printf("I: %s", LA_S("Sending UNREGISTER packet to COMPACT signaling server", LA_S70, 236));
 
             uint8_t unreg[P2P_PEER_ID_MAX * 2];
             memset(unreg, 0, sizeof(unreg));
@@ -270,7 +274,7 @@ p2p_destroy(p2p_handle_t hdl) {
             udp_send_packet(s->sock, &s->sig_compact_ctx.server_addr,
                             SIG_PKT_UNREGISTER, 0, 0, unreg, sizeof(unreg));
 
-            printf("D:", LA_F("Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s", LA_F107, 240),
+            printf("D:", LA_F("Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s", LA_F110, 240),
                           s->sig_compact_ctx.local_peer_id, s->sig_compact_ctx.remote_peer_id);
         }
 
@@ -282,8 +286,7 @@ p2p_destroy(p2p_handle_t hdl) {
     if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY
         && s->sig_relay_ctx.state != SIGNAL_DISCONNECTED) {
 
-        printf("I: %s", LA_S("Closing TCP connection to Relay signaling server", LA_S13, 223));
-
+        printf("I: %s", LA_S("Closing TCP connection to RELAY signaling server", LA_S13, 223));
         p2p_signal_relay_close(&s->sig_relay_ctx);
     }
 
@@ -297,10 +300,10 @@ p2p_destroy(p2p_handle_t hdl) {
 int
 p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
-    if (!hdl) return -1;
+    P_check(hdl, return -1;)
 
     p2p_session_t *s = (p2p_session_t*)hdl;
-    if (s->state != P2P_STATE_INIT) return -1;
+    P_check(s->state == P2P_STATE_INIT, return -1;)
 
     if (remote_peer_id && !*remote_peer_id) remote_peer_id = NULL;
 
@@ -323,6 +326,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     s->signal_sent = false;
     s->cands_pending_send = false;
 
+    ret_t ret;
     switch (s->signaling_mode) {
 
         // 对于 COMPACT 模式
@@ -331,10 +335,9 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             // 解析信令服务器地址
             assert(s->cfg.server_host);         // p2p_create 成功会确保这个条件
             struct sockaddr_in server_addr;
-            if (resolve_host(s->cfg.server_host, s->cfg.server_port, &server_addr) < 0) {
-
-                printf("E: %s: %s:%d", LA_S("Failed to resolve signaling server address", LA_S35, 230),
-                             s->cfg.server_host, s->cfg.server_port);
+            if ((ret = resolve_host(s->cfg.server_host, s->cfg.server_port, &server_addr)) != E_NONE) {
+                printf("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F107, 230),
+                             s->cfg.server_host, s->cfg.server_port, ret);
                 s->state = P2P_STATE_ERROR;
                 UNLOCK(s);
                 return -1;
@@ -354,18 +357,18 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                     c->type = P2P_ICE_CAND_HOST;
                     c->addr = s->route.local_addrs[i];
                     c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
-                    printf("I:", LA_F("Append Host candidate: %s:%d", LA_F60, 4),
+                    printf("I:", LA_F("Append Host candidate: %s:%d", LA_F57, 4),
                                  inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
                 }
             }
-            else printf("I: %s", LA_S("Skipping local Host candidates on --public-only", LA_S81, 121));
+            else printf("I: %s", LA_S("Skipping local Host candidates on --public-only", LA_S73, 121));
 
             // 注册（连接）到 COMPACT 信令服务器
-            printf("I:", LA_F("Register to Compact signaling server at %s:%d", LA_F101, 244),
+            printf("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F103, 244),
                          inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
 
-            if (p2p_signal_compact_connect(s, s->local_peer_id, remote_peer_id, &server_addr) != 0) {
-                printf("E: %s", LA_S("Failed to connect to Compact signaling server", LA_S30, 226));
+            if ((ret = p2p_signal_compact_connect(s, s->local_peer_id, remote_peer_id, &server_addr)) != E_NONE) {
+                printf("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F60, 226), ret);
                 s->state = P2P_STATE_ERROR;
                 UNLOCK(s);
                 return -1;
@@ -382,11 +385,11 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             // 首次连接：自动登录信令服务器（只执行一次）
             if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
 
-                printf("I:", LA_F("Connecting to Relay signaling server at %s:%d", LA_F63, 239),
+                printf("I:", LA_F("Connecting to RELAY signaling server at %s:%d", LA_F62, 239),
                              s->cfg.server_host, s->cfg.server_port);
 
-                if (p2p_signal_relay_login(&s->sig_relay_ctx, s->cfg.server_host, s->cfg.server_port, s->local_peer_id) != 0) {
-                    printf("E: %s", LA_S("Failed to connect to signaling server", LA_S31, 176));
+                if ((ret = p2p_signal_relay_login(&s->sig_relay_ctx, s->cfg.server_host, s->cfg.server_port, s->local_peer_id)) != E_NONE) {
+                    printf("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F61, 176), ret);
                     s->state = P2P_STATE_ERROR;
                     UNLOCK(s);
                     return -1;
@@ -411,8 +414,9 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                     n += pack_candidate(&s->local_cands[i], buf + n);
                 }
 
-                printf("I:", LA_F("Sent initial offer(%d) to %s)", LA_F108, 245), n, remote_peer_id);
-                if (p2p_signal_relay_send_connect(&s->sig_relay_ctx, remote_peer_id, buf, n) != 0) {
+                printf("I:", LA_F("Sent initial offer(%d) to %s)", LA_F111, 245), n, remote_peer_id);
+                if ((ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, remote_peer_id, buf, n)) != E_NONE) {
+                    printf("E:", LA_F("Send offer to RELAY signaling server failed(%d)", LA_F109, 568), ret);
                     // todo
                 }
                 s->signal_sent = true;
@@ -420,7 +424,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             // 被动模式：等待任意对等方的 offer
             else if (!remote_peer_id) {
 
-                printf("I: %s", LA_W("Waiting for incoming offer from any peer", LA_W125, 100));
+                printf("I: %s", LA_W("Waiting for incoming offer from any peer", LA_W118, 100));
             }
 
             // 注意：后续 Srflx 候选者（STUN 响应）会在 p2p_update 中增量发送
@@ -447,7 +451,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
                 // PUB 模式必须等待 STUN 响应（获取公网地址）后才能发布 offer
                 // + PUB/SUB 不支持 Trickle ICE 模式，所以必须等候选收集完成后一次性发送
-                printf("I: %s", LA_S("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_S60, 85));
+                printf("I: %s", LA_S("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_S52, 85));
             }
             else {
 
@@ -455,13 +459,13 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 p2p_signal_pubsub_set_role(&s->sig_pubsub_ctx, P2P_SIGNAL_ROLE_SUB);
 
                 // SUB 模式：被动等待 offer，收到后自动回复
-                printf("I: %s", LA_S("PUBSUB (SUB): waiting for offer from any peer", LA_S61, 86));
+                printf("I: %s", LA_S("PUBSUB (SUB): waiting for offer from any peer", LA_S53, 86));
             }
             break;
         }
 
         default:
-            printf("E:", LA_F("Unknown signaling mode: %d", LA_F113, 140), s->signaling_mode);
+            printf("E:", LA_F("Unknown signaling mode: %d", LA_F117, 140), s->signaling_mode);
             s->state = P2P_STATE_ERROR;
             UNLOCK(s);
             return -1;
@@ -483,7 +487,7 @@ p2p_close(p2p_handle_t hdl) {
     // 发送 FIN 包通知对端断开连接（仅在已连接状态）
     if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
 
-        printf("V: %s", LA_S("Sending FIN packet to peer before closing", LA_S77, 235));
+        printf("V: %s", LA_S("Sending FIN packet to peer before closing", LA_S69, 235));
         udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
     }
 
@@ -551,10 +555,7 @@ p2p_update(p2p_handle_t hdl) {
             // --------------------
 
             case P2P_PKT_PUNCH:
-            case P2P_PKT_PUNCH_ACK:
-            case P2P_PKT_PING:
-            case P2P_PKT_PONG:
-                nat_on_packet(s, hdr.type, payload, payload_len, &from);
+                nat_on_packet(s, &hdr, payload, payload_len, &from);
                 break;
 
             // --------------------
@@ -583,8 +584,6 @@ p2p_update(p2p_handle_t hdl) {
                                     ((uint32_t)payload[3] << 16) |
                                     ((uint32_t)payload[4] << 8) |
                                     (uint32_t)payload[5];
-                    printf("D:", LA_F("recv ACK from %s:%d ack_seq=%u sack=0x%08x", LA_F126, 367),
-                                  inet_ntoa(from.sin_addr), ntohs(from.sin_port), ack_seq, sack);
                     reliable_on_ack(&s->reliable, ack_seq, sack);
                 }
                 break;
@@ -593,15 +592,13 @@ p2p_update(p2p_handle_t hdl) {
             // FIN 连接断开
             // --------------------
 
+            // 收到对端主动断开通知
             case P2P_PKT_FIN:
-                // 收到对端主动断开通知
                 if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
                     s->state = P2P_STATE_CLOSED;
-                    if (s->cfg.on_disconnected)
-                        s->cfg.on_disconnected(s, s->cfg.userdata);
-                } else {
-                    s->state = P2P_STATE_CLOSED;
+                    if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
                 }
+                else s->state = P2P_STATE_CLOSED;
                 break;
 
             // --------------------
@@ -624,10 +621,10 @@ p2p_update(p2p_handle_t hdl) {
                 // 简化版安全握手：检查 payload 是否匹配 cfg.auth_key
                 if (s->cfg.auth_key && payload_len > 0) {
                     if (strncmp((const char*)payload, s->cfg.auth_key, payload_len) == 0) {
-                        printf("I: [AUTH] %s", LA_W("Authenticated successfully", LA_W10, 13));
+                        printf("I: %s", LA_W("Authenticated successfully", LA_W10, 13));
                     } else {
-                        printf("I: [AUTH] %s", LA_W("Authentication failed", LA_W11, 14));
-                        s->state = P2P_STATE_ERROR; // fixme 不应该是 ERROR 状态，应该是 AUTH_FAILED 或类似状态，以便区分其他错误
+                        printf("I: %s", LA_W("Authentication failed", LA_W11, 14));
+                        s->state = P2P_STATE_ERROR;
                     }
                 }
                 break;
@@ -644,8 +641,7 @@ p2p_update(p2p_handle_t hdl) {
             case SIG_PKT_NAT_PROBE_ACK:
 
                 if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
-                    printf("E: %s: received signaling packet type 0x%02X in non-COMPACT mode",
-                                 "", hdr.type);
+                    printf("E:", LA_F("Received COMPACT signaling packet type 0x%02X in non-COMPACT mode", 0, 0), hdr.type);
                     break;
                 }
 
@@ -656,24 +652,30 @@ p2p_update(p2p_handle_t hdl) {
 
             default:
 
-                printf("W: %s: 0x%02X", LA_W("Received unknown packet type", LA_W84, 95), hdr.type);
+                printf("W:", LA_F("Received unknown packet type: 0x%02X", LA_W81, 95), hdr.type);
                 break;
         }
 
     } // while ((n = udp_recv_from(s->sock, &from, buf, sizeof(buf))) > 0)
 
     // --------------------
-    // 维护连接状态机（未连接到已连接）
+    // 维护连接状态机
     // --------------------
 
     if (s->state == P2P_STATE_REGISTERING && s->nat.state == NAT_PUNCHING) {
+        printf("I: %s", LA_S("P2P punching in progress ...", 0, 0));
         s->state = P2P_STATE_PUNCHING;
     }
 
     // 成功 NAT 穿透连接
+    // + 注意，NAT 变为 CONNECTED 状态时，P2P 可能还为进入 PUNCHING 状态
+    //   因为，NAT 的 CONNECTED，是收到对方发过来的包，说明自己的端口对对方是开放的了
+    //   但 PUNCHING 状态是向对方端口发送打洞包，也就是检测对方端口是否可写入。
+    //   所以，对方可能先于自己获得对方（也就是自己）的候选地址，并先完成 NAT 穿透（对方发包过来），此时自己还未开始打洞（PUNCHING）
     if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING) &&
         s->nat.state == NAT_CONNECTED) {
 
+        printf("I: %s", LA_S("P2P connection established", 0, 0));
         s->state = P2P_STATE_CONNECTED;
         s->path = P2P_PATH_PUNCH;
         s->active_addr = s->nat.peer_addr;
@@ -693,42 +695,46 @@ p2p_update(p2p_handle_t hdl) {
         }
 
         // 如果对方内网 IP 和自己属于同一个子网段内
-        if (!s->cfg.disable_lan_shortcut && peer_priv &&
-            route_check_same_subnet(&s->route, peer_priv)) {
-            // 发送 ROUTE_PROBE，确认后将 active_addr 切换到私网 IP（LAN shortcut）
-            struct sockaddr_in priv = *peer_priv;
-            priv.sin_port = s->nat.peer_addr.sin_port;
-            route_send_probe(&s->route, s->sock, &priv, 0);
-            printf("V:", "[NAT_PUNCH] %s %s:%d",
-                   LA_W("Same subnet detected, sent ROUTE_PROBE to", LA_W94, 109),
-                   inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
-        } else if (s->cfg.disable_lan_shortcut && peer_priv &&
-                   route_check_same_subnet(&s->route, peer_priv)) {
+        if (peer_priv && route_check_same_subnet(&s->route, peer_priv)) {
+
+            if (!s->cfg.disable_lan_shortcut) {
+
+                // 发送 ROUTE_PROBE，确认后将 active_addr 切换到私网 IP（LAN shortcut）
+                struct sockaddr_in priv = *peer_priv;
+                priv.sin_port = s->nat.peer_addr.sin_port;
+                route_send_probe(&s->route, s->sock, &priv, 0);
+
+                printf("I:", LA_F("Same subnet detecting, sent ROUTE_PROBE to %s:%d", LA_W91, 109),
+                       inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
+            }
             // 同子网但 disable_lan_shortcut=true：跳过升级，仅打印日志
-            printf("V:", "[NAT_PUNCH] %s", LA_W("Same subnet detected but LAN shortcut disabled", LA_W93, 108));
+            else printf("V: %s", LA_S("Skipping LAN shortcut on --disable-lan-shortcut", LA_S74, 122));
         }
     }
 
     // 降级到服务器中继
+    // fixme 中继的模式应该作为后补，而不是状态切换。因为连接状态是动态的，不稳定的。
     if (s->state == P2P_STATE_PUNCHING &&
         s->nat.state == NAT_RELAY) {
 
+        // 中继模式：NAT 打洞失败后的降级方案
+        printf("I: %s", LA_S("P2P punch failed, switching to relay mode", 0, 0));
         s->state = P2P_STATE_RELAY;
         s->path = P2P_PATH_RELAY;
 
-        // 中继模式：NAT 打洞失败后的降级方案
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+
             // 检查服务器是否支持中继功能
             if (s->sig_compact_ctx.relay_support) {
                 // COMPACT 模式：通过 UDP 信令服务器中继数据
                 // 服务器会将 P2P_PKT_RELAY_DATA 转发给对端
                 // 注意：中继模式下不发 UNREGISTER，服务器槽位仍用于识别对端
                 s->active_addr = s->sig_compact_ctx.server_addr;
-                printf("I: [NAT_PUNCH] %s", LA_W("NAT punch failed, using server relay", LA_W54, 62));
+                printf("I: %s", LA_W("NAT punch failed, using server relay", LA_W53, 62));
             } else {
                 // 服务器不支持中继，继续尝试打洞
                 s->active_addr = s->nat.peer_addr;
-                printf("W: [NAT_PUNCH] %s", LA_W("NAT punch failed, server has no relay support", LA_W53, 61));
+                printf("W: %s", LA_W("NAT punch failed, server has no relay support", LA_W52, 61));
             }
         } 
         else {
@@ -736,16 +742,25 @@ p2p_update(p2p_handle_t hdl) {
             // 保持 peer_addr，继续尝试打洞（NAT_RELAY 状态会周期性重试）
             // TODO: 需要配置 TURN 服务器或扩展 RELAY 服务器的中继功能
             s->active_addr = s->nat.peer_addr;
-            printf("W: [NAT_PUNCH] %s", LA_W("NAT punch failed, no TURN server configured", LA_W52, 60));
+            printf("W: %s", LA_W("NAT punch failed, no TURN server configured", LA_W51, 60));
         }
     }
 
     // --------------------
-    // 周期维护 ROUTE 状态机
+    // 周期维护 ICE（候选地址交换）/ NAT（打洞、保活）/ 子网直连
     // --------------------
+
+    if (s->cfg.use_ice) {
+        p2p_ice_tick(s);
+    }
+
+    if (s->nat.state != NAT_INIT) {
+        nat_tick(s);
+    }
 
     // 升级到 LAN 路径（如果确认同一子网）
     if (s->route.lan_confirmed && s->path != P2P_PATH_LAN) {
+        printf("I: %s", LA_S("Same subnet confirmed, switching to LAN path", 0, 0));
         s->path = P2P_PATH_LAN;
         s->active_addr = s->route.lan_peer_addr;
     }
@@ -771,7 +786,7 @@ p2p_update(p2p_handle_t hdl) {
         else stream_flush_to_reliable(&s->stream, &s->reliable);
     }
 
-    /* reliable 周期 tick：发送/重传数据包 + 发 ACK */
+    // reliable 周期 tick：发送/重传数据包 + 发 ACK
     if (!s->trans || !s->trans->on_packet) {
         int is_relay = (s->state == P2P_STATE_RELAY);
         reliable_tick(&s->reliable, s->sock, &s->active_addr, is_relay);
@@ -792,24 +807,8 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     // --------------------
-    // 周期维护 STUN/ICE 机制状态机
+    // 周期维护信令服务状态机
     // --------------------
-
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
-        p2p_signal_compact_nat_detect_tick(s);
-    else
-        p2p_stun_nat_detect_tick(s);
-
-    if (s->cfg.use_ice) {
-        p2p_ice_tick(s);
-    }
-
-    // --------------------
-    // 周期维护 NAT/信令 状态机（按信令模式分组）
-    // --------------------
-
-    // NAT 层维护（打洞、保活）
-    if (s->nat.state != NAT_INIT) nat_tick(s);
 
     if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
@@ -886,22 +885,22 @@ p2p_update(p2p_handle_t hdl) {
 
                             if (ret > 0) {
                                 printf("I: [SIGNALING] %s [%d-%d] %s %s (%s=%d)",
-                                             LA_W("Sent candidates, forwarded", LA_W101, 116),
+                                             LA_W("Sent candidates, forwarded", LA_W98, 116),
                                              start_idx, start_idx + batch_size - 1,
-                                             LA_W("to", LA_W119, 135), s->remote_peer_id,
-                                             LA_W("forwarded", LA_W33, 39), ret);
+                                             LA_W("to", LA_W112, 135), s->remote_peer_id,
+                                             LA_W("forwarded", LA_W32, 39), ret);
                             } else {
                                 printf("I: [SIGNALING] %s %d %s %s",
-                                             LA_W("Sent candidates (cached, peer offline)", LA_W100, 115),
-                                             batch_size, LA_W("to", LA_W119, 135), s->remote_peer_id);
+                                             LA_W("Sent candidates (cached, peer offline)", LA_W97, 115),
+                                             batch_size, LA_W("to", LA_W112, 135), s->remote_peer_id);
                             }
                         } else if (ret == -2) {
                             /* 服务器缓存满（status=2）：停止发送，等待对端上线后收到 FORWARD */
                             /* waiting_for_peer 已在 send_connect() 中设置为 true */
-                            printf("W: [SIGNALING] %s", LA_W("Server storage full, waiting for peer to come online", LA_W105, 120));
+                            printf("W: [SIGNALING] %s", LA_W("Server storage full, waiting for peer to come online", LA_W102, 120));
                         } else {
                             s->cands_pending_send = true;  /* TCP 发送失败（-1/-3），标记待重发 */
-                            printf("W: [SIGNALING] %s (ret=%d)", LA_W("Failed to send candidates, will retry", LA_W31, 36), ret);
+                            printf("W: [SIGNALING] %s (ret=%d)", LA_W("Failed to send candidates, will retry", LA_W30, 36), ret);
                         }
                     }
                 }  // 结束 if (start_idx < s->local_cand_cnt)
@@ -959,9 +958,9 @@ p2p_update(p2p_handle_t hdl) {
                         s->last_signal_time = now;
                         s->last_cand_cnt_sent = s->local_cand_cnt;
                         printf("I: [SIGNALING] %s %s %d %s %s",
-                                     s->last_cand_cnt_sent > 0 ? LA_W("Resent", LA_W89, 103) : LA_W("Published", LA_W75, 84),
-                                     LA_S("offer with", LA_S52, 190),
-                                     s->local_cand_cnt, LA_W("to", LA_W119, 135), s->remote_peer_id);
+                                     s->last_cand_cnt_sent > 0 ? LA_W("Resent", LA_W86, 103) : LA_W("Published", LA_W74, 84),
+                                     LA_S("offer with", LA_S45, 190),
+                                     s->local_cand_cnt, LA_W("to", LA_W112, 135), s->remote_peer_id);
                     }
                 }
             }
@@ -972,11 +971,21 @@ p2p_update(p2p_handle_t hdl) {
     // 检测 NAT 断开连接（仅当使用 NAT 时）
     // --------------------
 
-    if (s->nat.state == NAT_INIT && s->nat.last_send_time > 0
-        && (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)) {
-        // fixme 断开？不应该是错误状态
-        //s->state = P2P_STATE_ERROR;
+    if (s->nat.state == NAT_DISCONNECTED && s->state == P2P_STATE_CONNECTED) {
+        // NAT 连接超时断开，降级到中继模式
+        s->state = P2P_STATE_RELAY;
+        s->nat.state = NAT_RELAY;
     }
+
+    // --------------------
+    // NAT 类型检测
+    // --------------------
+
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+        p2p_signal_compact_nat_detect_tick(s);
+    else
+        p2p_stun_nat_detect_tick(s);
+
 
     P_clock _clk; P_clock_now(&_clk);
     s->last_update = clock_ms(_clk);

@@ -78,13 +78,20 @@ TEST(nat_punch_batch_mode_success) {
     ASSERT_EQ(s->state, P2P_STATE_INIT);
     ASSERT_EQ(s->nat.state, NAT_PUNCHING);
     
-    // 模拟收到 PUNCH_ACK
+    // 模拟收到 PUNCH 确认包（echo_seq=1 表示对方收到了我们的 seq=1）
     struct sockaddr_in peer_addr;
     peer_addr.sin_family = AF_INET;
     peer_addr.sin_port = htons(10001);
     inet_pton(AF_INET, "192.168.1.100", &peer_addr.sin_addr);
     
-    nat_on_packet(s, P2P_PKT_PUNCH_ACK, NULL, 0, &peer_addr);
+    p2p_packet_hdr_t hdr = {
+        .type = P2P_PKT_PUNCH,
+        .flags = 0,
+        .seq = htons(100)  // 对方的序列号
+    };
+    uint8_t payload[2] = {0, 1};  // echo_seq=1（网络字节序，确认我们的 punch_seq=1）
+    
+    nat_on_packet(s, &hdr, payload, 2, &peer_addr);
     
     // 验证状态转换
     ASSERT_EQ(s->nat.state, NAT_CONNECTED);

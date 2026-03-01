@@ -71,7 +71,7 @@ static void send_register(p2p_session_t *s) {
 
     udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, n);
 
-    printf("I:", LA_F("REGISTERING: %s #%d (%d %s)...", LA_F91, 340),
+    printf("I:", LA_F("REGISTERING: %s #%d (%d %s)...", LA_F93, 340),
                  LA_W("Attempt", LA_W8, 10), ctx->register_attempts, s->local_cand_cnt, LA_W("candidate pairs", LA_W16, 20));
 }
 
@@ -97,7 +97,7 @@ static void parse_peer_info(p2p_session_t *s, const uint8_t *payload, int cand_c
         c->last_punch_send_ms = 0;
         offset += (int)sizeof(p2p_compact_candidate_t);
 
-        printf("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F121, 363),
+        printf("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F125, 363),
                      inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
 
         nat_punch(s, &c->cand.addr);
@@ -131,7 +131,7 @@ static int apply_addr_update_candidate(p2p_session_t *s, const uint8_t *payload)
     // Trickle ICE：NAT 打洞已启动时，立即探测最新地址
     if (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_RELAY) {
 
-        printf("I:", LA_F("[Trickle] Probing updated candidate %s:%d", LA_F122, 364),
+        printf("I:", LA_F("[Trickle] Probing updated candidate %s:%d", LA_F126, 364),
                      inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
 
         nat_punch(s, &c->cand.addr);
@@ -248,12 +248,12 @@ void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx) {
 /*
  * 开始信令交换（发送 REGISTER）
  */
-int p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id,
-                               const char *remote_peer_id,
-                               const struct sockaddr_in *server) {
+ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id,
+                                 const char *remote_peer_id,
+                                 const struct sockaddr_in *server) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
-    if (ctx->state != SIGNAL_COMPACT_INIT) return -1;
+    P_check(ctx->state == SIGNAL_COMPACT_INIT, return -1;)
 
     ctx->server_addr = *server;
 
@@ -270,17 +270,17 @@ int p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id,
     ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
     ctx->peer_online = false;
 
-    printf("D:", LA_F("START: %s '%s' -> '%s' %s %s:%d (%d %s)", LA_F106, 354),
-                 LA_W("Registering", LA_W86, 98), local_peer_id, remote_peer_id,
-                 LA_W("with server", LA_W131, 149), inet_ntoa(server->sin_addr), ntohs(server->sin_port),
+    printf("D:", LA_F("START: %s '%s' -> '%s' %s %s:%d (%d %s)", LA_F108, 354),
+                 LA_W("Registering", LA_W83, 98), local_peer_id, remote_peer_id,
+                 LA_W("with server", LA_W124, 149), inet_ntoa(server->sin_addr), ntohs(server->sin_port),
                  s->local_cand_cnt, LA_W("candidate pairs", LA_W16, 20));
 
-    printf("V: %s", LA_S("Local candidates:", LA_S46, 248));
+    printf("V: %s", LA_S("Local candidates:", LA_S40, 248));
 
     // 构造并发送带候选列表的注册包
     send_register(s);
 
-    return 0;
+    return E_NONE;
 }
 
 int p2p_signal_compact_disconnect(struct p2p_session *s) {
@@ -345,13 +345,13 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
         }
 
         if (len < 10) {
-            printf("E:", LA_F("REGISTER_ACK payload too short: %d", LA_F93, 342), len);
+            printf("E:", LA_F("REGISTER_ACK payload too short: %d", LA_F95, 342), len);
             return;
         }
 
         uint8_t status = payload[0];
         if (status >= 2) {
-            printf("E:", LA_F("REGISTER_ACK error: %s (status=%d)", LA_F92, 341), LA_W("Server error", LA_W104, 119), status);
+            printf("E:", LA_F("REGISTER_ACK error: %s (status=%d)", LA_F94, 341), LA_W("Server error", LA_W101, 119), status);
             return;
         }
 
@@ -369,17 +369,17 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
         memcpy(&ctx->probe_port, payload + 8, 2);
         ctx->probe_port = ntohs(ctx->probe_port);
 
-        printf("V:", LA_F("REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d", LA_F94, 343),
-                        ctx->peer_online, payload[1], LA_W("cache", LA_W15, 19), payload[1] > 0 ? LA_W("yes", LA_W132, 150) : LA_W("no (cached)", LA_W55, 63),
-                        LA_S("relay", LA_S67, 197), ctx->relay_support ? LA_W("yes", LA_W132, 150) : LA_W("no (cached)", LA_W55, 63),
+        printf("V:", LA_F("REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d", LA_F96, 343),
+                        ctx->peer_online, payload[1], LA_W("cache", LA_W15, 19), payload[1] > 0 ? LA_W("yes", LA_W125, 150) : LA_W("no (cached)", LA_W54, 63),
+                        LA_S("relay", LA_S59, 197), ctx->relay_support ? LA_W("yes", LA_W125, 150) : LA_W("no (cached)", LA_W54, 63),
                         inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
                         ctx->probe_port);
 
         // 标记进入 REGISTERED 状态（该状态将停止周期发送 REGISTER）
         ctx->state = SIGNAL_COMPACT_REGISTERED;
 
-        printf("I:", LA_F("%s: %s", LA_F56, 311), LA_W("Entered REGISTERED state", LA_W25, 30),
-                     ctx->peer_online ? LA_W("Peer online, waiting for PEER_INFO(seq=1)", LA_W70, 78) : LA_W("Peer offline, waiting for peer to come online", LA_W68, 76));
+        printf("I:", LA_F("%s: %s", LA_F53, 311), LA_W("Entered REGISTERED state", LA_W25, 30),
+                     ctx->peer_online ? LA_W("Peer online, waiting for PEER_INFO(seq=1)", LA_W69, 78) : LA_W("Peer offline, waiting for peer to come online", LA_W67, 76));
 
         // 如果对方在线
         // + 注意，此时对方可能已经是在线状态，也就是 SIG_PKT_PEER_INFO 可能先于 SIG_PKT_REGISTER_ACK 到达
@@ -393,7 +393,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
         if (ctx->session_id) {
             ctx->state = SIGNAL_COMPACT_ICE;
 
-            printf("I: %s", LA_S("Received REGISTER_ACK with session_id already set, directly enter ICE phase", LA_S66, 252));
+            printf("I: %s", LA_S("Received REGISTER_ACK with session_id already set, directly enter ICE phase", LA_S58, 252));
 
             send_rest_candidates_and_fin(s);
             P_clock _clk; P_clock_now(&_clk);
@@ -429,7 +429,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
                 udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ctx->nat_probe_retries, NULL, 0);
 
                 printf("I:", LA_F("NAT_PROBE: %s %s:%d (1/%d)", LA_F88, 337),
-                             LA_W("NAT probe sent to", LA_W50, 58),
+                             LA_W("NAT probe sent to", LA_W49, 58),
                              inet_ntoa(probe_addr.sin_addr), ctx->probe_port,
                              NAT_PROBE_MAX_RETRIES);
             }
@@ -446,7 +446,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
             return;
         }
 
-        printf("V: %s", LA_S("Received ALIVE_ACK from server", LA_S64, 250));
+        printf("V: %s", LA_S("Received ALIVE_ACK from server", LA_S56, 250));
 
         // 确认服务器未掉线
         P_clock _clk; P_clock_now(&_clk);
@@ -495,7 +495,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
             if (ctx->state == SIGNAL_COMPACT_REGISTERED) {
                 ctx->state = SIGNAL_COMPACT_ICE;
 
-                printf("I: %s", LA_S("Received first PEER_INFO with session_id, enter ICE phase", LA_S65, 251));
+                printf("I: %s", LA_S("Received first PEER_INFO with session_id, enter ICE phase", LA_S57, 251));
 
                 send_rest_candidates_and_fin(s);
                 P_clock _clk; P_clock_now(&_clk);
@@ -509,7 +509,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
             return;
         }
 
-        printf("V:", LA_F("Received PEER_INFO(seq=%u, cand_cnt=%d, flags=0x%02x)", LA_F97, 346), seq, cand_cnt, flags);
+        printf("V:", LA_F("Received PEER_INFO(seq=%u, cand_cnt=%d, flags=0x%02x)", LA_F99, 346), seq, cand_cnt, flags);
 
         bool new_seq = false;
 
@@ -585,14 +585,14 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
             if (ctx->remote_candidates_0 && ctx->remote_candidates_mask &&
                 (ctx->remote_candidates_done & ctx->remote_candidates_mask) == ctx->remote_candidates_mask) {
 
-                printf("I:", LA_F("Remote candidate sync complete (mask=0x%04x)", LA_F103, 351),
+                printf("I:", LA_F("Remote candidate sync complete (mask=0x%04x)", LA_F105, 351),
                              (unsigned)ctx->remote_candidates_mask);
             }
         }
 
         /* 发送 PEER_INFO_ACK: [session_id(8)]，确认序号在包头 seq */
         {
-            printf("V:", LA_F("%s PEER_INFO_ACK(seq=%u)", LA_F41, 296), LA_W("Sent ANSWER", LA_W98, 113), seq);
+            printf("V:", LA_F("%s PEER_INFO_ACK(seq=%u)", LA_F38, 296), LA_W("Sent ANSWER", LA_W95, 113), seq);
 
             uint8_t ack_payload[sizeof(uint64_t)];
             uint64_t sid_net = htonll(ctx->session_id);
@@ -627,14 +627,14 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
 
         uint16_t bit = (uint16_t)(1u << (ack_seq - 1));
         if ((ctx->candidates_mask & bit) == 0) {
-            printf("E:", LA_F("Unexpected PEER_INFO_ACK ack_seq=%u mask=0x%04x", LA_F111, 356),
+            printf("E:", LA_F("Unexpected PEER_INFO_ACK ack_seq=%u mask=0x%04x", LA_F115, 356),
                           ack_seq, (unsigned)ctx->candidates_mask);
             return;
         }
 
         if ((ctx->candidates_acked & bit) == 0) {
 
-            printf("V:", LA_F("Received PEER_INFO_ACK for seq=%u", LA_F98, 347), ack_seq);
+            printf("V:", LA_F("Received PEER_INFO_ACK for seq=%u", LA_F100, 347), ack_seq);
 
             ctx->candidates_acked |= bit;
 
@@ -646,7 +646,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
                 printf("I:", LA_F("%s (sid=%" PRIu64 ")", 0, 0), LA_W("Entered READY state, starting NAT punch and candidate sync", LA_W24, 29), ctx->session_id);
             }
         }
-        else printf("W:", LA_F("Received PEER_INFO_ACK for seq=%u", LA_F98, 347), ack_seq);
+        else printf("W:", LA_F("Received PEER_INFO_ACK for seq=%u", LA_F100, 347), ack_seq);
 
     } break;
 
@@ -692,7 +692,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
     case P2P_PKT_RELAY_ACK: {
 
         if (!ctx->relay_support) {
-            printf("E: %s", LA_S("Relay packet received but relay not enabled", LA_S69, 253));
+            printf("E: %s", LA_S("Relay packet received but relay not enabled", LA_S61, 253));
             return;
         }
 
@@ -733,7 +733,7 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
         memcpy(&probe_mapped.sin_addr.s_addr, payload, 4);
         memcpy(&probe_mapped.sin_port,        payload + 4, 2);
 
-        printf("V:", LA_F("Received NAT_PROBE_ACK: probe_mapped=%s:%d", LA_F96, 345), inet_ntoa(probe_mapped.sin_addr), ntohs(probe_mapped.sin_port));
+        printf("V:", LA_F("Received NAT_PROBE_ACK: probe_mapped=%s:%d", LA_F98, 345), inet_ntoa(probe_mapped.sin_addr), ntohs(probe_mapped.sin_port));
         
         // 端口一致性：主端口映射端口 == 探测端口映射端口 → 锥形，否则 → 对称
         ctx->nat_is_port_consistent = (probe_mapped.sin_port == ctx->public_addr.sin_port) ? 1 : 0;
@@ -753,16 +753,16 @@ void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t 
         else s->nat_type = P2P_NAT_SYMMETRIC;
         ctx->nat_probe_retries = -1/* 探测完成 */;
         
-        printf("I:", LA_F("%s %s %s:%d probe=%s:%d -> %s", LA_F18, 273),
+        printf("I:", LA_F("%s %s %s:%d probe=%s:%d -> %s", LA_F16, 273),
                      LA_W("Detection completed", LA_W22, 27),
-                     LA_S("Mapped address", LA_S47, 186),
+                     LA_S("Mapped address", LA_S41, 186),
                      inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
                      inet_ntoa(probe_mapped.sin_addr),     ntohs(probe_mapped.sin_port),
                      p2p_nat_type_str(s->nat_type));
 
     } break;
 
-    default: printf("E:", LA_F("Unknown packet type: %u", LA_F112, 357), type);
+    default: printf("E:", LA_F("Unknown packet type: %u", LA_F116, 357), type);
     }
 }
 
@@ -789,12 +789,12 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
         if (ctx->register_attempts > MAX_REGISTER_ATTEMPTS) return -1;
         if (++ctx->register_attempts > MAX_REGISTER_ATTEMPTS) {
 
-            printf("W:", LA_F("TIMEOUT: Max register attempts reached (%d)", LA_F110, 55), MAX_REGISTER_ATTEMPTS);
+            printf("W:", LA_F("TIMEOUT: Max register attempts reached (%d)", LA_F114, 55), MAX_REGISTER_ATTEMPTS);
 
             return -1;
         }
         
-        printf("V:", LA_F("Resend REGISTER (attempt %d)", LA_F104, 352), ctx->register_attempts);
+        printf("V:", LA_F("Resend REGISTER (attempt %d)", LA_F106, 352), ctx->register_attempts);
 
         send_register(s);
 
@@ -805,7 +805,7 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
 
         if (now - ctx->last_send_time < PEER_INFO_INTERVAL_MS) return 0;
 
-        printf("V: %s", LA_S("Resend remaining candidates and FIN to peer", LA_S72, 254));
+        printf("V: %s", LA_S("Resend remaining candidates and FIN to peer", LA_S64, 254));
 
         resend_rest_candidates_and_fin(s);
 
@@ -826,7 +826,7 @@ int p2p_signal_compact_tick(struct p2p_session *s) {
 
         ctx->last_send_time = now;
 
-        printf("V:", LA_F("%s: keepalive ALIVE sent to %s:%d", LA_F58, 313),
+        printf("V:", LA_F("%s: keepalive ALIVE sent to %s:%d", LA_F55, 313),
                         ctx->state == SIGNAL_COMPACT_REGISTERED ? "REGISTERED" : "READY",
                         inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port));
     }
@@ -870,9 +870,9 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
         udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ++ctx->nat_probe_retries, NULL, 0);
 
         printf("V:", LA_F("NAT_PROBE: %s %d/%d %s %s:%d", LA_F87, 336),
-                        LA_W("NAT probe retry", LA_W49, 57),
+                        LA_W("NAT probe retry", LA_W48, 57),
                         (int)ctx->nat_probe_retries, NAT_PROBE_MAX_RETRIES,
-                        LA_W("to", LA_W119, 135),
+                        LA_W("to", LA_W112, 135),
                         inet_ntoa(probe_addr.sin_addr), ctx->probe_port);
     }
     // 最大重试失败，探测端口无应答，无法确定 NAT 类型
@@ -882,7 +882,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
         ctx->nat_probe_retries = -2/* 探测超时 */;
         s->nat_type = P2P_NAT_TIMEOUT;
 
-        printf("W:", LA_F("NAT_PROBE: %s", LA_F86, 335), LA_W("NAT probe timeout, type unknown", LA_W51, 59));
+        printf("W:", LA_F("NAT_PROBE: %s", LA_F86, 335), LA_W("NAT probe timeout, type unknown", LA_W50, 59));
     }
 }
 

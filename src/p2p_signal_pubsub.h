@@ -228,7 +228,7 @@ typedef struct {
  * @param channel_id Gist ID（仅允许字母、数字、连字符、下划线、点）
  * @return           0=成功，-1=失败（channel_id 格式非法）
  */
-int  p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, const char *channel_id);
+ret_t p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, const char *channel_id);
 
 /*
  * 设置本端角色（PUB / SUB）

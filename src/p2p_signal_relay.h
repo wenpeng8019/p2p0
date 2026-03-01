@@ -456,7 +456,7 @@ void p2p_signal_relay_tick(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
  * @param my_name   本地 peer 名称（最大 32 字节）
  * @return          0 成功发起连接，-1 失败（参数错误或 socket 创建失败）
  */
-int  p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, int port, const char *my_name);
+ret_t p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, int port, const char *my_name);
 
 /*
  * 发送 CONNECT 消息（发起连接）
@@ -474,7 +474,7 @@ int  p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, 
  *                    - = -1: 连接断开（网络错误）
  *                    - = -2: 缓存已满（停止发送，等待对端上线或超时）
  */
-int  p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len);
+ret_t p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len);
 
 /*
  * 发送 ANSWER 消息（应答连接）

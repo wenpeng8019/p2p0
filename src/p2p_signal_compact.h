@@ -371,7 +371,7 @@ int p2p_signal_compact_tick(struct p2p_session *s);
  * @param verbose       是否输出详细日志
  * @return              0 成功，-1 失败
  */
-int p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
+ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
                                const struct sockaddr_in *server);
 
 int p2p_signal_compact_disconnect(struct p2p_session *s);

@@ -22,7 +22,7 @@ void route_final(route_ctx_t *rt);
  * <0: 检测失败
  * >=0: 检测到的地址数量
  */
-int  route_detect_local(route_ctx_t *rt);
+ret_t  route_detect_local(route_ctx_t *rt);
 
 bool  route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv);
 

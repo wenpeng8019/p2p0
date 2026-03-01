@@ -20,10 +20,11 @@ struct p2p_session;
 
 /* 打洞状态 */
 enum {
-    NAT_INIT = 0,       /* 未启动 */
-    NAT_PUNCHING,       /* 打洞中 */
-    NAT_CONNECTED,      /* 已连接 */
-    NAT_RELAY           /* 中继模式 */
+    NAT_INIT = 0,       // 初始化状态（从未连接过）
+    NAT_PUNCHING,       // 打洞中。即首次执行 nat_punch 时，也就是支持 Trickle 模式
+    NAT_CONNECTED,      // 已连接，即首次收到对方的 P2P_PKT_PUNCH 包。注意，可能存在从 NAT_RELAY 变为 NAT_CONNECTED 可能，例如 P2P_PKT_PUNCH 回复的非常慢
+    NAT_RELAY,          // 中继模式，即打洞超时失败。注意，此时如果执行 nat_punch，则会重新变为 NAT_PUNCHING 状态
+    NAT_DISCONNECTED    // 连接超时断开（曾经连接过，但现在断开了）
 };
 
 /* 打洞上下文（精简版，候选列表在 session 中） */
@@ -33,6 +34,7 @@ typedef struct {
     uint64_t            last_send_time;     /* 上次发送时间 */
     uint64_t            last_recv_time;     /* 上次接收时间 */
     uint64_t            punch_start;        /* 打洞开始时间 */
+    uint16_t            punch_seq;          /* 本地 PUNCH 包序列号（用于匹配 echo_seq） */
 } nat_ctx_t;
 
 /*
@@ -60,17 +62,17 @@ void nat_init(nat_ctx_t *n);
 int nat_punch(struct p2p_session *s, const struct sockaddr_in *addr);
 
 /*
- * 处理打洞相关数据包 (PUNCH/PUNCH_ACK/PING/PONG)
+ * 处理打洞相关数据包
  *
- * @param s       会话对象
- * @param type    包类型
- * @param payload 负载数据（可能为空）
- * @param len     负载长度
- * @param from    发送方地址
- * @return        0 正常，-1 错误
+ * @param s        会话对象
+ * @param hdr      包头（包含 type, flags, seq）
+ * @param payload  负载数据
+ * @param len      负载长度
+ * @param from     来源地址
+ * @return         0=处理成功，1=未处理
  */
-int nat_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len,
-                  const struct sockaddr_in *from);
+int nat_on_packet(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+                  const uint8_t *payload, int len, const struct sockaddr_in *from);
 
 /*
  * 周期调用，发送打洞包和心跳

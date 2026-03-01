@@ -56,6 +56,7 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
     
     /* ========== 首次批量或重新启动模式：addr == NULL ========== */
 
+    // todo 如果已经是 connected 状态，是否需要重启打洞？
     if (addr == NULL) {
         if (s->remote_cand_cnt == 0) {
             printf("E: %s", LA_S("ERROR: No remote candidates to punch", LA_S22, 171));
@@ -70,8 +71,7 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
         // 打印详细日志
         if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
 
-            printf("V:", LA_F("%s %d %s", LA_F6, 261), LA_W("START: Punching to", LA_W106, 122),
-                            s->remote_cand_cnt, LA_W("candidates", LA_W17, 21));
+            // Verbose: START punching (output disabled in current implementation)
 
             for (int i = 0; i < s->remote_cand_cnt; i++) {
                 const char *type_str = "Unknown";
@@ -93,15 +93,14 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
                     }
                 }
 
-                printf("V:", LA_F("  [%d] %s: %s:%d", LA_F3, 258), i, type_str,
-                                inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
-                                ntohs(s->remote_cands[i].cand.addr.sin_port));
+                // Verbose: candidate details (output disabled)
             }
         }
 
-        // 立即向所有候选并行发送打洞包
+        // 立即向所有候选并行发送打洞包（echo_seq=0 表示探测包）
+        uint8_t probe_payload[2] = {0, 0};  // echo_seq = 0
         for (int i = 0; i < s->remote_cand_cnt; i++) {
-            udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+            udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
             s->remote_cands[i].last_punch_send_ms = now;
         }
         n->last_send_time = now;
@@ -120,11 +119,11 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
         n->state = NAT_PUNCHING;
         n->punch_start = now;
 
-        printf("V:", LA_F("Restart punching from RELAY on new candidate %s:%d", LA_F105, 353),
-                        inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
+        // Verbose: restarting punch (output disabled)
 
-        // 发送打洞包
-        udp_send_packet(s->sock, addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+        // 发送打洞包（echo_seq=0 表示探测包）
+        uint8_t probe_payload[2] = {0, 0};
+        udp_send_packet(s->sock, addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
         n->last_send_time = now;
 
         // 更新候选的时间戳
@@ -135,8 +134,7 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
     }
     else {
 
-        printf("V:", LA_F("Ignore punch request to %s:%d since already connected", LA_F74, 324),
-                        inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
+        // Verbose: ignoring duplicate punch (output disabled)
     }
 
     return 0;
@@ -147,30 +145,45 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
 /*
  * 处理打洞相关数据包
  */
-int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {
-    (void)payload; (void)len;
+int nat_on_packet(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
+                  const uint8_t *payload, int len, const struct sockaddr_in *from) {
 
     nat_ctx_t *n = &s->nat;
     P_clock _clk; P_clock_now(&_clk);
     uint64_t now = clock_ms(_clk);
 
-    switch (type) {
+    switch (hdr->type) {
 
-    case P2P_PKT_PUNCH:
+    case P2P_PKT_PUNCH: {
+        
+        // 解析 echo_seq（2字节网络字节序）
+        uint16_t echo_seq = 0;
+        if (len >= 2) {
+            echo_seq = ((uint16_t)payload[0] << 8) | payload[1];
+        }
 
-        // 回复应答包
-        udp_send_packet(s->sock, from, P2P_PKT_PUNCH_ACK, 0, 0, NULL, 0);
-
-        /* fall through - 收到 PUNCH 也算成功 */
-
-    case P2P_PKT_PUNCH_ACK:
-
-        printf("V:", LA_F("%s %s:%d", LA_F21, 276), type == P2P_PKT_PUNCH ? LA_W("PUNCH: Received from", LA_W76, 87) : LA_W("PUNCH_ACK: Received from", LA_W77, 88),
-                        inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        // 如果 echo_seq 为 0，说明这是探测包，需要回复确认
+        if (echo_seq == 0) {
+            // Verbose: received probe
+            
+            // 回复确认包：echo 对方的 seq
+            uint8_t reply_payload[2];
+            reply_payload[0] = (uint8_t)(hdr->seq >> 8);
+            reply_payload[1] = (uint8_t)(hdr->seq & 0xFF);
+            
+            udp_send_packet(s->sock, from, P2P_PKT_PUNCH, 0, ++n->punch_seq, reply_payload, 2);
+            
+            // Verbose: sent confirmation
+        }
+        // 如果 echo_seq 不为 0，说明这是对我之前 PUNCH 的确认
+        else if (echo_seq == n->punch_seq) {
+            // Verbose: received valid confirmation -> NAT_CONNECTED
+        } else {
+            // Verbose: received stale confirmation (echo_seq mismatch)
+        }
 
         // 通知 ICE 层（如果启用）
         if (s->cfg.use_ice) {
-
             p2p_ice_on_check_success(s, from);
         }
 
@@ -180,29 +193,14 @@ int nat_on_packet(p2p_session_t *s, uint8_t type, const uint8_t *payload, int le
             n->state = NAT_CONNECTED;
             n->last_recv_time = now;
             
-            printf("I:", LA_F("%s %s:%d", LA_F21, 276),
-                   LA_W("SUCCESS: Hole punched! Connected to", LA_W110, 126),
-                   inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-
-            printf("I:", LA_F("  %s %llu ms", LA_F0, 255), LA_W("Time:", LA_W113, 129), now - n->punch_start);
+            // Info: SUCCESS
         }
-        return 0;
-
-    case P2P_PKT_PING:
-
-        // 回复 PONG
-        udp_send_packet(s->sock, from, P2P_PKT_PONG, 0, 0, NULL, 0);
-
-        /* fall through */
-
-    case P2P_PKT_PONG:
-
+        
+        // 更新最后接收时间（保活）
         n->last_recv_time = now;
 
-        printf("V:", LA_F("%s %s:%d", LA_F21, 276), type == P2P_PKT_PONG ? "received PONG from" : "received PING from",
-                        inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-
         return 0;
+    }
 
     default:
         return 1;  /* 未处理 */
@@ -226,8 +224,8 @@ int nat_tick(p2p_session_t *s) {
             // 超时判断
             if (now - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 
-                printf("W:", LA_F("%s (%llu ms), %s", LA_F34, 289),
-                       LA_W("TIMEOUT: Punch failed after", LA_W118, 134),
+                printf("W:", LA_F("%s (%llu ms), %s", LA_F32, 289),
+                       LA_W("TIMEOUT: Punch failed after", LA_W111, 134),
                        now - n->punch_start, LA_W("attempts, switching to RELAY", LA_W9, 12));
 
                 n->state = NAT_RELAY;
@@ -246,7 +244,7 @@ int nat_tick(p2p_session_t *s) {
 
                 if (should_send) {
 
-                    printf("D:", LA_F("%s %s:%d (candidate %d)", LA_F23, 278), "",
+                    printf("D:", LA_F("%s %s:%d (candidate %d)", LA_F21, 278), "",
                                   inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
                                   ntohs(s->remote_cands[i].cand.addr.sin_port), i);
 
@@ -260,8 +258,8 @@ int nat_tick(p2p_session_t *s) {
 
                 n->last_send_time = now;
 
-                printf("V:", LA_F("%s %s %d/%d %s (elapsed: %llu ms)", LA_F10, 265), LA_W("PUNCHING: Attempt", LA_W78, 89),
-                                LA_S("to", LA_S87, 209), sent_cnt,
+                printf("V:", LA_F("%s %s %d/%d %s (elapsed: %llu ms)", LA_F8, 265), LA_W("PUNCHING: Attempt", LA_W75, 89),
+                                LA_S("to", LA_S79, 209), sent_cnt,
                                 s->remote_cand_cnt, LA_W("candidates", LA_W17, 21),
                                 now - n->punch_start);
             }
@@ -269,35 +267,37 @@ int nat_tick(p2p_session_t *s) {
 
         case NAT_CONNECTED:
 
-            // 发送心跳保活包
+            // 发送保活包（复用 PUNCH 包，echo_seq=0）
             if (now - n->last_send_time >= PING_INTERVAL_MS) {
 
-                printf("V:", LA_F("%s %s:%d", LA_F21, 276), "",
-                                inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port));
+// Verbose: KEEPALIVE
 
-                udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PING, 0, 0, NULL, 0);
+                uint8_t probe_payload[2] = {0, 0};
+                udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
                 n->last_send_time = now;
             }
 
             // 超时检查
             if (n->last_recv_time > 0 && now - n->last_recv_time >= PONG_TIMEOUT_MS) {
 
-                printf("W:", LA_F("%s (%s %d ms)", LA_F35, 290),
-                       LA_W("TIMEOUT: Connection lost", LA_W117, 133),
-                       LA_S("no pong for", LA_S51, 189),
-                       PONG_TIMEOUT_MS);
+                // Warning: connection lost
 
-                n->state = NAT_INIT;
+                n->state = NAT_DISCONNECTED;
                 return -1;
             }
             break;
 
+        case NAT_DISCONNECTED:
+            // 连接断开，不再自动重连（由上层决定是否重启打洞或切换到 RELAY）
+            break;
+
         case NAT_RELAY:
 
-            // 中继模式下周期性尝试直连
+            // 中继模式下周期性尝试直连（echo_seq=0）
             if (now - n->last_send_time >= PUNCH_INTERVAL_MS * 4) {
+                uint8_t probe_payload[2] = {0, 0};
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
-                    udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, 0, NULL, 0);
+                    udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
                     s->remote_cands[i].last_punch_send_ms = now;
                 }
                 n->last_send_time = now;

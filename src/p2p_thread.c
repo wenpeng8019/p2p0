@@ -19,17 +19,17 @@ static int32_t p2p_thread_func(void *arg) {
     return 0;
 }
 
-int p2p_thread_start(p2p_session_t *s) {
+ret_t p2p_thread_start(p2p_session_t *s) {
     s->quit = 0;
     if (P_mutex_init(&s->mtx) != 0)
         return -1;
     ret_t ret = P_thread(&s->thread, p2p_thread_func, s, P_THD_NORMAL, 0);
     if (ret != E_NONE) {
         P_mutex_final(&s->mtx);
-        return -1;
+        return ret;
     }
     s->thread_running = 1;
-    return 0;
+    return E_NONE;
 }
 
 void p2p_thread_stop(p2p_session_t *s) {

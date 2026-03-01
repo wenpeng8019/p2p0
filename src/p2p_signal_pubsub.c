@@ -89,7 +89,7 @@ static void derive_key(const char *auth_key, uint8_t key_out[8]) {
         }
     } else {
         /* 未提供密钥时使用默认值（不安全，仅用于测试） */
-        printf("W: %s", LA_S("No auth_key provided, using default key (insecure)", LA_S50, 188));
+        printf("W: %s", LA_S("No auth_key provided, using default key (insecure)", LA_S44, 188));
         memset(key_out, 0xAA, key_len);
     }
 }
@@ -126,7 +126,7 @@ static int is_safe_string(const char *str) {
  * @param channel_id Gist ID（作为信令通道）
  * @return           0=成功，-1=失败
  */
-int p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, const char *channel_id) {
+ret_t p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, const char *channel_id) {
 
     memset(ctx, 0, sizeof(*ctx));
     ctx->role = P2P_SIGNAL_ROLE_UNKNOWN;
@@ -135,19 +135,19 @@ int p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, cons
     
     /* 安全验证：防止命令注入 */
     if (!is_safe_string(channel_id)) {
-        printf("E: %s",  LA_S("Invalid channel_id format (security risk)", LA_S44, 184));
+        printf("E: %s",  LA_S("Invalid channel_id format (security risk)", LA_S38, 184));
         return -1;
     }
     
-    printf("I:", LA_F("%s %s", LA_F8, 263), LA_W("Initialized:", LA_W40, 46), channel_id);
-    return 0;
+    printf("I:", LA_F("%s %s", LA_F6, 263), LA_W("Initialized:", LA_W39, 46), channel_id);
+    return E_NONE;
 }
 
 void p2p_signal_pubsub_set_role(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t role) {
 
     ctx->role = role;
-    printf("I:", LA_F("%s %s", LA_F8, 263), LA_W("Initialized:", LA_W40, 46),
-                 role == P2P_SIGNAL_ROLE_PUB ? LA_W("PUB", LA_W74, 83) : LA_W("SUB", LA_W108, 124));
+    printf("I:", LA_F("%s %s", LA_F6, 263), LA_W("Initialized:", LA_W39, 46),
+                 role == P2P_SIGNAL_ROLE_PUB ? LA_W("PUB", LA_W73, 83) : LA_W("SUB", LA_W104, 124));
 }
 
 /*
@@ -182,7 +182,7 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
     /* 分配解密缓冲区 */
     uint8_t *dec_buf = malloc(enc_len);
     if (!dec_buf) {
-        printf("E: %s",  LA_S("Out of memory", LA_S55, 192));
+        printf("E: %s",  LA_S("Out of memory", LA_S47, 192));
         return;
     }
     
@@ -193,12 +193,12 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
     p2p_signaling_payload_hdr_t payload;
     if (enc_len >= sizeof(p2p_signaling_payload_hdr_t) && unpack_signaling_payload_hdr(&payload, dec_buf) == 0 &&
         enc_len >= (size_t)(sizeof(p2p_signaling_payload_hdr_t) + payload.candidate_count * sizeof(p2p_candidate_t))) {
-        printf("I:", LA_F("Received valid signal from '%s'", LA_F100, 349), payload.sender);
+        printf("I:", LA_F("Received valid signal from '%s'", LA_F102, 349), payload.sender);
         
         /* SUB 收到首个 offer（或发送者改变），重置 ICE 避免残留旧连接状态 */
         if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
             if (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_INIT) {
-                printf("D:", LA_F("[DEBUG] First offer, resetting ICE and clearing %d stale candidates", LA_F117, 361), s->remote_cand_cnt);
+                printf("D:", LA_F("[DEBUG] First offer, resetting ICE and clearing %d stale candidates", LA_F121, 361), s->remote_cand_cnt);
                 s->remote_cand_cnt = 0;
                 s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
                 s->ice_check_count = 0;
@@ -212,14 +212,14 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             if (!c) break;  /* OOM */
              unpack_candidate(&c->cand, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
              c->last_punch_send_ms = 0;
-            printf("I:", LA_F("%s: %s=%d, %s=%s:%d", LA_F57, 312),
-                 LA_W("Received remote candidate", LA_W81, 92), LA_S("type", LA_S88, 211), c->cand.type,
+            printf("I:", LA_F("%s: %s=%d, %s=%s:%d", LA_F54, 312),
+                 LA_W("Received remote candidate", LA_W78, 92), LA_S("type", LA_S80, 211), c->cand.type,
                  LA_W("address", LA_W4, 6), inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
             
             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
             if (s->ice_state == P2P_ICE_STATE_CHECKING) {
 
-                printf("D:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F121, 363),
+                printf("D:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F125, 363),
                               inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
                 nat_punch(s, &c->cand.addr);
             }
@@ -250,12 +250,12 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             }
             if (n > 0) {
                 p2p_signal_pubsub_send(ctx, payload.sender, buf, n);
-                printf("I:", LA_F("Auto-send answer (with %d candidates) total sent %s", LA_F62, 316),
+                printf("I:", LA_F("Auto-send answer (with %d candidates) total sent %s", LA_F59, 316),
                        s->local_cand_cnt, payload.sender);
             }
         }
     } else {
-        printf("W: %s", LA_S("Signal payload deserialization failed", LA_S80, 205));
+        printf("W: %s", LA_S("Signal payload deserialization failed", LA_S72, 205));
     }
     
     free(dec_buf);
@@ -306,7 +306,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     int padded_len = (len + 7) & ~7;
     uint8_t *padded_data = calloc(1, padded_len);
     if (!padded_data) {
-        printf("E: %s",  LA_S("Out of memory", LA_S55, 192));
+        printf("E: %s",  LA_S("Out of memory", LA_S47, 192));
         return -1;
     }
     memcpy(padded_data, data, len);
@@ -315,7 +315,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
     uint8_t *enc_data = malloc(padded_len);
     if (!enc_data) {
         free(padded_data);
-        printf("E: %s",  LA_S("Out of memory", LA_S55, 192));
+        printf("E: %s",  LA_S("Out of memory", LA_S47, 192));
         return -1;
     }
     
@@ -488,7 +488,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
         snprintf(patch_url, sizeof(patch_url),
                  "https://api.github.com/gists/%s", ctx->channel_id);
 
-        printf("I:", LA_F("Updating Gist field '%s'...", LA_F114, 358), field_name);
+        printf("I:", LA_F("Updating Gist field '%s'...", LA_F118, 358), field_name);
         ret = p2p_http_patch(patch_url, ctx->auth_token, body_buf);
 
         free(body_buf);
@@ -552,7 +552,7 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
 
     int got = p2p_http_get(get_url, ctx->auth_token, buffer, 32768);
     if (got <= 0) {
-        printf("D: %s", LA_S("Gist GET failed", LA_S41, 182));
+        printf("D: %s", LA_S("Gist GET failed", LA_S35, 182));
         free(buffer);
         return;
     }
@@ -650,8 +650,8 @@ void p2p_signal_pubsub_tick(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s)
 
     /* 处理有效数据 */
     if (strlen(content) > 10) {
-        printf("I:", LA_F("Processing (role=%s)", LA_F90, 339),
-                     ctx->role == P2P_SIGNAL_ROLE_PUB ? LA_W("PUB", LA_W74, 83) : LA_W("SUB", LA_W108, 124));
+        printf("I:", LA_F("Processing (role=%s)", LA_F92, 339),
+                     ctx->role == P2P_SIGNAL_ROLE_PUB ? LA_W("PUB", LA_W73, 83) : LA_W("SUB", LA_W104, 124));
         process_payload(ctx, s, content);
     }
 

@@ -6,7 +6,7 @@
 
 struct p2p_session;
 
-int  p2p_thread_start(struct p2p_session *s);
+ret_t  p2p_thread_start(struct p2p_session *s);
 void p2p_thread_stop(struct p2p_session *s);
 
 #endif /* P2P_THREADED */

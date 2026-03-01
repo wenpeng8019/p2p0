@@ -72,16 +72,28 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 编号范围：0x01-0x7F
  */
 
-/* 打洞协议 (NAT 穿透) */
-#define P2P_PKT_PUNCH           0x01        // NAT 打洞包
-#define P2P_PKT_PUNCH_ACK       0x02        // NAT 打洞确认
+/*
+ * P2P_PKT_PUNCH 协议（对称设计）
+ *
+ * 包头: [type=0x01 | flags=0 | seq=发送方序列号(2B)]
+ * 负载: [echo_seq(2B, 网络字节序)]
+ *   - echo_seq = 0: 探测包（首次发送或保活）
+ *   - echo_seq > 0: 确认包（确认收到了对方的 seq=echo_seq）
+ *
+ * 示例：
+ *   A → PUNCH(seq=1, echo=0) → B     // A发起探测
+ *   A ← PUNCH(seq=2, echo=1) ← B     // B回应：我收到了你的seq=1
+ *   A → PUNCH(seq=3, echo=2) → B     // A确认：我收到了你的seq=2
+ *
+ * 优势：
+ *   - 完全对称：双方发送同一种包
+ *   - 明确确认：echo_seq 确认双向连通
+ *   - NAT/防火墙友好：确认包建立状态表
+ */
+#define P2P_PKT_PUNCH           0x01        // 连接探测包（用于打洞和保活，带 echo_seq 负载）
 
 /* 安全协议 */
 #define P2P_PKT_AUTH            0x03        // 安全握手包
-
-/* 保活协议 */
-#define P2P_PKT_PING            0x10        // 心跳请求
-#define P2P_PKT_PONG            0x11        // 心跳响应
 
 /* 数据传输 (peer-to-peer) */
 #define P2P_PKT_DATA            0x20        // 数据包
@@ -114,15 +126,22 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 /* COMPACT 信令协议 (客户端 <-> 信令服务器) - 0x80-0x9F */
 #define SIG_PKT_REGISTER        0x80        // 注册到信令服务器（含本地候选列表）
 #define SIG_PKT_REGISTER_ACK    0x81        // 注册确认（告知缓存能力、公网地址、探测端口、中继支持）
-#define SIG_PKT_ALIVE           0x82        // 保活包（可选，客户端定期发送以维持注册状态）
-#define SIG_PKT_ALIVE_ACK       0x83        // 保活确认（服务器回复以确认注册状态）
-#define SIG_PKT_PEER_INFO       0x84        // 候选列表同步包（序列化传输）
-#define SIG_PKT_PEER_INFO_ACK   0x85        // 候选列表确认（确认指定序列号）
-#define SIG_PKT_NAT_PROBE       0x86        // NAT 类型探测请求（发往探测端口）
-#define SIG_PKT_NAT_PROBE_ACK   0x87        // NAT 类型探测响应（返回第二次映射地址）
-#define SIG_PKT_UNREGISTER      0x88        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
+#define SIG_PKT_UNREGISTER      0x82        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
                                             // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
-#define SIG_PKT_PEER_OFF        0x89        // 服务器下行通知：对端已离线/断开
+#define SIG_PKT_PEER_INFO       0x83        // 候选列表同步包（序列化传输）
+#define SIG_PKT_PEER_INFO_ACK   0x84        // 候选列表确认（确认指定序列号）
+#define SIG_PKT_PEER_OFF        0x85        // 服务器下行通知：对端已离线/断开
+
+#define SIG_PKT_ALIVE           0x86        // 保活包（可选，客户端定期发送以维持注册状态）
+#define SIG_PKT_ALIVE_ACK       0x87        // 保活确认（服务器回复以确认注册状态）
+
+#define SIG_PKT_PING            0x88        // PING 包（通过服务器向对方发送可信赖到达探测包）
+#define SIG_PKT_PING_ACK        0x89        // PING 确认包，表示服务器收到了 PING 请求包
+#define SIG_PKT_PONG            0x8A        // PONG 包（PING 的响应）
+#define SIG_PKT_PONG_ACK        0x8B        // PONG 确认包，表示收到了服务器下发的 PONG 包
+ 
+#define SIG_PKT_NAT_PROBE       0x8C        // NAT 类型探测请求（发往探测端口）
+#define SIG_PKT_NAT_PROBE_ACK   0x8D        // NAT 类型探测响应（返回第二次映射地址）
 
 
 /* COMPACT 服务器中继扩展协议 - 0xA0-0xBF */
