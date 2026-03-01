@@ -80,6 +80,7 @@ set(LIB_SRCS
     src/p2p_signal_pubsub.c
     src/p2p_signal_compact.c
     src/p2p_http.c
+    src/p2p_path_manager.c
 )
 
 # --- i18n code generation for p2p core library ---

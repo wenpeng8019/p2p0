@@ -194,6 +194,9 @@ typedef struct {
     /* 语言选项（已废弃，保留字段以兼容旧 API） */
     p2p_language_t          language;                   // 旧系统语言选项，已无效；请用 lang_load_fp() 控制语言
     
+    /* 路径管理策略 */
+    int                     path_strategy;              // 路径选择策略：0=直连优先，1=性能优先，2=混合模式（默认0）
+    
     /* 事件回调 */
     p2p_on_connected_fn     on_connected;               // 连接建立回调 (可选)
     p2p_on_disconnected_fn  on_disconnected;            // 连接断开回调 (可选)

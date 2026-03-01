@@ -89,6 +89,7 @@
 #include "p2p_signal_relay.h"   /* 中继模式信令 */
 #include "p2p_signal_pubsub.h"  /* 发布/订阅模式信令 */
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
+#include "p2p_path_manager.h"   /* 多路径管理器 */
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -160,6 +161,7 @@ typedef struct p2p_session {
     route_ctx_t                 route;              // 路由表上下文
     reliable_t                  reliable;           // 可靠传输层状态
     stream_t                    stream;             // 流传输层状态
+    path_manager_t              path_mgr;           // 路径管理器（多路径并行支持）
 
     /* ======================== 模块化传输 ======================== */
     /*

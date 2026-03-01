@@ -727,12 +727,6 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
             printf("I:", LA_F("%s '%s'", LA_F25, 282), LA_W("Sent answer to", LA_W93, 114), s->sig_relay_ctx.incoming_peer_name);
         }
     }
-
-    /* 认证握手 */
-    if (s->cfg.auth_key) {
-        udp_send_packet(s->sock, from, P2P_PKT_AUTH, 0, 0, s->cfg.auth_key, (int)strlen(s->cfg.auth_key));
-        printf("I:", LA_S("Sent authentication request to peer", LA_S76, 204));
-    }
 }
 
 /* ============================================================================

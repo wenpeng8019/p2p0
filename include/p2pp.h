@@ -92,9 +92,6 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 #define P2P_PKT_PUNCH           0x01        // 连接探测包（用于打洞和保活，带 echo_seq 负载）
 
-/* 安全协议 */
-#define P2P_PKT_AUTH            0x03        // 安全握手包
-
 /* 数据传输 (peer-to-peer) */
 #define P2P_PKT_DATA            0x20        // 数据包
 #define P2P_PKT_ACK             0x21        // 确认包

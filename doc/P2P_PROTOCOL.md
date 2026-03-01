@@ -977,7 +977,7 @@ p2p_signaling_payload_t (76B header + N×32B candidates)
 | **0x01-0x0F** | **打洞与安全** | | |
 | 0x01 | P2P_PKT_PUNCH | NAT 打洞包 |
 | 0x02 | P2P_PKT_PUNCH_ACK | NAT 打洞确认 |
-| 0x03 | P2P_PKT_AUTH | 安全握手包 |
+| ~~0x03~~ | ~~P2P_PKT_AUTH~~ | ~~安全握手包~~ (已废弃，改为应用层实现) |
 | **0x10-0x1F** | **保活协议** | | |
 | 0x10 | P2P_PKT_PING | 心跳请求 |
 | 0x11 | P2P_PKT_PONG | 心跳响应 |

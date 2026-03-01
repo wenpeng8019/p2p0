@@ -164,6 +164,14 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 初始化基础传输层（reliable ARQ）
     reliable_init(&s->reliable);
 
+    // 初始化路径管理器（多路径并行支持）
+    p2p_path_strategy_t strategy = (p2p_path_strategy_t)(cfg->path_strategy);
+    if (strategy < P2P_PATH_STRATEGY_CONNECTION_FIRST || strategy > P2P_PATH_STRATEGY_HYBRID) {
+        strategy = P2P_PATH_STRATEGY_CONNECTION_FIRST; // 默认：直连优先
+    }
+    path_manager_init(&s->path_mgr, strategy);
+    printf("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F89, 232), strategy);
+
     // 初始化传输层（可选的高级传输模块）
     // + 这里的 s->trans 只用于高级传输模块（DTLS/OpenSSL/SCTP/PseudoTCP）
     s->trans = NULL;
@@ -628,6 +636,12 @@ p2p_update(p2p_handle_t hdl) {
                     hdr.type == P2P_PKT_DATA ? "DATA" : "RELAY_DATA",
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
 
+                // 记录数据包接收（更新路径活跃时间）
+                if (s->path_mgr.active_path >= 0) {
+                    P_clock _clk_recv; P_clock_now(&_clk_recv);
+                    path_manager_on_packet_recv(&s->path_mgr, s->path_mgr.active_path, clock_ms(_clk_recv));
+                }
+
                 // 高级传输层（DTLS/SCTP/PseudoTCP）有自己的解包逻辑
                 if (s->trans && s->trans->on_packet)
                     s->trans->on_packet(s, hdr.type, payload, payload_len, &from);
@@ -651,7 +665,21 @@ p2p_update(p2p_handle_t hdl) {
                     printf("D:", LA_F("Received %s from %s:%d, ack_seq=%u, sack=0x%08x", LA_F124, 144),
                         hdr.type == P2P_PKT_ACK ? "ACK" : "RELAY_ACK",
                         inet_ntoa(from.sin_addr), ntohs(from.sin_port), ack_seq, sack);
+                    
+                    // 记录 ACK 前的 RTT 值
+                    int old_srtt = s->reliable.srtt;
+                    
+                    // 处理 ACK（reliable 层会更新 RTT）
                     reliable_on_ack(&s->reliable, ack_seq, sack);
+                    
+                    // 如果 RTT 更新了，同步到路径管理器
+                    if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0) {
+                        if (s->path_mgr.active_path >= 0) {
+                            path_manager_update_metrics(&s->path_mgr, s->path_mgr.active_path, 
+                                                        (uint32_t)s->reliable.srtt, true);
+                            path_manager_update_quality(&s->path_mgr, s->path_mgr.active_path);
+                        }
+                    }
                 }
                 break;
 
@@ -683,25 +711,6 @@ p2p_update(p2p_handle_t hdl) {
                 printf("D:", LA_F("Received ROUTE_PROBE_ACK from %s:%d, len=%d", LA_F127, 147),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), payload_len);
                 route_on_probe_ack(&s->route, &from);
-                break;
-
-            // --------------------
-            // 连接授权验证
-            // --------------------
-
-            case P2P_PKT_AUTH:
-                printf("D:", LA_F("Received AUTH packet from %s:%d, len=%d", LA_F128, 148),
-                    inet_ntoa(from.sin_addr), ntohs(from.sin_port), payload_len);
-
-                // 简化版安全握手：检查 payload 是否匹配 cfg.auth_key
-                if (s->cfg.auth_key && payload_len > 0) {
-                    if (strncmp((const char*)payload, s->cfg.auth_key, payload_len) == 0) {
-                        printf("I: %s", LA_W("Authenticated successfully", LA_W10, 13));
-                    } else {
-                        printf("I: %s", LA_W("Authentication failed", LA_W11, 14));
-                        s->state = P2P_STATE_ERROR;
-                    }
-                }
                 break;
 
             // --------------------
@@ -785,8 +794,26 @@ p2p_update(p2p_handle_t hdl) {
     // 升级到 LAN 路径（如果确认同一子网）
     if (s->route.lan_confirmed && s->path != P2P_PATH_LAN) {
         printf("I: %s", LA_S("Same subnet confirmed, switching to LAN path", LA_S70, 624));
-        s->path = P2P_PATH_LAN;
-        s->active_addr = s->route.lan_peer_addr;
+        
+        // 添加 LAN 路径到路径管理器
+        int lan_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_LAN, &s->route.lan_peer_addr);
+        if (lan_idx >= 0) {
+            path_manager_set_path_state(&s->path_mgr, lan_idx, PATH_STATE_ACTIVE);
+            printf("I:", LA_F("Added LAN path to path manager, idx=%d", LA_F89, 232), lan_idx);
+            
+            // 重新选择最佳路径（LAN 应当优先）
+            int best_path = path_manager_select_best_path(&s->path_mgr);
+            if (best_path >= 0 && best_path == lan_idx) {
+                s->path = P2P_PATH_LAN;
+                s->active_addr = s->route.lan_peer_addr;
+                s->path_mgr.active_path = best_path;
+                printf("I: %s", LA_S("Switched to LAN path", LA_S70, 624));
+            }
+        } else {
+            // 降级：路径管理器失败，使用传统方式
+            s->path = P2P_PATH_LAN;
+            s->active_addr = s->route.lan_peer_addr;
+        }
     }
 
     /* ========================================================================
@@ -809,8 +836,30 @@ p2p_update(p2p_handle_t hdl) {
 
         printf("I: %s", LA_S("P2P connection established", LA_S50, 621));
         s->state = P2P_STATE_CONNECTED;
-        s->path = P2P_PATH_PUNCH;
-        s->active_addr = s->nat.peer_addr;
+        
+        // 添加 PUNCH 路径到路径管理器
+        int path_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_PUNCH, &s->nat.peer_addr);
+        if (path_idx >= 0) {
+            path_manager_set_path_state(&s->path_mgr, path_idx, PATH_STATE_ACTIVE);
+            printf("I:", LA_F("Added PUNCH path to path manager, idx=%d", LA_F89, 232), path_idx);
+        }
+        
+        // 选择最佳路径
+        int best_path = path_manager_select_best_path(&s->path_mgr);
+        if (best_path >= 0) {
+            path_info_t *pi = path_manager_get_active_path(&s->path_mgr);
+            if (pi) {
+                s->path = pi->type;
+                s->active_addr = pi->addr;
+                s->path_mgr.active_path = best_path;
+                printf("I:", LA_F("Selected path: %s (idx=%d)", LA_F89, 232), 
+                       path_type_str(pi->type), best_path);
+            }
+        } else {
+            // 降级：路径管理器无可用路径，使用传统方式
+            s->path = P2P_PATH_PUNCH;
+            s->active_addr = s->nat.peer_addr;
+        }
 
         // 触发连接建立回调
         if (s->cfg.on_connected) {
@@ -831,7 +880,7 @@ p2p_update(p2p_handle_t hdl) {
 
             if (!s->cfg.disable_lan_shortcut) {
 
-                // 发送 ROUTE_PROBE，确认后将 active_addr 切换到私网 IP（LAN shortcut）
+                // 发送 ROUTE_PROBE，确认后将切换到 LAN 路径
                 struct sockaddr_in priv = *peer_priv;
                 priv.sin_port = s->nat.peer_addr.sin_port;
                 route_send_probe(&s->route, s->sock, &priv, 0);
@@ -844,45 +893,122 @@ p2p_update(p2p_handle_t hdl) {
         }
     }
 
-    // 转换：PUNCHING → RELAY（NAT 打洞失败，降级到服务器中继）
-    // fixme 中继的模式应该作为后补，而不是状态切换。因为连接状态是动态的，不稳定的。
-    if (s->state == P2P_STATE_PUNCHING &&
-        s->nat.state == NAT_RELAY) {
+    // NAT 重新连接后恢复路径（NAT_RELAY → NAT_CONNECTED）
+    if (s->nat.state == NAT_CONNECTED && s->state == P2P_STATE_RELAY) {
+        printf("I: %s", LA_S("NAT connection recovered, upgrading from RELAY to CONNECTED", LA_S42, 620));
+        
+        // 更新 PUNCH 路径状态
+        int punch_idx = path_manager_find_path(&s->path_mgr, P2P_PATH_PUNCH);
+        if (punch_idx >= 0) {
+            path_manager_set_path_state(&s->path_mgr, punch_idx, PATH_STATE_ACTIVE);
+            path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_PUNCH, &s->nat.peer_addr);
+        } else {
+            punch_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_PUNCH, &s->nat.peer_addr);
+            if (punch_idx >= 0) {
+                path_manager_set_path_state(&s->path_mgr, punch_idx, PATH_STATE_ACTIVE);
+            }
+        }
+        
+        // 标记中继路径为降级（但不移除，保留作为备份）
+        int relay_idx = path_manager_find_path(&s->path_mgr, P2P_PATH_RELAY);
+        if (relay_idx >= 0) {
+            path_manager_set_path_state(&s->path_mgr, relay_idx, PATH_STATE_DEGRADED);
+        }
+        
+        // 重新选择最佳路径（PUNCH 应当优先）
+        int best_path = path_manager_select_best_path(&s->path_mgr);
+        if (best_path >= 0) {
+            path_info_t *pi = &s->path_mgr.paths[best_path];
+            s->path = pi->type;
+            s->active_addr = pi->addr;
+            s->path_mgr.active_path = best_path;
+            s->state = P2P_STATE_CONNECTED; // 恢复为 CONNECTED 状态
+            printf("I:", LA_F("Path recovered: switched to %s", LA_F89, 232), path_type_str(pi->type));
+        }
+    }
 
-        // 中继模式：NAT 打洞失败后的降级方案
-        printf("I: %s", LA_S("P2P punch failed, switching to relay mode", LA_S51, 622));
-        s->state = P2P_STATE_RELAY;
-        s->path = P2P_PATH_RELAY;
+    // 转换：PUNCHING → RELAY（NAT 打洞失败，添加中继路径）
+    if (s->state == P2P_STATE_PUNCHING && s->nat.state == NAT_RELAY) {
 
+        // 打洞失败：标记 PUNCH 路径为失效
+        int punch_idx = path_manager_find_path(&s->path_mgr, P2P_PATH_PUNCH);
+        if (punch_idx >= 0) {
+            path_manager_set_path_state(&s->path_mgr, punch_idx, PATH_STATE_FAILED);
+        }
+        
+        // 添加中继路径
+        printf("I: %s", LA_S("P2P punch failed, adding relay path", LA_S51, 622));
+        
+        struct sockaddr_in relay_addr;
+        bool relay_available = false;
+        
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-
-            // 检查服务器是否支持中继功能
             if (s->sig_compact_ctx.relay_support) {
-                // COMPACT 模式：通过 UDP 信令服务器中继数据
-                // 服务器会将 P2P_PKT_RELAY_DATA 转发给对端
-                // 注意：中继模式下不发 UNREGISTER，服务器槽位仍用于识别对端
-                s->active_addr = s->sig_compact_ctx.server_addr;
-                printf("I: %s", LA_W("NAT punch failed, using server relay", LA_W53, 62));
+                relay_addr = s->sig_compact_ctx.server_addr;
+                relay_available = true;
+                printf("I: %s", LA_W("NAT punch failed, using COMPACT server relay", LA_W53, 62));
             } else {
-                // 服务器不支持中继，继续尝试打洞
-                s->active_addr = s->nat.peer_addr;
                 printf("W: %s", LA_W("NAT punch failed, server has no relay support", LA_W52, 61));
             }
-        } 
-        else {
-            // RELAY/PUBSUB 模式：目前不支持数据中继
-            // 保持 peer_addr，继续尝试打洞（NAT_RELAY 状态会周期性重试）
-            // TODO: 需要配置 TURN 服务器或扩展 RELAY 服务器的中继功能
-            s->active_addr = s->nat.peer_addr;
+        } else {
             printf("W: %s", LA_W("NAT punch failed, no TURN server configured", LA_W51, 60));
+        }
+        
+        if (relay_available) {
+            int relay_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_RELAY, &relay_addr);
+            if (relay_idx >= 0) {
+                path_manager_set_path_state(&s->path_mgr, relay_idx, PATH_STATE_ACTIVE);
+                printf("I:", LA_F("Added RELAY path to path manager, idx=%d", LA_F89, 232), relay_idx);
+            }
+        }
+        
+        // 选择最佳可用路径
+        int best_path = path_manager_select_best_path(&s->path_mgr);
+        if (best_path >= 0) {
+            path_info_t *pi = &s->path_mgr.paths[best_path];
+            s->path = pi->type;
+            s->active_addr = pi->addr;
+            s->path_mgr.active_path = best_path;
+            s->state = P2P_STATE_RELAY;
+            printf("I:", LA_F("Using path: %s", LA_F89, 232), path_type_str(pi->type));
+        } else {
+            // 无可用路径：降级到传统方式
+            s->state = P2P_STATE_RELAY;
+            s->path = P2P_PATH_RELAY;
+            s->active_addr = relay_available ? relay_addr : s->nat.peer_addr;
         }
     }
 
     // 转换：CONNECTED → RELAY（NAT 连接超时断开，降级到中继模式）
     if (s->nat.state == NAT_DISCONNECTED && s->state == P2P_STATE_CONNECTED) {
         printf("W: %s", LA_S("NAT connection timeout, downgrading to relay mode", LA_S42, 620));
-        s->state = P2P_STATE_RELAY;
-        s->nat.state = NAT_RELAY;
+        
+        // 标记 PUNCH 路径为失效
+        int punch_idx = path_manager_find_path(&s->path_mgr, P2P_PATH_PUNCH);
+        if (punch_idx >= 0) {
+            path_manager_set_path_state(&s->path_mgr, punch_idx, PATH_STATE_FAILED);
+        }
+        
+        // 标记 LAN 路径为失效（如果存在）
+        int lan_idx = path_manager_find_path(&s->path_mgr, P2P_PATH_LAN);
+        if (lan_idx >= 0) {
+            path_manager_set_path_state(&s->path_mgr, lan_idx, PATH_STATE_FAILED);
+        }
+        
+        // 尝试切换到中继路径
+        int best_path = path_manager_select_best_path(&s->path_mgr);
+        if (best_path >= 0) {
+            path_info_t *pi = &s->path_mgr.paths[best_path];
+            s->path = pi->type;
+            s->active_addr = pi->addr;
+            s->path_mgr.active_path = best_path;
+            s->state = P2P_STATE_RELAY;
+            printf("I:", LA_F("Switched to backup path: %s", LA_F89, 232), path_type_str(pi->type));
+        } else {
+            // 无备用路径：NAT 层会继续尝试恢复
+            s->state = P2P_STATE_RELAY;
+            s->nat.state = NAT_RELAY;
+        }
     }
 
     /* ========================================================================
@@ -947,6 +1073,62 @@ p2p_update(p2p_handle_t hdl) {
 
         // 发布 offer（PUB 角色）
         p2p_signal_pubsub_tick_send(&s->sig_pubsub_ctx, s);
+    }
+
+    /* ========================================================================
+     * 阶段 7.5：路径管理器维护（健康检查与路径选择）
+     * ======================================================================== */
+
+    if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
+        P_clock _clk_pm; P_clock_now(&_clk_pm);
+        uint64_t now_ms = clock_ms(_clk_pm);
+        
+        // 健康检查
+        path_manager_health_check(&s->path_mgr, now_ms);
+        
+        // 周期性路径重选（每5秒检查一次是否有更优路径）
+        static uint64_t last_path_reselect = 0;
+        if (now_ms - last_path_reselect > 5000) {
+            last_path_reselect = now_ms;
+            
+            int current_path = s->path_mgr.active_path;
+            int best_path = path_manager_select_best_path(&s->path_mgr);
+            
+            // 如果找到更优路径且不在冷却期内
+            if (best_path >= 0 && best_path != current_path &&
+                now_ms - s->path_mgr.last_switch_time > s->path_mgr.path_switch_cooldown_ms) {
+                
+                path_info_t *new_pi = &s->path_mgr.paths[best_path];
+                path_info_t *old_pi = (current_path >= 0) ? &s->path_mgr.paths[current_path] : NULL;
+                
+                // 判断是否值得切换（性能提升显著）
+                bool should_switch = false;
+                if (!old_pi) {
+                    should_switch = true; // 当前无路径，立即切换
+                } else if (new_pi->rtt_ms + s->path_mgr.switch_rtt_threshold_ms < old_pi->rtt_ms) {
+                    should_switch = true; // RTT 显著改善
+                } else if (old_pi->loss_rate > s->path_mgr.switch_loss_threshold) {
+                    should_switch = true; // 当前路径丢包严重
+                } else if (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST &&
+                           new_pi->cost_score < old_pi->cost_score) {
+                    should_switch = true; // 直连优先模式：更低成本
+                }
+                
+                if (should_switch) {
+                    s->path = new_pi->type;
+                    s->active_addr = new_pi->addr;
+                    s->path_mgr.active_path = best_path;
+                    s->path_mgr.last_switch_time = now_ms;
+                    s->path_mgr.total_path_switches++;
+                    
+                    printf("I:", LA_F("Path switched: %s -> %s (RTT: %u -> %u ms)", LA_F89, 232),
+                           old_pi ? path_type_str(old_pi->type) : "NONE",
+                           path_type_str(new_pi->type),
+                           old_pi ? old_pi->rtt_ms : 9999,
+                           new_pi->rtt_ms);
+                }
+            }
+        }
     }
 
     /* ========================================================================
