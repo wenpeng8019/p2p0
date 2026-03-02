@@ -628,23 +628,26 @@ p2p_update(p2p_handle_t hdl) {
         switch (hdr.type) {
 
             // --------------------
-            // 打洞/保活
-            // --------------------
-
-            case P2P_PKT_PUNCH:
-                printf(LA_F("Received PUNCH pkt from %s:%d, seq=%u, flags=0x%02x, len=%d", LA_F122, 142),
-                    inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, hdr.flags, payload_len);
-                nat_on_packet(s, &hdr, payload, payload_len, &from);
-                break;
-
-            // --------------------
             // 数据传输（P2P 直连 或 服务器中继）
             // --------------------
 
-            case P2P_PKT_DATA: case P2P_PKT_RELAY_DATA:
-                printf(LA_F("Received %s pkt from %s:%d, seq=%u, len=%d", LA_F123, 143),
-                    hdr.type == P2P_PKT_DATA ? "DATA" : "RELAY_DATA",
+            case P2P_PKT_RELAY_DATA:
+            case P2P_PKT_RELAY_ACK:
+                if (compact_on_relay_packet(s, hdr.type, &payload, &payload_len, &from) != 0)
+                    break;
+                if (hdr.type == P2P_PKT_RELAY_DATA) goto handle_data;
+                else goto handle_ack;
+
+            /*
+             * 协议：P2P_PKT_DATA (0x20)
+             * 包头: [type=0x20 | flags=0 | seq=序列号(2B)]
+             * 负载: [data(N)]
+             * 说明：P2P 数据包，由 reliable 层或高级传输层处理
+             */
+            case P2P_PKT_DATA:
+                printf(LA_F("Received DATA pkt from %s:%d, seq=%u, len=%d", LA_F123, 143),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
+            handle_data:
 
                 // 记录数据包接收（更新路径活跃时间）
                 if (s->path_mgr.active_path >= 0) {
@@ -660,20 +663,23 @@ p2p_update(p2p_handle_t hdl) {
                 
                 break;
 
-            // ACK 仅基础 reliable 层使用
-            // + 注：DTLS/SCTP 有自己的确认机制，不使用 P2P_PKT_ACK
-            case P2P_PKT_ACK: case P2P_PKT_RELAY_ACK:
+            /*
+             * 协议：P2P_PKT_ACK (0x21)
+             * 包头: [type=0x21 | flags=0 | seq=序列号(2B)]
+             * 负载: [ack_seq(2B) | sack(4B)]
+             * 说明：ACK 仅基础 reliable 层使用，DTLS/SCTP 有自己的确认机制
+             */
+            case P2P_PKT_ACK:
+            handle_ack: {
+                uint16_t ack_seq; nbtohs(payload, &ack_seq);
+                uint32_t sack; nbtohl(payload + 2, &sack);
+                if (hdr.type == P2P_PKT_ACK) {
+                    printf(LA_F("Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x", LA_F122, 142),
+                        inet_ntoa(from.sin_addr), ntohs(from.sin_port), ack_seq, sack);
+                }
 
                 // 只有使用基础 reliable 层时才处理（无高级传输层或高级传输层无 on_packet）
                 if ((!s->trans || !s->trans->on_packet) && payload_len >= 6) {
-                    uint16_t ack_seq = ((uint16_t)payload[0] << 8) | payload[1];
-                    uint32_t sack = ((uint32_t)payload[2] << 24) |
-                                    ((uint32_t)payload[3] << 16) |
-                                    ((uint32_t)payload[4] << 8) |
-                                    (uint32_t)payload[5];
-                    printf(LA_F("Received %s pkt from %s:%d, ack_seq=%u, sack=0x%08x", LA_F124, 144),
-                        hdr.type == P2P_PKT_ACK ? "ACK" : "RELAY_ACK",
-                        inet_ntoa(from.sin_addr), ntohs(from.sin_port), ack_seq, sack);
                     
                     // 记录 ACK 前的 RTT 值
                     int old_srtt = s->reliable.srtt;
@@ -684,27 +690,22 @@ p2p_update(p2p_handle_t hdl) {
                     // 如果 RTT 更新了，同步到路径管理器
                     if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0) {
                         if (s->path_mgr.active_path >= 0) {
-                            path_manager_update_metrics(&s->path_mgr, s->path_mgr.active_path, 
-                                                        (uint32_t)s->reliable.srtt, true);
+                            path_manager_update_metrics(&s->path_mgr, s->path_mgr.active_path, (uint32_t)s->reliable.srtt, true);
                             path_manager_update_quality(&s->path_mgr, s->path_mgr.active_path);
                         }
                     }
                 }
                 break;
-
+            }
             // --------------------
-            // FIN 连接断开
+            // NAT 链路层（打洞、保活、断开）
             // --------------------
 
-            // 收到对端主动断开通知
+            case P2P_PKT_PUNCH:
+                nat_on_punch(s, &hdr, payload, payload_len, &from);
+                break;
             case P2P_PKT_FIN:
-                printf(LA_F("Received FIN pkt from %s:%d, prev_state=%d", LA_F125, 145),
-                    inet_ntoa(from.sin_addr), ntohs(from.sin_port), s->state);
-                if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
-                    s->state = P2P_STATE_CLOSED;
-                    if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
-                }
-                else s->state = P2P_STATE_CLOSED;
+                nat_on_fin(s, &from);
                 break;
 
             // --------------------
@@ -712,51 +713,38 @@ p2p_update(p2p_handle_t hdl) {
             // --------------------
 
             case P2P_PKT_ROUTE_PROBE:
-                printf(LA_F("Received ROUTE_PROBE pkt from %s:%d, len=%d", LA_F126, 146),
-                    inet_ntoa(from.sin_addr), ntohs(from.sin_port), payload_len);
                 route_on_probe(&s->route, &from, s->sock);
                 break;
             case P2P_PKT_ROUTE_PROBE_ACK:
-                printf(LA_F("Received ROUTE_PROBE_ACK pkt from %s:%d, len=%d", LA_F127, 147),
-                    inet_ntoa(from.sin_addr), ntohs(from.sin_port), payload_len);
                 route_on_probe_ack(&s->route, &from);
                 break;
 
             // --------------------
-            // COMPACT 模式的信令包（REGISTER_ACK、PEER_INFO、PEER_INFO_ACK）
+            // COMPACT 模式的信令包（REGISTER_ACK、PEER_INFO、PEER_INFO_ACK 等）
             // --------------------
 
             case SIG_PKT_REGISTER_ACK:
-            case SIG_PKT_ALIVE_ACK:
-            case SIG_PKT_PEER_INFO:
-            case SIG_PKT_PEER_INFO_ACK:
-            case SIG_PKT_PEER_OFF:
-            case SIG_PKT_NAT_PROBE_ACK: {
-                const char *pkt_name = 
-                    hdr.type == SIG_PKT_REGISTER_ACK ? "REGISTER_ACK" :
-                    hdr.type == SIG_PKT_ALIVE_ACK ? "ALIVE_ACK" :
-                    hdr.type == SIG_PKT_PEER_INFO ? "PEER_INFO" :
-                    hdr.type == SIG_PKT_PEER_INFO_ACK ? "PEER_INFO_ACK" :
-                    hdr.type == SIG_PKT_PEER_OFF ? "PEER_OFF" :
-                    hdr.type == SIG_PKT_NAT_PROBE_ACK ? "NAT_PROBE_ACK" : "UNKNOWN";
-                printf(LA_F("Received COMPACT %s pkt from %s:%d, seq=%u, len=%d", LA_F129, 149),
-                    pkt_name, inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
-
-                if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
-                    print("E:", LA_F("Received COMPACT signaling packet type 0x%02X in non-COMPACT mode", LA_F98, 629), hdr.type);
-                    break;
-                }
-
-                // 处理信令包
-                p2p_signal_compact_on_packet(s, hdr.type, hdr.seq, hdr.flags, payload, payload_len, &from);
-                
+                compact_on_register_ack(s, hdr.seq, hdr.flags, payload, payload_len, &from);
                 break;
-            }
-
+            case SIG_PKT_ALIVE_ACK:
+                compact_on_alive_ack(s, &from);
+                break;
+            case SIG_PKT_PEER_INFO:
+                compact_on_peer_info(s, hdr.seq, hdr.flags, payload, payload_len, &from);
+                break;
+            case SIG_PKT_PEER_INFO_ACK:
+                compact_on_peer_info_ack(s, hdr.seq, payload, payload_len, &from);
+                break;
+            case SIG_PKT_PEER_OFF:
+                compact_on_peer_off(s, payload, payload_len, &from);
+                break;
+            case SIG_PKT_NAT_PROBE_ACK:
+                compact_on_nat_probe_ack(s, hdr.seq, payload, payload_len, &from);
+                break;
             default:
+                print("V:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F103, 95), hdr.type);
                 printf(LA_F("Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d", LA_F130, 150),
-                    inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.type, hdr.seq, payload_len);
-                print("W:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F103, 95), hdr.type);
+                       inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.type, hdr.seq, payload_len);
                 break;
         }
 
@@ -986,6 +974,14 @@ p2p_update(p2p_handle_t hdl) {
             s->path = P2P_PATH_RELAY;
             s->active_addr = relay_available ? relay_addr : s->nat.peer_addr;
         }
+    }
+
+    // 转换：CONNECTED/RELAY → CLOSED（收到 FIN 包主动断开）
+    if (s->nat.state == NAT_CLOSED && 
+        (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)) {
+        print("I: %s", LA_S("Received FIN packet, connection closed", LA_S50, 621));
+        s->state = P2P_STATE_CLOSED;
+        if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
     }
 
     // 转换：CONNECTED → RELAY（NAT 连接超时断开，降级到中继模式）

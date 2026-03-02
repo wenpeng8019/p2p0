@@ -161,8 +161,17 @@ int route_send_probe(route_ctx_t *rt, sock_t sock,
     return udp_send_packet(sock, peer_priv, P2P_PKT_ROUTE_PROBE, 0, 0, payload, 2);
 }
 
-// 处理对方直接发过来的 ROUTE_PROBE 消息，说明对方和自己处于同一个子网内
+/*
+ * 协议：P2P_PKT_ROUTE_PROBE (0x30)
+ * 包头: [type=0x30 | flags=0 | seq=0]
+ * 负载: [probe_seq(2B)] (用于匹配响应)
+ * 
+ * 处理对方直接发过来的 ROUTE_PROBE 消息，说明对方和自己处于同一个子网内
+ */
 int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, sock_t sock) { (void)rt;
+
+    printf(LA_F("Received ROUTE_PROBE pkt from %s:%d, len=0", LA_F126, 146),
+           inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
     print("I:", LA_F("%s %s:%d, %s", LA_F22, 279), LA_W("Received route probe from", LA_W79, 93),
                  inet_ntoa(from->sin_addr), ntohs(from->sin_port),
@@ -172,8 +181,18 @@ int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, sock_t sock)
     return udp_send_packet(sock, from, P2P_PKT_ROUTE_PROBE_ACK, 0, 0, NULL, 0);
 }
 
-// 收到对方回复的 ROUTE_PROBE 应答消息，说明自己和对方处于同一个子网内
+/*
+ * 协议：P2P_PKT_ROUTE_PROBE_ACK (0x31)
+ * 包头: [type=0x31 | flags=0 | seq=0]
+ * 负载: 无
+ * 
+ * 收到对方回复的 ROUTE_PROBE 应答消息，说明自己和对方处于同一个子网内
+ */
 int route_on_probe_ack(route_ctx_t *rt, const struct sockaddr_in *from) {
+
+    printf(LA_F("Received ROUTE_PROBE_ACK pkt from %s:%d, len=0", LA_F127, 147),
+           inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
     rt->lan_peer_addr = *from;
     rt->lan_confirmed = 1;
     print("I:", LA_F("%s %s:%d", LA_F19, 276), LA_W("LAN peer confirmed", LA_W43, 51),

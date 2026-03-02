@@ -397,26 +397,45 @@ int p2p_signal_compact_disconnect(struct p2p_session *s);
 int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t size);
 
 /*
- * 处理收到的信令包
- *
- * 支持的包类型：
- * - REGISTER_ACK:   服务器确认，提取对端状态、缓存能力、公网地址、探测端口
- * - PEER_INFO:      对端候选列表（序列化传输）
- * - PEER_INFO_ACK:  对端确认（停止重传对应序列号的包）
- * - NAT_PROBE_ACK:  NAT 探测响应（包含探测端口观察到的映射地址）
- *
- * @param s       会话对象
- * @param type    包类型
- * @param seq     包序列号（从包头提取）
- * @param flags   包标志位（从包头提取）
- * @param payload 负载数据
- * @param len     负载长度
- * @param from    发送方地址
- * @return        0 成功处理，-1 解析失败，1 未处理
+ * 处理收到的信令包（独立接口）
+ * 
+ * 以下函数分别处理不同类型的 COMPACT 信令包，消除包类型派发层。
  */
-void p2p_signal_compact_on_packet(struct p2p_session *s, uint8_t type, uint16_t seq, uint8_t flags,
-                                 const uint8_t *payload, int len,
-                                 const struct sockaddr_in *from);
+
+/* 处理 REGISTER_ACK（服务器注册确认） */
+void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
+                              const uint8_t *payload, int len,
+                              const struct sockaddr_in *from);
+
+/* 处理 ALIVE_ACK（保活确认） */
+void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from);
+
+/* 处理 PEER_INFO（对端候选信息） */
+void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
+                          const uint8_t *payload, int len,
+                          const struct sockaddr_in *from);
+
+/* 处理 PEER_INFO_ACK（对端候选确认） */
+void compact_on_peer_info_ack(struct p2p_session *s, uint16_t seq,
+                               const uint8_t *payload, int len,
+                               const struct sockaddr_in *from);
+
+/* 处理 PEER_OFF（对端离线通知） */
+void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
+                         const struct sockaddr_in *from);
+
+/* 处理 RELAY_DATA / RELAY_ACK（中继数据）
+ * 验证 COMPACT 层的 session_id，并调整 payload/len 跳过该头部
+ * @return 0=验证成功（payload/len 已调整），-1=验证失败
+ */
+int compact_on_relay_packet(struct p2p_session *s, uint8_t type,
+                             const uint8_t **payload, int *len,
+                             const struct sockaddr_in *from);
+
+/* 处理 NAT_PROBE_ACK（NAT 探测响应） */
+void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
+                               const uint8_t *payload, int len,
+                               const struct sockaddr_in *from);
 
 /*
  * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果

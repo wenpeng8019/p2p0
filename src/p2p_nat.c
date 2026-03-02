@@ -126,8 +126,8 @@ int nat_punch(p2p_session_t *s, int idx) {
         udp_send_packet(s->sock, addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
         s->remote_cands[idx].last_punch_send_ms = now;    // 更新候选的时间戳
 
-        printf(LA_F("Send probe PUNCH pkt to %s:%d (idx=%d), seq=%u", 0, 0),
-               inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), idx, n->punch_seq);
+        printf(LA_F("Send probe PUNCH pkt to %s:%d, seq=%u", 0, 0),
+               inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), n->punch_seq);
 
         n->last_send_time = now;
     }
@@ -139,69 +139,86 @@ int nat_punch(p2p_session_t *s, int idx) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * 处理打洞相关数据包
+ * 协议：P2P_PKT_PUNCH (0x01)
+ * 包头: [type=0x01 | flags=0 | seq=发送方序列号(2B)]
+ * 负载: [echo_seq(2B, 网络字节序)]
+ *   - echo_seq = 0: 探测包（首次发送或保活）
+ *   - echo_seq > 0: 确认包（确认收到了对方的 seq=echo_seq）
+ * 
+ * 处理 PUNCH 包（NAT 打洞、保活）
  */
-ret_t nat_on_packet(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
-                    const uint8_t *payload, int len, const struct sockaddr_in *from) {
+ret_t nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
+                   const uint8_t *payload, int len, const struct sockaddr_in *from) {
 
     nat_ctx_t *n = &s->nat;
     P_clock _clk; P_clock_now(&_clk);
     uint64_t now = clock_ms(_clk);
 
-    switch (hdr->type) {
+    // 解析 echo_seq（2字节网络字节序）
+    uint16_t echo_seq = 0;
+    if (len >= 2) {
+        echo_seq = ((uint16_t)payload[0] << 8) | payload[1];
+    }
 
-    case P2P_PKT_PUNCH: {
+    printf(LA_F("Received PUNCH pkt from %s:%d, seq=%u, echo_seq=%u, len=%d", LA_F123, 143),
+        inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq, echo_seq, len);
+
+    // 如果 echo_seq 为 0，说明这是探测包，需要回复确认
+    if (echo_seq == 0) {
+        // Verbose: received probe
         
-        // 解析 echo_seq（2字节网络字节序）
-        uint16_t echo_seq = 0;
-        if (len >= 2) {
-            echo_seq = ((uint16_t)payload[0] << 8) | payload[1];
-        }
-
-        // 如果 echo_seq 为 0，说明这是探测包，需要回复确认
-        if (echo_seq == 0) {
-            // Verbose: received probe
-            
-            // 回复确认包：echo 对方的 seq
-            uint8_t reply_payload[2];
-            reply_payload[0] = (uint8_t)(hdr->seq >> 8);
-            reply_payload[1] = (uint8_t)(hdr->seq & 0xFF);
-            
-            udp_send_packet(s->sock, from, P2P_PKT_PUNCH, 0, ++n->punch_seq, reply_payload, 2);
-            
-            // Verbose: sent confirmation
-        }
-        // 如果 echo_seq 不为 0，说明这是对我之前 PUNCH 的确认
-        else if (echo_seq == n->punch_seq) {
-            // Verbose: received valid confirmation -> NAT_CONNECTED
-        } else {
-            // Verbose: received stale confirmation (echo_seq mismatch)
-        }
-
-        // 通知 ICE 层（如果启用）
-        if (s->cfg.use_ice) {
-            p2p_ice_on_check_success(s, from);
-        }
-
-        // 标记连接成功
-        if (n->state == NAT_PUNCHING || n->state == NAT_RELAY) {
-            n->peer_addr = *from;
-            n->state = NAT_CONNECTED;
-            n->last_recv_time = now;
-            
-            // Info: SUCCESS
-        }
+        // 回复确认包：echo 对方的 seq
+        uint8_t reply_payload[2];
+        reply_payload[0] = (uint8_t)(hdr->seq >> 8);
+        reply_payload[1] = (uint8_t)(hdr->seq & 0xFF);
         
-        // 更新最后接收时间（保活）
+        udp_send_packet(s->sock, from, P2P_PKT_PUNCH, 0, ++n->punch_seq, reply_payload, 2);
+        
+        // Verbose: sent confirmation
+    }
+    // 如果 echo_seq 不为 0，说明这是对我之前 PUNCH 的确认
+    else if (echo_seq == n->punch_seq) {
+        // Verbose: received valid confirmation -> NAT_CONNECTED
+    } else {
+        // Verbose: received stale confirmation (echo_seq mismatch)
+    }
+
+    // 通知 ICE 层（如果启用）
+    if (s->cfg.use_ice) {
+        p2p_ice_on_check_success(s, from);
+    }
+
+    // 标记连接成功
+    if (n->state == NAT_PUNCHING || n->state == NAT_RELAY) {
+        n->peer_addr = *from;
+        n->state = NAT_CONNECTED;
         n->last_recv_time = now;
-
-        return E_NONE;
+        
+        // Info: SUCCESS
     }
+    
+    // 更新最后接收时间（保活）
+    n->last_recv_time = now;
 
-    default:
-        print("W:", LA_F("Received unknown NAT packet type: 0x%02X", LA_F103, 95), hdr->type);
-        return E_NO_SUPPORT;  /* 未处理 */
-    }
+    return E_NONE;
+}
+
+/*
+ * 协议：P2P_PKT_FIN (0x22)
+ * 包头: [type=0x22 | flags=0 | seq=0]
+ * 负载: 无
+ * 
+ * 处理 FIN 包（连接断开）
+ */
+ret_t nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
+
+    printf(LA_F("Received FIN pkt from %s:%d, NAT state will be closed", LA_F125, 145),
+           inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+    
+    // 收到对端主动断开通知，标记 NAT 层为已关闭
+    s->nat.state = NAT_CLOSED;
+    
+    return E_NONE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

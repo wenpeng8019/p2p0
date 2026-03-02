@@ -91,7 +91,7 @@ TEST(nat_punch_batch_mode_success) {
     };
     uint8_t payload[2] = {0, 1};  // echo_seq=1（网络字节序，确认我们的 punch_seq=1）
     
-    nat_on_packet(s, &hdr, payload, 2, &peer_addr);
+    nat_on_punch(s, &hdr, payload, 2, &peer_addr);
     
     // 验证状态转换
     ASSERT_EQ(s->nat.state, NAT_CONNECTED);
