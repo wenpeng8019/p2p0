@@ -141,10 +141,42 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_ALIVE           0x86        // 保活包（可选，客户端定期发送以维持注册状态）
 #define SIG_PKT_ALIVE_ACK       0x87        // 保活确认（服务器回复以确认注册状态）
 
-#define SIG_PKT_PING            0x88        // PING 包（通过服务器向对方发送可信赖到达探测包）
-#define SIG_PKT_PING_ACK        0x89        // PING 确认包，表示服务器收到了 PING 请求包
-#define SIG_PKT_PONG            0x8A        // PONG 包（PING 的响应）
-#define SIG_PKT_PONG_ACK        0x8B        // PONG 确认包，表示收到了服务器下发的 PONG 包
+/*
+ * MSG：服务器缓存+可靠中转的 RPC 机制（服务器可选实现）
+ *
+ * 通过服务器中转，实现对端间可信赖的一次请求-应答交互（类似 RPC）。
+ * 服务器是否支持由 REGISTER_ACK.flags 中 SIG_REGACK_FLAG_MSG (0x02) 位标识。
+ *
+ * 流程（6 次传输）：
+ *
+ *   A                      Server                      B
+ *   │                         │                        │
+ *   ├── MSG_REQ(req_id) ──────►│  A 重发直到收到 REQ_ACK  │
+ *   │   [target_id][req_id]   │  Server 查找 B 的注册槽   │
+ *   │   [msg_type][data]      │                        │
+ *   │                         │                        │
+ *   │◄── MSG_REQ_ACK ──────────┤  status=0 成功/1 B不在线 │
+ *   │   [req_id][status]      │  A 停止重发              │
+ *   │                         │                        │
+ *   │                         ├── MSG_REQ ─────────────►│  Server 重发直到收到 RES
+ *   │                         │   [session_id][req_id]  │  (relay 标志位=1)
+ *   │                         │   [msg_type][data]      │
+ *   │                         │                        │
+ *   │                         │◄── MSG_RES ─────────────┤  B 的应答同时作为对 relay 的 ACK
+ *   │                         │   [session_id][req_id]  │  Server 停止重发
+ *   │                         │   [msg_type][data]      │
+ *   │                         │                        │
+ *   │◄── MSG_RES ──────────────┤  Server 重发直到收到 RES_ACK
+ *   │   [req_id][msg_type]    │                        │
+ *   │   [data]                │                        │
+ *   │                         │                        │
+ *   ├── MSG_RES_ACK ──────────►│  流程完成               │
+ *   │   [req_id]              │                        │
+ */
+#define SIG_PKT_MSG_REQ         0x88        // MSG 请求：A→Server（含目标 peer_id + payload）；Server→B relay（含 session_id，flags=SIG_MSG_FLAG_RELAY）
+#define SIG_PKT_MSG_REQ_ACK     0x89        // MSG 请求确认：Server→A（已缓存并开始中转，或失败状态）
+#define SIG_PKT_MSG_RES         0x8A        // MSG 应答：B→Server（应答内容，兼作对 relay 的 ACK）；Server→A relay（转发 B 的应答）
+#define SIG_PKT_MSG_RES_ACK     0x8B        // MSG 应答确认：A→Server（已收到应答，流程完成）
  
 #define SIG_PKT_NAT_PROBE       0x8C        // NAT 类型探测请求（发往探测端口）
 #define SIG_PKT_NAT_PROBE_ACK   0x8D        // NAT 类型探测响应（返回第二次映射地址）
@@ -159,7 +191,11 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_REGACK_PEER_ONLINE   1          // 成功，对端在线
 
 /* REGISTER_ACK 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_REGACK_FLAG_RELAY    0x01       // 服务器支持中继功能
+#define SIG_REGACK_FLAG_RELAY    0x01       // 服务器支持数据中继功能（P2P 打洞失败降级）
+#define SIG_REGACK_FLAG_MSG      0x02       // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
+
+/* MSG 包标志位（p2p_packet_hdr_t.flags） */
+#define SIG_MSG_FLAG_RELAY       0x01       // 标识此 MSG_REQ 是 Server→B 的中转包（而非 A→Server 的原始请求）
 
 /* PEER_INFO 标志位（p2p_packet_hdr_t.flags） */
 #define SIG_PEER_INFO_FIN        0x01       // 候选列表发送完毕
@@ -237,6 +273,43 @@ typedef struct {
  *   包头: type=0x87, flags=0, seq=对应的 NAT_PROBE 请求 seq
  *   - probe_ip/port: 服务器在探测端口观察到的客户端源地址（第二次映射）
  *   - seq: 复制请求包的 seq，用于客户端匹配响应
+ *
+ * MSG_REQ (A → Server):
+ *   payload: [target_peer_id(32)][req_id(2)][msg_type(1)][data(N)]
+ *   包头: type=0x88, flags=0, seq=0
+ *   - target_peer_id: 目标对端 peer_id（必须已在服务器注册且在线）
+ *   - req_id: A 生成的 16 位请求标识（每次 connect() 范围内唯一，用于匹配应答）
+ *   - msg_type: 应用层消息类型（协议层透传，由应用自定义）
+ *   - A 重发此包直到收到 MSG_REQ_ACK
+ *
+ * MSG_REQ (Server → B, relay):
+ *   payload: [session_id(8)][req_id(2)][msg_type(1)][data(N)]
+ *   包头: type=0x88, flags=SIG_MSG_FLAG_RELAY(0x01), seq=0
+ *   - session_id: A 的会话 ID（B 用此字段构造 MSG_RES）
+ *   - Server 重发此包直到收到 MSG_RES
+ *
+ * MSG_REQ_ACK (Server → A):
+ *   payload: [req_id(2)][status(1)]
+ *   包头: type=0x89, flags=0, seq=0
+ *   - req_id: 对应的 MSG_REQ 请求标识
+ *   - status: 0=已缓存并开始向 B 中转；1=目标 B 不在线
+ *   - A 收到此包后停止重发
+ *
+ * MSG_RES (B → Server):
+ *   payload: [session_id(8)][req_id(2)][msg_type(1)][data(N)]
+ *   包头: type=0x8A, flags=0, seq=0
+ *   - session_id: 从 MSG_REQ relay 中取得的 A 的会话 ID
+ *   - B 的应答同时兼作对 Server relay 的 ACK（Server 收到后停止向 B 重发）
+ *
+ * MSG_RES (Server → A, relay):
+ *   payload: [req_id(2)][msg_type(1)][data(N)]
+ *   包头: type=0x8A, flags=0, seq=0
+ *   - Server 重发此包直到收到 MSG_RES_ACK
+ *
+ * MSG_RES_ACK (A → Server):
+ *   payload: [req_id(2)]
+ *   包头: type=0x8B, flags=0, seq=0
+ *   - A 收到 MSG_RES 后发送，流程完成
  *
  * UNREGISTER:
  *   payload: [local_peer_id(32)][remote_peer_id(32)]
