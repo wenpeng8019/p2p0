@@ -36,8 +36,26 @@
 #define NAT_PROBE_INTERVAL_MS           1000    /* NAT_PROBE 重发间隔 */
 
 /*
+ * 生成本次 connect() 的实例 ID（32 位随机数，非零）
+ * 语义同 RTP SSRC：区分同一 peer_key 的不同注册会话
+ */
+static uint32_t p2p_gen_instance_id(void) {
+    uint32_t id;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
+    id = arc4random();
+#elif defined(_WIN32) && defined(_MSC_VER) && _MSC_VER >= 1400
+    if (rand_s(&id) != 0) id = (uint32_t)time(NULL);
+#else
+    FILE *fp = fopen("/dev/urandom", "rb");
+    if (fp && fread(&id, sizeof(id), 1, fp) == 1) { fclose(fp); }
+    else { if (fp) fclose(fp); id = (uint32_t)time(NULL); }
+#endif
+    return id ? id : 1;  /* 0 保留为"未初始化" */
+}
+
+/*
  * 向信令服务器请求 REGISTER 操作
- * 格式: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
+ * 格式: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
  */
 static void send_register(p2p_session_t *s) {
 
@@ -46,7 +64,7 @@ static void send_register(p2p_session_t *s) {
 
     uint8_t payload[P2P_MAX_PAYLOAD];
 
-    int n = P2P_MAX_PAYLOAD - (P2P_PEER_ID_MAX * 2 + 1);
+    int n = P2P_MAX_PAYLOAD - (P2P_PEER_ID_MAX * 2 + 4 + 1);
     int cand_cnt = n / (int)sizeof(p2p_compact_candidate_t)/* 7 */;
     if (cand_cnt > s->local_cand_cnt) {
         cand_cnt = s->local_cand_cnt;
@@ -57,7 +75,11 @@ static void send_register(p2p_session_t *s) {
     memcpy(payload, ctx->local_peer_id, strlen(ctx->local_peer_id));
     memcpy(payload + P2P_PEER_ID_MAX, ctx->remote_peer_id, strlen(ctx->remote_peer_id));
     n = P2P_PEER_ID_MAX * 2;
-    
+
+    /* instance_id（4 字节大端序）*/
+    hltonb(ctx->instance_id, payload + n);
+    n += 4;
+
     /* candidate_count */
     payload[n++] = (uint8_t)cand_cnt;
     
@@ -263,6 +285,9 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
     P_clock _clk; P_clock_now(&_clk);
     ctx->last_send_time = clock_ms(_clk);
     ctx->register_attempts = 0;
+
+    /* 每次 connect() 生成新的实例 ID，用于服务器区分重启 vs 重传 */
+    ctx->instance_id = p2p_gen_instance_id();
 
     memset(ctx->local_peer_id, 0, sizeof(ctx->local_peer_id));
     memset(ctx->remote_peer_id, 0, sizeof(ctx->remote_peer_id));

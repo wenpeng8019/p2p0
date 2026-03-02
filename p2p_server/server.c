@@ -86,6 +86,7 @@ typedef struct relay_client {
  */
 typedef struct compact_pair {
     bool                    valid;                              // 记录是否有效（无效意味着未分配或已回收）
+    uint32_t                instance_id;                        // 客户端本次 connect() 的实例 ID（每次客户重启就变，区分重传 vs 新会话）
     uint64_t                session_id;                         // 会话 ID（服务器分配，唯一标识一个配对，64位随机数）
     char                    local_peer_id[P2P_PEER_ID_MAX];     // 本端 ID
     char                    remote_peer_id[P2P_PEER_ID_MAX];    // 目标对端 ID
@@ -742,7 +743,7 @@ static void retry_compact_pending(sock_t udp_fd, time_t now) {
         if (q->pending_retry >= PEER_INFO0_MAX_RETRY) {
             
             // 超过最大重传次数，从链表移除（放弃）
-            printf(LA_F("[UDP] PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n", LA_F47, 66),
+            printf(LA_F("[UDP] PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n", LA_F48, 66),
                    q->local_peer_id, q->remote_peer_id, q->pending_retry);
 
             q->next_pending = NULL;
@@ -798,26 +799,34 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     char from_str[64];
     snprintf(from_str, sizeof(from_str), "%s:%d", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     
-    // SIG_PKT_REGISTER: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
+    // SIG_PKT_REGISTER: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
     if (hdr->type == SIG_PKT_REGISTER) {
 
-        if (payload_len <= P2P_PEER_ID_MAX * 2) {
-            printf(LA_F("[UDP] Invalid REGISTER from %s (payload too short)\n", LA_F45, 64), from_str);
+        if (payload_len <= P2P_PEER_ID_MAX * 2 + 4) {
+            printf(LA_F("[UDP] Invalid REGISTER from %s (payload too short)\n", LA_F46, 64), from_str);
             return;
         }
 
         // 解析 local_peer_id 和 remote_peer_id
         char local_peer_id[P2P_PEER_ID_MAX + 1] = {0}, remote_peer_id[P2P_PEER_ID_MAX + 1] = {0};
-        memcpy(local_peer_id, payload, P2P_PEER_ID_MAX); local_peer_id[P2P_PEER_ID_MAX] = '\0';     // 确保字符串以 \0 结尾
+        memcpy(local_peer_id, payload, P2P_PEER_ID_MAX); local_peer_id[P2P_PEER_ID_MAX] = '\0';
         memcpy(remote_peer_id, payload + P2P_PEER_ID_MAX, P2P_PEER_ID_MAX); remote_peer_id[P2P_PEER_ID_MAX] = '\0';
+
+        // 解析 instance_id（4 字节大端序）
+        uint32_t instance_id = 0;
+        nbtohl(payload + P2P_PEER_ID_MAX * 2, &instance_id);
+        if (instance_id == 0) {
+            printf(LA_F("[UDP] Invalid REGISTER from %s (instance_id=0)\n", LA_F45, 64), from_str);
+            return;
+        }
 
         // 解析候选列表（新格式）
         int candidate_count = 0;
         p2p_compact_candidate_t candidates[MAX_CANDIDATES];
         memset(candidates, 0, sizeof(candidates));
 
-        // 读取候选数量（1 字节，紧跟在两个 peer_id 之后）
-        size_t cand_offset = P2P_PEER_ID_MAX * 2;
+        // 读取候选数量（1 字节，紧跟在 instance_id 之后）
+        size_t cand_offset = P2P_PEER_ID_MAX * 2 + 4;
         candidate_count = payload[cand_offset];
         if (candidate_count > MAX_CANDIDATES) {
             candidate_count = MAX_CANDIDATES;
@@ -832,7 +841,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             cand_offset += sizeof(p2p_compact_candidate_t);
         }
 
-        printf(LA_F("[UDP] REGISTER from %s: local='%s', remote='%s', candidates=%d\n", LA_F54, 73), from_str, local_peer_id, remote_peer_id, candidate_count);
+        printf(LA_F("[UDP] REGISTER from %s: local='%s', remote='%s', instance_id=%u, candidates=%d\n", LA_F55, 73), from_str, local_peer_id, remote_peer_id, instance_id, candidate_count);
         for (int i = 0; i < candidate_count; i++) {
             struct in_addr ip; ip.s_addr = candidates[i].ip;
             printf(LA_F("      [%d] type=%d, %s:%d\n", LA_F0, 19), i, candidates[i].type,
@@ -853,6 +862,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                     local_idx = i;
                     
                     // 注意：session_id 在首次匹配成功时才分配，此时为 0
+                    g_compact_pairs[i].instance_id = instance_id;
                     g_compact_pairs[i].session_id = 0;
                     
                     strncpy(g_compact_pairs[i].local_peer_id, local_peer_id, P2P_PEER_ID_MAX);
@@ -884,12 +894,54 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
             sendto(udp_fd, (const char *)ack_response, 14, 0, (struct sockaddr *)from, sizeof(*from));
 
-            printf(LA_F("[UDP] REGISTER_ACK to %s: error (no slot available)\n", LA_F55, 74), from_str);
+            printf(LA_F("[UDP] REGISTER_ACK to %s: error (no slot available)\n", LA_F57, 74), from_str);
             fflush(stdout);
             return;
         }
 
         compact_pair_t *local = &g_compact_pairs[local_idx];
+
+        // 检测 instance_id：不同则客户端重启，必须重置旧会话
+        if (local->instance_id != 0 && local->instance_id != instance_id) {
+            printf(LA_F("[UDP] REGISTER from '%s': new instance_id (old=%u new=%u), resetting session\n", LA_F56, 75),
+                   local_peer_id, local->instance_id, instance_id);
+            fflush(stdout);
+
+            // 通知对端下线（如果对端在线且有 session_id）
+            if (local->peer != NULL && local->peer != (compact_pair_t*)(void*)-1
+                    && local->peer->session_id != 0) {
+                uint8_t notify[4 + 8];
+                p2p_packet_hdr_t *nh = (p2p_packet_hdr_t *)notify;
+                nh->type = SIG_PKT_PEER_OFF; nh->flags = 0; nh->seq = htons(0);
+                uint64_t sid_net = htonll(local->peer->session_id);
+                memcpy(notify + 4, &sid_net, 8);
+                sendto(udp_fd, (const char *)notify, sizeof(notify), 0,
+                       (struct sockaddr *)&local->peer->addr, sizeof(local->peer->addr));
+                printf(LA_F("[UDP] PEER_OFF sent to %s (sid=%" PRIu64 ")%s\n", 0),
+                       local->peer->local_peer_id, local->peer->session_id, " [reregister]");
+                fflush(stdout);
+                local->peer->peer = (compact_pair_t*)(void*)-1;
+            }
+
+            // 从待确认链表移除
+            if (local->next_pending) remove_compact_pending(local);
+
+            // 从 session_id 索引移除
+            if (local->session_id != 0) {
+                HASH_DELETE(hh, g_pairs_by_session, local);
+            }
+
+            // 重置状态（保留 valid=true 和 hh_peer 不变）
+            local->instance_id = instance_id;
+            local->session_id = 0;
+            local->peer = NULL;
+            local->info0_acked = false;
+            local->addr_notify_seq = 0;
+            local->pending_base_index = 0;
+            local->pending_retry = 0;
+            local->pending_sent_time = 0;
+        }
+        local->instance_id = instance_id;
 
         // 检测地址是否变化，并记录最新地址
         bool addr_changed = memcmp(&local->addr, from, sizeof(*from)) != 0;
@@ -941,7 +993,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             sendto(udp_fd, (const char *)ack_response, 14, 0, (struct sockaddr *)from, sizeof(*from));
 
             // register ack 无需提供确认重发机制，因为客户端会在收到 ACK 前一直重试注册请求
-            printf(LA_F("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n", LA_F56, 75),
+            printf(LA_F("[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n", LA_F58, 75),
                    from_str, (remote_idx >= 0) ? 1 : 0, MAX_CANDIDATES,
                    g_relay_enabled ? "yes" : "no",
                    inet_ntoa(from->sin_addr), ntohs(from->sin_port), g_probe_port);
@@ -992,7 +1044,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 send_peer_info_seq0(udp_fd, remote, 0);
                 enqueue_compact_pending(remote, 0, local->last_active);
 
-                printf(LA_F("[UDP] PEER_INFO(seq=0) bilateral: %s(%d cands) <-> %s(%d cands)\n", LA_F49, 68),
+                printf(LA_F("[UDP] PEER_INFO(seq=0) bilateral: %s(%d cands) <-> %s(%d cands)\n", LA_F50, 68),
                        local_peer_id, remote->candidate_count,
                        remote_peer_id, local->candidate_count);
                 fflush(stdout);
@@ -1011,7 +1063,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                         send_peer_info_seq0(udp_fd, remote, remote->addr_notify_seq);
                         enqueue_compact_pending(remote, remote->addr_notify_seq, local->last_active);
 
-                        printf(LA_F("[UDP] Sent PEER_INFO(seq=0) to %s:%d (peer='%s') with %d cands%s\n", LA_F65, 84),
+                        printf(LA_F("[UDP] Sent PEER_INFO(seq=0) to %s:%d (peer='%s') with %d cands%s\n", LA_F67, 84),
                                inet_ntoa(remote->addr.sin_addr), ntohs(remote->addr.sin_port),
                                remote_peer_id, 1, " [ADDR_CHANGED]");
                         fflush(stdout);
@@ -1019,7 +1071,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 }
             }
         } else {
-            printf(LA_F("[UDP] Target pair (%s → %s) not found (waiting for peer registration)\n", LA_F66, 85), remote_peer_id, local_peer_id);
+            printf(LA_F("[UDP] Target pair (%s → %s) not found (waiting for peer registration)\n", LA_F68, 85), remote_peer_id, local_peer_id);
             fflush(stdout);
         }
     }
@@ -1030,7 +1082,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     else if (hdr->type == SIG_PKT_UNREGISTER) {
 
         if (payload_len < P2P_PEER_ID_MAX * 2) {
-            printf(LA_F("[UDP] Invalid UNREGISTER from %s (payload too short)\n", LA_F46, 65), from_str);
+            printf(LA_F("[UDP] Invalid UNREGISTER from %s (payload too short)\n", LA_F47, 65), from_str);
             fflush(stdout);
             return;
         }
@@ -1045,7 +1097,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             memcpy(local_peer_id, pair->local_peer_id, P2P_PEER_ID_MAX);
             memcpy(remote_peer_id, pair->remote_peer_id, P2P_PEER_ID_MAX);
 
-            printf(LA_F("[UDP] UNREGISTER: releasing slot for '%s' -> '%s'\n", LA_F67, 86), local_peer_id, remote_peer_id);
+            printf(LA_F("[UDP] UNREGISTER: releasing slot for '%s' -> '%s'\n", LA_F69, 86), local_peer_id, remote_peer_id);
             fflush(stdout);
 
             // 向对端发送 PEER_OFF 通知（如果对端在线且有 session_id）
@@ -1175,14 +1227,14 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // SIG_PKT_PEER_INFO 特殊处理：seq=0 是服务器维护的包，不应该出现在这里
         if (hdr->type == SIG_PKT_PEER_INFO && hdr->seq == 0) {
-            printf(LA_F("[UDP] PEER_INFO seq=0 from client %s (server-only, dropped)\n", LA_F48, 67), from_str);
+            printf(LA_F("[UDP] PEER_INFO seq=0 from client %s (server-only, dropped)\n", LA_F49, 67), from_str);
             fflush(stdout);
             return;
         }
 
         // 所有需要 relay 的包格式都是 [session_id(8)][...]
         if (payload_len < P2P_PEER_ID_MAX) {
-            printf(LA_F("[UDP] Relay packet too short: type=0x%02x from %s (size %zu)\n", LA_F63, 82), hdr->type, from_str, payload_len);
+            printf(LA_F("[UDP] Relay packet too short: type=0x%02x from %s (size %zu)\n", LA_F65, 82), hdr->type, from_str, payload_len);
             fflush(stdout);
             return;
         }
@@ -1222,7 +1274,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         fflush(stdout);
     }
     else {
-        printf(LA_F("[UDP] Unknown signaling packet type %d from %s\n", LA_F68, 87), hdr->type, from_str);
+        printf(LA_F("[UDP] Unknown signaling packet type %d from %s\n", LA_F70, 87), hdr->type, from_str);
         fflush(stdout);
     }
 }
@@ -1235,7 +1287,7 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
         if (!g_compact_pairs[i].valid || 
             (now - g_compact_pairs[i].last_active) <= COMPACT_PAIR_TIMEOUT) continue;
 
-        printf(LA_F("[UDP] Peer pair (%s → %s) timed out\n", LA_F53, 72), 
+        printf(LA_F("[UDP] Peer pair (%s → %s) timed out\n", LA_F54, 72), 
                g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id);
         
         // 向对端发送 PEER_OFF 通知（如果对端在线且有 session_id）

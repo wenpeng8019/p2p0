@@ -91,7 +91,12 @@ struct p2p_session;
  * 候选地址使用 p2p_compact_candidate_t（定义在 p2pp.h），每个 7 字节。
  *
  * REGISTER:
- *   [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
+ *   [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
+ *   - instance_id: 客户端每次调用 connect() 时生成的 32 位随机数（参考 RTP SSRC）
+ *     · 服务器用于区分"同一 peer_key 的重新注册"和"正常重传"：
+ *       instance_id 相同 → 重传，幂等处理；
+ *       instance_id 不同 → 客户端重启，服务器重置旧会话（清除 session_id、通知对端下线）
+ *     · 初始值 0 不合法（服务器忽略），客户端必须保证非零
  *   注意：candidate_count 仅表示本次 REGISTER 包中的候选数量（受 UDP MTU 限制），
  *   不代表总候选数。即使服务器缓存能力足够，客户端也必须通过后续 PEER_INFO
  *   序列化传输剩余候选，并发送 FIN 包明确结束，否则对端无法判断是否还有更多候选。
@@ -318,6 +323,7 @@ typedef struct {
     uint64_t            last_recv_time;                     /* 上次收到时间 */
 
     /* REGISTER 重发控制（仅 REGISTERING 状态） */
+    uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
     int                 register_attempts;                  /* REGISTER 重发次数 */
 
     /* REGISTER_ACK 返回的信息 */
