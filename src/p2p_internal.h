@@ -65,12 +65,6 @@
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 #pragma ide diagnostic ignored "UnreachableCallsOfFunction"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <inttypes.h>           /* PRIu64 */
-
 #include <p2p.h>
 
 #include "p2p_common.h"         /* pack/unpack_signaling_payload_hdr（服务端也可包含此头） */
@@ -295,30 +289,30 @@ static inline int unpack_candidate(p2p_candidate_entry_t *c, const uint8_t *buf)
  * 动态候选数组辅助函数
  *
  * 向 local_cands / remote_cands 追加新候选，容量不足时自动翻倍扩容。
- * 返回新候选槽位指针；OOM 时返回 NULL。
+ * 返回新候选槽位索引，或负值错误码（E_OUT_OF_MEMORY）
  * ============================================================================ */
 
-static inline p2p_candidate_entry_t *p2p_cand_push_local(p2p_session_t *s) {
+static inline ret_t p2p_cand_push_local(p2p_session_t *s) {
     if (s->local_cand_cnt >= s->local_cand_cap) {
         int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
         p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_candidate_entry_t));
         if (!p) {
             print("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F64, 241), nc);
-            return NULL;
+            return E_OUT_OF_MEMORY;
         }
         s->local_cands    = p;
         s->local_cand_cap = nc;
     }
-    return &s->local_cands[s->local_cand_cnt++];
+    return s->local_cand_cnt++;
 }
 
-static inline p2p_remote_candidate_entry_t *p2p_cand_push_remote(p2p_session_t *s) {
+static inline ret_t p2p_cand_push_remote(p2p_session_t *s) {
     if (s->remote_cand_cnt >= s->remote_cand_cap) {
         int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
         p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
         if (!p) {
             print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F65, 242), nc);
-            return NULL;
+            return E_OUT_OF_MEMORY;
         }
         if (nc > s->remote_cand_cap) {
             memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));
@@ -326,23 +320,26 @@ static inline p2p_remote_candidate_entry_t *p2p_cand_push_remote(p2p_session_t *
         s->remote_cands    = p;
         s->remote_cand_cap = nc;
     }
-    return &s->remote_cands[s->remote_cand_cnt++];
+    return s->remote_cand_cnt++;
 }
 
-// 为 remote_cands 保留目标（need）个槽位。（新分配空间会被置 0，返回 0 成功，-1 OOM）
-static inline int p2p_remote_cands_reserve(p2p_session_t *s, int need) {
-    if (need <= s->remote_cand_cap) return 0;
+/*
+ * 为 remote_cands 保留目标（need）个槽位。新分配空间会被置 NULL
+ * 返回 E_NONE，分配失败返回 E_OUT_OF_MEMORY
+*/
+static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
+    if (need <= s->remote_cand_cap) return E_NONE;
     int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap : 8;
     while (nc < need) nc *= 2;
     p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
     if (!p) {
         print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F65, 242), nc);
-        return -1;
+        return E_OUT_OF_MEMORY;
     }
     memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));
     s->remote_cands    = p;
     s->remote_cand_cap = nc;
-    return 0;
+    return E_NONE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

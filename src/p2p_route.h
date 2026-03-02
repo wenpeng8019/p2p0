@@ -2,7 +2,7 @@
 #ifndef P2P_ROUTE_H
 #define P2P_ROUTE_H
 
-#include "../stdc/stdc.h"   /* cross-platform utilities */
+#include <stdc.h>
 
 typedef struct {
     struct sockaddr_in* local_addrs;

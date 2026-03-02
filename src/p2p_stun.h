@@ -80,6 +80,7 @@
 #ifndef P2P_STUN_H
 #define P2P_STUN_H
 
+#include <stdc.h>
 #include <p2p.h>            /* p2p_nat_type_t */
 
 /*

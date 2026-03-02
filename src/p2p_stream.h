@@ -2,8 +2,8 @@
 #ifndef P2P_STREAM_H
 #define P2P_STREAM_H
 
-#include <stdint.h>
-#include "p2p_udp.h"           /* P2P_MAX_PAYLOAD */
+#include <stdc.h>
+#include "p2pp.h"               /* P2P_MAX_PAYLOAD */
 
 /* ============================================================================
  * 流层分片常量

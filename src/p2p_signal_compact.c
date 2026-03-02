@@ -86,7 +86,9 @@ static void parse_peer_info(p2p_session_t *s, const uint8_t *payload, int cand_c
 
     int offset = sizeof(uint64_t) + 2; // 负载头：[session_id(8)][base_index(1)][candidate_count(1)]
     for (int i = 0; i < cand_cnt; i++) {
-        p2p_remote_candidate_entry_t *c = &s->remote_cands[s->remote_cand_cnt++];
+        int idx = p2p_cand_push_remote(s);
+        if (idx < 0) break;  /* OOM */
+        p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
 
         c->cand.type = (p2p_compact_cand_type_t)payload[offset];
         c->cand.priority = 0;                            // COMPACT 模式不使用优先级
@@ -100,7 +102,7 @@ static void parse_peer_info(p2p_session_t *s, const uint8_t *payload, int cand_c
         print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F128, 363),
                      inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
 
-        nat_punch(s, &c->cand.addr);
+        nat_punch(s, idx);
     }
 }
 
@@ -134,7 +136,7 @@ static int apply_addr_update_candidate(p2p_session_t *s, const uint8_t *payload)
         print("I:", LA_F("[Trickle] Probing updated candidate %s:%d", LA_F129, 364),
                      inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
 
-        nat_punch(s, &c->cand.addr);
+        nat_punch(s, 0);
     }
 
     return 0;

@@ -175,7 +175,7 @@
 #ifndef P2P_SIGNAL_PUBSUB_H
 #define P2P_SIGNAL_PUBSUB_H
 
-#include <stdint.h>
+#include <stdc.h>
 
 /* PUB 端轮询 answer 的间隔（毫秒）：尽快获取 answer，缩短建连延迟 */
 #ifndef P2P_PUBSUB_PUB_POLL_MS

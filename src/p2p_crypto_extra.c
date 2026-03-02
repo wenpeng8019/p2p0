@@ -123,7 +123,7 @@ int p2p_base64_encode(const uint8_t *src, size_t slen, char *dst, size_t dlen) {
     }
     
     dst[j] = '\0';  /* NUL 结尾 */
-    return j;
+    return (int)j;
 }
 
 /*
@@ -195,7 +195,7 @@ int p2p_base64_decode(const char *src, size_t slen, uint8_t *dst, size_t dlen) {
         if (src[i - 1] != '=') dst[j++] = (values[2] << 6) | values[3];
     }
     
-    return j;
+    return (int)j;
 }
 
 /* ============================= DES 加密实现 ============================= */

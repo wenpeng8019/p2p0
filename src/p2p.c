@@ -358,9 +358,11 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             getsockname(s->sock, (struct sockaddr *)&loc, &len);
 
             // 将 route 中的本地地址转换为候选列表（skip_host_candidates 时跳过）
-            if (!s->cfg.skip_host_candidates) { p2p_candidate_entry_t *c;
+            if (!s->cfg.skip_host_candidates) {
                 for (int i = 0; i < s->route.addr_count; i++) {
-                    if (!(c = p2p_cand_push_local(s))) break;
+                    int idx = p2p_cand_push_local(s);
+                    if (idx < 0) break;
+                    p2p_candidate_entry_t *c = &s->local_cands[idx];
 
                     c->type = P2P_ICE_CAND_HOST;
                     c->addr = s->route.local_addrs[i];
@@ -518,7 +520,7 @@ p2p_close(p2p_handle_t hdl) {
  * ============================================================================
  * 执行流程说明（按逻辑顺序组织）
  * ============================================================================
- * 
+ *
  * 阶段 1: 远程数据输入（被动接收）
  *   - 从 UDP socket 接收数据包
  *   - 分发到各个协议处理器（STUN/TURN/P2P）
@@ -554,8 +556,13 @@ p2p_close(p2p_handle_t hdl) {
  * 阶段 7: 信令输出（主动推送）
  *   - RELAY: Trickle ICE 增量发送候选（含断点续传）
  *   - PUBSUB: 发布 offer（PUB 角色）
- * 
- * 阶段 8: NAT 类型检测
+ *
+ * 阶段 8: 连接监控与维护
+ *  - 监控连接质量（RTT、丢包率等）
+ *  - 根据策略动态切换路径（直连/中继）
+ *  - 连接异常处理（重试、降级、断开）
+ *
+ * 阶段 9: NAT 类型检测
  *   - 后台定期运行 STUN 探测
  *   - 检测 NAT 类型（Full Cone / Symmetric 等）
  * 
@@ -578,6 +585,9 @@ p2p_update(p2p_handle_t hdl) {
 
     uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; int n;
 
+    P_clock _clk_now; P_clock_now(&_clk_now);
+    uint64_t now_ms = clock_ms(_clk_now);
+
     /* ========================================================================
      * 阶段 1：远程数据输入（被动接收所有网络数据包）
      * ======================================================================== */
@@ -593,7 +603,7 @@ p2p_update(p2p_handle_t hdl) {
             uint32_t magic = ntohl(*(uint32_t *)(buf + 4));
             if (magic == STUN_MAGIC) {
                 uint16_t msg_type = (buf[0] << 8) | buf[1];
-                printf(LA_F("Received STUN/TURN packet from %s:%d, type=0x%04x, len=%d", LA_F121, 141),
+                printf(LA_F("Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F121, 141),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), msg_type, n);
                 p2p_stun_handle_packet(s, buf, n, &from);  // 处理 Binding Response
                 p2p_turn_handle_packet(s, buf, n, &from);  // 处理 Allocate Success 等
@@ -622,7 +632,7 @@ p2p_update(p2p_handle_t hdl) {
             // --------------------
 
             case P2P_PKT_PUNCH:
-                printf(LA_F("Received PUNCH packet from %s:%d, seq=%u, flags=0x%02x, len=%d", LA_F122, 142),
+                printf(LA_F("Received PUNCH pkt from %s:%d, seq=%u, flags=0x%02x, len=%d", LA_F122, 142),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, hdr.flags, payload_len);
                 nat_on_packet(s, &hdr, payload, payload_len, &from);
                 break;
@@ -632,14 +642,13 @@ p2p_update(p2p_handle_t hdl) {
             // --------------------
 
             case P2P_PKT_DATA: case P2P_PKT_RELAY_DATA:
-                printf(LA_F("Received %s packet from %s:%d, seq=%u, len=%d", LA_F123, 143),
+                printf(LA_F("Received %s pkt from %s:%d, seq=%u, len=%d", LA_F123, 143),
                     hdr.type == P2P_PKT_DATA ? "DATA" : "RELAY_DATA",
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
 
                 // 记录数据包接收（更新路径活跃时间）
                 if (s->path_mgr.active_path >= 0) {
-                    P_clock _clk_recv; P_clock_now(&_clk_recv);
-                    path_manager_on_packet_recv(&s->path_mgr, s->path_mgr.active_path, clock_ms(_clk_recv));
+                    path_manager_on_packet_recv(&s->path_mgr, s->path_mgr.active_path, now_ms);
                 }
 
                 // 高级传输层（DTLS/SCTP/PseudoTCP）有自己的解包逻辑
@@ -662,7 +671,7 @@ p2p_update(p2p_handle_t hdl) {
                                     ((uint32_t)payload[3] << 16) |
                                     ((uint32_t)payload[4] << 8) |
                                     (uint32_t)payload[5];
-                    printf(LA_F("Received %s from %s:%d, ack_seq=%u, sack=0x%08x", LA_F124, 144),
+                    printf(LA_F("Received %s pkt from %s:%d, ack_seq=%u, sack=0x%08x", LA_F124, 144),
                         hdr.type == P2P_PKT_ACK ? "ACK" : "RELAY_ACK",
                         inet_ntoa(from.sin_addr), ntohs(from.sin_port), ack_seq, sack);
                     
@@ -689,7 +698,7 @@ p2p_update(p2p_handle_t hdl) {
 
             // 收到对端主动断开通知
             case P2P_PKT_FIN:
-                printf(LA_F("Received FIN packet from %s:%d, prev_state=%d", LA_F125, 145),
+                printf(LA_F("Received FIN pkt from %s:%d, prev_state=%d", LA_F125, 145),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), s->state);
                 if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
                     s->state = P2P_STATE_CLOSED;
@@ -703,12 +712,12 @@ p2p_update(p2p_handle_t hdl) {
             // --------------------
 
             case P2P_PKT_ROUTE_PROBE:
-                printf(LA_F("Received ROUTE_PROBE from %s:%d, len=%d", LA_F126, 146),
+                printf(LA_F("Received ROUTE_PROBE pkt from %s:%d, len=%d", LA_F126, 146),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), payload_len);
                 route_on_probe(&s->route, &from, s->sock);
                 break;
             case P2P_PKT_ROUTE_PROBE_ACK:
-                printf(LA_F("Received ROUTE_PROBE_ACK from %s:%d, len=%d", LA_F127, 147),
+                printf(LA_F("Received ROUTE_PROBE_ACK pkt from %s:%d, len=%d", LA_F127, 147),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), payload_len);
                 route_on_probe_ack(&s->route, &from);
                 break;
@@ -730,7 +739,7 @@ p2p_update(p2p_handle_t hdl) {
                     hdr.type == SIG_PKT_PEER_INFO_ACK ? "PEER_INFO_ACK" :
                     hdr.type == SIG_PKT_PEER_OFF ? "PEER_OFF" :
                     hdr.type == SIG_PKT_NAT_PROBE_ACK ? "NAT_PROBE_ACK" : "UNKNOWN";
-                printf(LA_F("Received COMPACT %s from %s:%d, seq=%u, len=%d", LA_F129, 149),
+                printf(LA_F("Received COMPACT %s pkt from %s:%d, seq=%u, len=%d", LA_F129, 149),
                     pkt_name, inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
 
                 if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
@@ -745,9 +754,9 @@ p2p_update(p2p_handle_t hdl) {
             }
 
             default:
-                printf(LA_F("Received unknown packet from %s:%d, type=0x%02X, seq=%u, len=%d", LA_F130, 150),
+                printf(LA_F("Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d", LA_F130, 150),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.type, hdr.seq, payload_len);
-                print("W:", LA_F("Received unknown packet type: 0x%02X", LA_F103, 95), hdr.type);
+                print("W:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F103, 95), hdr.type);
                 break;
         }
 
@@ -780,7 +789,7 @@ p2p_update(p2p_handle_t hdl) {
      * ======================================================================== */
 
     if (s->cfg.use_ice) {
-        p2p_ice_tick(s);
+        p2p_ice_tick(s, now_ms);
     }
 
     /* ========================================================================
@@ -788,7 +797,7 @@ p2p_update(p2p_handle_t hdl) {
      * ======================================================================== */
 
     if (s->nat.state != NAT_INIT) {
-        nat_tick(s);
+        nat_tick(s, now_ms);
     }
 
     // 升级到 LAN 路径（如果确认同一子网）
@@ -1076,13 +1085,11 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     /* ========================================================================
-     * 阶段 7.5：路径管理器维护（健康检查与路径选择）
+     * 阶段 8：路径管理器维护（健康检查与路径选择）
      * ======================================================================== */
 
     if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
-        P_clock _clk_pm; P_clock_now(&_clk_pm);
-        uint64_t now_ms = clock_ms(_clk_pm);
-        
+
         // 健康检查
         path_manager_health_check(&s->path_mgr, now_ms);
         
@@ -1132,7 +1139,7 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     /* ========================================================================
-     * 阶段 8：NAT 类型检测（后台定期运行 STUN 探测）
+     * 阶段 9：NAT 类型检测（后台定期运行 STUN 探测）
      * ======================================================================== */
 
     if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
@@ -1141,8 +1148,7 @@ p2p_update(p2p_handle_t hdl) {
         p2p_stun_nat_detect_tick(s);
 
 
-    P_clock _clk; P_clock_now(&_clk);
-    s->last_update = clock_ms(_clk);
+    s->last_update = now_ms;
     return 0;
 }
 

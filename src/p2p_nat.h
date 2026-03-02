@@ -12,8 +12,8 @@
 #ifndef P2P_NAT_H
 #define P2P_NAT_H
 
-#include <p2p.h>
-#include "../stdc/stdc.h"   /* cross-platform utilities */
+#include <stdc.h>
+#include <p2pp.h>
 
 /* 前向声明 */
 struct p2p_session;
@@ -46,20 +46,19 @@ void nat_init(nat_ctx_t *n);
  * NAT 打洞（统一接口，支持批量启动和单候选追加）
  *
  * @param s        会话对象
- * @param addr     目标地址（NULL=批量启动所有候选，非NULL=单个候选打洞）
- * @param verbose  详细日志开关（仅批量启动时有效）
+ * @param idx      目标候选索引（-1=批量启动所有候选，>=0=单个候选打洞）
  * @return         0=成功，-1=失败（无候选）
  *
  * 用法：
- *   - nat_punch(s, NULL, verbose)  批量启动所有 remote_cands 的打洞
- *   - nat_punch(s, &addr, 0)       向单个候选追加打洞（Trickle ICE）
+ *   - nat_punch(s, -1)      批量启动所有 remote_cands 的打洞
+ *   - nat_punch(s, idx)     向单个候选追加打洞（Trickle ICE）
  *
  * 语义：
- *   - 批量模式（addr==NULL）：进入 PUNCHING 状态，向所有候选并发打洞
- *   - 单候选模式（addr!=NULL）：追加打洞，若当前是 RELAY 状态则自动重启
+ *   - 批量模式（idx==-1）：进入 PUNCHING 状态，向所有候选并发打洞
+ *   - 单候选模式（idx>=0）：追加打洞，若当前是 RELAY 状态则自动重启
  *   - 根据候选的 last_punch_send_ms 自动管理打洞时序
  */
-int nat_punch(struct p2p_session *s, const struct sockaddr_in *addr);
+ret_t nat_punch(struct p2p_session *s, int idx);
 
 /*
  * 处理打洞相关数据包
@@ -71,8 +70,8 @@ int nat_punch(struct p2p_session *s, const struct sockaddr_in *addr);
  * @param from     来源地址
  * @return         0=处理成功，1=未处理
  */
-int nat_on_packet(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                  const uint8_t *payload, int len, const struct sockaddr_in *from);
+ret_t nat_on_packet(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+                    const uint8_t *payload, int len, const struct sockaddr_in *from);
 
 /*
  * 周期调用，发送打洞包和心跳
@@ -80,6 +79,6 @@ int nat_on_packet(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
  * @param s    会话对象
  * @return     0 正常，-1 连接超时断开
  */
-int nat_tick(struct p2p_session *s);
+void nat_tick(struct p2p_session *s, uint64_t now_ms);
 
 #endif /* P2P_NAT_H */

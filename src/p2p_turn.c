@@ -210,8 +210,9 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                     
                     /* 将中继地址加入本地 ICE 候选列表 */
                     {
-                        p2p_candidate_entry_t *c = p2p_cand_push_local(s);
-                        if (c) {
+                        int idx = p2p_cand_push_local(s);
+                        if (idx >= 0) {
+                            p2p_candidate_entry_t *c = &s->local_cands[idx];
                             c->type = P2P_ICE_CAND_RELAY;   /* 候选类型: 中继 */
                             c->addr = relay_addr;
                             /* RFC 5245: Relay 候选优先级使用标准公式计算 */

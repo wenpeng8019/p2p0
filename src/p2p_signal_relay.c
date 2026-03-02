@@ -709,8 +709,9 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                         }
                         
                         if (!exists) {
-                            p2p_remote_candidate_entry_t *rc = p2p_cand_push_remote(s);
-                            if (rc) {
+                            int idx = p2p_cand_push_remote(s);
+                            if (idx >= 0) {
+                                p2p_remote_candidate_entry_t *rc = &s->remote_cands[idx];
 
                                 rc->cand = c;  /* entry ← base entry */
                                 rc->last_punch_send_ms = 0;
@@ -723,7 +724,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                                     print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F128, 363),
                                                  inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
 
-                                    nat_punch(s, &rc->cand.addr);
+                                    nat_punch(s, idx);
                                 }
                             }
                         }

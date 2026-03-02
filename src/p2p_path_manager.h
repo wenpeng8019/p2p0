@@ -17,9 +17,7 @@
 #ifndef P2P_PATH_MANAGER_H
 #define P2P_PATH_MANAGER_H
 
-#include <stdint.h>
-#include <stdbool.h>
-#include "../stdc/stdc.h"
+#include <stdc.h>
 
 /* 路径选择策略 */
 typedef enum {

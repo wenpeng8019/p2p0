@@ -131,8 +131,7 @@
 #ifndef P2P_ICE_H
 #define P2P_ICE_H
 
-#include <stdint.h>
-#include "../stdc/stdc.h"   /* cross-platform utilities */
+#include <stdc.h>
 #include "p2pp.h"
 
 /* ============================================================================
@@ -171,7 +170,7 @@ struct p2p_signaling_payload;
 int p2p_ice_gather_candidates(struct p2p_session *s);
 
 /* ICE 状态机定时处理（发送连通性检查） */
-void p2p_ice_tick(struct p2p_session *s);
+void p2p_ice_tick(struct p2p_session *s, uint64_t now_ms);
 
 /* 处理 Trickle ICE 候选（增量添加） */
 void p2p_ice_on_remote_candidates(struct p2p_session *s, const uint8_t *payload, int len);

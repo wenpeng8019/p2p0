@@ -470,8 +470,9 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                     struct sockaddr_in *sa = (struct sockaddr_in *)ua->Address.lpSockaddr;
                     if (sa->sin_family != AF_INET) continue;
 
-                    p2p_candidate_entry_t *c = p2p_cand_push_local(s);
-                    if (!c) break;
+                    int idx = p2p_cand_push_local(s);
+                    if (idx < 0) break;
+                    p2p_candidate_entry_t *c = &s->local_cands[idx];
                     c->type = P2P_ICE_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
                     c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
@@ -494,8 +495,9 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                 if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET) continue;
                 if (ifa->ifa_flags & IFF_LOOPBACK) continue;
 
-                p2p_candidate_entry_t *c = p2p_cand_push_local(s);
-                if (c) {
+                int idx = p2p_cand_push_local(s);
+                if (idx >= 0) {
+                    p2p_candidate_entry_t *c = &s->local_cands[idx];
                     c->type = P2P_ICE_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
                     c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
@@ -606,8 +608,9 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
         }
 
         if (!exists) {
-            p2p_remote_candidate_entry_t *c = p2p_cand_push_remote(s);
-            if (!c) break;  /* OOM */
+            int idx = p2p_cand_push_remote(s);
+            if (idx < 0) break;  /* OOM */
+            p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
             c->cand.type = ctype;
             c->cand.addr = caddr;
             c->cand.priority = 0;
@@ -650,8 +653,9 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
      * 标准 ICE 行为：将其作为 prflx 候选加入列表，仍然视为成功。
      * 只要 IP 与某个已知候选匹配（或任意来源），均接受。 */
     if (matched_idx < 0) {
-        p2p_remote_candidate_entry_t *c = p2p_cand_push_remote(s);
-        if (c) {
+        int idx = p2p_cand_push_remote(s);
+        if (idx >= 0) {
+            p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
             c->cand.type     = P2P_ICE_CAND_PRFLX;
             c->cand.addr     = *from;
             c->cand.priority = 0;
@@ -742,7 +746,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 #define P2P_ICE_MAX_CHECKS 20
 #define P2P_ICE_CHECK_INTERVAL_MS 500
 
-void p2p_ice_tick(p2p_session_t *s) {
+void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
     if (s->ice_state == P2P_ICE_STATE_INIT ||
         s->ice_state == P2P_ICE_STATE_COMPLETED ||
         s->ice_state == P2P_ICE_STATE_FAILED) return;
@@ -757,7 +761,7 @@ void p2p_ice_tick(p2p_session_t *s) {
         if (s->nat.state == NAT_INIT) {
             print("I:", LA_F("[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)", LA_F130, 365),
                          s->remote_cand_cnt);
-            nat_punch(s, NULL);
+            nat_punch(s, -1);
         }
         s->ice_state = P2P_ICE_STATE_COMPLETED;  /* ICE 阶段结束，由 nat_tick 接管 */
         return;
@@ -778,11 +782,9 @@ void p2p_ice_tick(p2p_session_t *s) {
         return;
     }
 
-    P_clock _clk; P_clock_now(&_clk);
-    uint64_t now = clock_ms(_clk);
-    if (now - s->ice_check_last_ms < P2P_ICE_CHECK_INTERVAL_MS) return;
+    if (now_ms - s->ice_check_last_ms < P2P_ICE_CHECK_INTERVAL_MS) return;
 
-    s->ice_check_last_ms = now;
+    s->ice_check_last_ms = now_ms;
     s->ice_check_count++;
 
     /*
@@ -871,8 +873,7 @@ void p2p_ice_tick(p2p_session_t *s) {
 
     /* 当前简化实现：向所有远端候选发送探测包 */
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        p2p_remote_candidate_entry_t *c = &s->remote_cands[i];
-        nat_punch(s, &c->cand.addr);
+        nat_punch(s, i);
     }
 
     /* 第 1 轮打 INFO，此后每隔 1s（2 轮）打一次 DEBUG */

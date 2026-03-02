@@ -78,6 +78,7 @@
 #ifndef P2P_SIGNAL_COMPACT_H
 #define P2P_SIGNAL_COMPACT_H
 
+#include <stdc.h>
 #include <p2p.h>
 
 /* 前向声明 */

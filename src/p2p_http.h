@@ -22,6 +22,8 @@
 #ifndef P2P_HTTP_H
 #define P2P_HTTP_H
 
+#include <stdc.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,9 +36,9 @@ extern "C" {
  *                   传 NULL 或空字符串则不附加 Authorization 头
  * @param resp_buf   响应体输出缓冲区（调用方分配）
  * @param resp_size  缓冲区字节数（含结尾 '\0'）
- * @return           实际写入 resp_buf 的字节数（不含 '\0'），< 0 表示失败
+ * @return           实际写入 resp_buf 的字节数（不含 '\0'）; < 0 表示失败
  */
-int p2p_http_get(const char *url, const char *token,
+ret_t p2p_http_get(const char *url, const char *token,
                  char *resp_buf, int resp_size);
 
 /*
@@ -48,9 +50,9 @@ int p2p_http_get(const char *url, const char *token,
  * @param url    完整 URL
  * @param token  GitHub token
  * @param body   JSON 请求体（以 '\0' 结尾的字符串）
- * @return       0=成功，< 0=失败
+ * @return       0:成功; !=0: 失败
  */
-int p2p_http_patch(const char *url, const char *token, const char *body);
+ret_t p2p_http_patch(const char *url, const char *token, const char *body);
 
 #ifdef __cplusplus
 }

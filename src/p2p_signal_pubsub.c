@@ -208,8 +208,9 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         
         /* 添加远端 ICE 候选（步长 = sizeof(p2p_candidate_t) = 32）*/
         for (int i = 0; i < payload.candidate_count; i++) {
-             p2p_remote_candidate_entry_t *c = p2p_cand_push_remote(s);
-            if (!c) break;  /* OOM */
+             int idx = p2p_cand_push_remote(s);
+            if (idx < 0) break;  /* OOM */
+             p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
              unpack_candidate(&c->cand, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
              c->last_punch_send_ms = 0;
             print("I:", LA_F("%s: %s=%d, %s=%s:%d", LA_F54, 312),
@@ -221,7 +222,7 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
 
                 printf(LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F128, 363),
                               inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
-                nat_punch(s, &c->cand.addr);
+                nat_punch(s, idx);
             }
         }
         

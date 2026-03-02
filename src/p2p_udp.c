@@ -1,10 +1,6 @@
 
 #include "p2p_internal.h"
 
-#include <string.h>
-
-/* ---- UDP socket ---- */
-
 sock_t udp_open_socket(uint16_t port) {
 
     sock_t sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -35,15 +31,15 @@ sock_t udp_open_socket(uint16_t port) {
     return sock;
 }
 
-int udp_send_to(sock_t sock, const struct sockaddr_in *addr,
-                const void *buf, int len) {
+ret_t udp_send_to(sock_t sock, const struct sockaddr_in *addr,
+                  const void *buf, int len) {
     ssize_t n = sendto(sock, (const char *)buf, len, 0,
                        (const struct sockaddr *)addr, sizeof(*addr));
     return (int)n;
 }
 
-int udp_recv_from(sock_t sock, struct sockaddr_in *from,
-                  void *buf, int max_len) {
+ret_t udp_recv_from(sock_t sock, struct sockaddr_in *from,
+                    void *buf, int max_len) {
     socklen_t fromlen = sizeof(*from);
     ssize_t n = recvfrom(sock, (char *)buf, max_len, 0,
                          (struct sockaddr *)from, &fromlen);
@@ -55,9 +51,9 @@ int udp_recv_from(sock_t sock, struct sockaddr_in *from,
     return (int)n;
 }
 
-int udp_send_packet(sock_t sock, const struct sockaddr_in *addr,
-                    uint8_t type, uint8_t flags, uint16_t seq,
-                    const void *payload, int payload_len) {
+ret_t udp_send_packet(sock_t sock, const struct sockaddr_in *addr,
+                      uint8_t type, uint8_t flags, uint16_t seq,
+                      const void *payload, int payload_len) {
     uint8_t buf[P2P_MTU];
     if (P2P_HDR_SIZE + payload_len > P2P_MTU) return -1;
 

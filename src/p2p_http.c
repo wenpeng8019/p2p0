@@ -5,8 +5,6 @@
  */
 
 #include "p2p_http.h"
-#include <stdio.h>
-#include <string.h>
 
 /* ============================================================
  * Windows 后端：WinHTTP
@@ -15,9 +13,8 @@
  * 无需任何第三方依赖，支持 XP SP2 及以上所有 Windows 版本。
  * 通过 #pragma comment 自动链接，不需要在 CMakeLists 中额外指定。
  * ============================================================ */
-#ifdef _WIN32
+#if P_WIN
 
-#include <windows.h>
 #include <winhttp.h>
 #pragma comment(lib, "winhttp.lib")
 
@@ -129,14 +126,14 @@ cleanup_connect:
     return result;
 }
 
-int p2p_http_get(const char *url, const char *token,
-                 char *resp_buf, int resp_size)
-{
+ret_t p2p_http_get(const char *url, const char *token,
+                 char *resp_buf, int resp_size) {
+
     return winhttp_request("GET", url, token, NULL, resp_buf, resp_size);
 }
 
-int p2p_http_patch(const char *url, const char *token, const char *body)
-{
+ret_t p2p_http_patch(const char *url, const char *token, const char *body) {
+
     int r = winhttp_request("PATCH", url, token, body, NULL, 0);
     return (r >= 0) ? 0 : -1;
 }
@@ -153,13 +150,11 @@ int p2p_http_patch(const char *url, const char *token, const char *body)
  * PATCH—— popen("curl ... -d @- url", "w")，将 body 写入 curl 的
  *          stdin（-d @- 表示从 stdin 读请求体），无需临时文件。
  * ============================================================ */
-#else /* !_WIN32 */
+#else /* !P_WIN */
 
-#include <errno.h>
+ret_t p2p_http_get(const char *url, const char *token,
+                 char *resp_buf, int resp_size) {
 
-int p2p_http_get(const char *url, const char *token,
-                 char *resp_buf, int resp_size)
-{
     if (!resp_buf || resp_size <= 1) return -1;
 
     char cmd[2048];
@@ -186,8 +181,8 @@ int p2p_http_get(const char *url, const char *token,
     return total;
 }
 
-int p2p_http_patch(const char *url, const char *token, const char *body)
-{
+ret_t p2p_http_patch(const char *url, const char *token, const char *body) {
+
     if (!body) return -1;
 
     char cmd[2048];
@@ -208,4 +203,4 @@ int p2p_http_patch(const char *url, const char *token, const char *body)
     return (rc == 0) ? 0 : -1;
 }
 
-#endif /* _WIN32 */
+#endif /* !P_WIN */

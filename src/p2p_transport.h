@@ -1,7 +1,7 @@
 #ifndef P2P_TRANSPORT_H
 #define P2P_TRANSPORT_H
 
-#include "../stdc/stdc.h"
+#include <stdc.h>
 
 /* ============================================================================
  * 可靠传输层 (Reliable Transport Layer)

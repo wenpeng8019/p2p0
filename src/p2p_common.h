@@ -82,6 +82,10 @@ static inline void sockaddr_from_p2p_wire(const p2p_sockaddr_t *w, struct sockad
     s->sin_addr.s_addr = w->ip;
 }
 
+/* ============================================================================
+ * signaling_payload_hdr TCP 信令负载头部的序列化与反序列化
+ * ============================================================================ */
+
 /*
  * pack_signaling_payload_hdr: 序列化信令负载头部到字节流
  *
