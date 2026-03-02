@@ -36,6 +36,7 @@
 #define P2P_MTU         1200              
 #define P2P_HDR_SIZE    4                           /* 包头大小 */
 #define P2P_MAX_PAYLOAD (P2P_MTU - P2P_HDR_SIZE)    /* 1196 */
+#define P2P_MSG_DATA_MAX  (P2P_MAX_PAYLOAD - P2P_PEER_ID_MAX - 3)  /* MSG_REQ data: 1196-32-3=1161 */
 
 typedef struct {
     uint8_t             type;               // 包类型（0x01-0x7F: P2P协议, 0x80-0xFF: 信令协议）
@@ -218,18 +219,18 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define P2P_PKT_RELAY_ACK       0xA1        // 中继服务器转发的 ACK 确认包
 
 /* REGISTER_ACK status 码 */
-#define SIG_REGACK_PEER_OFFLINE  0          // 成功，对端离线
-#define SIG_REGACK_PEER_ONLINE   1          // 成功，对端在线
+#define SIG_REGACK_PEER_OFFLINE 0           // 成功，对端离线
+#define SIG_REGACK_PEER_ONLINE  1           // 成功，对端在线
 
 /* REGISTER_ACK 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_REGACK_FLAG_RELAY    0x01       // 服务器支持数据中继功能（P2P 打洞失败降级）
-#define SIG_REGACK_FLAG_MSG      0x02       // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
+#define SIG_REGACK_FLAG_RELAY   0x01        // 服务器支持数据中继功能（P2P 打洞失败降级）
+#define SIG_REGACK_FLAG_MSG     0x02        // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
 
 /* MSG 包标志位（p2p_packet_hdr_t.flags） */
-#define SIG_MSG_FLAG_RELAY       0x01       // 标识此 MSG_REQ 是 Server→B 的中转包（而非 A→Server 的原始请求）
+#define SIG_MSG_FLAG_RELAY      0x01        // 标识此 MSG_REQ 是 Server→B 的中转包（而非 A→Server 的原始请求）
 
 /* PEER_INFO 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_PEER_INFO_FIN        0x01       // 候选列表发送完毕
+#define SIG_PEER_INFO_FIN       0x01        // 候选列表发送完毕
 
 /*
  * COMPACT 模式精简候选结构 (7 bytes)
@@ -428,7 +429,7 @@ typedef struct {
  */
 typedef struct {
     uint8_t             status;
-    uint8_t             candidates_acked;   // 本次确认的候选数量
+    uint8_t             candidates_acked;           // 本次确认的候选数量
     uint8_t             reserved[2];
 } p2p_relay_connect_ack_t;
 
@@ -457,9 +458,9 @@ typedef struct {
  * 转换函数见 p2p_internal.h：sockaddr_to_p2p_wire() / sockaddr_from_p2p_wire()
  */
 typedef struct {
-    uint32_t            family;             // 地址族   htonl(sin_family)
-    uint32_t            port;               // 端口     htonl((uint32_t)sin_port)
-    uint32_t            ip;                 // IPv4     sin_addr.s_addr
+    uint32_t            family;                     // 地址族   htonl(sin_family)
+    uint32_t            port;                       // 端口     htonl((uint32_t)sin_port)
+    uint32_t            ip;                         // IPv4     sin_addr.s_addr
 } p2p_sockaddr_t;
 
 /*
@@ -475,10 +476,10 @@ typedef struct {
  *   └──────────┴────────────────────┴────────────────────┴──────────┘
  */
 typedef struct {
-    uint32_t            type;               // 候选类型 htonl(0=Host 1=Srflx 2=Relay 3=Prflx)
-    p2p_sockaddr_t      addr;               // 传输地址（12B）
-    p2p_sockaddr_t      base_addr;          // 基础地址（12B）
-    uint32_t            priority;           // 候选优先级 htonl
+    uint32_t            type;                       // 候选类型 htonl(0=Host 1=Srflx 2=Relay 3=Prflx)
+    p2p_sockaddr_t      addr;                       // 传输地址（12B）
+    p2p_sockaddr_t      base_addr;                  // 基础地址（12B）
+    uint32_t            priority;                   // 候选优先级 htonl
 } p2p_candidate_t;
 
 #pragma pack(pop)

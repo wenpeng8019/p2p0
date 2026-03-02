@@ -33,9 +33,10 @@
  *
  * 候选列表统一存储在 p2p_session 中，本模块只负责序列化和发送。
  */
-
 #ifndef P2P_SIGNAL_COMPACT_H
 #define P2P_SIGNAL_COMPACT_H
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
 #include <stdc.h>
 #include <p2p.h>
@@ -309,6 +310,20 @@ typedef struct {
     uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
     uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 PEER_INFO 重传定时器）*/
 
+    /* MSG RPC（A 端：发送请求） */
+    bool                msg_support;                        /* 服务器是否支持 MSG（从 REGISTER_ACK flags 读取）*/
+    uint16_t            msg_req_id;                         /* 当前挂起的 req_id（0=无挂起）*/
+    uint8_t             msg_state;                          /* 0=空闲 1=等待 REQ_ACK 2=等待 RES */
+    uint8_t             msg_type;                           /* 挂起请求的 msg_type */
+    int                 msg_data_len;                       /* 挂起请求的数据长度 */
+    uint8_t             msg_data[P2P_MSG_DATA_MAX];         /* 挂起请求的数据缓冲区 */
+    uint64_t            msg_send_time;                      /* MSG_REQ 最后发送时间 */
+    int                 msg_retries;                        /* MSG_REQ 已重发次数 */
+
+    /* MSG RPC（B 端：接收中转的请求，等待用户回应） */
+    uint16_t            msg_relay_req_id;                   /* 待回应的 req_id（0=无）*/
+    uint64_t            msg_relay_session_id;               /* A 的 session_id（用于构建 MSG_RES）*/
+
 } p2p_signal_compact_ctx_t;
 
 /*
@@ -328,7 +343,7 @@ void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx);
  * @param s   P2P 会话
  * @return    0 正常，-1 错误
  */
-int p2p_signal_compact_tick_recv(struct p2p_session *s);
+void p2p_signal_compact_tick_recv(struct p2p_session *s);
 
 /*
  * 信令输出（推送阶段）— 向对端发送候选地址
@@ -342,7 +357,7 @@ int p2p_signal_compact_tick_recv(struct p2p_session *s);
  * @param s   P2P 会话
  * @return    0 正常，-1 错误
  */
-int p2p_signal_compact_tick_send(struct p2p_session *s);
+void p2p_signal_compact_tick_send(struct p2p_session *s);
 
 /*
  * 开始信令交换（发送 REGISTER）
@@ -402,11 +417,48 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
                                const uint8_t *payload, int len,
                                const struct sockaddr_in *from);
 
+/* 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）
+ * 通过 flags & SIG_MSG_FLAG_RELAY 内部区分两种情况：
+ *   flags=0: A→Server，客户端不可能收到此包，忽略
+ *   flags=SIG_MSG_FLAG_RELAY: Server→B relay，解析 [session_id][req_id][msg_type][data]，触发 on_msg_req 回调 */
+void compact_on_msg_req(struct p2p_session *s, uint8_t flags,
+                        const uint8_t *payload, int len,
+                        const struct sockaddr_in *from);
+
+/* 处理 MSG_REQ_ACK（Server→A，确认已缓存并开始中转）
+ * payload: [req_id(2)][status(1)]  status: 0=成功, 1=B 不在线 */
+void compact_on_msg_req_ack(struct p2p_session *s,
+                             const uint8_t *payload, int len,
+                             const struct sockaddr_in *from);
+
+/* 处理 MSG_RES（Server→A relay B 的应答）
+ * payload: [req_id(2)][msg_type(1)][data(N)]
+ * 处理器内部自动回复 MSG_RES_ACK、触发 on_msg_res 回调 */
+void compact_on_msg_res(struct p2p_session *s,
+                        const uint8_t *payload, int len,
+                        const struct sockaddr_in *from);
+
+/* ---------- 公共 MSG RPC 接口 ---------- */
+
+/*
+ * 向对端发送 MSG 请求（A 端）。
+ * 内部分配 req_id，立即发送第一个 MSG_REQ 并进入重发状态。
+ */
+int p2p_signal_compact_msg_send(struct p2p_session *s,
+                                 uint8_t msg_type, const void *data, int len);
+
+/*
+ * 回复对端的 MSG 请求（B 端）。
+ * req_id 必须与 on_msg_req 回调中的 req_id 一致。
+ */
+int p2p_signal_compact_msg_reply(struct p2p_session *s, uint16_t req_id,
+                                  uint8_t msg_type, const void *data, int len);
+
 /*
  * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果
  * 每次 p2p_update() tick 时调用，用于同步 s->nat_type
  */
 void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
 
+#pragma clang diagnostic pop
 #endif /* P2P_SIGNAL_COMPACT_H */
-

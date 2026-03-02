@@ -137,6 +137,26 @@ typedef void (*p2p_on_disconnected_fn)(p2p_handle_t hdl, void *userdata);
  */
 typedef void (*p2p_on_data_fn)(p2p_handle_t hdl, const void *data, int len, void *userdata);
 
+/*
+ * MSG RPC 请求到达回调（B 端，服务器把 A 的 MSG_REQ 中转给 B 时触发）
+ * - req_id   : 请求标识，B 调用 p2p_msg_reply(hdl, req_id, ...) 时传回
+ * - msg_type : 应用层消息类型（1 字节，由应用自定义）
+ * - data/len : 请求数据
+ */
+typedef void (*p2p_on_msg_req_fn)(p2p_handle_t hdl, uint16_t req_id,
+                                   uint8_t msg_type, const void *data, int len,
+                                   void *userdata);
+
+/*
+ * MSG RPC 应答到达回调（A 端，服务器把 B 的 MSG_RES 转回给 A 时触发）
+ * - req_id   : 对应的原始请求标识
+ * - msg_type : 应答消息类型（由 B 在 p2p_msg_reply 中指定）
+ * - data/len : 应答数据；len=-1 表示失败（B 不在线或超时）
+ */
+typedef void (*p2p_on_msg_res_fn)(p2p_handle_t hdl, uint16_t req_id,
+                                   uint8_t msg_type, const void *data, int len,
+                                   void *userdata);
+
 /* ---------- 配置结构 ---------- */
 
 typedef struct {
@@ -201,6 +221,8 @@ typedef struct {
     p2p_on_connected_fn     on_connected;               // 连接建立回调 (可选)
     p2p_on_disconnected_fn  on_disconnected;            // 连接断开回调 (可选)
     p2p_on_data_fn          on_data;                    // 数据到达回调 (可选)
+    p2p_on_msg_req_fn       on_msg_req;                 // MSG RPC 请求到达（B 端，服务器可选）
+    p2p_on_msg_res_fn       on_msg_res;                 // MSG RPC 应答到达（A 端，服务器可选）
     void*                   userdata;                   // 用户自定义数据，传递给回调函数
 } p2p_config_t;
 
@@ -358,6 +380,35 @@ p2p_send(p2p_handle_t hdl, const void *buf, int len);
  */
 int
 p2p_recv(p2p_handle_t hdl, void *buf, int len);
+
+/**
+ * 通过信令服务器向对端发送 MSG 请求（A 端）。
+ *
+ * 仅在 COMPACT 模式、服务器支持 MSG（REGISTER_ACK flags 含 SIG_REGACK_FLAG_MSG）
+ * 且当前无挂起请求时有效。发送成功后通过 on_msg_res 回调接收应答。
+ *
+ * @param hdl      会话句柄
+ * @param msg_type 应用层消息类型（1 字节，应用自定义）
+ * @param data     请求数据（最多 P2P_MSG_DATA_MAX 字节）
+ * @param len      数据长度
+ * @return 0=已加入发送队列，-1=失败（不支持/已有挂起/参数错误/未注册）
+ */
+int
+p2p_msg_send(p2p_handle_t hdl, uint8_t msg_type, const void *data, int len);
+
+/**
+ * 回复对端的 MSG 请求（B 端，在 on_msg_req 回调中或异步调用）。
+ *
+ * @param hdl      会话句柄
+ * @param req_id   需要回复的请求 ID（从 on_msg_req 回调的参数中获取）
+ * @param msg_type 应答消息类型（1 字节）
+ * @param data     应答数据
+ * @param len      数据长度
+ * @return 0=成功，-1=失败（无对应挂起请求/参数错误）
+ */
+int
+p2p_msg_reply(p2p_handle_t hdl, uint16_t req_id,
+              uint8_t msg_type, const void *data, int len);
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus

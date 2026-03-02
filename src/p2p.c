@@ -84,13 +84,13 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         if (!cfg->gh_token || !cfg->gist_id) {
-            print("E: %s", LA_S("PUBSUB mode requires gh_token and gist_id", LA_S59, 195));
+            print("E: %s", LA_S("PUBSUB mode requires gh_token and gist_id", LA_S64, 195));
             return NULL;
         }
     }
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT || cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
         if (!cfg->server_host) {
-            print("E: %s", LA_S("RELAY/COMPACT mode requires server_host", LA_S68, 199));
+            print("E: %s", LA_S("RELAY/COMPACT mode requires server_host", LA_S73, 199));
             return NULL;
         }
     } else {
@@ -189,7 +189,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("I: %s", LA_S("OpenSSL DTLS enabled as transport layer", 0, 0));
         s->trans = &p2p_trans_openssl;
 #else
-        print("W: %s", LA_S("OpenSSL requested but library not linked", LA_S48, 191));
+        print("W: %s", LA_S("OpenSSL requested but library not linked", LA_S53, 191));
 #endif
     }
     else if (cfg->use_sctp) {
@@ -197,14 +197,14 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("I: %s", LA_S("SCTP (usrsctp) enabled as transport layer", 0, 0));
         s->trans = &p2p_trans_sctp;
 #else
-        print("W: %s", LA_S("SCTP (usrsctp) requested but library not linked", LA_S73, 202));
+        print("W: %s", LA_S("SCTP (usrsctp) requested but library not linked", LA_S78, 202));
 #endif
     }
     else if (cfg->use_pseudotcp) {
-        print("I: %s", LA_S("PseudoTCP enabled as transport layer", LA_S56, 233));
+        print("I: %s", LA_S("PseudoTCP enabled as transport layer", LA_S61, 233));
         s->trans = &p2p_trans_pseudotcp;
     }
-    else print("I: %s", LA_S("No advanced transport layer enabled, using simple reliable layer", LA_S44, 231));
+    else print("I: %s", LA_S("No advanced transport layer enabled, using simple reliable layer", LA_S49, 231));
 
     // 执行传输模块的初始化处理
     if (s->trans && s->trans->init) s->trans->init(s);
@@ -230,7 +230,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
 #ifdef P2P_THREADED
     if (cfg->threaded) {
-        print("I: %s", LA_S("Starting internal thread", LA_S82, 237));
+        print("I: %s", LA_S("Starting internal thread", LA_S87, 237));
         if ((ret = p2p_thread_start(s)) != E_NONE) {
             print("E:", LA_F("Start internal thread failed(%d)", LA_F145, 570), ret);
             P_sock_close(s->sock);
@@ -251,7 +251,7 @@ p2p_destroy(p2p_handle_t hdl) {
 
 #ifdef P2P_THREADED
     if (s->cfg.threaded) {
-        print("I: %s", LA_S("Stopping internal thread", LA_S83, 238));
+        print("I: %s", LA_S("Stopping internal thread", LA_S88, 238));
         p2p_thread_stop(s);
     }
 #endif
@@ -262,7 +262,7 @@ p2p_destroy(p2p_handle_t hdl) {
         // 发送 FIN 包，断开 P2P 连接
         if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
 
-            print("I: %s", LA_S("Sending FIN packet to peer", LA_S75, 234));
+            print("I: %s", LA_S("Sending FIN packet to peer", LA_S80, 234));
             udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
         }
 
@@ -273,7 +273,7 @@ p2p_destroy(p2p_handle_t hdl) {
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT &&
             s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
 
-            print("I: %s", LA_S("Sending UNREGISTER packet to COMPACT signaling server", LA_S77, 236));
+            print("I: %s", LA_S("Sending UNREGISTER packet to COMPACT signaling server", LA_S82, 236));
 
             uint8_t unreg[P2P_PEER_ID_MAX * 2];
             memset(unreg, 0, sizeof(unreg));
@@ -371,7 +371,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                                  inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
                 }
             }
-            else print("I: %s", LA_S("Skipping local Host candidates on --public-only", LA_S80, 121));
+            else print("I: %s", LA_S("Skipping local Host candidates on --public-only", LA_S85, 121));
 
             // 注册（连接）到 COMPACT 信令服务器
             print("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F129, 244),
@@ -461,7 +461,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
                 // PUB 模式必须等待 STUN 响应（获取公网地址）后才能发布 offer
                 // + PUB/SUB 不支持 Trickle ICE 模式，所以必须等候选收集完成后一次性发送
-                print("I: %s", LA_S("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_S57, 85));
+                print("I: %s", LA_S("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_S62, 85));
             }
             else {
 
@@ -469,7 +469,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 p2p_signal_pubsub_set_role(&s->sig_pubsub_ctx, P2P_SIGNAL_ROLE_SUB);
 
                 // SUB 模式：被动等待 offer，收到后自动回复
-                print("I: %s", LA_S("PUBSUB (SUB): waiting for offer from any peer", LA_S58, 86));
+                print("I: %s", LA_S("PUBSUB (SUB): waiting for offer from any peer", LA_S63, 86));
             }
             break;
         }
@@ -497,7 +497,7 @@ p2p_close(p2p_handle_t hdl) {
     // 发送 FIN 包通知对端断开连接（仅在已连接状态）
     if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
 
-        print("V: %s", LA_S("Sending FIN packet to peer before closing", LA_S76, 235));
+        print("V: %s", LA_S("Sending FIN packet to peer before closing", LA_S81, 235));
         udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
     }
 
@@ -741,6 +741,15 @@ p2p_update(p2p_handle_t hdl) {
             case SIG_PKT_NAT_PROBE_ACK:
                 compact_on_nat_probe_ack(s, hdr.seq, payload, payload_len, &from);
                 break;
+            case SIG_PKT_MSG_REQ:
+                compact_on_msg_req(s, hdr.flags, payload, payload_len, &from);
+                break;
+            case SIG_PKT_MSG_REQ_ACK:
+                compact_on_msg_req_ack(s, payload, payload_len, &from);
+                break;
+            case SIG_PKT_MSG_RES:
+                compact_on_msg_res(s, payload, payload_len, &from);
+                break;
             default:
                 print("V:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F127, 95), hdr.type);
                 printf(LA_F("Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d", LA_F126, 150),
@@ -790,7 +799,7 @@ p2p_update(p2p_handle_t hdl) {
 
     // 升级到 LAN 路径（如果确认同一子网）
     if (s->route.lan_confirmed && s->path != P2P_PATH_LAN) {
-        print("I: %s", LA_S("Same subnet confirmed, switching to LAN path", LA_S72, 624));
+        print("I: %s", LA_S("Same subnet confirmed, switching to LAN path", LA_S77, 624));
         
         // 添加 LAN 路径到路径管理器
         int lan_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_LAN, &s->route.lan_peer_addr);
@@ -804,7 +813,7 @@ p2p_update(p2p_handle_t hdl) {
                 s->path = P2P_PATH_LAN;
                 s->active_addr = s->route.lan_peer_addr;
                 s->path_mgr.active_path = best_path;
-                print("I: %s", LA_S("Switched to LAN path", LA_S85, 624));
+                print("I: %s", LA_S("Switched to LAN path", LA_S90, 624));
             }
         } else {
             // 降级：路径管理器失败，使用传统方式
@@ -819,7 +828,7 @@ p2p_update(p2p_handle_t hdl) {
 
     // 转换：REGISTERING → PUNCHING（开始打洞）
     if (s->state == P2P_STATE_REGISTERING && s->nat.state == NAT_PUNCHING) {
-        print("I: %s", LA_S("P2P punching in progress ...", LA_S53, 623));
+        print("I: %s", LA_S("P2P punching in progress ...", LA_S58, 623));
         s->state = P2P_STATE_PUNCHING;
     }
 
@@ -831,7 +840,7 @@ p2p_update(p2p_handle_t hdl) {
     if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING) &&
         s->nat.state == NAT_CONNECTED) {
 
-        print("I: %s", LA_S("P2P connection established", LA_S51, 621));
+        print("I: %s", LA_S("P2P connection established", LA_S56, 621));
         s->state = P2P_STATE_CONNECTED;
         
         // 添加 PUNCH 路径到路径管理器
@@ -886,13 +895,13 @@ p2p_update(p2p_handle_t hdl) {
                        inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
             }
             // 同子网但 disable_lan_shortcut=true：跳过升级，仅打印日志
-            else print("V: %s", LA_S("Skipping LAN shortcut on --disable-lan-shortcut", LA_S79, 122));
+            else print("V: %s", LA_S("Skipping LAN shortcut on --disable-lan-shortcut", LA_S84, 122));
         }
     }
 
     // NAT 重新连接后恢复路径（NAT_RELAY → NAT_CONNECTED）
     if (s->nat.state == NAT_CONNECTED && s->state == P2P_STATE_RELAY) {
-        print("I: %s", LA_S("NAT connection recovered, upgrading from RELAY to CONNECTED", LA_S41, 620));
+        print("I: %s", LA_S("NAT connection recovered, upgrading from RELAY to CONNECTED", LA_S46, 620));
         
         // 更新 PUNCH 路径状态
         int punch_idx = path_manager_find_path(&s->path_mgr, P2P_PATH_PUNCH);
@@ -934,7 +943,7 @@ p2p_update(p2p_handle_t hdl) {
         }
         
         // 添加中继路径
-        print("I: %s", LA_S("P2P punch failed, adding relay path", LA_S52, 622));
+        print("I: %s", LA_S("P2P punch failed, adding relay path", LA_S57, 622));
         
         struct sockaddr_in relay_addr;
         bool relay_available = false;
@@ -979,14 +988,14 @@ p2p_update(p2p_handle_t hdl) {
     // 转换：CONNECTED/RELAY → CLOSED（收到 FIN 包主动断开）
     if (s->nat.state == NAT_CLOSED && 
         (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)) {
-        print("I: %s", LA_S("Received FIN packet, connection closed", LA_S62, 621));
+        print("I: %s", LA_S("Received FIN packet, connection closed", LA_S67, 621));
         s->state = P2P_STATE_CLOSED;
         if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
     }
 
     // 转换：CONNECTED → RELAY（NAT 连接超时断开，降级到中继模式）
     if (s->nat.state == NAT_DISCONNECTED && s->state == P2P_STATE_CONNECTED) {
-        print("W: %s", LA_S("NAT connection timeout, downgrading to relay mode", LA_S42, 620));
+        print("W: %s", LA_S("NAT connection timeout, downgrading to relay mode", LA_S47, 620));
         
         // 标记 PUNCH 路径为失效
         int punch_idx = path_manager_find_path(&s->path_mgr, P2P_PATH_PUNCH);
@@ -1200,6 +1209,33 @@ p2p_recv(p2p_handle_t hdl, void *buf, int len) {
 
     LOCK(s);
     int ret = stream_read(&s->stream, buf, len);
+    UNLOCK(s);
+    return ret;
+}
+
+int
+p2p_msg_send(p2p_handle_t hdl, uint8_t msg_type, const void *data, int len) {
+
+    if (!hdl) return -1;
+    p2p_session_t *s = (p2p_session_t*)hdl;
+    if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) return -1;
+
+    LOCK(s);
+    int ret = p2p_signal_compact_msg_send(s, msg_type, data, len);
+    UNLOCK(s);
+    return ret;
+}
+
+int
+p2p_msg_reply(p2p_handle_t hdl, uint16_t req_id,
+              uint8_t msg_type, const void *data, int len) {
+
+    if (!hdl) return -1;
+    p2p_session_t *s = (p2p_session_t*)hdl;
+    if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) return -1;
+
+    LOCK(s);
+    int ret = p2p_signal_compact_msg_reply(s, req_id, msg_type, data, len);
     UNLOCK(s);
     return ret;
 }
