@@ -243,18 +243,18 @@ typedef struct {
  *   客户端收到此包后应停止该会话的所有传输和重传
  *
  * RELAY_DATA:
- *   payload: [session_id(8)][data_len(2)][data(N)]
+ *   payload: [session_id(8)][data(N)]
  *   包头: type=0xA0, flags=0, seq=数据序列号
  *   - session_id: 会话 ID（网络字节序，64位，用于服务器查找目标对端）
- *   - data_len: 数据长度（网络字节序）
- *   - data: 实际数据内容
+ *   - data: 实际数据内容（UDP 保留消息边界，无需 data_len 字段）
  *   用于在 P2P 打洞失败后，通过服务器中继转发数据
  *
  * RELAY_ACK:
- *   payload: [session_id(8)][ack_seq(2)]
+ *   payload: [session_id(8)][ack_seq(2)][sack(4)]
  *   包头: type=0xA1, flags=0, seq=0
  *   - session_id: 会话 ID（网络字节序，64位）
- *   - ack_seq: 确认的 RELAY_DATA 序列号（网络字节序）
+ *   - ack_seq: 累积确认序列号（网络字节序）
+ *   - sack: 选择性确认位图（网络字节序）
  */
 
 /* ============================================================================
