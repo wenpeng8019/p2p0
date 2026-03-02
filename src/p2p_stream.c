@@ -274,10 +274,7 @@ int stream_flush_to_reliable(stream_t *st, reliable_t *r) {
         
         /* 流偏移量（4 字节，大端序） */
         uint32_t off = st->send_offset;
-        pkt[0] = (uint8_t)(off >> 24);
-        pkt[1] = (uint8_t)(off >> 16);
-        pkt[2] = (uint8_t)(off >> 8);
-        pkt[3] = (uint8_t)(off);
+        hltonb(off, pkt);
 
         /* 分片标志 */
         uint8_t fflags = 0;

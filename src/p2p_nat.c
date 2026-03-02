@@ -93,7 +93,6 @@ int nat_punch(p2p_session_t *s, int idx) {
         for (int i = 0; i < s->remote_cand_cnt; i++) {
             udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
             s->remote_cands[i].last_punch_send_ms = now;
-
             printf(LA_F("Send probe PUNCH pkt to %s:%d, echo_seq=%d", LA_F139, 652),
                    inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
                    ntohs(s->remote_cands[i].cand.addr.sin_port), n->punch_seq);
@@ -127,7 +126,6 @@ int nat_punch(p2p_session_t *s, int idx) {
         hstonb(n->last_peer_seq, probe_payload);
         udp_send_packet(s->sock, addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
         s->remote_cands[idx].last_punch_send_ms = now;    // 更新候选的时间戳
-
         printf(LA_F("Send probe PUNCH pkt to %s:%d, seq=%u", LA_F140, 653),
                inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), n->punch_seq);
 
@@ -299,10 +297,9 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
                     udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
                     s->remote_cands[i].last_punch_send_ms = now_ms;
-
                     printf(LA_F("Send relay PUNCH pkt to %s:%d, echo_seq=%d", LA_F141, 654),
                            inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
-                           ntohs(s->remote_cands[i].cand.addr.sin_port), i);
+                           ntohs(s->remote_cands[i].cand.addr.sin_port), n->last_peer_seq);
                 }
             }
             break;

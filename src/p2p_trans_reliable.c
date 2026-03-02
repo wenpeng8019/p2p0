@@ -165,8 +165,7 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
 static int build_ack_payload(const reliable_t *r, uint8_t *buf) {
     // 累积 ACK：recv_base（它之前的所有内容都已接收）
     uint16_t ack_seq = r->recv_base;
-    buf[0] = (uint8_t)(ack_seq >> 8);
-    buf[1] = (uint8_t)(ack_seq & 0xFF);
+    hstonb(ack_seq, buf);
 
     // SACK 位图：第 i 位 = recv_base + 1 + i（与接收方解读一致：ack_seq + 1 + i）
     // 注：循环上限用 RELIABLE_WINDOW-1 而非 RELIABLE_WINDOW，避免环形缓冲区回绕导致漏报已确认包
@@ -176,10 +175,7 @@ static int build_ack_payload(const reliable_t *r, uint8_t *buf) {
         if (r->recv_bitmap[idx])
             sack |= (1u << i);
     }
-    buf[2] = (uint8_t)(sack >> 24);
-    buf[3] = (uint8_t)(sack >> 16);
-    buf[4] = (uint8_t)(sack >> 8);
-    buf[5] = (uint8_t)(sack);
+    hltonb(sack, buf + 2);
 
     return 6;
 }
@@ -192,9 +188,8 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
     if (r->recv_base > 0 || r->recv_bitmap[r->recv_base % RELIABLE_WINDOW]) {
         uint8_t ack_payload[6];
         build_ack_payload(r, ack_payload);
-        uint16_t ack_seq = ((uint16_t)ack_payload[0] << 8) | ack_payload[1];
-        uint32_t sack = ((uint32_t)ack_payload[2] << 24) | ((uint32_t)ack_payload[3] << 16)
-                      | ((uint32_t)ack_payload[4] << 8)  | (uint32_t)ack_payload[5];
+        uint16_t ack_seq; nbtohs(ack_payload, &ack_seq);
+        uint32_t sack;    nbtohl(ack_payload + 2, &sack);
         printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F166, 368),
                       ack_seq, sack, r->recv_base,
                       addr ? inet_ntoa(addr->sin_addr) : "?",

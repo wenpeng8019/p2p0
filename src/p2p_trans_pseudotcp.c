@@ -65,7 +65,7 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
     if (s->tcp.ssthresh < MIN_CWND) s->tcp.ssthresh = MIN_CWND;
     s->tcp.cwnd = MIN_CWND;
     s->tcp.dup_acks = 0;
-    print("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F132, 219), s->tcp.ssthresh, s->tcp.cwnd);
+    print("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F165, 219), s->tcp.ssthresh, s->tcp.cwnd);
 }
 
 /*
