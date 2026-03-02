@@ -208,7 +208,7 @@ static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, ui
  */
 static int sctp_init(p2p_session_t *s) {
     (void)s;
-    printf("I:", LA_S("[SCTP] usrsctp wrapper initialized (skeleton)", LA_S3, 154));
+    print("I:", LA_S("[SCTP] usrsctp wrapper initialized (skeleton)", LA_S3, 154));
     
     /*
      * 完整实现示例：
@@ -264,7 +264,7 @@ static int sctp_init(p2p_session_t *s) {
  */
 static int sctp_send(p2p_session_t *s, const void *buf, int len) {
     (void)s; (void)buf;
-    printf("V:", LA_F("[SCTP] sending %d bytes", LA_F127, 221), len);
+    print("V:", LA_F("[SCTP] sending %d bytes", LA_F127, 221), len);
     
     /* 
      * 完整实现：
@@ -317,7 +317,7 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
     if (type != P2P_PKT_DATA) return;
     (void)from; (void)s; (void)payload;
     
-    printf("V:", LA_F("[SCTP] received encapsulated packet, length %d", LA_F126, 220), len);
+    print("V:", LA_F("[SCTP] received encapsulated packet, length %d", LA_F126, 220), len);
     
     /*
      * 完整实现：

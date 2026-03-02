@@ -20,7 +20,7 @@ void reliable_init(reliable_t *r) {
     r->rto = RELIABLE_RTO_INIT;
     r->srtt = 0;
     r->rttvar = 0;
-    printf("D:", LA_F("%s rto=%d win=%d", LA_F42, 300),
+    printf(LA_F("%s rto=%d win=%d", LA_F42, 300),
                   LA_W("Reliable transport initialized", LA_W83, 101), RELIABLE_RTO_INIT, RELIABLE_WINDOW);
 }
 
@@ -36,11 +36,11 @@ int reliable_window_avail(const reliable_t *r) {
  */
 int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
     if (r->send_count >= RELIABLE_WINDOW) {
-        printf("W:", LA_F("%s send_count=%d", LA_F44, 302), LA_W("Send window full, dropping packet", LA_W89, 110), r->send_count);
+        print("W:", LA_F("%s send_count=%d", LA_F44, 302), LA_W("Send window full, dropping packet", LA_W89, 110), r->send_count);
         return -1;
     }
     if (len > P2P_MAX_PAYLOAD) {
-        printf("W:", LA_F("%s len=%d max=%d", LA_F40, 298), LA_W("Packet too large", LA_W60, 69), len, P2P_MAX_PAYLOAD);
+        print("W:", LA_F("%s len=%d max=%d", LA_F40, 298), LA_W("Packet too large", LA_W60, 69), len, P2P_MAX_PAYLOAD);
         return -1;
     }
 
@@ -55,7 +55,7 @@ int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
 
     r->send_seq++;
     r->send_count++;
-    printf("V:", LA_F("%s seq=%u len=%d inflight=%d", LA_F47, 305),
+    print("V:", LA_F("%s seq=%u len=%d inflight=%d", LA_F47, 305),
                     LA_W("Packet queued", LA_W59, 68), e->seq, len, r->send_count);
     return 0;
 }
@@ -80,7 +80,7 @@ int reliable_recv_pkt(reliable_t *r, uint8_t *buf, int *out_len) {
  */
 int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int len) {
     if (!seq_in_window(seq, r->recv_base, RELIABLE_WINDOW)) {
-        printf("D:", LA_F("%s seq=%u base=%u", LA_F45, 303),
+        printf(LA_F("%s seq=%u base=%u", LA_F45, 303),
                       LA_W("Out-of-window packet discarded", LA_W58, 67), seq, r->recv_base);
         return 0;  // 超出窗口，忽略
     }
@@ -90,7 +90,7 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
         memcpy(r->recv_data[idx], payload, len);
         r->recv_lens[idx] = len;
         r->recv_bitmap[idx] = 1;
-        printf("V:", LA_F("%s seq=%u len=%d base=%u", LA_F46, 304),
+        print("V:", LA_F("%s seq=%u len=%d base=%u", LA_F46, 304),
                         LA_W("Data stored in recv buffer", LA_W20, 25), seq, len, r->recv_base);
     }
 
@@ -133,13 +133,13 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
                 r->rto = r->srtt + 4 * r->rttvar;
                 if (r->rto < 50) r->rto = 50;
                 if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-                printf("D:", LA_F("%s rtt=%dms srtt=%d rttvar=%d rto=%d", LA_F43, 301),
+                printf(LA_F("%s rtt=%dms srtt=%d rttvar=%d rto=%d", LA_F43, 301),
                               LA_W("RTT updated", LA_W88, 107), rtt, r->srtt, r->rttvar, r->rto);
             }
         }
         r->send_base++;
     }
-    printf("D:", LA_F("%s ack_seq=%u send_base=%u inflight=%d", LA_F39, 297),
+    printf(LA_F("%s ack_seq=%u send_base=%u inflight=%d", LA_F39, 297),
                   LA_W("ACK processed", LA_W2, 3), ack_seq, r->send_base, r->send_count);
 
     // SACK 位图：第 i 位 = ack_seq + 1 + i
@@ -195,7 +195,7 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
         uint16_t ack_seq = ((uint16_t)ack_payload[0] << 8) | ack_payload[1];
         uint32_t sack = ((uint32_t)ack_payload[2] << 24) | ((uint32_t)ack_payload[3] << 16)
                       | ((uint32_t)ack_payload[4] << 8)  | (uint32_t)ack_payload[5];
-        printf("D:", LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F133, 368),
+        printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F133, 368),
                       ack_seq, sack, r->recv_base,
                       addr ? inet_ntoa(addr->sin_addr) : "?",
                       addr ? ntohs(addr->sin_port) : 0);
@@ -238,7 +238,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
             e->retx_count++;
             r->rto = r->rto * 2;
             if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-            printf("W:", LA_F("重传 seq=%u retx=%d rto=%d", LA_F138, 372),
+            print("W:", LA_F("重传 seq=%u retx=%d rto=%d", LA_F138, 372),
                          e->seq, e->retx_count, r->rto);
         }
     }

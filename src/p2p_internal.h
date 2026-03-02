@@ -303,7 +303,7 @@ static inline p2p_candidate_entry_t *p2p_cand_push_local(p2p_session_t *s) {
         int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
         p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_candidate_entry_t));
         if (!p) {
-            printf("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F64, 241), nc);
+            print("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F64, 241), nc);
             return NULL;
         }
         s->local_cands    = p;
@@ -317,7 +317,7 @@ static inline p2p_remote_candidate_entry_t *p2p_cand_push_remote(p2p_session_t *
         int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
         p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
         if (!p) {
-            printf("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F65, 242), nc);
+            print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F65, 242), nc);
             return NULL;
         }
         if (nc > s->remote_cand_cap) {
@@ -336,7 +336,7 @@ static inline int p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     while (nc < need) nc *= 2;
     p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
     if (!p) {
-        printf("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F65, 242), nc);
+        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F65, 242), nc);
         return -1;
     }
     memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));

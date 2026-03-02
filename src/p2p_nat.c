@@ -59,7 +59,7 @@ int nat_punch(p2p_session_t *s, const struct sockaddr_in *addr) {
     // todo 如果已经是 connected 状态，是否需要重启打洞？
     if (addr == NULL) {
         if (s->remote_cand_cnt == 0) {
-            printf("E: %s", LA_S("ERROR: No remote candidates to punch", LA_S22, 171));
+            print("E: %s", LA_S("ERROR: No remote candidates to punch", LA_S22, 171));
             return -1;
         }
         
@@ -224,7 +224,7 @@ int nat_tick(p2p_session_t *s) {
             // 超时判断
             if (now - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 
-                printf("W:", LA_F("%s (%llu ms), %s", LA_F32, 289),
+                print("W:", LA_F("%s (%llu ms), %s", LA_F32, 289),
                        LA_W("TIMEOUT: Punch failed after", LA_W108, 134),
                        now - n->punch_start, LA_W("attempts, switching to RELAY", LA_W9, 12));
 
@@ -244,7 +244,7 @@ int nat_tick(p2p_session_t *s) {
 
                 if (should_send) {
 
-                    printf("D:", LA_F("%s %s:%d (candidate %d)", LA_F21, 278), "",
+                    printf(LA_F("%s %s:%d (candidate %d)", LA_F21, 278), "",
                                   inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
                                   ntohs(s->remote_cands[i].cand.addr.sin_port), i);
 
@@ -258,7 +258,7 @@ int nat_tick(p2p_session_t *s) {
 
                 n->last_send_time = now;
 
-                printf("V:", LA_F("%s %s %d/%d %s (elapsed: %llu ms)", LA_F8, 265), LA_W("PUNCHING: Attempt", LA_W75, 89),
+                print("V:", LA_F("%s %s %d/%d %s (elapsed: %llu ms)", LA_F8, 265), LA_W("PUNCHING: Attempt", LA_W75, 89),
                                 LA_S("to", LA_S85, 209), sent_cnt,
                                 s->remote_cand_cnt, LA_W("candidates", LA_W17, 21),
                                 now - n->punch_start);
