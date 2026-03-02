@@ -35,7 +35,8 @@ typedef struct {
     uint64_t            last_send_time;     /* 上次发送时间 */
     uint64_t            last_recv_time;     /* 上次接收时间 */
     uint64_t            punch_start;        /* 打洞开始时间 */
-    uint16_t            punch_seq;          /* 本地 PUNCH 包序列号（用于匹配 echo_seq） */
+    uint16_t            punch_seq;          /* 本地 PUNCH 包序列号（自增） */
+    uint16_t            last_peer_seq;      /* 上次收到对方的 seq（捎带式 echo，用于双向连通确认） */
 } nat_ctx_t;
 
 /*

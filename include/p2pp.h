@@ -73,22 +73,31 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 
 /*
- * P2P_PKT_PUNCH 协议（对称设计）
+ * P2P_PKT_PUNCH 协议（对称捎带式设计）
  *
  * 包头: [type=0x01 | flags=0 | seq=发送方序列号(2B)]
  * 负载: [echo_seq(2B, 网络字节序)]
- *   - echo_seq = 0: 探测包（首次发送或保活）
- *   - echo_seq > 0: 确认包（确认收到了对方的 seq=echo_seq）
+ *   - echo_seq: 上次收到对方的 seq（初始为 0，即 last_peer_seq）
+ *   - 无"探测包"/"确认包"之分，所有 PUNCH 格式完全相同
  *
- * 示例：
- *   A → PUNCH(seq=1, echo=0) → B     // A发起探测
- *   A ← PUNCH(seq=2, echo=1) ← B     // B回应：我收到了你的seq=1
- *   A → PUNCH(seq=3, echo=2) → B     // A确认：我收到了你的seq=2
+ * 机制：
+ *   双方各自按固定间隔定时发送 PUNCH，payload 中持续携带
+ *   "上次收到对方的 seq"（捎带式 echo），无需立刻回复。
  *
- * 优势：
- *   - 完全对称：双方发送同一种包
- *   - 明确确认：echo_seq 确认双向连通
- *   - NAT/防火墙友好：确认包建立状态表
+ * 示例（A、B 各自定时发）：
+ *   A → PUNCH(seq=1, echo=0) → B     // A 还没收到 B 的 seq
+ *   B → PUNCH(seq=1, echo=0) → A     // B 还没收到 A 的 seq
+ *   A → PUNCH(seq=2, echo=1) → B     // A 收到了 B 的 seq=1，捎带
+ *   B → PUNCH(seq=2, echo=1) → A     // B 收到了 A 的 seq=1，捎带
+ *
+ * 双向连通判定：
+ *   收到对方 PUNCH 中 echo_seq == 自己最近发的 seq → me→peer 方向确认
+ *   收到任意 PUNCH                               → peer→me 方向确认
+ *
+ * 与即时 ACK 方案对比：
+ *   即时 ACK：收到探测包后立刻额外发一个确认包（~2× 包量）
+ *   捎带式：确认信息在下次定时包中捎带（包量减少 ~50%）
+ *   代价：连通确认延迟增加最多一个 PUNCH_INTERVAL_MS（500ms）
  */
 #define P2P_PKT_PUNCH           0x01        // 连接探测包（用于打洞和保活，带 echo_seq 负载）
 
