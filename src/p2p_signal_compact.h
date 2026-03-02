@@ -15,48 +15,7 @@
  *   - RELAY_DATA:    中继数据转发（P2P 打洞失败时的降级方案）
  *   - RELAY_ACK:     中继数据确认
  *
- * ============================================================================
- * 候选列表序列化同步机制
- * ============================================================================
- *
- * 由于 UDP 包大小限制，候选列表需要分批传输。本实现通过序列化的
- * PEER_INFO 包完成可靠同步：
- *
- *   1. 注册阶段（仅发送一次）：
- *      - 客户端发送 REGISTER（含 UDP 包可容纳的最大候选列表）
- *      - 服务器回复 REGISTER_ACK（告知缓存能力 max_candidates）
- *        · max_candidates = 0: 不支持缓存
- *        · max_candidates > 0: 支持缓存，最大缓存数量
- *      - 收到 ACK 后停止 REGISTER，进入 REGISTERED 状态
- *
- *   2. 候选同步阶段（序列化 + 确认 + session_id 分配）：
- *      - 双方上线后，服务器发送 PEER_INFO(seq=0)，包含缓存的对端候选，**首次分配 session_id**
- *      - 客户端收到后发送 PEER_INFO_ACK（携带 session_id） 确认
- *      - 客户端通过 PEER_INFO(seq=1,2,3,...) 继续同步剩余候选（携带 session_id）
- *      - 对端通过 PEER_INFO_ACK 确认，未确认则重发
- *      - 允许乱序：seq>0 可能先于 seq=0 到达，接收端按 seq 位图去重并最终收敛
- *
- *   3. 离线缓存流程（含 session_id 分配）：
- *
- *      Alice (在线)           Server                    Bob (离线)
- *        |                       |                          |
- *        |--- REGISTER --------->|                          |
- *        |<-- REGISTER_ACK ------|  (peer_online=0, max=5)
- *        |   [进入 REGISTERED]   |                          |
- *        |                       |  (缓存 Alice 的候选)      |
- *        |    ... Bob 上线 ...                              |
- *        |                       |<-- REGISTER ------------|
- *        |                       |--- REGISTER_ACK -------->|  (peer_online=1, max=5)
- *        |<-- PEER_INFO(seq=0) --|--- PEER_INFO(seq=0) --->|  (包含缓存的 5 个候选 + session_id)
- *        |--- PEER_INFO_ACK ----->|<-- PEER_INFO_ACK -------|  (携带 session_id)
- *        |                       |                          |
- *        |<=============== P2P PEER_INFO 序列化同步 ========>|  (所有包携带 session_id)
- *        |--- PEER_INFO(seq=1, base=5) ----------------->  |  (从第 6 个候选开始)
- *        |<-- PEER_INFO_ACK(seq=1) ----------------------  |
- *        |--- PEER_INFO(seq=2, base=10) ---------------->  |
- *        |<-- PEER_INFO_ACK(seq=2) ----------------------  |
- *        |--- PEER_INFO(seq=3, count=0, FIN) ----------->  |  (结束标识)
- *        |<-- PEER_INFO_ACK(seq=3) ----------------------  |
+ * 候选列表序列化同步机制详见 p2pp.h（COMPACT 模式信令服务协议节）。
  *
  * ============================================================================
  * 状态机

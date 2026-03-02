@@ -117,14 +117,45 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 基于 P2P 协议的扩展，用于客户端与信令服务器通信。
  * 复用 P2P 协议的 4 字节包头: [type: u8 | flags: u8 | seq: u16]
  *
- * 候选列表同步流程:
- * 1. 客户端发送 REGISTER（含 UDP 包可容纳的最大候选列表）
- * 2. 服务器回复 REGISTER_ACK（告知远程缓存的候选数量限制、公网地址、探测端口、是否支持中继）
- * 3. 服务器配置：若支持 NAT 探测，则在 REGISTER_ACK 中设置 probe_port > 0；客户端收到后可发送 NAT_PROBE
- * 4. 双方上线后，服务器向双方发送 PEER_INFO(seq=0)，包含服务器缓存的对端候选
- * 5. 双方通过 PEER_INFO(seq=2,3,...)继续向对方同步剩余候选列表
- * 6. 每个 PEER_INFO 需要 PEER_INFO_ACK 确认，未确认则重发
- * 7. 如果 P2P 打洞失败且服务器支持中继，可通过 RELAY_DATA 转发数据
+ * 候选列表序列化同步机制:
+ *
+ * 由于 UDP 包大小限制，候选列表需要分批传输。通过序列化的 PEER_INFO 包完成可靠同步：
+ *
+ *   1. 注册阶段（仅发送一次）：
+ *      - 客户端发送 REGISTER（含 UDP 包可容纳的最大候选列表）
+ *      - 服务器回复 REGISTER_ACK（告知缓存能力 max_candidates）
+ *        · max_candidates = 0: 不支持缓存
+ *        · max_candidates > 0: 支持缓存，最大缓存数量
+ *      - 收到 ACK 后停止 REGISTER，进入 REGISTERED 状态
+ *
+ *   2. 候选同步阶段（序列化 + 确认 + session_id 分配）：
+ *      - 双方上线后，服务器发送 PEER_INFO(seq=0)，包含缓存的对端候选，**首次分配 session_id**
+ *      - 客户端收到后发送 PEER_INFO_ACK（携带 session_id）确认
+ *      - 客户端通过 PEER_INFO(seq=1,2,3,...) 继续同步剩余候选（携带 session_id）
+ *      - 对端通过 PEER_INFO_ACK 确认，未确认则重发
+ *      - 允许乱序：seq>0 可能先于 seq=0 到达，接收端按 seq 位图去重并最终收敛
+ *
+ *   3. 离线缓存流程（含 session_id 分配）：
+ *
+ *      Alice (在线)           Server                    Bob (离线)
+ *        |                       |                          |
+ *        |--- REGISTER --------->|                          |
+ *        |<-- REGISTER_ACK ------|  (peer_online=0, max=5)
+ *        |   [进入 REGISTERED]   |                          |
+ *        |                       |  (缓存 Alice 的候选)      |
+ *        |    ... Bob 上线 ...                              |
+ *        |                       |<-- REGISTER ------------|
+ *        |                       |--- REGISTER_ACK -------->|  (peer_online=1, max=5)
+ *        |<-- PEER_INFO(seq=0) --|--- PEER_INFO(seq=0) --->|  (包含缓存的 5 个候选 + session_id)
+ *        |--- PEER_INFO_ACK ----->|<-- PEER_INFO_ACK -------|  (携带 session_id)
+ *        |                       |                          |
+ *        |<=============== P2P PEER_INFO 序列化同步 ========>|  (所有包携带 session_id)
+ *        |--- PEER_INFO(seq=1, base=5) ----------------->  |  (从第 6 个候选开始)
+ *        |<-- PEER_INFO_ACK(seq=1) ----------------------  |
+ *        |--- PEER_INFO(seq=2, base=10) ---------------->  |
+ *        |<-- PEER_INFO_ACK(seq=2) ----------------------  |
+ *        |--- PEER_INFO(seq=3, count=0, FIN) ----------->  |  (结束标识)
+ *        |<-- PEER_INFO_ACK(seq=3) ----------------------  |
  *
  * 注：REGISTER 仅在注册阶段发送，收到 REGISTER_ACK 后停止（直到重连）
  */
@@ -151,27 +182,27 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  *   A                      Server                      B
  *   │                         │                        │
- *   ├── MSG_REQ(req_id) ──────►│  A 重发直到收到 REQ_ACK  │
- *   │   [target_id][req_id]   │  Server 查找 B 的注册槽   │
+ *   ├── MSG_REQ(req_id) ─────►│  A 重发直到收到 REQ_ACK  │
+ *   │   [target_id][req_id]   │  Server 查找 B 的注册槽  │
  *   │   [msg_type][data]      │                        │
  *   │                         │                        │
- *   │◄── MSG_REQ_ACK ──────────┤  status=0 成功/1 B不在线 │
+ *   │◄── MSG_REQ_ACK ─────────┤  status=0 成功/1 B不在线 │
  *   │   [req_id][status]      │  A 停止重发              │
- *   │                         │                        │
+ *   │                         │                         │
  *   │                         ├── MSG_REQ ─────────────►│  Server 重发直到收到 RES
  *   │                         │   [session_id][req_id]  │  (relay 标志位=1)
  *   │                         │   [msg_type][data]      │
- *   │                         │                        │
+ *   │                         │                         │
  *   │                         │◄── MSG_RES ─────────────┤  B 的应答同时作为对 relay 的 ACK
  *   │                         │   [session_id][req_id]  │  Server 停止重发
  *   │                         │   [msg_type][data]      │
- *   │                         │                        │
- *   │◄── MSG_RES ──────────────┤  Server 重发直到收到 RES_ACK
- *   │   [req_id][msg_type]    │                        │
- *   │   [data]                │                        │
- *   │                         │                        │
- *   ├── MSG_RES_ACK ──────────►│  流程完成               │
- *   │   [req_id]              │                        │
+ *   │                         │                         │
+ *   │◄── MSG_RES ─────────────┤  Server 重发直到收到 RES_ACK
+ *   │   [req_id][msg_type]    │                         │
+ *   │   [data]                │                         │
+ *   │                         │                         │
+ *   ├── MSG_RES_ACK ─────────►│  流程完成                │
+ *   │   [req_id]              │                         │
  */
 #define SIG_PKT_MSG_REQ         0x88        // MSG 请求：A→Server（含目标 peer_id + payload）；Server→B relay（含 session_id，flags=SIG_MSG_FLAG_RELAY）
 #define SIG_PKT_MSG_REQ_ACK     0x89        // MSG 请求确认：Server→A（已缓存并开始中转，或失败状态）
