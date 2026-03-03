@@ -84,8 +84,8 @@ int nat_punch(p2p_session_t *s, int idx) {
                 }
 
                 print("V:", LA_F("  [%d]: %s:%d (type: %s)", LA_F3, 640), i,
-                              inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
-                              ntohs(s->remote_cands[i].cand.addr.sin_port), type_str);
+                      inet_ntoa(s->remote_cands[i].cand.addr.sin_addr), ntohs(s->remote_cands[i].cand.addr.sin_port),
+                      type_str);
             }
         }
 
@@ -119,8 +119,8 @@ int nat_punch(p2p_session_t *s, int idx) {
             n->punch_start = now;
         }
 
-        struct sockaddr_in *addr = &s->remote_cands[idx].cand.addr;
-        print("V:", LA_F("Punching candidate(%d) %s:%d", LA_F104, 647), idx,
+        struct sockaddr_in *addr = &s->remote_cands[idx].cand.addr;        
+        print("V:", LA_F("Punching remote candidate(%d) %s:%d", LA_F104, 647), idx,
               inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
 
         // 发送打洞包，捎带上次收到的对方 seq
@@ -169,12 +169,10 @@ ret_t nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     // 解析 echo_seq（2字节网络字节序）
     uint16_t echo_seq = 0;
-    if (len >= 2) {
-        nread_s(&echo_seq, payload);
-    }
+    if (len >= 2) nread_s(&echo_seq, payload);
 
     printf(LA_F("Received PUNCH pkt from %s:%d, seq=%u, echo_seq=%u, len=%d", LA_F122, 143),
-        inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq, echo_seq, len);
+           inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq, echo_seq, len);
 
     // 记录对方最新 seq，下次定时发包时捎带作为 echo_seq
     n->last_peer_seq = hdr->seq;
@@ -249,8 +247,8 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             // 超时判断
             if (now_ms - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 
-                print("W:", LA_F("TIMEOUT: Punch failed after (" PRIu64 " ms), switching to RELAY", LA_F32, 289),
-                      now_ms - n->punch_start, LA_W("", LA_W9, 12));
+                print("W:", LA_F("TIMEOUT: Punch failed after %" PRIu64 " ms, switching to RELAY", LA_F32, 289),
+                      now_ms - n->punch_start);
 
                 // 进入中继模式，重置双向确认标志，在中继期间继续尝试打洞
                 n->rx_confirmed = false;
@@ -263,7 +261,6 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
                 if (s->remote_cands[i].last_punch_send_ms == 0 ||
                     now_ms - s->remote_cands[i].last_punch_send_ms >= PUNCH_INTERVAL_MS) {
-                    // s->remote_cands[i].last_punch_send_ms = now_ms;
                     nat_punch(s, i);
                     sent_cnt++;
                 }
@@ -271,8 +268,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
             // 如果存在未完成的 nat 打洞
             if (sent_cnt > 0) {
-                n->last_send_time = now_ms;
-                print("V:", LA_F("ATTEMPT: punch to %d/%d candidates (elapsed: " PRIu64 " ms)", LA_F8, 265),
+                print("V:", LA_F("ATTEMPT: punch to %d/%d candidates (elapsed: %" PRIu64 " ms)", LA_F8, 265),
                       sent_cnt, s->remote_cand_cnt, now_ms - n->punch_start);
             }
             break;
@@ -281,22 +277,22 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
             // 发送保活包（复用 PUNCH 包，echo_seq=0）
             if (now_ms - n->last_send_time >= PING_INTERVAL_MS) {
-                n->last_send_time = now_ms;
 
                 print("V:", LA_F("Keep-alive to %s:%d", LA_F89, 96),
                       inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port));
 
-                uint8_t probe_payload[2];
-                nwrite_s(probe_payload, n->last_peer_seq);
+                uint8_t probe_payload[2]; nwrite_s(probe_payload, n->last_peer_seq);
                 udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
                 printf(LA_F("Send alive PUNCH pkt to %s:%d, seq=%u", LA_F140, 651),
-                       inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port));
+                       inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port), n->punch_seq);
+
+                n->last_send_time = now_ms;
             }
 
             // 超时检查
             if (n->last_recv_time > 0 && now_ms - n->last_recv_time >= PONG_TIMEOUT_MS) {
 
-                print("W:", LA_F("TIMEOUT: No response from peer for (" PRIu64 " ms), connection lost", 0, 0),
+                print("W:", LA_F("TIMEOUT: No response from peer for (%" PRIu64 " ms), connection lost", 0, 0),
                       now_ms - n->last_recv_time);
 
                 n->state = NAT_DISCONNECTED;
@@ -363,10 +359,8 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
             // 中继模式下周期性尝试直连，携带 last_peer_seq
             if (now_ms - n->last_send_time >= PUNCH_INTERVAL_MS * 4) {
-                n->last_send_time = now_ms;
 
-                uint8_t probe_payload[2];
-                nwrite_s(probe_payload, n->last_peer_seq);
+                uint8_t probe_payload[2]; nwrite_s(probe_payload, n->last_peer_seq);
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
 
                     udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
@@ -375,6 +369,8 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                            inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
                            ntohs(s->remote_cands[i].cand.addr.sin_port), n->last_peer_seq);
                 }
+
+                n->last_send_time = now_ms;
             }
             break;
 
