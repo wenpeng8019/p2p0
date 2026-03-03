@@ -1,9 +1,8 @@
 /*
- * NAT 穿透（纯打洞逻辑）
+ * NAT 穿透（P2P 虚拟链路层）
  *
- * 本模块只负责 NAT 打洞的核心逻辑：
- *   - PUNCH/PUNCH_ACK 交换
- *   - PING/PONG 心跳保活
+ * 本模块负责 NAT 打洞以及链路状态的维护。
+ *   - PUNCH/PUNCH_ACK 交换（打洞/保活）
  *   - 打洞状态管理
  *
  * 候选列表统一存储在 p2p_session 中，本模块从 session 读取远端候选进行打洞。
@@ -14,6 +13,8 @@
 
 #include <stdc.h>
 #include <p2pp.h>
+
+///////////////////////////////////////////////////////////////////////////////
 
 /* 前向声明 */
 struct p2p_session;
@@ -49,11 +50,21 @@ typedef struct {
 void nat_init(nat_ctx_t *n);
 
 /*
+ * 周期调用，发送打洞包和心跳
+ *
+ * @param s        会话对象
+ * @param now_ms   当前时间（毫秒）
+ */
+void nat_tick(struct p2p_session *s, uint64_t now_ms);
+
+//-----------------------------------------------------------------------------
+
+/*
  * NAT 打洞（统一接口，支持批量启动和单候选追加）
  *
  * @param s        会话对象
  * @param idx      目标候选索引（-1=批量启动所有候选，>=0=单个候选打洞）
- * @return         0=成功，-1=失败（无候选）
+ * @return         0=成功，!0=失败
  *
  * 用法：
  *   - nat_punch(s, -1)      批量启动所有 remote_cands 的打洞
@@ -66,6 +77,8 @@ void nat_init(nat_ctx_t *n);
  */
 ret_t nat_punch(struct p2p_session *s, int idx);
 
+//-----------------------------------------------------------------------------
+
 /*
  * 处理 PUNCH 包（NAT 打洞、保活）
  *
@@ -74,26 +87,20 @@ ret_t nat_punch(struct p2p_session *s, int idx);
  * @param payload  负载数据
  * @param len      负载长度
  * @param from     来源地址
- * @return         E_NONE
+ * @return         0=成功，!0=失败
  */
 ret_t nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
                    const uint8_t *payload, int len, const struct sockaddr_in *from);
 
 /*
- * 处理 FIN 包（连接断开）
+ * 处理 FIN 包（对方主动断开连接）
  *
  * @param s        会话对象
  * @param from     来源地址
- * @return         E_NONE
+ * @return         0=成功，!0=失败
  */
 ret_t nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from);
 
-/*
- * 周期调用，发送打洞包和心跳
- *
- * @param s    会话对象
- * @return     0 正常，-1 连接超时断开
- */
-void nat_tick(struct p2p_session *s, uint64_t now_ms);
+///////////////////////////////////////////////////////////////////////////////
 
 #endif /* P2P_NAT_H */

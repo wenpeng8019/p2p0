@@ -124,11 +124,6 @@ static compact_pair_t*      g_pending_connecting_rear = NULL;
 static int                  g_probe_port = 0;                   // compact 模式 NAT 探测端口（0=不支持探测）
 static bool                 g_relay_enabled = false;            // compact 模式是否支持中继功能
 
-// 随机数源（用于生成安全的 session_id）
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
-static FILE*                g_urandom_fp = NULL;                // /dev/urandom 文件句柄（Linux）
-#endif
-
 // 全局运行状态标志（用于信号处理）
 static volatile sig_atomic_t g_running = 1;
 
@@ -161,39 +156,7 @@ void signal_handler(int signum) {
 
 // 生成安全的随机 session_id（64位，加密安全，防止跨会话注入攻击）
 static uint64_t generate_session_id(void) {
-    uint64_t id;
-    
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__)
-    // macOS/BSD: 使用 arc4random() 生成 64 位
-    id = ((uint64_t)arc4random() << 32) | arc4random();
-    if (id == 0) id = 1;  // 0 保留为无效值
-    
-#elif defined(_WIN32)
-    // Windows: 使用 rand_s 生成 64 位（加密安全）
-    #if defined(_MSC_VER) && _MSC_VER >= 1400
-        uint32_t high, low;
-        while (rand_s(&high) != 0 || rand_s(&low) != 0) {
-            // rand_s 失败，重试
-        }
-        id = ((uint64_t)high << 32) | low;
-        if (id == 0) id = 1;
-    #else
-        // 降级方案：使用 rand()（不推荐用于生产环境）
-        id = ((uint64_t)rand() << 48) ^ ((uint64_t)rand() << 32) ^ 
-             ((uint64_t)rand() << 16) ^ (uint64_t)rand();
-        if (id == 0) id = 1;
-    #endif
-    
-#else
-    // Linux: 使用全局 /dev/urandom 文件句柄读取 64 位
-    if (g_urandom_fp && fread(&id, sizeof(id), 1, g_urandom_fp) == 1) {
-        if (id == 0) id = 1;  // 0 保留为无效值
-    } else {
-        // /dev/urandom 不可用或读取失败，使用降级方案
-        id = ((uint64_t)time(NULL) << 32) ^ ((uint64_t)getpid() << 16) ^ (uint64_t)clock();
-        if (id == 0) id = 1;
-    }
-#endif
+    uint64_t id = P_rand64();  // 使用 stdc.h 统一封装的加密安全随机数
 
     // 冲突检测（虽然概率极低：1/2^64 ≈ 5.4×10^-20）
     compact_pair_t *existing = NULL;
@@ -1441,14 +1404,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // 初始化随机数源（用于生成安全的 session_id）
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
-    // Linux: 打开 /dev/urandom 文件句柄（保持打开，避免重复 open/close）
-    g_urandom_fp = fopen("/dev/urandom", "rb");
-    if (!g_urandom_fp) {
-        fprintf(stderr, "%s", LA_S("[SERVER] Warning: Cannot open /dev/urandom, using fallback RNG\n", 0));
-    }
-#endif
+    // 初始化随机数生成器（用于生成安全的 session_id）
+    P_rand_init();
 
 #ifdef _WIN32
     WSADATA wsa_data;
@@ -1703,13 +1660,6 @@ int main(int argc, char *argv[]) {
     WSACleanup();
 #endif
 
-    // 关闭随机数源
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
-    if (g_urandom_fp) {
-        fclose(g_urandom_fp);
-    }
-#endif
-    
     printf("%s\n", LA_S("[SERVER] Goodbye!", LA_S6, 9));
     return 0;
 }

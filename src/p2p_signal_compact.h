@@ -360,6 +360,14 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s);
 void p2p_signal_compact_tick_send(struct p2p_session *s);
 
 /*
+ * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果
+ * 每次 p2p_update() tick 时调用，用于同步 s->nat_type
+ */
+void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
+
+//-----------------------------------------------------------------------------
+
+/*
  * 开始信令交换（发送 REGISTER）
  *
  * @param s             会话对象（包含候选列表）
@@ -375,6 +383,22 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
 int p2p_signal_compact_disconnect(struct p2p_session *s);
 
 int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t size);
+
+/*
+ * 向对端发送 MSG 请求（A 端）。
+ * 内部分配 req_id，立即发送第一个 MSG_REQ 并进入重发状态。
+ */
+int p2p_signal_compact_msg_send(struct p2p_session *s,
+                                 uint8_t msg_type, const void *data, int len);
+
+/*
+ * 回复对端的 MSG 请求（B 端）。
+ * req_id 必须与 on_msg_req 回调中的 req_id 一致。
+ */
+int p2p_signal_compact_msg_reply(struct p2p_session *s, uint16_t req_id,
+                                  uint8_t msg_type, const void *data, int len);
+
+//-----------------------------------------------------------------------------
 
 /*
  * 处理收到的信令包（独立接口）
@@ -438,27 +462,7 @@ void compact_on_msg_res(struct p2p_session *s,
                         const uint8_t *payload, int len,
                         const struct sockaddr_in *from);
 
-/* ---------- 公共 MSG RPC 接口 ---------- */
-
-/*
- * 向对端发送 MSG 请求（A 端）。
- * 内部分配 req_id，立即发送第一个 MSG_REQ 并进入重发状态。
- */
-int p2p_signal_compact_msg_send(struct p2p_session *s,
-                                 uint8_t msg_type, const void *data, int len);
-
-/*
- * 回复对端的 MSG 请求（B 端）。
- * req_id 必须与 on_msg_req 回调中的 req_id 一致。
- */
-int p2p_signal_compact_msg_reply(struct p2p_session *s, uint16_t req_id,
-                                  uint8_t msg_type, const void *data, int len);
-
-/*
- * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果
- * 每次 p2p_update() tick 时调用，用于同步 s->nat_type
- */
-void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
+///////////////////////////////////////////////////////////////////////////////
 
 #pragma clang diagnostic pop
 #endif /* P2P_SIGNAL_COMPACT_H */

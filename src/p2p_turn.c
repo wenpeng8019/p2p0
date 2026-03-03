@@ -60,7 +60,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
     if (!s->cfg.turn_server) return -1;
     
     print("I:", LA_F("%s %s:%d", LA_F19, 276),
-                 LA_W("Sending Allocate Request to", LA_W87, 112), s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
+                 LA_W("Sending Allocate Request to", LA_W83, 112), s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
     
     uint8_t buf[256];
 
@@ -81,10 +81,8 @@ int p2p_turn_allocate(p2p_session_t *s) {
     h.length = htons(4);                     /* 属性总长度: 4 字节 */
     h.magic = htonl(STUN_MAGIC);             /* 0x2112A442 */
     
-    /* 生成随机 Transaction ID（用于匹配响应） */
-    for (int i = 0; i < 12; i++) {
-        h.tsx_id[i] = (uint8_t)rand();
-    }
+    /* 生成随机 Transaction ID（加密安全随机数，用于匹配响应） */
+    P_rand_bytes(h.tsx_id, 12);
     
     memcpy(buf, &h, sizeof(h));  /* 复制头部到缓冲区 */
 
@@ -217,10 +215,10 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                             c->addr = relay_addr;
                             /* RFC 5245: Relay 候选优先级使用标准公式计算 */
                             c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
-                            print("I:", LA_F("%s %s:%u (%s=%u)", LA_F22, 280),
+                            print("I:", LA_F("%s %s:%u (%s=%u)", LA_F21, 280),
                                          LA_W("Gathered Relay Candidate", LA_W33, 43),
                                          inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                                         LA_W("priority", LA_W69, 81), c->priority);
+                                         LA_W("priority", LA_W66, 81), c->priority);
                             /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
                             p2p_ice_send_local_candidate(s, c);
                         }

@@ -66,8 +66,8 @@ const char* lang_en[LA_NUM] = {
     [LA_F39] = "[TCP] Storage full, flushing connection intent from '%s' to '%s' (sending empty OFFER)...\n",  /* SID:58 */
     [LA_F40] = "[TCP] Target %s offline, caching candidates...\n",  /* SID:59 */
     [LA_F41] = "[TCP] Unknown message type %d from %s\n",  /* SID:60 */
-    [LA_F42] = "[UDP] Assigned session_id=%llu for %s -> %s\n",  /* SID:232 */
-    [LA_F43] = "[UDP] Cannot relay PEER_INFO_ACK: sid=%llu (peer unavailable)\n",  /* SID:233 */
+    [LA_F42] = "[UDP] Assigned session_id=%llu for %s -> %s\n",  /* SID:268 */
+    [LA_F43] = "[UDP] Cannot relay PEER_INFO_ACK: sid=%llu (peer unavailable)\n",  /* SID:269 */
     [LA_F44] = "[UDP] Invalid PEER_INFO_ACK from %s (size %zu)\n",  /* SID:63 */
     [LA_F45] = "[UDP] Invalid REGISTER from %s (instance_id=0)\n",  /* SID:64 */
     [LA_F46] = "[UDP] Invalid REGISTER from %s (payload too short)\n",  /* SID:64 */
@@ -75,22 +75,22 @@ const char* lang_en[LA_NUM] = {
     [LA_F48] = "[UDP] PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:66 */
     [LA_F49] = "[UDP] PEER_INFO seq=0 from client %s (server-only, dropped)\n",  /* SID:67 */
     [LA_F50] = "[UDP] PEER_INFO(seq=0) bilateral: %s(%d cands) <-> %s(%d cands)\n",  /* SID:68 */
-    [LA_F51] = "[UDP] PEER_INFO_ACK for unknown sid=%llu from %s\n",  /* SID:234 */
-    [LA_F52] = "[UDP] PEER_INFO_ACK(seq=0) confirmed: sid=%llu (%s <-> %s, %d retransmits)\n",  /* SID:235 */
-    [LA_F53] = "[UDP] PEER_OFF sent to %s (sid=%llu)%s\n",  /* SID:236 */
+    [LA_F51] = "[UDP] PEER_INFO_ACK for unknown sid=%llu from %s\n",  /* SID:270 */
+    [LA_F52] = "[UDP] PEER_INFO_ACK(seq=0) confirmed: sid=%llu (%s <-> %s, %d retransmits)\n",  /* SID:271 */
+    [LA_F53] = "[UDP] PEER_OFF sent to %s (sid=%llu)%s\n",  /* SID:272 */
     [LA_F54] = "[UDP] Peer pair (%s → %s) timed out\n",  /* SID:72 */
     [LA_F55] = "[UDP] REGISTER from %s: local='%s', remote='%s', instance_id=%u, candidates=%d\n",  /* SID:73 */
     [LA_F56] = "[UDP] REGISTER from '%s': new instance_id (old=%u new=%u), resetting session\n",  /* SID:75 */
     [LA_F57] = "[UDP] REGISTER_ACK to %s: error (no slot available)\n",  /* SID:74 */
     [LA_F58] = "[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n",  /* SID:75 */
-    [LA_F59] = "[UDP] Relay 0x%02x for sid=%llu: peer unavailable (dropped)\n",  /* SID:237 */
-    [LA_F60] = "[UDP] Relay 0x%02x for unknown sid=%llu from %s (dropped)\n",  /* SID:238 */
-    [LA_F61] = "[UDP] Relay ACK: sid=%llu (%s -> %s)\n",  /* SID:239 */
-    [LA_F62] = "[UDP] Relay DATA seq=%u: sid=%llu (%s -> %s)\n",  /* SID:240 */
-    [LA_F63] = "[UDP] Relay PEER_INFO seq=%u: sid=%llu (%s -> %s)\n",  /* SID:241 */
-    [LA_F64] = "[UDP] Relay PEER_INFO_ACK seq=%u: sid=%llu (%s -> %s)\n",  /* SID:242 */
+    [LA_F59] = "[UDP] Relay 0x%02x for sid=%llu: peer unavailable (dropped)\n",  /* SID:273 */
+    [LA_F60] = "[UDP] Relay 0x%02x for unknown sid=%llu from %s (dropped)\n",  /* SID:274 */
+    [LA_F61] = "[UDP] Relay ACK: sid=%llu (%s -> %s)\n",  /* SID:275 */
+    [LA_F62] = "[UDP] Relay DATA seq=%u: sid=%llu (%s -> %s)\n",  /* SID:276 */
+    [LA_F63] = "[UDP] Relay PEER_INFO seq=%u: sid=%llu (%s -> %s)\n",  /* SID:277 */
+    [LA_F64] = "[UDP] Relay PEER_INFO_ACK seq=%u: sid=%llu (%s -> %s)\n",  /* SID:278 */
     [LA_F65] = "[UDP] Relay packet too short: type=0x%02x from %s (size %zu)\n",  /* SID:82 */
-    [LA_F66] = "[UDP] Retransmit PEER_INFO (sid=%llu): %s <-> %s (attempt %d/%d)\n",  /* SID:243 */
+    [LA_F66] = "[UDP] Retransmit PEER_INFO (sid=%llu): %s <-> %s (attempt %d/%d)\n",  /* SID:279 */
     [LA_F67] = "[UDP] Sent PEER_INFO(seq=0) to %s:%d (peer='%s') with %d cands%s\n",  /* SID:84 */
     [LA_F68] = "[UDP] Target pair (%s → %s) not found (waiting for peer registration)\n",  /* SID:85 */
     [LA_F69] = "[UDP] UNREGISTER: releasing slot for '%s' -> '%s'\n",  /* SID:86 */

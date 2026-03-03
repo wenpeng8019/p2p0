@@ -55,84 +55,79 @@ enum {
     LA_W37,  /* "Invalid magic"  [p2p_signal_relay.c] */
     LA_W38,  /* "Invalid read state"  [p2p_signal_relay.c] */
     LA_W39,  /* "is now online"  [p2p_signal_relay.c] */
-    LA_W40,  /* "LAN peer confirmed"  [p2p_route.c] */
-    LA_W41,  /* "len"  [p2p_stun.c] */
-    LA_W42,  /* "Local address detection done"  [p2p_route.c] */
-    LA_W43,  /* "Mapped address"  [p2p_stun.c] */
-    LA_W44,  /* "more pairs"  [p2p_ice.c] */
-    LA_W45,  /* "NAT probe retry"  [p2p_signal_compact.c] */
-    LA_W46,  /* "NAT probe sent to"  [p2p_signal_compact.c] */
-    LA_W47,  /* "NAT probe timeout, type unknown"  [p2p_signal_compact.c] */
-    LA_W48,  /* "NAT punch failed, no TURN server configured"  [p2p.c] */
-    LA_W49,  /* "NAT punch failed, server has no relay support"  [p2p.c] */
-    LA_W50,  /* "NAT punch failed, using COMPACT server relay"  [p2p.c] */
-    LA_W51,  /* "no (cached)"  [p2p_ice.c, p2p_signal_compact.c] */
-    LA_W52,  /* "Nomination successful! Using"  [p2p_ice.c] */
-    LA_W53,  /* "online"  [p2p_ice.c] */
-    LA_W54,  /* "Open Internet (No NAT)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_W55,  /* "Out-of-window packet discarded"  [p2p_trans_reliable.c] */
-    LA_W56,  /* "Packet queued"  [p2p_trans_reliable.c] */
-    LA_W57,  /* "Packet too large"  [p2p_trans_reliable.c] */
-    LA_W58,  /* "Passive peer learned remote ID"  [p2p_signal_relay.c] */
-    LA_W59,  /* "path"  [p2p_ice.c] */
-    LA_W60,  /* "Peer"  [p2p_signal_relay.c] */
-    LA_W61,  /* "Peer is on a different subnet"  [p2p_route.c] */
-    LA_W62,  /* "Peer is on the same subnet as"  [p2p_route.c] */
-    LA_W63,  /* "Peer offline"  [p2p_signal_relay.c] */
-    LA_W64,  /* "Peer offline, waiting for peer to come online"  [p2p_signal_compact.c] */
-    LA_W65,  /* "Peer online"  [p2p_signal_relay.c] */
-    LA_W66,  /* "Peer online, waiting for PEER_INFO(seq=1)"  [p2p_signal_compact.c] */
-    LA_W67,  /* "port busy, trying random port"  [p2p_tcp_punch.c] */
-    LA_W68,  /* "Port Restricted Cone NAT"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_W69,  /* "priority"  [p2p_turn.c] */
-    LA_W70,  /* "PUB"  [p2p_signal_pubsub.c] */
-    LA_W71,  /* "Published"  [p2p_signal_pubsub.c] */
-    LA_W72,  /* "Received ACK"  [p2p_signal_relay.c] */
-    LA_W73,  /* "Received New Remote Candidate"  [p2p_ice.c] */
-    LA_W74,  /* "Received remote candidate"  [p2p_signal_pubsub.c] */
-    LA_W75,  /* "Received route probe from"  [p2p_route.c] */
-    LA_W76,  /* "Received signal from"  [p2p_signal_relay.c] */
-    LA_W77,  /* "recv error"  [p2p_signal_relay.c] */
-    LA_W78,  /* "Registering"  [p2p_signal_compact.c] */
-    LA_W79,  /* "Reliable transport initialized"  [p2p_trans_reliable.c] */
-    LA_W80,  /* "Requested"  [p2p_ice.c] */
-    LA_W81,  /* "Resent"  [p2p_signal_pubsub.c] */
-    LA_W82,  /* "resetting"  [p2p_signal_relay.c] */
-    LA_W83,  /* "Restricted Cone NAT"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_W84,  /* "RTT updated"  [p2p_trans_reliable.c] */
-    LA_W85,  /* "Send window full, dropping packet"  [p2p_trans_reliable.c] */
-    LA_W86,  /* "Sending"  [p2p_stun.c] */
-    LA_W87,  /* "Sending Allocate Request to"  [p2p_turn.c] */
-    LA_W88,  /* "Sent ANSWER"  [p2p_signal_compact.c] */
-    LA_W89,  /* "Sent answer to"  [p2p_ice.c, p2p_signal_relay.c] */
-    LA_W90,  /* "Sent candidates (cached, peer offline)"  [p2p_signal_relay.c] */
-    LA_W91,  /* "Sent candidates, forwarded"  [p2p_signal_relay.c] */
-    LA_W92,  /* "Sent connect"  [p2p_signal_relay.c] */
-    LA_W93,  /* "Sent route probe to"  [p2p_route.c] */
-    LA_W94,  /* "Server error"  [p2p_signal_compact.c] */
-    LA_W95,  /* "Server storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
-    LA_W96,  /* "Storage full"  [p2p_signal_relay.c] */
-    LA_W97,  /* "SUB"  [p2p_signal_pubsub.c] */
-    LA_W98,  /* "Success"  [p2p_stun.c] */
-    LA_W99,  /* "Symmetric NAT (port-random)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_W100,  /* "Test"  [p2p_stun.c] */
-    LA_W101,  /* "timed out"  [p2p_signal_relay.c] */
-    LA_W102,  /* "Timeout"  [p2p_stun.c] */
-    LA_W103,  /* "Timeout (no response)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_W104,  /* "to"  [p2p_signal_pubsub.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p_stun.c] */
-    LA_W105,  /* "UDP Blocked (STUN unreachable)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_W106,  /* "UDP hole-punch probing remote candidates"  [p2p_ice.c] */
-    LA_W107,  /* "Unknown"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_W108,  /* "Unknown ACK status"  [p2p_signal_relay.c] */
-    LA_W109,  /* "Unsupported (no STUN/probe configured)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_W110,  /* "Waiting for incoming offer from any peer"  [p2p.c] */
-    LA_W111,  /* "Waiting for peer"  [p2p_signal_relay.c] */
-    LA_W112,  /* "while discarding"  [p2p_signal_relay.c] */
-    LA_W113,  /* "while reading payload"  [p2p_signal_relay.c] */
-    LA_W114,  /* "while reading sender"  [p2p_signal_relay.c] */
-    LA_W115,  /* "will be retried by p2p_update()"  [p2p_ice.c] */
-    LA_W116,  /* "with server"  [p2p_signal_compact.c] */
-    LA_W117,  /* "yes"  [p2p_ice.c, p2p_signal_compact.c] */
+    LA_W40,  /* "len"  [p2p_stun.c] */
+    LA_W41,  /* "Local address detection done"  [p2p_route.c] */
+    LA_W42,  /* "Mapped address"  [p2p_stun.c] */
+    LA_W43,  /* "more pairs"  [p2p_ice.c] */
+    LA_W44,  /* "NAT probe retry"  [p2p_signal_compact.c] */
+    LA_W45,  /* "NAT probe sent to"  [p2p_signal_compact.c] */
+    LA_W46,  /* "NAT probe timeout, type unknown"  [p2p_signal_compact.c] */
+    LA_W47,  /* "NAT punch failed, no TURN server configured"  [p2p.c] */
+    LA_W48,  /* "NAT punch failed, server has no relay support"  [p2p.c] */
+    LA_W49,  /* "NAT punch failed, using COMPACT server relay"  [p2p.c] */
+    LA_W50,  /* "no (cached)"  [p2p_ice.c, p2p_signal_compact.c] */
+    LA_W51,  /* "Nomination successful! Using"  [p2p_ice.c] */
+    LA_W52,  /* "online"  [p2p_ice.c] */
+    LA_W53,  /* "Open Internet (No NAT)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_W54,  /* "Out-of-window packet discarded"  [p2p_trans_reliable.c] */
+    LA_W55,  /* "Packet queued"  [p2p_trans_reliable.c] */
+    LA_W56,  /* "Packet too large"  [p2p_trans_reliable.c] */
+    LA_W57,  /* "Passive peer learned remote ID"  [p2p_signal_relay.c] */
+    LA_W58,  /* "path"  [p2p_ice.c] */
+    LA_W59,  /* "Peer"  [p2p_signal_relay.c] */
+    LA_W60,  /* "Peer offline"  [p2p_signal_relay.c] */
+    LA_W61,  /* "Peer offline, waiting for peer to come online"  [p2p_signal_compact.c] */
+    LA_W62,  /* "Peer online"  [p2p_signal_relay.c] */
+    LA_W63,  /* "Peer online, waiting for PEER_INFO(seq=1)"  [p2p_signal_compact.c] */
+    LA_W64,  /* "port busy, trying random port"  [p2p_tcp_punch.c] */
+    LA_W65,  /* "Port Restricted Cone NAT"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_W66,  /* "priority"  [p2p_turn.c] */
+    LA_W67,  /* "PUB"  [p2p_signal_pubsub.c] */
+    LA_W68,  /* "Published"  [p2p_signal_pubsub.c] */
+    LA_W69,  /* "Received ACK"  [p2p_signal_relay.c] */
+    LA_W70,  /* "Received New Remote Candidate"  [p2p_ice.c] */
+    LA_W71,  /* "Received remote candidate"  [p2p_signal_pubsub.c] */
+    LA_W72,  /* "Received signal from"  [p2p_signal_relay.c] */
+    LA_W73,  /* "recv error"  [p2p_signal_relay.c] */
+    LA_W74,  /* "Registering"  [p2p_signal_compact.c] */
+    LA_W75,  /* "Reliable transport initialized"  [p2p_trans_reliable.c] */
+    LA_W76,  /* "Requested"  [p2p_ice.c] */
+    LA_W77,  /* "Resent"  [p2p_signal_pubsub.c] */
+    LA_W78,  /* "resetting"  [p2p_signal_relay.c] */
+    LA_W79,  /* "Restricted Cone NAT"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_W80,  /* "RTT updated"  [p2p_trans_reliable.c] */
+    LA_W81,  /* "Send window full, dropping packet"  [p2p_trans_reliable.c] */
+    LA_W82,  /* "Sending"  [p2p_stun.c] */
+    LA_W83,  /* "Sending Allocate Request to"  [p2p_turn.c] */
+    LA_W84,  /* "Sent ANSWER"  [p2p_signal_compact.c] */
+    LA_W85,  /* "Sent answer to"  [p2p_ice.c, p2p_signal_relay.c] */
+    LA_W86,  /* "Sent candidates (cached, peer offline)"  [p2p_signal_relay.c] */
+    LA_W87,  /* "Sent candidates, forwarded"  [p2p_signal_relay.c] */
+    LA_W88,  /* "Sent connect"  [p2p_signal_relay.c] */
+    LA_W89,  /* "Server error"  [p2p_signal_compact.c] */
+    LA_W90,  /* "Server storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
+    LA_W91,  /* "Storage full"  [p2p_signal_relay.c] */
+    LA_W92,  /* "SUB"  [p2p_signal_pubsub.c] */
+    LA_W93,  /* "Success"  [p2p_stun.c] */
+    LA_W94,  /* "Symmetric NAT (port-random)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_W95,  /* "Test"  [p2p_stun.c] */
+    LA_W96,  /* "timed out"  [p2p_signal_relay.c] */
+    LA_W97,  /* "Timeout"  [p2p_stun.c] */
+    LA_W98,  /* "Timeout (no response)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_W99,  /* "to"  [p2p_signal_pubsub.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p_stun.c] */
+    LA_W100,  /* "UDP Blocked (STUN unreachable)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_W101,  /* "UDP hole-punch probing remote candidates"  [p2p_ice.c] */
+    LA_W102,  /* "Unknown"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_W103,  /* "Unknown ACK status"  [p2p_signal_relay.c] */
+    LA_W104,  /* "Unsupported (no STUN/probe configured)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_W105,  /* "Waiting for incoming offer from any peer"  [p2p.c] */
+    LA_W106,  /* "Waiting for peer"  [p2p_signal_relay.c] */
+    LA_W107,  /* "while discarding"  [p2p_signal_relay.c] */
+    LA_W108,  /* "while reading payload"  [p2p_signal_relay.c] */
+    LA_W109,  /* "while reading sender"  [p2p_signal_relay.c] */
+    LA_W110,  /* "will be retried by p2p_update()"  [p2p_ice.c] */
+    LA_W111,  /* "with server"  [p2p_signal_compact.c] */
+    LA_W112,  /* "yes"  [p2p_ice.c, p2p_signal_compact.c] */
 
     /* Strings (LA_S) */
     LA_S0,  /* "1 candidate to"  [p2p_ice.c] */
@@ -214,24 +209,22 @@ enum {
     LA_S76,  /* "resuming"  [p2p_signal_relay.c] */
     LA_S77,  /* "Same subnet confirmed, switching to LAN path"  [p2p.c] */
     LA_S78,  /* "SCTP (usrsctp) requested but library not linked"  [p2p.c] */
-    LA_S79,  /* "sending ACK"  [p2p_route.c] */
-    LA_S80,  /* "Sending FIN packet to peer"  [p2p.c] */
-    LA_S81,  /* "Sending FIN packet to peer before closing"  [p2p.c] */
-    LA_S82,  /* "Sending UNREGISTER packet to COMPACT signaling server"  [p2p.c] */
-    LA_S83,  /* "Signal payload deserialization failed"  [p2p_signal_pubsub.c] */
-    LA_S84,  /* "Skipping LAN shortcut on --disable-lan-shortcut"  [p2p.c] */
-    LA_S85,  /* "Skipping local Host candidates on --public-only"  [p2p.c] */
-    LA_S86,  /* "Srflx Candidate"  [p2p_ice.c] */
-    LA_S87,  /* "Starting internal thread"  [p2p.c] */
-    LA_S88,  /* "Stopping internal thread"  [p2p.c] */
-    LA_S89,  /* "STUN server"  [p2p_stun.c] */
-    LA_S90,  /* "Switched to LAN path"  [p2p.c] */
-    LA_S91,  /* "Test"  [p2p_stun.c] */
-    LA_S92,  /* "to"  [p2p_tcp_punch.c] */
-    LA_S93,  /* "type"  [p2p_signal_pubsub.c] */
-    LA_S94,  /* "Using"  [p2p_ice.c] */
-    LA_S95,  /* "via local"  [p2p_route.c] */
-    LA_S96,  /* "waiting for peer to come online"  [p2p_signal_relay.c] */
+    LA_S79,  /* "Sending FIN packet to peer"  [p2p.c] */
+    LA_S80,  /* "Sending FIN packet to peer before closing"  [p2p.c] */
+    LA_S81,  /* "Sending UNREGISTER packet to COMPACT signaling server"  [p2p.c] */
+    LA_S82,  /* "Signal payload deserialization failed"  [p2p_signal_pubsub.c] */
+    LA_S83,  /* "Skipping LAN shortcut on --disable-lan-shortcut"  [p2p.c] */
+    LA_S84,  /* "Skipping local Host candidates on --public-only"  [p2p.c] */
+    LA_S85,  /* "Srflx Candidate"  [p2p_ice.c] */
+    LA_S86,  /* "Starting internal thread"  [p2p.c] */
+    LA_S87,  /* "Stopping internal thread"  [p2p.c] */
+    LA_S88,  /* "STUN server"  [p2p_stun.c] */
+    LA_S89,  /* "Switched to LAN path"  [p2p.c] */
+    LA_S90,  /* "Test"  [p2p_stun.c] */
+    LA_S91,  /* "to"  [p2p_tcp_punch.c] */
+    LA_S92,  /* "type"  [p2p_signal_pubsub.c] */
+    LA_S93,  /* "Using"  [p2p_ice.c] */
+    LA_S94,  /* "waiting for peer to come online"  [p2p_signal_relay.c] */
 
     /* Formats (LA_F) - Format strings for validation */
     LA_F0,  /* "  ... %s %d %s" (%s,%d,%s)  [p2p_ice.c] */
@@ -244,7 +237,7 @@ enum {
     LA_F7,  /* "%s %s" (%s,%s)  [p2p_signal_pubsub.c, p2p_turn.c, p2p_stun.c] */
     LA_F8,  /* "%s %s %d, %s" (%s,%s,%d,%s)  [p2p_tcp_punch.c] */
     LA_F9,  /* "%s %s %s" (%s,%s,%s)  [p2p_stun.c] */
-    LA_F10,  /* "%s %s %s %s" (%s,%s,%s,%s)  [p2p_ice.c, p2p_route.c] */
+    LA_F10,  /* "%s %s %s %s" (%s,%s,%s,%s)  [p2p_ice.c] */
     LA_F11,  /* "%s %s %s %s %s:%d (%s=%d)" (%s,%s,%s,%s,%s,%d,%s,%d)  [p2p_stun.c] */
     LA_F12,  /* "%s %s %s (%s %s %s)" (%s,%s,%s,%s,%s,%s)  [p2p_stun.c] */
     LA_F13,  /* "%s %s %s (%s=%s)" (%s,%s,%s,%s,%s)  [p2p_ice.c] */
@@ -253,77 +246,77 @@ enum {
     LA_F16,  /* "%s %s %s:%d probe=%s:%d -> %s" (%s,%s,%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
     LA_F17,  /* "%s %s '%s' (%d %s)" (%s,%s,%s,%d,%s)  [p2p_signal_relay.c] */
     LA_F18,  /* "%s %s: %s:%d (priority=0x%08x)" (%s,%s,%s,%d)  [p2p_ice.c] */
-    LA_F19,  /* "%s %s:%d" (%s,%s,%d)  [p2p_turn.c, p2p_route.c] */
+    LA_F19,  /* "%s %s:%d" (%s,%s,%d)  [p2p_turn.c] */
     LA_F20,  /* "%s %s:%d %s '%s'" (%s,%s,%d,%s,%s)  [p2p_signal_relay.c] */
-    LA_F21,  /* "%s %s:%d, %s" (%s,%s,%d,%s)  [p2p_route.c] */
-    LA_F22,  /* "%s %s:%u (%s=%u)" (%s,%s,%u,%s,%u)  [p2p_turn.c] */
-    LA_F23,  /* "%s %u %s" (%s,%u,%s)  [p2p_signal_relay.c] */
-    LA_F24,  /* "%s '%s'" (%s,%s)  [p2p_ice.c] */
-    LA_F25,  /* "%s '%s' %s (%dms), %s" (%s,%s,%s,%d,%s)  [p2p_signal_relay.c] */
-    LA_F26,  /* "%s '%s' %s (%s FORWARD), %s" (%s,%s,%s,%s,%s)  [p2p_signal_relay.c] */
-    LA_F27,  /* "%s '%s' %s OFFER" (%s,%s,%s)  [p2p_signal_relay.c] */
-    LA_F28,  /* "%s '%s' (%d %s)" (%s,%s,%d,%s)  [p2p_signal_relay.c] */
-    LA_F29,  /* "%s '%s' (%u %s)" (%s,%s,%u,%s)  [p2p_signal_relay.c] */
-    LA_F30,  /* "%s (%d %s)" (%s,%d,%s)  [p2p_ice.c] */
-    LA_F31,  /* "%s (ret=%d), %s" (%s,%d,%s)  [p2p_ice.c] */
-    LA_F32,  /* "%s (sid=%llu)" (%s,%l)  [p2p_signal_compact.c] */
-    LA_F33,  /* "%s (status=%d, candidates_acked=%d)" (%s,%d,%d)  [p2p_signal_relay.c] */
-    LA_F34,  /* "%s 0x%x (%s 0x%x), %s" (%s,%x,%s,%x,%s)  [p2p_signal_relay.c] */
-    LA_F35,  /* "%s :%d" (%s,%d)  [p2p_tcp_punch.c] */
-    LA_F36,  /* "%s PEER_INFO_ACK(seq=%u)" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F37,  /* "%s ack_seq=%u send_base=%u inflight=%d" (%s,%u,%u,%d)  [p2p_trans_reliable.c] */
-    LA_F38,  /* "%s len=%d max=%d" (%s,%d,%d)  [p2p_trans_reliable.c] */
-    LA_F39,  /* "%s round %d/%d" (%s,%d,%d)  [p2p_ice.c] */
-    LA_F40,  /* "%s rto=%d win=%d" (%s,%d,%d)  [p2p_trans_reliable.c] */
-    LA_F41,  /* "%s rtt=%dms srtt=%d rttvar=%d rto=%d" (%s,%d,%d,%d,%d)  [p2p_trans_reliable.c] */
-    LA_F42,  /* "%s send_count=%d" (%s,%d)  [p2p_trans_reliable.c] */
-    LA_F43,  /* "%s seq=%u base=%u" (%s,%u,%u)  [p2p_trans_reliable.c] */
-    LA_F44,  /* "%s seq=%u len=%d base=%u" (%s,%u,%d,%u)  [p2p_trans_reliable.c] */
-    LA_F45,  /* "%s seq=%u len=%d inflight=%d" (%s,%u,%d,%d)  [p2p_trans_reliable.c] */
-    LA_F46,  /* "%s! %s %s %s %s:%d%s" (%s,%s,%s,%s,%s,%d,%s)  [p2p_ice.c] */
-    LA_F47,  /* "%s, %s" (%s,%s)  [p2p_signal_relay.c] */
-    LA_F48,  /* "%s, %s %d %s" (%s,%s,%d,%s)  [p2p_signal_relay.c] */
-    LA_F49,  /* "%s: %d %s" (%s,%d,%s)  [p2p_route.c] */
-    LA_F50,  /* "%s: %d -> %s:%d" (%s,%d,%s,%d)  [p2p_ice.c, p2p_signal_relay.c] */
-    LA_F51,  /* "%s: %s" (%s,%s)  [p2p_signal_compact.c, p2p_route.c] */
-    LA_F52,  /* "%s: %s=%d, %s=%s:%d" (%s,%s,%d,%s,%s,%d)  [p2p_signal_pubsub.c] */
-    LA_F53,  /* "%s: keepalive ALIVE sent to %s:%d" (%s,%s,%d)  [p2p_signal_compact.c] */
-    LA_F54,  /* "%s:%04d: %s" (%s,%s)  [p2p_trans_mbedtls.c] */
-    LA_F55,  /* "ATTEMPT: punch to %d/%d candidates (elapsed: llu ms)" (%d,%d)  [p2p_nat.c] */
-    LA_F56,  /* "Added LAN path to path manager, idx=%d" (%d)  [p2p.c] */
-    LA_F57,  /* "Added PUNCH path to path manager, idx=%d" (%d)  [p2p.c] */
-    LA_F58,  /* "Added RELAY path to path manager, idx=%d" (%d)  [p2p.c] */
-    LA_F59,  /* "Append Host candidate: %s:%d" (%s,%d)  [p2p.c] */
-    LA_F60,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
-    LA_F61,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
-    LA_F62,  /* "Connect to COMPACT signaling server failed(%d)" (%d)  [p2p.c] */
-    LA_F63,  /* "Connect to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
-    LA_F64,  /* "Connecting to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
-    LA_F65,  /* "Detect local network interfaces failed(%d)" (%d)  [p2p.c] */
-    LA_F66,  /* "Failed to realloc memory for local candidates (capacity: %d)" (%d)  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_F67,  /* "Failed to realloc memory for remote candidates (capacity: %d)" (%d)  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
-    LA_F68,  /* "Failed to reserve remote candidates (base=%u cnt=%d)" (%u,%d)  [p2p_signal_compact.c] */
-    LA_F69,  /* "Failed to reserve remote candidates (cnt=%d)" (%d)  [p2p_signal_compact.c] */
-    LA_F70,  /* "Field %s is empty or too short" (%s)  [p2p_signal_pubsub.c] */
-    LA_F71,  /* "Handshake failed: %s (-0x%04x)" (%s)  [p2p_trans_mbedtls.c] */
-    LA_F72,  /* "Ignore ALIVE_ACK in state=%d" (%d)  [p2p_signal_compact.c] */
-    LA_F73,  /* "Ignore NAT_PROBE_ACK seq=%u (expect=%d)" (%u,%d)  [p2p_signal_compact.c] */
-    LA_F74,  /* "Ignore PEER_INFO_ACK for sid=%llu (local sid=%llu)" (%l,%l)  [p2p_signal_compact.c] */
-    LA_F75,  /* "Ignore REGISTER_ACK in state=%d" (%d)  [p2p_signal_compact.c] */
-    LA_F76,  /* "Ignoring punch request for candidate %d since already connected" (%d)  [p2p_nat.c] */
-    LA_F77,  /* "Initialize PUBSUB signaling context failed(%d)" (%d)  [p2p.c] */
-    LA_F78,  /* "Initialize signaling mode: %d" (%d)  [p2p.c] */
-    LA_F79,  /* "Invalid NAT_PROBE_ACK len=%d" (%d)  [p2p_signal_compact.c] */
-    LA_F80,  /* "Invalid PEER_INFO notify: base=%u cand_cnt=%d flags=0x%02x" (%u,%d)  [p2p_signal_compact.c] */
-    LA_F81,  /* "Invalid PEER_INFO payload: len=%d cand_cnt=%d" (%d,%d)  [p2p_signal_compact.c] */
-    LA_F82,  /* "Invalid PEER_INFO seq=%u" (%u)  [p2p_signal_compact.c] */
-    LA_F83,  /* "Invalid PEER_INFO seq=0: cand_cnt=%d flags=0x%02x" (%d)  [p2p_signal_compact.c] */
-    LA_F84,  /* "Invalid PEER_INFO: state=%d len=%d" (%d,%d)  [p2p_signal_compact.c] */
-    LA_F85,  /* "Invalid PEER_INFO_ACK ack_seq=%u" (%u)  [p2p_signal_compact.c] */
-    LA_F86,  /* "Invalid PEER_INFO_ACK len=%d" (%d)  [p2p_signal_compact.c] */
-    LA_F87,  /* "Invalid PEER_OFF len=%d" (%d)  [p2p_signal_compact.c] */
-    LA_F88,  /* "Invalid candidate index: %d (count: %d)" (%d,%d)  [p2p_nat.c] */
-    LA_F89,  /* "Keep-alive to %s:%d" (%s,%d)  [p2p_nat.c] */
+    LA_F21,  /* "%s %s:%u (%s=%u)" (%s,%s,%u,%s,%u)  [p2p_turn.c] */
+    LA_F22,  /* "%s %u %s" (%s,%u,%s)  [p2p_signal_relay.c] */
+    LA_F23,  /* "%s '%s'" (%s,%s)  [p2p_ice.c] */
+    LA_F24,  /* "%s '%s' %s (%dms), %s" (%s,%s,%s,%d,%s)  [p2p_signal_relay.c] */
+    LA_F25,  /* "%s '%s' %s (%s FORWARD), %s" (%s,%s,%s,%s,%s)  [p2p_signal_relay.c] */
+    LA_F26,  /* "%s '%s' %s OFFER" (%s,%s,%s)  [p2p_signal_relay.c] */
+    LA_F27,  /* "%s '%s' (%d %s)" (%s,%s,%d,%s)  [p2p_signal_relay.c] */
+    LA_F28,  /* "%s '%s' (%u %s)" (%s,%s,%u,%s)  [p2p_signal_relay.c] */
+    LA_F29,  /* "%s (%d %s)" (%s,%d,%s)  [p2p_ice.c] */
+    LA_F30,  /* "%s (ret=%d), %s" (%s,%d,%s)  [p2p_ice.c] */
+    LA_F31,  /* "%s (sid=%llu)" (%s,%l)  [p2p_signal_compact.c] */
+    LA_F32,  /* "%s (status=%d, candidates_acked=%d)" (%s,%d,%d)  [p2p_signal_relay.c] */
+    LA_F33,  /* "%s 0x%x (%s 0x%x), %s" (%s,%x,%s,%x,%s)  [p2p_signal_relay.c] */
+    LA_F34,  /* "%s :%d" (%s,%d)  [p2p_tcp_punch.c] */
+    LA_F35,  /* "%s PEER_INFO_ACK(seq=%u)" (%s,%u)  [p2p_signal_compact.c] */
+    LA_F36,  /* "%s ack_seq=%u send_base=%u inflight=%d" (%s,%u,%u,%d)  [p2p_trans_reliable.c] */
+    LA_F37,  /* "%s len=%d max=%d" (%s,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F38,  /* "%s round %d/%d" (%s,%d,%d)  [p2p_ice.c] */
+    LA_F39,  /* "%s rto=%d win=%d" (%s,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F40,  /* "%s rtt=%dms srtt=%d rttvar=%d rto=%d" (%s,%d,%d,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F41,  /* "%s send_count=%d" (%s,%d)  [p2p_trans_reliable.c] */
+    LA_F42,  /* "%s seq=%u base=%u" (%s,%u,%u)  [p2p_trans_reliable.c] */
+    LA_F43,  /* "%s seq=%u len=%d base=%u" (%s,%u,%d,%u)  [p2p_trans_reliable.c] */
+    LA_F44,  /* "%s seq=%u len=%d inflight=%d" (%s,%u,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F45,  /* "%s! %s %s %s %s:%d%s" (%s,%s,%s,%s,%s,%d,%s)  [p2p_ice.c] */
+    LA_F46,  /* "%s, %s" (%s,%s)  [p2p_signal_relay.c] */
+    LA_F47,  /* "%s, %s %d %s" (%s,%s,%d,%s)  [p2p_signal_relay.c] */
+    LA_F48,  /* "%s: %d %s" (%s,%d,%s)  [p2p_route.c] */
+    LA_F49,  /* "%s: %d -> %s:%d" (%s,%d,%s,%d)  [p2p_ice.c, p2p_signal_relay.c] */
+    LA_F50,  /* "%s: %s" (%s,%s)  [p2p_signal_compact.c] */
+    LA_F51,  /* "%s: %s=%d, %s=%s:%d" (%s,%s,%d,%s,%s,%d)  [p2p_signal_pubsub.c] */
+    LA_F52,  /* "%s: keepalive ALIVE sent to %s:%d" (%s,%s,%d)  [p2p_signal_compact.c] */
+    LA_F53,  /* "%s:%04d: %s" (%s,%s)  [p2p_trans_mbedtls.c] */
+    LA_F54,  /* "ATTEMPT: punch to %d/%d candidates (elapsed: %llu ms)" (%d,%d,%l)  [p2p_nat.c] */
+    LA_F55,  /* "Added LAN path to path manager, idx=%d" (%d)  [p2p.c] */
+    LA_F56,  /* "Added PUNCH path to path manager, idx=%d" (%d)  [p2p.c] */
+    LA_F57,  /* "Added RELAY path to path manager, idx=%d" (%d)  [p2p.c] */
+    LA_F58,  /* "Append Host candidate: %s:%d" (%s,%d)  [p2p.c] */
+    LA_F59,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
+    LA_F60,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
+    LA_F61,  /* "Connect to COMPACT signaling server failed(%d)" (%d)  [p2p.c] */
+    LA_F62,  /* "Connect to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
+    LA_F63,  /* "Connecting to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F64,  /* "Detect local network interfaces failed(%d)" (%d)  [p2p.c] */
+    LA_F65,  /* "Failed to realloc memory for local candidates (capacity: %d)" (%d)  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_F66,  /* "Failed to realloc memory for remote candidates (capacity: %d)" (%d)  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_trans_mbedtls.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_trans_sctp.c, p2p_trans_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h] */
+    LA_F67,  /* "Failed to reserve remote candidates (base=%u cnt=%d)" (%u,%d)  [p2p_signal_compact.c] */
+    LA_F68,  /* "Failed to reserve remote candidates (cnt=%d)" (%d)  [p2p_signal_compact.c] */
+    LA_F69,  /* "Field %s is empty or too short" (%s)  [p2p_signal_pubsub.c] */
+    LA_F70,  /* "Handshake failed: %s (-0x%04x)" (%s)  [p2p_trans_mbedtls.c] */
+    LA_F71,  /* "Ignore ALIVE_ACK in state=%d" (%d)  [p2p_signal_compact.c] */
+    LA_F72,  /* "Ignore NAT_PROBE_ACK seq=%u (expect=%d)" (%u,%d)  [p2p_signal_compact.c] */
+    LA_F73,  /* "Ignore PEER_INFO_ACK for sid=%llu (local sid=%llu)" (%l,%l)  [p2p_signal_compact.c] */
+    LA_F74,  /* "Ignore REGISTER_ACK in state=%d" (%d)  [p2p_signal_compact.c] */
+    LA_F75,  /* "Ignoring punch request for candidate %d since already connected" (%d)  [p2p_nat.c] */
+    LA_F76,  /* "Initialize PUBSUB signaling context failed(%d)" (%d)  [p2p.c] */
+    LA_F77,  /* "Initialize signaling mode: %d" (%d)  [p2p.c] */
+    LA_F78,  /* "Invalid NAT_PROBE_ACK len=%d" (%d)  [p2p_signal_compact.c] */
+    LA_F79,  /* "Invalid PEER_INFO notify: base=%u cand_cnt=%d flags=0x%02x" (%u,%d)  [p2p_signal_compact.c] */
+    LA_F80,  /* "Invalid PEER_INFO payload: len=%d cand_cnt=%d" (%d,%d)  [p2p_signal_compact.c] */
+    LA_F81,  /* "Invalid PEER_INFO seq=%u" (%u)  [p2p_signal_compact.c] */
+    LA_F82,  /* "Invalid PEER_INFO seq=0: cand_cnt=%d flags=0x%02x" (%d)  [p2p_signal_compact.c] */
+    LA_F83,  /* "Invalid PEER_INFO: state=%d len=%d" (%d,%d)  [p2p_signal_compact.c] */
+    LA_F84,  /* "Invalid PEER_INFO_ACK ack_seq=%u" (%u)  [p2p_signal_compact.c] */
+    LA_F85,  /* "Invalid PEER_INFO_ACK len=%d" (%d)  [p2p_signal_compact.c] */
+    LA_F86,  /* "Invalid PEER_OFF len=%d" (%d)  [p2p_signal_compact.c] */
+    LA_F87,  /* "Invalid candidate index: %d (count: %d)" (%d,%d)  [p2p_nat.c] */
+    LA_F88,  /* "Keep-alive to %s:%d" (%s,%d)  [p2p_nat.c] */
+    LA_F89,  /* "LAN peer confirmed %s:%d" (%s,%d)  [p2p_route.c] */
     LA_F90,  /* "NAT_PROBE already started (retries=%d)" (%d)  [p2p_signal_compact.c] */
     LA_F91,  /* "NAT_PROBE: %s" (%s)  [p2p_signal_compact.c] */
     LA_F92,  /* "NAT_PROBE: %s %d/%d %s %s:%d" (%s,%d,%d,%s,%s,%d)  [p2p_signal_compact.c] */
@@ -337,80 +330,85 @@ enum {
     LA_F100,  /* "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)" (%d)  [p2p.c] */
     LA_F101,  /* "Path recovered: switched to %s" (%s)  [p2p.c] */
     LA_F102,  /* "Path switched: %s -> %s (RTT: %u -> %u ms)" (%s,%s,%u,%u)  [p2p.c] */
-    LA_F103,  /* "Processing (role=%s)" (%s)  [p2p_signal_pubsub.c] */
-    LA_F104,  /* "Punching candidate(%d) %s:%d" (%d,%s,%d)  [p2p_nat.c] */
-    LA_F105,  /* "REGISTERING: %s #%d (%d %s)..." (%s,%d,%d,%s)  [p2p_signal_compact.c] */
-    LA_F106,  /* "REGISTER_ACK error: %s (status=%d)" (%s,%d)  [p2p_signal_compact.c] */
-    LA_F107,  /* "REGISTER_ACK payload too short: %d" (%d)  [p2p_signal_compact.c] */
-    LA_F108,  /* "REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d" (%d,%d,%s,%s,%s,%s,%s,%d,%d)  [p2p_signal_compact.c] */
-    LA_F109,  /* "Received %s for sid=%llu, len=%d" (%s,%l,%d)  [p2p_signal_compact.c] */
-    LA_F110,  /* "Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x" (%s,%d,%u)  [p2p.c] */
-    LA_F111,  /* "Received ALIVE_ACK pkt from %s:%d" (%s,%d)  [p2p_signal_compact.c] */
-    LA_F112,  /* "Received DATA pkt from %s:%d, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
-    LA_F113,  /* "Received FIN pkt from %s:%d, NAT state will be closed" (%s,%d)  [p2p_nat.c] */
-    LA_F114,  /* "Received NAT_PROBE_ACK pkt from %s:%d, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F115,  /* "Received NAT_PROBE_ACK: probe_mapped=%s:%d" (%s,%d)  [p2p_signal_compact.c] */
-    LA_F116,  /* "Received PEER_INFO pkt from %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F117,  /* "Received PEER_INFO(seq=%u, cand_cnt=%d, flags=0x%02x)" (%u,%d)  [p2p_signal_compact.c] */
-    LA_F118,  /* "Received PEER_INFO_ACK for seq=%u" (%u)  [p2p_signal_compact.c] */
-    LA_F119,  /* "Received PEER_INFO_ACK pkt from %s:%d, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F120,  /* "Received PEER_OFF for sid=%llu" (%l)  [p2p_signal_compact.c] */
-    LA_F121,  /* "Received PEER_OFF pkt from %s:%d, len=%d" (%s,%d,%d)  [p2p_signal_compact.c] */
-    LA_F122,  /* "Received PUNCH pkt from %s:%d, seq=%u, echo_seq=%u, len=%d" (%s,%d,%u,%u,%d)  [p2p_nat.c] */
-    LA_F123,  /* "Received REGISTER_ACK pkt from %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F124,  /* "Received RELAY packet (type=0x%02X) in non-COMPACT mode"  [p2p_signal_compact.c] */
-    LA_F125,  /* "Received RELAY pkt from %s:%d, type=0x%02X, len=%d" (%s,%d,%d)  [p2p_signal_compact.c] */
-    LA_F126,  /* "Received ROUTE_PROBE pkt from %s:%d, len=0" (%s,%d)  [p2p_route.c] */
-    LA_F127,  /* "Received ROUTE_PROBE_ACK pkt from %s:%d, len=0" (%s,%d)  [p2p_route.c] */
-    LA_F128,  /* "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d" (%s,%d,%d)  [p2p.c] */
-    LA_F129,  /* "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
-    LA_F130,  /* "Received UNKNOWN pkt type: 0x%02X"  [p2p.c] */
-    LA_F131,  /* "Received valid signal from '%s'" (%s)  [p2p_signal_pubsub.c] */
-    LA_F132,  /* "Register to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
-    LA_F133,  /* "Relay sid mismatch: local=%llu pkt=%llu" (%l,%l)  [p2p_signal_compact.c] */
-    LA_F134,  /* "Remote candidate sync complete (mask=0x%04x)"  [p2p_signal_compact.c] */
-    LA_F135,  /* "Resend REGISTER (attempt %d)" (%d)  [p2p_signal_compact.c] */
-    LA_F136,  /* "Resolve COMPACT signaling server address: %s:%d failed(%d)" (%s,%d,%d)  [p2p.c] */
-    LA_F137,  /* "START: %s '%s' -> '%s' %s %s:%d (%d %s)" (%s,%s,%s,%s,%s,%d,%d,%s)  [p2p_signal_compact.c] */
-    LA_F138,  /* "Same subnet detecting, sent ROUTE_PROBE to %s:%d" (%s,%d)  [p2p.c] */
-    LA_F139,  /* "Selected path: %s (idx=%d)" (%s,%d)  [p2p.c] */
-    LA_F140,  /* "Send alive PUNCH pkt to %s:%d, seq=%u" (%s,%d,%u)  [p2p_nat.c] */
-    LA_F141,  /* "Send offer to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
-    LA_F142,  /* "Send probe PUNCH pkt to %s:%d, echo_seq=%d" (%s,%d,%d)  [p2p_nat.c] */
-    LA_F143,  /* "Send probe PUNCH pkt to %s:%d, seq=%u" (%s,%d,%u)  [p2p_nat.c] */
-    LA_F144,  /* "Send relay PUNCH pkt to %s:%d, echo_seq=%d" (%s,%d,%d)  [p2p_nat.c] */
-    LA_F145,  /* "Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s" (%s,%s)  [p2p.c] */
-    LA_F146,  /* "Sent initial offer(%d) to %s)" (%d,%s)  [p2p.c] */
-    LA_F147,  /* "Session mismatch in PEER_INFO: local=%llu pkt=%llu" (%l,%l)  [p2p_signal_compact.c] */
-    LA_F148,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
-    LA_F149,  /* "Start punching all(%d) remote candidates" (%d)  [p2p_nat.c] */
-    LA_F150,  /* "Switched to backup path: %s" (%s)  [p2p.c] */
-    LA_F151,  /* "TIMEOUT: Max register attempts reached (%d)" (%d)  [p2p_signal_compact.c] */
-    LA_F152,  /* "TIMEOUT: No response from peer for (llu ms), connection lost"  [p2p_nat.c] */
-    LA_F153,  /* "TIMEOUT: Punch failed after (llu ms), switching to RELAY"  [p2p_nat.c] */
-    LA_F154,  /* "Unexpected PEER_INFO_ACK ack_seq=%u mask=0x%04x" (%u)  [p2p_signal_compact.c] */
-    LA_F155,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
-    LA_F156,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
-    LA_F157,  /* "Using path: %s" (%s)  [p2p.c] */
-    LA_F158,  /* "[DEBUG] %s %d %s %s %d" (%s,%d,%s,%s,%d)  [p2p_signal_relay.c] */
-    LA_F159,  /* "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates" (%s,%d,%d)  [p2p_signal_relay.c] */
-    LA_F160,  /* "[DEBUG] First offer, resetting ICE and clearing %d stale candidates" (%d)  [p2p_signal_pubsub.c] */
-    LA_F161,  /* "[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u" (%x,%d,%u)  [p2p_signal_relay.c] */
-    LA_F162,  /* "[SCTP] received encapsulated packet, length %d" (%d)  [p2p_trans_sctp.c] */
-    LA_F163,  /* "[SCTP] sending %d bytes" (%d)  [p2p_trans_sctp.c] */
-    LA_F164,  /* "[Trickle] Immediately probing new candidate %s:%d" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_compact.c, p2p_signal_relay.c] */
-    LA_F165,  /* "[Trickle] Probing updated candidate %s:%d" (%s,%d)  [p2p_signal_compact.c] */
-    LA_F166,  /* "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)" (%d)  [p2p_ice.c] */
-    LA_F167,  /* "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)" (%s,%s,%d)  [p2p_ice.c] */
-    LA_F168,  /* "congestion detected, new ssthresh: %u, cwnd: %u" (%u,%u)  [p2p_trans_pseudotcp.c] */
-    LA_F169,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
-    LA_F170,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_trans_mbedtls.c] */
-    LA_F171,  /* "✓ %s %s %s:%d (%s=%u)" (%s,%s,%s,%d,%s,%u)  [p2p_stun.c] */
-    LA_F172,  /* "✗ %s" (%s)  [p2p_stun.c] */
-    LA_F173,  /* "连通性检查超时（已发送 %d 轮），放弃" (%d)  [p2p_ice.c] */
-    LA_F174,  /* "重传 seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F103,  /* "Peer IP %s does not match any local network segment" (%s)  [p2p_route.c] */
+    LA_F104,  /* "Peer IP %s matches local network segment %s (connectivity pending probe)" (%s,%s)  [p2p_route.c] */
+    LA_F105,  /* "Processing (role=%s)" (%s)  [p2p_signal_pubsub.c] */
+    LA_F106,  /* "Punching remote candidate(%d) %s:%d" (%d,%s,%d)  [p2p_nat.c] */
+    LA_F107,  /* "REGISTERING: %s #%d (%d %s)..." (%s,%d,%d,%s)  [p2p_signal_compact.c] */
+    LA_F108,  /* "REGISTER_ACK error: %s (status=%d)" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F109,  /* "REGISTER_ACK payload too short: %d" (%d)  [p2p_signal_compact.c] */
+    LA_F110,  /* "REGISTER_ACK: peer_online=%d, max_cands=%d (%s=%s), %s=%s, public_addr=%s:%d, probe_port=%d" (%d,%d,%s,%s,%s,%s,%s,%d,%d)  [p2p_signal_compact.c] */
+    LA_F111,  /* "Received %s for sid=%llu, len=%d" (%s,%l,%d)  [p2p_signal_compact.c] */
+    LA_F112,  /* "Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x" (%s,%d,%u)  [p2p.c] */
+    LA_F113,  /* "Received ALIVE_ACK pkt from %s:%d" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F114,  /* "Received DATA pkt from %s:%d, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
+    LA_F115,  /* "Received FIN pkt from %s:%d, NAT state will be closed" (%s,%d)  [p2p_nat.c] */
+    LA_F116,  /* "Received NAT_PROBE_ACK pkt from %s:%d, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p_signal_compact.c] */
+    LA_F117,  /* "Received NAT_PROBE_ACK: probe_mapped=%s:%d" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F118,  /* "Received PEER_INFO pkt from %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%d,%u,%d)  [p2p_signal_compact.c] */
+    LA_F119,  /* "Received PEER_INFO(seq=%u, cand_cnt=%d, flags=0x%02x)" (%u,%d)  [p2p_signal_compact.c] */
+    LA_F120,  /* "Received PEER_INFO_ACK for seq=%u" (%u)  [p2p_signal_compact.c] */
+    LA_F121,  /* "Received PEER_INFO_ACK pkt from %s:%d, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p_signal_compact.c] */
+    LA_F122,  /* "Received PEER_OFF for sid=%llu" (%l)  [p2p_signal_compact.c] */
+    LA_F123,  /* "Received PEER_OFF pkt from %s:%d, len=%d" (%s,%d,%d)  [p2p_signal_compact.c] */
+    LA_F124,  /* "Received PUNCH pkt from %s:%d, seq=%u, echo_seq=%u, len=%d" (%s,%d,%u,%u,%d)  [p2p_nat.c] */
+    LA_F125,  /* "Received REGISTER_ACK pkt from %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%d,%u,%d)  [p2p_signal_compact.c] */
+    LA_F126,  /* "Received RELAY packet (type=0x%02X) in non-COMPACT mode"  [p2p_signal_compact.c] */
+    LA_F127,  /* "Received RELAY pkt from %s:%d, type=0x%02X, len=%d" (%s,%d,%d)  [p2p_signal_compact.c] */
+    LA_F128,  /* "Received ROUTE_PROBE pkt from %s:%d, seq=0, flags=0, len=2" (%s,%d)  [p2p_route.c] */
+    LA_F129,  /* "Received ROUTE_PROBE_ACK pkt from %s:%d, seq=0, flags=0, len=0" (%s,%d)  [p2p_route.c] */
+    LA_F130,  /* "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d" (%s,%d,%d)  [p2p.c] */
+    LA_F131,  /* "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
+    LA_F132,  /* "Received UNKNOWN pkt type: 0x%02X"  [p2p.c] */
+    LA_F133,  /* "Received valid signal from '%s'" (%s)  [p2p_signal_pubsub.c] */
+    LA_F134,  /* "Register to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F135,  /* "Relay sid mismatch: local=%llu pkt=%llu" (%l,%l)  [p2p_signal_compact.c] */
+    LA_F136,  /* "Remote candidate sync complete (mask=0x%04x)"  [p2p_signal_compact.c] */
+    LA_F137,  /* "Resend REGISTER (attempt %d)" (%d)  [p2p_signal_compact.c] */
+    LA_F138,  /* "Resolve COMPACT signaling server address: %s:%d failed(%d)" (%s,%d,%d)  [p2p.c] */
+    LA_F139,  /* "START: %s '%s' -> '%s' %s %s:%d (%d %s)" (%s,%s,%s,%s,%s,%d,%d,%s)  [p2p_signal_compact.c] */
+    LA_F140,  /* "Same subnet detecting, sent ROUTE_PROBE to %s:%d" (%s,%d)  [p2p.c] */
+    LA_F141,  /* "Selected path: %s (idx=%d)" (%s,%d)  [p2p.c] */
+    LA_F142,  /* "Send ROUTE_PROBE pkt to %s:%d, seq=0, flags=0, len=2" (%s,%d)  [p2p_route.c] */
+    LA_F143,  /* "Send ROUTE_PROBE_ACK pkt to %s:%d, seq=0, flags=0, len=0" (%s,%d)  [p2p_route.c] */
+    LA_F144,  /* "Send alive PUNCH pkt to %s:%d, seq=%u" (%s,%d,%u)  [p2p_nat.c] */
+    LA_F145,  /* "Send offer to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
+    LA_F146,  /* "Send probe PUNCH pkt to %s:%d, echo_seq=%d" (%s,%d,%d)  [p2p_nat.c] */
+    LA_F147,  /* "Send probe PUNCH pkt to %s:%d, seq=%u" (%s,%d,%u)  [p2p_nat.c] */
+    LA_F148,  /* "Send relay PUNCH pkt to %s:%d, echo_seq=%d" (%s,%d,%d)  [p2p_nat.c] */
+    LA_F149,  /* "Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s" (%s,%s)  [p2p.c] */
+    LA_F150,  /* "Sent initial offer(%d) to %s)" (%d,%s)  [p2p.c] */
+    LA_F151,  /* "Sent route probe to %s:%d" (%s,%d)  [p2p_route.c] */
+    LA_F152,  /* "Session mismatch in PEER_INFO: local=%llu pkt=%llu" (%l,%l)  [p2p_signal_compact.c] */
+    LA_F153,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
+    LA_F154,  /* "Start punching all(%d) remote candidates" (%d)  [p2p_nat.c] */
+    LA_F155,  /* "Switched to backup path: %s" (%s)  [p2p.c] */
+    LA_F156,  /* "TIMEOUT: Max register attempts reached (%d)" (%d)  [p2p_signal_compact.c] */
+    LA_F157,  /* "TIMEOUT: No response from peer for (%llu ms), connection lost" (%l)  [p2p_nat.c] */
+    LA_F158,  /* "TIMEOUT: Punch failed after %llu ms, switching to RELAY" (%l)  [p2p_nat.c] */
+    LA_F159,  /* "Unexpected PEER_INFO_ACK ack_seq=%u mask=0x%04x" (%u)  [p2p_signal_compact.c] */
+    LA_F160,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
+    LA_F161,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
+    LA_F162,  /* "Using path: %s" (%s)  [p2p.c] */
+    LA_F163,  /* "[DEBUG] %s %d %s %s %d" (%s,%d,%s,%s,%d)  [p2p_signal_relay.c] */
+    LA_F164,  /* "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates" (%s,%d,%d)  [p2p_signal_relay.c] */
+    LA_F165,  /* "[DEBUG] First offer, resetting ICE and clearing %d stale candidates" (%d)  [p2p_signal_pubsub.c] */
+    LA_F166,  /* "[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u" (%x,%d,%u)  [p2p_signal_relay.c] */
+    LA_F167,  /* "[SCTP] received encapsulated packet, length %d" (%d)  [p2p_trans_sctp.c] */
+    LA_F168,  /* "[SCTP] sending %d bytes" (%d)  [p2p_trans_sctp.c] */
+    LA_F169,  /* "[Trickle] Immediately probing new candidate %s:%d" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_F170,  /* "[Trickle] Probing updated candidate %s:%d" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F171,  /* "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)" (%d)  [p2p_ice.c] */
+    LA_F172,  /* "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)" (%s,%s,%d)  [p2p_ice.c] */
+    LA_F173,  /* "congestion detected, new ssthresh: %u, cwnd: %u" (%u,%u)  [p2p_trans_pseudotcp.c] */
+    LA_F174,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
+    LA_F175,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_trans_mbedtls.c] */
+    LA_F176,  /* "✓ %s %s %s:%d (%s=%u)" (%s,%s,%s,%d,%s,%u)  [p2p_stun.c] */
+    LA_F177,  /* "✗ %s" (%s)  [p2p_stun.c] */
+    LA_F178,  /* "连通性检查超时（已发送 %d 轮），放弃" (%d)  [p2p_ice.c] */
+    LA_F179,  /* "重传 seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
 
-    LA_NUM = 390
+    LA_NUM = 388
 };
 
 /* 格式字符串起始位置（用于验证） */
