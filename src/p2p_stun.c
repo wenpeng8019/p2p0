@@ -25,7 +25,6 @@
 
 #include "p2p_internal.h"
 #ifndef _WIN32
-#include <arpa/inet.h>
 #include <sys/socket.h>
 #endif
 
@@ -131,7 +130,7 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12]
 
     /* 更新消息长度（MESSAGE-INTEGRITY 计算前） */
     int payload_len = offset - 20;
-    hstonb((uint16_t)payload_len, buf + 2);
+    nwrite_s(buf + 2, (uint16_t)payload_len);
 
     /*
      * 2. MESSAGE-INTEGRITY 属性 (0x0008)
@@ -153,7 +152,7 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12]
         /* 调整长度字段（必须包含 MI 属性） */
         int mi_len = 24; /* 4字节头 + 20字节 HMAC */
         payload_len += mi_len;
-        hstonb((uint16_t)payload_len, buf + 2);
+        nwrite_s(buf + 2, (uint16_t)payload_len);
 
         /* 计算 HMAC-SHA1 */
         uint8_t digest[20];
@@ -184,7 +183,7 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12]
     if (offset + 8 <= max_len) {
         /* 调整长度字段 */
         payload_len += 8;
-        hstonb((uint16_t)payload_len, buf + 2);
+        nwrite_s(buf + 2, (uint16_t)payload_len);
 
         uint32_t crc = p2p_crc32(buf, offset) ^ 0x5354554e; /* XOR "STUN" */
         buf[offset++] = (uint8_t)(STUN_ATTR_FINGERPRINT >> 8);   /* 0x80 */
@@ -496,14 +495,14 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
                 /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 c->addr = mapped;
-                print("I:", LA_F("✓ %s %s %s:%d (%s=%u)", LA_F168, 369),
+                print("I:", LA_F("✓ %s %s %s:%d (%s=%u)", LA_F171, 369),
                              LA_W("Gathered Srflx Candidate", LA_W34, 44), LA_S("Added Remote Candidate", LA_S5, 156),
                              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                             LA_S("priority", LA_S55, 194), c->priority);
+                             LA_S("priority", LA_S60, 194), c->priority);
                 /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
                 p2p_ice_send_local_candidate(s, c);
             } else {
-                print("W:", LA_F("✗ %s", LA_F169, 370), LA_W("Cannot add Srflx candidate: realloc failed (OOM)", LA_W15, 22));
+                print("W:", LA_F("✗ %s", LA_F172, 370), LA_W("Cannot add Srflx candidate: realloc failed (OOM)", LA_W15, 22));
             }
         }
         
@@ -579,7 +578,7 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
             
             case NAT_TEST_II_SENT:
                 print("W:", LA_F("%s %s %s (%s %s %s)", LA_F12, 269), LA_W("Test", LA_W100, 128), "II:", LA_W("Timeout", LA_W102, 131),
-                             LA_S("need", LA_S43, 187), LA_S("Test", LA_S86, 208), "III");
+                             LA_S("need", LA_S48, 187), LA_S("Test", LA_S91, 208), "III");
                 ctx->test_ii_success = 0;
                 ctx->state = NAT_TEST_II_DONE;
                 break;
@@ -614,7 +613,7 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
         //        s->cfg.stun_server, s->cfg.stun_port);
         
         if (resolve_host(s->cfg.stun_server, s->cfg.stun_port, &stun_addr) < 0) {
-            print("E:", LA_F("%s %s %s", LA_F9, 266), LA_W("Failed to resolve", LA_W25, 34), LA_S("STUN server", LA_S84, 207), s->cfg.stun_server);
+            print("E:", LA_F("%s %s %s", LA_F9, 266), LA_W("Failed to resolve", LA_W25, 34), LA_S("STUN server", LA_S89, 207), s->cfg.stun_server);
             ctx->state = NAT_TEST_COMPLETED;
             return;
         }
@@ -650,7 +649,7 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
             ctx->last_send_time = now;
             ctx->state = NAT_TEST_I_SENT;
             /* 不要在这里重置 retry_count，保留重试计数 */
-            print("I:", LA_F("%s %s %s %s %s:%d (%s=%d)", LA_F11, 268), LA_W("Sending", LA_W86, 111), LA_S("Test", LA_S86, 208), "I",
+            print("I:", LA_F("%s %s %s %s %s:%d (%s=%d)", LA_F11, 268), LA_W("Sending", LA_W86, 111), LA_S("Test", LA_S91, 208), "I",
                          LA_W("to", LA_W104, 135), s->cfg.stun_server, s->cfg.stun_port, LA_W("len", LA_W41, 52), len);
         } else {
             print("E: %s", LA_S("Failed to build STUN request", LA_S28, 175));

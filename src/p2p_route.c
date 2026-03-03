@@ -7,8 +7,6 @@
 
 #include "p2p_internal.h"
 #ifdef _WIN32
-#   include <winsock2.h>
-#   include <ws2tcpip.h>
 #   include <iphlpapi.h>
 #   pragma comment(lib, "iphlpapi.lib")
 #else
@@ -135,7 +133,7 @@ bool route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_pri
         uint32_t mask = rt->local_masks[i];
         if ((local_ip & mask) == (peer_ip & mask)) {
             print("I:", LA_F("%s %s %s %s", LA_F10, 267), LA_W("Peer is on the same subnet as", LA_W62, 74),
-                         inet_ntoa(peer_priv->sin_addr), LA_S("via local", LA_S90, 213),
+                         inet_ntoa(peer_priv->sin_addr), LA_S("via local", LA_S95, 213),
                          inet_ntoa(rt->local_addrs[i].sin_addr));
             return true;
         }
@@ -151,7 +149,7 @@ int route_send_probe(route_ctx_t *rt, sock_t sock,
 
     // Payload: [ local_port: u16 ] 对方可以通过该信息知道自己的端口
     uint8_t payload[2];
-    hstonb(local_port, payload);
+    nwrite_s(payload, local_port);
 
     print("I:", LA_F("%s %s:%d", LA_F19, 276), LA_W("Sent route probe to", LA_W93, 118),
                  inet_ntoa(peer_priv->sin_addr), ntohs(peer_priv->sin_port));
@@ -169,12 +167,12 @@ int route_send_probe(route_ctx_t *rt, sock_t sock,
  */
 int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, sock_t sock) { (void)rt;
 
-    printf(LA_F("Received ROUTE_PROBE pkt from %s:%d, len=0", LA_F123, 146),
+    printf(LA_F("Received ROUTE_PROBE pkt from %s:%d, len=0", LA_F126, 146),
            inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
     print("I:", LA_F("%s %s:%d, %s", LA_F21, 279), LA_W("Received route probe from", LA_W75, 93),
                  inet_ntoa(from->sin_addr), ntohs(from->sin_port),
-                 LA_S("sending ACK", LA_S74, 203));
+                 LA_S("sending ACK", LA_S79, 203));
 
     // ROUTE_PROBE 回复应答消息
     return udp_send_packet(sock, from, P2P_PKT_ROUTE_PROBE_ACK, 0, 0, NULL, 0);
@@ -189,7 +187,7 @@ int route_on_probe(route_ctx_t *rt, const struct sockaddr_in *from, sock_t sock)
  */
 int route_on_probe_ack(route_ctx_t *rt, const struct sockaddr_in *from) {
 
-    printf(LA_F("Received ROUTE_PROBE_ACK pkt from %s:%d, len=0", LA_F124, 147),
+    printf(LA_F("Received ROUTE_PROBE_ACK pkt from %s:%d, len=0", LA_F127, 147),
            inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
     rt->lan_peer_addr = *from;

@@ -170,7 +170,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         strategy = P2P_PATH_STRATEGY_CONNECTION_FIRST; // 默认：直连优先
     }
     path_manager_init(&s->path_mgr, strategy);
-    print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F97, 232), strategy);
+    print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F100, 232), strategy);
 
     // 初始化传输层（可选的高级传输模块）
     // + 这里的 s->trans 只用于高级传输模块（DTLS/OpenSSL/SCTP/PseudoTCP）
@@ -232,7 +232,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     if (cfg->threaded) {
         print("I: %s", LA_S("Starting internal thread", LA_S87, 237));
         if ((ret = p2p_thread_start(s)) != E_NONE) {
-            print("E:", LA_F("Start internal thread failed(%d)", LA_F145, 570), ret);
+            print("E:", LA_F("Start internal thread failed(%d)", LA_F148, 570), ret);
             P_sock_close(s->sock);
             free(s->local_cands); free(s->remote_cands); free(s);
             return NULL;
@@ -282,7 +282,7 @@ p2p_destroy(p2p_handle_t hdl) {
             udp_send_packet(s->sock, &s->sig_compact_ctx.server_addr,
                             SIG_PKT_UNREGISTER, 0, 0, unreg, sizeof(unreg));
 
-            printf(LA_F("Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s", LA_F142, 240),
+            printf(LA_F("Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s", LA_F145, 240),
                           s->sig_compact_ctx.local_peer_id, s->sig_compact_ctx.remote_peer_id);
         }
 
@@ -344,7 +344,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             assert(s->cfg.server_host);         // p2p_create 成功会确保这个条件
             struct sockaddr_in server_addr;
             if ((ret = resolve_host(s->cfg.server_host, s->cfg.server_port, &server_addr)) != E_NONE) {
-                print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F133, 230),
+                print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F136, 230),
                              s->cfg.server_host, s->cfg.server_port, ret);
                 s->state = P2P_STATE_ERROR;
                 UNLOCK(s);
@@ -374,7 +374,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             else print("I: %s", LA_S("Skipping local Host candidates on --public-only", LA_S85, 121));
 
             // 注册（连接）到 COMPACT 信令服务器
-            print("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F129, 244),
+            print("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F132, 244),
                          inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
 
             if ((ret = p2p_signal_compact_connect(s, s->local_peer_id, remote_peer_id, &server_addr)) != E_NONE) {
@@ -424,9 +424,9 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                     n += pack_candidate(&s->local_cands[i], buf + n);
                 }
 
-                print("I:", LA_F("Sent initial offer(%d) to %s)", LA_F143, 245), n, remote_peer_id);
+                print("I:", LA_F("Sent initial offer(%d) to %s)", LA_F146, 245), n, remote_peer_id);
                 if ((ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, remote_peer_id, buf, n)) != E_NONE) {
-                    print("E:", LA_F("Send offer to RELAY signaling server failed(%d)", LA_F138, 568), ret);
+                    print("E:", LA_F("Send offer to RELAY signaling server failed(%d)", LA_F141, 568), ret);
                     // todo
                 }
                 s->signal_sent = true;
@@ -475,7 +475,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         }
 
         default:
-            print("E:", LA_F("Unknown signaling mode: %d", LA_F152, 140), s->signaling_mode);
+            print("E:", LA_F("Unknown signaling mode: %d", LA_F155, 140), s->signaling_mode);
             s->state = P2P_STATE_ERROR;
             UNLOCK(s);
             return -1;
@@ -603,7 +603,7 @@ p2p_update(p2p_handle_t hdl) {
             uint32_t magic = ntohl(*(uint32_t *)(buf + 4));
             if (magic == STUN_MAGIC) {
                 uint16_t msg_type = (buf[0] << 8) | buf[1];
-                printf(LA_F("Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F125, 141),
+                printf(LA_F("Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F128, 141),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), msg_type, n);
                 p2p_stun_handle_packet(s, buf, n, &from);  // 处理 Binding Response
                 p2p_turn_handle_packet(s, buf, n, &from);  // 处理 Allocate Success 等
@@ -645,7 +645,7 @@ p2p_update(p2p_handle_t hdl) {
              * 说明：P2P 数据包，由 reliable 层或高级传输层处理
              */
             case P2P_PKT_DATA:
-                printf(LA_F("Received DATA pkt from %s:%d, seq=%u, len=%d", LA_F109, 143),
+                printf(LA_F("Received DATA pkt from %s:%d, seq=%u, len=%d", LA_F112, 143),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
             handle_data:
 
@@ -671,10 +671,10 @@ p2p_update(p2p_handle_t hdl) {
              */
             case P2P_PKT_ACK:
             handle_ack: {
-                uint16_t ack_seq; nbtohs(payload, &ack_seq);
-                uint32_t sack; nbtohl(payload + 2, &sack);
+                uint16_t ack_seq; nread_s(&ack_seq, payload);
+                uint32_t sack; nread_l(&sack, payload + 2);
                 if (hdr.type == P2P_PKT_ACK) {
-                    printf(LA_F("Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x", LA_F107, 142),
+                    printf(LA_F("Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x", LA_F110, 142),
                         inet_ntoa(from.sin_addr), ntohs(from.sin_port), ack_seq, sack);
                 }
 
@@ -751,8 +751,8 @@ p2p_update(p2p_handle_t hdl) {
                 compact_on_msg_res(s, payload, payload_len, &from);
                 break;
             default:
-                print("V:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F127, 95), hdr.type);
-                printf(LA_F("Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d", LA_F126, 150),
+                print("V:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F130, 95), hdr.type);
+                printf(LA_F("Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d", LA_F129, 150),
                        inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.type, hdr.seq, payload_len);
                 break;
         }
@@ -858,7 +858,7 @@ p2p_update(p2p_handle_t hdl) {
                 s->path = pi->type;
                 s->active_addr = pi->addr;
                 s->path_mgr.active_path = best_path;
-                print("I:", LA_F("Selected path: %s (idx=%d)", LA_F136, 232),
+                print("I:", LA_F("Selected path: %s (idx=%d)", LA_F139, 232),
                        path_type_str(pi->type), best_path);
             }
         } else {
@@ -891,7 +891,7 @@ p2p_update(p2p_handle_t hdl) {
                 priv.sin_port = s->nat.peer_addr.sin_port;
                 route_send_probe(&s->route, s->sock, &priv, 0);
 
-                print("I:", LA_F("Same subnet detecting, sent ROUTE_PROBE to %s:%d", LA_F135, 109),
+                print("I:", LA_F("Same subnet detecting, sent ROUTE_PROBE to %s:%d", LA_F138, 109),
                        inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
             }
             // 同子网但 disable_lan_shortcut=true：跳过升级，仅打印日志
@@ -929,7 +929,7 @@ p2p_update(p2p_handle_t hdl) {
             s->active_addr = pi->addr;
             s->path_mgr.active_path = best_path;
             s->state = P2P_STATE_CONNECTED; // 恢复为 CONNECTED 状态
-            print("I:", LA_F("Path recovered: switched to %s", LA_F98, 232), path_type_str(pi->type));
+            print("I:", LA_F("Path recovered: switched to %s", LA_F101, 232), path_type_str(pi->type));
         }
     }
 
@@ -976,7 +976,7 @@ p2p_update(p2p_handle_t hdl) {
             s->active_addr = pi->addr;
             s->path_mgr.active_path = best_path;
             s->state = P2P_STATE_RELAY;
-            print("I:", LA_F("Using path: %s", LA_F154, 232), path_type_str(pi->type));
+            print("I:", LA_F("Using path: %s", LA_F157, 232), path_type_str(pi->type));
         } else {
             // 无可用路径：降级到传统方式
             s->state = P2P_STATE_RELAY;
@@ -1017,7 +1017,7 @@ p2p_update(p2p_handle_t hdl) {
             s->active_addr = pi->addr;
             s->path_mgr.active_path = best_path;
             s->state = P2P_STATE_RELAY;
-            print("I:", LA_F("Switched to backup path: %s", LA_F147, 232), path_type_str(pi->type));
+            print("I:", LA_F("Switched to backup path: %s", LA_F150, 232), path_type_str(pi->type));
         } else {
             // 无备用路径：NAT 层会继续尝试恢复
             s->state = P2P_STATE_RELAY;
@@ -1133,7 +1133,7 @@ p2p_update(p2p_handle_t hdl) {
                     s->path_mgr.last_switch_time = now_ms;
                     s->path_mgr.total_path_switches++;
                     
-                    print("I:", LA_F("Path switched: %s -> %s (RTT: %u -> %u ms)", LA_F99, 232),
+                    print("I:", LA_F("Path switched: %s -> %s (RTT: %u -> %u ms)", LA_F102, 232),
                            old_pi ? path_type_str(old_pi->type) : "NONE",
                            path_type_str(new_pi->type),
                            old_pi ? old_pi->rtt_ms : 9999,

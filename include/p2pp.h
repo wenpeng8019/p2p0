@@ -92,8 +92,13 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   B → PUNCH(seq=2, echo=1) → A     // B 收到了 A 的 seq=1，捎带
  *
  * 双向连通判定：
- *   收到对方 PUNCH 中 echo_seq == 自己最近发的 seq → me→peer 方向确认
- *   收到任意 PUNCH                               → peer→me 方向确认
+ *   收到任意 PUNCH                    → peer→me 方向确认（入方向通）
+ *   收到 PUNCH 中 echo_seq != 0       → me→peer 方向确认（出方向通，因为对方
+ *                                       已收到我们至少一个包并将其 seq 回显）
+ *   两个条件都满足                     → 真正双向连通 → NAT_CONNECTED
+ *
+ * 注：echo_seq == 0 仅在对方尚未收到我们任何包时出现（初始值）。
+ *     因此 echo_seq != 0 足以证明出方向至少有一包到达，无需精确匹配最后发的 seq。
  *
  * 与即时 ACK 方案对比：
  *   即时 ACK：收到探测包后立刻额外发一个确认包（~2× 包量）

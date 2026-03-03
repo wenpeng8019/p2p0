@@ -273,8 +273,7 @@ int stream_flush_to_reliable(stream_t *st, reliable_t *r) {
         uint8_t pkt[P2P_MAX_PAYLOAD];
         
         /* 流偏移量（4 字节，大端序） */
-        uint32_t off = st->send_offset;
-        hltonb(off, pkt);
+        nwrite_l(pkt, st->send_offset);
 
         /* 分片标志 */
         uint8_t fflags = 0;

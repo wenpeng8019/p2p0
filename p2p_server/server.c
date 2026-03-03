@@ -814,7 +814,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 解析 instance_id（4 字节大端序）
         uint32_t instance_id = 0;
-        nbtohl(payload + P2P_PEER_ID_MAX * 2, &instance_id);
+        nread_l(&instance_id, payload + P2P_PEER_ID_MAX * 2);
         if (instance_id == 0) {
             printf(LA_F("[UDP] Invalid REGISTER from %s (instance_id=0)\n", LA_F45, 64), from_str);
             return;

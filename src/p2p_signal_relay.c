@@ -304,7 +304,7 @@ ret_t p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *tar
         return -1;
     }
     
-    print("I:", LA_F("%s %s '%s' (%d %s)", LA_F17, 274), LA_W("Sent connect", LA_W92, 117), LA_S("request to", LA_S69, 200), target_name, len, LA_W("bytes", LA_W11, 18));
+    print("I:", LA_F("%s %s '%s' (%d %s)", LA_F17, 274), LA_W("Sent connect", LA_W92, 117), LA_S("request to", LA_S74, 200), target_name, len, LA_W("bytes", LA_W11, 18));
     
     /* 发送成功，ACK 将在状态机中异步接收 */
     return E_NONE;
@@ -386,7 +386,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
 
     /* P2P 连接已建立（直连或 TURN 中继），信令服务器使命完成，关闭 TCP 连接释放服务器资源 */
     if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
-        print("I: %s", LA_S("P2P connected, closing signaling TCP connection", LA_S50, 249));
+        print("I: %s", LA_S("P2P connected, closing signaling TCP connection", LA_S55, 249));
         p2p_signal_relay_close(ctx);
         return;
     }
@@ -472,7 +472,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     return;
                 }
                 
-                printf(LA_F("[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u", LA_F158, 362),
+                printf(LA_F("[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u", LA_F161, 362),
                        ctx->read_hdr.magic, ctx->read_hdr.type, ctx->read_hdr.length);
                 
                 /* 根据消息类型决定下一步 */
@@ -616,7 +616,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                                 break;
                             case 2:  // 缓存已满
                                 print("I:", LA_F("%s, %s", LA_F47, 307),
-                                       LA_W("Storage full", LA_W96, 123), LA_S("waiting for peer to come online", LA_S91, 215));
+                                       LA_W("Storage full", LA_W96, 123), LA_S("waiting for peer to come online", LA_S96, 215));
                                 ctx->waiting_for_peer = true;
                                 P_clock _clk; P_clock_now(&_clk);
                                 ctx->waiting_start_time = clock_ms(_clk);
@@ -661,7 +661,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     strcmp(ctx->waiting_target, ctx->read_sender) == 0) {
                     print("I:", LA_F("%s '%s' %s (%s FORWARD), %s", LA_F26, 284),
                            LA_W("Peer", LA_W60, 72), ctx->read_sender, LA_W("is now online", LA_W39, 50),
-                           LA_S("received", LA_S60, 196), LA_S("resuming", LA_S71, 201));
+                           LA_S("received", LA_S65, 196), LA_S("resuming", LA_S76, 201));
                     ctx->waiting_for_peer = false;
                     ctx->waiting_target[0] = '\0';
                 }
@@ -676,7 +676,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                                        (s->ice_state == P2P_ICE_STATE_FAILED);
                     
                     if (should_reset && (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_INIT)) {
-                        printf(LA_F("[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates", LA_F156, 360),
+                        printf(LA_F("[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates", LA_F159, 360),
                                ctx->read_hdr.type == P2P_RLY_OFFER ? "OFFER" : "FORWARD", s->ice_state, s->remote_cand_cnt);
                         s->remote_cand_cnt = 0;
                         s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
@@ -721,7 +721,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                                 /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
                                 if (s->ice_state == P2P_ICE_STATE_CHECKING) {
 
-                                    print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F161, 363),
+                                    print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F164, 363),
                                                  inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
 
                                     nat_punch(s, idx);
@@ -780,9 +780,9 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             ctx->read_offset += n;
             
             if (ctx->read_offset >= ctx->read_expected) {
-                printf(LA_F("[DEBUG] %s %d %s %s %d", LA_F155, 359),
+                printf(LA_F("[DEBUG] %s %d %s %s %d", LA_F158, 359),
                        LA_W("Discarded", LA_W20, 28), ctx->read_expected, LA_W("bytes", LA_W11, 18),
-                       LA_S("payload of message type", LA_S54, 193), ctx->read_hdr.type);
+                       LA_S("payload of message type", LA_S59, 193), ctx->read_hdr.type);
                 
                 /* 释放缓冲区 */
                 if (ctx->read_payload) {

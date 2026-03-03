@@ -20,23 +20,27 @@ struct p2p_session;
 
 /* 打洞状态 */
 enum {
-    NAT_INIT = 0,       // 初始化状态（从未连接过）
-    NAT_PUNCHING,       // 打洞中。即首次执行 nat_punch 时，也就是支持 Trickle 模式
-    NAT_CONNECTED,      // 已连接，即首次收到对方的 P2P_PKT_PUNCH 包。注意，可能存在从 NAT_RELAY 变为 NAT_CONNECTED 可能，例如 P2P_PKT_PUNCH 回复的非常慢
-    NAT_RELAY,          // 中继模式，即打洞超时失败。注意，此时如果执行 nat_punch，则会重新变为 NAT_PUNCHING 状态
-    NAT_DISCONNECTED,   // 连接超时断开（曾经连接过，但现在断开了，可尝试恢复）
-    NAT_CLOSED          // 收到 FIN 包主动断开（连接彻底终止）
+    NAT_INIT = 0,                           // 初始化状态（从未连接过）
+    NAT_PUNCHING,                           // 打洞中（已回取候选列表，正在尝试建立双向路径）
+    NAT_CONNECTED,                          // 双向连通：rx + tx 同时已确认
+                                            //   rx: 收到对方的 PUNCH （peer→me 方向通）
+                                            //   tx: 对方的 echo_seq != 0（对方收到了我们的 PUNCH，me→peer 方向通）
+    NAT_RELAY,                              // 中继模式：打洞超时失败。此时仍周期发送 PUNCH 尝试重连
+    NAT_DISCONNECTED,                       // 双向连通曾经建立，现已断开（超时无 PUNCH 响应）
+    NAT_CLOSED                              // 收到 FIN 包主动断开（连接彻底终止）
 };
 
 /* 打洞上下文（精简版，候选列表在 session 中） */
 typedef struct {
-    int                 state;              /* 打洞状态 */
-    struct sockaddr_in  peer_addr;          /* 成功连接的对端地址 */
-    uint64_t            last_send_time;     /* 上次发送时间 */
-    uint64_t            last_recv_time;     /* 上次接收时间 */
-    uint64_t            punch_start;        /* 打洞开始时间 */
-    uint16_t            punch_seq;          /* 本地 PUNCH 包序列号（自增） */
-    uint16_t            last_peer_seq;      /* 上次收到对方的 seq（捎带式 echo，用于双向连通确认） */
+    int                 state;              // 打洞状态
+    struct sockaddr_in  peer_addr;          // 成功连接的对端地址
+    uint64_t            last_send_time;     // 上次发送时间
+    uint64_t            last_recv_time;     // 上次接收时间
+    uint64_t            punch_start;        // 打洞开始时间
+    uint16_t            punch_seq;          // 本地 PUNCH 包序列号（自增）
+    uint16_t            last_peer_seq;      // 上次收到对方的 seq（捎带式 echo，用于双向连通确认）
+    bool                rx_confirmed;       // peer→me 已确认：收到对方至少一个 PUNCH
+    bool                tx_confirmed;       // me→peer 已确认：对方的 echo_seq != 0（证明对方收到了我们的包）
 } nat_ctx_t;
 
 /*
