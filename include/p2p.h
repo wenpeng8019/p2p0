@@ -65,6 +65,21 @@ typedef enum {
     P2P_STATE_ERROR                             // 错误状态
 } p2p_state_t;
 
+/* ---------- 信道外可达性探测状态 ---------- */
+/*
+ * 当 P2P 处于中继（RELAY）或断连（DISCONNECTED）状态时，
+ * 库会通过信令服务器探测对端是否在线、信令信道是否可用。
+ * 此状态反映最近一次探测的结论，与传输路径无关。
+ */
+typedef enum {
+    P2P_PROBE_STATE_NONE = 0,           // 未启动 / 不适用（初始或信令不支持）
+    P2P_PROBE_STATE_CONNECTED,          // P2P 已直连，无需探测
+    P2P_PROBE_STATE_RUNNING,            // 探测进行中
+    P2P_PROBE_STATE_SUCCESS,            // 探测成功（对端通过信令可达）
+    P2P_PROBE_STATE_PEER_OFFLINE,       // 对端离线（服务器无法转发）
+    P2P_PROBE_STATE_TIMEOUT             // 探测超时（服务器无响应）
+} p2p_probe_state_t;
+
 /* ---------- 连接路径 ---------- */
 
 typedef enum {
@@ -329,6 +344,16 @@ p2p_update(p2p_handle_t hdl);
  */
 p2p_state_t
 p2p_state(p2p_handle_t hdl);
+
+/**
+ * 获取信道外可达性探测状态。
+ *
+ * - P2P 已直连时（CONNECTED），直接返回 P2P_PROBE_STATE_CONNECTED，无需探测。
+ * - 处于中继或断连状态时，返回当前探测进度或最近一次探测结论。
+ * - 探测由库自动驱动，无需手动触发。
+ */
+p2p_probe_state_t
+p2p_probe(p2p_handle_t hdl);
 
 /**
  * 获取本地 NAT 类型（由 STUN 检测得出，仅在 use_ice=true 时自动检测）。

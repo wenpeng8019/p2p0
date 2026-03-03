@@ -23,7 +23,7 @@
 #define MOD_TAG "COMPACT"
 
 #include "p2p_internal.h"
-#include "p2p_relay_probe.h"
+#include "p2p_probe.h"
 
 #define REGISTER_INTERVAL_MS            1000    /* 注册重发间隔 */
 #define PEER_INFO_INTERVAL_MS           500     /* PEER_INFO 重发间隔 */
@@ -1161,7 +1161,7 @@ void compact_on_request_ack(struct p2p_session *s,
     if (ctx->msg_state != 1 || ctx->msg_sid != sid) return; /* 过期/无关 */
 
     // Relay 探测回调
-    relay_probe_on_req_ack(s, sid, status);
+    probe_compact_on_req_ack(s, sid, status);
 
     if (status == 0) {
         /* 成功：服务器已收到请求并开始向 B 中转，A 停止重发，等待 MSG_RESP */
@@ -1228,7 +1228,7 @@ void compact_on_response(struct p2p_session *s,
     udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_MSG_RESP_ACK, 0, 0, ack, 2);
 
     // Relay 探测回调
-    relay_probe_on_response(s, sid);
+    probe_compact_on_response(s, sid);
 
     /* 仅当序列号匹配且仍在等待应答时触发回调 */
     if (ctx->msg_state == 2 && ctx->msg_sid == sid) {

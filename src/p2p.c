@@ -4,6 +4,7 @@
 #define MOD_TAG "P2P"
 
 #include "p2p_internal.h"
+#include "p2p_probe.h"
 #include "p2p_thread.h"
 #include "p2p_udp.h"
 
@@ -336,13 +337,20 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     s->signal_sent = false;
     s->cands_pending_send = false;
 
-    // 初始化 Relay 探测状态
-    s->relay_probe_state = P2P_RELAY_PROBE_IDLE;
-    s->relay_probe_sid = 0;
-    s->relay_probe_start = 0;
-    s->relay_probe_complete = 0;
-    s->relay_probe_retries = 0;
-    s->relay_probe_enabled = true;  // 默认启用自动探测
+    // 初始化探测状态（COMPACT 模式）
+    s->probe_compact_state = P2P_PROBE_COMPACT_IDLE;
+    s->probe_compact_sid = 0;
+    s->probe_compact_start = 0;
+    s->probe_compact_complete = 0;
+    s->probe_compact_retries = 0;
+    s->probe_compact_enabled = true;  // 默认启用自动探测
+
+    // 初始化探测状态（RELAY 模式）
+    s->probe_relay_state = P2P_PROBE_RELAY_IDLE;
+    s->probe_relay_start = 0;
+    s->probe_relay_complete = 0;
+    s->probe_relay_retries = 0;
+    s->probe_relay_enabled = true;  // 默认启用
 
     ret_t ret;
     switch (s->signaling_mode) {
@@ -1114,6 +1122,37 @@ p2p_state(const p2p_handle_t hdl) {
 int
 p2p_nat_type(const p2p_handle_t hdl) {
     return hdl ? ((p2p_session_t*)hdl)->nat_type : P2P_NAT_UNKNOWN;
+}
+
+p2p_probe_state_t
+p2p_probe(p2p_handle_t hdl) {
+    if (!hdl) return P2P_PROBE_STATE_NONE;
+    p2p_session_t *s = (p2p_session_t*)hdl;
+
+    // 已直连时无需探测
+    if (s->state == P2P_STATE_CONNECTED) return P2P_PROBE_STATE_CONNECTED;
+
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+        switch (s->probe_compact_state) {
+            case P2P_PROBE_COMPACT_IDLE:         return P2P_PROBE_STATE_NONE;
+            case P2P_PROBE_COMPACT_PENDING:
+            case P2P_PROBE_COMPACT_WAITING:      return P2P_PROBE_STATE_RUNNING;
+            case P2P_PROBE_COMPACT_SUCCESS:      return P2P_PROBE_STATE_SUCCESS;
+            case P2P_PROBE_COMPACT_PEER_OFFLINE: return P2P_PROBE_STATE_PEER_OFFLINE;
+            case P2P_PROBE_COMPACT_TIMEOUT:      return P2P_PROBE_STATE_TIMEOUT;
+            default:                             return P2P_PROBE_STATE_NONE;
+        }
+    } else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+        switch (s->probe_relay_state) {
+            case P2P_PROBE_RELAY_IDLE:           return P2P_PROBE_STATE_NONE;
+            case P2P_PROBE_RELAY_SUCCESS:        return P2P_PROBE_STATE_SUCCESS;
+            case P2P_PROBE_RELAY_PEER_OFFLINE:   return P2P_PROBE_STATE_PEER_OFFLINE;
+            case P2P_PROBE_RELAY_TIMEOUT:        return P2P_PROBE_STATE_TIMEOUT;
+            default:                             return P2P_PROBE_STATE_RUNNING;
+        }
+    }
+
+    return P2P_PROBE_STATE_NONE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

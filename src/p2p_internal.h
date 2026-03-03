@@ -99,14 +99,29 @@
  *
  * 目标：在不重新连接的情况下，自动恢复可恢复的网络故障
  */
+/* COMPACT 模式探测状态（MSG+echo 单次往返）*/
 typedef enum {
-    P2P_RELAY_PROBE_IDLE = 0,       // 空闲，无需探测
-    P2P_RELAY_PROBE_PENDING,        // 等待发起探测
-    P2P_RELAY_PROBE_WAITING,        // 探测中，等待 MSG 响应
-    P2P_RELAY_PROBE_SUCCESS,        // 探测成功（对端可达）
-    P2P_RELAY_PROBE_PEER_OFFLINE,   // 对端离线（MSG_REQ_ACK status=1）
-    P2P_RELAY_PROBE_TIMEOUT         // 探测超时（服务器无法到达对端）
-} p2p_relay_probe_state_t;
+    P2P_PROBE_COMPACT_IDLE = 0,         // 空闲，无需探测
+    P2P_PROBE_COMPACT_PENDING,          // 等待发起探测
+    P2P_PROBE_COMPACT_WAITING,          // 探测中，等待 MSG 响应
+    P2P_PROBE_COMPACT_SUCCESS,          // 探测成功（对端可达）
+    P2P_PROBE_COMPACT_PEER_OFFLINE,     // 对端离线（MSG_REQ_ACK status=1）
+    P2P_PROBE_COMPACT_TIMEOUT           // 探测超时（服务器无法到达对端）
+} p2p_probe_compact_state_t;
+
+/* RELAY 模式探测状态（分步：TURN 刷新 → 地址交换 → UDP 探测）*/
+typedef enum {
+    P2P_PROBE_RELAY_IDLE = 0,           // 空闲状态
+    P2P_PROBE_RELAY_REFRESH_TURN,       // 正在刷新 TURN 地址
+    P2P_PROBE_RELAY_WAIT_TURN,          // 等待 TURN 分配响应
+    P2P_PROBE_RELAY_EXCHANGE_ADDR,      // 通过信令服务器交换地址
+    P2P_PROBE_RELAY_WAIT_EXCHANGE,      // 等待地址交换完成
+    P2P_PROBE_RELAY_PROBE_UDP,          // 发送 UDP 探测包
+    P2P_PROBE_RELAY_WAIT_PROBE,         // 等待 UDP 探测响应
+    P2P_PROBE_RELAY_SUCCESS,            // 探测成功
+    P2P_PROBE_RELAY_PEER_OFFLINE,       // 对端离线
+    P2P_PROBE_RELAY_TIMEOUT             // 超时失败
+} p2p_probe_relay_state_t;
 
 /* ============================================================================
  * p2p_session: P2P 会话主结构体
@@ -178,13 +193,21 @@ typedef struct p2p_session {
     stream_t                    stream;             // 流传输层状态
     path_manager_t              path_mgr;           // 路径管理器（多路径并行支持）
 
-    /* ======================== Relay 探测状态（信道外可达性检测）======================== */
-    p2p_relay_probe_state_t     relay_probe_state;  // 当前探测状态
-    uint16_t                    relay_probe_sid;    // 探测使用的 MSG 序列号
-    uint64_t                    relay_probe_start;  // 探测开始时间（毫秒）
-    uint64_t                    relay_probe_complete;// 探测完成时间（毫秒，用于重复探测间隔）
-    int                         relay_probe_retries;// 探测重试次数
-    bool                        relay_probe_enabled;// 是否启用自动探测（默认 true）
+    /* ======================== 信道外可达性探测（probe）======================== */
+    /* COMPACT 模式：MSG+echo 单次往返探测 */
+    p2p_probe_compact_state_t   probe_compact_state;    // 探测状态
+    uint16_t                    probe_compact_sid;      // 探测 MSG 序列号
+    uint64_t                    probe_compact_start;    // 探测开始时间（毫秒）
+    uint64_t                    probe_compact_complete; // 探测完成时间（毫秒）
+    int                         probe_compact_retries;  // 重试计数
+    bool                        probe_compact_enabled;  // 是否启用（默认 true）
+
+    /* RELAY 模式：TURN 刷新 → 地址交换 → UDP 探测 */
+    p2p_probe_relay_state_t     probe_relay_state;      // 探测状态
+    uint64_t                    probe_relay_start;      // 探测开始时间（毫秒）
+    uint64_t                    probe_relay_complete;   // 探测完成时间（毫秒）
+    int                         probe_relay_retries;    // 重试计数
+    bool                        probe_relay_enabled;    // 是否启用（默认 true）
 
     /* ======================== 模块化传输 ======================== */
     /*
