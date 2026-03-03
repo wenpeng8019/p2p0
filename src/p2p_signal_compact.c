@@ -39,7 +39,10 @@
 
 /*
  * 向信令服务器请求 REGISTER 操作
- * 格式: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
+ *
+ * 协议：SIG_PKT_REGISTER (0x80)
+ * 包头: [type=0x80 | flags=0 | seq=0]
+ * 负载: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
  */
 static void send_register(p2p_session_t *s) {
 
@@ -74,6 +77,11 @@ static void send_register(p2p_session_t *s) {
         memcpy(payload + n + 5, &s->local_cands[i].addr.sin_port, 2);
         n += 7;
     }
+
+    // 调试打印协议包信息
+    printf(LA_F("Send REGISTER pkt to %s:%d, seq=0, flags=0, len=%d, instance_id=%u, cands=%d", 0, 0),
+           inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+           n, ctx->instance_id, cand_cnt);
 
     udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, n);
 
@@ -187,9 +195,21 @@ static int build_peer_info_candidates(p2p_session_t *s, uint16_t seq, uint8_t *p
     return offset;
 }
 
-// 在首次收到 PEER_INFO 包，且已经收到 REGISTER_ACK 的情况下，发送剩余候选队列和 FIN 包给对方
-// + 注意，首次收到的 PEER_INFO 包，可能是服务器下发的 seq=0 的 PEER_INFO 包;
-//   也可能是对方发送的 seq!=1 的 PEER_INFO 包（在并发网络状况下，对方的 PEER_INFO 包可能先到达）
+/*
+ * 在首次收到 PEER_INFO 包，且已经收到 REGISTER_ACK 的情况下，发送剩余候选队列和 FIN 包给对方
+ * 注意：首次收到的 PEER_INFO 包，可能是服务器下发的 seq=0 的 PEER_INFO 包；
+ *       也可能是对方发送的 seq!=1 的 PEER_INFO 包（在并发网络状况下，对方的 PEER_INFO 包可能先到达）
+ *
+ * 协议：SIG_PKT_PEER_INFO (0x03)
+ * 包头: [type=0x03 | flags=见下 | seq=1-16]
+ * 负载: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
+ *   - session_id: 会话 ID（网络字节序，64位）
+ *   - base_index: 本批候选的起始索引
+ *   - candidate_count: 本批候选数量
+ *   - candidates: 每个候选 7 字节 [type(1)+ip(4)+port(2)]
+ *   - flags: SIG_PKT_FLAG_MORE_CAND (0x02) 表示后续还有包
+ *           SIG_PKT_FLAG_FIN (0x01) 表示发送完毕
+ */
 static void send_rest_candidates_and_fin(p2p_session_t *s) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -216,11 +236,24 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
 
     for (uint16_t seq = 1; seq <= (uint16_t)pkt_cnt; seq++) { uint8_t flags = 0;
         int payload_len = build_peer_info_candidates(s, seq, payload, &flags);
+
+        // 调试打印协议包信息
+        printf(LA_F("Send PEER_INFO pkt to %s:%d, seq=%u, flags=0x%02x, len=%d, session_id=%" PRIu64, 0, 0),
+               inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+               seq, flags, payload_len, ctx->session_id);
+        
         udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
     }
 }
 
-// 周期将未确认的 PEER_INFO 包重发给对方
+/*
+ * 周期将未确认的 PEER_INFO 包重发给对方
+ *
+ * 协议：SIG_PKT_PEER_INFO (0x03) - 重传机制
+ * 包头: [type=0x03 | flags=见下 | seq=1-16]
+ * 负载: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
+ * 说明: 重发所有未收到 ACK 的 PEER_INFO 包
+ */
 static void resend_rest_candidates_and_fin(p2p_session_t *s) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -239,11 +272,28 @@ static void resend_rest_candidates_and_fin(p2p_session_t *s) {
 
         uint8_t flags = 0;
         int payload_len = build_peer_info_candidates(s, seq, payload, &flags);
+
+        // 调试打印协议包信息
+        printf(LA_F("Resend PEER_INFO pkt to %s:%d, seq=%u, flags=0x%02x, len=%d", 0, 0),
+               inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+               seq, flags, payload_len);
+        
         udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
     }
 }
 
-/* 发送一次 MSG_REQ（A→Server） */
+/*
+ * 发送一次 MSG_REQ（A→Server）
+ *
+ * 协议：SIG_PKT_MSG_REQ (0x20)
+ * 包头: [type=0x20 | flags=0 | seq=0]
+ * 负载: [target_peer_id(32)][sid(2)][msg(1)][data(N)]
+ *   - target_peer_id: 目标对端的 peer_id（32字节，0填充）
+ *   - sid: 序列号（2字节，网络字节序），用于匹配响应
+ *   - msg: 消息 ID（1字节，用户自定义）
+ *   - data: 消息数据（可选）
+ * 说明: A端向服务器发送消息请求，服务器缓存并转给B端
+ */
 static void send_msg_req(struct p2p_session *s) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -251,14 +301,18 @@ static void send_msg_req(struct p2p_session *s) {
     uint8_t payload[P2P_PEER_ID_MAX + 3 + P2P_MSG_DATA_MAX];
     int n = 0;
 
-    /* [target_peer_id(32)][req_id(2)][msg_type(1)][data(N)] */
     memcpy(payload + n, ctx->remote_peer_id, P2P_PEER_ID_MAX); n += P2P_PEER_ID_MAX;
-    nwrite_s(payload + n, ctx->msg_req_id); n += 2;
-    payload[n++] = ctx->msg_type;
+    nwrite_s(payload + n, ctx->msg_sid); n += 2;
+    payload[n++] = ctx->msg;
     if (ctx->msg_data_len > 0) {
         memcpy(payload + n, ctx->msg_data, (size_t)ctx->msg_data_len);
         n += ctx->msg_data_len;
     }
+
+    // 调试打印协议包信息
+    printf(LA_F("Send MSG_REQ pkt to %s:%d, seq=0, flags=0, len=%d, sid=%u, msg=%u", 0, 0),
+           inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+           n, ctx->msg_sid, ctx->msg);
 
     udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_MSG_REQ, 0, 0, payload, n);
 
@@ -282,12 +336,11 @@ void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx) {
 /*
  * 开始信令交换（发送 REGISTER）
  */
-ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id,
-                                 const char *remote_peer_id,
+ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
                                  const struct sockaddr_in *server) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
-    P_check(ctx->state == SIGNAL_COMPACT_INIT, return -1;)
+    P_check(ctx->state == SIGNAL_COMPACT_INIT, return E_NONE_CONTEXT;)
 
     ctx->server_addr = *server;
 
@@ -320,25 +373,53 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
     return E_NONE;
 }
 
-int p2p_signal_compact_disconnect(struct p2p_session *s) {
+/*
+ * 断开连接，通知服务器注销配对
+ *
+ * 协议：SIG_PKT_UNREGISTER (0x06)
+ * 包头: [type=0x06 | flags=0 | seq=0]
+ * 负载: [local_peer_id(32)][remote_peer_id(32)]
+ *   - local_peer_id: 本地 peer_id（32字节，0填充）
+ *   - remote_peer_id: 远端 peer_id（32字节，0填充）
+ * 说明: 客户端通知服务器注销配对，清理服务器上的会话状态
+ */
+ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
-    if (ctx->state == SIGNAL_COMPACT_INIT) return 1;
+    P_check(ctx->state != SIGNAL_COMPACT_INIT, return E_NONE_CONTEXT;)
 
     uint8_t payload[P2P_PEER_ID_MAX * 2];
     memset(payload, 0, sizeof(payload));
     memcpy(payload, ctx->local_peer_id, strnlen(ctx->local_peer_id, P2P_PEER_ID_MAX));
     memcpy(payload + P2P_PEER_ID_MAX, ctx->remote_peer_id, strnlen(ctx->remote_peer_id, P2P_PEER_ID_MAX));
 
+    // 调试打印协议包信息
+    printf(LA_F("Send UNREGISTER pkt to %s:%d, seq=0, flags=0, len=%d", 0, 0),
+           inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+           (int)sizeof(payload));
+
     udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_UNREGISTER, 0, 0, payload, (int)sizeof(payload));
 
     ctx->state = SIGNAL_COMPACT_INIT;
-    return 0;
+    return E_NONE;
 }
 
-int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t size) {
+/*
+ * 通过服务器中转发送数据包（RELAY 机制）
+ *
+ * 协议：P2P_PKT_RELAY_DATA (0x10)
+ * 包头: [type=0x10 | flags=0 | seq=0]
+ * 负载: [session_id(8)][data(N)]
+ *   - session_id: 会话 ID（8字节，网络字节序）
+ *   - data: 用户数据
+ * 说明: 当直连失败时，通过服务器中转数据包
+ */
+ret_t p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t size) {
+
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
-    if (!ctx->relay_support || !ctx->session_id || !data || size == 0) return -1;
+    P_check(data && size, return E_INVALID;)
+    P_check(ctx->relay_support, return E_NO_SUPPORT;)
+    P_check(ctx->session_id, return E_NONE_CONTEXT;)
 
     if (size > (uint32_t)(P2P_MAX_PAYLOAD - sizeof(uint64_t))) {
         size = (uint32_t)(P2P_MAX_PAYLOAD - sizeof(uint64_t));
@@ -349,32 +430,39 @@ int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t si
     memcpy(payload, &sid_net, sizeof(uint64_t));
     memcpy(payload + sizeof(uint64_t), data, size);
 
+    // 调试打印协议包信息
+    printf(LA_F("Send RELAY_DATA pkt to %s:%d, seq=0, flags=0, len=%d, session_id=%" PRIu64, 0, 0),
+           inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+           (int)(sizeof(uint64_t) + size), ctx->session_id);
+
     udp_send_packet(s->sock, &ctx->server_addr, P2P_PKT_RELAY_DATA, 0, 0, payload, (int)(sizeof(uint64_t) + size));
-    return 0;
+
+
+    return E_NONE;
 }
 
 /*
  * A 端：发起 MSG 请求
- * 生成 req_id，保存 payload，立即发送第一个 MSG_REQ，进入 state=1 等待 REQ_ACK。
+ * 生成序列号，保存 payload，立即发送第一个 MSG_REQ，进入 state=1 等待 REQ_ACK。
  */
-int p2p_signal_compact_msg_send(struct p2p_session *s,
-                                 uint8_t msg_type, const void *data, int len) {
+ret_t p2p_signal_compact_request(struct p2p_session *s,
+                                 uint8_t msg, const void *data, int len) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    if (!ctx->msg_support)                                  return -1; /* 服务器不支持 MSG */
-    if (ctx->msg_state != 0)                                return -1; /* 已有挂起请求 */
-    if (ctx->state < SIGNAL_COMPACT_REGISTERED)             return -1; /* 未注册 */
-    if (len < 0 || len > P2P_MSG_DATA_MAX)                  return -1;
-    if (len > 0 && !data)                                   return -1;
+    P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
+    P_check(len == 0 || data, return E_INVALID;)
+    P_check(ctx->msg_support, return E_NO_SUPPORT;)                    /* 服务器不支持 MSG */
+    P_check(ctx->state >= SIGNAL_COMPACT_REGISTERED, return E_NONE_CONTEXT;) /* 未注册 */
+    P_check(ctx->msg_state == 0, return E_BUSY;)                       /* 已有挂起请求 */
 
-    /* 生成非零 req_id（简单递增，不依赖随机源）*/
-    static uint16_t _req_counter = 0;
-    uint16_t req_id = ++_req_counter;
-    if (req_id == 0) req_id = ++_req_counter;
+    /* 生成非零序列号（简单递增，不依赖随机源）*/
+    static uint16_t _sid_counter = 0;
+    uint16_t sid = ++_sid_counter;
+    if (sid == 0) sid = ++_sid_counter;
 
-    ctx->msg_req_id   = req_id;
-    ctx->msg_type     = msg_type;
+    ctx->msg_sid      = sid;
+    ctx->msg          = msg;
     ctx->msg_data_len = len;
     if (len > 0) memcpy(ctx->msg_data, data, (size_t)len);
     ctx->msg_state    = 1;   /* 等待 REQ_ACK */
@@ -382,50 +470,51 @@ int p2p_signal_compact_msg_send(struct p2p_session *s,
     ctx->msg_send_time = 0;  /* 强制 tick 中立即发出第一包 */
 
     send_msg_req(s);
-    return 0;
+    return E_NONE;
 }
 
 /*
  * B 端：回复 MSG 请求（用户在 on_msg_req 回调中或异步调用）
- * 向服务器发送 MSG_RES，服务器负责转给 A 并重传直至 A 回 MSG_RES_ACK。
+ * 向服务器发送 MSG_RESP，服务器负责转给 A 并重传直至 A 回 MSG_RESP_ACK。
+ *
+ * 协议：SIG_PKT_MSG_RESP (0x22)
+ * 包头: [type=0x22 | flags=0 | seq=0]
+ * 负载: [session_id(8)][sid(2)][msg(1)][data(N)]
+ *   - session_id: A端的会话 ID（8字节，网络字节序）
+ *   - sid: 序列号，必顾与 MSG_REQ 中的 sid 一致
+ *   - msg: 响应消息类型
+ *   - data: 响应数据
+ * 说明: B端向服务器发送消息响应，服务器转给A端
  */
-int p2p_signal_compact_msg_reply(struct p2p_session *s, uint16_t req_id,
-                                  uint8_t msg_type, const void *data, int len) {
+ret_t p2p_signal_compact_response(struct p2p_session *s, uint16_t sid,
+                                  uint8_t msg, const void *data, int len) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    if (ctx->msg_relay_req_id != req_id)    return -1;
-    if (len < 0 || len > P2P_MSG_DATA_MAX)  return -1;
-    if (len > 0 && !data)                   return -1;
+    P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
+    P_check(len == 0 || data, return E_INVALID;)
+    P_check(ctx->msg_relay_sid == sid, return E_INVALID;)
 
-    /* MSG_RES (B→Server): [session_id(8)][req_id(2)][msg_type(1)][data(N)] */
     uint8_t payload[8 + 2 + 1 + P2P_MSG_DATA_MAX];
     int n = 0;
 
     uint64_t sid_net = htonll(ctx->msg_relay_session_id);
     memcpy(payload + n, &sid_net, 8); n += 8;
-    nwrite_s(payload + n, req_id); n += 2;
-    payload[n++] = msg_type;
+    nwrite_s(payload + n, sid); n += 2;
+    payload[n++] = msg;
     if (len > 0) { memcpy(payload + n, data, (size_t)len); n += len; }
 
-    udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_MSG_RES, 0, 0, payload, n);
+    // 调试打印协议包信息
+    printf(LA_F("Send MSG_RESP pkt to %s:%d, seq=0, flags=0, len=%d, sid=%u, msg=%u", 0, 0),
+           inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+           n, sid, msg);
 
-    ctx->msg_relay_req_id = 0;   /* 清除挂起状态 */
-    return 0;
+    udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_MSG_RESP, 0, 0, payload, n);
+
+    ctx->msg_relay_sid = 0;   /* 清除挂起状态 */
+    return E_NONE;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-
-/*
- * 处理收到的信令包
- *
- * 支持的包类型：
- * - REGISTER_ACK: 服务器确认，提取对端状态
- * - PEER_INFO: 对端候选列表（序列化）
- * - PEER_INFO_ACK: 对端确认
- */
-///////////////////////////////////////////////////////////////////////////////
-// 拆分后的独立信令包处理函数
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -535,9 +624,23 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
             P_clock _clk; P_clock_now(&_clk);
             ctx->nat_probe_send_time = clock_ms(_clk);
 
-            // 构造并发送 NAT_PROBE 包（协议：空包，服务器通过观察源地址和 probe_port 来探测 NAT 映射）
+            /*
+             * 发送 NAT_PROBE 探测包
+             *
+             * 协议：SIG_PKT_NAT_PROBE (0x07)
+             * 包头: [type=0x07 | flags=0 | seq=探测重试次数]
+             * 负载: 空
+             *   - seq: 探测重试次数（从1开始）
+             * 说明: 向服务器探测端口发送空包，服务器观察源地址来判断 NAT 类型
+             */
             struct sockaddr_in probe_addr = ctx->server_addr;
             probe_addr.sin_port = htons(ctx->probe_port);
+
+            // 调试打印协议包信息
+            printf(LA_F("Send NAT_PROBE pkt to %s:%d, seq=%u, flags=0, len=0", 0, 0),
+                   inet_ntoa(probe_addr.sin_addr), ntohs(probe_addr.sin_port),
+                   ctx->nat_probe_retries);
+            
             udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ctx->nat_probe_retries, NULL, 0);
 
             print("I:", LA_F("NAT_PROBE: %s %s:%d (1/%d)", LA_F93, 337),
@@ -728,13 +831,28 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         }
     }
 
-    /* 发送 PEER_INFO_ACK: [session_id(8)]，确认序号在包头 seq */
+    /*
+     * 发送 PEER_INFO_ACK 确认包
+     *
+     * 协议：SIG_PKT_PEER_INFO_ACK (0x04)
+     * 包头: [type=0x04 | flags=0 | seq=被确认的PEER_INFO包序号]
+     * 负载: [session_id(8)]
+     *   - session_id: 会话 ID（网络字节序，64位）
+     *   - seq: 被确认的 PEER_INFO 包的序列号
+     * 说明: 确认收到对方的候选地址包
+     */
     {
         print("V:", LA_F("%s PEER_INFO_ACK(seq=%u)", LA_F35, 296), LA_W("Sent ANSWER", LA_W84, 113), seq);
 
         uint8_t ack_payload[sizeof(uint64_t)];
         uint64_t sid_net = htonll(ctx->session_id);
         memcpy(ack_payload, &sid_net, sizeof(uint64_t));
+
+        // 调试打印协议包信息
+        printf(LA_F("Send PEER_INFO_ACK pkt to %s:%d, seq=%u, flags=0, len=%d, session_id=%" PRIu64, 0, 0),
+               inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+               seq, (int)sizeof(ack_payload), ctx->session_id);
+        
         udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO_ACK, 0, seq, ack_payload, sizeof(ack_payload));
     }
 }
@@ -849,19 +967,20 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
 
 /*
  * 协议：P2P_PKT_RELAY_DATA (0xA0) / P2P_PKT_RELAY_ACK (0xA1)
- * RELAY_DATA:
- *   包头: [type=0xA0 | flags=0 | seq=数据序列号]
- *   负载: [session_id(8) | data(N)]
- * RELAY_ACK:
- *   包头: [type=0xA1 | flags=0 | seq=0]
- *   负载: [session_id(8) | ack_seq(2) | sack(4)]
- * 说明：用于 P2P 打洞失败后，通过服务器中继转发数据
- * 
+ * 包头: [type=0xA0/0xA1 | flags=0 | seq=数据序列号]
+ * 负载: [session_id(8)][data(N)]  (对于 RELAY_DATA)
+ *       [session_id(8)][ack_seq(2)][sack(4)]  (对于 RELAY_ACK)
+ *   - session_id: 会话 ID（网络字节序，64位）
+ *   - data: 中继数据（对于 RELAY_DATA）
+ *   - ack_seq: 确认序列号（对于 RELAY_ACK）
+ *   - sack: 选择性确认（对于 RELAY_ACK）
+ * 说明: P2P 打洞失败后，通过服务器中继转发数据
+ *
  * 处理 RELAY_DATA / RELAY_ACK（中继数据）
  * 验证 COMPACT 层的 session_id，并调整 payload/len 跳过该头部
- * @return 0=验证成功（payload/len 已调整），-1=验证失败
+ * @return true=验证成功（payload/len 已调整），false=验证失败
  */
-int compact_on_relay_packet(struct p2p_session *s, uint8_t type,
+bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
                              const uint8_t **payload, int *len,
                              const struct sockaddr_in *from) {
     printf(LA_F("Received RELAY pkt from %s:%d, type=0x%02X, len=%d", LA_F127, 143),
@@ -870,18 +989,18 @@ int compact_on_relay_packet(struct p2p_session *s, uint8_t type,
     // RELAY 包只能在 COMPACT 模式下使用
     if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
         print("W:", LA_F("Received RELAY packet (type=0x%02X) in non-COMPACT mode", LA_F126, 232), type);
-        return -1;
+        return false;
     }
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
     if (!ctx->relay_support) {
         print("E: %s", LA_S("Relay packet received but relay not enabled", LA_S72, 253));
-        return -1;
+        return false;
     }
 
     if (*len < (int)sizeof(uint64_t)) {
-        return -1;
+        return false;
     }
 
     uint64_t off_sid;
@@ -891,7 +1010,7 @@ int compact_on_relay_packet(struct p2p_session *s, uint8_t type,
     if (off_sid != ctx->session_id) {
         print("E:", LA_F("Relay sid mismatch: local=%" PRIu64 " pkt=%" PRIu64, 0, 0),
                      ctx->session_id, off_sid);
-        return -1;
+        return false;
     }
 
     print("V:", LA_F("Received %s for sid=%" PRIu64 ", len=%d", 0, 0),
@@ -900,7 +1019,7 @@ int compact_on_relay_packet(struct p2p_session *s, uint8_t type,
     // 跳过 COMPACT 层的 session_id 头部
     *payload += sizeof(uint64_t);
     *len -= (int)sizeof(uint64_t);
-    return 0;
+    return true;
 }
 
 /*
@@ -964,109 +1083,158 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
 }
 
 /*
- * B 端收到 Server→B MSG_REQ relay（flags=SIG_MSG_FLAG_RELAY）：
- *   payload: [session_id(8)][req_id(2)][msg_type(1)][data(N)]
- * A 端收到 A→Server 原始请求（flags=0）不可能出现在客户端，直接忽略。
+ * 协议：SIG_PKT_MSG_REQ (0x20)
+ * 包头: [type=0x20 | flags=SIG_MSG_FLAG_RELAY | seq=0]
+ * 负载: [session_id(8)][sid(2)][msg(1)][data(N)]
+ *   - session_id: A端的会话 ID（网络字节序，64位）
+ *   - sid: 序列号（2字节，网络字节序）
+ *   - msg: 消息 ID（1字节）
+ *   - data: 消息数据
+ *   - flags: SIG_MSG_FLAG_RELAY (0x01) 表示服务器转发
+ * 说明: B端收到服务器转发的消息请求，A端发出的原始请求(flags=0)不会到达客户端
+ *
+ * 处理 MSG_REQ（服务器转发的消息请求）
  */
-void compact_on_msg_req(struct p2p_session *s, uint8_t flags,
+void compact_on_request(struct p2p_session *s, uint8_t flags,
                         const uint8_t *payload, int len,
                         const struct sockaddr_in *from) {
 
     if (!(flags & SIG_MSG_FLAG_RELAY)) return;  /* A→Server 不应由客户端收到 */
-    if (len < 11) return;                       /* session_id(8)+req_id(2)+msg_type(1) */
+    if (len < 11) return;                       /* session_id(8)+sid(2)+msg(1) */
+
+    printf(LA_F("Received MSG_REQ pkt from %s:%d, flags=0x%02x, len=%d", 0, 0),
+           inet_ntoa(from->sin_addr), ntohs(from->sin_port), flags, len);
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
     uint64_t session_id = 0;
     nread_ll(&session_id, payload);
-    uint16_t req_id = 0;
-    nread_s(&req_id, payload + 8);
-    uint8_t msg_type = payload[10];
+    uint16_t sid = 0;
+    nread_s(&sid, payload + 8);
+    uint8_t msg = payload[10];
     const uint8_t *req_data = payload + 11;
     int req_len = len - 11;
 
     /* 保存 B 端待回复状态 */
-    ctx->msg_relay_req_id      = req_id;
+    ctx->msg_relay_sid         = sid;
     ctx->msg_relay_session_id  = session_id;
+
+    /* msg=0: 自动 echo 回复（无需应用层介入） */
+    if (msg == 0) {
+        print("V:", LA_F("MSG_REQ msg=0, auto echo reply: sid=%u, len=%d", 0, 0), sid, req_len);
+        p2p_signal_compact_response(s, sid, 0, req_data, req_len);
+        return;
+    }
 
     /* 触发用户回调 */
     if (s->cfg.on_msg_req)
-        s->cfg.on_msg_req((p2p_handle_t)s, req_id, msg_type,
+        s->cfg.on_msg_req((p2p_handle_t)s, sid, msg,
                           req_data, req_len, s->cfg.userdata);
 }
 
 /*
- * A 端收到 Server→A MSG_REQ_ACK：
- *   payload: [req_id(2)][status(1)]
- *   status: 0=已缓存开始中转, 1=B不在线（失败）
+ * 协议：SIG_PKT_MSG_REQ_ACK (0x21)
+ * 包头: [type=0x21 | flags=0 | seq=0]
+ * 负载: [sid(2)][status(1)]
+ *   - sid: 序列号，与 MSG_REQ 中的 sid 对应
+ *   - status: 0=已缓存开始中转, 1=B不在线（失败）
+ * 说明: A端收到服务器对消息请求的确认
+ *
+ * 处理 MSG_REQ_ACK（服务器对请求的确认）
  */
-void compact_on_msg_req_ack(struct p2p_session *s,
+void compact_on_request_ack(struct p2p_session *s,
                              const uint8_t *payload, int len,
                              const struct sockaddr_in *from) {
 
     if (len < 3) return;
 
+    printf(LA_F("Received MSG_REQ_ACK pkt from %s:%d, len=%d", 0, 0),
+           inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
+
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    uint16_t req_id = 0;
-    nread_s(&req_id, payload);
+    uint16_t sid = 0;
+    nread_s(&sid, payload);
     uint8_t status = payload[2];
 
-    if (ctx->msg_state != 1 || ctx->msg_req_id != req_id) return; /* 过期/无关 */
+    if (ctx->msg_state != 1 || ctx->msg_sid != sid) return; /* 过期/无关 */
 
     if (status == 0) {
-        /* 成功：服务器已收到请求并开始向 B 中转，A 停止重发，等待 MSG_RES */
+        /* 成功：服务器已收到请求并开始向 B 中转，A 停止重发，等待 MSG_RESP */
         ctx->msg_state = 2;
         print("I:", LA_S("MSG_REQ_ACK: request accepted, waiting for response", LA_S44, 752));
     } else {
         /* B 不在线：请求失败，通知上层 */
-        uint16_t saved_id = ctx->msg_req_id;
-        uint8_t  saved_type = ctx->msg_type;
+        uint16_t saved_id  = ctx->msg_sid;
+        uint8_t  saved_msg = ctx->msg;
         ctx->msg_state  = 0;
-        ctx->msg_req_id = 0;
+        ctx->msg_sid = 0;
         print("W:", LA_S("MSG_REQ_ACK: peer offline, request failed", LA_S43, 751));
         if (s->cfg.on_msg_res)
-            s->cfg.on_msg_res((p2p_handle_t)s, saved_id, saved_type,
+            s->cfg.on_msg_res((p2p_handle_t)s, saved_id, saved_msg,
                               NULL, -1, s->cfg.userdata);
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-
 /*
- * A 端收到 Server→A MSG_RES（B 的应答中转）：
- *   payload: [req_id(2)][msg_type(1)][data(N)]
- * 自动回复 MSG_RES_ACK 给服务器，并触发 on_msg_res 回调。
+ * 协议：SIG_PKT_MSG_RESP (0x22)
+ * 包头: [type=0x22 | flags=0 | seq=0]
+ * 负载: [sid(2)][msg(1)][data(N)]
+ *   - sid: 序列号，与 MSG_REQ 中的 sid 对应
+ *   - msg: 响应消息 ID
+ *   - data: 响应数据
+ * 说明: A端收到服务器转发的B端响应，自动回复 MSG_RESP_ACK 给服务器
+ *
+ * 处理 MSG_RESP（服务器转发的B端响应）
  */
-void compact_on_msg_res(struct p2p_session *s,
+void compact_on_response(struct p2p_session *s,
                         const uint8_t *payload, int len,
                         const struct sockaddr_in *from) {
 
     if (len < 3) return;
 
+    printf(LA_F("Received MSG_RESP pkt from %s:%d, len=%d", 0, 0),
+           inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
+
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    uint16_t req_id = 0;
-    nread_s(&req_id, payload);
+    uint16_t sid = 0;
+    nread_s(&sid, payload);
     uint8_t res_type = payload[2];
     const uint8_t *res_data = payload + 3;
     int res_len = len - 3;
 
-    /* 回复 MSG_RES_ACK（幂等，即使已处理过也补发），payload=[req_id(2)] */
+    /*
+     * 发送 MSG_RESP_ACK 确认包
+     *
+     * 协议：SIG_PKT_MSG_RESP_ACK (0x23)
+     * 包头: [type=0x23 | flags=0 | seq=0]
+     * 负载: [sid(2)]
+     *   - sid: 序列号，与 MSG_RESP 中的 sid 一致
+     * 说明: A端确认收到B端的响应，幂等操作，即使已处理过也补发
+     */
     uint8_t ack[2];
-    nwrite_s(ack, req_id);
-    udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_MSG_RES_ACK, 0, 0, ack, 2);
+    nwrite_s(ack, sid);
 
-    /* 仅当 req_id 匹配且仍在等待应答时触发回调 */
-    if (ctx->msg_state == 2 && ctx->msg_req_id == req_id) {
+    // 调试打印协议包信息
+    printf(LA_F("Send MSG_RESP_ACK pkt to %s:%d, seq=0, flags=0, len=2, sid=%u", 0, 0),
+           inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+           sid);
+    
+    udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_MSG_RESP_ACK, 0, 0, ack, 2);
+
+    /* 仅当序列号匹配且仍在等待应答时触发回调 */
+    if (ctx->msg_state == 2 && ctx->msg_sid == sid) {
         ctx->msg_state  = 0;
-        ctx->msg_req_id = 0;
-        print("I:", LA_S("MSG_RES received, RPC complete", LA_S45, 753));
+        ctx->msg_sid = 0;
+        print("I:", LA_S("MSG_RESP received, RPC complete", LA_S45, 753));
         if (s->cfg.on_msg_res)
-            s->cfg.on_msg_res((p2p_handle_t)s, req_id, res_type,
+            s->cfg.on_msg_res((p2p_handle_t)s, sid, res_type,
                               res_data, res_len, s->cfg.userdata);
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 /*
  * 信令服务周期维护（拉取阶段）— 注册重试、保活
@@ -1108,7 +1276,21 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
         memcpy(payload, ctx->local_peer_id, strnlen(ctx->local_peer_id, P2P_PEER_ID_MAX));
         memcpy(payload + P2P_PEER_ID_MAX, ctx->remote_peer_id, strnlen(ctx->remote_peer_id, P2P_PEER_ID_MAX));
 
-        // 发送 keep-alive 包
+        /*
+         * 发送 ALIVE 保活包
+         *
+         * 协议：SIG_PKT_ALIVE (0x0A)
+         * 包头: [type=0x0A | flags=0 | seq=0]
+         * 负载: [local_peer_id(32)][remote_peer_id(32)]
+         *   - local_peer_id: 本地 peer_id
+         *   - remote_peer_id: 远端 peer_id
+         * 说明: 保活包，维持服务器上的注册状态
+         */
+        // 调试打印协议包信息
+        printf(LA_F("Send ALIVE pkt to %s:%d, seq=0, flags=0, len=%d", 0, 0),
+               inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+               (int)sizeof(payload));
+        
         udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_ALIVE, 0, 0, payload, (int)sizeof(payload));
         ctx->last_send_time = now;
 
@@ -1123,13 +1305,13 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
 
     if (ctx->msg_retries > MSG_REQ_MAX_RETRIES) {
         /* 超时失败 */
-        uint16_t saved_id   = ctx->msg_req_id;
-        uint8_t  saved_type = ctx->msg_type;
+        uint16_t saved_id  = ctx->msg_sid;
+        uint8_t  saved_msg = ctx->msg;
         ctx->msg_state  = 0;
-        ctx->msg_req_id = 0;
+        ctx->msg_sid = 0;
         print("W:", LA_S("MSG_REQ timeout, no REQ_ACK received", LA_S42, 750));
         if (s->cfg.on_msg_res)
-            s->cfg.on_msg_res((p2p_handle_t)s, saved_id, saved_type,
+            s->cfg.on_msg_res((p2p_handle_t)s, saved_id, saved_msg,
                               NULL, -1, s->cfg.userdata);
         return;
     }
@@ -1200,8 +1382,23 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
 
         ctx->nat_probe_send_time = now;
 
+        /*
+         * 重发 NAT_PROBE 探测包
+         *
+         * 协议：SIG_PKT_NAT_PROBE (0x07)
+         * 包头: [type=0x07 | flags=0 | seq=重试次数]
+         * 负载: 空
+         *   - seq: 探测重试次数（递增）
+         * 说明: 重试NAT探测，seq字段递增表示重试次数
+         */
         struct sockaddr_in probe_addr = ctx->server_addr;
         probe_addr.sin_port = htons(ctx->probe_port);
+
+        // 调试打印协议包信息
+        printf(LA_F("Resend NAT_PROBE pkt to %s:%d, seq=%u, flags=0, len=0", 0, 0),
+               inet_ntoa(probe_addr.sin_addr), ntohs(probe_addr.sin_port),
+               ctx->nat_probe_retries + 1);
+        
         udp_send_packet(s->sock, &probe_addr, SIG_PKT_NAT_PROBE, 0, ++ctx->nat_probe_retries, NULL, 0);
 
         print("V:", LA_F("NAT_PROBE: %s %d/%d %s %s:%d", LA_F92, 336),

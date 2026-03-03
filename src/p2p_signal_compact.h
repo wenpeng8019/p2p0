@@ -312,17 +312,17 @@ typedef struct {
 
     /* MSG RPC（A 端：发送请求） */
     bool                msg_support;                        /* 服务器是否支持 MSG（从 REGISTER_ACK flags 读取）*/
-    uint16_t            msg_req_id;                         /* 当前挂起的 req_id（0=无挂起）*/
+    uint16_t            msg_sid;                            /* 当前挂起的序列号（0=无挂起）*/
     uint8_t             msg_state;                          /* 0=空闲 1=等待 REQ_ACK 2=等待 RES */
-    uint8_t             msg_type;                           /* 挂起请求的 msg_type */
+    uint8_t             msg;                                /* 挂起请求的消息 ID */
     int                 msg_data_len;                       /* 挂起请求的数据长度 */
     uint8_t             msg_data[P2P_MSG_DATA_MAX];         /* 挂起请求的数据缓冲区 */
     uint64_t            msg_send_time;                      /* MSG_REQ 最后发送时间 */
     int                 msg_retries;                        /* MSG_REQ 已重发次数 */
 
     /* MSG RPC（B 端：接收中转的请求，等待用户回应） */
-    uint16_t            msg_relay_req_id;                   /* 待回应的 req_id（0=无）*/
-    uint64_t            msg_relay_session_id;               /* A 的 session_id（用于构建 MSG_RES）*/
+    uint16_t            msg_relay_sid;                      /* 待回应的序列号（0=无）*/
+    uint64_t            msg_relay_session_id;               /* A 的 session_id（用于构建 MSG_RESP）*/
 
 } p2p_signal_compact_ctx_t;
 
@@ -375,28 +375,54 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
  * @param remote_peer_id 对端 ID
  * @param server        服务器地址
  * @param verbose       是否输出详细日志
- * @return              0 成功，-1 失败
+ * @return              =0 成功，!=0 错误码
  */
 ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
                                const struct sockaddr_in *server);
 
-int p2p_signal_compact_disconnect(struct p2p_session *s);
-
-int p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t size);
+/*
+ * 结束信令交换（发送 UNREGISTER）
+ *
+ * @param s 会话对象
+ * @return =0 成功，!=0 错误码
+ */
+ret_t p2p_signal_compact_disconnect(struct p2p_session *s);
 
 /*
- * 向对端发送 MSG 请求（A 端）。
- * 内部分配 req_id，立即发送第一个 MSG_REQ 并进入重发状态。
+ * 通过信令中继服务向对端发送数据（P2P 打洞失败时的降级方案）
+ *
+ * @param s     会话对象
+ * @param data  数据缓冲区
+ * @param size  数据长度
+ * @return      =0 成功，!=0 错误码
  */
-int p2p_signal_compact_msg_send(struct p2p_session *s,
-                                 uint8_t msg_type, const void *data, int len);
+ret_t p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t size);
+
+/*
+ * 通过信令代理服务向对端发送 MSG 请求（A 端）
+ *
+ * @param s     会话对象
+ * @param msg   应用层消息类型（1 字节，应用自定义）
+ * @param data  请求数据（最多 P2P_MSG_DATA_MAX 字节）
+ * @param len   数据长度
+ * @return      0=已加入发送队列，-1=失败（不支持/已有挂起/参数错误/未注册）
+ */
+ret_t p2p_signal_compact_request(struct p2p_session *s,
+                                 uint8_t msg, const void *data, int len);
 
 /*
  * 回复对端的 MSG 请求（B 端）。
- * req_id 必须与 on_msg_req 回调中的 req_id 一致。
+ * sid 必须与 on_msg_req 回调中的 sid 一致
+ *
+ * @param s     会话对象
+ * @param sid   待回复的请求序列号（来自 on_msg_req 回调）
+ * @param msg   应用层消息类型（1 字节，应用自定义）
+ * @param data  回复数据（最多 P2P_MSG_DATA_MAX 字节）
+ * @param len   数据长度
+ * @return      0=已加入发送队列，-1=失败（参数错误/未匹配的 sid）
  */
-int p2p_signal_compact_msg_reply(struct p2p_session *s, uint16_t req_id,
-                                  uint8_t msg_type, const void *data, int len);
+ret_t p2p_signal_compact_response(struct p2p_session *s, uint16_t sid,
+                                  uint8_t msg, const void *data, int len);
 
 //-----------------------------------------------------------------------------
 
@@ -430,9 +456,9 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
 
 /* 处理 RELAY_DATA / RELAY_ACK（中继数据）
  * 验证 COMPACT 层的 session_id，并调整 payload/len 跳过该头部
- * @return 0=验证成功（payload/len 已调整），-1=验证失败
+ * @return true=验证成功（payload/len 已调整），false=验证失败
  */
-int compact_on_relay_packet(struct p2p_session *s, uint8_t type,
+bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
                              const uint8_t **payload, int *len,
                              const struct sockaddr_in *from);
 
@@ -444,23 +470,23 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
 /* 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）
  * 通过 flags & SIG_MSG_FLAG_RELAY 内部区分两种情况：
  *   flags=0: A→Server，客户端不可能收到此包，忽略
- *   flags=SIG_MSG_FLAG_RELAY: Server→B relay，解析 [session_id][req_id][msg_type][data]，触发 on_msg_req 回调 */
-void compact_on_msg_req(struct p2p_session *s, uint8_t flags,
+ *   flags=SIG_MSG_FLAG_RELAY: Server→B relay，解析 [session_id][sid][msg][data]，触发 on_msg_req 回调 */
+void compact_on_request(struct p2p_session *s, uint8_t flags,
                         const uint8_t *payload, int len,
                         const struct sockaddr_in *from);
 
 /* 处理 MSG_REQ_ACK（Server→A，确认已缓存并开始中转）
- * payload: [req_id(2)][status(1)]  status: 0=成功, 1=B 不在线 */
-void compact_on_msg_req_ack(struct p2p_session *s,
-                             const uint8_t *payload, int len,
-                             const struct sockaddr_in *from);
+ * payload: [sid(2)][status(1)]  status: 0=成功, 1=B 不在线 */
+void compact_on_request_ack(struct p2p_session *s,
+                            const uint8_t *payload, int len,
+                            const struct sockaddr_in *from);
 
-/* 处理 MSG_RES（Server→A relay B 的应答）
- * payload: [req_id(2)][msg_type(1)][data(N)]
- * 处理器内部自动回复 MSG_RES_ACK、触发 on_msg_res 回调 */
-void compact_on_msg_res(struct p2p_session *s,
-                        const uint8_t *payload, int len,
-                        const struct sockaddr_in *from);
+/* 处理 MSG_RESP（Server→A relay B 的应答）
+ * payload: [sid(2)][msg(1)][data(N)]
+ * 处理器内部自动回复 MSG_RESP_ACK、触发 on_msg_res 回调 */
+void compact_on_response(struct p2p_session *s,
+                         const uint8_t *payload, int len,
+                         const struct sockaddr_in *from);
 
 ///////////////////////////////////////////////////////////////////////////////
 
