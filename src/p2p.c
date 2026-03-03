@@ -635,8 +635,7 @@ p2p_update(p2p_handle_t hdl) {
 
             case P2P_PKT_RELAY_DATA:
             case P2P_PKT_RELAY_ACK:
-                if (compact_on_relay_packet(s, hdr.type, &payload, &payload_len, &from) != 0)
-                    break;
+                if (!compact_on_relay_packet(s, hdr.type, &payload, &payload_len, &from)) break;
                 if (hdr.type == P2P_PKT_RELAY_DATA) goto handle_data;
                 else goto handle_ack;
 
@@ -711,17 +710,6 @@ p2p_update(p2p_handle_t hdl) {
                 break;
 
             // --------------------
-            // 路由探测包，即处于同一个子网内的双方的探测和确认
-            // --------------------
-
-            case P2P_PKT_ROUTE_PROBE:
-                route_on_probe(&s->route, &from, s->sock);
-                break;
-            case P2P_PKT_ROUTE_PROBE_ACK:
-                route_on_probe_ack(&s->route, &from);
-                break;
-
-            // --------------------
             // COMPACT 模式的信令包（REGISTER_ACK、PEER_INFO、PEER_INFO_ACK 等）
             // --------------------
 
@@ -744,13 +732,13 @@ p2p_update(p2p_handle_t hdl) {
                 compact_on_nat_probe_ack(s, hdr.seq, payload, payload_len, &from);
                 break;
             case SIG_PKT_MSG_REQ:
-                compact_on_msg_req(s, hdr.flags, payload, payload_len, &from);
+                compact_on_request(s, hdr.flags, payload, payload_len, &from);
                 break;
             case SIG_PKT_MSG_REQ_ACK:
-                compact_on_msg_req_ack(s, payload, payload_len, &from);
+                compact_on_request_ack(s, payload, payload_len, &from);
                 break;
-            case SIG_PKT_MSG_RES:
-                compact_on_msg_res(s, payload, payload_len, &from);
+            case SIG_PKT_MSG_RESP:
+                compact_on_response(s, payload, payload_len, &from);
                 break;
             default:
                 print("V:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F132, 95), hdr.type);
@@ -797,31 +785,6 @@ p2p_update(p2p_handle_t hdl) {
 
     if (s->nat.state != NAT_INIT) {
         nat_tick(s, now_ms);
-    }
-
-    // 升级到 LAN 路径（如果确认同一子网）
-    if (s->route.lan_confirmed && s->path != P2P_PATH_LAN) {
-        print("I: %s", LA_S("Same subnet confirmed, switching to LAN path", LA_S77, 624));
-        
-        // 添加 LAN 路径到路径管理器
-        int lan_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_LAN, &s->route.lan_peer_addr);
-        if (lan_idx >= 0) {
-            path_manager_set_path_state(&s->path_mgr, lan_idx, PATH_STATE_ACTIVE);
-            print("I:", LA_F("Added LAN path to path manager, idx=%d", LA_F55, 232), lan_idx);
-            
-            // 重新选择最佳路径（LAN 应当优先）
-            int best_path = path_manager_select_best_path(&s->path_mgr);
-            if (best_path >= 0 && best_path == lan_idx) {
-                s->path = P2P_PATH_LAN;
-                s->active_addr = s->route.lan_peer_addr;
-                s->path_mgr.active_path = best_path;
-                print("I: %s", LA_S("Switched to LAN path", LA_S89, 624));
-            }
-        } else {
-            // 降级：路径管理器失败，使用传统方式
-            s->path = P2P_PATH_LAN;
-            s->active_addr = s->route.lan_peer_addr;
-        }
     }
 
     /* ========================================================================
@@ -872,32 +835,6 @@ p2p_update(p2p_handle_t hdl) {
         // 触发连接建立回调
         if (s->cfg.on_connected) {
             s->cfg.on_connected(s, s->cfg.userdata);
-        }
-
-        // 查找远端 Host 候选（用于同子网检测）
-        struct sockaddr_in *peer_priv = NULL;
-        for (int i = 0; i < s->remote_cand_cnt; i++) {
-            if (s->remote_cands[i].cand.type == P2P_ICE_CAND_HOST) {
-                peer_priv = &s->remote_cands[i].cand.addr;
-                break;
-            }
-        }
-
-        // 如果对方内网 IP 和自己属于同一个子网段内
-        if (peer_priv && route_check_same_subnet(&s->route, peer_priv)) {
-
-            if (!s->cfg.disable_lan_shortcut) {
-
-                // 发送 ROUTE_PROBE，确认后将切换到 LAN 路径
-                struct sockaddr_in priv = *peer_priv;
-                priv.sin_port = s->nat.peer_addr.sin_port;
-                route_send_probe(&s->route, s->sock, &priv, 0);
-
-                print("I:", LA_F("Same subnet detecting, sent ROUTE_PROBE to %s:%d", LA_F140, 109),
-                       inet_ntoa(priv.sin_addr), ntohs(priv.sin_port));
-            }
-            // 同子网但 disable_lan_shortcut=true：跳过升级，仅打印日志
-            else print("V: %s", LA_S("Skipping LAN shortcut on --disable-lan-shortcut", LA_S83, 122));
         }
     }
 
@@ -1216,28 +1153,28 @@ p2p_recv(p2p_handle_t hdl, void *buf, int len) {
 }
 
 int
-p2p_msg_send(p2p_handle_t hdl, uint8_t msg_type, const void *data, int len) {
+p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len) {
 
     if (!hdl) return -1;
     p2p_session_t *s = (p2p_session_t*)hdl;
     if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) return -1;
 
     LOCK(s);
-    int ret = p2p_signal_compact_msg_send(s, msg_type, data, len);
+    int ret = p2p_signal_compact_request(s, msg, data, len);
     UNLOCK(s);
     return ret;
 }
 
 int
-p2p_msg_reply(p2p_handle_t hdl, uint16_t req_id,
-              uint8_t msg_type, const void *data, int len) {
+p2p_response(p2p_handle_t hdl, uint16_t sid,
+             uint8_t msg, const void *data, int len) {
 
     if (!hdl) return -1;
     p2p_session_t *s = (p2p_session_t*)hdl;
     if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) return -1;
 
     LOCK(s);
-    int ret = p2p_signal_compact_msg_reply(s, req_id, msg_type, data, len);
+    int ret = p2p_signal_compact_response(s, sid, msg, data, len);
     UNLOCK(s);
     return ret;
 }

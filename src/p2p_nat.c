@@ -99,11 +99,13 @@ int nat_punch(p2p_session_t *s, int idx) {
         uint8_t probe_payload[2];
         nwrite_s(probe_payload, n->last_peer_seq);
         for (int i = 0; i < s->remote_cand_cnt; i++) {
-            udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
-            s->remote_cands[i].last_punch_send_ms = now;
+
             printf(LA_F("Send probe PUNCH pkt to %s:%d, echo_seq=%d", LA_F146, 652),
                    inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
                    ntohs(s->remote_cands[i].cand.addr.sin_port), n->punch_seq);
+
+            udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
+            s->remote_cands[i].last_punch_send_ms = now;
         }
         n->last_send_time = now;
         
@@ -132,10 +134,12 @@ int nat_punch(p2p_session_t *s, int idx) {
         // 发送打洞包，捎带上次收到的对方 seq
         uint8_t probe_payload[2];
         nwrite_s(probe_payload, n->last_peer_seq);
-        udp_send_packet(s->sock, addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
-        s->remote_cands[idx].last_punch_send_ms = now;    // 更新候选的时间戳
+
         printf(LA_F("Send probe PUNCH pkt to %s:%d, seq=%u", LA_F147, 653),
                inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), n->punch_seq);
+
+        udp_send_packet(s->sock, addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
+        s->remote_cands[idx].last_punch_send_ms = now;
 
         n->last_send_time = now;
     }
@@ -214,6 +218,17 @@ ret_t nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
             n->state = NAT_CONNECTED;
             print("I:", LA_F("PUNCH bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F97, 788),
                   inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+            
+            // 检查打通的路径是否为同子网（LAN）
+            if (route_check_same_subnet(&s->route, from)) {
+                // 标记为 LAN 路径（高优先级）
+                int lan_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_LAN, (struct sockaddr_in*)from);
+                if (lan_idx >= 0) {
+                    path_manager_set_path_state(&s->path_mgr, lan_idx, PATH_STATE_ACTIVE);
+                    print("I:", LA_F("LAN path detected and activated: %s:%d", LA_F89, 276),
+                          inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+                }
+            }
         }
     }
 
@@ -284,15 +299,16 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             // 发送保活包（复用 PUNCH 包，echo_seq=0）
             if (now_ms - n->last_send_time >= PING_INTERVAL_MS) {
 
-                print("V:", LA_F("Keep-alive to %s:%d", LA_F88, 96),
-                      inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port));
-
                 uint8_t probe_payload[2]; nwrite_s(probe_payload, n->last_peer_seq);
-                udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
+
                 printf(LA_F("Send alive PUNCH pkt to %s:%d, seq=%u", LA_F144, 651),
                        inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port), n->punch_seq);
 
+                udp_send_packet(s->sock, &n->peer_addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
                 n->last_send_time = now_ms;
+
+                print("V:", LA_F("Keep-alive to %s:%d", LA_F88, 96),
+                      inet_ntoa(n->peer_addr.sin_addr), ntohs(n->peer_addr.sin_port));
             }
 
             // 超时检查
@@ -369,11 +385,12 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 uint8_t probe_payload[2]; nwrite_s(probe_payload, n->last_peer_seq);
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
 
-                    udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
-                    s->remote_cands[i].last_punch_send_ms = now_ms;
                     printf(LA_F("Send relay PUNCH pkt to %s:%d, echo_seq=%d", LA_F148, 654),
                            inet_ntoa(s->remote_cands[i].cand.addr.sin_addr),
                            ntohs(s->remote_cands[i].cand.addr.sin_port), n->last_peer_seq);
+
+                    udp_send_packet(s->sock, &s->remote_cands[i].cand.addr, P2P_PKT_PUNCH, 0, ++n->punch_seq, probe_payload, 2);
+                    s->remote_cands[i].last_punch_send_ms = now_ms;
                 }
 
                 n->last_send_time = now_ms;

@@ -112,10 +112,6 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define P2P_PKT_ACK             0x21        // 确认包
 #define P2P_PKT_FIN             0x22        // 结束包 (无需应答)
 
-/* 路由探测 (同一子网) */
-#define P2P_PKT_ROUTE_PROBE     0x30        // 路由探测包
-#define P2P_PKT_ROUTE_PROBE_ACK 0x31        // 路由探测确认
-
 /* ============================================================================
  * COMPACT 模式信令服务协议 (UDP)
  * ============================================================================
