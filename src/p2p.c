@@ -336,6 +336,14 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     s->signal_sent = false;
     s->cands_pending_send = false;
 
+    // 初始化 Relay 探测状态
+    s->relay_probe_state = P2P_RELAY_PROBE_IDLE;
+    s->relay_probe_sid = 0;
+    s->relay_probe_start = 0;
+    s->relay_probe_complete = 0;
+    s->relay_probe_retries = 0;
+    s->relay_probe_enabled = true;  // 默认启用自动探测
+
     ret_t ret;
     switch (s->signaling_mode) {
 
@@ -755,9 +763,11 @@ p2p_update(p2p_handle_t hdl) {
 
     if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
-        // 信令层维护（注册、等待、候选同步）
+        // 信令层维护（注册、等待、候选同步）+ MSG 超时重传
+        // 注意：MSG 机制在所有非 INIT 状态下都需要处理超时重传
         if (s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERING ||
             s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERED ||
+            s->sig_compact_ctx.state == SIGNAL_COMPACT_ICE ||
             s->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
             p2p_signal_compact_tick_recv(s);
         }

@@ -8,6 +8,7 @@
 #define MOD_TAG "NAT"
 
 #include "p2p_internal.h"
+#include "p2p_relay_probe.h"
 
 #define PUNCH_INTERVAL_MS       500         /* 打洞间隔 */
 #define PUNCH_TIMEOUT_MS        5000        /* 打洞超时 */
@@ -275,6 +276,9 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 n->rx_confirmed = false;
                 n->tx_confirmed = false;
                 n->state = NAT_RELAY;
+                
+                // 触发 Relay 探测：通过服务器检测对端可达性
+                relay_probe_trigger(s);
             }
 
             int sent_cnt = 0;
@@ -375,9 +379,20 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         //   - 切换到 RELAY 中继模式（适用于打洞多次失败后的降级，或原因 6-永久）
         //   - 触发重新 REGISTER（适用于原因 4/5，需要重新交换地址）
         //   - 直接通知上层断开（适用于原因 1，对方已不可达）            
+            // 处理 Relay 探测状态机（检测对端状态）
+            
+            relay_probe_tick(s, now_ms);
+            
+            // 首次进入此状态时触发探测
+            if (s->relay_probe_state == P2P_RELAY_PROBE_IDLE) {
+                relay_probe_trigger(s);
+            }
             break;
 
         case NAT_RELAY:
+
+            // 处理 Relay 探测状态机
+            relay_probe_tick(s, now_ms);
 
             // 中继模式下周期性尝试直连，携带 last_peer_seq
             if (now_ms - n->last_send_time >= PUNCH_INTERVAL_MS * 4) {

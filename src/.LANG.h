@@ -175,7 +175,7 @@ enum {
     LA_S42,  /* "MSG_REQ timeout, no REQ_ACK received"  [p2p_signal_compact.c] */
     LA_S43,  /* "MSG_REQ_ACK: peer offline, request failed"  [p2p_signal_compact.c] */
     LA_S44,  /* "MSG_REQ_ACK: request accepted, waiting for response"  [p2p_signal_compact.c] */
-    LA_S45,  /* "MSG_RES received, RPC complete"  [p2p_signal_compact.c] */
+    LA_S45,  /* "MSG_RESP received, RPC complete"  [p2p_signal_compact.c] */
     LA_S46,  /* "NAT connection recovered, upgrading from RELAY to CONNECTED"  [p2p.c] */
     LA_S47,  /* "NAT connection timeout, downgrading to relay mode"  [p2p.c] */
     LA_S48,  /* "need"  [p2p_stun.c] */

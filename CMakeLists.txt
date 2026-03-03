@@ -68,6 +68,7 @@ set(LIB_SRCS
     src/p2p_trans_reliable.c
     src/p2p_stream.c
     src/p2p_route.c
+    src/p2p_relay_probe.c
     src/p2p.c
     src/p2p_stun.c
     src/p2p_ice.c
