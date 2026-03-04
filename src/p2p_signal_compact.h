@@ -284,7 +284,7 @@ typedef struct {
 
     /* REGISTER 重发控制（仅 REGISTERING 状态） */
     uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
-    int                 register_attempts;                  /* REGISTER 重发次数 */
+    int                 register_attempts;                  /* REGISTER 总共尝试次数 */
 
     /* REGISTER_ACK 返回的信息 */
     int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量 */
@@ -307,29 +307,30 @@ typedef struct {
 
     /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
     struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */
-    int16_t             nat_probe_retries;                  /* NAT_PROBE 已发次数（0=尚未发送，最多 3 次）*/
-    uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
     uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 PEER_INFO 重传定时器）*/
+    int16_t             nat_probe_retries;                  /* 失败重试次数（不包括首次执行）*/
+    uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
 
     /* MSG RPC（A 端：发送请求） */
-    uint16_t            msg_sid;                            /* 当前挂起的序列号（0=无挂起）*/
-    uint8_t             msg_state;                          /* 0=空闲 1=等待 REQ_ACK 2=等待 RESP */
-    uint8_t             msg;                                /* 挂起请求的消息 ID */
-    uint8_t             msg_data[P2P_MSG_DATA_MAX];         /* 挂起请求的数据缓冲区 */
-    int                 msg_data_len;                       /* 挂起请求的数据长度 */
-    uint64_t            msg_send_time;                      /* MSG_REQ 最后发送时间 */
-    int                 msg_retries;                        /* MSG_REQ 已重发次数 */
+    uint8_t             req_state;                          /* 0=空闲 1=等待 REQ_ACK 2=等待 RESP */
+    uint16_t            req_sid;                            /* 当前挂起的 rpc 序列号（0=无挂起）*/
+    uint8_t             req_msg;                            /* 挂起请求的消息 ID */
+    uint8_t             req_data[P2P_MSG_DATA_MAX];         /* 挂起请求的数据缓冲区 */
+    int                 req_data_len;                       /* 挂起请求的数据长度 */
+    uint64_t            req_send_time;                      /* MSG_REQ 最后发送时间 */
+    int                 req_retries;                        /* 失败重试次数（不包括首次执行）*/
 
     /* MSG RPC（B 端：接收中转的请求，等待用户回应） */
-    uint16_t            msg_relay_sid;                      /* 待回应的序列号（0=无）*/
-    uint64_t            msg_relay_session_id;               /* A 的 session_id（用于构建 MSG_RESP）*/
-    uint16_t            msg_relay_last_sid;                 /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
-    uint8_t             msg_resp_state;                     /* 0=空闲 1=等待 RESP_ACK */
-    uint8_t             msg_resp_code;                      /* 缓存的响应码 */
-    uint8_t             msg_resp_data[P2P_MSG_DATA_MAX];    /* 缓存的响应数据 */
-    int                 msg_resp_data_len;                  /* 缓存的响应长度 */
-    uint64_t            msg_resp_send_time;                 /* MSG_RESP 最后发送时间 */
-    int                 msg_resp_retries;                   /* MSG_RESP 已重发次数 */
+    uint8_t             resp_state;                         /* 0=空闲 1=等待 RESP_ACK */
+    uint16_t            resp_sid;                           /* 待回应的 rpc 序列号（0=无）*/
+    uint64_t            resp_session_id;                    /* 待回应的 rpc 所属 session id */
+    uint8_t             resp_code;                          /* 缓存的响应码 */
+    uint8_t             resp_data[P2P_MSG_DATA_MAX];        /* 缓存的响应数据 */
+    int                 resp_data_len;                      /* 缓存的响应长度 */
+    uint64_t            resp_send_time;                     /* MSG_RESP 最后发送时间 */
+    int                 resp_retries;                       /* 失败重试次数（不包括首次执行）*/
+
+    uint16_t            rpc_last_sid;                       /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
 
 } p2p_signal_compact_ctx_t;
 
@@ -403,7 +404,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s);
  * @param size  数据长度
  * @return      =0 成功，!=0 错误码
  */
-ret_t p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t size);
+ret_t p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t* size);
 
 /*
  * 通过信令代理服务向对端发送 MSG 请求（A 端）

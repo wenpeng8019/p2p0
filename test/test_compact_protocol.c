@@ -404,7 +404,7 @@ TEST(peer_info_addr_change_notify_wrap_around) {
     ASSERT_EQ(info_255.base_index, 255);
     ASSERT_EQ(info_1.base_index, 1);
     
-    // 验证循环逻辑：255 之后是 1（需要 seq8_is_newer 函数判断）
+    // 验证循环逻辑：255 之后是 1（需要 uint8_circle_newer 函数判断）
     TEST_LOG("  ✓ Sequence wrap-around: 254 -> 255 -> 1");
     TEST_LOG("  ✓ base_index uses 8-bit cyclic numbering (1..255)");
 }

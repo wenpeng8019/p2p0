@@ -57,7 +57,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
                 ret_t ret = p2p_signal_compact_request(s, 0, NULL, 0);
                 if (ret == E_NONE) {
                     s->probe_compact_state = P2P_PROBE_COMPACT_WAITING;
-                    s->probe_compact_sid   = s->sig_compact_ctx.msg_sid;
+                    s->probe_compact_sid   = s->sig_compact_ctx.req_sid;
                     s->probe_compact_start = now_ms;
 
                     print("I:", LA_F("probe(compact) sent: MSG(msg=0, sid=%u)", LA_F208, 410),
