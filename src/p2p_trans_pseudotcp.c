@@ -49,8 +49,7 @@ void p2p_pseudotcp_on_ack(struct p2p_session *s, uint16_t ack_seq) {
         s->tcp.cwnd += (MSS * MSS) / s->tcp.cwnd;
     }
     s->tcp.dup_acks = 0;
-    P_clock _clk; P_clock_now(&_clk);
-    s->tcp.last_ack = clock_ms(_clk);
+    s->tcp.last_ack = P_tick_ms();
 }
 
 /* 
@@ -65,7 +64,7 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
     if (s->tcp.ssthresh < MIN_CWND) s->tcp.ssthresh = MIN_CWND;
     s->tcp.cwnd = MIN_CWND;
     s->tcp.dup_acks = 0;
-    print("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F173, 219), s->tcp.ssthresh, s->tcp.cwnd);
+    print("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F205, 407), s->tcp.ssthresh, s->tcp.cwnd);
 }
 
 /*
@@ -76,8 +75,7 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
  */
 static void p2p_pseudotcp_tick(struct p2p_session *s) {
     reliable_t *r = &s->reliable;
-    P_clock _clk; P_clock_now(&_clk);
-    uint64_t now = clock_ms(_clk);
+    uint64_t now = P_tick_ms();
 
     /* 
      * 在 PseudoTCP 模式下，根据 cwnd 限制在途数据包数量

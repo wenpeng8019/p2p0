@@ -911,6 +911,31 @@ static void send_msg_req_to_peer(sock_t udp_fd, compact_pair_t *pair) {
     fflush(stdout);
 }
 
+// 发送 MSG_RESP_ACK 给 B 端（Server→B）
+// 协议格式: [sid(2)]
+// 说明: 确认收到 B 端的 MSG_RESP，让 B 停止重发
+static void send_msg_resp_ack_to_responder(sock_t udp_fd, const struct sockaddr_in *addr, 
+                                           const char *peer_id, uint16_t sid) {
+    const char* PROTO = "MSG_RESP_ACK";
+
+    uint8_t pkt[4 + 2];
+    p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
+    hdr->type = SIG_PKT_MSG_RESP_ACK;
+    hdr->flags = 0;
+    hdr->seq = 0;
+
+    nwrite_s(pkt + 4, sid);
+
+    // 调试打印协议包信息
+    printf("Send %s pkt to %s:%d, seq=0, flags=0, len=2, sid=%u\n",
+           PROTO, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), sid);
+
+    sendto(udp_fd, (const char *)pkt, 6, 0, (struct sockaddr *)addr, sizeof(*addr));
+
+    printf("[UDP] V: %s sent to '%s', sid=%u\n", PROTO, peer_id, sid);
+    fflush(stdout);
+}
+
 // 发送 MSG_RESP 给 A 端（Server→A）
 // 协议格式: [sid(2)][code(1)][data(N)]（正常响应，code=响应码）
 //          [sid(2)]（错误响应，flags 中标识错误类型）
@@ -1780,8 +1805,15 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             printf(LA_F("[UDP] W: %s: no matching pending msg (sid=%u, expected=%u)\n", 0),
                    PROTO, sid, requester->msg_sid);
             fflush(stdout);
+            // 即使不匹配，也要发送 ACK（幂等，避免 B 端一直重发）
+            send_msg_resp_ack_to_responder(udp_fd, from, "unknown", sid);
             return;
         }
+
+        // 立即发送 MSG_RESP_ACK 给 B 端（让 B 停止重发）
+        // 注意：是向源地址发送（from = B 端地址）
+        const char *responder_peer_id = requester->peer ? requester->peer->local_peer_id : "unknown";
+        send_msg_resp_ack_to_responder(udp_fd, from, responder_peer_id, sid);
 
         // 转发给 A 端
         send_msg_resp_to_requester(udp_fd, requester, 0, resp_msg, resp_data, resp_len);

@@ -191,7 +191,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   3. Server 转发请求超时：Server → A 发送 MSG_RESP(flags=SIG_MSG_FLAG_TIMEOUT)，
  *      A 调用 on_response(len=-1, code=SIG_MSG_ERR_TIMEOUT)
  *
- * 流程（6 次传输）：
+ * 流程（7 次传输）：
  *
  *   A                      Server                      B
  *   │                         │                        │
@@ -202,25 +202,29 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   │◄── MSG_REQ_ACK ─────────┤  status=0 成功/1 B不在线 │
  *   │   [sid][status]         │  A 停止重发              │
  *   │                         │                         │
- *   │                         ├── MSG_REQ ─────────────►│  Server 重发直到收到 RES
+ *   │                         ├── MSG_REQ ─────────────►│  Server 重发直到收到 RESP
  *   │                         │   [session_id][sid]     │  (relay 标志位=1)
- *   │                         │   [msg][data]           │  msg=0 时自动 echo
- *   │                         │                         │
- *   │                         │◄── MSG_RESP ────────────┤  B 的应答同时作为对 relay 的 ACK
- *   │                         │   [session_id][sid]     │  Server 停止重发
+ *   │                         │   [msg][data]           │  B 循环比较 sid：
+ *   │                         │                         │  sid>last_sid → 执行新请求
+ *   │                         │                         │  sid≤last_sid → 忽略旧请求
+ *   │                         │◄── MSG_RESP ────────────┤  B 定时重发直到收到 ACK
+ *   │                         │   [session_id][sid]     │  Server 收到后停止向 B 发 REQ
  *   │                         │   [code][data]          │  code=响应码
  *   │                         │                         │
- *   │◄── MSG_RESP ────────────┤  Server 重发直到收到 RES_ACK
- *   │   [sid][code]           │  (flags 可能标识特殊错误) │
- *   │   [data]                │  code=响应码             │
+ *   │                         ├── MSG_RESP_ACK ────────►│  Server 每次收到 RESP 都回 ACK
+ *   │                         │   [sid]                 │  B 收到 ACK 后停止重发
+ *   │                         │                         │
+ *   │◄── MSG_RESP ────────────┤  Server 转发第一次 RESP 给 A
+ *   │   [sid][code]           │  后续重发直到收到 A 的 ACK
+ *   │   [data]                │  (flags 可能标识特殊错误) │
  *   │                         │                         │
  *   ├── MSG_RESP_ACK ────────►│  流程完成                │
  *   │   [sid]                 │                         │
  */
 #define SIG_PKT_MSG_REQ         0x88        // MSG 请求：A→Server（含目标 peer_id + payload）；Server→B relay（含 session_id，flags=SIG_MSG_FLAG_RELAY）
 #define SIG_PKT_MSG_REQ_ACK     0x89        // MSG 请求确认：Server→A（已缓存并开始中转，或失败状态）
-#define SIG_PKT_MSG_RESP        0x8A        // MSG 应答：B→Server（应答内容，兼作对 relay 的 ACK）；Server→A relay（转发 B 的应答）
-#define SIG_PKT_MSG_RESP_ACK    0x8B        // MSG 应答确认：A→Server（已收到应答，流程完成）
+#define SIG_PKT_MSG_RESP        0x8A        // MSG 应答：B→Server（应答内容）；Server→A relay（转发 B 的应答）
+#define SIG_PKT_MSG_RESP_ACK    0x8B        // MSG 应答确认：Server→B（B 停止重发）；A→Server（A 停止重发）
  
 #define SIG_PKT_NAT_PROBE       0x8C        // NAT 类型探测请求（发往探测端口）
 #define SIG_PKT_NAT_PROBE_ACK   0x8D        // NAT 类型探测响应（返回第二次映射地址）
@@ -351,17 +355,22 @@ typedef struct {
  *   payload: [session_id(8)][sid(2)][msg(1)][data(N)]
  *   包头: type=0x8A, flags=0, seq=0
  *   - session_id: 从 MSG_REQ relay 中取得的 A 的会话 ID
- *   - B 的应答同时兼作对 Server relay 的 ACK（Server 收到后停止向 B 重发）
+ *   - B 重发此包直到收到 Server → B 的 MSG_RESP_ACK
+ *
+ * MSG_RESP_ACK (Server → B):
+ *   payload: [sid(2)]
+ *   包头: type=0x8B, flags=0, seq=0
+ *   - Server 确认收到 B 的 MSG_RESP，B 停止重发
  *
  * MSG_RESP (Server → A, relay):
  *   payload: [sid(2)][msg(1)][data(N)]
  *   包头: type=0x8A, flags=0, seq=0
- *   - Server 重发此包直到收到 MSG_RESP_ACK
+ *   - Server 重发此包直到收到 A → Server 的 MSG_RESP_ACK
  *
  * MSG_RESP_ACK (A → Server):
  *   payload: [sid(2)]
  *   包头: type=0x8B, flags=0, seq=0
- *   - A 收到 MSG_RESP 后发送，流程完成
+ *   - A 收到 Server 转发的 MSG_RESP 后发送，流程完成
  *
  * UNREGISTER:
  *   payload: [local_peer_id(32)][remote_peer_id(32)]

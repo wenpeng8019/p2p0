@@ -121,7 +121,7 @@
  */
 static void p2p_dtls_debug(void *ctx, int level, const char *file, int line, const char *str) {
     (void)ctx; (void)level;
-    printf(LA_F("%s:%04d: %s", LA_F53, 314), file, line, str);
+    printf(LA_F("%s:%04d: %s", LA_F120, 322), file, line, str);
 }
 
 /*
@@ -155,8 +155,7 @@ static void p2p_dtls_set_timer(void *ctx, uint32_t int_ms, uint32_t fin_ms) {
     timer->int_ms = int_ms;
     timer->fin_ms = fin_ms;
     if (fin_ms != 0) {
-        P_clock _clk; P_clock_now(&_clk);
-        timer->snapshot = clock_ms(_clk);
+        timer->snapshot = P_tick_ms();
     }
 }
 
@@ -166,8 +165,7 @@ static void p2p_dtls_set_timer(void *ctx, uint32_t int_ms, uint32_t fin_ms) {
 static int p2p_dtls_get_timer(void *ctx) {
     p2p_dtls_timer_t *timer = (p2p_dtls_timer_t *)ctx;
     if (timer->fin_ms == 0) return -1;  /* 定时器已取消 */
-    P_clock _clk; P_clock_now(&_clk);
-    uint64_t elapsed = clock_ms(_clk) - timer->snapshot;
+    uint64_t elapsed = P_tick_ms() - timer->snapshot;
     if (elapsed >= timer->fin_ms) return 2;  /* 最终超时 → 需重传 */
     if (elapsed >= timer->int_ms) return 1;  /* 中间超时 */
     return 0;  /* 未超时 */
@@ -343,7 +341,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret;
     if ((ret = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F175, 218), -ret);
+        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F216, 418), -ret);
         return -1;
     }
     
@@ -405,11 +403,11 @@ static void dtls_tick(p2p_session_t *s) {
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            print("I: %s", LA_S("Handshake complete", LA_S35, 152));
+            print("I: %s", LA_S("Handshake complete", LA_S36, 137));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));
-            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F70, 217), ebuf, -ret);
+            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F138, 340), ebuf, -ret);
             s->state = P2P_STATE_ERROR;
         }
     }

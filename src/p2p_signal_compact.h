@@ -323,6 +323,13 @@ typedef struct {
     /* MSG RPC（B 端：接收中转的请求，等待用户回应） */
     uint16_t            msg_relay_sid;                      /* 待回应的序列号（0=无）*/
     uint64_t            msg_relay_session_id;               /* A 的 session_id（用于构建 MSG_RESP）*/
+    uint16_t            msg_relay_last_sid;                 /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
+    uint8_t             msg_resp_state;                     /* 0=空闲 1=等待 RESP_ACK */
+    uint8_t             msg_resp_code;                      /* 缓存的响应码 */
+    uint8_t             msg_resp_data[P2P_MSG_DATA_MAX];    /* 缓存的响应数据 */
+    int                 msg_resp_data_len;                  /* 缓存的响应长度 */
+    uint64_t            msg_resp_send_time;                 /* MSG_RESP 最后发送时间 */
+    int                 msg_resp_retries;                   /* MSG_RESP 已重发次数 */
 
 } p2p_signal_compact_ctx_t;
 
@@ -412,17 +419,15 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
 
 /*
  * 回复对端的 MSG 请求（B 端）。
- * sid 必须与 on_request 回调中的 sid 一致
  *
  * @param s     会话对象
- * @param sid   待回复的请求序列号（来自 on_request 回调）
- * @param msg   应用层消息类型（1 字节，应用自定义）
+ * @param code  应用层消息类型（1 字节，应用自定义）
  * @param data  回复数据（最多 P2P_MSG_DATA_MAX 字节）
  * @param len   数据长度
- * @return      0=已加入发送队列，-1=失败（参数错误/未匹配的 sid）
+ * @return      0=已加入发送队列，-1=失败（参数错误/无挂起请求）
  */
-ret_t p2p_signal_compact_response(struct p2p_session *s, uint16_t sid,
-                                  uint8_t msg, const void *data, int len);
+ret_t p2p_signal_compact_response(struct p2p_session *s,
+                                  uint8_t code, const void *data, int len);
 
 //-----------------------------------------------------------------------------
 
@@ -485,7 +490,13 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
                          const uint8_t *payload, int len,
                          const struct sockaddr_in *from);
 
-/* 处理 NAT_PROBE_ACK（NAT 探测响应） */
+/*
+ * 处理 MSG_RESP_ACK（Server 对 B 端响应的确认）
+ */
+void compact_on_response_ack(struct p2p_session *s,
+                             const uint8_t *payload, int len,
+                             const struct sockaddr_in *from);
+
 void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
                               const uint8_t *payload, int len,
                               const struct sockaddr_in *from);

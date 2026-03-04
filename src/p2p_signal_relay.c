@@ -155,8 +155,7 @@ ret_t p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip,
 
     // 标记为连接中
     ctx->state = SIGNAL_CONNECTING;
-    P_clock _clk; P_clock_now(&_clk);
-    ctx->last_connect_attempt = clock_ms(_clk);
+    ctx->last_connect_attempt = P_tick_ms();
 
     // 建立标准 tcp 连接
 
@@ -227,7 +226,7 @@ ret_t p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip,
     // 标记为已连接
     ctx->state = SIGNAL_CONNECTED;
 
-    print("I:", LA_F("%s %s:%d %s '%s'", LA_F20, 277), LA_W("Connected to server", LA_W16, 24), server_ip, port, LA_W("as", LA_W7, 9), my_name);
+    print("I:", LA_F("%s %s:%d %s '%s'", LA_F19, 221), LA_W("Connected to server", LA_W14, 15), server_ip, port, LA_W("as", LA_W7, 8), my_name);
     return E_NONE;
 }
 
@@ -292,19 +291,19 @@ ret_t p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *tar
     strncpy(target, target_name, P2P_PEER_ID_MAX);
 
     if (send(ctx->fd, (const char *)&hdr, sizeof(hdr), 0) != sizeof(hdr)) {
-        print("E:", LA_S("Failed to send header", LA_S29, 177));
+        print("E:", LA_S("Failed to send header", LA_S29, 130));
         return -1;
     }
     if (send(ctx->fd, target, P2P_PEER_ID_MAX, 0) != P2P_PEER_ID_MAX) {
-        print("E:", LA_S("Failed to send target name", LA_S31, 179));
+        print("E:", LA_S("Failed to send target name", LA_S32, 133));
         return -1;
     }
     if (send(ctx->fd, (const char *)data, len, 0) != len) {
-        print("E:", LA_S("Failed to send payload", LA_S30, 178));
+        print("E:", LA_S("Failed to send payload", LA_S30, 131));
         return -1;
     }
     
-    print("I:", LA_F("%s %s '%s' (%d %s)", LA_F17, 274), LA_W("Sent connect", LA_W88, 117), LA_S("request to", LA_S74, 200), target_name, len, LA_W("bytes", LA_W11, 18));
+    print("I:", LA_F("%s %s '%s' (%d %s)", LA_F16, 218), LA_W("Sent connect", LA_W77, 78), LA_S("request to", LA_S84, 185), target_name, len, LA_W("bytes", LA_W10, 11));
     
     /* 发送成功，ACK 将在状态机中异步接收 */
     return E_NONE;
@@ -336,7 +335,7 @@ int p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *targ
     send(ctx->fd, target, P2P_PEER_ID_MAX, 0);
     send(ctx->fd, (const char *)data, len, 0);
     
-    print("I:", LA_F("%s '%s' (%d %s)", LA_F27, 286), LA_W("Sent answer to", LA_W85, 114), target_name, len, LA_W("bytes", LA_W11, 18));
+    print("I:", LA_F("%s '%s' (%d %s)", LA_F26, 228), LA_W("Sent answer to", LA_W74, 75), target_name, len, LA_W("bytes", LA_W10, 11));
     return 0;
 }
 
@@ -386,15 +385,14 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
 
     /* P2P 连接已建立（直连或 TURN 中继），信令服务器使命完成，关闭 TCP 连接释放服务器资源 */
     if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
-        print("I: %s", LA_S("P2P connected, closing signaling TCP connection", LA_S55, 249));
+        print("I: %s", LA_S("P2P connected, closing signaling TCP connection", LA_S49, 150));
         p2p_signal_relay_close(ctx);
         return;
     }
 
     /* 发送心跳，刷新服务器的 last_active，防止超时踢下线（仅连接建立前） */
     {
-        P_clock _clk; P_clock_now(&_clk);
-        uint64_t now_ms = clock_ms(_clk);
+        uint64_t now_ms = P_tick_ms();
         if (ctx->last_heartbeat_ms == 0 ||
             now_ms - ctx->last_heartbeat_ms >= P2P_RELAY_HEARTBEAT_INTERVAL_MS) {
             p2p_relay_hdr_t hb;
@@ -408,12 +406,11 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
 
     /* 检查等待超时 */
     if (ctx->waiting_for_peer) {
-        P_clock _clk; P_clock_now(&_clk);
-        uint64_t elapsed = clock_ms(_clk) - ctx->waiting_start_time;
+        uint64_t elapsed = P_tick_ms() - ctx->waiting_start_time;
         if (elapsed > P2P_RELAY_PEER_WAIT_TIMEOUT_MS) {
-            print("W:", LA_F("%s '%s' %s (%dms), %s", LA_F24, 283),
-                   LA_W("Waiting for peer", LA_W106, 143), ctx->waiting_target, LA_W("timed out", LA_W96, 130),
-                   P2P_RELAY_PEER_WAIT_TIMEOUT_MS, LA_W("giving up", LA_W35, 45));
+            print("W:", LA_F("%s '%s' %s (%dms), %s", LA_F23, 225),
+                   LA_W("Waiting for peer", LA_W94, 95), ctx->waiting_target, LA_W("timed out", LA_W84, 85),
+                   P2P_RELAY_PEER_WAIT_TIMEOUT_MS, LA_W("giving up", LA_W31, 32));
             ctx->waiting_for_peer = false;
             ctx->waiting_target[0] = '\0';
             return;
@@ -443,7 +440,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             
             if (n == 0) {
                 /* 连接关闭 */
-                print("W:", LA_S("Connection closed by server", LA_S15, 164));
+                print("W:", LA_S("Connection closed by server", LA_S14, 115));
                 p2p_signal_relay_close(ctx);
                 return;
             }
@@ -454,7 +451,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     return;
                 }
                 /* 真正的错误 */
-                print("E:", LA_F("%s %d", LA_F4, 260), LA_W("recv error", LA_W73, 97), P_sock_errno());
+                print("E:", LA_F("%s %d", LA_F4, 206), LA_W("recv error", LA_W64, 65), P_sock_errno());
                 p2p_signal_relay_close(ctx);
                 return;
             }
@@ -465,14 +462,14 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             if (ctx->read_offset >= ctx->read_expected) {
                 /* 验证 magic */
                 if (ctx->read_hdr.magic != P2P_RLY_MAGIC) {
-                    print("W:", LA_F("%s 0x%x (%s 0x%x), %s", LA_F33, 294),
-                           LA_W("Invalid magic", LA_W37, 47), ctx->read_hdr.magic,
-                           LA_W("expected", LA_W23, 31), P2P_RLY_MAGIC, LA_W("resetting", LA_W78, 104));
+                    print("W:", LA_F("%s 0x%x (%s 0x%x), %s", LA_F31, 233),
+                           LA_W("Invalid magic", LA_W33, 34), ctx->read_hdr.magic,
+                           LA_W("expected", LA_W19, 20), P2P_RLY_MAGIC, LA_W("resetting", LA_W68, 69));
                     ctx->read_state = RELAY_READ_IDLE;
                     return;
                 }
                 
-                printf(LA_F("[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u", LA_F166, 362),
+                printf(LA_F("[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u", LA_F199, 401),
                        ctx->read_hdr.magic, ctx->read_hdr.type, ctx->read_hdr.length);
                 
                 /* 根据消息类型决定下一步 */
@@ -486,7 +483,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     if (ctx->read_hdr.length > 0) {
                         ctx->read_payload = (uint8_t*)malloc(ctx->read_hdr.length);
                         if (!ctx->read_payload) {
-                            print("E:", LA_S("Failed to allocate ACK payload buffer", LA_S23, 173));
+                            print("E:", LA_S("Failed to allocate ACK payload buffer", LA_S22, 123));
                             ctx->read_state = RELAY_READ_IDLE;
                             return;
                         }
@@ -519,7 +516,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             int n = recv(ctx->fd, buf, remaining, 0);
             
             if (n == 0) {
-                print("W:", LA_S("Connection closed while reading sender", LA_S18, 167));
+                print("W:", LA_S("Connection closed while reading sender", LA_S17, 118));
                 p2p_signal_relay_close(ctx);
                 return;
             }
@@ -529,7 +526,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     /* 缓冲区空了，等待下次 tick */
                     return;
                 }
-                print("E:", LA_F("%s %d %s", LA_F5, 261), LA_W("recv error", LA_W73, 97), P_sock_errno(), LA_W("while reading sender", LA_W109, 146));
+                print("E:", LA_F("%s %d %s", LA_F5, 207), LA_W("recv error", LA_W64, 65), P_sock_errno(), LA_W("while reading sender", LA_W97, 98));
                 p2p_signal_relay_close(ctx);
                 return;
             }
@@ -545,7 +542,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     /* 分配 payload 缓冲区 */
                     ctx->read_payload = (uint8_t*)malloc(payload_len);
                     if (!ctx->read_payload) {
-                        print("E:", LA_F("%s %u %s", LA_F22, 281), LA_W("Failed to allocate", LA_W24, 32), payload_len, LA_W("bytes", LA_W11, 18));
+                        print("E:", LA_F("%s %u %s", LA_F21, 223), LA_W("Failed to allocate", LA_W20, 21), payload_len, LA_W("bytes", LA_W10, 11));
                         ctx->read_state = RELAY_READ_IDLE;
                         return;
                     }
@@ -570,7 +567,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             int n = recv(ctx->fd, buf, remaining, 0);
             
             if (n == 0) {
-                print("W:", LA_S("Connection closed while reading payload", LA_S17, 166));
+                print("W:", LA_S("Connection closed while reading payload", LA_S16, 117));
                 p2p_signal_relay_close(ctx);
                 return;
             }
@@ -580,7 +577,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     /* 缓冲区空了，等待下次 tick */
                     return;
                 }
-                print("E:", LA_F("%s %d %s", LA_F5, 261), LA_W("recv error", LA_W73, 97), P_sock_errno(), LA_W("while reading payload", LA_W108, 145));
+                print("E:", LA_F("%s %d %s", LA_F5, 207), LA_W("recv error", LA_W64, 65), P_sock_errno(), LA_W("while reading payload", LA_W96, 97));
                 p2p_signal_relay_close(ctx);
                 return;
             }
@@ -596,8 +593,8 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                 if (ctx->read_hdr.type == P2P_RLY_CONNECT_ACK) {
                     if (payload_len >= sizeof(p2p_relay_connect_ack_t)) {
                         p2p_relay_connect_ack_t *ack = (p2p_relay_connect_ack_t *)ctx->read_payload;
-                        print("I:", LA_F("%s (status=%d, candidates_acked=%d)", LA_F32, 293),
-                               LA_W("Received ACK", LA_W69, 90), ack->status, ack->candidates_acked);
+                        print("I:", LA_F("%s (status=%d, candidates_acked=%d)", LA_F30, 232),
+                               LA_W("Received ACK", LA_W60, 61), ack->status, ack->candidates_acked);
                         
                         /* 更新候选索引（避免重复发送） */
                         ctx->next_candidate_index += ack->candidates_acked;
@@ -605,24 +602,23 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                         /* 根据状态处理 */
                         switch (ack->status) {
                             case 0:  // 对端在线
-                                print("I:", LA_F("%s, %s %d %s", LA_F47, 308),
-                                       LA_W("Peer online", LA_W62, 77), LA_S("forwarded", LA_S32, 180), ack->candidates_acked, LA_W("candidates", LA_W14, 21));
+                                print("I:", LA_F("%s, %s %d %s", LA_F58, 260),
+                                       LA_W("Peer online", LA_W54, 55), LA_S("forwarded", LA_S33, 134), ack->candidates_acked, LA_W("candidates", LA_W12, 13));
                                 ctx->waiting_for_peer = false;
                                 break;
                             case 1:  // 对端离线，已缓存
-                                print("I:", LA_F("%s, %s %d %s", LA_F47, 308),
-                                       LA_W("Peer offline", LA_W60, 75), LA_S("cached", LA_S10, 161), ack->candidates_acked, LA_W("candidates", LA_W14, 21));
+                                print("I:", LA_F("%s, %s %d %s", LA_F58, 260),
+                                       LA_W("Peer offline", LA_W53, 54), LA_S("cached", LA_S9, 110), ack->candidates_acked, LA_W("candidates", LA_W12, 13));
                                 ctx->waiting_for_peer = false;
                                 break;
                             case 2:  // 缓存已满
-                                print("I:", LA_F("%s, %s", LA_F46, 307),
-                                       LA_W("Storage full", LA_W91, 123), LA_S("waiting for peer to come online", LA_S94, 215));
+                                print("I:", LA_F("%s, %s", LA_F57, 259),
+                                       LA_W("Storage full", LA_W79, 80), LA_S("waiting for peer to come online", LA_S100, 201));
                                 ctx->waiting_for_peer = true;
-                                P_clock _clk; P_clock_now(&_clk);
-                                ctx->waiting_start_time = clock_ms(_clk);
+                                ctx->waiting_start_time = P_tick_ms();
                                 break;
                             default:
-                                print("W:", LA_F("%s %d", LA_F4, 260), LA_W("Unknown ACK status", LA_W103, 139), ack->status);
+                                print("W:", LA_F("%s %d", LA_F4, 206), LA_W("Unknown ACK status", LA_W91, 92), ack->status);
                                 break;
                         }
                     }
@@ -651,22 +647,22 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                         s->signal_sent              = false;
                         s->last_cand_cnt_sent       = 0;
                         
-                        print("I:", LA_F("%s '%s' %s OFFER", LA_F26, 285),
-                               LA_W("Passive peer learned remote ID", LA_W57, 70), ctx->read_sender, LA_W("from", LA_W30, 40));
+                        print("I:", LA_F("%s '%s' %s OFFER", LA_F25, 227),
+                               LA_W("Passive peer learned remote ID", LA_W50, 51), ctx->read_sender, LA_W("from", LA_W26, 27));
                     }
                 }
                 
                 /* 收到 FORWARD：对端已上线，清除等待状态 */
                 if (ctx->read_hdr.type == P2P_RLY_FORWARD && ctx->waiting_for_peer &&
                     strcmp(ctx->waiting_target, ctx->read_sender) == 0) {
-                    print("I:", LA_F("%s '%s' %s (%s FORWARD), %s", LA_F25, 284),
-                           LA_W("Peer", LA_W59, 72), ctx->read_sender, LA_W("is now online", LA_W39, 50),
-                           LA_S("received", LA_S65, 196), LA_S("resuming", LA_S76, 201));
+                    print("I:", LA_F("%s '%s' %s (%s FORWARD), %s", LA_F24, 226),
+                           LA_W("Peer", LA_W52, 53), ctx->read_sender, LA_W("is now online", LA_W35, 36),
+                           LA_S("received", LA_S80, 181), LA_S("resuming", LA_S85, 186));
                     ctx->waiting_for_peer = false;
                     ctx->waiting_target[0] = '\0';
                 }
                 
-                print("I:", LA_F("%s '%s' (%u %s)", LA_F28, 287), LA_W("Received signal from", LA_W72, 94), ctx->read_sender, payload_len, LA_W("bytes", LA_W11, 18));
+                print("I:", LA_F("%s '%s' (%u %s)", LA_F27, 229), LA_W("Received signal from", LA_W63, 64), ctx->read_sender, payload_len, LA_W("bytes", LA_W10, 11));
                 
                 /* OFFER 表示新连接，FORWARD 如果 ICE 已 FAILED 则重置让其恢复 */
                 if (ctx->read_hdr.type == P2P_RLY_OFFER || ctx->read_hdr.type == P2P_RLY_FORWARD) {
@@ -676,7 +672,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                                        (s->ice_state == P2P_ICE_STATE_FAILED);
                     
                     if (should_reset && (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_INIT)) {
-                        printf(LA_F("[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates", LA_F164, 360),
+                        printf(LA_F("[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates", LA_F197, 399),
                                ctx->read_hdr.type == P2P_RLY_OFFER ? "OFFER" : "FORWARD", s->ice_state, s->remote_cand_cnt);
                         s->remote_cand_cnt = 0;
                         s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
@@ -715,13 +711,13 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
 
                                 rc->cand = c;  /* entry ← base entry */
                                 rc->last_punch_send_ms = 0;
-                                print("I:", LA_F("%s: %d -> %s:%d", LA_F49, 310),
-                                       LA_W("Added Remote Candidate", LA_W3, 5), c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
+                                print("I:", LA_F("%s: %d -> %s:%d", LA_F63, 265),
+                                       LA_W("Added Remote Candidate", LA_W3, 4), c.type, inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
                                 
                                 /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
                                 if (s->ice_state == P2P_ICE_STATE_CHECKING) {
 
-                                    print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F169, 363),
+                                    print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F202, 404),
                                                  inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
 
                                     nat_punch(s, idx);
@@ -750,7 +746,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             if (!ctx->read_payload && ctx->read_expected > 0) {
                 ctx->read_payload = (uint8_t*)malloc(ctx->read_expected);
                 if (!ctx->read_payload) {
-                    print("E:", LA_S("Failed to allocate discard buffer, closing connection", LA_S24, 174));
+                    print("E:", LA_S("Failed to allocate discard buffer, closing connection", LA_S23, 124));
                     p2p_signal_relay_close(ctx);
                     return;
                 }
@@ -762,7 +758,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             int n = recv(ctx->fd, buf, remaining, 0);
             
             if (n == 0) {
-                print("W:", LA_S("Connection closed while discarding", LA_S16, 165));
+                print("W:", LA_S("Connection closed while discarding", LA_S15, 116));
                 p2p_signal_relay_close(ctx);
                 return;
             }
@@ -772,7 +768,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     /* 缓冲区空了，等待下次 tick */
                     return;
                 }
-                print("E:", LA_F("%s %d %s", LA_F5, 261), LA_W("recv error", LA_W73, 97), P_sock_errno(), LA_W("while discarding", LA_W107, 144));
+                print("E:", LA_F("%s %d %s", LA_F5, 207), LA_W("recv error", LA_W64, 65), P_sock_errno(), LA_W("while discarding", LA_W95, 96));
                 p2p_signal_relay_close(ctx);
                 return;
             }
@@ -780,9 +776,9 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             ctx->read_offset += n;
             
             if (ctx->read_offset >= ctx->read_expected) {
-                printf(LA_F("[DEBUG] %s %d %s %s %d", LA_F163, 359),
-                       LA_W("Discarded", LA_W20, 28), ctx->read_expected, LA_W("bytes", LA_W11, 18),
-                       LA_S("payload of message type", LA_S59, 193), ctx->read_hdr.type);
+                printf(LA_F("[DEBUG] %s %d %s %s %d", LA_F196, 398),
+                       LA_W("Discarded", LA_W18, 19), ctx->read_expected, LA_W("bytes", LA_W10, 11),
+                       LA_S("payload of message type", LA_S53, 154), ctx->read_hdr.type);
                 
                 /* 释放缓冲区 */
                 if (ctx->read_payload) {
@@ -799,7 +795,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
         
         default:
             /* 不应该到达这里 */
-            print("W:", LA_F("%s %d, %s", LA_F6, 262), LA_W("Invalid read state", LA_W38, 48), ctx->read_state, LA_W("resetting", LA_W78, 104));
+            print("W:", LA_F("%s %d, %s", LA_F6, 208), LA_W("Invalid read state", LA_W34, 35), ctx->read_state, LA_W("resetting", LA_W68, 69));
             ctx->read_state = RELAY_READ_IDLE;
             break;
         }
@@ -826,8 +822,7 @@ void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
         s->state == P2P_STATE_REGISTERING &&
         s->remote_peer_id[0] != '\0') {
         
-        P_clock _clk; P_clock_now(&_clk);
-        uint64_t now = clock_ms(_clk);
+        uint64_t now = P_tick_ms();
         int unsent_count = s->local_cand_cnt - ctx->total_candidates_acked;
         
         // 检查是否需要发送（包括断点续传）
@@ -877,22 +872,22 @@ void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
 
                         if (ret > 0) {
                             print("I: [SIGNALING] %s [%d-%d] %s %s (%s=%d)",
-                                         LA_W("Sent candidates, forwarded", LA_W87, 116),
+                                         LA_W("Sent candidates, forwarded", LA_W76, 77),
                                          start_idx, start_idx + batch_size - 1,
-                                         LA_W("to", LA_W99, 135), s->remote_peer_id,
-                                         LA_W("forwarded", LA_W29, 39), ret);
+                                         LA_W("to", LA_W87, 88), s->remote_peer_id,
+                                         LA_W("forwarded", LA_W25, 26), ret);
                         } else {
                             print("I: [SIGNALING] %s %d %s %s",
-                                         LA_W("Sent candidates (cached, peer offline)", LA_W86, 115),
-                                         batch_size, LA_W("to", LA_W99, 135), s->remote_peer_id);
+                                         LA_W("Sent candidates (cached, peer offline)", LA_W75, 76),
+                                         batch_size, LA_W("to", LA_W87, 88), s->remote_peer_id);
                         }
                     } else if (ret == -2) {
                         /* 服务器缓存满（status=2）：停止发送，等待对端上线后收到 FORWARD */
                         /* waiting_for_peer 已在 send_connect() 中设置为 true */
-                        print("W: [SIGNALING] %s", LA_W("Server storage full, waiting for peer to come online", LA_W90, 120));
+                        print("W: [SIGNALING] %s", LA_W("Server storage full, waiting for peer to come online", LA_W78, 79));
                     } else {
                         s->cands_pending_send = true;  /* TCP 发送失败（-1/-3），标记待重发 */
-                        print("W: [SIGNALING] %s (ret=%d)", LA_W("Failed to send candidates, will retry", LA_W27, 36), ret);
+                        print("W: [SIGNALING] %s (ret=%d)", LA_W("Failed to send candidates, will retry", LA_W23, 24), ret);
                     }
                 }
             }  // 结束 if (start_idx < s->local_cand_cnt)

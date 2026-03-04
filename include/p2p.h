@@ -433,15 +433,13 @@ p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len);
  * 回复对端的 MSG 请求（B 端，在 on_request 回调中或异步调用）。
  *
  * @param hdl      会话句柄
- * @param sid      需要回复的序列号（从 on_request 回调的参数中获取）
  * @param msg 应答消息类型（1 字节）
  * @param data     应答数据
  * @param len      数据长度
- * @return 0=成功，-1=失败（无对应挂起请求/参数错误）
+ * @return 0=成功，-1=失败（无挂起请求/参数错误）
  */
 int
-p2p_response(p2p_handle_t hdl, uint16_t sid,
-             uint8_t msg, const void *data, int len);
+p2p_response(p2p_handle_t hdl, uint8_t msg, const void *data, int len);
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus

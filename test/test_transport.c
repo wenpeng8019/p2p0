@@ -53,8 +53,7 @@ void mock_capture_send(int sock, const uint8_t *buf, int len, const struct socka
     mock_packet_t *pkt = &mock_send_queue[mock_send_count++];
     memcpy(pkt->data, buf, len);
     pkt->len = len;
-    P_clock _clk; P_clock_now(&_clk);
-    pkt->timestamp = clock_ms(_clk);
+    pkt->timestamp = P_tick_ms();
 }
 
 /* 模拟接收：从接收队列拿包 */
