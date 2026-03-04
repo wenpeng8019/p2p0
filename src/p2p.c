@@ -754,7 +754,7 @@ p2p_update(p2p_handle_t hdl) {
                 compact_on_request_ack(s, payload, payload_len, &from);
                 break;
             case SIG_PKT_MSG_RESP:
-                compact_on_response(s, payload, payload_len, &from);
+                compact_on_response(s, hdr.flags, payload, payload_len, &from);
                 break;
             default:
                 print("V:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F132, 95), hdr.type);

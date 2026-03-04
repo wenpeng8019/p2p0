@@ -180,9 +180,16 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 通过服务器中转，实现对端间可信赖的一次请求-应答交互（类似 RPC）。
  * 服务器是否支持由 REGISTER_ACK.flags 中 SIG_REGACK_FLAG_MSG (0x02) 位标识。
  *
- * msg 特殊值：
+ * msg 特殊值（请求消息类型）：
  *   - msg=0: Echo 测试，B端自动回复相同数据，无需应用层介入
- *   - msg>0: 应用层自定义消息 ID，需要应用层在 on_msg_req 回调中处理并调用 p2p_response()
+ *   - msg>0: 应用层自定义消息类型，需要应用层在 on_request 回调中处理并调用 p2p_response()
+ *
+ * 错误处理：
+ *   1. REQ_ACK 阶段 B 不在线：Server → A 返回 status=1，A 调用 on_response(len=-1, code=原始请求msg)
+ *   2. B 在等待响应期间离线：Server → A 发送 MSG_RESP(flags=SIG_MSG_FLAG_PEER_OFFLINE)，
+ *      A 调用 on_response(len=-1, code=SIG_MSG_ERR_PEER_OFFLINE)
+ *   3. Server 转发请求超时：Server → A 发送 MSG_RESP(flags=SIG_MSG_FLAG_TIMEOUT)，
+ *      A 调用 on_response(len=-1, code=SIG_MSG_ERR_TIMEOUT)
  *
  * 流程（6 次传输）：
  *
@@ -190,7 +197,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   │                         │                        │
  *   ├── MSG_REQ(sid) ────────►│  A 重发直到收到 REQ_ACK  │
  *   │   [target_id][sid]      │  Server 查找 B 的注册槽  │
- *   │   [msg][data]           │                        │
+ *   │   [msg][data]           │  msg=消息类型            │
  *   │                         │                        │
  *   │◄── MSG_REQ_ACK ─────────┤  status=0 成功/1 B不在线 │
  *   │   [sid][status]         │  A 停止重发              │
@@ -201,11 +208,11 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   │                         │                         │
  *   │                         │◄── MSG_RESP ────────────┤  B 的应答同时作为对 relay 的 ACK
  *   │                         │   [session_id][sid]     │  Server 停止重发
- *   │                         │   [msg][data]           │
+ *   │                         │   [code][data]          │  code=响应码
  *   │                         │                         │
  *   │◄── MSG_RESP ────────────┤  Server 重发直到收到 RES_ACK
- *   │   [sid][msg]            │                         │
- *   │   [data]                │                         │
+ *   │   [sid][code]           │  (flags 可能标识特殊错误) │
+ *   │   [data]                │  code=响应码             │
  *   │                         │                         │
  *   ├── MSG_RESP_ACK ────────►│  流程完成                │
  *   │   [sid]                 │                         │
@@ -233,6 +240,14 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 
 /* MSG 包标志位（p2p_packet_hdr_t.flags） */
 #define SIG_MSG_FLAG_RELAY      0x01        // 标识此 MSG_REQ 是 Server→B 的中转包（而非 A→Server 的原始请求）
+
+/* MSG_RESP 包标志位 - 用于标识服务器特殊错误（而非对端返回的正常响应） */
+#define SIG_MSG_FLAG_PEER_OFFLINE   0x02    // B端在 REQ_ACK 之后离线（等待响应期间离线）
+#define SIG_MSG_FLAG_TIMEOUT        0x04    // 服务器向B端转发请求超时
+
+/* MSG_RESP 错误码（当 on_response 回调的 len=-1 时，msg 字段表示错误类型） */
+#define SIG_MSG_ERR_PEER_OFFLINE    0xFE    // B端在等待响应期间离线（区别于 REQ_ACK 时已知离线）
+#define SIG_MSG_ERR_TIMEOUT         0xFF    // 服务器转发请求超时
 
 /* PEER_INFO 标志位（p2p_packet_hdr_t.flags） */
 #define SIG_PEER_INFO_FIN       0x01        // 候选列表发送完毕
