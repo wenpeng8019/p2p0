@@ -164,6 +164,7 @@ typedef struct p2p_session {
     p2p_remote_candidate_entry_t* remote_cands;     // 远端候选地址（动态分配，含运行时状态）
     int                         remote_cand_cnt;    // 远端候选数量
     int                         remote_cand_cap;    // 远端候选容量
+    bool                        ice_exchange_done;  // ICE 候选交换是否完成（由信令层设置，NAT 层判断超时用）
     uint64_t                    ice_check_last_ms;  // 上次连通性检查时间
     int                         ice_check_count;    // 已发送检查轮数
 

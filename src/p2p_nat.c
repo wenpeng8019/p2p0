@@ -267,18 +267,25 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         case NAT_PUNCHING:
 
             // 超时判断
+            // 注意：只有在 ICE 候选交换完成后才判定打洞超时，否则可能还有新候选在路上
             if (now_ms - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 
-                print("W:", LA_F("TIMEOUT: Punch failed after %" PRIu64 " ms, switching to RELAY", LA_F32, 289),
-                      now_ms - n->punch_start);
+                // 统一判断：由信令层负责设置 ice_exchange_done 标志
+                if (s->ice_exchange_done) {
+                    print("W:", LA_F("TIMEOUT: Punch failed after %" PRIu64 " ms (ICE done), switching to RELAY", LA_F32, 289),
+                          now_ms - n->punch_start);
 
-                // 进入中继模式，重置双向确认标志，在中继期间继续尝试打洞
-                n->rx_confirmed = false;
-                n->tx_confirmed = false;
-                n->state = NAT_RELAY;
-                
-                // 触发探测：统一接口内部按信令模式分发
-                probe_trigger(s);
+                    // 进入中继模式，重置双向确认标志，在中继期间继续尝试打洞
+                    n->rx_confirmed = false;
+                    n->tx_confirmed = false;
+                    n->state = NAT_RELAY;
+                    
+                    // 触发探测：统一接口内部按信令模式分发
+                    probe_trigger(s);
+                } else {
+                    print("V:", LA_F("Punch timeout but ICE exchange not done yet (%" PRIu64 " ms elapsed, mode=%d), waiting for more candidates", 0, 0),
+                          now_ms - n->punch_start, s->signaling_mode);
+                }
             }
 
             int sent_cnt = 0;

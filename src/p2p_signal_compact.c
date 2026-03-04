@@ -384,6 +384,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     print("V:", LA_F("%s sent", 0, 0), PROTO);
 
     ctx->state = SIGNAL_COMPACT_INIT;
+    s->ice_exchange_done = false;  // 重置 ICE 交换状态
     return E_NONE;
 }
 
@@ -842,9 +843,13 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         // 收到该消息说明对方肯定已上线
         ctx->peer_online = true;
 
-        // 如果对方所有的候选队列都已经接收完成（todo 打洞超时失败，应该和这个状态有关）
+        // 如果对方所有的候选队列都已经接收完成
+        // 注：此状态用于 NAT 打洞超时判断，只有 ICE 交换完成后才会触发打洞超时
         if (ctx->remote_candidates_0 && ctx->remote_candidates_mask &&
             (ctx->remote_candidates_done & ctx->remote_candidates_mask) == ctx->remote_candidates_mask) {
+
+            // 标记 ICE 候选交换完成（供 NAT 层判断打洞超时使用）
+            s->ice_exchange_done = true;
 
             print("I:", LA_F("%s: sync complete (ses_id=%" PRIu64 ", mask=0x%04x)", LA_F136, 351),
                   TASK_ICE_REMOTE, ctx->session_id, (unsigned)ctx->remote_candidates_mask);
@@ -979,6 +984,7 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     ctx->remote_addr_notify_seq = 0;
 
     s->remote_cand_cnt = 0;
+    s->ice_exchange_done = false;  // 重置 ICE 交换状态
 
     print("I:", LA_F("%s: peer disconnected (ses_id=%" PRIu64 "), reset to REGISTERED", 0, 0), PROTO, session_id);
 }
@@ -1004,8 +1010,8 @@ bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
     assert(type == P2P_PKT_RELAY_DATA || type == P2P_PKT_RELAY_ACK);
     const char* PROTO = type == P2P_PKT_RELAY_DATA ? "RELAY_DATA" : "RELAY_ACK";
 
-        printf(LA_F("Received %s pkt from %s:%d, len=%d", LA_F127, 143),
-            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), *len);
+    printf(LA_F("Received %s pkt from %s:%d, len=%d", LA_F127, 143),
+           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), *len);
 
     // RELAY 包只能在 COMPACT 模式下使用
     if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
@@ -1013,9 +1019,19 @@ bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
         return false;
     }
 
-    if (*len < (int)sizeof(uint64_t)) {
-        print("E:", LA_F("%s: bad payload(len=%d)", LA_S72, 253), PROTO, *len);
-        return false;
+    // 验证负载长度
+    if (type == P2P_PKT_RELAY_ACK) {
+        // RELAY_ACK 固定长度：session_id(8) + ack_seq(2) + sack(4) = 14 字节
+        if (*len != 14) {
+            print("E:", LA_F("%s: bad payload(len=%d, expect 14)", LA_S72, 253), PROTO, *len);
+            return false;
+        }
+    } else {
+        // RELAY_DATA 至少需要 session_id(8)
+        if (*len < (int)sizeof(uint64_t)) {
+            print("E:", LA_F("%s: bad payload(len=%d)", LA_S72, 253), PROTO, *len);
+            return false;
+        }
     }
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -1033,8 +1049,6 @@ bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
     }
 
     print("V:", LA_F("%s: accepted, len=%d (ses_id=%" PRIu64 ")", 0, 0), PROTO, *len, session_id);
-
-    // fixme 区分 ack
 
     // 跳过 COMPACT 层的 session_id 头部
     *payload += sizeof(uint64_t);
