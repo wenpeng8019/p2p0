@@ -629,8 +629,7 @@ static void send_peer_info_seq0(sock_t udp_fd, compact_pair_t *pair, uint8_t bas
     resp_hdr->flags = 0;
     resp_hdr->seq = htons(0);
 
-    uint64_t session_id_net = htonll(pair->session_id);
-    memcpy(pkt + 4, &session_id_net, P2P_PEER_ID_MAX);
+    nwrite_ll(pkt + 4, pair->session_id);
     pkt[12] = base_index;
 
     int resp_len = 14;
@@ -876,8 +875,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 uint8_t notify[4 + 8];
                 p2p_packet_hdr_t *nh = (p2p_packet_hdr_t *)notify;
                 nh->type = SIG_PKT_PEER_OFF; nh->flags = 0; nh->seq = htons(0);
-                uint64_t sid_net = htonll(local->peer->session_id);
-                memcpy(notify + 4, &sid_net, 8);
+                nwrite_ll(notify + 4, local->peer->session_id);
                 sendto(udp_fd, (const char *)notify, sizeof(notify), 0,
                        (struct sockaddr *)&local->peer->addr, sizeof(local->peer->addr));
                 printf(LA_F("[UDP] PEER_OFF sent to %s (sid=%" PRIu64 ")%s\n", 0),
@@ -1072,8 +1070,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 notify_hdr->flags = 0;
                 notify_hdr->seq = htons(0);
                 
-                uint64_t peer_session_id_net = htonll(pair->peer->session_id);
-                memcpy(notify + 4, &peer_session_id_net, P2P_PEER_ID_MAX);
+                nwrite_ll(notify + 4, pair->peer->session_id);
                 
                 sendto(udp_fd, (const char *)notify, 4 + P2P_PEER_ID_MAX, 0, (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
                 
@@ -1134,7 +1131,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             return;
         }
 
-        uint64_t session_id = ntohll(*(uint64_t*)payload);
+        uint64_t session_id = nget_ll(payload);
         uint16_t ack_seq = ntohs(hdr->seq);
         if (ack_seq > 16) {
             printf(LA_F("[UDP] Invalid PEER_INFO_ACK from %s (size %zu)\n", LA_F44, 63), from_str, payload_len);
@@ -1202,7 +1199,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             return;
         }
 
-        uint64_t session_id = ntohll(*(uint64_t*)payload);
+        uint64_t session_id = nget_ll(payload);
 
         // 根据 session_id 查找配对记录
         compact_pair_t *pair = NULL;
@@ -1264,8 +1261,7 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
             notify_hdr->flags = 0;
             notify_hdr->seq = htons(0);
             
-            uint64_t peer_session_id_net = htonll(g_compact_pairs[i].peer->session_id);
-            memcpy(notify + 4, &peer_session_id_net, P2P_PEER_ID_MAX);
+            nwrite_ll(notify + 4, g_compact_pairs[i].peer->session_id);
             
             sendto(udp_fd, (const char *)notify, 4 + P2P_PEER_ID_MAX, 0,
                    (struct sockaddr *)&g_compact_pairs[i].peer->addr, 

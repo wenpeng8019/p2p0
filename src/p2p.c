@@ -688,7 +688,7 @@ p2p_update(p2p_handle_t hdl) {
              */
             case P2P_PKT_ACK:
             handle_ack: {
-                uint16_t ack_seq; nread_s(&ack_seq, payload);
+                uint16_t ack_seq = nget_s(payload);
                 uint32_t sack; nread_l(&sack, payload + 2);
                 if (hdr.type == P2P_PKT_ACK) {
                     printf(LA_F("Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x", LA_F112, 142),

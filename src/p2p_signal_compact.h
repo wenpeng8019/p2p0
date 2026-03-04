@@ -462,11 +462,6 @@ bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
                              const uint8_t **payload, int *len,
                              const struct sockaddr_in *from);
 
-/* 处理 NAT_PROBE_ACK（NAT 探测响应） */
-void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
-                               const uint8_t *payload, int len,
-                               const struct sockaddr_in *from);
-
 /* 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）
  * 通过 flags & SIG_MSG_FLAG_RELAY 内部区分两种情况：
  *   flags=0: A→Server，客户端不可能收到此包，忽略
@@ -487,6 +482,11 @@ void compact_on_request_ack(struct p2p_session *s,
 void compact_on_response(struct p2p_session *s,
                          const uint8_t *payload, int len,
                          const struct sockaddr_in *from);
+
+/* 处理 NAT_PROBE_ACK（NAT 探测响应） */
+void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
+                              const uint8_t *payload, int len,
+                              const struct sockaddr_in *from);
 
 ///////////////////////////////////////////////////////////////////////////////
 

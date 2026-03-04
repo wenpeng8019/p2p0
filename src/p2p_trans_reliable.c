@@ -188,8 +188,8 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
     if (r->recv_base > 0 || r->recv_bitmap[r->recv_base % RELIABLE_WINDOW]) {
         uint8_t ack_payload[6];
         build_ack_payload(r, ack_payload);
-        uint16_t ack_seq; nread_s(&ack_seq, ack_payload);
-        uint32_t sack;    nread_l(&sack, ack_payload + 2);
+        uint16_t ack_seq = nget_s(ack_payload);
+        uint32_t sack = nget_l(ack_payload + 2);
         printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F174, 368),
                       ack_seq, sack, r->recv_base,
                       addr ? inet_ntoa(addr->sin_addr) : "?",
@@ -199,8 +199,7 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
         if (is_relay_mode) {
             struct p2p_session *s = (struct p2p_session *)((char *)r - offsetof(struct p2p_session, reliable));
             uint8_t relay_ack[sizeof(uint64_t) + 6];
-            uint64_t sid_net = htonll(s->sig_compact_ctx.session_id);
-            memcpy(relay_ack, &sid_net, sizeof(uint64_t));
+            nwrite_ll(relay_ack, s->sig_compact_ctx.session_id);
             memcpy(relay_ack + sizeof(uint64_t), ack_payload, 6);
             udp_send_packet(sock, addr, pkt_type, 0, 0, relay_ack, (int)(sizeof(uint64_t) + 6));
         } else {
@@ -224,10 +223,10 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
     uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_DATA : P2P_PKT_DATA;
 
     /* 中继模式：预取 session_id 用于包头 */
-    uint64_t sid_net = 0;
+    uint64_t sid = 0;
     if (is_relay_mode) {
         struct p2p_session *s = (struct p2p_session *)((char *)r - offsetof(struct p2p_session, reliable));
-        sid_net = htonll(s->sig_compact_ctx.session_id);
+        sid = s->sig_compact_ctx.session_id;
     }
 
     /* 遍历所有未确认的发送条目 */
@@ -241,7 +240,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
             /* 首次发送 */
             if (is_relay_mode) {
                 uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
-                memcpy(relay_pkt, &sid_net, sizeof(uint64_t));
+                nwrite_ll(relay_pkt, sid);
                 memcpy(relay_pkt + sizeof(uint64_t), e->data, e->len);
                 udp_send_packet(sock, addr, pkt_type, 0, e->seq, relay_pkt, (int)(sizeof(uint64_t) + e->len));
             } else {
@@ -253,7 +252,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
             /* 超时重传 + 指数退避 */
             if (is_relay_mode) {
                 uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
-                memcpy(relay_pkt, &sid_net, sizeof(uint64_t));
+                nwrite_ll(relay_pkt, sid);
                 memcpy(relay_pkt + sizeof(uint64_t), e->data, e->len);
                 udp_send_packet(sock, addr, pkt_type, 0, e->seq, relay_pkt, (int)(sizeof(uint64_t) + e->len));
             } else {

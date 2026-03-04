@@ -103,8 +103,7 @@ static void tui_println(const char *line) {
 }
 
 /* 日志回调：在滚动区域打印一行（含等级与模块前缀） */
-static void tui_log_callback(p2p_log_level_t level,
-                             const char *module, const char *message) {
+static void tui_log_callback(p2p_log_level_t level, const char *module, const char *message) {
     const char *lvl = "?????";
     switch (level) {
         case P2P_LOG_LEVEL_ERROR: lvl = "ERROR"; break;
@@ -128,7 +127,7 @@ static void tui_init(void) {
     if (!P_isatty(stdout)) return;
     g_rows = P_term_rows();
 
-#ifdef _WIN32
+#if P_WIN
     /* Windows：先启用 ANSI VT 输出，再发送 ANSI 序列，否则第一屏乱码 */
     HANDLE hin  = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE hout = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -142,9 +141,7 @@ static void tui_init(void) {
         /* 真实控制台：保留 ENABLE_PROCESSED_INPUT 使 Ctrl+C 能产生 SIGINT
          * 去掉 ENABLE_LINE_INPUT + ENABLE_ECHO_INPUT 实现逐字符读取 */
         GetConsoleMode(hin, &g_orig_in_mode);
-        SetConsoleMode(hin, (g_orig_in_mode
-                              | ENABLE_VIRTUAL_TERMINAL_INPUT)
-                              & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
+        SetConsoleMode(hin, (g_orig_in_mode | ENABLE_VIRTUAL_TERMINAL_INPUT) & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
     }
 #endif
 
@@ -157,7 +154,7 @@ static void tui_init(void) {
     printf("\033[%d;1H\033[K> ", g_rows);
     fflush(stdout);
 
-#ifndef _WIN32
+#if !P_WIN
     /* stdin：raw 模式（禁用行缓冲 + 回显） + 非阻塞 */
     struct termios t;
     tcgetattr(STDIN_FILENO, &g_orig_term);
@@ -174,23 +171,24 @@ static void tui_init(void) {
 
 /* 退出 TUI，恢复终端状态 */
 static void tui_cleanup(void) {
+
     if (!g_tui_active) return;
     g_tui_active = 0;
 
-    /* 清除日志回调，恢复 p2p_log 默认输出（stdout） */
+    // 清除日志回调，恢复 p2p_log 默认输出（stdout）
     p2p_set_log_output(NULL);
 
-    /* 重置滚动区域，光标移到最后一行 */
+    // 重置滚动区域，光标移到最后一行
     printf("\033[r");
     printf("\033[%d;1H\n", g_rows);
     fflush(stdout);
 
-#ifdef _WIN32
+#if P_WIN
     if (!g_win_pty_mode)
         SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), g_orig_in_mode);
     SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), g_orig_out_mode);
 #else
-    /* 恢复终端模式 */
+    // 恢复终端模式
     tcsetattr(STDIN_FILENO, TCSANOW, &g_orig_term);
     fcntl(STDIN_FILENO, F_SETFL, 0);
 #endif
@@ -198,10 +196,11 @@ static void tui_cleanup(void) {
 
 /* 处理 stdin 按键，维护输入缓冲，回车时发送 */
 static void tui_process_input(p2p_handle_t hdl) {
+
     if (!g_tui_active) return;  /* 非交互模式（重定向/后台）跳过 stdin 读取 */
     for (;;) {
         int ch;
-#ifdef _WIN32
+#if P_WIN
         if (g_win_pty_mode) {
             /* ConPTY / 管道模式：_kbhit() 对管道无效，改用 PeekNamedPipe */
             HANDLE hin = GetStdHandle(STD_INPUT_HANDLE);
@@ -267,7 +266,7 @@ static void on_signal(int sig) {
 }
 
 /* SIGWINCH：终端窗口大小变化，更新滚动区域（仅 Unix） */
-#ifndef _WIN32
+#if !P_WIN
 static void on_sigwinch(int sig) {
     (void)sig;
     if (!g_tui_active) return;
@@ -471,7 +470,7 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
-#ifndef _WIN32
+#if !P_WIN
     signal(SIGWINCH, on_sigwinch);
 #endif
 

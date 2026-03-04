@@ -95,6 +95,28 @@ static inline uint64_t test_htonll(uint64_t x) {
 static inline uint64_t test_ntohll(uint64_t x) { return test_htonll(x); }
 #endif
 
+static inline void test_nread_ll(uint64_t *out, const uint8_t *p) {
+    *out = ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) |
+           ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
+           ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) |
+           ((uint64_t)p[6] << 8)  | (uint64_t)p[7];
+}
+
+static inline void test_nread_s(uint16_t *out, const uint8_t *p) {
+    *out = (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+
+static inline void test_nwrite_ll(uint8_t *p, uint64_t v) {
+    p[0] = (uint8_t)(v >> 56);
+    p[1] = (uint8_t)(v >> 48);
+    p[2] = (uint8_t)(v >> 40);
+    p[3] = (uint8_t)(v >> 32);
+    p[4] = (uint8_t)(v >> 24);
+    p[5] = (uint8_t)(v >> 16);
+    p[6] = (uint8_t)(v >> 8);
+    p[7] = (uint8_t)v;
+}
+
 static bool g_verbose = true;
 #define TEST_LOG(fmt, ...) \
     do { if (g_verbose) printf("[TEST] " fmt "\n", ##__VA_ARGS__); } while(0)
@@ -208,8 +230,7 @@ static void mock_server_init(void) {
 static void mock_send_peer_info0(mock_pair_t *to_pair, mock_pair_t *from_pair) {
     uint8_t buf[4 + 8 + 2 + MOCK_MAX_CANDIDATES * 7];
     buf[0]=SIG_PKT_PEER_INFO; buf[1]=0; buf[2]=0; buf[3]=0;
-    uint64_t sid_net = test_htonll(to_pair->session_id);
-    memcpy(buf+4, &sid_net, 8);
+    test_nwrite_ll(buf + 4, to_pair->session_id);
     buf[12] = 0;
     buf[13] = (uint8_t)from_pair->candidate_count;
     int len = 14;
@@ -227,8 +248,7 @@ static void mock_send_peer_info0(mock_pair_t *to_pair, mock_pair_t *from_pair) {
 static void mock_send_addr_change_notify(mock_pair_t *to_pair, mock_pair_t *from_pair, uint8_t base_index) {
     uint8_t buf[4 + 8 + 2 + 7];  // 包头(4) + session_id(8) + base_index(1) + count(1) + candidate(7)
     buf[0]=SIG_PKT_PEER_INFO; buf[1]=0; buf[2]=0; buf[3]=0;  // seq=0
-    uint64_t sid_net = test_htonll(to_pair->session_id);
-    memcpy(buf+4, &sid_net, 8);
+    test_nwrite_ll(buf + 4, to_pair->session_id);
     buf[12] = base_index;  // base_index!=0 表示地址变更通知
     buf[13] = 1;           // candidate_count 必须为 1
     // 候选地址：from_pair 的新公网地址
@@ -323,7 +343,7 @@ static void mock_handle_unregister(const char *local, const char *remote) {
     if (pair->peer && pair->peer != (mock_pair_t*)(void*)-1 && pair->peer->session_id) {
         mock_pair_t *peer = pair->peer;
         uint8_t buf[12]; buf[0]=SIG_PKT_PEER_OFF; buf[1]=0; buf[2]=0; buf[3]=0;
-        uint64_t n = test_htonll(peer->session_id); memcpy(buf+4, &n, 8);
+        test_nwrite_ll(buf + 4, peer->session_id);
         mock_sendto(buf, 12, peer->addr_ip, peer->addr_port);
         peer->peer = (mock_pair_t*)(void*)-1;
     }
@@ -333,8 +353,8 @@ static void mock_handle_unregister(const char *local, const char *remote) {
 static void mock_handle_peer_info_ack(const uint8_t *payload, size_t plen,
                                       uint32_t from_ip, uint16_t from_port) {
     if (plen < 10) return;
-    uint64_t sid; memcpy(&sid, payload, 8); sid = test_ntohll(sid);
-    uint16_t ack_seq; memcpy(&ack_seq, payload+8, 2); ack_seq = ntohs(ack_seq);
+    uint64_t sid; test_nread_ll(&sid, payload);
+    uint16_t ack_seq; test_nread_s(&ack_seq, payload + 8);
     mock_pair_t *pair = mock_find_by_session(sid);
     if (!pair) return;
     if (ack_seq == 0) {
@@ -351,7 +371,7 @@ static bool mock_handle_relay(uint8_t pkt_type, uint16_t seq,
                                const uint8_t *payload, size_t plen) {
     if (pkt_type == SIG_PKT_PEER_INFO && seq == 0) return false;
     if (plen < 8) return false;
-    uint64_t sid; memcpy(&sid, payload, 8); sid = test_ntohll(sid);
+    uint64_t sid; test_nread_ll(&sid, payload);
     mock_pair_t *pair = mock_find_by_session(sid);
     if (!pair || !pair->peer || pair->peer == (mock_pair_t*)(void*)-1) return false;
     uint8_t fwd[4 + 512];
@@ -389,7 +409,7 @@ static int mock_cleanup_timeout(void) {
         if (pair->peer && pair->peer != (mock_pair_t*)(void*)-1 && pair->peer->session_id) {
             mock_pair_t *peer = pair->peer;
             uint8_t buf[12]; buf[0]=SIG_PKT_PEER_OFF; buf[1]=0; buf[2]=0; buf[3]=0;
-            uint64_t n = test_htonll(peer->session_id); memcpy(buf+4, &n, 8);
+            test_nwrite_ll(buf + 4, peer->session_id);
             mock_sendto(buf, 12, peer->addr_ip, peer->addr_port);
             peer->peer = (mock_pair_t*)(void*)-1;
         }
@@ -400,7 +420,7 @@ static int mock_cleanup_timeout(void) {
 }
 
 static uint64_t read_u64_be(const uint8_t *p) {
-    uint64_t v; memcpy(&v, p, 8); return test_ntohll(v);
+    uint64_t v; test_nread_ll(&v, p); return v;
 }
 static uint16_t read_u16_be(const uint8_t *p) {
     return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
@@ -571,8 +591,8 @@ TEST(peer_info_ack_seq0_clears_pending) {
     mock_handle_register("alice","bob",  ip_a,port_a,&c,1);
     mock_handle_register("bob",  "alice",ip_b,port_b,&c,1);
     mock_pair_t *alice = mock_find_by_peer("alice","bob");
-    uint8_t pl[10]; uint64_t n = test_htonll(alice->session_id);
-    memcpy(pl,&n,8); pl[8]=pl[9]=0;
+    uint8_t pl[10];
+    test_nwrite_ll(pl, alice->session_id); pl[8]=pl[9]=0;
     mock_handle_peer_info_ack(pl, 10, ip_a, port_a);
     ASSERT_EQ(alice->info0_acked, true);
     ASSERT_EQ(alice->in_pending,  false);
@@ -602,7 +622,7 @@ TEST(peer_info_ack_seq_positive_relayed) {
     mock_handle_register("alice","bob",  ip_a,port_a,&c,1);
     mock_handle_register("bob",  "alice",ip_b,port_b,&c,1);
     mock_pair_t *alice = mock_find_by_peer("alice","bob");
-    uint8_t pl[10]; uint64_t n = test_htonll(alice->session_id); memcpy(pl,&n,8);
+    uint8_t pl[10]; test_nwrite_ll(pl, alice->session_id);
     uint16_t aseq = htons(3); memcpy(pl+8, &aseq, 2);
     mock_clear_sent();
     mock_handle_peer_info_ack(pl, 10, ip_a, port_a);
@@ -620,8 +640,8 @@ TEST(peer_info_ack_seq0_idempotent) {
     mock_handle_register("alice","bob",  ip_a,port_a,&c,1);
     mock_handle_register("bob",  "alice",ip_b,port_b,&c,1);
     mock_pair_t *alice = mock_find_by_peer("alice","bob");
-    uint8_t pl[10]; uint64_t n = test_htonll(alice->session_id);
-    memcpy(pl,&n,8); pl[8]=pl[9]=0;
+    uint8_t pl[10];
+    test_nwrite_ll(pl, alice->session_id); pl[8]=pl[9]=0;
     mock_handle_peer_info_ack(pl, 10, ip_a, port_a);
     mock_handle_peer_info_ack(pl, 10, ip_a, port_a);
     ASSERT_EQ(alice->info0_acked, true);
@@ -641,7 +661,7 @@ TEST(peer_info_seq_positive_relayed) {
     mock_handle_register("bob",  "alice",ip_b,port_b,&ca,1);
     mock_pair_t *alice = mock_find_by_peer("alice","bob");
     uint8_t pl[17];
-    uint64_t n = test_htonll(alice->session_id); memcpy(pl,&n,8);
+    test_nwrite_ll(pl, alice->session_id);
     pl[8]=0; pl[9]=1; pl[10]=0; memcpy(pl+11,&ca.ip,4); memcpy(pl+15,&ca.port,2);
     mock_clear_sent();
     ASSERT_EQ(mock_handle_relay(SIG_PKT_PEER_INFO, 2, pl, sizeof(pl)), true);
@@ -659,7 +679,7 @@ TEST(peer_info_seq0_from_client_rejected) {
     mock_handle_register("alice","bob",  ip_a,port_a,&c,1);
     mock_handle_register("bob",  "alice",ip_b,port_b,&c,1);
     mock_pair_t *alice = mock_find_by_peer("alice","bob");
-    uint8_t pl[8]; uint64_t n = test_htonll(alice->session_id); memcpy(pl,&n,8);
+    uint8_t pl[8]; test_nwrite_ll(pl, alice->session_id);
     mock_clear_sent();
     ASSERT_EQ(mock_handle_relay(SIG_PKT_PEER_INFO, 0, pl, 8), false);
     ASSERT_EQ(g_sent_count, 0);
@@ -679,7 +699,7 @@ TEST(relay_data_forwarded_to_peer) {
     mock_handle_register("bob",  "alice",ip_b,port_b,&c,1);
     mock_pair_t *alice = mock_find_by_peer("alice","bob");
     uint8_t pl[15];
-    uint64_t n = test_htonll(alice->session_id); memcpy(pl,&n,8);
+    test_nwrite_ll(pl, alice->session_id);
     pl[8]=0; pl[9]=5; pl[10]='h'; pl[11]='e'; pl[12]='l'; pl[13]='l'; pl[14]='o';
     mock_clear_sent();
     ASSERT_EQ(mock_handle_relay(P2P_PKT_RELAY_DATA, 1, pl, sizeof(pl)), true);
@@ -697,8 +717,8 @@ TEST(relay_ack_forwarded_to_peer) {
     mock_handle_register("alice","bob",  ip_a,port_a,&c,1);
     mock_handle_register("bob",  "alice",ip_b,port_b,&c,1);
     mock_pair_t *bob = mock_find_by_peer("bob","alice");
-    uint8_t pl[10]; uint64_t n = test_htonll(bob->session_id);
-    memcpy(pl,&n,8); pl[8]=0; pl[9]=7;
+    uint8_t pl[10]; test_nwrite_ll(pl, bob->session_id);
+    pl[8]=0; pl[9]=7;
     mock_clear_sent();
     ASSERT_EQ(mock_handle_relay(P2P_PKT_RELAY_ACK, 0, pl, sizeof(pl)), true);
     ASSERT_NOT_NULL(mock_find_sent(ip_a, port_a, P2P_PKT_RELAY_ACK));
