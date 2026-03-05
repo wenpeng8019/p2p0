@@ -39,7 +39,7 @@ void route_final(route_ctx_t *rt) {
 // 检测获取本地所有有效的网络地址
 ret_t route_detect_local(route_ctx_t *rt) {
 
-    printf("%s", LA_S("Detecting local network addresses", LA_S18, 121));
+    printf("%s", LA_S("Detecting local network addresses", LA_S19, 123));
 
     rt->addr_count = 0;
 
@@ -119,9 +119,9 @@ ret_t route_detect_local(route_ctx_t *rt) {
 #endif
 
     for (i = 0; i < rt->addr_count; i++) {
-        printf(LA_F("  [%d] %s/%d", LA_F1, 205), i, inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
+        printf(LA_F("  [%d] %s/%d", LA_F1, 207), i, inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
     }
-    print("I:", LA_F("%s: %d %s", LA_F61, 265), LA_W("Local address detection done", LA_W37, 38), rt->addr_count, LA_W("address(es)", LA_W5, 6));
+    print("I:", LA_F("%s: %d %s", LA_F61, 267), LA_W("Local address detection done", LA_W38, 39), rt->addr_count, LA_W("address(es)", LA_W5, 6));
     return rt->addr_count;
 }
 
@@ -134,12 +134,12 @@ bool route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_pri
         uint32_t local_ip = rt->local_addrs[i].sin_addr.s_addr;
         uint32_t mask = rt->local_masks[i];
         if ((local_ip & mask) == (peer_ip & mask)) {
-            print("I:", LA_F("Peer IP %s matches local network segment %s (connectivity pending probe)", LA_F155, 359),
+            print("I:", LA_F("Peer IP %s matches local network segment %s (connectivity pending probe)", LA_F156, 362),
                   inet_ntoa(peer_priv->sin_addr), inet_ntoa(rt->local_addrs[i].sin_addr));
             return true;
         }
     }
 
-    print("I:", LA_F("Peer IP %s does not match any local network segment", LA_F154, 358), inet_ntoa(peer_priv->sin_addr));
+    print("I:", LA_F("Peer IP %s does not match any local network segment", LA_F155, 361), inet_ntoa(peer_priv->sin_addr));
     return false;
 }

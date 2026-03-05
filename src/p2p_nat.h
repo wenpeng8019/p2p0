@@ -27,7 +27,7 @@ enum {
                                             //   rx: 收到对方的 PUNCH （peer→me 方向通）
                                             //   tx: 对方的 echo_seq != 0（对方收到了我们的 PUNCH，me→peer 方向通）
     NAT_RELAY,                              // 中继模式：打洞超时失败。此时仍周期发送 PUNCH 尝试重连
-    NAT_DISCONNECTED,                       // 双向连通曾经建立，现已断开（超时无 PUNCH 响应）
+    NAT_LOST,                               // 连接丢失：曾经连通，现超时无响应（可能恢复）
     NAT_CLOSED                              // 收到 FIN 包主动断开（连接彻底终止）
 };
 
@@ -89,8 +89,8 @@ ret_t nat_punch(struct p2p_session *s, int idx);
  * @param from     来源地址
  * @return         0=成功，!0=失败
  */
-ret_t nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                   const uint8_t *payload, int len, const struct sockaddr_in *from);
+void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+                  const uint8_t *payload, int len, const struct sockaddr_in *from);
 
 /*
  * 处理 FIN 包（对方主动断开连接）
@@ -99,7 +99,7 @@ ret_t nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
  * @param from     来源地址
  * @return         0=成功，!0=失败
  */
-ret_t nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from);
+void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from);
 
 ///////////////////////////////////////////////////////////////////////////////
 

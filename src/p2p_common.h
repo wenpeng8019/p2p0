@@ -58,6 +58,13 @@ static inline void sockaddr_init_with_net(struct sockaddr_in *s, uint32_t* net_i
     memcpy(&s->sin_port, (void*)net_port, 2);
 }
 
+static inline bool sockaddr_equal(const struct sockaddr_in *a, const struct sockaddr_in *b) {
+    return a && b &&
+           a->sin_family == b->sin_family &&
+           a->sin_addr.s_addr == b->sin_addr.s_addr &&
+           a->sin_port == b->sin_port;
+}
+
 /*
  * struct sockaddr_in → p2p_sockaddr_t
  *

@@ -59,8 +59,8 @@
 int p2p_turn_allocate(p2p_session_t *s) {
     if (!s->cfg.turn_server) return -1;
     
-    print("I:", LA_F("%s %s:%d", LA_F18, 222),
-                 LA_W("Sending Allocate Request to", LA_W75, 76), s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
+    print("I:", LA_F("%s %s:%d", LA_F18, 224),
+                 LA_W("Sending Allocate Request to", LA_W76, 77), s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
     
     uint8_t buf[256];
 
@@ -120,7 +120,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
     
     struct hostent *he = gethostbyname(s->cfg.turn_server);
     if (!he) {
-        print("E:", LA_F("%s %s", LA_F7, 211), LA_W("Failed to resolve TURN server:", LA_W22, 23), s->cfg.turn_server);
+        print("E:", LA_F("%s %s", LA_F7, 213), LA_W("Failed to resolve TURN server:", LA_W23, 24), s->cfg.turn_server);
         return -1;
     }
     memcpy(&turn_addr.sin_addr, he->h_addr_list[0], he->h_length);
@@ -153,7 +153,7 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
     
     /* 处理 Allocate Success Response */
     if (type == TURN_ALLOCATE_SUCCESS) {
-        print("I: %s", LA_S("Allocation successful!", LA_S5, 108));
+        print("I: %s", LA_S("Allocation successful!", LA_S5, 109));
         
         /*
          * 解析 RELAYED-ADDRESS / XOR-RELAYED-ADDRESS 属性
@@ -215,10 +215,10 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                             c->addr = relay_addr;
                             /* RFC 5245: Relay 候选优先级使用标准公式计算 */
                             c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
-                            print("I:", LA_F("%s %s:%u (%s=%u)", LA_F20, 224),
-                                         LA_W("Gathered Relay Candidate", LA_W29, 30),
+                            print("I:", LA_F("%s %s:%u (%s=%u)", LA_F20, 226),
+                                         LA_W("Gathered Relay Candidate", LA_W30, 31),
                                          inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                                         LA_W("priority", LA_W57, 58), c->priority);
+                                         LA_W("priority", LA_W58, 59), c->priority);
                             /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
                             p2p_ice_send_local_candidate(s, c);
                         }
