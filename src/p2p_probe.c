@@ -16,31 +16,33 @@
 // COMPACT 模式（MSG+echo）
 ///////////////////////////////////////////////////////////////////////////////
 
+#define TASK_RELAY_PROBE                   "PROXY PROBE"
+
 static ret_t probe_compact_trigger(struct p2p_session *s) {
 
     if (!s->probe_compact_enabled)                  return E_NO_SUPPORT;
 
-    // 需要服务器支持 MSG 机制（REGISTER_ACK flags 含 SIG_REGACK_FLAG_MSG）
+    // 需要服务器支持 MSG RPC 机制（REGISTER_ACK flags 含 SIG_REGACK_FLAG_MSG）
     if (!s->sig_compact_ctx.msg_support) {
-        print("W:", LA_S("probe(compact) skipped: server does not support MSG", LA_S60, 164));
+        print("W:", LA_F("%s: skipped for server does not support MSG", LA_S60, 164), TASK_RELAY_PROBE);
         return E_NO_SUPPORT;
     }
 
     // 需要信令状态已达到 REGISTERED（收到 REGISTER_ACK 并分配了 session）
     if (s->sig_compact_ctx.state < SIGNAL_COMPACT_REGISTERED) {
-        print("W:", LA_S("probe(compact) skipped: signaling not yet registered", LA_S61, 165));
+        print("W:", LA_F("%s: skipped for signaling not yet registered", LA_S61, 165), TASK_RELAY_PROBE);
         return E_NONE_CONTEXT;
     }
 
     if (s->probe_compact_state != P2P_PROBE_COMPACT_IDLE) {
-        print("V:", LA_S("probe(compact) already in progress", LA_S56, 160));
+        print("V:", LA_F("%s: already in progress", LA_S56, 160), TASK_RELAY_PROBE);
         return E_BUSY;
     }
 
     s->probe_compact_state   = P2P_PROBE_COMPACT_PENDING;
     s->probe_compact_retries = 0;
 
-    print("I:", LA_S("probe(compact) triggered: MSG echo via server", LA_S63, 167));
+    print("I:", LA_F("%s: triggered by echo via server", LA_S63, 167), TASK_RELAY_PROBE);
     return E_NONE;
 }
 
@@ -48,52 +50,50 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
 
     switch (s->probe_compact_state) {
 
-        case P2P_PROBE_COMPACT_IDLE:
-            break;
+        // 发送 msg=0 空包（服务器会自动 echo 回复）
+        case P2P_PROBE_COMPACT_PENDING: {
 
-        case P2P_PROBE_COMPACT_PENDING:
-            // 发送 msg=0 空包（服务器会自动 echo 回复）
-            {
-                ret_t ret = p2p_signal_compact_request(s, 0, NULL, 0);
-                if (ret == E_NONE) {
-                    s->probe_compact_state = P2P_PROBE_COMPACT_WAITING;
-                    s->probe_compact_sid   = s->sig_compact_ctx.req_sid;
-                    s->probe_compact_start = now_ms;
+            ret_t ret = p2p_signal_compact_request(s, 0, NULL, 0);
+            if (ret == E_NONE) {
+                s->probe_compact_state = P2P_PROBE_COMPACT_WAITING;
+                s->probe_compact_sid   = s->sig_compact_ctx.req_sid;
+                s->probe_compact_start = now_ms;
 
-                    print("I:", LA_F("probe(compact) sent: MSG(msg=0, sid=%u)", LA_F210, 413),
-                          s->probe_compact_sid);
-                } else {
-                    print("W:", LA_F("probe(compact) send failed: ret=%d", LA_F209, 412), ret);
-                    s->probe_compact_state = P2P_PROBE_COMPACT_IDLE;
-                }
+                print("I:", LA_F("%s: sent: MSG(msg=0, sid=%u)", LA_F210, 413), TASK_RELAY_PROBE,
+                      s->probe_compact_sid);
+            } else {
+                print("W:", LA_F("%s: send failed(%d)", LA_F209, 412), TASK_RELAY_PROBE, ret);
+                s->probe_compact_state = P2P_PROBE_COMPACT_IDLE;
             }
-            break;
+        } break;
 
+        // 超时检测
         case P2P_PROBE_COMPACT_WAITING:
-            // 超时检测
+
             if (now_ms - s->probe_compact_start >= PROBE_COMPACT_TIMEOUT_MS) {
                 if (s->probe_compact_retries < PROBE_COMPACT_MAX_RETRIES) {
                     s->probe_compact_retries++;
                     s->probe_compact_state = P2P_PROBE_COMPACT_PENDING;
-                    print("W:", LA_F("probe(compact) timeout, retry %d/%d", LA_F211, 414),
+                    print("W:", LA_F("%s: timeout, retry %d/%d", LA_F211, 414), TASK_RELAY_PROBE,
                           s->probe_compact_retries, PROBE_COMPACT_MAX_RETRIES);
                 } else {
                     s->probe_compact_state    = P2P_PROBE_COMPACT_TIMEOUT;
                     s->probe_compact_complete = now_ms;
-                    print("W:", LA_S("probe(compact) timeout: server cannot reach peer", LA_S62, 166));
+                    print("W:", LA_F("%s: timeout: server cannot reach peer", LA_S62, 166), TASK_RELAY_PROBE);
                 }
             }
             break;
 
+        // 等待间隔后自动重新触发（定时重复探测）
         case P2P_PROBE_COMPACT_SUCCESS:
         case P2P_PROBE_COMPACT_PEER_OFFLINE:
         case P2P_PROBE_COMPACT_TIMEOUT:
-            // 等待间隔后自动重新触发（定时重复探测）
+
             if (s->probe_compact_complete == 0)
                 s->probe_compact_complete = now_ms;
 
             if (now_ms - s->probe_compact_complete >= PROBE_COMPACT_REPEAT_INTERVAL) {
-                print("V:", LA_S("probe(compact) restarting periodic check", LA_S59, 163));
+                print("V:", LA_F("%s: restarting periodic check", LA_S59, 163), TASK_RELAY_PROBE);
                 s->probe_compact_state    = P2P_PROBE_COMPACT_IDLE;
                 s->probe_compact_sid      = 0;
                 s->probe_compact_start    = 0;
@@ -101,6 +101,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
                 s->probe_compact_retries  = 0;
             }
             break;
+        default: break;
     }
 }
 
@@ -114,19 +115,19 @@ static ret_t probe_relay_trigger(struct p2p_session *s) {
 
     // 需要 TCP 信令通道已登录（SIGNAL_CONNECTED）
     if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
-        print("W:", LA_S("probe(relay) skipped: relay signaling not connected", LA_S70, 174));
+        print("W:", LA_F("%s: skipped: relay signaling not connected", LA_S70, 174), TASK_RELAY_PROBE);
         return E_NONE_CONTEXT;
     }
 
     if (s->probe_relay_state != P2P_PROBE_RELAY_IDLE) {
-        print("V:", LA_S("probe(relay) already in progress", LA_S67, 171));
+        print("V:", LA_F("%s: already in progress", LA_S67, 171), TASK_RELAY_PROBE);
         return E_BUSY;
     }
 
     s->probe_relay_state   = P2P_PROBE_RELAY_REFRESH_TURN;
     s->probe_relay_retries = 0;
 
-    print("I:", LA_S("probe(relay) triggered: refreshing TURN allocation", LA_S71, 175));
+    print("I:", LA_F("%s: triggered: refreshing TURN allocation", LA_S71, 175), TASK_RELAY_PROBE);
     return E_NONE;
 }
 
@@ -144,9 +145,9 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                 if (ret == E_NONE) {
                     s->probe_relay_state = P2P_PROBE_RELAY_WAIT_TURN;
                     s->probe_relay_start = now_ms;
-                    print("I:", LA_S("probe(relay) TURN allocation request sent", LA_S73, 177));
+                    print("I:", LA_F("%s: TURN allocation request sent", LA_S73, 177), TASK_RELAY_PROBE);
                 } else {
-                    print("W:", LA_F("probe(relay) TURN allocation failed: ret=%d", LA_F213, 416), ret);
+                    print("W:", LA_F("%s: TURN allocation failed: ret=%d", LA_F213, 416), TASK_RELAY_PROBE, ret);
                     s->probe_relay_state    = P2P_PROBE_RELAY_TIMEOUT;
                     s->probe_relay_complete = now_ms;
                 }
@@ -159,12 +160,12 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                 if (s->probe_relay_retries < PROBE_RELAY_MAX_RETRIES) {
                     s->probe_relay_retries++;
                     s->probe_relay_state = P2P_PROBE_RELAY_REFRESH_TURN;
-                    print("W:", LA_F("probe(relay) TURN timeout, retry %d/%d", LA_F214, 417),
+                    print("W:", LA_F("%s: TURN timeout, retry %d/%d", LA_F214, 417), TASK_RELAY_PROBE,
                           s->probe_relay_retries, PROBE_RELAY_MAX_RETRIES);
                 } else {
                     s->probe_relay_state    = P2P_PROBE_RELAY_TIMEOUT;
                     s->probe_relay_complete = now_ms;
-                    print("W:", LA_S("probe(relay) TURN allocation timeout", LA_S74, 178));
+                    print("W:", LA_F("%s: TURN allocation timeout", LA_S74, 178), TASK_RELAY_PROBE);
                 }
             }
             break;
@@ -175,7 +176,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
             //   此处仅做超时等待）
             s->probe_relay_state = P2P_PROBE_RELAY_WAIT_EXCHANGE;
             s->probe_relay_start = now_ms;
-            print("I:", LA_S("probe(relay) address exchange initiated", LA_S65, 169));
+            print("I:", LA_F("%s: address exchange initiated", LA_S65, 169), TASK_RELAY_PROBE);
             // TODO: p2p_signal_relay_send_connect(&s->sig_relay_ctx, target, NULL, 0);
             break;
 
@@ -185,12 +186,12 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                 if (s->probe_relay_retries < PROBE_RELAY_MAX_RETRIES) {
                     s->probe_relay_retries++;
                     s->probe_relay_state = P2P_PROBE_RELAY_EXCHANGE_ADDR;
-                    print("W:", LA_F("probe(relay) exchange timeout, retry %d/%d", LA_F216, 419),
+                    print("W:", LA_F("%s: exchange timeout, retry %d/%d", LA_F216, 419), TASK_RELAY_PROBE,
                           s->probe_relay_retries, PROBE_RELAY_MAX_RETRIES);
                 } else {
                     s->probe_relay_state    = P2P_PROBE_RELAY_PEER_OFFLINE;
                     s->probe_relay_complete = now_ms;
-                    print("W:", LA_S("probe(relay) exchange timeout: peer offline?", LA_S68, 172));
+                    print("W:", LA_F("%s: exchange timeout: peer offline?", LA_S68, 172), TASK_RELAY_PROBE);
                 }
             }
             break;
@@ -199,7 +200,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
             // 步骤3：发送 UDP 探测包（通过 TURN 中继）
             s->probe_relay_state = P2P_PROBE_RELAY_WAIT_PROBE;
             s->probe_relay_start = now_ms;
-            print("I:", LA_S("probe(relay) UDP probe packet sent", LA_S75, 179));
+            print("I:", LA_F("%s: UDP probe packet sent", LA_S75, 179), TASK_RELAY_PROBE);
             // TODO: udp_send_packet(s->sock, &peer_addr, P2P_PKT_PUNCH, 0, ++seq, NULL, 0);
             break;
 
@@ -209,12 +210,12 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                 if (s->probe_relay_retries < PROBE_RELAY_MAX_RETRIES) {
                     s->probe_relay_retries++;
                     s->probe_relay_state = P2P_PROBE_RELAY_PROBE_UDP;
-                    print("W:", LA_F("probe(relay) UDP timeout, retry %d/%d", LA_F215, 418),
+                    print("W:", LA_F("%s: UDP timeout, retry %d/%d", LA_F215, 418), TASK_RELAY_PROBE,
                           s->probe_relay_retries, PROBE_RELAY_MAX_RETRIES);
                 } else {
                     s->probe_relay_state    = P2P_PROBE_RELAY_TIMEOUT;
                     s->probe_relay_complete = now_ms;
-                    print("W:", LA_S("probe(relay) UDP timeout: network issue", LA_S76, 180));
+                    print("W:", LA_F("%s: UDP timeout: network issue", LA_S76, 180), TASK_RELAY_PROBE);
                 }
             }
             break;
@@ -227,7 +228,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                 s->probe_relay_complete = now_ms;
 
             if (now_ms - s->probe_relay_complete >= PROBE_RELAY_REPEAT_INTERVAL) {
-                print("V:", LA_S("probe(relay) restarting periodic check", LA_S69, 173));
+                print("V:", LA_F("%s: restarting periodic check", LA_S69, 173), TASK_RELAY_PROBE);
                 s->probe_relay_state    = P2P_PROBE_RELAY_IDLE;
                 s->probe_relay_start    = 0;
                 s->probe_relay_complete = 0;
@@ -258,6 +259,7 @@ void probe_tick(struct p2p_session *s, uint64_t now_ms) {
 }
 
 void probe_reset(struct p2p_session *s) {
+
     // 同时重置两侧（防止模式切换时遗留脏状态）
     s->probe_compact_state    = P2P_PROBE_COMPACT_IDLE;
     s->probe_compact_sid      = 0;
@@ -280,13 +282,13 @@ void probe_compact_on_req_ack(struct p2p_session *s, uint16_t sid, uint8_t statu
     if (s->probe_compact_state != P2P_PROBE_COMPACT_WAITING) return;
     if (s->probe_compact_sid   != sid)                        return;
 
+    // 服务器已向对端转发，保持 WAITING 继续等待 echo 回复
     if (status == 0) {
-        // 服务器已向对端转发，保持 WAITING 继续等待 echo 回复
-        print("I:", LA_S("probe(compact) REQ_ACK: peer is online, waiting echo", LA_S58, 162));
+        print("I:", LA_S("%s: REQ_ACK: peer is online, waiting echo", LA_S58, 162), TASK_RELAY_PROBE);
     } else {
         s->probe_compact_state    = P2P_PROBE_COMPACT_PEER_OFFLINE;
         s->probe_compact_complete = 0;
-        print("W:", LA_S("probe(compact) peer is OFFLINE (REQ_ACK status=1)", LA_S57, 161));
+        print("W:", LA_S("%s: peer is OFFLINE (REQ_ACK status=1)", LA_S57, 161), TASK_RELAY_PROBE);
     }
 }
 
@@ -301,7 +303,7 @@ void probe_compact_on_response(struct p2p_session *s, uint16_t sid) {
     s->probe_compact_state    = P2P_PROBE_COMPACT_SUCCESS;
     s->probe_compact_complete = now_ms;
 
-    print("I:", LA_F("probe(compact) SUCCESS: peer reachable via server (RTT: %" PRIu64 " ms)", 0, 0), rtt);
+    print("I:", LA_F("%s: SUCCESS: peer reachable via server (RTT: %" PRIu64 " ms)", 0, 0), TASK_RELAY_PROBE, rtt);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -313,7 +315,7 @@ void probe_relay_on_turn_success(struct p2p_session *s) {
     if (s->probe_relay_state != P2P_PROBE_RELAY_WAIT_TURN) return;
 
     s->probe_relay_state = P2P_PROBE_RELAY_EXCHANGE_ADDR;
-    print("I:", LA_S("probe(relay) TURN allocated, starting address exchange", LA_S72, 176));
+    print("I:", LA_S("%s: TURN allocated, starting address exchange", LA_S72, 176), TASK_RELAY_PROBE);
 }
 
 void probe_relay_on_exchange_done(struct p2p_session *s, bool success) {
@@ -322,11 +324,11 @@ void probe_relay_on_exchange_done(struct p2p_session *s, bool success) {
 
     if (success) {
         s->probe_relay_state = P2P_PROBE_RELAY_PROBE_UDP;
-        print("I:", LA_S("probe(relay) address exchange success, sending UDP probe", LA_S66, 170));
+        print("I:", LA_S("%s: address exchange success, sending UDP probe", LA_S66, 170), TASK_RELAY_PROBE);
     } else {
         s->probe_relay_state    = P2P_PROBE_RELAY_PEER_OFFLINE;
         s->probe_relay_complete = P_tick_ms();
-        print("W:", LA_S("probe(relay) address exchange failed: peer OFFLINE", LA_S64, 168));
+        print("W:", LA_S("%s: address exchange failed: peer OFFLINE", LA_S64, 168), TASK_RELAY_PROBE);
     }
 }
 
@@ -340,5 +342,5 @@ void probe_relay_on_udp_response(struct p2p_session *s) {
     s->probe_relay_state    = P2P_PROBE_RELAY_SUCCESS;
     s->probe_relay_complete = now_ms;
 
-    print("I:", LA_F("probe(relay) SUCCESS: UDP reachable via TURN (RTT: %" PRIu64 " ms)", 0, 0), rtt);
+    print("I:", LA_F("%s: SUCCESS: UDP reachable via TURN (RTT: %" PRIu64 " ms)", 0, 0), TASK_RELAY_PROBE, rtt);
 }

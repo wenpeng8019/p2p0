@@ -460,40 +460,27 @@ void compact_on_peer_info_ack(struct p2p_session *s, uint16_t seq,
 void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
                          const struct sockaddr_in *from);
 
-/* 处理 RELAY_DATA / RELAY_ACK（中继数据）
- * 验证 COMPACT 层的 session_id，并调整 payload/len 跳过该头部
- * @return true=验证成功（payload/len 已调整），false=验证失败
- */
+/* 处理 RELAY_DATA / RELAY_ACK（中继数据）*/
 bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
                              const uint8_t **payload, int *len,
                              const struct sockaddr_in *from);
 
-/* 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）
- * 通过 flags & SIG_MSG_FLAG_RELAY 内部区分两种情况：
- *   flags=0: A→Server，客户端不可能收到此包，忽略
- *   flags=SIG_MSG_FLAG_RELAY: Server→B relay，解析 [session_id][sid][msg][data]，触发 on_request 回调
- *   msg=消息类型，msg=0 时自动 echo，msg>0 应用层处理 */
+/* 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）*/
 void compact_on_request(struct p2p_session *s, uint8_t flags,
                         const uint8_t *payload, int len,
                         const struct sockaddr_in *from);
 
-/* 处理 MSG_REQ_ACK（Server→A，确认已缓存并开始中转）
- * payload: [sid(2)][status(1)]  status: 0=成功, 1=B 不在线 */
+/* 处理 MSG_REQ_ACK（Server→A，确认已缓存并开始中转）*/
 void compact_on_request_ack(struct p2p_session *s,
                             const uint8_t *payload, int len,
                             const struct sockaddr_in *from);
 
-/* 处理 MSG_RESP（Server→A relay B 的应答）
- * flags: 0=正常响应，SIG_MSG_FLAG_PEER_OFFLINE=对端离线，SIG_MSG_FLAG_TIMEOUT=转发超时
- * payload: [sid(2)][code(1)][data(N)] （正常响应，code=响应码）或 [sid(2)] （错误响应）
- * 处理器内部自动回复 MSG_RESP_ACK、触发 on_response 回调 */
+/* 处理 MSG_RESP（Server→A relay B 的应答）*/
 void compact_on_response(struct p2p_session *s, uint8_t flags,
                          const uint8_t *payload, int len,
                          const struct sockaddr_in *from);
 
-/*
- * 处理 MSG_RESP_ACK（Server 对 B 端响应的确认）
- */
+/* 处理 MSG_RESP_ACK（Server 对 B 端响应的确认） */
 void compact_on_response_ack(struct p2p_session *s,
                              const uint8_t *payload, int len,
                              const struct sockaddr_in *from);

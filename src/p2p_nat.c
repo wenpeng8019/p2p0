@@ -180,6 +180,22 @@ int nat_punch(p2p_session_t *s, int idx) {
     return E_NONE;
 }
 
+/*
+ * 发送 FIN 包通知对端主动断开连接
+ *
+ * 协议：P2P_PKT_FIN (0x03)
+ * 包头: [type=0x03 | flags=0 | seq=0]
+ * 负载: 无
+ */
+void nat_send_fin(p2p_session_t *s) {
+    const char* PROTO = "FIN";
+
+    udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
+
+    print("V:", LA_F("%s sent to %s:%d", LA_F193, 396),
+          PROTO, inet_ntoa(s->active_addr.sin_addr), ntohs(s->active_addr.sin_port));
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*

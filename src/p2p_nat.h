@@ -77,6 +77,14 @@ void nat_tick(struct p2p_session *s, uint64_t now_ms);
  */
 ret_t nat_punch(struct p2p_session *s, int idx);
 
+/*
+ * 发送 FIN 包（主动断开 NAT 连接）
+ *
+ * @param s        会话对象
+ * @param to       目标地址
+ */
+void nat_send_fin(struct p2p_session *s);
+
 //-----------------------------------------------------------------------------
 
 /*

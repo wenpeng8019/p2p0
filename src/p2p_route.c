@@ -43,7 +43,7 @@ ret_t route_detect_local(route_ctx_t *rt) {
 
     rt->addr_count = 0;
 
-#ifdef _WIN32
+#if P_WIN
     /* Windows: 使用 GetAdaptersAddresses 枚举 IPv4 地址 */
     ULONG bufLen = 15000;
     PIP_ADAPTER_ADDRESSES pAddrs = NULL;
@@ -94,9 +94,9 @@ ret_t route_detect_local(route_ctx_t *rt) {
 
     for (ifa = ifa_list; ifa != NULL; ifa = ifa->ifa_next) {
         if (!ifa->ifa_addr) continue;
-        if (!(ifa->ifa_flags & IFF_UP)) continue;               /* 接口未启动 */
-        if (ifa->ifa_flags & IFF_LOOPBACK) continue;            /* 跳过 localhost */
-        if (ifa->ifa_addr->sa_family != AF_INET) continue;      /* 协议无效 */
+        if (!(ifa->ifa_flags & IFF_UP)) continue;               // 接口未启动
+        if (ifa->ifa_flags & IFF_LOOPBACK) continue;            // 跳过 localhost
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;      // 协议无效
         ++rt->addr_count;
     }
 
@@ -118,10 +118,13 @@ ret_t route_detect_local(route_ctx_t *rt) {
     freeifaddrs(ifa_list);
 #endif
 
-    for (i = 0; i < rt->addr_count; i++) {
-        printf(LA_F("  [%d] %s/%d", LA_F1, 207), i, inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
+    print("I:", LA_F("Local address detection done: %d address(es)", LA_F61, 267), rt->addr_count);
+    if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
+        for (i = 0; i < rt->addr_count; i++) {
+            print("V:", LA_F("  [%d] %s/%d", LA_F1, 207), i,
+                  inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
+        }
     }
-    print("I:", LA_F("%s: %d %s", LA_F61, 267), LA_W("Local address detection done", LA_W38, 39), rt->addr_count, LA_W("address(es)", LA_W5, 6));
     return rt->addr_count;
 }
 
@@ -129,17 +132,11 @@ ret_t route_detect_local(route_ctx_t *rt) {
 bool route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_priv) {
 
     uint32_t peer_ip = peer_priv->sin_addr.s_addr;
-
     for (int i = 0; i < rt->addr_count; i++) {
         uint32_t local_ip = rt->local_addrs[i].sin_addr.s_addr;
         uint32_t mask = rt->local_masks[i];
-        if ((local_ip & mask) == (peer_ip & mask)) {
-            print("I:", LA_F("Peer IP %s matches local network segment %s (connectivity pending probe)", LA_F158, 362),
-                  inet_ntoa(peer_priv->sin_addr), inet_ntoa(rt->local_addrs[i].sin_addr));
-            return true;
-        }
+        if ((local_ip & mask) == (peer_ip & mask)) return true;
     }
 
-    print("I:", LA_F("Peer IP %s does not match any local network segment", LA_F157, 361), inet_ntoa(peer_priv->sin_addr));
     return false;
 }

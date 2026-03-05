@@ -264,28 +264,16 @@ p2p_destroy(p2p_handle_t hdl) {
         // 发送 FIN 包，断开 P2P 连接
         if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
 
-            print("I: %s", LA_S("Sending FIN packet to peer", LA_S88, 192));
-            udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
+            print("I: %s", LA_S("Sending FIN packet to peer on destroy", LA_S88, 192));
+            nat_send_fin(s);
         }
 
-        // COMPACT 模式：主动通知信令服务器释放配对槽位
-        // 不管当前处于哪个状态（连接前/连接后/中继中）均发送；
-        // 服务器收到后即刻释放槽位。如果服务器未实现此包类型的处理，
-        // 将自动降级为 90 秒超时清除机制。
+        // COMPACT 模式：主动通知信令服务器释放配对槽位（通过封装好的函数）
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT &&
             s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
-
+            
             print("I: %s", LA_S("Sending UNREGISTER packet to COMPACT signaling server", LA_S90, 194));
-
-            uint8_t unreg[P2P_PEER_ID_MAX * 2];
-            memset(unreg, 0, sizeof(unreg));
-            memcpy(unreg,                   s->sig_compact_ctx.local_peer_id,  P2P_PEER_ID_MAX);
-            memcpy(unreg + P2P_PEER_ID_MAX, s->sig_compact_ctx.remote_peer_id, P2P_PEER_ID_MAX);
-            udp_send_packet(s->sock, &s->sig_compact_ctx.server_addr,
-                            SIG_PKT_UNREGISTER, 0, 0, unreg, sizeof(unreg));
-
-            printf(LA_F("Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s", LA_F186, 390),
-                          s->sig_compact_ctx.local_peer_id, s->sig_compact_ctx.remote_peer_id);
+            p2p_signal_compact_disconnect(s);
         }
 
         print("I: %s", LA_S("Close P2P UDP socket", LA_S12, 116));
@@ -515,7 +503,7 @@ p2p_close(p2p_handle_t hdl) {
     if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
 
         print("V: %s", LA_S("Sending FIN packet to peer before closing", LA_S89, 193));
-        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
+        nat_send_fin(s);
     }
 
     // 标记连接状态为 CLOSING，等待对端确认（收到 FIN 包）后转为 CLOSED
