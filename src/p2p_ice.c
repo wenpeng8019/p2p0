@@ -641,7 +641,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
         int idx = p2p_upsert_remote_candidate(s, from, P2P_ICE_CAND_PRFLX, true);
         if (idx >= 0) {
             matched_idx = idx;
-            print("I:", LA_F("[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)", LA_F203, 409),
+            print("I:", LA_F("[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)", LA_F206, 409),
                          LA_W("Received New Remote Candidate", LA_W63, 64),
                          inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         } else {
@@ -745,7 +745,7 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
      * 与跨 NAT 场景完全相同，只是目标地址是 LAN 私网 IP。 */
     if (s->cfg.lan_punch) {
         if (s->nat.state == NAT_INIT) {
-            print("I:", LA_F("[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)", LA_F202, 408),
+            print("I:", LA_F("[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)", LA_F205, 408),
                          s->remote_cand_cnt);
             nat_punch(s, -1);
         }
@@ -763,7 +763,7 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
 
     /* 已超过最大重试次数 → FAILED */
     if (s->ice_check_count >= P2P_ICE_MAX_CHECKS) {
-        print("W:", LA_F("连通性检查超时（已发送 %d 轮），放弃", LA_F218, 424), s->ice_check_count);
+        print("W:", LA_F("连通性检查超时（已发送 %d 轮），放弃", LA_F221, 424), s->ice_check_count);
         s->ice_state = P2P_ICE_STATE_FAILED;
         return;
     }

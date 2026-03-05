@@ -374,78 +374,81 @@ enum {
     LA_F147,  /* "Initialize PUBSUB signaling context failed(%d)" (%d)  [p2p.c] */
     LA_F148,  /* "Initialize signaling mode: %d" (%d)  [p2p.c] */
     LA_F149,  /* "Invalid candidate index: %d (count: %d)" (%d,%d)  [p2p_nat.c] */
-    LA_F150,  /* "Open P2P UDP socket on port %d" (%d)  [p2p.c] */
-    LA_F151,  /* "Open P2P UDP socket on port %d failed(%d)" (%d,%d)  [p2p.c] */
-    LA_F152,  /* "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)" (%d)  [p2p.c] */
-    LA_F153,  /* "Path recovered: switched to %s" (%s)  [p2p.c] */
-    LA_F154,  /* "Path switched: %s -> %s (RTT: %u -> %u ms)" (%s,%s,%u,%u)  [p2p.c] */
-    LA_F155,  /* "Peer IP %s does not match any local network segment" (%s)  [p2p_route.c] */
-    LA_F156,  /* "Peer IP %s matches local network segment %s (connectivity pending probe)" (%s,%s)  [p2p_route.c] */
-    LA_F157,  /* "Processing (role=%s)" (%s)  [p2p_signal_pubsub.c] */
-    LA_F158,  /* "Punch timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates" (%l,%d)  [p2p_nat.c] */
-    LA_F159,  /* "Punching additional candidate(%d) %s:%d while connected" (%d,%s,%d)  [p2p_nat.c] */
-    LA_F160,  /* "Punching remote candidate(%d) %s:%d" (%d,%s,%d)  [p2p_nat.c] */
-    LA_F161,  /* "REGISTERED: peer=%s" (%s)  [p2p_signal_compact.c] */
-    LA_F162,  /* "Received %s pkt from %s:%d" (%s,%s,%d)  [p2p_signal_compact.c] */
-    LA_F163,  /* "Received %s pkt from %s:%d, flags=0x%02x, len=%d" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
-    LA_F164,  /* "Received %s pkt from %s:%d, len=%d" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
-    LA_F165,  /* "Received %s pkt from %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F166,  /* "Received %s pkt from %s:%d, seq=%u, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c, p2p_nat.c] */
-    LA_F167,  /* "Received %s pkt from %s:%d, seq=0, len=0" (%s,%s,%d)  [p2p_nat.c] */
-    LA_F168,  /* "Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x" (%s,%d,%u)  [p2p.c] */
-    LA_F169,  /* "Received DATA pkt from %s:%d, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
-    LA_F170,  /* "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d" (%s,%d,%d)  [p2p.c] */
-    LA_F171,  /* "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
-    LA_F172,  /* "Received UNKNOWN pkt type: 0x%02X"  [p2p.c] */
-    LA_F173,  /* "Received valid signal from '%s'" (%s)  [p2p_signal_pubsub.c] */
-    LA_F174,  /* "Register to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
-    LA_F175,  /* "Resend %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F176,  /* "Resolve COMPACT signaling server address: %s:%d failed(%d)" (%s,%d,%d)  [p2p.c] */
-    LA_F177,  /* "Selected path: %s (idx=%d)" (%s,%d)  [p2p.c] */
-    LA_F178,  /* "Send %s pkt to %s:%d, seq=%u, flags=0, len=0" (%s,%s,%d,%u)  [p2p_signal_compact.c] */
-    LA_F179,  /* "Send %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F180,  /* "Send %s pkt to %s:%d, seq=0, flags=0, len=%d" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
-    LA_F181,  /* "Send %s_ACK pkt to %s:%d, seq=%u, flags=0, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F182,  /* "Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=2" (%s,%s,%d)  [p2p_signal_compact.c] */
-    LA_F183,  /* "Send offer to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
-    LA_F184,  /* "Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s" (%s,%s)  [p2p.c] */
-    LA_F185,  /* "Sent initial offer(%d) to %s)" (%d,%s)  [p2p.c] */
-    LA_F186,  /* "Sent keepalive to %d reachable candidate(s)" (%d)  [p2p_nat.c] */
-    LA_F187,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
-    LA_F188,  /* "Start punching all(%d) remote candidates" (%d)  [p2p_nat.c] */
-    LA_F189,  /* "Switched to backup path: %s" (%s)  [p2p.c] */
-    LA_F190,  /* "TIMEOUT: No response from peer for (%llu ms), connection lost" (%l)  [p2p_nat.c] */
-    LA_F191,  /* "TIMEOUT: Punch failed after %llu ms (ICE done), switching to RELAY" (%l)  [p2p_nat.c] */
-    LA_F192,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
-    LA_F193,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
-    LA_F194,  /* "Using path: %s" (%s)  [p2p.c] */
-    LA_F195,  /* "[DEBUG] %s %d %s %s %d" (%s,%d,%s,%s,%d)  [p2p_signal_relay.c] */
-    LA_F196,  /* "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates" (%s,%d,%d)  [p2p_signal_relay.c] */
-    LA_F197,  /* "[DEBUG] First offer, resetting ICE and clearing %d stale candidates" (%d)  [p2p_signal_pubsub.c] */
-    LA_F198,  /* "[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u" (%x,%d,%u)  [p2p_signal_relay.c] */
-    LA_F199,  /* "[SCTP] received encapsulated packet, length %d" (%d)  [p2p_trans_sctp.c] */
-    LA_F200,  /* "[SCTP] sending %d bytes" (%d)  [p2p_trans_sctp.c] */
-    LA_F201,  /* "[Trickle] Immediately probing new candidate %s:%d" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
-    LA_F202,  /* "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)" (%d)  [p2p_ice.c] */
-    LA_F203,  /* "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)" (%s,%s,%d)  [p2p_ice.c] */
-    LA_F204,  /* "congestion detected, new ssthresh: %u, cwnd: %u" (%u,%u)  [p2p_trans_pseudotcp.c] */
-    LA_F205,  /* "probe(compact) SUCCESS: peer reachable via server (RTT: %llu ms)" (%l)  [p2p_probe.c] */
-    LA_F206,  /* "probe(compact) send failed: ret=%d" (%d)  [p2p_probe.c] */
-    LA_F207,  /* "probe(compact) sent: MSG(msg=0, sid=%u)" (%u)  [p2p_probe.c] */
-    LA_F208,  /* "probe(compact) timeout, retry %d/%d" (%d,%d)  [p2p_probe.c] */
-    LA_F209,  /* "probe(relay) SUCCESS: UDP reachable via TURN (RTT: %llu ms)" (%l)  [p2p_probe.c] */
-    LA_F210,  /* "probe(relay) TURN allocation failed: ret=%d" (%d)  [p2p_probe.c] */
-    LA_F211,  /* "probe(relay) TURN timeout, retry %d/%d" (%d,%d)  [p2p_probe.c] */
-    LA_F212,  /* "probe(relay) UDP timeout, retry %d/%d" (%d,%d)  [p2p_probe.c] */
-    LA_F213,  /* "probe(relay) exchange timeout, retry %d/%d" (%d,%d)  [p2p_probe.c] */
-    LA_F214,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
-    LA_F215,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_trans_mbedtls.c] */
-    LA_F216,  /* "✓ %s %s %s:%d (%s=%u)" (%s,%s,%s,%d,%s,%u)  [p2p_stun.c] */
-    LA_F217,  /* "✗ %s" (%s)  [p2p_stun.c] */
-    LA_F218,  /* "连通性检查超时（已发送 %d 轮），放弃" (%d)  [p2p_ice.c] */
-    LA_F219,  /* "重传 seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F150,  /* "Marked old PUNCH path (idx=%d) as FAILED due to addr change" (%d)  [p2p_signal_compact.c] */
+    LA_F151,  /* "Open P2P UDP socket on port %d" (%d)  [p2p.c] */
+    LA_F152,  /* "Open P2P UDP socket on port %d failed(%d)" (%d,%d)  [p2p.c] */
+    LA_F153,  /* "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)" (%d)  [p2p.c] */
+    LA_F154,  /* "Path recovered: switched to %s" (%s)  [p2p.c] */
+    LA_F155,  /* "Path switch debouncing: %s -> %s" (%s,%s)  [p2p.c] */
+    LA_F156,  /* "Path switched: %s -> %s (RTT: %u -> %u ms)" (%s,%s,%u,%u)  [p2p.c] */
+    LA_F157,  /* "Peer IP %s does not match any local network segment" (%s)  [p2p_route.c] */
+    LA_F158,  /* "Peer IP %s matches local network segment %s (connectivity pending probe)" (%s,%s)  [p2p_route.c] */
+    LA_F159,  /* "Processing (role=%s)" (%s)  [p2p_signal_pubsub.c] */
+    LA_F160,  /* "Punch timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates" (%l,%d)  [p2p_nat.c] */
+    LA_F161,  /* "Punching additional candidate(%d) %s:%d while connected" (%d,%s,%d)  [p2p_nat.c] */
+    LA_F162,  /* "Punching remote candidate(%d) %s:%d" (%d,%s,%d)  [p2p_nat.c] */
+    LA_F163,  /* "REGISTERED: peer=%s" (%s)  [p2p_signal_compact.c] */
+    LA_F164,  /* "Received %s pkt from %s:%d" (%s,%s,%d)  [p2p_signal_compact.c] */
+    LA_F165,  /* "Received %s pkt from %s:%d, flags=0x%02x, len=%d" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
+    LA_F166,  /* "Received %s pkt from %s:%d, len=%d" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
+    LA_F167,  /* "Received %s pkt from %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
+    LA_F168,  /* "Received %s pkt from %s:%d, seq=%u, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c, p2p_nat.c] */
+    LA_F169,  /* "Received %s pkt from %s:%d, seq=0, len=0" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F170,  /* "Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x" (%s,%d,%u)  [p2p.c] */
+    LA_F171,  /* "Received DATA pkt from %s:%d, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
+    LA_F172,  /* "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d" (%s,%d,%d)  [p2p.c] */
+    LA_F173,  /* "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
+    LA_F174,  /* "Received UNKNOWN pkt type: 0x%02X"  [p2p.c] */
+    LA_F175,  /* "Received valid signal from '%s'" (%s)  [p2p_signal_pubsub.c] */
+    LA_F176,  /* "Register to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F177,  /* "Resend %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
+    LA_F178,  /* "Resolve COMPACT signaling server address: %s:%d failed(%d)" (%s,%d,%d)  [p2p.c] */
+    LA_F179,  /* "Selected path: %s (idx=%d)" (%s,%d)  [p2p.c] */
+    LA_F180,  /* "Send %s pkt to %s:%d, seq=%u, flags=0, len=0" (%s,%s,%d,%u)  [p2p_signal_compact.c] */
+    LA_F181,  /* "Send %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
+    LA_F182,  /* "Send %s pkt to %s:%d, seq=0, flags=0, len=%d" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
+    LA_F183,  /* "Send %s_ACK pkt to %s:%d, seq=%u, flags=0, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
+    LA_F184,  /* "Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=2" (%s,%s,%d)  [p2p_signal_compact.c] */
+    LA_F185,  /* "Send offer to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
+    LA_F186,  /* "Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s" (%s,%s)  [p2p.c] */
+    LA_F187,  /* "Sent initial offer(%d) to %s)" (%d,%s)  [p2p.c] */
+    LA_F188,  /* "Sent keepalive to %d reachable candidate(s)" (%d)  [p2p_nat.c] */
+    LA_F189,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
+    LA_F190,  /* "Start punching all(%d) remote candidates" (%d)  [p2p_nat.c] */
+    LA_F191,  /* "Switched to backup path: %s" (%s)  [p2p.c] */
+    LA_F192,  /* "Synced path after failover: %s" (%s)  [p2p.c] */
+    LA_F193,  /* "TIMEOUT: No response from peer for (%llu ms), connection lost" (%l)  [p2p_nat.c] */
+    LA_F194,  /* "TIMEOUT: Punch failed after %llu ms (ICE done), switching to RELAY" (%l)  [p2p_nat.c] */
+    LA_F195,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
+    LA_F196,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
+    LA_F197,  /* "Using path: %s" (%s)  [p2p.c] */
+    LA_F198,  /* "[DEBUG] %s %d %s %s %d" (%s,%d,%s,%s,%d)  [p2p_signal_relay.c] */
+    LA_F199,  /* "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates" (%s,%d,%d)  [p2p_signal_relay.c] */
+    LA_F200,  /* "[DEBUG] First offer, resetting ICE and clearing %d stale candidates" (%d)  [p2p_signal_pubsub.c] */
+    LA_F201,  /* "[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u" (%x,%d,%u)  [p2p_signal_relay.c] */
+    LA_F202,  /* "[SCTP] received encapsulated packet, length %d" (%d)  [p2p_trans_sctp.c] */
+    LA_F203,  /* "[SCTP] sending %d bytes" (%d)  [p2p_trans_sctp.c] */
+    LA_F204,  /* "[Trickle] Immediately probing new candidate %s:%d" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
+    LA_F205,  /* "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)" (%d)  [p2p_ice.c] */
+    LA_F206,  /* "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)" (%s,%s,%d)  [p2p_ice.c] */
+    LA_F207,  /* "congestion detected, new ssthresh: %u, cwnd: %u" (%u,%u)  [p2p_trans_pseudotcp.c] */
+    LA_F208,  /* "probe(compact) SUCCESS: peer reachable via server (RTT: %llu ms)" (%l)  [p2p_probe.c] */
+    LA_F209,  /* "probe(compact) send failed: ret=%d" (%d)  [p2p_probe.c] */
+    LA_F210,  /* "probe(compact) sent: MSG(msg=0, sid=%u)" (%u)  [p2p_probe.c] */
+    LA_F211,  /* "probe(compact) timeout, retry %d/%d" (%d,%d)  [p2p_probe.c] */
+    LA_F212,  /* "probe(relay) SUCCESS: UDP reachable via TURN (RTT: %llu ms)" (%l)  [p2p_probe.c] */
+    LA_F213,  /* "probe(relay) TURN allocation failed: ret=%d" (%d)  [p2p_probe.c] */
+    LA_F214,  /* "probe(relay) TURN timeout, retry %d/%d" (%d,%d)  [p2p_probe.c] */
+    LA_F215,  /* "probe(relay) UDP timeout, retry %d/%d" (%d,%d)  [p2p_probe.c] */
+    LA_F216,  /* "probe(relay) exchange timeout, retry %d/%d" (%d,%d)  [p2p_probe.c] */
+    LA_F217,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
+    LA_F218,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_trans_mbedtls.c] */
+    LA_F219,  /* "✓ %s %s %s:%d (%s=%u)" (%s,%s,%s,%d,%s,%u)  [p2p_stun.c] */
+    LA_F220,  /* "✗ %s" (%s)  [p2p_stun.c] */
+    LA_F221,  /* "连通性检查超时（已发送 %d 轮），放弃" (%d)  [p2p_ice.c] */
+    LA_F222,  /* "重传 seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
 
-    LA_NUM = 425
+    LA_NUM = 428
 };
 
 /* 格式字符串起始位置（用于验证） */

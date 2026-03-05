@@ -190,12 +190,12 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
     p2p_signaling_payload_hdr_t payload;
     if (enc_len >= sizeof(p2p_signaling_payload_hdr_t) && unpack_signaling_payload_hdr(&payload, dec_buf) == 0 &&
         enc_len >= (size_t)(sizeof(p2p_signaling_payload_hdr_t) + payload.candidate_count * sizeof(p2p_candidate_t))) {
-        print("I:", LA_F("Received valid signal from '%s'", LA_F173, 379), payload.sender);
+        print("I:", LA_F("Received valid signal from '%s'", LA_F175, 379), payload.sender);
         
         /* SUB 收到首个 offer（或发送者改变），重置 ICE 避免残留旧连接状态 */
         if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
             if (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_INIT) {
-                printf(LA_F("[DEBUG] First offer, resetting ICE and clearing %d stale candidates", LA_F197, 403), s->remote_cand_cnt);
+                printf(LA_F("[DEBUG] First offer, resetting ICE and clearing %d stale candidates", LA_F200, 403), s->remote_cand_cnt);
                 s->remote_cand_cnt = 0;
                 s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
                 s->ice_check_count = 0;
@@ -218,7 +218,7 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
             if (s->ice_state == P2P_ICE_STATE_CHECKING) {
 
-                printf(LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F201, 407),
+                printf(LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F204, 407),
                               inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
                 nat_punch(s, idx);
             }
@@ -487,7 +487,7 @@ int p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name
         snprintf(patch_url, sizeof(patch_url),
                  "https://api.github.com/gists/%s", ctx->channel_id);
 
-        print("I:", LA_F("Updating Gist field '%s'...", LA_F193, 399), field_name);
+        print("I:", LA_F("Updating Gist field '%s'...", LA_F196, 399), field_name);
         ret = p2p_http_patch(patch_url, ctx->auth_token, body_buf);
 
         free(body_buf);
@@ -653,7 +653,7 @@ void p2p_signal_pubsub_tick_recv(p2p_signal_pubsub_ctx_t *ctx, struct p2p_sessio
 
     /* 处理有效数据 */
     if (strlen(content) > 10) {
-        print("I:", LA_F("Processing (role=%s)", LA_F157, 363),
+        print("I:", LA_F("Processing (role=%s)", LA_F159, 363),
                      ctx->role == P2P_SIGNAL_ROLE_PUB ? LA_W("PUB", LA_W59, 60) : LA_W("SUB", LA_W83, 84));
         process_payload(ctx, s, content);
     }

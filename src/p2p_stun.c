@@ -495,14 +495,14 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
                 /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 c->addr = mapped;
-                print("I:", LA_F("✓ %s %s %s:%d (%s=%u)", LA_F216, 422),
+                print("I:", LA_F("✓ %s %s %s:%d (%s=%u)", LA_F219, 422),
                              LA_W("Gathered Srflx Candidate", LA_W31, 32), LA_S("Added Remote Candidate", LA_S4, 108),
                              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                              LA_S("priority", LA_S55, 159), c->priority);
                 /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
                 p2p_ice_send_local_candidate(s, c);
             } else {
-                print("W:", LA_F("✗ %s", LA_F217, 423), LA_W("Cannot add Srflx candidate: realloc failed (OOM)", LA_W14, 15));
+                print("W:", LA_F("✗ %s", LA_F220, 423), LA_W("Cannot add Srflx candidate: realloc failed (OOM)", LA_W14, 15));
             }
         }
         

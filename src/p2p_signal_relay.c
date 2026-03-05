@@ -469,7 +469,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     return;
                 }
                 
-                printf(LA_F("[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u", LA_F198, 404),
+                printf(LA_F("[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u", LA_F201, 404),
                        ctx->read_hdr.magic, ctx->read_hdr.type, ctx->read_hdr.length);
                 
                 /* 根据消息类型决定下一步 */
@@ -672,7 +672,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                                        (s->ice_state == P2P_ICE_STATE_FAILED);
                     
                     if (should_reset && (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_INIT)) {
-                        printf(LA_F("[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates", LA_F196, 402),
+                        printf(LA_F("[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates", LA_F199, 402),
                                ctx->read_hdr.type == P2P_RLY_OFFER ? "OFFER" : "FORWARD", s->ice_state, s->remote_cand_cnt);
                         s->remote_cand_cnt = 0;
                         s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
@@ -703,7 +703,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
                             if (s->ice_state == P2P_ICE_STATE_CHECKING) {
 
-                                print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F201, 407),
+                                print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F204, 407),
                                              inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
 
                                 nat_punch(s, idx);
@@ -761,7 +761,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
             ctx->read_offset += n;
             
             if (ctx->read_offset >= ctx->read_expected) {
-                printf(LA_F("[DEBUG] %s %d %s %s %d", LA_F195, 401),
+                printf(LA_F("[DEBUG] %s %d %s %s %d", LA_F198, 401),
                        LA_W("Discarded", LA_W19, 20), ctx->read_expected, LA_W("bytes", LA_W11, 12),
                        LA_S("payload of message type", LA_S54, 158), ctx->read_hdr.type);
                 

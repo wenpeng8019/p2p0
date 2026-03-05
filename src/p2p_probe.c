@@ -60,10 +60,10 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
                     s->probe_compact_sid   = s->sig_compact_ctx.req_sid;
                     s->probe_compact_start = now_ms;
 
-                    print("I:", LA_F("probe(compact) sent: MSG(msg=0, sid=%u)", LA_F207, 413),
+                    print("I:", LA_F("probe(compact) sent: MSG(msg=0, sid=%u)", LA_F210, 413),
                           s->probe_compact_sid);
                 } else {
-                    print("W:", LA_F("probe(compact) send failed: ret=%d", LA_F206, 412), ret);
+                    print("W:", LA_F("probe(compact) send failed: ret=%d", LA_F209, 412), ret);
                     s->probe_compact_state = P2P_PROBE_COMPACT_IDLE;
                 }
             }
@@ -75,7 +75,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
                 if (s->probe_compact_retries < PROBE_COMPACT_MAX_RETRIES) {
                     s->probe_compact_retries++;
                     s->probe_compact_state = P2P_PROBE_COMPACT_PENDING;
-                    print("W:", LA_F("probe(compact) timeout, retry %d/%d", LA_F208, 414),
+                    print("W:", LA_F("probe(compact) timeout, retry %d/%d", LA_F211, 414),
                           s->probe_compact_retries, PROBE_COMPACT_MAX_RETRIES);
                 } else {
                     s->probe_compact_state    = P2P_PROBE_COMPACT_TIMEOUT;
@@ -146,7 +146,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                     s->probe_relay_start = now_ms;
                     print("I:", LA_S("probe(relay) TURN allocation request sent", LA_S73, 177));
                 } else {
-                    print("W:", LA_F("probe(relay) TURN allocation failed: ret=%d", LA_F210, 416), ret);
+                    print("W:", LA_F("probe(relay) TURN allocation failed: ret=%d", LA_F213, 416), ret);
                     s->probe_relay_state    = P2P_PROBE_RELAY_TIMEOUT;
                     s->probe_relay_complete = now_ms;
                 }
@@ -159,7 +159,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                 if (s->probe_relay_retries < PROBE_RELAY_MAX_RETRIES) {
                     s->probe_relay_retries++;
                     s->probe_relay_state = P2P_PROBE_RELAY_REFRESH_TURN;
-                    print("W:", LA_F("probe(relay) TURN timeout, retry %d/%d", LA_F211, 417),
+                    print("W:", LA_F("probe(relay) TURN timeout, retry %d/%d", LA_F214, 417),
                           s->probe_relay_retries, PROBE_RELAY_MAX_RETRIES);
                 } else {
                     s->probe_relay_state    = P2P_PROBE_RELAY_TIMEOUT;
@@ -185,7 +185,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                 if (s->probe_relay_retries < PROBE_RELAY_MAX_RETRIES) {
                     s->probe_relay_retries++;
                     s->probe_relay_state = P2P_PROBE_RELAY_EXCHANGE_ADDR;
-                    print("W:", LA_F("probe(relay) exchange timeout, retry %d/%d", LA_F213, 419),
+                    print("W:", LA_F("probe(relay) exchange timeout, retry %d/%d", LA_F216, 419),
                           s->probe_relay_retries, PROBE_RELAY_MAX_RETRIES);
                 } else {
                     s->probe_relay_state    = P2P_PROBE_RELAY_PEER_OFFLINE;
@@ -209,7 +209,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
                 if (s->probe_relay_retries < PROBE_RELAY_MAX_RETRIES) {
                     s->probe_relay_retries++;
                     s->probe_relay_state = P2P_PROBE_RELAY_PROBE_UDP;
-                    print("W:", LA_F("probe(relay) UDP timeout, retry %d/%d", LA_F212, 418),
+                    print("W:", LA_F("probe(relay) UDP timeout, retry %d/%d", LA_F215, 418),
                           s->probe_relay_retries, PROBE_RELAY_MAX_RETRIES);
                 } else {
                     s->probe_relay_state    = P2P_PROBE_RELAY_TIMEOUT;

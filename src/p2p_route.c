@@ -134,12 +134,12 @@ bool route_check_same_subnet(route_ctx_t *rt, const struct sockaddr_in *peer_pri
         uint32_t local_ip = rt->local_addrs[i].sin_addr.s_addr;
         uint32_t mask = rt->local_masks[i];
         if ((local_ip & mask) == (peer_ip & mask)) {
-            print("I:", LA_F("Peer IP %s matches local network segment %s (connectivity pending probe)", LA_F156, 362),
+            print("I:", LA_F("Peer IP %s matches local network segment %s (connectivity pending probe)", LA_F158, 362),
                   inet_ntoa(peer_priv->sin_addr), inet_ntoa(rt->local_addrs[i].sin_addr));
             return true;
         }
     }
 
-    print("I:", LA_F("Peer IP %s does not match any local network segment", LA_F155, 361), inet_ntoa(peer_priv->sin_addr));
+    print("I:", LA_F("Peer IP %s does not match any local network segment", LA_F157, 361), inet_ntoa(peer_priv->sin_addr));
     return false;
 }

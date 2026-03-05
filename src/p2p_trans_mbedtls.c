@@ -341,7 +341,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret;
     if ((ret = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F215, 421), -ret);
+        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F218, 421), -ret);
         return -1;
     }
     

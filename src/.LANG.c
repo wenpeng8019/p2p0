@@ -260,8 +260,8 @@ const char* lang_en[LA_NUM] = {
     [LA_F46] = "%s sent, inst_id=%u, cands=%d",  /* SID:252 */
     [LA_F47] = "%s sent, seq=%u",  /* SID:253 */
     [LA_F48] = "%s sent, sid=%u, msg=%u, size=%d",  /* SID:254 */
-    [LA_F49] = "%s sent, size=%d (ses_id=%llu)",  /* SID:255 */
-    [LA_F50] = "%s sent, total=%d (ses_id=%llu)",  /* SID:256 */
+    [LA_F49] = "%s sent, size=%d (ses_id=%llu)",  /* SID:528 */
+    [LA_F50] = "%s sent, total=%d (ses_id=%llu)",  /* SID:529 */
     [LA_F51] = "%s seq=%u base=%u",  /* SID:257 */
     [LA_F52] = "%s seq=%u len=%d base=%u",  /* SID:258 */
     [LA_F53] = "%s seq=%u len=%d inflight=%d",  /* SID:259 */
@@ -281,14 +281,14 @@ const char* lang_en[LA_NUM] = {
     [LA_F67] = "%s: RPC fail due to peer offline (sid=%u)",  /* SID:273 */
     [LA_F68] = "%s: RPC fail due to relay timeout (sid=%u)",  /* SID:274 */
     [LA_F69] = "%s: accepted",  /* SID:275 */
-    [LA_F70] = "%s: accepted (ses_id=%llu)",  /* SID:276 */
+    [LA_F70] = "%s: accepted (ses_id=%llu)",  /* SID:530 */
     [LA_F71] = "%s: accepted for ack_seq=%u",  /* SID:277 */
     [LA_F72] = "%s: accepted for echo_seq=%u",  /* SID:278 */
     [LA_F73] = "%s: accepted seq=%u cand_cnt=%d flags=0x%02x",  /* SID:279 */
     [LA_F74] = "%s: accepted sid=%u, msg=%u",  /* SID:280 */
     [LA_F75] = "%s: accepted, RPC complete (sid=%u)",  /* SID:281 */
     [LA_F76] = "%s: accepted, RPC finished (sid=%u)",  /* SID:282 */
-    [LA_F77] = "%s: accepted, len=%d (ses_id=%llu)",  /* SID:283 */
+    [LA_F77] = "%s: accepted, len=%d (ses_id=%llu)",  /* SID:531 */
     [LA_F78] = "%s: accepted, probe_mapped=%s:%d",  /* SID:284 */
     [LA_F79] = "%s: accepted, public=%s:%d max_cands=%d probe_port=%d relay=%s msg=%s",  /* SID:285 */
     [LA_F80] = "%s: accepted, waiting for response (sid=%u)",  /* SID:286 */
@@ -307,7 +307,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F93] = "%s: ignored (relay not supported)",  /* SID:299 */
     [LA_F94] = "%s: ignored for duplicated seq=%u, already acked",  /* SID:300 */
     [LA_F95] = "%s: ignored for seq=%u (expect=%d)",  /* SID:301 */
-    [LA_F96] = "%s: ignored for ses_id=%llu (local ses_id=%llu)",  /* SID:302 */
+    [LA_F96] = "%s: ignored for ses_id=%llu (local ses_id=%llu)",  /* SID:532 */
     [LA_F97] = "%s: ignored for sid=%u (current sid=%u)",  /* SID:303 */
     [LA_F98] = "%s: ignored in invalid state=%d",  /* SID:304 */
     [LA_F99] = "%s: ignored in state(%d)",  /* SID:305 */
@@ -318,7 +318,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F104] = "%s: invalid seq=%u",  /* SID:310 */
     [LA_F105] = "%s: new request (sid=%u) overrides pending request (sid=%u)",  /* SID:311 */
     [LA_F106] = "%s: old request ignored (sid=%u <= last_sid=%u)",  /* SID:312 */
-    [LA_F107] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED",  /* SID:313 */
+    [LA_F107] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED",  /* SID:533 */
     [LA_F108] = "%s: received FIN from peer, marking NAT as CLOSED",  /* SID:314 */
     [LA_F109] = "%s: remote candidate[%d] %s:%d, starting punch",  /* SID:315 */
     [LA_F110] = "%s: retry(%d/%d) probe",  /* SID:316 */
@@ -327,22 +327,22 @@ const char* lang_en[LA_NUM] = {
     [LA_F113] = "%s: retry, (attempt %d/%d)",  /* SID:319 */
     [LA_F114] = "%s: rx confirmed: peer->me path is UP (%s:%d)",  /* SID:320 */
     [LA_F115] = "%s: sent, sid=%u, code=%u, size=%d",  /* SID:321 */
-    [LA_F116] = "%s: session mismatch(local=%llu pkt=%llu)",  /* SID:322 */
-    [LA_F117] = "%s: session mismatch(local=%llu, pkt=%llu)",  /* SID:323 */
+    [LA_F116] = "%s: session mismatch(local=%llu pkt=%llu)",  /* SID:534 */
+    [LA_F117] = "%s: session mismatch(local=%llu, pkt=%llu)",  /* SID:535 */
     [LA_F118] = "%s: skip and mark NAT as OPEN (lan_punch enabled)",  /* SID:324 */
     [LA_F119] = "%s: started, sending first probe",  /* SID:325 */
     [LA_F120] = "%s: status error(%d)",  /* SID:326 */
-    [LA_F121] = "%s: sync complete (ses_id=%llu)",  /* SID:327 */
-    [LA_F122] = "%s: sync complete (ses_id=%llu, mask=0x%04x)",  /* SID:328 */
+    [LA_F121] = "%s: sync complete (ses_id=%llu)",  /* SID:536 */
+    [LA_F122] = "%s: sync complete (ses_id=%llu, mask=0x%04x)",  /* SID:537 */
     [LA_F123] = "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)",  /* SID:329 */
     [LA_F124] = "%s: timeout after %d retries , type unknown",  /* SID:330 */
     [LA_F125] = "%s: timeout, max(%d) attempts reached, reset to INIT",  /* SID:331 */
     [LA_F126] = "%s: tx confirmed: me->peer path is UP (peer echoed seq=%u)",  /* SID:332 */
     [LA_F127] = "%s: unexpected ack_seq=%u mask=0x%04x",  /* SID:333 */
     [LA_F128] = "%s:%04d: %s",  /* SID:334 */
-    [LA_F129] = "%s_ACK sent, seq=%u (ses_id=%llu)",  /* SID:335 */
+    [LA_F129] = "%s_ACK sent, seq=%u (ses_id=%llu)",  /* SID:538 */
     [LA_F130] = "%s_ACK sent, sid=%u",  /* SID:336 */
-    [LA_F131] = "ATTEMPT: punch to %d/%d candidates (elapsed: %llu ms)",  /* SID:337 */
+    [LA_F131] = "ATTEMPT: punch to %d/%d candidates (elapsed: %llu ms)",  /* SID:539 */
     [LA_F132] = "Added PUNCH path to path manager, idx=%d",  /* SID:338 */
     [LA_F133] = "Added RELAY path to path manager, idx=%d",  /* SID:339 */
     [LA_F134] = "Append Host candidate: %s:%d",  /* SID:340 */
@@ -361,74 +361,77 @@ const char* lang_en[LA_NUM] = {
     [LA_F147] = "Initialize PUBSUB signaling context failed(%d)",  /* SID:353 */
     [LA_F148] = "Initialize signaling mode: %d",  /* SID:354 */
     [LA_F149] = "Invalid candidate index: %d (count: %d)",  /* SID:355 */
-    [LA_F150] = "Open P2P UDP socket on port %d",  /* SID:356 */
-    [LA_F151] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:357 */
-    [LA_F152] = "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)",  /* SID:358 */
-    [LA_F153] = "Path recovered: switched to %s",  /* SID:359 */
-    [LA_F154] = "Path switched: %s -> %s (RTT: %u -> %u ms)",  /* SID:360 */
-    [LA_F155] = "Peer IP %s does not match any local network segment",  /* SID:361 */
-    [LA_F156] = "Peer IP %s matches local network segment %s (connectivity pending probe)",  /* SID:362 */
-    [LA_F157] = "Processing (role=%s)",  /* SID:363 */
-    [LA_F158] = "Punch timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:364 */
-    [LA_F159] = "Punching additional candidate(%d) %s:%d while connected",  /* SID:365 */
-    [LA_F160] = "Punching remote candidate(%d) %s:%d",  /* SID:366 */
-    [LA_F161] = "REGISTERED: peer=%s",  /* SID:367 */
-    [LA_F162] = "Received %s pkt from %s:%d",  /* SID:368 */
-    [LA_F163] = "Received %s pkt from %s:%d, flags=0x%02x, len=%d",  /* SID:369 */
-    [LA_F164] = "Received %s pkt from %s:%d, len=%d",  /* SID:370 */
-    [LA_F165] = "Received %s pkt from %s:%d, seq=%u, flags=0x%02x, len=%d",  /* SID:371 */
-    [LA_F166] = "Received %s pkt from %s:%d, seq=%u, len=%d",  /* SID:372 */
-    [LA_F167] = "Received %s pkt from %s:%d, seq=0, len=0",  /* SID:373 */
-    [LA_F168] = "Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x",  /* SID:374 */
-    [LA_F169] = "Received DATA pkt from %s:%d, seq=%u, len=%d",  /* SID:375 */
-    [LA_F170] = "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d",  /* SID:376 */
-    [LA_F171] = "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d",  /* SID:377 */
-    [LA_F172] = "Received UNKNOWN pkt type: 0x%02X",  /* SID:378 */
-    [LA_F173] = "Received valid signal from '%s'",  /* SID:379 */
-    [LA_F174] = "Register to COMPACT signaling server at %s:%d",  /* SID:380 */
-    [LA_F175] = "Resend %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d",  /* SID:381 */
-    [LA_F176] = "Resolve COMPACT signaling server address: %s:%d failed(%d)",  /* SID:382 */
-    [LA_F177] = "Selected path: %s (idx=%d)",  /* SID:383 */
-    [LA_F178] = "Send %s pkt to %s:%d, seq=%u, flags=0, len=0",  /* SID:384 */
-    [LA_F179] = "Send %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d",  /* SID:385 */
-    [LA_F180] = "Send %s pkt to %s:%d, seq=0, flags=0, len=%d",  /* SID:386 */
-    [LA_F181] = "Send %s_ACK pkt to %s:%d, seq=%u, flags=0, len=%d",  /* SID:387 */
-    [LA_F182] = "Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=2",  /* SID:388 */
-    [LA_F183] = "Send offer to RELAY signaling server failed(%d)",  /* SID:389 */
-    [LA_F184] = "Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s",  /* SID:390 */
-    [LA_F185] = "Sent initial offer(%d) to %s)",  /* SID:391 */
-    [LA_F186] = "Sent keepalive to %d reachable candidate(s)",  /* SID:392 */
-    [LA_F187] = "Start internal thread failed(%d)",  /* SID:393 */
-    [LA_F188] = "Start punching all(%d) remote candidates",  /* SID:394 */
-    [LA_F189] = "Switched to backup path: %s",  /* SID:395 */
-    [LA_F190] = "TIMEOUT: No response from peer for (%llu ms), connection lost",  /* SID:396 */
-    [LA_F191] = "TIMEOUT: Punch failed after %llu ms (ICE done), switching to RELAY",  /* SID:397 */
-    [LA_F192] = "Unknown signaling mode: %d",  /* SID:398 */
-    [LA_F193] = "Updating Gist field '%s'...",  /* SID:399 */
-    [LA_F194] = "Using path: %s",  /* SID:400 */
-    [LA_F195] = "[DEBUG] %s %d %s %s %d",  /* SID:401 */
-    [LA_F196] = "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates",  /* SID:402 */
-    [LA_F197] = "[DEBUG] First offer, resetting ICE and clearing %d stale candidates",  /* SID:403 */
-    [LA_F198] = "[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u",  /* SID:404 */
-    [LA_F199] = "[SCTP] received encapsulated packet, length %d",  /* SID:405 */
-    [LA_F200] = "[SCTP] sending %d bytes",  /* SID:406 */
-    [LA_F201] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:407 */
-    [LA_F202] = "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)",  /* SID:408 */
-    [LA_F203] = "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)",  /* SID:409 */
-    [LA_F204] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:410 */
-    [LA_F205] = "probe(compact) SUCCESS: peer reachable via server (RTT: %llu ms)",  /* SID:411 */
-    [LA_F206] = "probe(compact) send failed: ret=%d",  /* SID:412 */
-    [LA_F207] = "probe(compact) sent: MSG(msg=0, sid=%u)",  /* SID:413 */
-    [LA_F208] = "probe(compact) timeout, retry %d/%d",  /* SID:414 */
-    [LA_F209] = "probe(relay) SUCCESS: UDP reachable via TURN (RTT: %llu ms)",  /* SID:415 */
-    [LA_F210] = "probe(relay) TURN allocation failed: ret=%d",  /* SID:416 */
-    [LA_F211] = "probe(relay) TURN timeout, retry %d/%d",  /* SID:417 */
-    [LA_F212] = "probe(relay) UDP timeout, retry %d/%d",  /* SID:418 */
-    [LA_F213] = "probe(relay) exchange timeout, retry %d/%d",  /* SID:419 */
-    [LA_F214] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:420 */
-    [LA_F215] = "ssl_setup failed: -0x%x",  /* SID:421 */
-    [LA_F216] = "✓ %s %s %s:%d (%s=%u)",  /* SID:422 */
-    [LA_F217] = "✗ %s",  /* SID:423 */
-    [LA_F218] = "连通性检查超时（已发送 %d 轮），放弃",  /* SID:424 */
-    [LA_F219] = "重传 seq=%u retx=%d rto=%d",  /* SID:425 */
+    [LA_F150] = "Marked old PUNCH path (idx=%d) as FAILED due to addr change",  /* SID:360 */
+    [LA_F151] = "Open P2P UDP socket on port %d",  /* SID:356 */
+    [LA_F152] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:357 */
+    [LA_F153] = "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)",  /* SID:358 */
+    [LA_F154] = "Path recovered: switched to %s",  /* SID:359 */
+    [LA_F155] = "Path switch debouncing: %s -> %s",  /* SID:360 */
+    [LA_F156] = "Path switched: %s -> %s (RTT: %u -> %u ms)",  /* SID:360 */
+    [LA_F157] = "Peer IP %s does not match any local network segment",  /* SID:361 */
+    [LA_F158] = "Peer IP %s matches local network segment %s (connectivity pending probe)",  /* SID:362 */
+    [LA_F159] = "Processing (role=%s)",  /* SID:363 */
+    [LA_F160] = "Punch timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:540 */
+    [LA_F161] = "Punching additional candidate(%d) %s:%d while connected",  /* SID:365 */
+    [LA_F162] = "Punching remote candidate(%d) %s:%d",  /* SID:366 */
+    [LA_F163] = "REGISTERED: peer=%s",  /* SID:367 */
+    [LA_F164] = "Received %s pkt from %s:%d",  /* SID:368 */
+    [LA_F165] = "Received %s pkt from %s:%d, flags=0x%02x, len=%d",  /* SID:369 */
+    [LA_F166] = "Received %s pkt from %s:%d, len=%d",  /* SID:370 */
+    [LA_F167] = "Received %s pkt from %s:%d, seq=%u, flags=0x%02x, len=%d",  /* SID:371 */
+    [LA_F168] = "Received %s pkt from %s:%d, seq=%u, len=%d",  /* SID:372 */
+    [LA_F169] = "Received %s pkt from %s:%d, seq=0, len=0",  /* SID:373 */
+    [LA_F170] = "Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x",  /* SID:374 */
+    [LA_F171] = "Received DATA pkt from %s:%d, seq=%u, len=%d",  /* SID:375 */
+    [LA_F172] = "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d",  /* SID:376 */
+    [LA_F173] = "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d",  /* SID:377 */
+    [LA_F174] = "Received UNKNOWN pkt type: 0x%02X",  /* SID:378 */
+    [LA_F175] = "Received valid signal from '%s'",  /* SID:379 */
+    [LA_F176] = "Register to COMPACT signaling server at %s:%d",  /* SID:380 */
+    [LA_F177] = "Resend %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d",  /* SID:381 */
+    [LA_F178] = "Resolve COMPACT signaling server address: %s:%d failed(%d)",  /* SID:382 */
+    [LA_F179] = "Selected path: %s (idx=%d)",  /* SID:383 */
+    [LA_F180] = "Send %s pkt to %s:%d, seq=%u, flags=0, len=0",  /* SID:384 */
+    [LA_F181] = "Send %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d",  /* SID:385 */
+    [LA_F182] = "Send %s pkt to %s:%d, seq=0, flags=0, len=%d",  /* SID:386 */
+    [LA_F183] = "Send %s_ACK pkt to %s:%d, seq=%u, flags=0, len=%d",  /* SID:387 */
+    [LA_F184] = "Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=2",  /* SID:388 */
+    [LA_F185] = "Send offer to RELAY signaling server failed(%d)",  /* SID:389 */
+    [LA_F186] = "Sent UNREGISTER Pkt for local_peer_id=%s, remote_peer_id=%s",  /* SID:390 */
+    [LA_F187] = "Sent initial offer(%d) to %s)",  /* SID:391 */
+    [LA_F188] = "Sent keepalive to %d reachable candidate(s)",  /* SID:392 */
+    [LA_F189] = "Start internal thread failed(%d)",  /* SID:393 */
+    [LA_F190] = "Start punching all(%d) remote candidates",  /* SID:394 */
+    [LA_F191] = "Switched to backup path: %s",  /* SID:395 */
+    [LA_F192] = "Synced path after failover: %s",  /* SID:360 */
+    [LA_F193] = "TIMEOUT: No response from peer for (%llu ms), connection lost",  /* SID:541 */
+    [LA_F194] = "TIMEOUT: Punch failed after %llu ms (ICE done), switching to RELAY",  /* SID:542 */
+    [LA_F195] = "Unknown signaling mode: %d",  /* SID:398 */
+    [LA_F196] = "Updating Gist field '%s'...",  /* SID:399 */
+    [LA_F197] = "Using path: %s",  /* SID:400 */
+    [LA_F198] = "[DEBUG] %s %d %s %s %d",  /* SID:401 */
+    [LA_F199] = "[DEBUG] %s received (ice_state=%d), resetting ICE and clearing %d stale candidates",  /* SID:402 */
+    [LA_F200] = "[DEBUG] First offer, resetting ICE and clearing %d stale candidates",  /* SID:403 */
+    [LA_F201] = "[DEBUG] relay_tick: recv header complete, magic=0x%x, type=%d, length=%u",  /* SID:404 */
+    [LA_F202] = "[SCTP] received encapsulated packet, length %d",  /* SID:405 */
+    [LA_F203] = "[SCTP] sending %d bytes",  /* SID:406 */
+    [LA_F204] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:407 */
+    [LA_F205] = "[lan_punch] 启动 PUNCH 流程 (Host 候选 %d 个)",  /* SID:408 */
+    [LA_F206] = "[prflx] %s %s:%d (Peer Reflexive - symmetric NAT)",  /* SID:409 */
+    [LA_F207] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:410 */
+    [LA_F208] = "probe(compact) SUCCESS: peer reachable via server (RTT: %llu ms)",  /* SID:543 */
+    [LA_F209] = "probe(compact) send failed: ret=%d",  /* SID:412 */
+    [LA_F210] = "probe(compact) sent: MSG(msg=0, sid=%u)",  /* SID:413 */
+    [LA_F211] = "probe(compact) timeout, retry %d/%d",  /* SID:414 */
+    [LA_F212] = "probe(relay) SUCCESS: UDP reachable via TURN (RTT: %llu ms)",  /* SID:544 */
+    [LA_F213] = "probe(relay) TURN allocation failed: ret=%d",  /* SID:416 */
+    [LA_F214] = "probe(relay) TURN timeout, retry %d/%d",  /* SID:417 */
+    [LA_F215] = "probe(relay) UDP timeout, retry %d/%d",  /* SID:418 */
+    [LA_F216] = "probe(relay) exchange timeout, retry %d/%d",  /* SID:419 */
+    [LA_F217] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:420 */
+    [LA_F218] = "ssl_setup failed: -0x%x",  /* SID:421 */
+    [LA_F219] = "✓ %s %s %s:%d (%s=%u)",  /* SID:422 */
+    [LA_F220] = "✗ %s",  /* SID:423 */
+    [LA_F221] = "连通性检查超时（已发送 %d 轮），放弃",  /* SID:424 */
+    [LA_F222] = "重传 seq=%u retx=%d rto=%d",  /* SID:425 */
 };
