@@ -902,20 +902,24 @@ TEST(error_register_ack_failed) {
 TEST(protocol_number_verification) {
     TEST_LOG("Testing SIMPLE protocol number ranges");
     
-    // COMPACT 信令协议编号: 0x80-0x9F
+    // COMPACT 信令协议编号: 0x80-0x8D
     ASSERT_EQ(SIG_PKT_REGISTER, 0x80);
     ASSERT_EQ(SIG_PKT_REGISTER_ACK, 0x81);
-    ASSERT_EQ(SIG_PKT_ALIVE, 0x82);
-    ASSERT_EQ(SIG_PKT_ALIVE_ACK, 0x83);
-    ASSERT_EQ(SIG_PKT_PEER_INFO, 0x84);
-    ASSERT_EQ(SIG_PKT_PEER_INFO_ACK, 0x85);
-    ASSERT_EQ(SIG_PKT_NAT_PROBE, 0x86);
-    ASSERT_EQ(SIG_PKT_NAT_PROBE_ACK, 0x87);
+    ASSERT_EQ(SIG_PKT_PEER_INFO, 0x83);
+    ASSERT_EQ(SIG_PKT_PEER_INFO_ACK, 0x84);
+    ASSERT_EQ(SIG_PKT_ALIVE, 0x86);
+    ASSERT_EQ(SIG_PKT_ALIVE_ACK, 0x87);
+    ASSERT_EQ(SIG_PKT_MSG_REQ, 0x88);
+    ASSERT_EQ(SIG_PKT_MSG_REQ_ACK, 0x89);
+    ASSERT_EQ(SIG_PKT_MSG_RESP, 0x8A);
+    ASSERT_EQ(SIG_PKT_MSG_RESP_ACK, 0x8B);
+    ASSERT_EQ(SIG_PKT_NAT_PROBE, 0x8C);
+    ASSERT_EQ(SIG_PKT_NAT_PROBE_ACK, 0x8D);
     
     // 中继扩展协议: 0xA0-0xBF
     ASSERT_EQ(P2P_PKT_RELAY_DATA, 0xA0);
     
-    TEST_LOG("  ✓ COMPACT signaling protocols: 0x80-0x87");
+    TEST_LOG("  ✓ COMPACT signaling protocols: 0x80-0x8D");
     TEST_LOG("  ✓ Relay extension: 0xA0");
 }
 
