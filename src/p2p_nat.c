@@ -12,7 +12,7 @@
 
 #define PUNCH_INTERVAL_MS       500         /* 打洞间隔 */
 #define PUNCH_TIMEOUT_MS        5000        /* 打洞超时 */
-#define PING_INTERVAL_MS        15000       /* 心跳间隔 */
+#define PING_INTERVAL_MS        5000        /* 心跳间隔（调整为5秒，适配path_manager 10秒超时）*/
 #define PONG_TIMEOUT_MS         30000       /* 心跳超时 */
 
 #define TASK_NAT                "NAT"
@@ -45,6 +45,16 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
     print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, echo_seq=%u", LA_F44, 250),
           PROTO, inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port),
           reason, s->nat.punch_seq, s->nat.last_peer_seq);
+    
+    /* 集成 path_manager：记录发送用于 RTT 测量 */
+    int path_idx = path_manager_find_path_by_addr(&s->path_mgr, &entry->cand.addr);
+    if (path_idx < 0) {
+        /* 路径不存在，自动注册（用于主动打洞场景）*/
+        path_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_PUNCH, &entry->cand.addr);
+    }
+    if (path_idx >= 0) {
+        path_manager_on_packet_send(&s->path_mgr, path_idx, s->nat.punch_seq, now);
+    }
 
     entry->last_punch_send_ms = now;
 }
@@ -136,7 +146,7 @@ int nat_punch(p2p_session_t *s, int idx) {
         uint8_t payload[2]; nwrite_s(payload, n->last_peer_seq);
         for (int i = 0; i < s->remote_cand_cnt; i++) {
             nat_send_punch(s, LA_W("punch", LA_W61, 62), &s->remote_cands[i], payload, sizeof(payload), now);
-            ++n->punch_seq;
+            // 注意：不在此处递增 punch_seq，因为 nat_send_punch() 内部已经递增
         }
         n->last_send_time = now;
         
@@ -258,9 +268,21 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     n->last_recv_time = now;
 
     print("V:", LA_F("%s: accepted for echo_seq=%u", LA_F72, 278), PROTO, echo_seq);
-
+    
     // 收到 PUNCH 即证明该地址可达，立即注册路径（所有状态都适用）
+    // 注意：必须先注册路径，再更新统计，否则 last_recv_ms 将为 0 导致立即超时
     nat_register_reachable_paths(s, from);
+    
+    /* 集成 path_manager：更新 RTT 和接收时间 */
+    int path_idx = path_manager_find_path_by_addr(&s->path_mgr, from);
+    if (path_idx >= 0) {
+        /* 尝试匹配 ACK（echo_seq 对应之前发送的 seq）*/
+        if (echo_seq > 0) {
+            path_manager_on_packet_ack(&s->path_mgr, echo_seq, now);
+        }
+        /* 更新接收时间（防止超时）*/
+        path_manager_on_packet_recv(&s->path_mgr, path_idx, now);
+    }
 
     // NAT_CONNECTED 状态：只收集路径，不需要双向确认逻辑
     if (n->state == NAT_CONNECTED) {

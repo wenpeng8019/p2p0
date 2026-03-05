@@ -26,15 +26,8 @@ typedef enum {
     P2P_PATH_STRATEGY_HYBRID                 // 混合模式（平衡成本和性能）
 } p2p_path_strategy_t;
 
-/* 路径类型（复用现有定义） */
-#ifndef P2P_PATH_TYPES_DEFINED
-#define P2P_PATH_TYPES_DEFINED
-#define P2P_PATH_NONE   0
-#define P2P_PATH_LAN    1   // 同一子网，直连
-#define P2P_PATH_PUNCH  2   // NAT 打洞
-#define P2P_PATH_RELAY  3   // 服务器中继
+/* 路径类型扩展（TURN）：复用 include/p2p.h 中的 P2P_PATH_* 枚举，并添加 TURN */
 #define P2P_PATH_TURN   4   // TURN 中继（预留）
-#endif
 
 /* 路径质量等级 */
 typedef enum {
@@ -219,6 +212,15 @@ int path_manager_add_or_update_path(path_manager_t *pm, int type, struct sockadd
  * @return          路径索引（>=0），或 -1（未找到）
  */
 int path_manager_find_path(path_manager_t *pm, int type);
+
+/*
+ * 根据地址查找路径（用于 NAT 层集成）
+ *
+ * @param pm        路径管理器指针
+ * @param addr      目标地址
+ * @return          路径索引（>=0），或 -1（未找到）
+ */
+int path_manager_find_path_by_addr(path_manager_t *pm, const struct sockaddr_in *addr);
 
 /*
  * 更新路径性能指标

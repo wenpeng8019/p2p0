@@ -339,6 +339,7 @@
 #define MOD_TAG "PATH_MGR"
 
 #include "p2p_path_manager.h"
+#include "p2p_common.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -432,6 +433,17 @@ void path_manager_init(path_manager_t *pm, p2p_path_strategy_t strategy) {
 int path_manager_find_path(path_manager_t *pm, int type) {
     for (int i = 0; i < pm->path_count; i++) {
         if (pm->paths[i].type == type) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int path_manager_find_path_by_addr(path_manager_t *pm, const struct sockaddr_in *addr) {
+    if (!pm || !addr) return -1;
+    
+    for (int i = 0; i < pm->path_count; i++) {
+        if (sockaddr_equal(&pm->paths[i].addr, addr)) {
             return i;
         }
     }
@@ -887,7 +899,7 @@ int path_manager_on_packet_send(path_manager_t *pm, int path_idx, uint32_t seq, 
 int path_manager_on_packet_ack(path_manager_t *pm, uint32_t seq, uint64_t now_ms) {
     if (!pm) return -1;
     
-    /* 查找对应的发送记录 */
+    /* 查找对应的发送记录（seq=0 为特殊值，也允许测量）*/
     for (int i = 0; i < pm->pending_count; i++) {
         if (pm->pending_packets[i].seq == seq) {
             packet_track_t *track = &pm->pending_packets[i];
