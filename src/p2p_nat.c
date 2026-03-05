@@ -18,16 +18,12 @@
 #define TASK_NAT                "NAT"
 
 static void nat_register_reachable_paths(p2p_session_t *s, const struct sockaddr_in *addr) {
-    int punch_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_PUNCH, (struct sockaddr_in *)addr);
-    if (punch_idx >= 0) {
-        path_manager_set_path_state(&s->path_mgr, punch_idx, PATH_STATE_ACTIVE);
-    }
-
-    if (route_check_same_subnet(&s->route, addr)) {
-        int lan_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_LAN, (struct sockaddr_in *)addr);
-        if (lan_idx >= 0) {
-            path_manager_set_path_state(&s->path_mgr, lan_idx, PATH_STATE_ACTIVE);
-        }
+    /* 优先判断是否同一子网，决定路径类型（避免同一地址注册两次）*/
+    int path_type = route_check_same_subnet(&s->route, addr) ? P2P_PATH_LAN : P2P_PATH_PUNCH;
+    
+    int idx = path_manager_add_or_update_path(&s->path_mgr, path_type, (struct sockaddr_in *)addr);
+    if (idx >= 0) {
+        path_manager_set_path_state(&s->path_mgr, idx, PATH_STATE_ACTIVE);
     }
 }
 
@@ -105,7 +101,7 @@ int nat_punch(p2p_session_t *s, int idx) {
         n->rx_confirmed = false;
         n->tx_confirmed = false;
 
-        print("I:", LA_F("Start punching all(%d) remote candidates", LA_F188, 394), s->remote_cand_cnt);
+        print("I:", LA_F("Start punching all(%d) remote candidates", LA_F190, 394), s->remote_cand_cnt);
 
         // 打印详细日志
         if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
@@ -159,11 +155,11 @@ int nat_punch(p2p_session_t *s, int idx) {
     // 已连接状态：直接发送打洞包建立新路径，不改变连接状态
     if (n->state == NAT_CONNECTED) {
 
-        print("I:", LA_F("Punching additional candidate(%d) %s:%d while connected", LA_F159, 365), idx,
+        print("I:", LA_F("Punching additional candidate(%d) %s:%d while connected", LA_F161, 365), idx,
               inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port));
     }
     else {
-        print("I:", LA_F("Punching remote candidate(%d) %s:%d", LA_F160, 366), idx,
+        print("I:", LA_F("Punching remote candidate(%d) %s:%d", LA_F162, 366), idx,
               inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port));
 
         // 首次或重新启动时初始化状态（INIT/CLOSED）
@@ -216,7 +212,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 解析 echo_seq（2字节网络字节序）
     uint16_t echo_seq = nget_s(payload);
 
-    printf(LA_F("Received %s pkt from %s:%d, seq=%u, len=%d", LA_F166, 372),
+    printf(LA_F("Received %s pkt from %s:%d, seq=%u, len=%d", LA_F168, 372),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq, len);
 
     // 记录对方最新 seq，下次定时发包时捎带作为 echo_seq
@@ -301,7 +297,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
     const char* PROTO = "FIN";
 
-    printf(LA_F("Received %s pkt from %s:%d, seq=0, len=0", LA_F167, 373),
+    printf(LA_F("Received %s pkt from %s:%d, seq=0, len=0", LA_F169, 373),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
     print("V:", LA_F("%s: accepted", LA_F69, 275), PROTO);
@@ -392,7 +388,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 
                 if (keepalive_cnt > 0) {
                     n->last_send_time = now_ms;
-                    print("V:", LA_F("Sent keepalive to %d reachable candidate(s)", LA_F186, 392), keepalive_cnt);
+                    print("V:", LA_F("Sent keepalive to %d reachable candidate(s)", LA_F188, 392), keepalive_cnt);
                 }
             }
             break;
