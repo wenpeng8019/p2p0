@@ -35,7 +35,8 @@ typedef enum {
     P2P_LOG_LEVEL_NONE = 6                      // 无日志输出
 } p2p_log_level_t;
 
-/* 日志回调接口
+/*
+ * 日志回调接口
  * level   — 日志等级
  * module  — 模块名（可为 NULL/空）
  * message — 已格式化的日志正文（不含时间戳，不含 ANSI 颜色）
@@ -44,16 +45,18 @@ typedef void (*p2p_log_callback_t)(p2p_log_level_t level,
                                    const char *module,
                                    const char *message);
 
-/* ---------- 信令模式 ---------- */
-
+/*
+ * 信令模式
+ */
 typedef enum {
     P2P_SIGNALING_MODE_COMPACT = 0,             // 简单无状态信令（UDP，无登录，无需 STUN 服务）
     P2P_SIGNALING_MODE_RELAY,                   // ICE 有状态信令（TCP，需登录，基于 STUN/ICE 协议）
     P2P_SIGNALING_MODE_PUBSUB                   // 发布/订阅模式（Gist 交换信令，无登录，需 STUN 服务）
 } p2p_signaling_t;
 
-/* ---------- 连接状态 ---------- */
-
+/*
+ * 连接状态
+ */
 typedef enum {
     P2P_STATE_INIT = 0,                         // 初始状态
     P2P_STATE_REGISTERING,                      // 注册到信令服务器
@@ -65,23 +68,24 @@ typedef enum {
     P2P_STATE_ERROR                             // 错误状态
 } p2p_state_t;
 
-/* ---------- 信道外可达性探测状态 ---------- */
 /*
- * 当 P2P 处于中继（RELAY）或断连（DISCONNECTED）状态时，
- * 库会通过信令服务器探测对端是否在线、信令信道是否可用。
- * 此状态反映最近一次探测的结论，与传输路径无关。
+ * 信道外可达性探测状态
+ * + 当 P2P 处于中继（RELAY）或断连（DISCONNECTED）状态时，
+ *   库会通过信令服务器探测对端是否在线、信令信道是否可用。
+ *   此状态反映最近一次探测的结论，与传输路径无关。
  */
 typedef enum {
-    P2P_PROBE_STATE_NONE = 0,           // 未启动 / 不适用（初始或信令不支持）
-    P2P_PROBE_STATE_CONNECTED,          // P2P 已直连，无需探测
-    P2P_PROBE_STATE_RUNNING,            // 探测进行中
-    P2P_PROBE_STATE_SUCCESS,            // 探测成功（对端通过信令可达）
-    P2P_PROBE_STATE_PEER_OFFLINE,       // 对端离线（服务器无法转发）
-    P2P_PROBE_STATE_TIMEOUT             // 探测超时（服务器无响应）
+    P2P_PROBE_STATE_NONE = 0,                   // 未启动 / 不适用（初始或信令不支持）
+    P2P_PROBE_STATE_CONNECTED,                  // P2P 已直连，无需探测
+    P2P_PROBE_STATE_RUNNING,                    // 探测进行中
+    P2P_PROBE_STATE_SUCCESS,                    // 探测成功（对端通过信令可达）
+    P2P_PROBE_STATE_PEER_OFFLINE,               // 对端离线（服务器无法转发）
+    P2P_PROBE_STATE_TIMEOUT                     // 探测超时（服务器无响应）
 } p2p_probe_state_t;
 
-/* ---------- 连接路径 ---------- */
-
+/*
+ * 连接路径
+ */
 typedef enum {
     P2P_PATH_NONE = 0,
     P2P_PATH_LAN,                               // 同一子网，直连
@@ -89,8 +93,9 @@ typedef enum {
     P2P_PATH_RELAY                              // 服务器中继（fallback）
 } p2p_path_t;
 
-/* ---------- NAT 类型 ---------- */
 /*
+ * NAT 类型
+ *
  * P2P 穿透难度（从易到难）：
  *   OPEN < FULL_CONE < RESTRICTED < PORT_RESTRICTED < BLOCKED
  *

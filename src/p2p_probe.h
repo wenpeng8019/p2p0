@@ -1,10 +1,10 @@
 /*
- * P2P 信道外可达性探测（统一接口）
+ * P2P 信道外可达性探测（统一上下文）
  *
  * 当 NAT 打洞失败（转入 RELAY 状态）或连接断开（DISCONNECTED）时触发，
  * 通过信道外通讯检测对端可达性，辅助判断故障原因并自动恢复。
  *
- * 支持两种信令模式，接口相同，内部实现不同：
+ * 支持两种信令模式，统一封装在 p2p_probe_ctx_t 中：
  *
  * COMPACT 模式（MSG+echo）：
  *   发送 MSG(msg=0) → 服务器收到后转发到对端 → 对端自动 echo 回复
@@ -15,6 +15,25 @@
  *   2. 通过信令服务器交换新地址（可判断对端是否在线）
  *   3. 发送 UDP 探测包到对端（通过 TURN 中继）
  *   TCP 信令在线不代表 UDP 路径可通，所以需要独立的 UDP 探测
+ *
+ * 设计优化：
+ *   - 统一上下文：合并两种模式的通用字段（start/complete/retries）
+ *   - 状态分离：使用 union 保存模式特定的状态
+ *   - 接口统一：外部调用无需关心内部模式
+ * 
+* ============================================================================
+ * Relay 探测状态（信道外可达性检测）
+ * ============================================================================
+ *
+ * 当 NAT 打洞失败/连接中断时，通过服务器 MSG+echo 探测对端可达性：
+ *   - 场景1：自己端口飘移 → 向服务器发包会重新打开映射
+ *   - 场景2：端口映射改变 → 服务器转发包触发地址变更通知
+ *   - 场景3：对端已离线 → 服务器 MSG_REQ_ACK 返回 status=1
+ *   - 场景4：对端网络故障 → 服务器 MSG 请求超时
+ *
+ * 目标：在不重新连接的情况下，自动恢复可恢复的网络故障
+ *
+ * 注意：探测状态定义和上下文现已统一封装在 p2p_probe.h 的 p2p_probe_ctx_t 中
  */
 
 #ifndef P2P_PROBE_H
@@ -40,6 +59,58 @@ struct p2p_session;
 #define PROBE_RELAY_UDP_TIMEOUT_MS      3000   /* UDP 探测超时（毫秒）*/
 #define PROBE_RELAY_MAX_RETRIES         2      /* 最大重试次数 */
 #define PROBE_RELAY_REPEAT_INTERVAL     15000  /* 重复探测间隔（毫秒）*/
+
+/* ============================================================================
+ * 探测内部流程细节（模式特定）
+ * ============================================================================ */
+
+/* COMPACT 模式内部阶段（细化 RUNNING 状态）*/
+typedef enum {
+    PROBE_COMPACT_PHASE_INIT = 0,       // 初始化
+    PROBE_COMPACT_PHASE_SENDING,        // 发送 MSG
+    PROBE_COMPACT_PHASE_WAIT_ACK,       // 等待 MSG_REQ_ACK
+    PROBE_COMPACT_PHASE_WAIT_ECHO       // 等待 MSG_RESP echo
+} probe_compact_phase_t;
+
+/* RELAY 模式内部步骤（细化 RUNNING 状态）*/
+typedef enum {
+    PROBE_RELAY_STEP_INIT = 0,          // 初始化
+    PROBE_RELAY_STEP_TURN_ALLOC,        // TURN 地址分配
+    PROBE_RELAY_STEP_ADDR_EXCHANGE,     // 地址交换
+    PROBE_RELAY_STEP_UDP_PROBE          // UDP 探测
+} probe_relay_step_t;
+
+/* ============================================================================
+ * 统一探测上下文
+ * ============================================================================ */
+typedef struct {
+    /* 公共状态（对应 include/p2p.h 的 p2p_probe_state_t）*/
+    p2p_probe_state_t state;        // 统一状态（NONE/RUNNING/SUCCESS/PEER_OFFLINE/TIMEOUT）
+    uint64_t          start_ms;     // 探测开始时间（毫秒）
+    uint64_t          complete_ms;  // 探测完成时间（毫秒）
+    int               retries;      // 当前重试计数
+    
+    /* 模式特定细节（union 节省内存）*/
+    union {
+        struct {
+            probe_compact_phase_t phase;  // 内部流程阶段
+            uint16_t              sid;    // MSG 序列号
+        } compact;
+        
+        struct {
+            probe_relay_step_t step;      // 内部流程步骤
+        } relay;
+    } mode;
+} p2p_probe_ctx_t;
+
+/* ============================================================================
+ * 上下文管理
+ * ============================================================================ */
+
+/*
+ * 初始化探测上下文
+ */
+void probe_init(p2p_probe_ctx_t *ctx);
 
 /* ============================================================================
  * 统一接口 — 调用方无需关心信令模式

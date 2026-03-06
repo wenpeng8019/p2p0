@@ -84,44 +84,9 @@
 #include "p2p_signal_pubsub.h"  /* 发布/订阅模式信令 */
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
 #include "p2p_path_manager.h"   /* 多路径管理器 */
+#include "p2p_probe.h"          /* 信道外可达性探测 */
 
 ///////////////////////////////////////////////////////////////////////////////
-
-/* ============================================================================
- * Relay 探测状态（信道外可达性检测）
- * ============================================================================
- *
- * 当 NAT 打洞失败/连接中断时，通过服务器 MSG+echo 探测对端可达性：
- *   - 场景1：自己端口飘移 → 向服务器发包会重新打开映射
- *   - 场景2：端口映射改变 → 服务器转发包触发地址变更通知
- *   - 场景3：对端已离线 → 服务器 MSG_REQ_ACK 返回 status=1
- *   - 场景4：对端网络故障 → 服务器 MSG 请求超时
- *
- * 目标：在不重新连接的情况下，自动恢复可恢复的网络故障
- */
-/* COMPACT 模式探测状态（MSG+echo 单次往返）*/
-typedef enum {
-    P2P_PROBE_COMPACT_IDLE = 0,         // 空闲，无需探测
-    P2P_PROBE_COMPACT_PENDING,          // 等待发起探测
-    P2P_PROBE_COMPACT_WAITING,          // 探测中，等待 MSG 响应
-    P2P_PROBE_COMPACT_SUCCESS,          // 探测成功（对端可达）
-    P2P_PROBE_COMPACT_PEER_OFFLINE,     // 对端离线（MSG_REQ_ACK status=1）
-    P2P_PROBE_COMPACT_TIMEOUT           // 探测超时（服务器无法到达对端）
-} p2p_probe_compact_state_t;
-
-/* RELAY 模式探测状态（分步：TURN 刷新 → 地址交换 → UDP 探测）*/
-typedef enum {
-    P2P_PROBE_RELAY_IDLE = 0,           // 空闲状态
-    P2P_PROBE_RELAY_REFRESH_TURN,       // 正在刷新 TURN 地址
-    P2P_PROBE_RELAY_WAIT_TURN,          // 等待 TURN 分配响应
-    P2P_PROBE_RELAY_EXCHANGE_ADDR,      // 通过信令服务器交换地址
-    P2P_PROBE_RELAY_WAIT_EXCHANGE,      // 等待地址交换完成
-    P2P_PROBE_RELAY_PROBE_UDP,          // 发送 UDP 探测包
-    P2P_PROBE_RELAY_WAIT_PROBE,         // 等待 UDP 探测响应
-    P2P_PROBE_RELAY_SUCCESS,            // 探测成功
-    P2P_PROBE_RELAY_PEER_OFFLINE,       // 对端离线
-    P2P_PROBE_RELAY_TIMEOUT             // 超时失败
-} p2p_probe_relay_state_t;
 
 /* ============================================================================
  * p2p_session: P2P 会话主结构体
@@ -156,6 +121,14 @@ typedef struct p2p_session {
     uint64_t                    det_last_send;      // 上次发送检测包时间
     int                         det_retries;        // 当前步骤重试次数
 
+    /* ======================== p2p 链路 ======================== */
+    nat_ctx_t                   nat;                // NAT 穿透上下文
+    route_ctx_t                 route;              // 路由表上下文
+    reliable_t                  reliable;           // 可靠传输层状态
+    stream_t                    stream;             // 流传输层状态
+    path_manager_t              path_mgr;           // 路径管理器（多路径并行支持）
+    p2p_probe_ctx_t             probe_ctx;          // 探测上下文
+
     /* ======================== ICE 状态 ======================== */
     p2p_ice_state_t             ice_state;          // ICE 协商状态
     p2p_candidate_entry_t*      local_cands;        // 本地候选地址（动态分配）
@@ -188,29 +161,6 @@ typedef struct p2p_session {
     bool                        cands_pending_send; // 有待发送的候选（TCP 发送失败时置 1）
 
     /* ======================== 传输层实例 ======================== */
-    nat_ctx_t                   nat;                // NAT 穿透上下文
-    route_ctx_t                 route;              // 路由表上下文
-    reliable_t                  reliable;           // 可靠传输层状态
-    stream_t                    stream;             // 流传输层状态
-    path_manager_t              path_mgr;           // 路径管理器（多路径并行支持）
-
-    /* ======================== 信道外可达性探测（probe）======================== */
-    /* COMPACT 模式：MSG+echo 单次往返探测 */
-    p2p_probe_compact_state_t   probe_compact_state;    // 探测状态
-    uint16_t                    probe_compact_sid;      // 探测 MSG 序列号
-    uint64_t                    probe_compact_start;    // 探测开始时间（毫秒）
-    uint64_t                    probe_compact_complete; // 探测完成时间（毫秒）
-    int                         probe_compact_retries;  // 重试计数
-    bool                        probe_compact_enabled;  // 是否启用（默认 true）
-
-    /* RELAY 模式：TURN 刷新 → 地址交换 → UDP 探测 */
-    p2p_probe_relay_state_t     probe_relay_state;      // 探测状态
-    uint64_t                    probe_relay_start;      // 探测开始时间（毫秒）
-    uint64_t                    probe_relay_complete;   // 探测完成时间（毫秒）
-    int                         probe_relay_retries;    // 重试计数
-    bool                        probe_relay_enabled;    // 是否启用（默认 true）
-
-    /* ======================== 模块化传输 ======================== */
     /*
      * 可插拔传输层架构，支持多种实现：
      *   - simple:    无加密直接传输
