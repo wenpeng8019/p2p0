@@ -121,7 +121,7 @@
  */
 static void p2p_dtls_debug(void *ctx, int level, const char *file, int line, const char *str) {
     (void)ctx; (void)level;
-    printf(LA_F("%s:%04d: %s", LA_F128, 334), file, line, str);
+    printf(LA_F("%s:%04d: %s", LA_F143, 334), file, line, str);
 }
 
 /*
@@ -341,7 +341,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret;
     if ((ret = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F218, 421), -ret);
+        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F220, 421), -ret);
         return -1;
     }
     
@@ -403,11 +403,11 @@ static void dtls_tick(p2p_session_t *s) {
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            print("I: %s", LA_S("Handshake complete", LA_S37, 141));
+            print("I: %s", LA_S("Handshake complete", LA_S44, 141));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));
-            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F146, 352), ebuf, -ret);
+            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F160, 352), ebuf, -ret);
             s->state = P2P_STATE_ERROR;
         }
     }
