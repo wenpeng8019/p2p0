@@ -254,7 +254,7 @@ struct p2p_remote_candidate_entry {
     p2p_candidate_entry_t cand;                 // 可序列化基础候选字段
     uint64_t              last_punch_send_ms;   // 最近一次发送 PUNCH 的时间（调度状态）
     bool                  reachable;            // 是否已观测到可达（收到对端 PUNCH/探测成功）
-    uint64_t              last_reachable_ms;    // 最近一次确认可达时间
+    path_stats_t          stats;                // 路径统计信息
 };
 
 #define P2P_REMOTE_CAND_TYPE_PUNCH      (-1)
@@ -377,15 +377,9 @@ static inline ret_t p2p_upsert_remote_candidate(p2p_session_t *s,
     c->cand.priority = 0;
     c->last_punch_send_ms = 0;
     c->reachable = false;
-    c->last_reachable_ms = 0;
+    path_stats_init(&c->stats, 0);  /* 初始化路径统计默认值（rtt_min=9999 等） */
 
     return idx;
-}
-
-static inline void p2p_mark_remote_candidate_reachable(p2p_session_t *s, int idx, uint64_t now_ms) {
-    if (!s || idx < 0 || idx >= s->remote_cand_cnt) return;
-    s->remote_cands[idx].reachable = true;
-    s->remote_cands[idx].last_reachable_ms = now_ms;
 }
 
 /*

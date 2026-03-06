@@ -680,7 +680,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
             connection_desc);
 
     if (matched_idx >= 0) {
-        p2p_mark_remote_candidate_reachable(s, matched_idx, P_tick_ms());
+        s->remote_cands[matched_idx].reachable = true;
     }
     
     /* 设置活动地址 */

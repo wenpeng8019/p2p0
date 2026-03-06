@@ -796,12 +796,11 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                 print("I:", LA_F("%s: Peer addr changed -> %s:%d, retrying punch", LA_F66, 272),
                       TASK_ICE_REMOTE, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
 
-                // 标记旧 PUNCH 路径为失效（地址已变更）
-                int old_punch_idx = path_manager_find_path(&s->path_mgr, P2P_PATH_PUNCH);
-                if (old_punch_idx >= 0) {
-                    path_manager_set_path_state(&s->path_mgr, old_punch_idx, PATH_STATE_FAILED);
-                    print("V:", LA_F("Marked old PUNCH path (idx=%d) as FAILED due to addr change", LA_F150, 360),
-                           old_punch_idx);
+                // 标记旧的活跃路径为失效（地址已变更）
+                if (s->path_mgr.active_path >= 0 && s->path_mgr.active_path < s->remote_cand_cnt) {
+                    path_manager_set_path_state(s, s->path_mgr.active_path, PATH_STATE_FAILED);
+                    print("V:", LA_F("Marked old path (idx=%d) as FAILED due to addr change", LA_F150, 360),
+                           s->path_mgr.active_path);
                 }
 
                 // 立即打洞新地址（nat_on_punch 收到回复后会自动注册新路径）

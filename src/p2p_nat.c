@@ -17,16 +17,6 @@
 
 #define TASK_NAT                "NAT"
 
-static void nat_register_reachable_paths(p2p_session_t *s, const struct sockaddr_in *addr) {
-    /* 优先判断是否同一子网，决定路径类型（避免同一地址注册两次）*/
-    int path_type = route_check_same_subnet(&s->route, addr) ? P2P_PATH_LAN : P2P_PATH_PUNCH;
-    
-    int idx = path_manager_add_or_update_path(&s->path_mgr, path_type, (struct sockaddr_in *)addr);
-    if (idx >= 0) {
-        path_manager_set_path_state(&s->path_mgr, idx, PATH_STATE_ACTIVE);
-    }
-}
-
 /*
  * 向指定候选发送打洞包
  *
@@ -45,18 +35,11 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
     print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, echo_seq=%u", LA_F44, 250),
           PROTO, inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port),
           reason, s->nat.punch_seq, s->nat.last_peer_seq);
-    
-    /* 集成 path_manager：记录发送用于 RTT 测量 */
-    int path_idx = path_manager_find_path_by_addr(&s->path_mgr, &entry->cand.addr);
-    if (path_idx < 0) {
-        /* 路径不存在，自动注册（用于主动打洞场景）*/
-        path_idx = path_manager_add_or_update_path(&s->path_mgr, P2P_PATH_PUNCH, &entry->cand.addr);
-    }
-    if (path_idx >= 0) {
-        path_manager_on_packet_send(&s->path_mgr, path_idx, s->nat.punch_seq, now);
-    }
 
     entry->last_punch_send_ms = now;
+
+    // 执行路径质量分析，记录发送用于 RTT 测量
+    path_manager_on_packet_send(s, (int)(entry - s->remote_cands), s->nat.punch_seq, now);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -232,6 +215,8 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                    const uint8_t *payload, int len, const struct sockaddr_in *from) {
     const char* PROTO = "PUNCH";
 
+    if (len < 2) return;  /* 最少需要 2 字节 echo_seq */
+
     nat_ctx_t *n = &s->nat;
     uint64_t now = P_tick_ms();
 
@@ -245,18 +230,22 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     if (uint16_circle_newer(hdr->seq, n->last_peer_seq))
         n->last_peer_seq = hdr->seq;
 
-    // 将来源地址映射到 remote candidate；若信令尚未同步到该地址，动态补录为 prflx
     int remote_cnt_before = s->remote_cand_cnt;
     int cand_idx = p2p_upsert_remote_candidate(s, from, -1, true);
     if (cand_idx < 0) {
-        print("W:", LA_F("%s: failed to track unsynced candidate %s:%d (ret=%d)", LA_F92, 298),
-              TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port), cand_idx);
-    } else if (cand_idx >= remote_cnt_before) {
+        print("E:", LA_F("%s: failed to track candidate %s:%d (outof memory), dropping packet", 0, 0),
+              TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        return;
+    } 
+
+    print("V:", LA_F("%s: accepted for echo_seq=%u", LA_F72, 278), PROTO, echo_seq);
+
+    // 更新最后接收时间（保活/心跳超时检测）
+    n->last_recv_time = now;
+
+    if (cand_idx >= remote_cnt_before) {
         print("I:", LA_F("%s: discovered unsynced peer-reflexive candidate %s:%d (idx=%d)", LA_F85, 291),
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port), cand_idx);
-    }
-    if (cand_idx >= 0) {
-        p2p_mark_remote_candidate_reachable(s, cand_idx, now);
     }
 
     // 通知 ICE 层（如果启用）
@@ -264,25 +253,21 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         p2p_ice_on_check_success(s, from);
     }
 
-    // 更新最后接收时间（保活/心跳超时检测）
-    n->last_recv_time = now;
-
-    print("V:", LA_F("%s: accepted for echo_seq=%u", LA_F72, 278), PROTO, echo_seq);
-    
-    // 收到 PUNCH 即证明该地址可达，立即注册路径（所有状态都适用）
-    // 注意：必须先注册路径，再更新统计，否则 last_recv_ms 将为 0 导致立即超时
-    nat_register_reachable_paths(s, from);
-    
-    /* 集成 path_manager：更新 RTT 和接收时间 */
-    int path_idx = path_manager_find_path_by_addr(&s->path_mgr, from);
-    if (path_idx >= 0) {
-        /* 尝试匹配 ACK（echo_seq 对应之前发送的 seq）*/
-        if (echo_seq > 0) {
-            path_manager_on_packet_ack(&s->path_mgr, echo_seq, now);
-        }
-        /* 更新接收时间（防止超时）*/
-        path_manager_on_packet_recv(&s->path_mgr, path_idx, now);
+    // 更新路径信息为可达、并标记路径管理类型
+    s->remote_cands[cand_idx].reachable = true;                                         // 标记候选可达
+    s->remote_cands[cand_idx].stats.state = PATH_STATE_ACTIVE;                          // 标记路径为活跃（已成功通信）
+    s->remote_cands[cand_idx].stats.is_lan = route_check_same_subnet(&s->route, from);  // 检测是否为 LAN 路径
+    s->remote_cands[cand_idx].stats.cost_score = 0;                                     // 直连路径免费（即真正的 P2P 路径，包括 PUNCH/LAN）
+    s->remote_cands[cand_idx].stats.consecutive_timeouts = 0;                           // 重置超时计数（恢复场景下清除残留值）
+    // 如果当前没有活动路径，或者新路径是 LAN（更优），则切换到新路径
+    if (s->path_mgr.active_path < 0 || s->remote_cands[cand_idx].stats.is_lan) {
+        path_manager_set_active(s, cand_idx);
     }
+
+    // 执行路径质量分析，更新 RTT 和接收时间
+    if (echo_seq > 0)
+        path_manager_on_packet_ack(s, echo_seq, now);                                   // 尝试匹配 ACK（echo_seq 对应之前发送的 seq）
+    path_manager_on_packet_recv(s, cand_idx, now);                                      // 更新接收时间（防止超时）
 
     // NAT_CONNECTED 状态：只收集路径，不需要双向确认逻辑
     if (n->state == NAT_CONNECTED) {
@@ -384,7 +369,6 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
             int sent_cnt = 0;
             for (int i = 0; i < s->remote_cand_cnt; i++) {
-
                 if (s->remote_cands[i].last_punch_send_ms == 0 ||
                     now_ms - s->remote_cands[i].last_punch_send_ms >= PUNCH_INTERVAL_MS) {
                     nat_punch(s, i);

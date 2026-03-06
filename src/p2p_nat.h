@@ -31,7 +31,7 @@ enum {
     NAT_CLOSED                              // 收到 FIN 包主动断开（连接彻底终止）
 };
 
-/* 打洞上下文（精简版，候选列表在 session 中） */
+/* 打洞上下文 */
 typedef struct {
     int                 state;              // 打洞状态
     struct sockaddr_in  peer_addr;          // 成功连接的对端地址
