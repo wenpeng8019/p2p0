@@ -226,6 +226,10 @@ ret_t p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip,
     // 标记为已连接
     ctx->state = SIGNAL_CONNECTED;
 
+    // 设置探测状态为 READY（信令已就绪，可以开始探测）
+    struct p2p_session *s = (struct p2p_session *)((char *)ctx - offsetof(struct p2p_session, sig_relay_ctx));
+    s->probe_ctx.state = P2P_PROBE_STATE_READY;
+
     print("I:", LA_F("%s %s:%d %s '%s'", LA_F19, 225), LA_W("Connected to server", LA_W15, 16), server_ip, port, LA_W("as", LA_W8, 9), my_name);
     return E_NONE;
 }

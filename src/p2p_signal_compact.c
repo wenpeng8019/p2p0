@@ -571,6 +571,13 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     if (ctx->candidates_cached > payload[1/*max_candidates*/])      // 计算服务器实际缓存的候选数量，作为后续发送 PEER_INFO 包的基准
         ctx->candidates_cached = payload[1/*max_candidates*/];
 
+    // 根据服务器能力设置探测状态
+    if (!ctx->msg_support) {
+        s->probe_ctx.state = P2P_PROBE_STATE_NO_SUPPORT;
+    } else {
+        s->probe_ctx.state = P2P_PROBE_STATE_READY;
+    }
+
     // 解析自己的公网地址（服务器主端口探测到的 UDP 源地址）
     memset(&ctx->public_addr, 0, sizeof(ctx->public_addr));
     ctx->public_addr.sin_family = AF_INET;
@@ -995,6 +1002,11 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     ctx->resp_sid = 0;
     ctx->resp_state = 0;
     ctx->resp_session_id = 0;
+
+    // 重置探测状态（对端已断开）
+    probe_reset(s);
+    // 设置为 OFFLINE（信令未就绪，等待重新配对）
+    s->probe_ctx.state = P2P_PROBE_STATE_OFFLINE;
 
     print("I:", LA_F("%s: peer disconnected (ses_id=%" PRIu64 "), reset to REGISTERED", 0, 0), PROTO, session_id);
 }

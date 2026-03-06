@@ -75,12 +75,18 @@ typedef enum {
  *   此状态反映最近一次探测的结论，与传输路径无关。
  */
 typedef enum {
-    P2P_PROBE_STATE_NONE = 0,                   // 未启动 / 不适用（初始或信令不支持）
+    // 前置状态（不探测的原因）
+    P2P_PROBE_STATE_OFFLINE = 0,                // 本地离线，信令未就绪（初始状态）
     P2P_PROBE_STATE_CONNECTED,                  // P2P 已直连，无需探测
+    P2P_PROBE_STATE_NO_SUPPORT,                 // 信令服务不支持探测（服务器不支持或协议不适用）
+    
+    // 探测流程状态（按执行顺序）
+    P2P_PROBE_STATE_READY,                      // 就绪：信令已连接且服务器支持，可触发探测
     P2P_PROBE_STATE_RUNNING,                    // 探测进行中
+    P2P_PROBE_STATE_TIMEOUT,                    // 探测超时（本地无法连接到服务器）
     P2P_PROBE_STATE_SUCCESS,                    // 探测成功（对端通过信令可达）
     P2P_PROBE_STATE_PEER_OFFLINE,               // 对端离线（服务器无法转发）
-    P2P_PROBE_STATE_TIMEOUT                     // 探测超时（服务器无响应）
+    P2P_PROBE_STATE_PEER_TIMEOUT                // 对端超时（服务器已转发，但对端无响应）
 } p2p_probe_state_t;
 
 /*

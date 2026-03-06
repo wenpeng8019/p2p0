@@ -485,9 +485,9 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         //   - 切换到 RELAY 中继模式（适用于打洞多次失败后的降级，或原因 6-永久）
         //   - 触发重新 REGISTER（适用于原因 4/5，需要重新交换地址）
         //   - 直接通知上层断开（适用于原因 1，对方已不可达）            
-            // 推进探测状态机；首次进入时若为 NONE 则自动触发
+            // 推进探测状态机；首次进入时若为 READY 则自动触发
             probe_tick(s, now_ms);
-            if (s->probe_ctx.state == P2P_PROBE_STATE_NONE) {
+            if (s->probe_ctx.state == P2P_PROBE_STATE_READY) {
                 probe_trigger(s);
             }
             break;

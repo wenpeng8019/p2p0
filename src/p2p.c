@@ -215,6 +215,9 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 初始化数据流层
     stream_init(&s->stream, cfg->nagle);
 
+    // 初始化探测上下文（初始状态为 OFFLINE）
+    probe_init(&s->probe_ctx);
+
     //----------------------------
 
     s->signaling_mode = cfg->signaling_mode;
@@ -288,6 +291,9 @@ p2p_destroy(p2p_handle_t hdl) {
         p2p_signal_relay_close(&s->sig_relay_ctx);
     }
 
+    // 重置探测状态
+    probe_reset(s);
+
     free(s->local_cands);
     free(s->remote_cands);
     free(s);
@@ -323,9 +329,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     // 初始化相关状态
     s->signal_sent = false;
     s->cands_pending_send = false;
-
-    // 初始化探测上下文
-    probe_init(&s->probe_ctx);
 
     ret_t ret;
     switch (s->signaling_mode) {
@@ -497,6 +500,12 @@ p2p_close(p2p_handle_t hdl) {
     // 标记连接状态为 CLOSING，等待对端确认（收到 FIN 包）后转为 CLOSED
     int prev_state = s->state;
     s->state = P2P_STATE_CLOSING;
+    
+    // 主动关闭 P2P 直连，但信令连接还在，回到 READY 状态（如果服务器支持）
+    if ((prev_state == P2P_STATE_CONNECTED || prev_state == P2P_STATE_RELAY) &&
+        s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT) {
+        s->probe_ctx.state = P2P_PROBE_STATE_READY;
+    }
     
     // 触发回调（仅在从连接状态转换时）
     if ((prev_state == P2P_STATE_CONNECTED || prev_state == P2P_STATE_RELAY)
@@ -923,6 +932,12 @@ p2p_update(p2p_handle_t hdl) {
         (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)) {
         print("I: %s", LA_S("Received FIN packet, connection closed", LA_S82, 186));
         s->state = P2P_STATE_CLOSED;
+        
+        // P2P 直连断开，但信令连接还在，回到 READY 状态（如果服务器支持）
+        if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT) {
+            s->probe_ctx.state = P2P_PROBE_STATE_READY;
+        }
+        
         if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
     }
 
@@ -1127,7 +1142,7 @@ p2p_nat_type(const p2p_handle_t hdl) {
 
 p2p_probe_state_t
 p2p_probe(p2p_handle_t hdl) {
-    if (!hdl) return P2P_PROBE_STATE_NONE;
+    if (!hdl) return P2P_PROBE_STATE_OFFLINE;
     p2p_session_t *s = (p2p_session_t*)hdl;
 
     // 已直连时无需探测

@@ -112,16 +112,10 @@ typedef struct {
  */
 void probe_init(p2p_probe_ctx_t *ctx);
 
-/* ============================================================================
- * 统一接口 — 调用方无需关心信令模式
- * ============================================================================ */
-
 /*
- * 触发探测（自动根据 signaling_mode 选择实现）
- *
- * @return 0=成功触发，-1=不符合条件（未启用/不支持/已在进行中）
+ * 重置探测状态到 IDLE
  */
-ret_t probe_trigger(struct p2p_session *s);
+void probe_reset(struct p2p_session *s);
 
 /*
  * 周期驱动探测状态机（在 nat_tick 中调用）
@@ -130,10 +124,14 @@ ret_t probe_trigger(struct p2p_session *s);
  */
 void probe_tick(struct p2p_session *s, uint64_t now_ms);
 
+/* ============================================================================
+ * 统一接口 — 调用方无需关心信令模式
+ * ============================================================================ */
+
 /*
- * 重置探测状态到 IDLE
+ * 触发探测（自动根据 signaling_mode 选择实现）
  */
-void probe_reset(struct p2p_session *s);
+void probe_trigger(struct p2p_session *s);
 
 /* ============================================================================
  * COMPACT 模式专用回调（在 compact_on_request_ack / compact_on_response 中调用）
