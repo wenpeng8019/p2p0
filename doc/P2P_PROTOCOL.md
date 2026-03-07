@@ -45,6 +45,137 @@ void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr);
 
 ---
 
+## NAT 打洞协议 (PUNCH / PUNCH_ACK)
+
+在完成信令交换（获得对端候选地址）后，双方通过 **PUNCH/PUNCH_ACK 协议**进行 NAT 打洞和双向连通确认。
+
+### 协议包类型
+
+| 类型值 | 名称 | 说明 |
+|-------|------|------|
+| 0x01 | P2P_PKT_PUNCH | NAT 打洞/保活包（无负载） |
+| 0x02 | P2P_PKT_PUNCH_ACK | PUNCH 的即时确认包（无负载） |
+
+### PUNCH (0x01) – 连接探测/打洞/保活包
+
+**包格式**：
+```
+包头: [type=0x01 | flags=0 | seq=发送方序列号(2B)]
+负载: 无
+```
+
+**发送策略**：
+- **打洞阶段**：每 500ms 向所有候选路径并发发送 PUNCH
+- **保活阶段**：已建连后，每 500ms 向活动路径发送 PUNCH
+- **独立触发**：定时发送，不依赖对方的包
+
+**接收处理**：
+1. 立即回复 PUNCH_ACK（从收到包的同一地址回复）
+2. 更新路径可达性状态（标记为 ACTIVE）
+3. 设置 `rx_confirmed = true`（证明 peer→me 方向联通）
+4. 将远端地址加入候选列表（peer-reflexive candidate）
+
+### PUNCH_ACK (0x02) – PUNCH 的即时确认包
+
+**包格式**：
+```
+包头: [type=0x02 | flags=0 | seq=回传的 PUNCH seq(2B)]
+负载: 无
+```
+
+**发送触发**：
+- 收到 PUNCH 后**立即回复**
+- 从收到 PUNCH 的同一源地址发出（确保回程走相同路径）
+
+**接收处理**：
+1. 通过 `seq` 匹配发送记录，计算 **per-path RTT**
+2. 设置 `rx_confirmed = true`（对方能发包给我）
+3. 设置 `tx_confirmed = true`（我发的 PUNCH 到达了对方）
+4. 如果 `rx_confirmed && tx_confirmed`，则进入 `NAT_CONNECTED` 状态
+
+### 双向连通判定
+
+系统通过两个标志位判定连通性：
+
+| 标志 | 条件 | 含义 |
+|------|------|------|
+| `rx_confirmed` | 收到 PUNCH 或 PUNCH_ACK | peer→me 方向联通（入方向可达） |
+| `tx_confirmed` | 收到 PUNCH_ACK | me→peer 方向联通（对方收到了我的 PUNCH） |
+| **双向连通** | `rx_confirmed && tx_confirmed` | **状态转换为 NAT_CONNECTED** |
+
+**状态机转换**：
+```
+NAT_PUNCHING → (收到 PUNCH) → rx_confirmed
+             → (收到 PUNCH_ACK) → tx_confirmed + rx_confirmed
+             → (双向确认) → NAT_CONNECTED
+```
+
+### per-path RTT 测量机制
+
+由于 PUNCH_ACK 从同一地址回复，可精确测量**单条路径**的 RTT（非混合路径）。
+
+**测量流程**：
+1. **发送 PUNCH**：记录 `{seq, path_idx, send_time}` 到 `pending_packets`
+2. **收到 PUNCH_ACK**：通过 `seq` 匹配记录，计算 `RTT = now - send_time`
+3. **更新统计**：更新对应 `path_idx` 的 RTT、loss、jitter 统计
+
+**精度保证**：
+- PUNCH_ACK 从收到包的同一地址回复 → 回程路径 = 去程路径
+- RTT 测量精确对应该条路径的实际往返时延
+
+### 协议交互示例
+
+```
+时间轴       Alice (192.168.1.100)                Bob (10.0.0.5)
+────────────────────────────────────────────────────────────────
+t=0         PUNCH(seq=1) ─────────────────────────────────→
+            [记录: seq=1, path=0, t=0]
+
+t=10                                              收到 PUNCH(seq=1)
+                                                  [rx_confirmed=true]
+                     ←───────────────────────── PUNCH_ACK(seq=1)
+                                                  [立即回复，同一地址]
+
+t=20        收到 PUNCH_ACK(seq=1)
+            [匹配 pending: RTT=20ms, path=0]
+            [tx_confirmed=true, rx_confirmed=true]
+            [NAT_CONNECTED]
+
+t=500       PUNCH(seq=2) ─────────────────────────────────→
+            [记录: seq=2, path=0, t=500]
+
+t=510                                             收到 PUNCH(seq=2)
+                     ←───────────────────────── PUNCH_ACK(seq=2)
+
+t=520       收到 PUNCH_ACK(seq=2)
+            [匹配 pending: RTT=20ms, path=0]
+
+注：Bob 也会独立定时发送 PUNCH（未在上图中显示），Alice 同样会立即回复 PUNCH_ACK。
+```
+
+### 关键时间参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `PUNCH_INTERVAL_MS` | 500 ms | PUNCH 定时发送间隔 |
+| `PUNCH_TIMEOUT_MS` | 5000 ms | 打洞超时（转为 RELAY 模式） |
+| `PING_INTERVAL_MS` | 5000 ms | 心跳间隔（NAT_CONNECTED 后） |
+| `PONG_TIMEOUT_MS` | 30000 ms | 心跳超时（转为 NAT_LOST） |
+
+### 与旧协议的对比
+
+| 特性 | 旧协议（捎带 echo） | 新协议（即时 ACK） |
+|------|-------------------|------------------|
+| **包数量** | 更少（~50%） | 更多（2× PUNCH） |
+| **RTT 精度** | 混合路径（去程路径X + 回程任意路径） | 精确单路径（去程 = 回程） |
+| **连通确认延迟** | 最多 1 个 PUNCH_INTERVAL | 1 个 RTT |
+| **实现复杂度** | 需要 echo_ring 缓冲区 | 无需额外状态 |
+| **多路径支持** | 不精确（echo 在下次定时包捎带） | 精确（每条路径独立测量） |
+
+**设计权衡**：新协议牺牲了一定的包数量，换取了**精确的 per-path RTT 测量**和**更快的连通确认**，更适合多路径场景和路径质量分析需求。
+
+---
+
 # 第一部分：COMPACT 模式 (UDP)
 
 ## 数据包格式

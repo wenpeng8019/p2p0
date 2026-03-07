@@ -36,11 +36,11 @@ int reliable_window_avail(const reliable_t *r) {
  */
 int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
     if (r->send_count >= RELIABLE_WINDOW) {
-        print("W:", LA_F("%s send_count=%d", LA_F43, 249), LA_W("Send window full, dropping packet", LA_W72, 75), r->send_count);
+        print("W:", LA_F("%s send_count=%d", LA_F37, 249), LA_W("Send window full, dropping packet", LA_W64, 75), r->send_count);
         return -1;
     }
     if (len > P2P_MAX_PAYLOAD) {
-        print("W:", LA_F("%s len=%d max=%d", LA_F37, 243), LA_W("Packet too large", LA_W48, 51), len, P2P_MAX_PAYLOAD);
+        print("W:", LA_F("%s len=%d max=%d", LA_F34, 243), LA_W("Packet too large", LA_W43, 51), len, P2P_MAX_PAYLOAD);
         return -1;
     }
 
@@ -55,8 +55,8 @@ int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
 
     r->send_seq++;
     r->send_count++;
-    print("V:", LA_F("%s seq=%u len=%d inflight=%d", LA_F54, 259),
-                    LA_W("Packet queued", LA_W47, 50), e->seq, len, r->send_count);
+    print("V:", LA_F("%s seq=%u len=%d inflight=%d", LA_F48, 259),
+                    LA_W("Packet queued", LA_W42, 50), e->seq, len, r->send_count);
     return 0;
 }
 
@@ -80,7 +80,7 @@ int reliable_recv_pkt(reliable_t *r, uint8_t *buf, int *out_len) {
  */
 int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int len) {
     if (!seq_in_window(seq, r->recv_base, RELIABLE_WINDOW)) {
-        printf(LA_F("%s seq=%u base=%u", LA_F52, 257),
+        printf(LA_F("%s seq=%u base=%u", LA_F53, 257),
                       LA_W("Out-of-window packet discarded", LA_W46, 49), seq, r->recv_base);
         return 0;  // 超出窗口，忽略
     }
@@ -90,8 +90,8 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
         memcpy(r->recv_data[idx], payload, len);
         r->recv_lens[idx] = len;
         r->recv_bitmap[idx] = 1;
-        print("V:", LA_F("%s seq=%u len=%d base=%u", LA_F53, 258),
-                        LA_W("Data stored in recv buffer", LA_W15, 17), seq, len, r->recv_base);
+        print("V:", LA_F("%s seq=%u len=%d base=%u", LA_F47, 258),
+                        LA_W("Data stored in recv buffer", LA_W12, 17), seq, len, r->recv_base);
     }
 
     return 1;  // 应当发送 ACK
@@ -189,7 +189,7 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
         build_ack_payload(r, ack_payload);
         uint16_t ack_seq = nget_s(ack_payload);
         uint32_t sack = nget_l(ack_payload + 2);
-        printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F221, 420),
+        printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F223, 420),
                       ack_seq, sack, r->recv_base,
                       addr ? inet_ntoa(addr->sin_addr) : "?",
                       addr ? ntohs(addr->sin_port) : 0);
@@ -260,7 +260,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
             e->retx_count++;
             r->rto = r->rto * 2;
             if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-            print("W:", LA_F("重传 seq=%u retx=%d rto=%d", LA_F226, 425),
+            print("W:", LA_F("重传 seq=%u retx=%d rto=%d", LA_F198, 425),
                          e->seq, e->retx_count, r->rto);
         }
     }

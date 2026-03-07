@@ -257,12 +257,7 @@ struct p2p_session;
  * COMPACT 模式候选类型枚举
  * 与 ICE 的 p2p_ice_cand_type_t 数值对齐，用于 COMPACT 模式内部解析
  */
-typedef enum {
-    P2P_COMPACT_CAND_HOST  = 0,             // 本地网卡地址
-    P2P_COMPACT_CAND_SRFLX = 1,             // STUN 反射地址
-    P2P_COMPACT_CAND_RELAY = 2,             // TURN 中继地址
-    P2P_COMPACT_CAND_PRFLX = 3              // 对端反射地址
-} p2p_compact_cand_type_t;
+/* COMPACT 候选类型直接使用 p2p_common.h 中的 p2p_cand_type_t，无需独立定义 */
 
 /* 信令状态 */
 typedef enum {

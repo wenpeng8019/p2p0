@@ -74,38 +74,78 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 
 /*
- * P2P_PKT_PUNCH 协议（对称捎带式设计）
+ * P2P_PKT_PUNCH / PUNCH_ACK 协议（即时应答设计）
  *
- * 包头: [type=0x01 | flags=0 | seq=发送方序列号(2B)]
- * 负载: [echo_seq(2B, 网络字节序)]
- *   - echo_seq: 上次收到对方的 seq（初始为 0，即 last_peer_seq）
- *   - 无"探测包"/"确认包"之分，所有 PUNCH 格式完全相同
+ * ============================================================================
+ * PUNCH (0x01) — 连接探测/打洞/保活包
+ * ============================================================================
+ *   包头: [type=0x01 | flags=0 | seq=发送方序列号(2B)]
+ *   负载: 无
+ *   发送: 每 500ms 定时向所有候选路径并发发送（打洞阶段），或向活动路径发送（保活阶段）
+ *   接收: 立即回复 PUNCH_ACK，更新路径可达性，设置 rx_confirmed
  *
- * 机制：
- *   双方各自按固定间隔定时发送 PUNCH，payload 中持续携带
- *   "上次收到对方的 seq"（捎带式 echo），无需立刻回复。
+ * ============================================================================
+ * PUNCH_ACK (0x02) — PUNCH 的即时确认包
+ * ============================================================================
+ *   包头: [type=0x02 | flags=0 | seq=回传对方的 PUNCH seq(2B)]
+ *   负载: 无
+ *   发送: 收到 PUNCH 后立即回复，从同一源地址发出（确保回程走相同路径）
+ *   接收: 通过 seq 匹配发送记录计算 per-path RTT，设置 rx_confirmed + tx_confirmed
  *
- * 示例（A、B 各自定时发）：
- *   A → PUNCH(seq=1, echo=0) → B     // A 还没收到 B 的 seq
- *   B → PUNCH(seq=1, echo=0) → A     // B 还没收到 A 的 seq
- *   A → PUNCH(seq=2, echo=1) → B     // A 收到了 B 的 seq=1，捎带
- *   B → PUNCH(seq=2, echo=1) → A     // B 收到了 A 的 seq=1，捎带
+ * ============================================================================
+ * 协议机制
+ * ============================================================================
+ *
+ * 定时发送策略：
+ *   双方各自按固定间隔（PUNCH_INTERVAL_MS = 500ms）定时发送 PUNCH 到所有候选
+ *   或已建连后的活动路径，不依赖对方的包才发送，完全独立触发。
+ *
+ * 即时回复机制：
+ *   收到 PUNCH 后立即回复 PUNCH_ACK，PUNCH_ACK.seq = PUNCH.seq。
+ *   由于 PUNCH_ACK 从收到包的同一地址回复，保证测量的是同一条路径的 RTT。
  *
  * 双向连通判定：
- *   收到任意 PUNCH                    → peer→me 方向确认（入方向通）
- *   收到 PUNCH 中 echo_seq != 0       → me→peer 方向确认（出方向通，因为对方
- *                                       已收到我们至少一个包并将其 seq 回显）
- *   两个条件都满足                     → 真正双向连通 → NAT_CONNECTED
+ *   rx_confirmed: 收到 PUNCH 或 PUNCH_ACK → 证明 peer→me 方向通
+ *   tx_confirmed: 收到 PUNCH_ACK → 证明 me→peer 方向通（对方收到了我的 PUNCH）
+ *   rx_confirmed && tx_confirmed → 状态转换为 NAT_CONNECTED
  *
- * 注：echo_seq == 0 仅在对方尚未收到我们任何包时出现（初始值）。
- *     因此 echo_seq != 0 足以证明出方向至少有一包到达，无需精确匹配最后发的 seq。
+ * per-path RTT 测量：
+ *   发送: 每次发送 PUNCH 时记录 {seq, path_idx, send_time} 到 pending_packets
+ *   接收: 收到 PUNCH_ACK(seq=N) 时，从 pending_packets 匹配 seq，计算
+ *        RTT = now - send_time，更新对应 path 的 RTT/loss/jitter 统计
+ *   精度: 由于 PUNCH_ACK 从同一地址回复，RTT 精确对应该路径（非混合路径）
  *
- * 与即时 ACK 方案对比：
- *   即时 ACK：收到探测包后立刻额外发一个确认包（~2× 包量）
- *   捎带式：确认信息在下次定时包中捎带（包量减少 ~50%）
- *   代价：连通确认延迟增加最多一个 PUNCH_INTERVAL_MS（500ms）
+ * ============================================================================
+ * 交互示例
+ * ============================================================================
+ *
+ *   时间轴（ms）      Alice                                 Bob
+ *   ────────────────────────────────────────────────────────────────────
+ *   t=0              PUNCH(seq=1) ─────────────────────────→
+ *                    [记录 pending: seq=1, path=0, t=0]
+ *
+ *   t=10                                                    收到 PUNCH(seq=1)
+ *                                                           [rx_confirmed=true]
+ *                                  ←───────────────────── PUNCH_ACK(seq=1)
+ *
+ *   t=20             收到 PUNCH_ACK(seq=1)
+ *                    [匹配 pending: RTT = 20ms, path=0]
+ *                    [tx_confirmed=true]
+ *                    [NAT_CONNECTED]
+ *
+ *   t=500            PUNCH(seq=2) ─────────────────────────→ (下一轮定时)
+ *                    [记录 pending: seq=2, path=0, t=500]
+ *
+ *   t=510                                                   收到 PUNCH(seq=2)
+ *                                  ←───────────────────── PUNCH_ACK(seq=2)
+ *
+ *   t=520            收到 PUNCH_ACK(seq=2)
+ *                    [匹配 pending: RTT = 20ms, path=0]
+ *
+ * 注：Bob 也会独立定时发送 PUNCH（未在上图中显示），Alice 同样会立即回复 PUNCH_ACK。
  */
-#define P2P_PKT_PUNCH           0x01        // 连接探测包（用于打洞和保活，带 echo_seq 负载）
+#define P2P_PKT_PUNCH           0x01        // 连接探测包（打洞/保活）
+#define P2P_PKT_PUNCH_ACK       0x02        // PUNCH 即时确认包（seq=回传对方的 PUNCH seq）
 
 /* 数据传输 (peer-to-peer) */
 #define P2P_PKT_DATA            0x20        // 数据包
@@ -264,7 +304,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 #pragma pack(push, 1)
 typedef struct {
-    uint8_t             type;               // 候选类型 (由客户端内部定义，见 p2p_signal_compact.h::p2p_compact_cand_type_t)
+    uint8_t             type;               // 候选类型 (p2p_cand_type_t, 见 p2p_common.h)
     uint32_t            ip;                 // IP 地址（网络字节序）
     uint16_t            port;               // 端口（网络字节序）
 } p2p_compact_candidate_t;

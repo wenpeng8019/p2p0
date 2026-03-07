@@ -107,7 +107,7 @@ add_executable(test_reliable
     test_reliable.c
 )
 target_include_directories(test_reliable PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
-target_link_libraries(test_reliable ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_reliable p2p_static ${TEST_PLATFORM_LIBS})
 add_test(NAME test_reliable COMMAND test_reliable)
 
 # PseudoTCP 拥塞控制单元测试（独立运行，测试 AIMD 拥塞控制算法）

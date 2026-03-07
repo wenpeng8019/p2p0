@@ -2,8 +2,8 @@
  * test_nat_api.c - NAT API统一测试
  * 
  * 测试新统一的 nat_punch API：
- * 1. 批量启动模式：nat_punch(s, NULL, verbose)
- * 2. 单候选模式：nat_punch(s, &addr, 0)
+ * 1. 批量启动模式：nat_punch(s, -1)
+ * 2. 单候选模式：nat_punch(s, idx)
  * 3. 自动状态转换（RELAY → PUNCHING）
  * 4. 模式感知的日志输出
  */
@@ -72,13 +72,13 @@ TEST(nat_punch_batch_mode_success) {
     add_test_candidate(s, "10.0.0.5", 10002, P2P_ICE_CAND_SRFLX);
     
     // 启动打洞
-    nat_punch(s, NULL);
+    nat_punch(s, -1);
     
     // 验证状态
     ASSERT_EQ(s->state, P2P_STATE_INIT);
     ASSERT_EQ(s->nat.state, NAT_PUNCHING);
     
-    // 模拟收到 PUNCH 确认包（echo_seq=1 表示对方收到了我们的 seq=1）
+    // 模拟收到对方的 PUNCH（仅证明 peer→me 方向通了）
     struct sockaddr_in peer_addr;
     peer_addr.sin_family = AF_INET;
     peer_addr.sin_port = htons(10001);
@@ -87,13 +87,27 @@ TEST(nat_punch_batch_mode_success) {
     p2p_packet_hdr_t hdr = {
         .type = P2P_PKT_PUNCH,
         .flags = 0,
-        .seq = htons(100)  // 对方的序列号
+        .seq = 100  // 对方的序列号
     };
-    uint8_t payload[2] = {0, 1};  // echo_seq=1（网络字节序，确认我们的 punch_seq=1）
     
-    nat_on_punch(s, &hdr, payload, 2, &peer_addr);
+    nat_on_punch(s, &hdr, &peer_addr);
     
-    // 验证状态转换
+    // PUNCH 只确认 rx 方向，尚未 NAT_CONNECTED
+    ASSERT_EQ(s->nat.rx_confirmed, true);
+    ASSERT_EQ(s->nat.tx_confirmed, false);
+    ASSERT_EQ(s->nat.state, NAT_PUNCHING);
+    
+    // 模拟收到 PUNCH_ACK（证明 me→peer 方向也通了 → NAT_CONNECTED）
+    p2p_packet_hdr_t ack_hdr = {
+        .type = P2P_PKT_PUNCH_ACK,
+        .flags = 0,
+        .seq = 1  // 回传我们的 punch_seq
+    };
+    
+    nat_on_punch_ack(s, &ack_hdr, &peer_addr);
+    
+    // 双向确认 → NAT_CONNECTED
+    ASSERT_EQ(s->nat.tx_confirmed, true);
     ASSERT_EQ(s->nat.state, NAT_CONNECTED);
     
     destroy_test_session(s);
@@ -103,7 +117,7 @@ TEST(nat_punch_batch_mode_no_candidates) {
     p2p_session_t *s = create_test_session();
     
     // 启动打洞（此时没有候选）
-    int ret = nat_punch(s, NULL);
+    int ret = nat_punch(s, -1);
     
     // 验证返回值和状态
     ASSERT_EQ(ret, -1);
@@ -123,7 +137,7 @@ TEST(nat_punch_single_mode_basic) {
     add_test_candidate(s, "192.168.1.100", 10001, P2P_ICE_CAND_HOST);
     
     // 启动打洞
-    nat_punch(s, NULL);
+    nat_punch(s, -1);
     
     // 验证状态
     ASSERT_EQ(s->state, P2P_STATE_INIT);
@@ -135,18 +149,14 @@ TEST(nat_punch_single_mode_basic) {
 TEST(nat_punch_single_mode_new_candidate) {
     p2p_session_t *s = create_test_session();
     
-    // 启动打洞
-    nat_punch(s, NULL);
+    // 启动打洞（无候选，忽略失败）
+    nat_punch(s, -1);
     
     // 添加新候选
     add_test_candidate(s, "192.168.1.100", 10001, P2P_ICE_CAND_HOST);
     
-    // 再次调用打洞，应该只向新候选发送
-    struct sockaddr_in new_addr;
-    new_addr.sin_family = AF_INET;
-    new_addr.sin_port = htons(10001);
-    inet_pton(AF_INET, "192.168.1.100", &new_addr.sin_addr);
-    nat_punch(s, &new_addr);
+    // 向新候选（index 0）单独打洞
+    nat_punch(s, 0);
     
     // 验证状态
     ASSERT_EQ(s->state, P2P_STATE_INIT);
@@ -169,7 +179,7 @@ TEST(nat_punch_relay_to_punching_restart) {
     s->nat.state = NAT_RELAY;
     
     // 启动打洞
-    nat_punch(s, NULL);
+    nat_punch(s, -1);
     
     // 验证状态重置
     ASSERT_EQ(s->state, P2P_STATE_INIT);
@@ -184,7 +194,7 @@ TEST(nat_punch_relay_to_punching_restart) {
 
 TEST(nat_punch_null_session) {
     // 验证空指针处理
-    int ret = nat_punch(NULL, NULL);
+    int ret = nat_punch(NULL, -1);
     ASSERT_EQ(ret, -1);
 }
 
@@ -195,7 +205,7 @@ TEST(nat_punch_verbose_flag) {
     add_test_candidate(s, "192.168.1.100", 10001, P2P_ICE_CAND_HOST);
     
     // 启动打洞
-    nat_punch(s, NULL);
+    nat_punch(s, -1);
     
     // 验证状态
     ASSERT_EQ(s->state, P2P_STATE_INIT);

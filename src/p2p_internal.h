@@ -213,23 +213,37 @@ typedef struct p2p_session {
  */
 static inline const char* p2p_nat_type_str(int type) {
     switch (type) {
-        case P2P_NAT_DETECTING:        return LA_W("Detecting...", LA_W16, 18);
-        case P2P_NAT_TIMEOUT:          return LA_W("Timeout (no response)", LA_W87, 90);
-        case P2P_NAT_UNKNOWN:          return LA_W("Unknown", LA_W91, 94);
-        case P2P_NAT_OPEN:             return LA_W("Open Internet (No NAT)", LA_W45, 48);
-        case P2P_NAT_FULL_CONE:        return LA_W("Full Cone NAT", LA_W27, 29);
-        case P2P_NAT_RESTRICTED:       return LA_W("Restricted Cone NAT", LA_W69, 72);
-        case P2P_NAT_PORT_RESTRICTED:  return LA_W("Port Restricted Cone NAT", LA_W55, 58);
-        case P2P_NAT_SYMMETRIC:        return LA_W("Symmetric NAT (port-random)", LA_W83, 86);
-        case P2P_NAT_BLOCKED:          return LA_W("UDP Blocked (STUN unreachable)", LA_W89, 92);
-        case P2P_NAT_UNSUPPORTED:      return LA_W("Unsupported (no STUN/probe configured)", LA_W93, 96);
-        default:                       return LA_W("Unknown", LA_W91, 94);
+        case P2P_NAT_DETECTING:        return LA_W("Detecting...", LA_W13, 18);
+        case P2P_NAT_TIMEOUT:          return LA_W("Timeout (no response)", LA_W79, 90);
+        case P2P_NAT_UNKNOWN:          return LA_W("Unknown", LA_W83, 94);
+        case P2P_NAT_OPEN:             return LA_W("Open Internet (No NAT)", LA_W41, 48);
+        case P2P_NAT_FULL_CONE:        return LA_W("Full Cone NAT", LA_W23, 29);
+        case P2P_NAT_RESTRICTED:       return LA_W("Restricted Cone NAT", LA_W62, 72);
+        case P2P_NAT_PORT_RESTRICTED:  return LA_W("Port Restricted Cone NAT", LA_W49, 58);
+        case P2P_NAT_SYMMETRIC:        return LA_W("Symmetric NAT (port-random)", LA_W75, 86);
+        case P2P_NAT_BLOCKED:          return LA_W("UDP Blocked (STUN unreachable)", LA_W81, 92);
+        case P2P_NAT_UNSUPPORTED:      return LA_W("Unsupported (no STUN/probe configured)", LA_W85, 96);
+        default:                       return LA_W("Unknown", LA_W83, 94);
     }
 }
 
 /* ============================================================================
  * 内部候选地址定义
  * ============================================================================ */
+
+/* 
+ * 候选地址类型
+ *
+ * p2p 内部均使用此枚举存储候选类型。
+ * 但不同信令模式（COMPACT、RELAY、PUBSUB）可根据其自身的协议定义，
+ * 将这里的地址类型映射为不同的线协议值（如 p2p_ice_cand_type_t）
+ */
+typedef enum {
+    P2P_CAND_HOST  = 0,                         // 本地网卡地址（Host Candidate）
+    P2P_CAND_SRFLX,                             // STUN 反射地址（Server Reflexive Candidate）
+    P2P_CAND_RELAY,                             // TURN 中继地址（Relayed Candidate）
+    P2P_CAND_PRFLX                              // 对端反射地址（Peer Reflexive Candidate）
+} p2p_cand_type_t;
 
 /*
  * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
@@ -238,7 +252,7 @@ static inline const char* p2p_nat_type_str(int type) {
  * 转换函数：pack_candidate() / unpack_candidate()，见下文。
  */
 struct p2p_candidate_entry {
-    int                type;                    // 候选类型（信令模式相关：RELAY/ICE=p2p_ice_cand_type_t，COMPACT=p2p_compact_cand_type_t）
+    p2p_cand_type_t    type;                    // 候选类型
     struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
     struct sockaddr_in base_addr;               // 基础地址（平台原生 16B）
     uint32_t           priority;                // 候选优先级
@@ -256,25 +270,6 @@ struct p2p_remote_candidate_entry {
     bool                  reachable;            // 是否已观测到可达（收到对端 PUNCH/探测成功）
     path_stats_t          stats;                // 路径统计信息
 };
-
-#define P2P_REMOTE_CAND_TYPE_PUNCH      (-1)
-
-static inline p2p_ice_cand_type_t p2p_remote_cand_type_to_ice(int cand_type) {
-    if (cand_type < 0/* P2P_REMOTE_CAND_TYPE_PUNCH */) return P2P_ICE_CAND_PRFLX;
-    return (p2p_ice_cand_type_t)cand_type;
-}
-
-static inline p2p_compact_cand_type_t p2p_remote_cand_type_to_compact(int cand_type) {
-    if (cand_type < 0/* P2P_REMOTE_CAND_TYPE_PUNCH */) return P2P_COMPACT_CAND_PRFLX;
-    return (p2p_compact_cand_type_t)cand_type;
-}
-
-static inline bool p2p_remote_cand_is_prflx(const p2p_session_t *s, int cand_type) {
-    if (cand_type < 0/* P2P_REMOTE_CAND_TYPE_PUNCH */) return true;
-    if (s && s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
-        return cand_type == P2P_COMPACT_CAND_PRFLX;
-    return cand_type == P2P_ICE_CAND_PRFLX;
-}
 
 /* ============================================================================
  * 候选地址序列化 / 反序列化
@@ -320,7 +315,7 @@ static inline ret_t p2p_cand_push_local(p2p_session_t *s) {
         int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
         p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_candidate_entry_t));
         if (!p) {
-            print("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F165, 347), nc);
+            print("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F159, 347), nc);
             return E_OUT_OF_MEMORY;
         }
         s->local_cands    = p;
@@ -334,7 +329,7 @@ static inline ret_t p2p_cand_push_remote(p2p_session_t *s) {
         int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
         p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
         if (!p) {
-            print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F166, 348), nc);
+            print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F160, 348), nc);
             return E_OUT_OF_MEMORY;
         }
         if (nc > s->remote_cand_cap) {
@@ -356,14 +351,13 @@ static inline int p2p_find_remote_candidate_by_addr(const p2p_session_t *s, cons
 
 static inline ret_t p2p_upsert_remote_candidate(p2p_session_t *s,
                                                  const struct sockaddr_in *addr,
-                                                 int cand_type,
+                                                 p2p_cand_type_t cand_type,
                                                  bool from_punch) {
     if (!s || !addr) return E_INVALID;
 
     int idx = p2p_find_remote_candidate_by_addr(s, addr);
     if (idx >= 0) {
-        if (!from_punch && cand_type >= 0)
-            s->remote_cands[idx].cand.type = cand_type;
+        if (!from_punch) s->remote_cands[idx].cand.type = cand_type;
         return idx;
     }
 
@@ -373,7 +367,7 @@ static inline ret_t p2p_upsert_remote_candidate(p2p_session_t *s,
     p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
     c->cand.addr = *addr;
     c->cand.base_addr = *addr;
-    c->cand.type = (from_punch || cand_type < 0) ? P2P_REMOTE_CAND_TYPE_PUNCH : cand_type;
+    c->cand.type = from_punch ? P2P_CAND_PRFLX : cand_type;
     c->cand.priority = 0;
     c->last_punch_send_ms = 0;
     c->reachable = false;
@@ -392,7 +386,7 @@ static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     while (nc < need) nc *= 2;
     p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
     if (!p) {
-        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F166, 348), nc);
+        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F160, 348), nc);
         return E_OUT_OF_MEMORY;
     }
     memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));

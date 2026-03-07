@@ -66,7 +66,7 @@ TEST(first_member_embedding) {
     memset(&remote, 0, sizeof(remote));
     
     // 设置基础字段
-    remote.cand.type = P2P_ICE_CAND_HOST;
+    remote.cand.type = P2P_CAND_HOST;
     remote.cand.priority = 12345;
     remote.cand.addr.sin_family = AF_INET;
     remote.cand.addr.sin_addr.s_addr = htonl(0xC0A80001);  // 192.168.0.1
@@ -76,7 +76,7 @@ TEST(first_member_embedding) {
     remote.last_punch_send_ms = 9876543210ULL;
     
     // 验证通过 .cand 访问基础字段
-    ASSERT_EQ(remote.cand.type, P2P_ICE_CAND_HOST);
+    ASSERT_EQ(remote.cand.type, P2P_CAND_HOST);
     ASSERT_EQ(remote.cand.priority, 12345);
     ASSERT_EQ(ntohl(remote.cand.addr.sin_addr.s_addr), 0xC0A80001);
     ASSERT_EQ(ntohs(remote.cand.addr.sin_port), 8080);
@@ -86,7 +86,7 @@ TEST(first_member_embedding) {
     
     // 验证指针转换安全性（first member 可以安全转换）
     p2p_candidate_entry_t *base_ptr = &remote.cand;
-    ASSERT_EQ(base_ptr->type, P2P_ICE_CAND_HOST);
+    ASSERT_EQ(base_ptr->type, P2P_CAND_HOST);
     ASSERT_EQ(base_ptr->priority, 12345);
     
     TEST_LOG("  ✓ First-member embedding works correctly");
@@ -111,16 +111,16 @@ TEST(ice_candidate_types) {
 }
 
 TEST(compact_candidate_types) {
-    TEST_LOG("Testing COMPACT candidate type enums");
+    TEST_LOG("Testing internal candidate type enums (p2p_cand_type_t)");
     
-    // 验证 COMPACT 候选类型常量（数值对齐但语义独立）
-    ASSERT_EQ(P2P_COMPACT_CAND_HOST, 0);
-    ASSERT_EQ(P2P_COMPACT_CAND_SRFLX, 1);
-    ASSERT_EQ(P2P_COMPACT_CAND_RELAY, 2);
-    ASSERT_EQ(P2P_COMPACT_CAND_PRFLX, 3);
+    // 验证内部通用候选类型常数
+    ASSERT_EQ(P2P_CAND_HOST,  0);
+    ASSERT_EQ(P2P_CAND_SRFLX, 1);
+    ASSERT_EQ(P2P_CAND_RELAY, 2);
+    ASSERT_EQ(P2P_CAND_PRFLX, 3);
     
-    TEST_LOG("  ✓ COMPACT candidate types: HOST=0, SRFLX=1, RELAY=2, PRFLX=3");
-    TEST_LOG("  ✓ Values align with ICE types (intentional)");
+    TEST_LOG("  \u2713 Internal candidate types: HOST=0, SRFLX=1, RELAY=2, PRFLX=3");
+    TEST_LOG("  \u2713 Values align with ICE types (enables zero-cost cast translation)");
 }
 
 /* ============================================================================
@@ -133,7 +133,7 @@ TEST(pack_unpack_candidate) {
     // 创建候选
     p2p_candidate_entry_t orig;
     memset(&orig, 0, sizeof(orig));
-    orig.type = P2P_ICE_CAND_SRFLX;
+    orig.type = P2P_CAND_SRFLX;
     orig.priority = 0x7FFFFFFF;
     orig.addr.sin_family = AF_INET;
     orig.addr.sin_addr.s_addr = htonl(0x08080808);  // 8.8.8.8
@@ -152,7 +152,7 @@ TEST(pack_unpack_candidate) {
     unpack_candidate(&unpacked, wire);
     
     // 验证
-    ASSERT_EQ(unpacked.type, P2P_ICE_CAND_SRFLX);
+    ASSERT_EQ(unpacked.type, P2P_CAND_SRFLX);
     ASSERT_EQ(unpacked.priority, 0x7FFFFFFF);
     ASSERT_EQ(unpacked.addr.sin_family, AF_INET);
     ASSERT_EQ(ntohl(unpacked.addr.sin_addr.s_addr), 0x08080808);
@@ -203,16 +203,16 @@ TEST(remote_candidate_array_access) {
     
     // 填充数据
     for (int i = 0; i < 3; i++) {
-        candidates[i].cand.type = P2P_ICE_CAND_HOST + i;
+        candidates[i].cand.type = P2P_CAND_HOST + i;
         candidates[i].cand.priority = 1000 + i;
         candidates[i].cand.addr.sin_port = htons(8000 + i);
         candidates[i].last_punch_send_ms = i * 1000ULL;
     }
     
     // 验证通过 .cand.* 路径访问
-    ASSERT_EQ(candidates[0].cand.type, P2P_ICE_CAND_HOST);
-    ASSERT_EQ(candidates[1].cand.type, P2P_ICE_CAND_SRFLX);
-    ASSERT_EQ(candidates[2].cand.type, P2P_ICE_CAND_RELAY);
+    ASSERT_EQ(candidates[0].cand.type, P2P_CAND_HOST);
+    ASSERT_EQ(candidates[1].cand.type, P2P_CAND_SRFLX);
+    ASSERT_EQ(candidates[2].cand.type, P2P_CAND_RELAY);
     
     ASSERT_EQ(candidates[0].last_punch_send_ms, 0ULL);
     ASSERT_EQ(candidates[1].last_punch_send_ms, 1000ULL);

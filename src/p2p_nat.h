@@ -24,15 +24,12 @@ enum {
     NAT_INIT = 0,                           // 初始化状态（从未连接过）
     NAT_PUNCHING,                           // 打洞中（已回取候选列表，正在尝试建立双向路径）
     NAT_CONNECTED,                          // 双向连通：rx + tx 同时已确认
-                                            //   rx: 收到对方的 PUNCH （peer→me 方向通）
-                                            //   tx: 对方的 echo_seq != 0（对方收到了我们的 PUNCH，me→peer 方向通）
+                                            //   rx: 收到对方的 PUNCH/PUNCH_ACK（peer→me 方向通）
+                                            //   tx: 收到 PUNCH_ACK（对方收到了我们的 PUNCH，me→peer 方向通）
     NAT_RELAY,                              // 中继模式：打洞超时失败。此时仍周期发送 PUNCH 尝试重连
     NAT_LOST,                               // 连接丢失：曾经连通，现超时无响应（可能恢复）
     NAT_CLOSED                              // 收到 FIN 包主动断开（连接彻底终止）
 };
-
-/* echo 环形缓冲区容量（用于 per-link RTT 测量） */
-#define NAT_ECHO_SLOTS  16
 
 /* 打洞上下文 */
 typedef struct {
@@ -42,14 +39,8 @@ typedef struct {
     uint64_t            last_recv_time;     // 上次接收时间
     uint64_t            punch_start;        // 打洞开始时间
     uint16_t            punch_seq;          // 本地 PUNCH 包序列号（自增）
-    uint16_t            last_peer_seq;      // 上次收到对方的 seq（用于双向连通确认）
     bool                rx_confirmed;       // peer→me 已确认
     bool                tx_confirmed;       // me→peer 已确认
-    /* echo 环形缓冲区：收到对方 PUNCH 时存入 seq，发送时逐条取出回传，
-     * 确保每条路径的 seq 都能被 echo（而不是只 echo 最新的 last_peer_seq）。 */
-    uint16_t            echo_ring[NAT_ECHO_SLOTS];
-    int                 echo_ring_w;        // 写入位置
-    int                 echo_ring_r;        // 读取位置（下一个要回传的）
 } nat_ctx_t;
 
 /*
@@ -100,13 +91,20 @@ void nat_send_fin(struct p2p_session *s);
  *
  * @param s        会话对象
  * @param hdr      包头（包含 type, flags, seq）
- * @param payload  负载数据
- * @param len      负载长度
  * @param from     来源地址
- * @return         0=成功，!0=失败
  */
 void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                  const uint8_t *payload, int len, const struct sockaddr_in *from);
+                  const struct sockaddr_in *from);
+
+/*
+ * 处理 PUNCH_ACK 包（PUNCH 的即时确认）
+ *
+ * @param s        会话对象
+ * @param hdr      包头（seq = 回传的 PUNCH seq）
+ * @param from     来源地址
+ */
+void nat_on_punch_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+                     const struct sockaddr_in *from);
 
 /*
  * 处理 FIN 包（对方主动断开连接）

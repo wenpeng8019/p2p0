@@ -48,7 +48,7 @@ int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
     P_sock_nonblock(sock, true);
 
     /* 进行三次握手的"同时发起"尝试 */
-    print("I:", LA_F("Attempting Simultaneous Open to %s:%d", LA_F159, 341),
+    print("I:", LA_F("Attempting Simultaneous Open to %s:%d", LA_F153, 341),
                  inet_ntoa(remote->sin_addr), ntohs(remote->sin_port));
     
     int ret = connect(sock, (struct sockaddr *)remote, sizeof(*remote));

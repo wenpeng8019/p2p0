@@ -65,30 +65,30 @@ typedef enum {
  */
 typedef struct {
     /* 路径状态 */
-    path_state_t        state;          // 路径状态
+    path_state_t        state;                      // 路径状态
     
     /* 性能指标（用于路径选择） */
-    uint32_t            rtt_ms;         // 往返延迟（毫秒）
-    uint32_t            rtt_min;        // 最小 RTT（基线）
-    uint32_t            rtt_max;        // 最大 RTT
-    uint32_t            rtt_variance;   // 延迟抖动
-    float               loss_rate;      // 丢包率（0.0-1.0）
-    uint64_t            bandwidth_bps;  // 估计带宽（bps）
+    uint32_t            rtt_ms;                     // 往返延迟（毫秒）
+    uint32_t            rtt_min;                    // 最小 RTT（基线）
+    uint32_t            rtt_max;                    // 最大 RTT
+    uint32_t            rtt_variance;               // 延迟抖动
+    float               loss_rate;                  // 丢包率（0.0-1.0）
+    uint64_t            bandwidth_bps;              // 估计带宽（bps）
     
     /* RTT 平滑（EWMA: Exponentially Weighted Moving Average） */
-    uint32_t            rtt_srtt;       // 平滑 RTT
-    uint32_t            rtt_rttvar;     // RTT 方差
+    uint32_t            rtt_srtt;                   // 平滑 RTT
+    uint32_t            rtt_rttvar;                 // RTT 方差
     
     /* RTT 样本统计 */
-    uint32_t            rtt_samples[10];    // RTT 样本环形缓冲区
-    int                 rtt_sample_idx;     // 当前样本索引
-    int                 rtt_sample_count;   // 有效样本数
+    uint32_t            rtt_samples[10];            // RTT 样本环形缓冲区
+    int                 rtt_sample_idx;             // 当前样本索引
+    int                 rtt_sample_count;           // 有效样本数
     
     /* 健康检查 */
-    uint64_t            last_send_ms;   // 最后发送时间
-    uint64_t            last_recv_ms;   // 最后接收时间
-    uint64_t            probe_seq;      // 探测序列号
-    int                 consecutive_timeouts; // 连续超时次数
+    uint64_t            last_send_ms;               // 最后发送时间
+    uint64_t            last_recv_ms;               // 最后接收时间
+    uint64_t            probe_seq;                  // 探测序列号
+    int                 consecutive_timeouts;       // 连续超时次数
     
     /* 流量统计 */
     uint64_t            total_bytes_sent;
@@ -98,48 +98,48 @@ typedef struct {
     uint64_t            total_packets_lost;
     
     /* 路径质量预测 */
-    uint64_t            last_quality_check_ms; // 上次质量检查时间
-    path_quality_t      quality;            // 当前质量等级
-    float               quality_score;      // 质量评分（0.0-1.0）
-    float               quality_trend;      // 质量趋势（-1.0=恶化, 0=稳定, 1.0=改善）
-    int                 stability_score;    // 稳定性评分（0-100）
-    uint64_t            rtt_trend_sum;      // RTT 趋势累积
-    int                 rtt_trend_count;    // RTT 趋势样本数
+    uint64_t            last_quality_check_ms;      // 上次质量检查时间
+    path_quality_t      quality;                    // 当前质量等级
+    float               quality_score;              // 质量评分（0.0-1.0）
+    float               quality_trend;              // 质量趋势（-1.0=恶化, 0=稳定, 1.0=改善）
+    int                 stability_score;            // 稳定性评分（0-100）
+    uint64_t            rtt_trend_sum;              // RTT 趋势累积
+    int                 rtt_trend_count;            // RTT 趋势样本数
     
     /* 成本估算（用于策略决策） */
-    int                 cost_score;     // 0=免费(LAN/PUNCH), 1-10=中继成本
-    bool                is_lan;         // 是否为 LAN 路径（同子网直连）
+    int                 cost_score;                 // 0=免费(LAN/PUNCH), 1-10=中继成本
+    bool                is_lan;                     // 是否为 LAN 路径（同子网直连）
 } path_stats_t;
 
 /* Phase 4: 路径切换历史记录（用于分析和防抖动） */
 #define MAX_SWITCH_HISTORY 20
 typedef struct {
-    uint64_t    timestamp_ms;       // 切换时间戳
-    int         from_path;          // 源路径索引
-    int         to_path;            // 目标路径索引
-    int         from_type;          // 源路径类型
-    int         to_type;            // 目标路径类型
-    uint32_t    from_rtt_ms;        // 源路径 RTT
-    uint32_t    to_rtt_ms;          // 目标路径 RTT
-    float       from_loss_rate;     // 源路径丢包率
-    float       to_loss_rate;       // 目标路径丢包率
-    const char* reason;             // 切换原因
+    uint64_t            timestamp_ms;               // 切换时间戳
+    int                 from_path;                  // 源路径索引
+    int                 to_path;                    // 目标路径索引
+    int                 from_type;                  // 源路径类型
+    int                 to_type;                    // 目标路径类型
+    uint32_t            from_rtt_ms;                // 源路径 RTT
+    uint32_t            to_rtt_ms;                  // 目标路径 RTT
+    float               from_loss_rate;             // 源路径丢包率
+    float               to_loss_rate;               // 目标路径丢包率
+    const char*         reason;                     // 切换原因
 } path_switch_record_t;
 
 /* Phase 4: 动态阈值配置（根据路径类型） */
 typedef struct {
-    uint32_t    rtt_threshold_ms;       // RTT 阈值
-    float       loss_threshold;         // 丢包率阈值
-    uint64_t    cooldown_ms;            // 切换冷却时间
-    uint32_t    stability_window_ms;    // 稳定窗口（防抖动）
+    uint32_t            rtt_threshold_ms;           // RTT 阈值
+    float               loss_threshold;             // 丢包率阈值
+    uint64_t            cooldown_ms;                // 切换冷却时间
+    uint32_t            stability_window_ms;        // 稳定窗口（防抖动）
 } path_threshold_config_t;
 
 /* Phase 5: TURN 路径配置 */
 typedef struct {
-    bool        enabled;                // 是否启用 TURN
-    int         cost_multiplier;        // 成本倍数（相对于 RELAY）
-    uint32_t    max_bandwidth_bps;      // 最大带宽限制
-    bool        use_as_last_resort;     // 仅作为最终备份
+    bool                enabled;                    // 是否启用 TURN
+    int                 cost_multiplier;            // 成本倍数（相对于 RELAY）
+    uint32_t            max_bandwidth_bps;          // 最大带宽限制
+    bool                use_as_last_resort;         // 仅作为最终备份
 } turn_config_t;
 
 /*
@@ -209,13 +209,11 @@ typedef struct {
  * ============================================================================ */
 
 /*
- * 初始化路径管理器（方案 A）
+ * 初始化路径管理器
  *
  * @param s         会话指针
  * @param strategy  路径选择策略
  * @return          0=成功，-1=失败
- *
- * 注意：统一API设计，第一个参数为 session
  */
 int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy);
 
