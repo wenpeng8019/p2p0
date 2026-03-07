@@ -118,10 +118,10 @@ ret_t route_detect_local(route_ctx_t *rt) {
     freeifaddrs(ifa_list);
 #endif
 
-    print("I:", LA_F("Local address detection done: %d address(es)", LA_F166, 267), rt->addr_count);
+    print("I:", LA_F("Local address detection done: %d address(es)", LA_F145, 236), rt->addr_count);
     if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
         for (i = 0; i < rt->addr_count; i++) {
-            print("V:", LA_F("  [%d] %s/%d", LA_F1, 207), i,
+            print("V:", LA_F("  [%d] %s/%d", LA_F1, 92), i,
                   inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
         }
     }

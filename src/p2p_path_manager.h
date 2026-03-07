@@ -25,39 +25,39 @@ typedef struct p2p_session p2p_session_t;
 
 /* 路径选择策略 */
 typedef enum {
-    P2P_PATH_STRATEGY_CONNECTION_FIRST = 0,  // P2P 直连优先（节省带宽成本）
-    P2P_PATH_STRATEGY_PERFORMANCE_FIRST,     // 传输效率优先（最低延迟）
-    P2P_PATH_STRATEGY_HYBRID                 // 混合模式（平衡成本和性能）
+    P2P_PATH_STRATEGY_CONNECTION_FIRST = 0,         // P2P 直连优先（节省带宽成本）
+    P2P_PATH_STRATEGY_PERFORMANCE_FIRST,            // 传输效率优先（最低延迟）
+    P2P_PATH_STRATEGY_HYBRID                        // 混合模式（平衡成本和性能）
 } p2p_path_strategy_t;
 
 /* 路径类型扩展（TURN）：复用 include/p2p.h 中的 P2P_PATH_* 枚举，并添加 TURN */
-#define P2P_PATH_TURN   4   // TURN 中继（预留）
+#define P2P_PATH_TURN   4                           // TURN 中继（预留）
 
 /* 路径质量等级 */
 typedef enum {
-    PATH_QUALITY_EXCELLENT = 4,    // 优秀（RTT < 50ms, 丢包 < 1%）
-    PATH_QUALITY_GOOD = 3,         // 良好（RTT < 100ms, 丢包 < 3%）
-    PATH_QUALITY_FAIR = 2,         // 一般（RTT < 200ms, 丢包 < 5%）
-    PATH_QUALITY_POOR = 1,         // 较差（RTT < 500ms, 丢包 < 10%）
-    PATH_QUALITY_BAD = 0           // 很差（RTT >= 500ms 或丢包 >= 10%）
+    PATH_QUALITY_EXCELLENT = 4,                     // 优秀（RTT < 50ms, 丢包 < 1%）
+    PATH_QUALITY_GOOD = 3,                          // 良好（RTT < 100ms, 丢包 < 3%）
+    PATH_QUALITY_FAIR = 2,                          // 一般（RTT < 200ms, 丢包 < 5%）
+    PATH_QUALITY_POOR = 1,                          // 较差（RTT < 500ms, 丢包 < 10%）
+    PATH_QUALITY_BAD = 0                            // 很差（RTT >= 500ms 或丢包 >= 10%）
 } path_quality_t;
 
 /* 数据包跟踪（用于 RTT 测量）*/
 #define MAX_PENDING_PACKETS 32
 typedef struct {
-    uint32_t    seq;           // 数据包序列号
-    uint64_t    sent_time_ms;  // 发送时间戳
-    int         path_idx;      // 发送路径索引
+    uint32_t    seq;                                // 数据包序列号
+    uint64_t    sent_time_ms;                       // 发送时间戳
+    int         path_idx;                            // 发送路径索引
 } packet_track_t;
 
 /* 路径状态 */
 typedef enum {
-    PATH_STATE_INIT = 0,        // 初始化
-    PATH_STATE_PROBING,         // 探测中
-    PATH_STATE_ACTIVE,          // 可用
-    PATH_STATE_DEGRADED,        // 降级（高丢包/高延迟）
-    PATH_STATE_FAILED,          // 失败
-    PATH_STATE_RECOVERING       // 恢复中
+    PATH_STATE_INIT = 0,                            // 初始化
+    PATH_STATE_PROBING,                             // 探测中
+    PATH_STATE_ACTIVE,                              // 可用
+    PATH_STATE_DEGRADED,                            // 降级（高丢包/高延迟）
+    PATH_STATE_FAILED,                              // 失败
+    PATH_STATE_RECOVERING                           // 恢复中
 } path_state_t;
 
 /*
@@ -111,7 +111,7 @@ typedef struct {
     bool                is_lan;                     // 是否为 LAN 路径（同子网直连）
 } path_stats_t;
 
-/* Phase 4: 路径切换历史记录（用于分析和防抖动） */
+/* 路径切换历史记录（用于分析和防抖动） */
 #define MAX_SWITCH_HISTORY 20
 typedef struct {
     uint64_t            timestamp_ms;               // 切换时间戳
@@ -126,7 +126,7 @@ typedef struct {
     const char*         reason;                     // 切换原因
 } path_switch_record_t;
 
-/* Phase 4: 动态阈值配置（根据路径类型） */
+/* 动态阈值配置（根据路径类型） */
 typedef struct {
     uint32_t            rtt_threshold_ms;           // RTT 阈值
     float               loss_threshold;             // 丢包率阈值
@@ -134,7 +134,7 @@ typedef struct {
     uint32_t            stability_window_ms;        // 稳定窗口（防抖动）
 } path_threshold_config_t;
 
-/* Phase 5: TURN 路径配置 */
+/* TURN 路径配置 */
 typedef struct {
     bool                enabled;                    // 是否启用 TURN
     int                 cost_multiplier;            // 成本倍数（相对于 RELAY）
@@ -186,12 +186,12 @@ typedef struct {
     uint64_t            total_failovers;            // 总故障转移次数
     uint64_t            start_time_ms;              // 管理器启动时间
     
-    /* Phase 2: 数据包跟踪（用于 RTT 测量）*/
+    /* 数据包跟踪（用于 RTT 测量）*/
     packet_track_t      pending_packets[MAX_PENDING_PACKETS]; // 待确认数据包
     int                 pending_count;              // 待确认数量
     uint32_t            next_track_seq;             // 下一个跟踪序列号
     
-    /* Phase 4: 切换历史与动态阈值 */
+    /* 切换历史与防抖动 */
     path_switch_record_t switch_history[MAX_SWITCH_HISTORY]; // 切换历史环形缓冲区
     int                 switch_history_idx;         // 当前索引
     int                 switch_history_count;       // 有效记录数
@@ -200,7 +200,7 @@ typedef struct {
     uint64_t            debounce_timer_ms;          // 防抖动计时器
     int                 pending_switch_path;        // 待确认的切换目标（-1=无）
     
-    /* Phase 5: TURN 支持（注：TURN是候选，此配置用于策略调整） */
+    /* TURN 策略配置（TURN 是候选，此配置用于策略调整） */
     turn_config_t       turn_config;                // TURN 配置
 } path_manager_t;
 
@@ -342,7 +342,7 @@ const char* path_type_str(int type);
 const char* path_state_str(path_state_t state);
 
 /* ============================================================================
- * Phase 2: RTT 测量与丢包统计 API
+ * RTT 测量与丢包统计 API
  * ============================================================================ */
 
 /*
@@ -386,7 +386,7 @@ int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms)
 int path_manager_on_packet_loss(p2p_session_t *s, uint32_t seq);
 
 /* ============================================================================
- * Phase 3: 路径质量预测 API
+ * 路径质量预测 API
  * ============================================================================ */
 
 /*
@@ -431,7 +431,7 @@ float path_manager_predict_trend(p2p_session_t *s, int path_idx);
 const char* path_quality_str(path_quality_t quality);
 
 /* ============================================================================
- * Phase 4: 动态阈值与防抖动 API
+ * 动态阈值与防抖动 API
  * ============================================================================ */
 
 /*
@@ -511,7 +511,7 @@ int path_manager_switch_path(p2p_session_t *s,
 void path_manager_health_check(p2p_session_t *s, uint64_t now_ms);
 
 /* ============================================================================
- * Phase 5: TURN 路径支持 API
+ * TURN 路径支持 API
  * ============================================================================ */
 
 /*
