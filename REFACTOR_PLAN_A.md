@@ -152,13 +152,13 @@ int path_manager_update_stats(path_manager_t *pm, int cand_idx, uint32_t rtt_ms,
 int path_manager_select_best_path(path_manager_t *pm);
 
 /* 设置活跃路径 */
-int path_manager_set_active(path_manager_t *pm, int path_idx);
+int path_manager_set_active(path_manager_t *pm, int path_chn);
 
 /* 获取路径地址（统一接口）*/
-const struct sockaddr_in* path_manager_get_addr(path_manager_t *pm, int path_idx);
+const struct sockaddr_in* path_manager_get_addr(path_manager_t *pm, int path_chn);
 
 /* 获取路径统计（统一接口）*/
-path_stats_t* path_manager_get_stats(path_manager_t *pm, int path_idx);
+path_stats_t* path_manager_get_stats(path_manager_t *pm, int path_chn);
 
 /* RELAY/TURN 特殊处理 */
 int path_manager_add_relay(path_manager_t *pm, struct sockaddr_in *addr);

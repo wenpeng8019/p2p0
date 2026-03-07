@@ -246,7 +246,7 @@ void path_stats_init(path_stats_t *st, int cost_score);
  * 获取路径地址（统一接口）
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_chn  路径索引（-1=RELAY, >=0=候选索引）
  * @return          地址指针，或 NULL（无效索引）
  */
 const struct sockaddr_in* path_manager_get_addr(p2p_session_t *s, int path_idx);
@@ -255,7 +255,7 @@ const struct sockaddr_in* path_manager_get_addr(p2p_session_t *s, int path_idx);
  * 获取路径统计（统一接口）
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_chn  路径索引（-1=RELAY, >=0=候选索引）
  * @return          统计指针，或 NULL（无效索引）
  */
 path_stats_t* path_manager_get_stats(p2p_session_t *s, int path_idx);
@@ -278,7 +278,7 @@ int path_manager_find_by_addr(p2p_session_t *s, const struct sockaddr_in *addr);
  * 更新路径性能指标
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_chn  路径索引（-1=RELAY, >=0=候选索引）
  * @param rtt_ms    往返延迟（毫秒）
  * @param success   是否成功（用于计算丢包率）
  * @return          0=成功，-1=失败
@@ -302,7 +302,7 @@ int path_manager_select_best_path(p2p_session_t *s);
  * 设置活跃路径
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_chn  路径索引（-1=RELAY, >=0=候选索引）
  * @return          0=成功，-1=失败
  */
 int path_manager_set_active(p2p_session_t *s, int path_idx);
@@ -327,7 +327,7 @@ bool path_manager_has_active_path(p2p_session_t *s);
  * 标记路径状态
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_chn  路径索引（-1=RELAY, >=0=候选索引）
  * @param state     新状态
  * @return          0=成功，-1=失败
  */
@@ -351,7 +351,7 @@ const char* path_state_str(path_state_t state);
  * 记录数据包发送（开始 RTT 测量）
  *
  * @param s         会话指针
- * @param path_idx  发送路径索引
+ * @param path_chn  发送路径索引
  * @param seq       数据包序列号
  * @param now_ms    当前时间（毫秒）
  * @return          0=成功，-1=失败
@@ -372,7 +372,7 @@ int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms);
  * 记录数据包接收（用于更新路径活跃时间）
  *
  * @param s         会话指针
- * @param path_idx  接收路径索引
+ * @param path_chn  接收路径索引
  * @param now_ms    当前时间（毫秒）
  * @return          0=成功，-1=失败
  */
@@ -395,7 +395,7 @@ int path_manager_on_packet_loss(p2p_session_t *s, uint32_t seq);
  * 更新路径质量评估
  *
  * @param s         session指针
- * @param path_idx  路径索引
+ * @param path_chn  路径索引
  * @return          0=成功，-1=失败
  */
 int path_manager_update_quality(p2p_session_t *s, int path_idx);
@@ -404,7 +404,7 @@ int path_manager_update_quality(p2p_session_t *s, int path_idx);
  * 获取路径质量等级
  *
  * @param s         session指针
- * @param path_idx  路径索引
+ * @param path_chn  路径索引
  * @return          质量等级，或 -1（失败）
  */
 path_quality_t path_manager_get_quality(p2p_session_t *s, int path_idx);
@@ -413,7 +413,7 @@ path_quality_t path_manager_get_quality(p2p_session_t *s, int path_idx);
  * 获取路径质量评分（0.0-1.0）
  *
  * @param s         session指针
- * @param path_idx  路径索引
+ * @param path_chn  路径索引
  * @return          质量评分，或 -1.0（失败）
  */
 float path_manager_get_quality_score(p2p_session_t *s, int path_idx);
@@ -422,7 +422,7 @@ float path_manager_get_quality_score(p2p_session_t *s, int path_idx);
  * 预测路径质量趋势
  *
  * @param s         session指针
- * @param path_idx  路径索引
+ * @param path_chn  路径索引
  * @return          趋势值（-1.0=恶化, 0=稳定, 1.0=改善），或 NaN（失败）
  */
 float path_manager_predict_trend(p2p_session_t *s, int path_idx);

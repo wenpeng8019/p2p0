@@ -162,13 +162,13 @@ local/examples/               : 2 个示例文件 (暂不入库)
 void path_manager_init(path_manager_t *pm, p2p_path_strategy_t strategy);
 int path_manager_add_or_update_path(path_manager_t *pm, int type, struct sockaddr_in *addr);
 int path_manager_find_path(path_manager_t *pm, int type);
-int path_manager_update_metrics(path_manager_t *pm, int path_idx, uint32_t rtt_ms, bool success);
+int path_manager_update_metrics(path_manager_t *pm, int path_chn, uint32_t rtt_ms, bool success);
 int path_manager_select_best_path(path_manager_t *pm);
 void path_manager_health_check(path_manager_t *pm, uint64_t now_ms);
 int path_manager_failover(path_manager_t *pm, int failed_path);
 path_info_t* path_manager_get_active_path(path_manager_t *pm);
 bool path_manager_has_active_path(path_manager_t *pm);
-int path_manager_set_path_state(path_manager_t *pm, int path_idx, path_state_t state);
+int path_manager_set_path_state(path_manager_t *pm, int path_chn, path_state_t state);
 int path_manager_remove_path(path_manager_t *pm, int type);
 const char* path_type_str(int type);
 const char* path_state_str(path_state_t state);
@@ -177,19 +177,19 @@ const char* path_state_str(path_state_t state);
 ### 测量 API（Phase 2）
 
 ```c
-int path_manager_on_packet_send(path_manager_t *pm, int path_idx, uint32_t seq, uint64_t now_ms);
+int path_manager_on_packet_send(path_manager_t *pm, int path_chn, uint32_t seq, uint64_t now_ms);
 int path_manager_on_packet_ack(path_manager_t *pm, uint32_t seq, uint64_t now_ms);
-int path_manager_on_packet_recv(path_manager_t *pm, int path_idx, uint64_t now_ms);
+int path_manager_on_packet_recv(path_manager_t *pm, int path_chn, uint64_t now_ms);
 int path_manager_on_packet_loss(path_manager_t *pm, uint32_t seq);
 ```
 
 ### 质量 API（Phase 3）
 
 ```c
-int path_manager_update_quality(path_manager_t *pm, int path_idx);
-path_quality_t path_manager_get_quality(path_manager_t *pm, int path_idx);
-float path_manager_get_quality_score(path_manager_t *pm, int path_idx);
-float path_manager_predict_trend(path_manager_t *pm, int path_idx);
+int path_manager_update_quality(path_manager_t *pm, int path_chn);
+path_quality_t path_manager_get_quality(path_manager_t *pm, int path_chn);
+float path_manager_get_quality_score(path_manager_t *pm, int path_chn);
+float path_manager_predict_trend(path_manager_t *pm, int path_chn);
 const char* path_quality_str(path_quality_t quality);
 ```
 

@@ -189,7 +189,7 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
         build_ack_payload(r, ack_payload);
         uint16_t ack_seq = nget_s(ack_payload);
         uint32_t sack = nget_l(ack_payload + 2);
-        printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F219, 420),
+        printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F221, 420),
                       ack_seq, sack, r->recv_base,
                       addr ? inet_ntoa(addr->sin_addr) : "?",
                       addr ? ntohs(addr->sin_port) : 0);
@@ -260,7 +260,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
             e->retx_count++;
             r->rto = r->rto * 2;
             if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-            print("W:", LA_F("重传 seq=%u retx=%d rto=%d", LA_F224, 425),
+            print("W:", LA_F("重传 seq=%u retx=%d rto=%d", LA_F226, 425),
                          e->seq, e->retx_count, r->rto);
         }
     }

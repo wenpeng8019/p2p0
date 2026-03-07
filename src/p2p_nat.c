@@ -22,44 +22,42 @@
  *
  * 协议：P2P_PKT_PUNCH (0x01)
  * 包头: [type=0x01 | flags=0 | seq=发送方序列号(2B)]
- * 负载: [echo_seq(2B) | self_path_idx(2B, 有符号)]
- *   - echo_seq:       回传对方的 seq（从 echo_ring 逐条取出，确保每条路径都被测量）
- *   - self_path_idx:  本端发送所用的候选索引（对端存入 echo_ring 以便回传）
+ * 负载: [echo_seq(2B)]
+ *   - echo_seq: 回传对方的 seq（从 echo_ring 逐条取出，确保每条路径都被测量）
  */
 static void nat_send_punch(p2p_session_t *s, const char *reason,
                            p2p_remote_candidate_entry_t *entry, uint64_t now) {
     const char* PROTO = "PUNCH";
     nat_ctx_t *n = &s->nat;
-    int self_path_idx = (int)(entry - s->remote_cands);
 
-    if (++n->punch_seq == 0) n->punch_seq = 1;  /* 避免 seq=0 的特殊情况 */
+    if (++n->punch_seq == 0) n->punch_seq = 1;  // 跳过 seq=0 的情况
 
     /* 从 echo 环形缓冲区取出下一个待回传的 seq（逐条轮转，确保所有路径都被 echo） */
     uint16_t echo_seq = 0;
     if (n->echo_ring_w - n->echo_ring_r > NAT_ECHO_SLOTS)
         n->echo_ring_r = n->echo_ring_w - NAT_ECHO_SLOTS; /* 跳过已被覆盖的旧条目 */
     if (n->echo_ring_r < n->echo_ring_w) {
-        echo_seq = n->echo_ring[n->echo_ring_r % NAT_ECHO_SLOTS].seq;
+        echo_seq = n->echo_ring[n->echo_ring_r % NAT_ECHO_SLOTS];
         n->echo_ring_r++;
     } else {
         echo_seq = n->last_peer_seq;  /* 无待 echo 数据时回退到全局 last_peer_seq（兼容/保活） */
     }
 
-    /* 构建载荷: [echo_seq(2B) | self_path_idx(2B)] */
-    uint8_t payload[4];
-    nwrite_s(payload,     echo_seq);
-    nwrite_s(payload + 2, (uint16_t)(int16_t)self_path_idx);
+    /* 构建载荷: [echo_seq(2B)] */
+    int send_path = (int)(entry - s->remote_cands);
+    uint8_t payload[2];
+    nwrite_s(payload, echo_seq);
 
     udp_send_packet(s->sock, &entry->cand.addr, P2P_PKT_PUNCH, 0, n->punch_seq, payload, sizeof(payload));
 
     print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, echo=%u, path=%d", LA_F45, 250),
           PROTO, inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port),
-          reason, n->punch_seq, echo_seq, self_path_idx);
+          reason, n->punch_seq, echo_seq, send_path);
 
     entry->last_punch_send_ms = now;
 
-    // 记录发送用于 RTT 测量（seq 唯一映射到路径，对端 echo 回来后即可匹配）
-    path_manager_on_packet_send(s, self_path_idx, n->punch_seq, now);
+    // 记录发送包用于 RTT 测量（seq 唯一映射到路径，对端 echo 回来后即可匹配）
+    path_manager_on_packet_send(s, send_path, n->punch_seq, now);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -97,24 +95,24 @@ int nat_punch(p2p_session_t *s, int idx) {
     if (idx == -1) {
 
         if (s->remote_cand_cnt == 0) {
-            print("E: %s", LA_S("No remote candidates to punch", LA_S53, 150));
+            print("E:", LA_F("%s: no remote candidates to punch", LA_F117, 150), TASK_NAT);
             return E_NONE_EXISTS;
         }
 
         // 已连接时忽略（避免破坏已建立的连接）
         if (n->state == NAT_CONNECTED) {
-            print("V: %s", LA_S("Already connected, ignoring batch punch request", LA_S13, 110));
+            print("V: %s", LA_F("%s: already connected, ignoring batch punch request", LA_F86, 110), TASK_NAT);
             return E_NONE;
         }
         
         // 启动/重启 PUNCHING 状态（适用于 INIT/CLOSED/DISCONNECTED/RELAY）
         n->state = NAT_PUNCHING;
         n->punch_start = now;
-        n->peer_addr = s->remote_cands[0].cand.addr;  /* 默认值，收到 ACK 时会更新 */
         n->rx_confirmed = false;
         n->tx_confirmed = false;
+        n->peer_addr = s->remote_cands[0].cand.addr;  /* 默认值，收到 ACK 时会更新 */
 
-        print("I:", LA_F("Start punching all(%d) remote candidates", LA_F201, 394), s->remote_cand_cnt);
+        print("I:", LA_F("%s: start punching all(%d) remote candidates", LA_F137, 394), TASK_NAT, s->remote_cand_cnt);
 
         // 打印详细日志
         if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
@@ -146,9 +144,8 @@ int nat_punch(p2p_session_t *s, int idx) {
         }
 
         // 立即向所有候选并行发送打洞包
-        for (int i = 0; i < s->remote_cand_cnt; i++) {
+        for (int i = 0; i < s->remote_cand_cnt; i++)
             nat_send_punch(s, LA_W("punch", LA_W59, 62), &s->remote_cands[i], now);
-        }
         n->last_send_time = now;
         
         return E_NONE;
@@ -157,7 +154,7 @@ int nat_punch(p2p_session_t *s, int idx) {
     /* ========== Trickle 单候选打洞模式：idx >= 0 ========== */
     
     if (idx < 0 || idx >= s->remote_cand_cnt) {
-        print("E:", LA_F("Invalid candidate index: %d (count: %d)", LA_F163, 355), idx, s->remote_cand_cnt);
+        print("E:", LA_F("%s: invalid candidate index: %d (count: %d)", LA_F111, 355), TASK_NAT, idx, s->remote_cand_cnt);
         return E_OUT_OF_RANGE;
     }
 
@@ -166,20 +163,20 @@ int nat_punch(p2p_session_t *s, int idx) {
     // 已连接状态：直接发送打洞包建立新路径，不改变连接状态
     if (n->state == NAT_CONNECTED) {
 
-        print("I:", LA_F("Punching additional candidate(%d) %s:%d while connected", LA_F173, 365), idx,
+        print("I:", LA_F("%s: punching additional candidate(%d) %s:%d while connected", LA_F121, 365), TASK_NAT, idx,
               inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port));
     }
     else {
-        print("I:", LA_F("Punching remote candidate(%d) %s:%d", LA_F174, 366), idx,
+        print("I:", LA_F("%s: punching remote candidate(%d) %s:%d", LA_F122, 366), TASK_NAT, idx,
               inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port));
 
         // 首次或重新启动时初始化状态（INIT/CLOSED）
         if (n->state == NAT_INIT || n->state == NAT_CLOSED) {
-            n->peer_addr = s->remote_cands[0].cand.addr;
             n->state = NAT_PUNCHING;
             n->punch_start = now;
             n->rx_confirmed = false;
             n->tx_confirmed = false;
+            n->peer_addr = s->remote_cands[0].cand.addr;
         }
     }
 
@@ -226,10 +223,8 @@ void nat_send_fin(p2p_session_t *s) {
  *
  * 协议：P2P_PKT_PUNCH (0x01)
  * 包头: [type=0x01 | flags=0 | seq=发送方序列号(2B)]
- * 负载: [echo_seq(2B) | self_path_idx(2B, 有符号, 可选)]
- *   - echo_seq:       回传的 seq（与 pending_packets 匹配计算 RTT）
- *   - self_path_idx:  发送方的候选索引（接收方存入 echo_ring 以便逐条回传）
- *   向后兼容：旧版 2 字节载荷仍能正常处理，仅缺少 per-link 精度
+ * 负载: [echo_seq(2B)]
+ *   - echo_seq: 回传的 seq（与 pending_packets 匹配计算 RTT）
  */
 void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                    const uint8_t *payload, int len, const struct sockaddr_in *from) {
@@ -240,30 +235,27 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     nat_ctx_t *n = &s->nat;
     uint64_t now = P_tick_ms();
 
-    // 解析载荷: [echo_seq(2B) | self_path_idx(2B, 可选)]
+    // 解析载荷: [echo_seq(2B)]
     uint16_t echo_seq = nget_s(payload);
-    int16_t  peer_path_idx = (len >= 4) ? (int16_t)nget_s(payload + 2) : -1;
 
-    printf(LA_F("Received %s pkt from %s:%d, seq=%u, len=%d", LA_F180, 372),
+    printf(LA_F("Received %s pkt from %s:%d, seq=%u, len=%d", LA_F186, 372),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq, len);
 
     // 更新全局 last_peer_seq（用于双向连通确认 + echo_ring 为空时的回退）
     if (uint16_circle_newer(hdr->seq, n->last_peer_seq))
         n->last_peer_seq = hdr->seq;
 
-    // 存入 echo 环形缓冲区（per-path：确保逐条路径的 seq 都能被 echo，而不是只 echo 最新的）
-    int w = n->echo_ring_w % NAT_ECHO_SLOTS;
-    n->echo_ring[w].seq = hdr->seq;
-    n->echo_ring[w].path_idx = peer_path_idx;
-    n->echo_ring_w++;
-
     int remote_cnt_before = s->remote_cand_cnt;
     int cand_idx = p2p_upsert_remote_candidate(s, from, -1, true);
     if (cand_idx < 0) {
-        print("E:", LA_F("%s: failed to track candidate %s:%d (outof memory), dropping packet", LA_F99, 551),
+        print("E:", LA_F("%s: failed to track candidate %s:%d (outof memory), dropping packet", LA_F101, 551),
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return;
     } 
+
+    // 存入 echo 环形缓冲区（确保逐条路径的 seq 都能被 echo，而不是只 echo 最新的）
+    n->echo_ring[n->echo_ring_w % NAT_ECHO_SLOTS] = hdr->seq;
+    n->echo_ring_w++;
 
     print("V:", LA_F("%s: accepted for echo_seq=%u", LA_F77, 278), PROTO, echo_seq);
 
@@ -271,7 +263,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     n->last_recv_time = now;
 
     if (cand_idx >= remote_cnt_before) {
-        print("I:", LA_F("%s: discovered unsynced peer-reflexive candidate %s:%d (idx=%d)", LA_F90, 291),
+        print("I:", LA_F("%s: discovered unsynced peer-reflexive candidate %s:%d (idx=%d)", LA_F92, 291),
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port), cand_idx);
     }
 
@@ -303,7 +295,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     // 非打洞相关状态：忽略
     if (n->state != NAT_PUNCHING && n->state != NAT_RELAY && n->state != NAT_LOST) {
-        print("W:", LA_F("%s: ignored in state(%d)", LA_F106, 305), TASK_NAT, n->state);
+        print("W:", LA_F("%s: ignored in state(%d)", LA_F108, 305), TASK_NAT, n->state);
         return;
     }
 
@@ -312,27 +304,22 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // peer→me 方向：收到对方 PUNCH 即证明入方向通了
     if (!n->rx_confirmed) {
         n->rx_confirmed = true;
-        print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F123, 320),
+        print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F130, 320),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 
     // me→peer 方向：对方的 echo_seq != 0，证明对方收到了我们的包
     if (!n->tx_confirmed && echo_seq != 0) {
         n->tx_confirmed = true;
-        print("I:", LA_F("%s: tx confirmed: me->peer path is UP (peer echoed seq=%u)", LA_F141, 332),
+        print("I:", LA_F("%s: tx confirmed: me->peer path is UP (peer echoed seq=%u)", LA_F152, 332),
                 TASK_NAT, echo_seq);
     }
 
     // 双向均确认 → NAT_CONNECTED
     if (n->rx_confirmed && n->tx_confirmed) {
-        if (cand_idx >= 0) {
-            n->peer_addr = s->remote_cands[cand_idx].cand.addr;
-        }
-        else {
-            n->peer_addr = *from;
-        }
         n->state = NAT_CONNECTED;
-        print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F88, 289),
+        n->peer_addr = s->remote_cands[cand_idx].cand.addr;
+        print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F90, 289),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 }
@@ -347,7 +334,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
     const char* PROTO = "FIN";
 
-    printf(LA_F("Received %s pkt from %s:%d, seq=0, len=0", LA_F181, 373),
+    printf(LA_F("Received %s pkt from %s:%d, seq=0, len=0", LA_F187, 373),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
     print("V:", LA_F("%s: accepted", LA_F74, 275), PROTO);
@@ -355,7 +342,7 @@ void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
     // 收到对端主动断开通知，标记 NAT 层为已关闭
     if (s->nat.state != NAT_CLOSED) {
         s->nat.state = NAT_CLOSED;
-        print("I:", LA_F("%s: received FIN from peer, marking NAT as CLOSED", LA_F116, 314), TASK_NAT);
+        print("I:", LA_F("%s: received FIN from peer, marking NAT as CLOSED", LA_F123, 314), TASK_NAT);
     }
 }
 
@@ -373,70 +360,68 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         case NAT_PUNCHING:
 
             // 超时判断
-            // 注意：只有在 ICE 候选交换完成后才判定打洞超时，否则可能还有新候选在路上
             if (now_ms - n->punch_start >= PUNCH_TIMEOUT_MS) {
                 
-                // 统一判断：由信令层负责设置 ice_exchange_done 标志
+                // ICE 候选交换完成后
+                // + 只有在 ICE 候选交换完成后才判定打洞超时，否则可能还有新候选在路上，该状态值由信令层负责设置维护
                 if (s->ice_exchange_done) {
-                    print("W:", LA_F("TIMEOUT: Punch failed after %" PRIu64 " ms (ICE done), switching to RELAY", LA_F32, 289),
-                          now_ms - n->punch_start);
 
-                    // 进入中继模式，重置双向确认标志，在中继期间继续尝试打洞
-                    n->rx_confirmed = false;
+                    print("W:", LA_F("%s: timeout after %" PRIu64 " ms (ICE done), switching to RELAY", LA_F32, 289),
+                          TASK_NAT, now_ms - n->punch_start);
+
+                    n->state = NAT_RELAY;           // 标记进入中继模式，
+                    n->rx_confirmed = false;        // 重置双向确认标志（在中继期间继续尝试打洞）
                     n->tx_confirmed = false;
-                    n->state = NAT_RELAY;
-                    
-                    // 触发探测：统一接口内部按信令模式分发
+
+                    // 启动信通外对端探测（如果支持）
                     probe_trigger(s);
-                } else {
-                    print("V:", LA_F("Punch timeout but ICE exchange not done yet (%" PRIu64 " ms elapsed, mode=%d), waiting for more candidates", 0, 0),
-                          now_ms - n->punch_start, s->signaling_mode);
                 }
+                else print("V:", LA_F("%s: timeout but ICE exchange not done yet (%" PRIu64 " ms elapsed, mode=%d), waiting for more candidates", 0, 0),
+                           TASK_NAT, now_ms - n->punch_start, s->signaling_mode);
             }
 
+            // 如果存在未完成的 nat 打洞
             int sent_cnt = 0;
             for (int i = 0; i < s->remote_cand_cnt; i++) {
                 if (s->remote_cands[i].last_punch_send_ms == 0 ||
                     now_ms - s->remote_cands[i].last_punch_send_ms >= PUNCH_INTERVAL_MS) {
+
                     nat_punch(s, i);
                     sent_cnt++;
                 }
             }
-
-            // 如果存在未完成的 nat 打洞
-            if (sent_cnt > 0) {
-                print("V:", LA_F("ATTEMPT: punch to %d/%d candidates (elapsed: %" PRIu64 " ms)", LA_F8, 265),
-                      sent_cnt, s->remote_cand_cnt, now_ms - n->punch_start);
+            if (sent_cnt) {
+                print("V:", LA_F("%s: attempt to punch %d/%d candidates (elapsed: %" PRIu64 " ms)", LA_F8, 265),
+                      TASK_NAT, sent_cnt, s->remote_cand_cnt, now_ms - n->punch_start);
             }
             break;
 
         case NAT_CONNECTED:
 
-            // 超时检查 - 先判断连接是否已失效
+            // 超时检查
             if (n->last_recv_time > 0 && now_ms - n->last_recv_time >= PONG_TIMEOUT_MS) {
 
-                print("W:", LA_F("TIMEOUT: No response from peer for (%" PRIu64 " ms), connection lost", 0, 0),
-                      now_ms - n->last_recv_time);
+                print("W:", LA_F("%s: timeout without response from peer for (%" PRIu64 " ms), connection lost", 0, 0),
+                      TASK_NAT, now_ms - n->last_recv_time);
 
                 n->state = NAT_LOST;
                 break;
             }
 
-            // 发送保活包（复用 PUNCH 包）- 向所有可达候选发送
+            // 向所有可达候选发送保活包（复用 PUNCH 包）-
             if (now_ms - n->last_send_time >= PING_INTERVAL_MS) {
 
-                int keepalive_cnt = 0;
-                
+                int alive_cnt = 0;
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
                     if (s->remote_cands[i].reachable) {
+
                         nat_send_punch(s, LA_W("alive", LA_W5, 7), &s->remote_cands[i], now_ms);
-                        keepalive_cnt++;
+                        alive_cnt++;
                     }
                 }
-                
-                if (keepalive_cnt > 0) {
+                if (alive_cnt) {
                     n->last_send_time = now_ms;
-                    print("V:", LA_F("Sent keepalive to %d reachable candidate(s)", LA_F199, 392), keepalive_cnt);
+                    print("V:", LA_F("%s: keep alive to %d reachable cand(s)", LA_F115, 392), TASK_NAT, alive_cnt);
                 }
             }
             break;

@@ -45,13 +45,9 @@ typedef struct {
     uint16_t            last_peer_seq;      // 上次收到对方的 seq（用于双向连通确认）
     bool                rx_confirmed;       // peer→me 已确认
     bool                tx_confirmed;       // me→peer 已确认
-    /* per-path echo 跟踪（用于精确的 per-link RTT 测量）
-     * 收到对方 PUNCH 时存入环形缓冲区，发送 PUNCH 时逐条取出回传，
-     * 确保每条路径的 seq 都能被 echo，而不是只 echo 最新的。 */
-    struct {
-        uint16_t seq;       // 收到对方的 seq
-        int16_t  path_idx;  // 对方声明的路径索引
-    }                   echo_ring[NAT_ECHO_SLOTS];
+    /* echo 环形缓冲区：收到对方 PUNCH 时存入 seq，发送时逐条取出回传，
+     * 确保每条路径的 seq 都能被 echo（而不是只 echo 最新的 last_peer_seq）。 */
+    uint16_t            echo_ring[NAT_ECHO_SLOTS];
     int                 echo_ring_w;        // 写入位置
     int                 echo_ring_r;        // 读取位置（下一个要回传的）
 } nat_ctx_t;

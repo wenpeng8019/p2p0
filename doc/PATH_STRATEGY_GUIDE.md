@@ -366,16 +366,16 @@ quality_score = 0.5 × RTT分数 + 0.3 × 丢包分数 + 0.2 × 抖动分数
 **质量 API**：
 ```c
 // 获取路径质量等级
-path_quality_t quality = path_manager_get_quality(&pm, path_idx);
+path_quality_t quality = path_manager_get_quality(&pm, path_chn);
 
 // 获取质量评分（0.0-1.0）
-float score = path_manager_get_quality_score(&pm, path_idx);
+float score = path_manager_get_quality_score(&pm, path_chn);
 
 // 预测质量趋势（-1.0 到 1.0）
-float trend = path_manager_predict_trend(&pm, path_idx);
+float trend = path_manager_predict_trend(&pm, path_chn);
 
 // 获取稳定性（0-100）
-int stability = pm.paths[path_idx].stability_score;
+int stability = pm.paths[path_chn].stability_score;
 ```
 
 ### 路径切换决策

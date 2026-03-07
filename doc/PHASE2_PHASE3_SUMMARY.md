@@ -130,16 +130,16 @@ stability_score = 100 × (1.0 - min(cv, 1.0))
 
 ```c
 // 1. 更新质量评估
-int path_manager_update_quality(path_manager_t *pm, int path_idx);
+int path_manager_update_quality(path_manager_t *pm, int path_chn);
 
 // 2. 获取质量等级
-path_quality_t path_manager_get_quality(path_manager_t *pm, int path_idx);
+path_quality_t path_manager_get_quality(path_manager_t *pm, int path_chn);
 
 // 3. 获取质量评分
-float path_manager_get_quality_score(path_manager_t *pm, int path_idx);
+float path_manager_get_quality_score(path_manager_t *pm, int path_chn);
 
 // 4. 预测趋势
-float path_manager_predict_trend(path_manager_t *pm, int path_idx);
+float path_manager_predict_trend(path_manager_t *pm, int path_chn);
 
 // 5. 辅助函数
 const char* path_quality_str(path_quality_t quality);
@@ -248,7 +248,7 @@ make clean && make -j4
 ### 查询质量
 
 ```c
-path_quality_t quality = path_manager_get_quality(&s->path_mgr, path_idx);
+path_quality_t quality = path_manager_get_quality(&s->path_mgr, path_chn);
 
 if (quality <= PATH_QUALITY_POOR) {
     printf("⚠️  路径质量较差，建议切换\n");
@@ -258,7 +258,7 @@ if (quality <= PATH_QUALITY_POOR) {
 ### 预测趋势
 
 ```c
-float trend = path_manager_predict_trend(&s->path_mgr, path_idx);
+float trend = path_manager_predict_trend(&s->path_mgr, path_chn);
 
 if (trend > 0.3) {
     printf("📉 质量正在恶化\n");
@@ -269,7 +269,7 @@ if (trend > 0.3) {
 ### 自适应码率
 
 ```c
-path_quality_t quality = path_manager_get_quality(&s->path_mgr, path_idx);
+path_quality_t quality = path_manager_get_quality(&s->path_mgr, path_chn);
 
 switch (quality) {
     case PATH_QUALITY_EXCELLENT:

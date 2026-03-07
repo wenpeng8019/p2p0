@@ -608,7 +608,7 @@ int path_manager_select_best_path(p2p_session_t *s) {
 /*
  * 对单条路径执行健康检查（共享逻辑，RELAY和候选都用）
  *   is_lan: 该路径是否为 LAN（超时更短）
- *   path_idx: 路径索引（-1=RELAY, >=0=候选），用于故障转移
+ *   path_chn: 路径索引（-1=RELAY, >=0=候选），用于故障转移
  */
 static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
                                    int path_idx, uint64_t now_ms) {
