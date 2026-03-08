@@ -35,7 +35,7 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
 
     udp_send_packet(s->sock, &entry->cand.addr, P2P_PKT_PUNCH, 0, n->punch_seq, NULL, 0);
 
-    print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, path=%d", LA_F11, 102),
+    print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, path=%d", LA_F12, 108),
           PROTO, inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port),
           reason, n->punch_seq, send_path);
 
@@ -62,15 +62,15 @@ void nat_init(nat_ctx_t *n) {
  *
  * @param s        会话对象
  * @param idx      目标候选索引（-1=批量启动所有候选，>=0=单个候选打洞）
- * @return         0=成功，-1=失败（无候选）
+ * @return         0=成功，!0=失败
  *
  * 用法：
  *   - nat_punch(s, -1)      批量启动所有 remote_cands 的打洞
  *   - nat_punch(s, idx)     向单个候选追加打洞（Trickle ICE）
  */
-int nat_punch(p2p_session_t *s, int idx) {
+ret_t nat_punch(p2p_session_t *s, int idx) {
 
-    P_check(s != NULL, return -1;)
+    P_check(s != NULL, return E_INVALID;)
     
     nat_ctx_t *n = &s->nat;
     uint64_t now = P_tick_ms();
@@ -80,13 +80,13 @@ int nat_punch(p2p_session_t *s, int idx) {
     if (idx == -1) {
 
         if (s->remote_cand_cnt == 0) {
-            print("E:", LA_F("%s: no remote candidates to punch", LA_F75, 166), TASK_NAT);
+            print("E:", LA_F("%s: no remote candidates to punch", LA_F76, 172), TASK_NAT);
             return E_NONE_EXISTS;
         }
 
         // 已连接时忽略（避免破坏已建立的连接）
         if (n->state == NAT_CONNECTED) {
-            print("V:", LA_F("%s: already connected, ignoring batch punch request", LA_F45, 136), TASK_NAT);
+            print("V:", LA_F("%s: already connected, ignoring batch punch request", LA_F46, 142), TASK_NAT);
             return E_NONE;
         }
         
@@ -97,7 +97,7 @@ int nat_punch(p2p_session_t *s, int idx) {
         n->tx_confirmed = false;
         n->peer_addr = s->remote_cands[0].cand.addr;  /* 默认值，收到 ACK 时会更新 */
 
-        print("I:", LA_F("%s: start punching all(%d) remote candidates", LA_F97, 188), TASK_NAT, s->remote_cand_cnt);
+        print("I:", LA_F("%s: start punching all(%d) remote candidates", LA_F98, 194), TASK_NAT, s->remote_cand_cnt);
 
         // 打印详细日志
         if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
@@ -111,7 +111,7 @@ int nat_punch(p2p_session_t *s, int idx) {
                     case P2P_CAND_RELAY: type_str = "Relay"; break;
                 }
 
-                print("V:", LA_F("  [%d]<%s:%d> (type: %s)", LA_F3, 94), i,
+                print("V:", LA_F("  [%d]<%s:%d> (type: %s)", LA_F3, 99), i,
                       inet_ntoa(s->remote_cands[i].cand.addr.sin_addr), ntohs(s->remote_cands[i].cand.addr.sin_port),
                       type_str);
             }
@@ -128,7 +128,7 @@ int nat_punch(p2p_session_t *s, int idx) {
     /* ========== Trickle 单候选打洞模式：idx >= 0 ========== */
     
     if (idx < 0 || idx >= s->remote_cand_cnt) {
-        print("E:", LA_F("%s: invalid cand idx: %d (count: %d)", LA_F69, 160), TASK_NAT, idx, s->remote_cand_cnt);
+        print("E:", LA_F("%s: invalid cand idx: %d (count: %d)", LA_F70, 166), TASK_NAT, idx, s->remote_cand_cnt);
         return E_OUT_OF_RANGE;
     }
 
@@ -137,11 +137,11 @@ int nat_punch(p2p_session_t *s, int idx) {
     // 已连接状态：直接发送打洞包建立新路径，不改变连接状态
     if (n->state == NAT_CONNECTED) {
 
-        print("I:", LA_F("%s: punching additional cand<%s:%d>[%d] while connected", LA_F81, 172), TASK_NAT,
+        print("I:", LA_F("%s: punching additional cand<%s:%d>[%d] while connected", LA_F82, 178), TASK_NAT,
               inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port), idx);
     }
     else {
-        print("I:", LA_F("%s: punching remote cand<%s:%d>[%d]", LA_F82, 173), TASK_NAT,
+        print("I:", LA_F("%s: punching remote cand<%s:%d>[%d]", LA_F83, 179), TASK_NAT,
               inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port), idx);
 
         // 首次或重新启动时初始化状态（INIT/CLOSED）
@@ -173,7 +173,7 @@ void nat_send_fin(p2p_session_t *s) {
 
     udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
 
-    print("V:", LA_F("%s sent to %s:%d", LA_F10, 101),
+    print("V:", LA_F("%s sent to %s:%d", LA_F11, 107),
           PROTO, inet_ntoa(s->active_addr.sin_addr), ntohs(s->active_addr.sin_port));
 }
 
@@ -193,7 +193,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                    const struct sockaddr_in *from) {
     const char* PROTO = "PUNCH";
 
-    printf(LA_F("Recv %s pkt from %s:%d seq=%u", LA_F191, 372),
+    printf(LA_F("Recv %s pkt from %s:%d seq=%u", LA_F180, 276),
           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
 
     /*
@@ -209,7 +209,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
         udp_send_packet(s->sock, from, P2P_PKT_PUNCH_ACK, 0, hdr->seq, NULL, 0);
 
-        print("V:", LA_F("%s sent to %s:%d, echo_seq=%u", LA_F12, 103),
+        print("V:", LA_F("%s sent to %s:%d, echo_seq=%u", LA_F13, 109),
               PROTO_ACK, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
     }
 
@@ -219,18 +219,18 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     int remote_cnt_before = s->remote_cand_cnt;
     int cand_idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
     if (cand_idx < 0) {
-        print("E:", LA_F("%s: failed to track cand<%s:%d>, dropping", LA_F59, 150),
+        print("E:", LA_F("%s: failed to track cand<%s:%d>, dropping", LA_F60, 156),
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return;
     }
 
-    print("V:", LA_F("%s: accepted from cand[%d]", LA_F36, 127), PROTO, cand_idx);
+    print("V:", LA_F("%s: accepted from cand[%d]", LA_F37, 133), PROTO, cand_idx);
 
     // 更新最后接收时间（保活/心跳超时检测）
     n->last_recv_time = now;
 
     if (cand_idx >= remote_cnt_before) {
-        print("I:", LA_F("%s: discovered unsynced prflx cand<%s:%d>[%d]", LA_F50, 141),
+        print("I:", LA_F("%s: discovered unsynced prflx cand<%s:%d>[%d]", LA_F51, 147),
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port), cand_idx);
     }
 
@@ -241,12 +241,15 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     // 更新路径信息为可达
     s->remote_cands[cand_idx].reachable = true;
-    s->remote_cands[cand_idx].stats.state = PATH_STATE_ACTIVE;
+    /* 仅在路径尚未被 health_check 管理时激活；ACTIVE/DEGRADED/RECOVERING 由 health_check 维护 */
+    if (s->remote_cands[cand_idx].stats.state != PATH_STATE_ACTIVE &&
+        s->remote_cands[cand_idx].stats.state != PATH_STATE_DEGRADED &&
+        s->remote_cands[cand_idx].stats.state != PATH_STATE_RECOVERING) {
+        path_manager_set_path_state(s, cand_idx, PATH_STATE_ACTIVE);
+    }
     s->remote_cands[cand_idx].stats.is_lan = route_check_same_subnet(&s->route, from);
-    s->remote_cands[cand_idx].stats.cost_score = 0;
-    s->remote_cands[cand_idx].stats.consecutive_timeouts = 0;
 
-    if (s->path_mgr.active_path < 0 || s->remote_cands[cand_idx].stats.is_lan) {
+    if (path_manager_get_active_idx(s) < 0 || s->remote_cands[cand_idx].stats.is_lan) {
         path_manager_set_active(s, cand_idx);
     }
 
@@ -260,7 +263,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     // 非打洞相关状态：忽略
     if (n->state != NAT_PUNCHING && n->state != NAT_RELAY && n->state != NAT_LOST) {
-        print("W:", LA_F("%s: ignored in state(%d)", LA_F66, 157), TASK_NAT, n->state);
+        print("W:", LA_F("%s: ignored in state(%d)", LA_F67, 163), TASK_NAT, n->state);
         return;
     }
 
@@ -269,7 +272,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // peer→me 方向：收到 PUNCH 即证明入方向通了
     if (!n->rx_confirmed) {
         n->rx_confirmed = true;
-        print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F90, 181),
+        print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F91, 187),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 
@@ -277,7 +280,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     if (n->rx_confirmed && n->tx_confirmed) {
         n->state = NAT_CONNECTED;
         n->peer_addr = s->remote_cands[cand_idx].cand.addr;
-        print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F48, 139),
+        print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F49, 145),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 }
@@ -298,7 +301,7 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     nat_ctx_t *n = &s->nat;
     uint64_t now = P_tick_ms();
 
-    printf(LA_F("Recv %s pkt from %s:%d echo_seq=%u", LA_F190, 372),
+    printf(LA_F("Recv %s pkt from %s:%d echo_seq=%u", LA_F179, 275),
           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
 
     // 更新最后接收时间
@@ -306,15 +309,19 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     int cand_idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
     if (cand_idx < 0) {
-        print("E:", LA_F("%s: failed to track cand<%s:%d>, dropping", LA_F59, 150),
+        print("E:", LA_F("%s: failed to track cand<%s:%d>, dropping", LA_F60, 156),
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return;
     }
 
     // 更新路径为可达
     s->remote_cands[cand_idx].reachable = true;
-    s->remote_cands[cand_idx].stats.state = PATH_STATE_ACTIVE;
-    s->remote_cands[cand_idx].stats.consecutive_timeouts = 0;
+    /* 仅在路径尚未被 health_check 管理时激活；ACTIVE/DEGRADED/RECOVERING 由 health_check 维护 */
+    if (s->remote_cands[cand_idx].stats.state != PATH_STATE_ACTIVE &&
+        s->remote_cands[cand_idx].stats.state != PATH_STATE_DEGRADED &&
+        s->remote_cands[cand_idx].stats.state != PATH_STATE_RECOVERING) {
+        path_manager_set_path_state(s, cand_idx, PATH_STATE_ACTIVE);
+    }
 
     // RTT 测量：通过 seq 匹配 pending_packets 计算精确 per-path RTT
     if (hdr->seq > 0)
@@ -336,14 +343,14 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // peer→me 方向：收到 PUNCH_ACK 也证明入方向通（对方能发包给我们）
     if (!n->rx_confirmed) {
         n->rx_confirmed = true;
-        print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F90, 181),
+        print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F91, 187),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 
     // me→peer 方向：收到 PUNCH_ACK 证明我们的 PUNCH 到达了对方
     if (!n->tx_confirmed) {
         n->tx_confirmed = true;
-        print("I:", LA_F("%s: tx confirmed: me->peer path is UP (echoed seq=%u)", LA_F111, 202),
+        print("I:", LA_F("%s: tx confirmed: me->peer path is UP (echoed seq=%u)", LA_F112, 208),
                 TASK_NAT, hdr->seq);
     }
 
@@ -351,7 +358,7 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     if (n->rx_confirmed && n->tx_confirmed) {
         n->state = NAT_CONNECTED;
         n->peer_addr = s->remote_cands[cand_idx].cand.addr;
-        print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F48, 139),
+        print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F49, 145),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 }
@@ -366,15 +373,15 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
     const char* PROTO = "FIN";
 
-    printf(LA_F("Recv %s pkt from %s:%d", LA_F189, 368),
+    printf(LA_F("Recv %s pkt from %s:%d", LA_F178, 274),
           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
-    print("V:", LA_F("%s: accepted", LA_F33, 124), PROTO);
+    print("V:", LA_F("%s: accepted", LA_F34, 130), PROTO);
 
     // 收到对端主动断开通知，标记 NAT 层为已关闭
     if (s->nat.state != NAT_CLOSED) {
         s->nat.state = NAT_CLOSED;
-        print("I:", LA_F("%s: received FIN from peer, marking NAT as CLOSED", LA_F83, 174), TASK_NAT);
+        print("I:", LA_F("%s: received FIN from peer, marking NAT as CLOSED", LA_F84, 180), TASK_NAT);
     }
 }
 
@@ -453,7 +460,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 }
                 if (alive_cnt) {
                     n->last_send_time = now_ms;
-                    print("V:", LA_F("%s: keep alive to %d reachable cand(s)", LA_F73, 164), TASK_NAT, alive_cnt);
+                    print("V:", LA_F("%s: keep alive to %d reachable cand(s)", LA_F74, 170), TASK_NAT, alive_cnt);
                 }
             }
             break;
@@ -529,7 +536,6 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
                     nat_send_punch(s, LA_W("retry", LA_W16, 17), &s->remote_cands[i], now_ms);
-                    ++n->punch_seq;
                 }
                 n->last_send_time = now_ms;
             }

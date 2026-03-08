@@ -120,7 +120,7 @@ TEST(nat_punch_batch_mode_no_candidates) {
     int ret = nat_punch(s, -1);
     
     // 验证返回值和状态
-    ASSERT_EQ(ret, -1);
+    ASSERT_EQ(ret, E_NONE_EXISTS);
     ASSERT_EQ(s->nat.state, NAT_INIT);
     
     destroy_test_session(s);
@@ -193,9 +193,14 @@ TEST(nat_punch_relay_to_punching_restart) {
  * ============================================================================ */
 
 TEST(nat_punch_null_session) {
-    // 验证空指针处理
+#ifdef NDEBUG
+    // 验证空指针处理（仅在 Release 模式下测试，Debug 模式会 assert）
     int ret = nat_punch(NULL, -1);
-    ASSERT_EQ(ret, -1);
+    ASSERT_EQ(ret, E_INVALID);
+#else
+    // Debug 模式下 NULL 会触发 assertion，这是预期行为
+    (void)0;  // 空测试
+#endif
 }
 
 TEST(nat_punch_verbose_flag) {

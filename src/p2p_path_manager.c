@@ -21,9 +21,12 @@
  *
  *   ACTIVE  : RTT<300ms 且 loss<10%，正常传输。
  *   DEGRADED: RTT>300ms 或 loss>10%；恢复到 RTT<250ms 且 loss<5% 回 ACTIVE。
- *   FAILED  : 连续 3 次超时（LAN 5s / 其他 10s）。30 秒后进入恢复探测。
- *   RECOVERING: 10 秒探测窗口，收到响应且 2 秒内有活动则恢复；否则回 FAILED。
- *     — probe_seq 复用存储 recovery_start_time。
+ *             同样监控超时：连续 3 次无响应则转 FAILED。
+ *   FAILED  : 连续 3 次超时（LAN 5s / 其他 10s）。清除 reachable 停止 keep-alive。
+ *             probe_seq 记录进入 FAILED 的时间戳，30 秒后进入恢复探测。
+ *   RECOVERING: 恢复 reachable 触发 keep-alive 探测。probe_seq 记录恢复开始时间。
+ *             10 秒窗口内收到响应且 2 秒内有活动则回 ACTIVE；
+ *             超时则回 FAILED（重新清除 reachable，重置 probe_seq）。
  *
  *
  * 【路径选择策略】
@@ -247,10 +250,12 @@ int path_manager_add_turn_path(p2p_session_t *s, struct sockaddr_in *addr) {
  * ========================================================================== */
 
 /*
- * 辅助：检查路径是否可选（ACTIVE 或 RECOVERING）
+ * 辅助：检查路径是否可选（ACTIVE、DEGRADED 或 RECOVERING）
  */
 static bool path_is_selectable(path_state_t state) {
-    return state == PATH_STATE_ACTIVE || state == PATH_STATE_RECOVERING;
+    return state == PATH_STATE_ACTIVE ||
+           state == PATH_STATE_DEGRADED ||
+           state == PATH_STATE_RECOVERING;
 }
 
 /*
@@ -737,6 +742,11 @@ int path_manager_set_path_state(p2p_session_t *s, int path_idx, path_state_t sta
         stats->last_recv_ms = P_tick_ms();
     }
     
+    /* 外部设置 FAILED 时记录时间戳，供 health_check 30s 后触发 RECOVERING */
+    if (state == PATH_STATE_FAILED && stats->state != PATH_STATE_FAILED) {
+        stats->probe_seq = P_tick_ms();
+    }
+    
     stats->state = state;
     return 0;
 }
@@ -953,6 +963,11 @@ int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms) 
             
             path_stats_t *p = path_manager_get_stats(s, path_idx);
             if (!p) {
+                /* stats 失效但仍需移除跟踪记录，防止 pending 缓冲区溢出 */
+                for (int j = i; j < pm->pending_count - 1; j++) {
+                    pm->pending_packets[j] = pm->pending_packets[j + 1];
+                }
+                pm->pending_count--;
                 return -1;
             }
             
@@ -1013,6 +1028,11 @@ static int path_manager_on_packet_loss(p2p_session_t *s, uint32_t seq) {
             
             path_stats_t *p = path_manager_get_stats(s, path_idx);
             if (!p) {
+                /* stats 失效但仍需移除跟踪记录，防止 pending 缓冲区溢出 */
+                for (int j = i; j < pm->pending_count - 1; j++) {
+                    pm->pending_packets[j] = pm->pending_packets[j + 1];
+                }
+                pm->pending_count--;
                 return -1;
             }
             
@@ -1170,21 +1190,25 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
                                    int path_idx, uint64_t now_ms) {
     path_manager_t *pm = &s->path_mgr;
 
-    /* ---- 1. ACTIVE 超时检测 ---- */
-    if (p->state == PATH_STATE_ACTIVE) {
+    /* ---- 1. ACTIVE / DEGRADED 超时检测 ---- */
+    if (p->state == PATH_STATE_ACTIVE || p->state == PATH_STATE_DEGRADED) {
         uint64_t timeout = p->is_lan ? 5000 : 10000;
 
         if (p->last_recv_ms > 0 && now_ms - p->last_recv_ms > timeout) {
-            p->consecutive_timeouts = (int)((now_ms - p->last_recv_ms) / timeout);
-            if (p->consecutive_timeouts >= 3) {
+            int silent_timeouts = (int)((now_ms - p->last_recv_ms) / timeout);
+            if (silent_timeouts >= 3) {
                 p->state = PATH_STATE_FAILED;
+                /* 记录进入 FAILED 的时间（用于 30s 后触发 RECOVERING） */
+                p->probe_seq = now_ms;
+                /* 清除 reachable，停止 keep-alive 以使 probe_seq 时间戳生效 */
+                if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
+                    s->remote_cands[path_idx].reachable = false;
+                }
                 /* 触发故障转移 */
                 if (pm->active_path == path_idx) {
                     path_manager_failover(s, path_idx);
                 }
             }
-        } else {
-            p->consecutive_timeouts = 0;
         }
     }
 
@@ -1199,11 +1223,15 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
 
     /* ---- 3. FAILED → RECOVERING：30 秒后探测恢复 ---- */
     if (p->state == PATH_STATE_FAILED) {
-        if (p->last_send_ms > 0 && now_ms - p->last_send_ms > 30000) {
+        if (p->probe_seq > 0 && now_ms - p->probe_seq > 30000) {
             p->state = PATH_STATE_RECOVERING;
             p->consecutive_timeouts = 0;
             /* 复用 probe_seq 存储恢复开始时间 */
             p->probe_seq = now_ms;
+            /* 恢复 reachable 让 keep-alive 发送探测包 */
+            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
+                s->remote_cands[path_idx].reachable = true;
+            }
             /* 初始化 last_recv_ms 避免使用旧值 */
             p->last_recv_ms = now_ms;
         }
@@ -1215,8 +1243,13 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
         uint64_t elapsed = now_ms - recovering_start;
 
         if (elapsed > 10000) {
-            /* 10 秒未恢复 → 回到 FAILED */
+            /* 10 秒未恢复 → 回到 FAILED，重新等待 30 秒 */
             p->state = PATH_STATE_FAILED;
+            p->probe_seq = now_ms;
+            /* 再次清除 reachable 停止探测 */
+            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
+                s->remote_cands[path_idx].reachable = false;
+            }
         } else if (p->last_recv_ms > recovering_start &&
                    now_ms - p->last_recv_ms < 2000) {
             /* 收到数据且最近 2 秒内有活动 → 恢复成功 */
@@ -1267,6 +1300,7 @@ int path_manager_failover(p2p_session_t *s, int failed_path) {
     path_stats_t *failed_stats = path_manager_get_stats(s, failed_path);
     if (failed_stats) {
         failed_stats->state = PATH_STATE_FAILED;
+        failed_stats->probe_seq = P_tick_ms();
     }
     
     /* 选择新路径 */
@@ -1278,8 +1312,13 @@ int path_manager_failover(p2p_session_t *s, int failed_path) {
         pm->total_switches++;
         pm->total_failovers++;
         
+        /* 清除挂起的防抖状态，并更新切换时间（防止 failover 后立即二次切换） */
+        pm->pending_switch_path = -2;
+        pm->debounce_timer_ms = 0;
+        
         /* 记录故障转移到切换历史（与 switch_path 共用历史缓冲区） */
         uint64_t now_ms = P_tick_ms();
+        pm->last_switch_time = now_ms;
         int idx = pm->switch_history_idx;
         path_switch_record_t *rec = &pm->switch_history[idx];
         rec->from_path = old_path;
