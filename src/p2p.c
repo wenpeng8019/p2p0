@@ -1090,9 +1090,14 @@ p2p_update(p2p_handle_t hdl) {
                 path_stats_t *old_stats = (current_path >= -1) ? path_manager_get_stats(s, current_path) : NULL;
                 
                 // 判断是否值得切换（性能提升显著）
+                // 根据当前活跃路径类型查抽切换阈值
+                p2p_path_t cur_type = (current_path >= -1) ? p2p_path(hdl) : P2P_PATH_PUNCH;
+                if (cur_type == P2P_PATH_NONE) cur_type = P2P_PATH_PUNCH;
+                const path_threshold_config_t *thr = &s->path_mgr.thresholds[cur_type];
+
                 if (!old_stats ||                                                                                   // 当前无路径，立即切换
-                    (new_stats && new_stats->rtt_ms + s->path_mgr.switch_rtt_threshold_ms < old_stats->rtt_ms) ||   // RTT 显著改善
-                    (old_stats->loss_rate > s->path_mgr.switch_loss_threshold) ||                                   // 当前路径丢包严重
+                    (new_stats && new_stats->rtt_ms + thr->rtt_threshold_ms < old_stats->rtt_ms) ||                 // RTT 显著改善
+                    (old_stats->loss_rate > thr->loss_threshold) ||                                                  // 当前路径丢包严重
                     (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST && new_stats && new_stats->cost_score < old_stats->cost_score) // 直连优先模式：更低成本
                     ) {
 

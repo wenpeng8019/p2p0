@@ -180,12 +180,8 @@ typedef struct {
         path_stats_t        stats;                  // 统计信息
     } signaling;
     
-    /* 自动切换参数 */
-    uint64_t            path_switch_cooldown_ms;    // 切换冷却时间（避免频繁切换）
+    /* 切换状态 */
     uint64_t            last_switch_time;           // 最后切换时间
-    uint32_t            switch_rtt_threshold_ms;    // RTT 改善阈值（触发切换）
-    float               switch_loss_threshold;      // 丢包率阈值（触发切换）
-    uint32_t            stability_window_ms;        // 稳定窗口（防抖动，默认2000ms）
     
     /* 健康检查参数 */
     uint32_t            probe_interval_ms;          // 探测间隔
@@ -417,7 +413,7 @@ int path_manager_find_by_addr(p2p_session_t *s, const struct sockaddr_in *addr);
 bool path_manager_has_active_path(p2p_session_t *s);
 
 /*
- * 设置路径状态
+ * 设置指定路径的状态
  *
  * @param s         会话指针
  * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
@@ -427,7 +423,7 @@ bool path_manager_has_active_path(p2p_session_t *s);
 int path_manager_set_path_state(p2p_session_t *s, int path_idx, path_state_t state);
 
 /*
- * 设置路径类型的切换阈值
+ * 设置不同类型路径的切换阈值
  *
  * @param s             会话指针
  * @param path_type     路径类型（P2P_PATH_LAN/PUNCH/RELAY/SIGNALING）

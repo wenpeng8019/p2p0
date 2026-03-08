@@ -48,7 +48,7 @@
  *
  *   数据流：on_packet_send 记录 seq→时间到 pending_packets[]（FIFO，最多32）→
  *   on_packet_ack 计算 RTT 并写入 rtt_samples[10] 滑动窗口 → update_metrics
- *   更新 EWMA。on_packet_loss 递增丢包计数。
+ *   更新 EWMA。path_manager_tick 扫描超时包并递增丢包计数。
  *
  *   要点：计数器(sent/lost/timeouts) 只在 send/loss/recv 中修改，
  *         update_metrics 只做指标计算，避免双重计数。
@@ -84,11 +84,9 @@
 
 #include "p2p_internal.h"
 
-/* 前向声明（health_check_one_path 中调用 failover） */
-int path_manager_failover(p2p_session_t *s, int failed_path);
-static int path_manager_on_packet_loss(p2p_session_t *s, uint32_t seq);
-static bool path_manager_should_debounce_switch(p2p_session_t *s, int target_path, uint64_t now_ms);
-static bool path_manager_should_use_turn(p2p_session_t *s);
+/* 前向声明（select_path_* 在 should_use_turn 之前，
+ * on_packet_send/ack/loss 在 update_metrics/update_quality 之前） */
+static bool should_use_turn(p2p_session_t *s);
 static int update_metrics(p2p_session_t *s, int path_idx, uint32_t rtt_ms, bool success);
 static int update_quality(p2p_session_t *s, int path_idx);
 
@@ -113,11 +111,9 @@ static p2p_path_t path_idx_to_type(p2p_session_t *s, int path_idx) {
 }
 
 /* 默认参数 */
-#define DEFAULT_SWITCH_COOLDOWN_MS      5000    /* 5秒切换冷却时间 */
-#define DEFAULT_SWITCH_RTT_THRESHOLD    50      /* RTT 改善50ms触发切换 */
-#define DEFAULT_SWITCH_LOSS_THRESHOLD   0.05f   /* 丢包率5%触发切换 */
 #define DEFAULT_PROBE_INTERVAL_MS       1000    /* 1秒探测间隔 */
 #define DEFAULT_HEALTH_CHECK_INTERVAL   500     /* 500ms 健康检查间隔 */
+#define PROBE_LOSS_TIMEOUT_MS           3000    /* 3秒未ACK视为丢包 */
 
 /* RTT 平滑参数（TCP 算法） */
 #define ALPHA   0.125f  /* SRTT 权重：1/8 */
@@ -148,10 +144,6 @@ int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy) {
     pm->signaling.stats.state = PATH_STATE_INIT;
     
     /* 设置默认参数 */
-    pm->path_switch_cooldown_ms = DEFAULT_SWITCH_COOLDOWN_MS;
-    pm->switch_rtt_threshold_ms = DEFAULT_SWITCH_RTT_THRESHOLD;
-    pm->switch_loss_threshold = DEFAULT_SWITCH_LOSS_THRESHOLD;
-    pm->stability_window_ms = 2000;  // 默认稳定窗口 2 秒
     pm->probe_interval_ms = DEFAULT_PROBE_INTERVAL_MS;
     pm->health_check_interval_ms = DEFAULT_HEALTH_CHECK_INTERVAL;
     
@@ -346,7 +338,7 @@ static int select_path_performance_first(p2p_session_t *s) {
 
         /* TURN last_resort 检查 */
         if (path_is_turn(st) && pm->turn_config.use_as_last_resort &&
-            !path_manager_should_use_turn(s)) continue;
+            !should_use_turn(s)) continue;
 
         float rtt_score = 1.0f - fminf((float)st->rtt_ms / 500.0f, 1.0f);
         float loss_score = 1.0f - st->loss_rate;
@@ -461,7 +453,7 @@ static int select_path_hybrid(p2p_session_t *s) {
         return best_relay;
 
     /* TURN 兜底 */
-    if (best_turn >= 0 && path_manager_should_use_turn(s))
+    if (best_turn >= 0 && should_use_turn(s))
         return best_turn;
 
     return -2; /* 无可用路径 */
@@ -471,7 +463,7 @@ static int select_path_hybrid(p2p_session_t *s) {
  * 判断是否应该使用TURN
  *   遍历候选列表，检查是否所有非TURN路径都失效
  */
-static bool path_manager_should_use_turn(p2p_session_t *s) {
+static bool should_use_turn(p2p_session_t *s) {
     path_manager_t *pm = &s->path_mgr;
     if (!pm->turn_config.enabled) return false;
     
@@ -481,10 +473,7 @@ static bool path_manager_should_use_turn(p2p_session_t *s) {
     /* 检查是否存在非TURN的可用路径 */
     
     /* 信令转发(SIGNALING)可用？ */
-    if (pm->signaling.active && 
-        (pm->signaling.stats.state == PATH_STATE_ACTIVE ||
-         pm->signaling.stats.state == PATH_STATE_DEGRADED ||
-         pm->signaling.stats.state == PATH_STATE_RECOVERING)) {
+    if (pm->signaling.active && path_is_selectable(pm->signaling.stats.state)) {
         return false; /* 有非TURN备选，不需要TURN */
     }
     
@@ -492,9 +481,7 @@ static bool path_manager_should_use_turn(p2p_session_t *s) {
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         path_stats_t *st = &s->remote_cands[i].stats;
         if (path_is_turn(st)) continue; /* 跳过TURN自身 */
-        if (st->state == PATH_STATE_ACTIVE ||
-            st->state == PATH_STATE_DEGRADED ||
-            st->state == PATH_STATE_RECOVERING) {
+        if (path_is_selectable(st->state)) {
             return false; /* 有非TURN备选 */
         }
     }
@@ -521,14 +508,17 @@ int path_manager_select_best_path(p2p_session_t *s) {
  * 检查是否应该防抖（避免频繁切换）
  *   三级检查：冷却期 → 频率检测 → 稳定窗口
  */
-static bool path_manager_should_debounce_switch(p2p_session_t *s, 
-                                          int target_path,
-                                          uint64_t now_ms) {
+static bool should_debounce_switch(p2p_session_t *s,
+                                   int target_path,
+                                   uint64_t now_ms) {
 
     path_manager_t *pm = &s->path_mgr;
     
-    /* 1. 冷却期检查 */
-    if (now_ms - pm->last_switch_time < pm->path_switch_cooldown_ms) {
+    /* 1. 冷却期检查：根据目标路径类型取对应的冷却时间 */
+    p2p_path_t target_type = path_idx_to_type(s, target_path);
+    uint64_t cooldown = pm->thresholds[target_type].cooldown_ms;
+    if (cooldown == 0) cooldown = 5000;  /* 默认 5s */
+    if (now_ms - pm->last_switch_time < cooldown) {
         return true;
     }
     
@@ -539,7 +529,6 @@ static bool path_manager_should_debounce_switch(p2p_session_t *s,
     }
     
     /* 3. 稳定窗口检查：根据目标路径类型取对应的稳定窗口 */
-    p2p_path_t target_type = path_idx_to_type(s, target_path);
     uint32_t stability_ms = pm->thresholds[target_type].stability_window_ms > 0
                           ? pm->thresholds[target_type].stability_window_ms
                           : 2000;
@@ -577,7 +566,7 @@ int path_manager_switch_path(p2p_session_t *s,
     if (target_path == pm->active_path) return 0; /* 已是目标路径 */
     
     /* 防抖检查 */
-    if (path_manager_should_debounce_switch(s, target_path, now_ms)) {
+    if (should_debounce_switch(s, target_path, now_ms)) {
         return 1; /* 防抖中，暂不切换 */
     }
     
@@ -692,7 +681,7 @@ int path_manager_find_by_addr(p2p_session_t *s, const struct sockaddr_in *addr) 
 }
 
 /*
- * 检查是否有可用路径（遍历所有路径检查实际状态）
+ * 检查是否有可用路径
  */
 bool path_manager_has_active_path(p2p_session_t *s) {
 
@@ -739,21 +728,13 @@ int path_manager_set_threshold(p2p_session_t *s, int path_type,
                                 uint64_t cooldown_ms, uint32_t stability_ms) {
     path_manager_t *pm = &s->path_mgr;
 
-    /* 有效类型范围：P2P_PATH_NONE(0) ~ P2P_PATH_SIGNALING(4) */
+    // 有效类型范围：P2P_PATH_NONE(0) ~ P2P_PATH_SIGNALING(4)
     if (path_type < P2P_PATH_NONE || path_type > P2P_PATH_SIGNALING) return -1;
 
     pm->thresholds[path_type].rtt_threshold_ms  = rtt_ms;
     pm->thresholds[path_type].loss_threshold    = loss_rate;
     pm->thresholds[path_type].cooldown_ms       = cooldown_ms;
     pm->thresholds[path_type].stability_window_ms = stability_ms;
-
-    /* 同步更新全局字段（供旧代码直接访问 pm->switch_rtt_threshold_ms 等） */
-    if (path_type == P2P_PATH_PUNCH) {
-        pm->switch_rtt_threshold_ms = rtt_ms;
-        pm->switch_loss_threshold   = loss_rate;
-        pm->path_switch_cooldown_ms = cooldown_ms;
-        pm->stability_window_ms     = stability_ms;
-    }
 
     return 0;
 }
@@ -762,7 +743,7 @@ path_quality_t path_manager_get_quality(p2p_session_t *s, int path_idx) {
     path_stats_t *stats = path_manager_get_stats(s, path_idx);
     if (!stats) return PATH_QUALITY_BAD;
     
-    /* 确保质量是最新的 */
+    // 计算最新的路径质量
     update_quality(s, path_idx);
     
     return stats->quality;
@@ -772,7 +753,7 @@ float path_manager_get_quality_score(p2p_session_t *s, int path_idx) {
     path_stats_t *stats = path_manager_get_stats(s, path_idx);
     if (!stats) return -1.0f;
     
-    /* 确保质量是最新的 */
+    // 计算最新的路径质量
     update_quality(s, path_idx);
     
     return stats->quality_score;
@@ -782,7 +763,7 @@ float path_manager_get_quality_trend(p2p_session_t *s, int path_idx) {
     path_stats_t *stats = path_manager_get_stats(s, path_idx);
     if (!stats) return NAN;
     
-    /* 确保质量是最新的 */
+    // 计算最新的路径质量
     update_quality(s, path_idx);
     
     return stats->quality_trend;
@@ -794,12 +775,13 @@ float path_manager_get_quality_trend(p2p_session_t *s, int path_idx) {
 int path_manager_get_switch_history(p2p_session_t *s, 
                                      path_switch_record_t *records,
                                      int max_count) {
+
     if (!records || max_count <= 0) return 0;
     path_manager_t *pm = &s->path_mgr;
     
     int count = pm->switch_history_count < max_count ? pm->switch_history_count : max_count;
     
-    /* 按时间倒序（最新在前）从环形缓冲区拷贝 */
+    // 按时间倒序（最新在前）从环形缓冲区拷贝
     for (int i = 0; i < count; i++) {
         int idx = (pm->switch_history_idx - 1 - i + MAX_SWITCH_HISTORY) % MAX_SWITCH_HISTORY;
         records[i] = pm->switch_history[idx];
@@ -812,6 +794,7 @@ int path_manager_get_switch_history(p2p_session_t *s,
  * 分析路径切换频率（指定时间窗口内的切换次数）
  */
 int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms) {
+    
     if (window_ms == 0) return 0;
     path_manager_t *pm = &s->path_mgr;
     if (pm->switch_history_count == 0) return 0;
@@ -825,7 +808,7 @@ int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms) {
         if (pm->switch_history[idx].timestamp_ms >= cutoff_time) {
             count++;
         } else {
-            break; /* 环形缓冲区按时间排序，可以提前退出 */
+            break; // 环形缓冲区按时间排序，可以提前退出
         }
     }
     
@@ -994,44 +977,16 @@ int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms,
     return 0;
 }
 
-static int path_manager_on_packet_loss(p2p_session_t *s, uint32_t seq) {
+int path_manager_update_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms, bool success) {
 
-    path_manager_t *pm = &s->path_mgr;
+    /* 立即更新原始 metrics（无节流） */
+    int ret = update_metrics(s, path_idx, rtt_ms, success);
+    if (ret < 0) return ret;
     
-    /* 查找对应的发送记录 */
-    for (int i = 0; i < pm->pending_count; i++) {
-        if (pm->pending_packets[i].seq == seq) {
-            packet_track_t *track = &pm->pending_packets[i];
-            int path_idx = track->path_idx;
-            
-            path_stats_t *p = path_manager_get_stats(s, path_idx);
-            if (!p) {
-                /* stats 失效但仍需移除跟踪记录，防止 pending 缓冲区溢出 */
-                for (int j = i; j < pm->pending_count - 1; j++) {
-                    pm->pending_packets[j] = pm->pending_packets[j + 1];
-                }
-                pm->pending_count--;
-                return -1;
-            }
-            
-            /* 更新丢包统计 */
-            p->total_packets_lost++;
-            p->consecutive_timeouts++;
-            
-            /* 使用内部函数更新丢包率 */
-            update_metrics(s, path_idx, 0, false);
-            
-            /* 移除跟踪记录 */
-            for (int j = i; j < pm->pending_count - 1; j++) {
-                pm->pending_packets[j] = pm->pending_packets[j + 1];
-            }
-            pm->pending_count--;
-            
-            return 0;
-        }
-    }
+    /* 尝试更新质量评估（受节流保护） */
+    update_quality(s, path_idx);
     
-    return -1; /* 未找到对应发送记录 */
+    return 0;
 }
 
 /* 内部函数：更新路径性能 metrics（RTT/丢包率 EWMA） */
@@ -1071,18 +1026,6 @@ static int update_metrics(p2p_session_t *s, int path_idx, uint32_t rtt_ms, bool 
     if (p->total_packets_sent > 0) {
         p->loss_rate = (float)p->total_packets_lost / (float)p->total_packets_sent;
     }
-    
-    return 0;
-}
-
-int path_manager_update_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms, bool success) {
-
-    /* 立即更新原始 metrics（无节流） */
-    int ret = update_metrics(s, path_idx, rtt_ms, success);
-    if (ret < 0) return ret;
-    
-    /* 尝试更新质量评估（受节流保护） */
-    update_quality(s, path_idx);
     
     return 0;
 }
@@ -1173,115 +1116,7 @@ static int update_quality(p2p_session_t *s, int path_idx) {
     return 0;
 }
 
-/*
- * 对单条路径执行健康检查（共享逻辑，RELAY和候选都用）
- *   is_lan: 该路径是否为 LAN（超时更短）
- *   path_chn: 路径索引（-1=SIGNALING, >=0=候选），用于故障转移
- */
-static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
-                                   int path_idx, uint64_t now_ms) {
-    path_manager_t *pm = &s->path_mgr;
-
-    /* ---- 1. ACTIVE / DEGRADED 超时检测 ---- */
-    if (p->state == PATH_STATE_ACTIVE || p->state == PATH_STATE_DEGRADED) {
-        uint64_t timeout = p->is_lan ? 5000 : 10000;
-
-        if (p->last_recv_ms > 0 && now_ms - p->last_recv_ms > timeout) {
-            int silent_timeouts = (int)((now_ms - p->last_recv_ms) / timeout);
-            if (silent_timeouts >= 3) {
-                p->state = PATH_STATE_FAILED;
-                /* 记录进入 FAILED 的时间（用于 30s 后触发 RECOVERING） */
-                p->probe_seq = now_ms;
-                /* 清除 reachable，停止 keep-alive 以使 probe_seq 时间戳生效 */
-                if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
-                    s->remote_cands[path_idx].reachable = false;
-                }
-                /* 触发故障转移 */
-                if (pm->active_path == path_idx) {
-                    path_manager_failover(s, path_idx);
-                }
-            }
-        }
-    }
-
-    /* ---- 2. 性能退化 / 恢复 ---- */
-    if (p->state == PATH_STATE_ACTIVE) {
-        if (p->rtt_ms > 300 || p->loss_rate > 0.1f)
-            p->state = PATH_STATE_DEGRADED;
-    } else if (p->state == PATH_STATE_DEGRADED) {
-        if (p->rtt_ms < 250 && p->loss_rate < 0.05f)
-            p->state = PATH_STATE_ACTIVE;
-    }
-
-    /* ---- 3. FAILED → RECOVERING：30 秒后探测恢复 ---- */
-    if (p->state == PATH_STATE_FAILED) {
-        if (p->probe_seq > 0 && now_ms - p->probe_seq > 30000) {
-            p->state = PATH_STATE_RECOVERING;
-            p->consecutive_timeouts = 0;
-            /* 复用 probe_seq 存储恢复开始时间 */
-            p->probe_seq = now_ms;
-            /* 恢复 reachable 让 keep-alive 发送探测包 */
-            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
-                s->remote_cands[path_idx].reachable = true;
-            }
-            /* 初始化 last_recv_ms 避免使用旧值 */
-            p->last_recv_ms = now_ms;
-        }
-    }
-
-    /* ---- 4. RECOVERING 超时或恢复成功 ---- */
-    if (p->state == PATH_STATE_RECOVERING) {
-        uint64_t recovering_start = p->probe_seq;
-        uint64_t elapsed = now_ms - recovering_start;
-
-        if (elapsed > 10000) {
-            /* 10 秒未恢复 → 回到 FAILED，重新等待 30 秒 */
-            p->state = PATH_STATE_FAILED;
-            p->probe_seq = now_ms;
-            /* 再次清除 reachable 停止探测 */
-            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
-                s->remote_cands[path_idx].reachable = false;
-            }
-        } else if (p->last_recv_ms > recovering_start &&
-                   now_ms - p->last_recv_ms < 2000) {
-            /* 收到数据且最近 2 秒内有活动 → 恢复成功 */
-            p->state = PATH_STATE_ACTIVE;
-        }
-    }
-}
-
-void path_manager_health_check(p2p_session_t *s, uint64_t now_ms) {
-    path_manager_t *pm = &s->path_mgr;
-    
-    /* 节流：避免过于频繁的健康检查 */
-    if (now_ms - pm->last_health_check_ms < pm->health_check_interval_ms) {
-        return;
-    }
-    pm->last_health_check_ms = now_ms;
-
-    /* 扫描超时未 ACK 的探测包，视为丢包
-     * 阈值：3 倍 PUNCH_INTERVAL（覆盖 2 次重传才判定丢失），上限 3000ms。
-     * 从后向前遍历，on_packet_loss 移除 i 处记录后不影响 0..i-1。 */
-#define PROBE_LOSS_TIMEOUT_MS 3000
-    for (int i = pm->pending_count - 1; i >= 0; i--) {
-        if (now_ms - pm->pending_packets[i].sent_time_ms > PROBE_LOSS_TIMEOUT_MS) {
-            path_manager_on_packet_loss(s, pm->pending_packets[i].seq);
-        }
-    }
-
-    /* 检查信令转发(SIGNALING)路径 */
-    if (pm->signaling.active) {
-        health_check_one_path(s, &pm->signaling.stats, PATH_IDX_SIGNALING, now_ms);
-    }
-    
-    /* 检查所有候选路径 */
-    for (int i = 0; i < s->remote_cand_cnt; i++) {
-        path_stats_t *stats = &s->remote_cands[i].stats;
-        health_check_one_path(s, stats, i, now_ms);
-    }
-}
-
-int path_manager_failover(p2p_session_t *s, int failed_path) {
+static int do_failover(p2p_session_t *s, int failed_path) {
     path_manager_t *pm = &s->path_mgr;
     
     /* 标记失效路径 */
@@ -1344,5 +1179,121 @@ int path_manager_failover(p2p_session_t *s, int failed_path) {
     }
     
     return -1; /* 无可用备用路径 */
+}
+
+/*
+ * 对单条路径执行健康检查（共享逻辑，SIGNALING 和候选都用）
+ */
+static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
+                                   int path_idx, uint64_t now_ms) {
+    path_manager_t *pm = &s->path_mgr;
+
+    /* ---- 1. ACTIVE / DEGRADED 超时检测 ---- */
+    if (p->state == PATH_STATE_ACTIVE || p->state == PATH_STATE_DEGRADED) {
+        uint64_t timeout = p->is_lan ? 5000 : 10000;
+
+        if (p->last_recv_ms > 0 && now_ms - p->last_recv_ms > timeout) {
+            int silent_timeouts = (int)((now_ms - p->last_recv_ms) / timeout);
+            if (silent_timeouts >= 3) {
+                p->state = PATH_STATE_FAILED;
+                /* 记录进入 FAILED 的时间（用于 30s 后触发 RECOVERING） */
+                p->probe_seq = now_ms;
+                /* 清除 reachable，停止 keep-alive 以使 probe_seq 时间戳生效 */
+                if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
+                    s->remote_cands[path_idx].reachable = false;
+                }
+                /* 触发故障转移 */
+                if (pm->active_path == path_idx) {
+                    do_failover(s, path_idx);
+                }
+            }
+        }
+    }
+
+    /* ---- 2. 性能退化 / 恢复 ---- */
+    if (p->state == PATH_STATE_ACTIVE) {
+        if (p->rtt_ms > 300 || p->loss_rate > 0.1f)
+            p->state = PATH_STATE_DEGRADED;
+    } else if (p->state == PATH_STATE_DEGRADED) {
+        if (p->rtt_ms < 250 && p->loss_rate < 0.05f)
+            p->state = PATH_STATE_ACTIVE;
+    }
+
+    /* ---- 3. FAILED → RECOVERING：30 秒后探测恢复 ---- */
+    if (p->state == PATH_STATE_FAILED) {
+        if (p->probe_seq > 0 && now_ms - p->probe_seq > 30000) {
+            p->state = PATH_STATE_RECOVERING;
+            p->consecutive_timeouts = 0;
+            /* 复用 probe_seq 存储恢复开始时间 */
+            p->probe_seq = now_ms;
+            /* 恢复 reachable 让 keep-alive 发送探测包 */
+            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
+                s->remote_cands[path_idx].reachable = true;
+            }
+            /* 初始化 last_recv_ms 避免使用旧值 */
+            p->last_recv_ms = now_ms;
+        }
+    }
+
+    /* ---- 4. RECOVERING 超时或恢复成功 ---- */
+    if (p->state == PATH_STATE_RECOVERING) {
+        uint64_t recovering_start = p->probe_seq;
+        uint64_t elapsed = now_ms - recovering_start;
+
+        if (elapsed > 10000) {
+            /* 10 秒未恢复 → 回到 FAILED，重新等待 30 秒 */
+            p->state = PATH_STATE_FAILED;
+            p->probe_seq = now_ms;
+            /* 再次清除 reachable 停止探测 */
+            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
+                s->remote_cands[path_idx].reachable = false;
+            }
+        } else if (p->last_recv_ms > recovering_start &&
+                   now_ms - p->last_recv_ms < 2000) {
+            /* 收到数据且最近 2 秒内有活动 → 恢复成功 */
+            p->state = PATH_STATE_ACTIVE;
+        }
+    }
+}
+
+void path_manager_tick(p2p_session_t *s, uint64_t now_ms) {
+    path_manager_t *pm = &s->path_mgr;
+    
+    /* 节流：避免过于频繁的健康检查 */
+    if (now_ms - pm->last_health_check_ms < pm->health_check_interval_ms) {
+        return;
+    }
+    pm->last_health_check_ms = now_ms;
+
+    /* 扫描超时未 ACK 的探测包，视为丢包
+     * 阈值：3 倍 PUNCH_INTERVAL（覆盖 2 次重传才判定丢失），上限 3000ms。
+     * 从后向前遍历，移除 i 处记录后不影响 0..i-1。 */
+    for (int i = pm->pending_count - 1; i >= 0; i--) {
+        if (now_ms - pm->pending_packets[i].sent_time_ms > PROBE_LOSS_TIMEOUT_MS) {
+            packet_track_t *track = &pm->pending_packets[i];
+            path_stats_t *p = path_manager_get_stats(s, track->path_idx);
+            if (p) {
+                p->total_packets_lost++;
+                p->consecutive_timeouts++;
+                update_metrics(s, track->path_idx, 0, false);
+            }
+            /* 移除跟踪记录 */
+            for (int j = i; j < pm->pending_count - 1; j++) {
+                pm->pending_packets[j] = pm->pending_packets[j + 1];
+            }
+            pm->pending_count--;
+        }
+    }
+
+    /* 检查信令转发(SIGNALING)路径 */
+    if (pm->signaling.active) {
+        health_check_one_path(s, &pm->signaling.stats, PATH_IDX_SIGNALING, now_ms);
+    }
+    
+    /* 检查所有候选路径 */
+    for (int i = 0; i < s->remote_cand_cnt; i++) {
+        path_stats_t *stats = &s->remote_cands[i].stats;
+        health_check_one_path(s, stats, i, now_ms);
+    }
 }
 
