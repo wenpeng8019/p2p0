@@ -213,17 +213,28 @@ typedef struct p2p_session {
  */
 static inline const char* p2p_nat_type_str(int type) {
     switch (type) {
-        case P2P_NAT_DETECTING:        return LA_W("Detecting...", LA_W2, 3);
-        case P2P_NAT_TIMEOUT:          return LA_W("Timeout (no response)", LA_W19, 20);
-        case P2P_NAT_UNKNOWN:          return LA_W("Unknown", LA_W21, 22);
-        case P2P_NAT_OPEN:             return LA_W("Open Internet (No NAT)", LA_W8, 9);
-        case P2P_NAT_FULL_CONE:        return LA_W("Full Cone NAT", LA_W3, 4);
-        case P2P_NAT_RESTRICTED:       return LA_W("Restricted Cone NAT", LA_W15, 16);
-        case P2P_NAT_PORT_RESTRICTED:  return LA_W("Port Restricted Cone NAT", LA_W9, 10);
-        case P2P_NAT_SYMMETRIC:        return LA_W("Symmetric NAT (port-random)", LA_W18, 19);
-        case P2P_NAT_BLOCKED:          return LA_W("UDP Blocked (STUN unreachable)", LA_W20, 21);
-        case P2P_NAT_UNSUPPORTED:      return LA_W("Unsupported (no STUN/probe configured)", LA_W22, 23);
-        default:                       return LA_W("Unknown", LA_W21, 22);
+        case P2P_NAT_DETECTING:         return LA_W("Detecting...", LA_W2, 3);
+        case P2P_NAT_TIMEOUT:           return LA_W("Timeout (no response)", LA_W19, 20);
+        case P2P_NAT_UNKNOWN:           return LA_W("Unknown", LA_W21, 22);
+        case P2P_NAT_OPEN:              return LA_W("Open Internet (No NAT)", LA_W8, 9);
+        case P2P_NAT_FULL_CONE:         return LA_W("Full Cone NAT", LA_W3, 4);
+        case P2P_NAT_RESTRICTED:        return LA_W("Restricted Cone NAT", LA_W15, 16);
+        case P2P_NAT_PORT_RESTRICTED:   return LA_W("Port Restricted Cone NAT", LA_W9, 10);
+        case P2P_NAT_SYMMETRIC:         return LA_W("Symmetric NAT (port-random)", LA_W18, 19);
+        case P2P_NAT_BLOCKED:           return LA_W("UDP Blocked (STUN unreachable)", LA_W20, 21);
+        case P2P_NAT_UNSUPPORTED:       return LA_W("Unsupported (no STUN/probe configured)", LA_W22, 23);
+        default:                        return LA_W("Unknown", LA_W21, 22);
+    }
+}
+
+static inline const char* p2p_path_type_str(int type) {
+    switch (type) {
+        case P2P_PATH_NONE:             return "NONE";
+        case P2P_PATH_LAN:              return "LAN";
+        case P2P_PATH_PUNCH:            return "PUNCH";
+        case P2P_PATH_RELAY:            return "RELAY";
+        case P2P_PATH_SIGNALING:        return "SIGNALING";
+        default:                        return "UNKNOWN";
     }
 }
 

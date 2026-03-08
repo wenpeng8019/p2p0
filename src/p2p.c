@@ -882,9 +882,9 @@ p2p_update(p2p_handle_t hdl) {
         }
         
         if (relay_available) {
-            /* 方案 A：设置 RELAY 路径 */
-            path_manager_set_relay(s, &relay_addr);
-            print("I:", LA_F("Added RELAY path to path manager", LA_F116, 207));
+            /* 设置 RELAY 路径 */
+            path_manager_enable_relay(s, &relay_addr);
+            print("I: %s", LA_S("Added RELAY path to path manager", LA_F116, 207));
         }
         
         // 选择最佳可用路径
@@ -896,7 +896,7 @@ p2p_update(p2p_handle_t hdl) {
                 s->active_addr = *addr;
                 s->path_mgr.active_path = best_path;
                 s->state = P2P_STATE_RELAY;
-                print("I:", LA_F("Using path: RELAY", LA_F192, 283));
+                print("I: %s", LA_S("Using path: RELAY", LA_S38, 64));
             }
         } else {
             // 无可用路径：降级到传统方式
@@ -936,7 +936,7 @@ p2p_update(p2p_handle_t hdl) {
                 s->active_addr = *addr;
                 s->path_mgr.active_path = best_path;
                 s->state = P2P_STATE_RELAY;
-                print("I:", LA_F("Switched to backup path: RELAY", LA_F180, 271));
+                print("I: %s", LA_S("Switched to backup path: RELAY", LA_S180, 271));
             }
         } else {
             // 无备用路径：NAT 层会继续尝试恢复

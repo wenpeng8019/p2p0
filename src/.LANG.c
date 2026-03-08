@@ -113,8 +113,8 @@ const char* lang_en[LA_NUM] = {
     [LA_F14] = "%s sent, inst_id=%u, cands=%d",  /* SID:105 */
     [LA_F15] = "%s sent, seq=%u",  /* SID:106 */
     [LA_F16] = "%s sent, sid=%u, msg=%u, size=%d",  /* SID:107 */
-    [LA_F17] = "%s sent, size=%d (ses_id=%llu)",  /* SID:438 */
-    [LA_F18] = "%s sent, total=%d (ses_id=%llu)",  /* SID:439 */
+    [LA_F17] = "%s sent, size=%d (ses_id=%llu)",  /* SID:591 */
+    [LA_F18] = "%s sent, total=%d (ses_id=%llu)",  /* SID:592 */
     [LA_F19] = "%s seq=0: accepted cand_cnt=%d",  /* SID:110 */
     [LA_F20] = "%s seq=0: invalid(cand_cnt=%d flags=0x%02x)",  /* SID:111 */
     [LA_F21] = "%s, retry remaining candidates and FIN to peer",  /* SID:112 */
@@ -124,20 +124,20 @@ const char* lang_en[LA_NUM] = {
     [LA_F25] = "%s: Peer addr changed -> %s:%d, retrying punch",  /* SID:116 */
     [LA_F26] = "%s: RPC fail due to peer offline (sid=%u)",  /* SID:117 */
     [LA_F27] = "%s: RPC fail due to relay timeout (sid=%u)",  /* SID:118 */
-    [LA_F28] = "%s: SUCCESS: UDP reachable via TURN (RTT: %llu ms)",  /* SID:440 */
+    [LA_F28] = "%s: SUCCESS: UDP reachable via TURN (RTT: %llu ms)",  /* SID:593 */
     [LA_F29] = "%s: TURN allocation failed: ret=%d",  /* SID:120 */
     [LA_F30] = "%s: TURN allocation request sent",  /* SID:121 */
     [LA_F31] = "%s: UDP timeout, retry %d/%d",  /* SID:122 */
     [LA_F32] = "%s: UDP timeout: peer not responding",  /* SID:123 */
     [LA_F33] = "%s: accepted",  /* SID:124 */
-    [LA_F34] = "%s: accepted (ses_id=%llu)",  /* SID:441 */
+    [LA_F34] = "%s: accepted (ses_id=%llu)",  /* SID:594 */
     [LA_F35] = "%s: accepted for ack_seq=%u",  /* SID:126 */
     [LA_F36] = "%s: accepted from cand[%d]",  /* SID:127 */
     [LA_F37] = "%s: accepted seq=%u cand_cnt=%d flags=0x%02x",  /* SID:128 */
     [LA_F38] = "%s: accepted sid=%u, msg=%u",  /* SID:129 */
     [LA_F39] = "%s: accepted, RPC complete (sid=%u)",  /* SID:130 */
     [LA_F40] = "%s: accepted, RPC finished (sid=%u)",  /* SID:131 */
-    [LA_F41] = "%s: accepted, len=%d (ses_id=%llu)",  /* SID:442 */
+    [LA_F41] = "%s: accepted, len=%d (ses_id=%llu)",  /* SID:595 */
     [LA_F42] = "%s: accepted, probe_mapped=%s:%d",  /* SID:133 */
     [LA_F43] = "%s: accepted, public=%s:%d max_cands=%d probe_port=%d relay=%s msg=%s",  /* SID:134 */
     [LA_F44] = "%s: accepted, waiting for response (sid=%u)",  /* SID:135 */
@@ -159,7 +159,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F60] = "%s: ignored (relay not supported)",  /* SID:151 */
     [LA_F61] = "%s: ignored for duplicated seq=%u, already acked",  /* SID:152 */
     [LA_F62] = "%s: ignored for seq=%u (expect=%d)",  /* SID:153 */
-    [LA_F63] = "%s: ignored for ses_id=%llu (local ses_id=%llu)",  /* SID:443 */
+    [LA_F63] = "%s: ignored for ses_id=%llu (local ses_id=%llu)",  /* SID:596 */
     [LA_F64] = "%s: ignored for sid=%u (current sid=%u)",  /* SID:155 */
     [LA_F65] = "%s: ignored in invalid state=%d",  /* SID:156 */
     [LA_F66] = "%s: ignored in state(%d)",  /* SID:157 */
@@ -172,11 +172,11 @@ const char* lang_en[LA_NUM] = {
     [LA_F73] = "%s: keep alive to %d reachable cand(s)",  /* SID:164 */
     [LA_F74] = "%s: new request (sid=%u) overrides pending request (sid=%u)",  /* SID:165 */
     [LA_F75] = "%s: no remote candidates to punch",  /* SID:166 */
-    [LA_F76] = "%s: no response for %llu ms, connection lost",  /* SID:444 */
+    [LA_F76] = "%s: no response for %llu ms, connection lost",  /* SID:597 */
     [LA_F77] = "%s: old request ignored (sid=%u <= last_sid=%u)",  /* SID:168 */
-    [LA_F78] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED",  /* SID:445 */
-    [LA_F79] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:446 */
-    [LA_F80] = "%s: punching %d/%d candidates (elapsed: %llu ms)",  /* SID:447 */
+    [LA_F78] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED",  /* SID:598 */
+    [LA_F79] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:599 */
+    [LA_F80] = "%s: punching %d/%d candidates (elapsed: %llu ms)",  /* SID:600 */
     [LA_F81] = "%s: punching additional cand<%s:%d>[%d] while connected",  /* SID:172 */
     [LA_F82] = "%s: punching remote cand<%s:%d>[%d]",  /* SID:173 */
     [LA_F83] = "%s: received FIN from peer, marking NAT as CLOSED",  /* SID:174 */
@@ -190,18 +190,18 @@ const char* lang_en[LA_NUM] = {
     [LA_F91] = "%s: send failed(%d)",  /* SID:182 */
     [LA_F92] = "%s: sent MSG(msg=0, sid=%u)",  /* SID:183 */
     [LA_F93] = "%s: sent, sid=%u, code=%u, size=%d",  /* SID:184 */
-    [LA_F94] = "%s: session mismatch(local=%llu pkt=%llu)",  /* SID:448 */
-    [LA_F95] = "%s: session mismatch(local=%llu, pkt=%llu)",  /* SID:449 */
+    [LA_F94] = "%s: session mismatch(local=%llu pkt=%llu)",  /* SID:601 */
+    [LA_F95] = "%s: session mismatch(local=%llu, pkt=%llu)",  /* SID:602 */
     [LA_F96] = "%s: skip and mark NAT as OPEN (lan_punch enabled)",  /* SID:187 */
     [LA_F97] = "%s: start punching all(%d) remote candidates",  /* SID:188 */
     [LA_F98] = "%s: started, sending first probe",  /* SID:189 */
     [LA_F99] = "%s: status error(%d)",  /* SID:190 */
-    [LA_F100] = "%s: sync complete (ses_id=%llu)",  /* SID:450 */
-    [LA_F101] = "%s: sync complete (ses_id=%llu, mask=0x%04x)",  /* SID:451 */
+    [LA_F100] = "%s: sync complete (ses_id=%llu)",  /* SID:603 */
+    [LA_F101] = "%s: sync complete (ses_id=%llu, mask=0x%04x)",  /* SID:604 */
     [LA_F102] = "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)",  /* SID:193 */
     [LA_F103] = "%s: timeout after %d retries , type unknown",  /* SID:194 */
-    [LA_F104] = "%s: timeout after %llu ms (ICE done), switching to RELAY",  /* SID:452 */
-    [LA_F105] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:453 */
+    [LA_F104] = "%s: timeout after %llu ms (ICE done), switching to RELAY",  /* SID:605 */
+    [LA_F105] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:606 */
     [LA_F106] = "%s: timeout, max(%d) attempts reached, reset to INIT",  /* SID:197 */
     [LA_F107] = "%s: timeout, peer did not respond",  /* SID:198 */
     [LA_F108] = "%s: timeout, retry %d/%d",  /* SID:199 */
@@ -210,7 +210,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F111] = "%s: tx confirmed: me->peer path is UP (echoed seq=%u)",  /* SID:202 */
     [LA_F112] = "%s: unexpected ack_seq=%u mask=0x%04x",  /* SID:203 */
     [LA_F113] = "%s:%04d: %s",  /* SID:204 */
-    [LA_F114] = "%s_ACK sent, seq=%u (ses_id=%llu)",  /* SID:454 */
+    [LA_F114] = "%s_ACK sent, seq=%u (ses_id=%llu)",  /* SID:607 */
     [LA_F115] = "%s_ACK sent, sid=%u",  /* SID:206 */
     [LA_F116] = "Added RELAY path to path manager",  /* SID:207 */
     [LA_F117] = "Added Remote Candidate: %d -> %s:%d",  /* SID:208 */
