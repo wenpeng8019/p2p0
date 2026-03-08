@@ -654,7 +654,7 @@ p2p_update(p2p_handle_t hdl) {
                 {
                     int recv_path = path_manager_find_by_addr(s, &from);
                     if (recv_path >= -1)
-                        path_manager_on_packet_recv(s, recv_path, now_ms);
+                        path_manager_on_packet_recv(s, recv_path, now_ms, P2P_HDR_SIZE + payload_len);
                 }
 
                 // 高级传输层（DTLS/SCTP/PseudoTCP）有自己的解包逻辑
@@ -821,12 +821,12 @@ p2p_update(p2p_handle_t hdl) {
         
         // 选择最佳路径
         int best_path = path_manager_select_best_path(s);
-        if (best_path >= 0) {
+        if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
             if (addr) {
                 s->path = P2P_PATH_PUNCH;  // 目前只有 PUNCH
                 s->active_addr = *addr;
-                path_manager_set_active(s, best_path);
+                s->path_mgr.active_path = best_path;
                 print("I:", LA_F("Selected path: PUNCH (idx=%d)", LA_F191, 287), best_path);
             }
         } else {
@@ -846,16 +846,16 @@ p2p_update(p2p_handle_t hdl) {
         print("I: %s", LA_S("NAT connection recovered, upgrading from RELAY to CONNECTED", LA_S41, 67));
         
         // 标记中继路径为降级（但不移除，保留作为备份）
-        path_manager_set_path_state(s, PATH_IDX_RELAY, PATH_STATE_DEGRADED);
+        path_manager_set_path_state(s, PATH_IDX_SIGNALING, PATH_STATE_DEGRADED);
         
         // 重新选择最佳路径（PUNCH 应当优先）
         int best_path = path_manager_select_best_path(s);
-        if (best_path >= 0) {
+        if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
             if (addr) {
                 s->path = P2P_PATH_PUNCH;
                 s->active_addr = *addr;
-                path_manager_set_active(s, best_path);
+                s->path_mgr.active_path = best_path;
                 s->state = P2P_STATE_CONNECTED; // 恢复为 CONNECTED 状态
                 print("I:", LA_F("Path recovered: switched to PUNCH", LA_F161, 257));
             }
@@ -891,12 +891,12 @@ p2p_update(p2p_handle_t hdl) {
         
         // 选择最佳可用路径
         int best_path = path_manager_select_best_path(s);
-        if (best_path >= -1) {  // -1=RELAY, >=0=候选
+        if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
             if (addr) {
-                s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
+                s->path = (best_path == PATH_IDX_SIGNALING) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                 s->active_addr = *addr;
-                path_manager_set_active(s, best_path);
+                s->path_mgr.active_path = best_path;
                 s->state = P2P_STATE_RELAY;
                 print("I: %s", LA_S("Using path: RELAY", LA_S69, 95));
             }
@@ -931,12 +931,12 @@ p2p_update(p2p_handle_t hdl) {
         
         // 尝试切换到中继路径
         int best_path = path_manager_select_best_path(s);
-        if (best_path >= -1) {  // -1=RELAY, >=0=候选
+        if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
             if (addr) {
-                s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
+                s->path = (best_path == PATH_IDX_SIGNALING) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                 s->active_addr = *addr;
-                path_manager_set_active(s, best_path);
+                s->path_mgr.active_path = best_path;
                 s->state = P2P_STATE_RELAY;
                 print("I: %s", LA_S("Switched to backup path: RELAY", LA_S68, 94));
             }
@@ -1025,13 +1025,13 @@ p2p_update(p2p_handle_t hdl) {
             const struct sockaddr_in *active_addr = path_manager_get_addr(s, s->path_mgr.active_path);
             
             if (active_addr && !sockaddr_equal(&s->active_addr, active_addr)) {
-                s->path = (s->path_mgr.active_path == PATH_IDX_RELAY) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
+                s->path = (s->path_mgr.active_path == PATH_IDX_SIGNALING) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                 s->active_addr = *active_addr;
                 
                 print("I:", LA_F("Synced path after failover", LA_F206, 302));
                 
                 // 同步 NAT 状态
-                if (s->path_mgr.active_path == PATH_IDX_RELAY && s->nat.state != NAT_RELAY) {
+                if (s->path_mgr.active_path == PATH_IDX_SIGNALING && s->nat.state != NAT_RELAY) {
                     s->nat.state = NAT_RELAY;
                 } else if (s->path_mgr.active_path >= 0 && s->nat.state != NAT_CONNECTED) {
                     s->nat.state = NAT_CONNECTED;
@@ -1053,26 +1053,19 @@ p2p_update(p2p_handle_t hdl) {
                 path_stats_t *old_stats = (current_path >= -1) ? path_manager_get_stats(s, current_path) : NULL;
                 
                 // 判断是否值得切换（性能提升显著）
-                bool should_switch = false;
-                if (!old_stats) {
-                    should_switch = true; // 当前无路径，立即切换
-                } else if (new_stats && new_stats->rtt_ms + s->path_mgr.switch_rtt_threshold_ms < old_stats->rtt_ms) {
-                    should_switch = true; // RTT 显著改善
-                } else if (old_stats->loss_rate > s->path_mgr.switch_loss_threshold) {
-                    should_switch = true; // 当前路径丢包严重
-                } else if (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST &&
-                           new_stats && new_stats->cost_score < old_stats->cost_score) {
-                    should_switch = true; // 直连优先模式：更低成本
-                }
-                
-                if (should_switch) {
+                if (!old_stats ||                                                                                   // 当前无路径，立即切换
+                    (new_stats && new_stats->rtt_ms + s->path_mgr.switch_rtt_threshold_ms < old_stats->rtt_ms) ||   // RTT 显著改善
+                    (old_stats->loss_rate > s->path_mgr.switch_loss_threshold) ||                                   // 当前路径丢包严重
+                    (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST && new_stats && new_stats->cost_score < old_stats->cost_score) // 直连优先模式：更低成本
+                    ) {
+
                     /* 执行路径切换（含防抖、历史记录） */
                     int ret = path_manager_switch_path(s, best_path, "periodic reselect", now_ms);
                     if (ret == 0) {
                         /* 切换成功：同步上层状态 */
                         const struct sockaddr_in *new_addr = path_manager_get_addr(s, best_path);
                         if (new_addr) {
-                            s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
+                            s->path = (best_path == PATH_IDX_SIGNALING) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                             s->active_addr = *new_addr;
                             
                             print("I:", LA_F("Path switched to better route (idx=%d)", LA_F162, 258), best_path);

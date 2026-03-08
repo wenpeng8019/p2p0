@@ -42,7 +42,8 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
     entry->last_punch_send_ms = now;
 
     // 记录发送包用于 RTT 测量（收到 PUNCH_ACK 时通过 seq 匹配计算精确 per-path RTT）
-    path_manager_on_packet_send(s, send_path, n->punch_seq, now);
+    // PUNCH包较小，不计入流量统计（size=0）
+    path_manager_on_packet_send(s, send_path, n->punch_seq, now, 0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -249,12 +250,13 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     }
     s->remote_cands[cand_idx].stats.is_lan = route_check_same_subnet(&s->route, from);
 
-    if (path_manager_get_active_idx(s) < 0 || s->remote_cands[cand_idx].stats.is_lan) {
-        path_manager_set_active(s, cand_idx);
+    if (s->path_mgr.active_path < 0 || s->remote_cands[cand_idx].stats.is_lan) {
+        s->path_mgr.active_path = cand_idx;
     }
 
     // 更新接收统计（防止超时误判）
-    path_manager_on_packet_recv(s, cand_idx, now);
+    // PUNCH包不计入流量统计（size=0）
+    path_manager_on_packet_recv(s, cand_idx, now, 0);
 
     // NAT_CONNECTED 状态：只收集路径状态信息，不需要双向确认逻辑
     if (n->state == NAT_CONNECTED) {
@@ -326,7 +328,8 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // RTT 测量：通过 seq 匹配 pending_packets 计算精确 per-path RTT
     if (hdr->seq > 0)
         path_manager_on_packet_ack(s, hdr->seq, now);
-    path_manager_on_packet_recv(s, cand_idx, now);
+    // PUNCH_ACK包不计入流量统计（size=0）
+    path_manager_on_packet_recv(s, cand_idx, now, 0);
 
     // NAT_CONNECTED 状态：只更新路径统计
     if (n->state == NAT_CONNECTED) {

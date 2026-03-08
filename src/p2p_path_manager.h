@@ -134,12 +134,12 @@ typedef struct {
  * 路径切换阈值配置（按路径类型独立配置）
  *
  * 阈值越小，切换越积极（如 LAN 出现时快速切回）；
- * 阈值越大，切换越保守（如 SIGNALING 中继作为最终降级）。
+ * 阈值越大，切换越保守（如 SIGNALING 转发作为最终降级）。
  * thresholds 数组以 p2p_path_t 枚举值为下标：
  *   [P2P_PATH_LAN]       小阈值，快速切回 LAN
  *   [P2P_PATH_PUNCH]     标准阈值
  *   [P2P_PATH_RELAY]     保守阈值，避免不必要的 TURN 切换
- *   [P2P_PATH_SIGNALING] 最大阈值，SIGNALING 中继作为最终手段
+ *   [P2P_PATH_SIGNALING] 最大阈值，SIGNALING 转发作为最终手段
  */
 typedef struct {
     uint32_t            rtt_threshold_ms;           // RTT 阈值：新路径需比当前快至少此值才触发切换
@@ -151,25 +151,25 @@ typedef struct {
 /*
  * 路径索引特殊值
  */
-#define PATH_IDX_RELAY (-1)  // 信令中继（特殊路径，不在候选列表中）
+#define PATH_IDX_SIGNALING (-1)  // 信令转发(SIGNALING)路径（不在候选列表中，非TURN）
 
 /*
  * 路径管理
- * TURN vs RELAY：
- *   - TURN：标准 ICE Relay 候选，在 remote_cands 中
- *   - RELAY：信令服务器中继，非标准降级方案，需特殊字段
+ * TURN vs SIGNALING：
+ *   - TURN：标准 ICE Relay 候选（P2P_PATH_RELAY），在 remote_cands 中
+ *   - SIGNALING：信令服务器转发（P2P_PATH_SIGNALING），非标准降级方案，需特殊字段
  */
 typedef struct {
     /* 路径选择策略 */
     p2p_path_strategy_t strategy;                   // 路径选择策略
     
     /* 当前活跃路径（索引语义见上）*/
-    int                 active_path;                // -1=RELAY, >=0=候选索引
+    int                 active_path;                // -1=PATH_IDX_SIGNALING, >=0=候选索引
     
-    /* 信令 RELAY 特殊处理（不是候选） */
+    /* 信令转发(SIGNALING)特殊处理（不是候选，非TURN） */
     struct {
         bool                active;                 // 是否启用
-        struct sockaddr_in  addr;                   // 中继地址
+        struct sockaddr_in  addr;                   // 信令服务器地址
         path_stats_t        stats;                  // 统计信息
     } relay;
     
@@ -237,13 +237,13 @@ int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy);
 void path_stats_init(path_stats_t *st, int cost_score);
 
 /*
- * 启用信令 RELAY 路径
+ * 启用信令转发(SIGNALING)路径
  *
  * 设置地址、初始化统计并将路径状态置为 ACTIVE，调用后即可用于数据转发。
- * 注意：RELAY 是信令服务器中继，不是 ICE 候选。
+ * 注意：此路径是信令服务器转发（P2P_PATH_SIGNALING），不是 TURN RELAY。
  *
  * @param s         会话指针
- * @param addr      RELAY 服务器地址
+ * @param addr      信令服务器地址
  * @return          0=成功，-1=失败
  */
 int path_manager_enable_relay(p2p_session_t *s, struct sockaddr_in *addr);
@@ -284,9 +284,10 @@ int path_manager_add_turn_path(p2p_session_t *s, struct sockaddr_in *addr);
  * @param path_idx  发送路径索引
  * @param seq       数据包序列号
  * @param now_ms    当前时间（毫秒）
+ * @param size      包大小（字节），0表示不计入流量统计（仅用于RTT测量）
  * @return          0=成功，-1=失败
  */
-int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, uint64_t now_ms);
+int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size);
 
 /*
  * 记录数据包确认（完成 RTT 测量）
@@ -299,20 +300,21 @@ int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, ui
 int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms);
 
 /*
- * 记录数据包接收（更新路径活跃时间）
+ * 记录数据包接收（更新路径活跃时间和流量统计）
  *
  * @param s         会话指针
  * @param path_idx  接收路径索引
  * @param now_ms    当前时间（毫秒）
+ * @param size      包大小（字节），0表示不计入流量统计
  * @return          0=成功，-1=失败
  */
-int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms);
+int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms, uint32_t size);
 
 /*
  * 更新路径性能指标（RTT/丢包率 EWMA）
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
  * @param rtt_ms    往返延迟（毫秒）
  * @param success   是否成功（用于计算丢包率）
  * @return          0=成功，-1=失败
@@ -345,15 +347,17 @@ void path_manager_health_check(p2p_session_t *s, uint64_t now_ms);
  * ============================================================================ */
 
 /*
- * 选择最佳路径（核心决策）
+ * 计算获取最佳路径
+ * + 基于当前指定的策略模式，根据路径质量评估并返回最佳路径（索引）
  *
  * @param s         会话指针
- * @return          最佳路径索引（-1=RELAY, >=0=候选索引），或 -2（无可用路径）
+ * @return          最佳路径索引（-1=SIGNALING, >=0=候选索引），或 -2（无可用路径）
  */
 int path_manager_select_best_path(p2p_session_t *s);
 
 /*
- * 执行路径切换（含防抖逻辑）
+ * 切换到指定目标路径
+ * + 支持防抖逻辑策略
  *
  * @param s             会话指针
  * @param target_path   目标路径索引
@@ -361,10 +365,8 @@ int path_manager_select_best_path(p2p_session_t *s);
  * @param now_ms        当前时间（毫秒）
  * @return              0=成功切换，1=防抖延迟，-1=失败
  */
-int path_manager_switch_path(p2p_session_t *s,
-                              int target_path,
-                              const char *reason,
-                              uint64_t now_ms);
+int path_manager_switch_path(p2p_session_t *s, int target_path,
+                              const char *reason, uint64_t now_ms);
 
 /* ============================================================================
  * 属性/状态访问与设置
@@ -374,7 +376,7 @@ int path_manager_switch_path(p2p_session_t *s,
  * 获取路径统计
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
  * @return          统计指针，或 NULL（无效索引）
  */
 path_stats_t* path_manager_get_stats(p2p_session_t *s, int path_idx);
@@ -383,7 +385,7 @@ path_stats_t* path_manager_get_stats(p2p_session_t *s, int path_idx);
  * 获取路径地址
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
  * @return          地址指针，或 NULL（无效索引）
  */
 const struct sockaddr_in* path_manager_get_addr(p2p_session_t *s, int path_idx);
@@ -393,7 +395,7 @@ const struct sockaddr_in* path_manager_get_addr(p2p_session_t *s, int path_idx);
  *
  * @param s         会话指针
  * @param addr      目标地址
- * @return          >=0=候选索引，-1(PATH_IDX_RELAY)=匹配RELAY地址，-2=未找到
+ * @return          >=0=候选索引，-1(PATH_IDX_SIGNALING)=匹配SIGNALING地址，-2=未找到
  */
 int path_manager_find_by_addr(p2p_session_t *s, const struct sockaddr_in *addr);
 
@@ -401,9 +403,9 @@ int path_manager_find_by_addr(p2p_session_t *s, const struct sockaddr_in *addr);
  * 获取活跃路径索引
  *
  * @param s         会话指针
- * @return          路径索引（-1=RELAY, >=0=候选索引），或 -2（无活跃路径）
+ * @return          路径索引（-1=SIGNALING, >=0=候选索引），或 -2（无活跃路径）
+ * @note            直接访问 s->path_mgr.active_path 即可
  */
-int path_manager_get_active_idx(p2p_session_t *s);
 
 /*
  * 检查是否有可用路径
@@ -414,19 +416,10 @@ int path_manager_get_active_idx(p2p_session_t *s);
 bool path_manager_has_active_path(p2p_session_t *s);
 
 /*
- * 设置活跃路径
- *
- * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
- * @return          0=成功，-1=失败
- */
-int path_manager_set_active(p2p_session_t *s, int path_idx);
-
-/*
  * 设置路径状态
  *
  * @param s         会话指针
- * @param path_idx  路径索引（-1=RELAY, >=0=候选索引）
+ * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
  * @param state     新状态
  * @return          0=成功，-1=失败
  */
