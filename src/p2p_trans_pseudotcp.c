@@ -123,7 +123,7 @@ static int pseudotcp_send(struct p2p_session *s, const void *buf, int len) {
 
 static void pseudotcp_tick(struct p2p_session *s) {
     p2p_pseudotcp_tick(s);
-    int is_relay_mode = (s->path == P2P_PATH_RELAY);
+    int is_relay_mode = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
     reliable_tick_ack(&s->reliable, s->sock, &s->active_addr, is_relay_mode);
 }
 

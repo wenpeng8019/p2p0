@@ -30,9 +30,6 @@ typedef enum {
     P2P_PATH_STRATEGY_HYBRID                        // 混合模式（平衡成本和性能）
 } p2p_path_strategy_t;
 
-/* 路径类型扩展（TURN）：复用 include/p2p.h 中的 P2P_PATH_* 枚举，并添加 TURN */
-#define P2P_PATH_TURN   4                           // TURN 中继（预留）
-
 /* 路径质量等级 */
 typedef enum {
     PATH_QUALITY_EXCELLENT = 4,                     // 优秀（RTT < 50ms, 丢包 < 1%）

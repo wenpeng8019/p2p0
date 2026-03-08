@@ -863,7 +863,7 @@ void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     } else if (ret == -2) {
                         /* 服务器缓存满（status=2）：停止发送，等待对端上线后收到 FORWARD */
                         /* waiting_for_peer 已在 send_connect() 中设置为 true */
-                        print("W:", LA_S("[SIGNALING] Server storage full, waiting for peer to come online", LA_S9, 35));
+                        print("W: %s", LA_S("[SIGNALING] Server storage full, waiting for peer to come online", LA_S9, 35));
                     } else {
                         s->cands_pending_send = true;  /* TCP 发送失败（-1/-3），标记待重发 */
                         print("W:", LA_F("[SIGNALING] Failed to send candidates, will retry (ret=%d)", LA_F196, 287), ret);

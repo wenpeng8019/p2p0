@@ -96,7 +96,8 @@ typedef enum {
     P2P_PATH_NONE = 0,
     P2P_PATH_LAN,                               // 同一子网，直连
     P2P_PATH_PUNCH,                             // NAT 打洞
-    P2P_PATH_RELAY                              // 服务器中继（fallback）
+    P2P_PATH_RELAY,                             // 数据中继（TURN 服务器）
+    P2P_PATH_SIGNALING                          // 信令服务器转发（最终降级方案）
 } p2p_path_t;
 
 /*

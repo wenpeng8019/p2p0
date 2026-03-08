@@ -892,7 +892,7 @@ p2p_update(p2p_handle_t hdl) {
         if (best_path >= -1) {  // -1=RELAY, >=0=候选
             const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
             if (addr) {
-                s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_RELAY : P2P_PATH_PUNCH;
+                s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                 s->active_addr = *addr;
                 s->path_mgr.active_path = best_path;
                 s->state = P2P_STATE_RELAY;
@@ -901,7 +901,7 @@ p2p_update(p2p_handle_t hdl) {
         } else {
             // 无可用路径：降级到传统方式
             s->state = P2P_STATE_RELAY;
-            s->path = P2P_PATH_RELAY;
+            s->path = P2P_PATH_SIGNALING;
             s->active_addr = relay_available ? relay_addr : s->nat.peer_addr;
         }
     }
@@ -932,7 +932,7 @@ p2p_update(p2p_handle_t hdl) {
         if (best_path >= -1) {  // -1=RELAY, >=0=候选
             const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
             if (addr) {
-                s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_RELAY : P2P_PATH_PUNCH;
+                s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                 s->active_addr = *addr;
                 s->path_mgr.active_path = best_path;
                 s->state = P2P_STATE_RELAY;
@@ -1023,7 +1023,7 @@ p2p_update(p2p_handle_t hdl) {
             const struct sockaddr_in *active_addr = path_manager_get_addr(s, s->path_mgr.active_path);
             
             if (active_addr && !sockaddr_equal(&s->active_addr, active_addr)) {
-                s->path = (s->path_mgr.active_path == PATH_IDX_RELAY) ? P2P_PATH_RELAY : P2P_PATH_PUNCH;
+                s->path = (s->path_mgr.active_path == PATH_IDX_RELAY) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                 s->active_addr = *active_addr;
                 
                 print("I:", LA_F("Synced path after failover", LA_F181, 272));
@@ -1070,7 +1070,7 @@ p2p_update(p2p_handle_t hdl) {
                         /* 切换成功：同步上层状态 */
                         const struct sockaddr_in *new_addr = path_manager_get_addr(s, best_path);
                         if (new_addr) {
-                            s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_RELAY : P2P_PATH_PUNCH;
+                            s->path = (best_path == PATH_IDX_RELAY) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                             s->active_addr = *new_addr;
                             
                             print("I:", LA_F("Path switched to better route (idx=%d)", LA_F155, 246), best_path);

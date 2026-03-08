@@ -106,12 +106,12 @@ int path_manager_failover(p2p_session_t *s, int failed_path);
 
 const char* path_type_str(int type) {
     switch (type) {
-        case P2P_PATH_NONE:  return "NONE";
-        case P2P_PATH_LAN:   return "LAN";
-        case P2P_PATH_PUNCH: return "PUNCH";
-        case P2P_PATH_RELAY: return "RELAY";
-        case P2P_PATH_TURN:  return "TURN";
-        default:             return "UNKNOWN";
+        case P2P_PATH_NONE:         return "NONE";
+        case P2P_PATH_LAN:          return "LAN";
+        case P2P_PATH_PUNCH:        return "PUNCH";
+        case P2P_PATH_RELAY:        return "RELAY";
+        case P2P_PATH_SIGNALING:    return "SIGNALING";
+        default:                    return "UNKNOWN";
     }
 }
 
