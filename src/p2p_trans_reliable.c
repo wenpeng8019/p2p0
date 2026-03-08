@@ -36,11 +36,11 @@ int reliable_window_avail(const reliable_t *r) {
  */
 int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
     if (r->send_count >= RELIABLE_WINDOW) {
-        print("W:", LA_F("Send window full, dropping packet send_count=%d", LA_F172, 263), r->send_count);
+        print("W:", LA_F("Send window full, dropping packet send_count=%d", LA_F171, 263), r->send_count);
         return -1;
     }
     if (len > P2P_MAX_PAYLOAD) {
-        print("W:", LA_F("Packet too large len=%d max=%d", LA_F151, 242), len, P2P_MAX_PAYLOAD);
+        print("W:", LA_F("Packet too large len=%d max=%d", LA_F150, 242), len, P2P_MAX_PAYLOAD);
         return -1;
     }
 
@@ -55,7 +55,7 @@ int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
 
     r->send_seq++;
     r->send_count++;
-    print("V:", LA_F("Packet queued seq=%u len=%d inflight=%d", LA_F150, 241),
+    print("V:", LA_F("Packet queued seq=%u len=%d inflight=%d", LA_F149, 241),
                     e->seq, len, r->send_count);
     return 0;
 }
@@ -90,7 +90,7 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
         memcpy(r->recv_data[idx], payload, len);
         r->recv_lens[idx] = len;
         r->recv_bitmap[idx] = 1;
-        print("V:", LA_F("Data stored in recv buffer seq=%u len=%d base=%u", LA_F126, 217),
+        print("V:", LA_F("Data stored in recv buffer seq=%u len=%d base=%u", LA_F125, 217),
                         seq, len, r->recv_base);
     }
 
@@ -260,7 +260,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
             e->retx_count++;
             r->rto = r->rto * 2;
             if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-            print("W:", LA_F("retry seq=%u retx=%d rto=%d", LA_F209, 300),
+            print("W:", LA_F("retry seq=%u retx=%d rto=%d", LA_F206, 300),
                          e->seq, e->retx_count, r->rto);
         }
     }

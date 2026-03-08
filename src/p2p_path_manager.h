@@ -91,8 +91,6 @@ typedef struct {
     float               quality_score;              // 质量评分（0.0-1.0）
     float               quality_trend;              // 质量趋势（-1.0=恶化, 0=稳定, 1.0=改善）
     int                 stability_score;            // 稳定性评分（0-100）
-    uint64_t            rtt_trend_sum;              // RTT 趋势累积
-    int                 rtt_trend_count;            // RTT 趋势样本数
     
     /* 成本估算（用于策略决策） */
     int                 cost_score;                 // 0=免费(LAN/PUNCH), 1-10=中继成本
@@ -167,7 +165,6 @@ typedef struct {
     
     /* 当前活跃路径（索引语义见上）*/
     int                 active_path;                // -1=RELAY, >=0=候选索引
-    int                 backup_path;                // 备用路径索引
     
     /* 信令 RELAY 特殊处理（不是候选） */
     struct {
@@ -197,7 +194,6 @@ typedef struct {
     /* 数据包跟踪（用于 RTT 测量）*/
     packet_track_t      pending_packets[MAX_PENDING_PACKETS]; // 待确认数据包
     int                 pending_count;              // 待确认数量
-    uint32_t            next_track_seq;             // 下一个跟踪序列号
     
     /* 切换历史与防抖动 */
     path_switch_record_t switch_history[MAX_SWITCH_HISTORY]; // 切换历史环形缓冲区

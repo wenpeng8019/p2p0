@@ -142,7 +142,6 @@ int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy) {
     
     /* 初始化路径索引（无活跃路径） */
     pm->active_path = -2;  // -2 表示无活跃路径
-    pm->backup_path = -2;
     
     /* RELAY 初始化为未启用 */
     pm->relay.active = false;
@@ -599,11 +598,11 @@ int path_manager_switch_path(p2p_session_t *s,
     /* 填充来源路径详情 */
     path_stats_t *from_stats = path_manager_get_stats(s, old_path);
     if (from_stats) {
-        record->from_type = from_stats->cost_score;
+        record->from_type = path_idx_to_type(s, old_path);
         record->from_rtt_ms = from_stats->rtt_ms;
         record->from_loss_rate = from_stats->loss_rate;
     } else {
-        record->from_type = 0;
+        record->from_type = P2P_PATH_NONE;
         record->from_rtt_ms = 0;
         record->from_loss_rate = 0.0f;
     }
@@ -611,11 +610,11 @@ int path_manager_switch_path(p2p_session_t *s,
     /* 填充目标路径详情 */
     path_stats_t *to_stats = path_manager_get_stats(s, target_path);
     if (to_stats) {
-        record->to_type = to_stats->cost_score;
+        record->to_type = path_idx_to_type(s, target_path);
         record->to_rtt_ms = to_stats->rtt_ms;
         record->to_loss_rate = to_stats->loss_rate;
     } else {
-        record->to_type = 0;
+        record->to_type = P2P_PATH_NONE;
         record->to_rtt_ms = 0;
         record->to_loss_rate = 0.0f;
     }
@@ -704,13 +703,13 @@ bool path_manager_has_active_path(p2p_session_t *s) {
     
     /* 检查 RELAY */
     if (s->path_mgr.relay.active &&
-        s->path_mgr.relay.stats.state == PATH_STATE_ACTIVE) {
+        path_is_selectable(s->path_mgr.relay.stats.state)) {
         return true;
     }
     
     /* 检查所有候选 */
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        if (s->remote_cands[i].stats.state == PATH_STATE_ACTIVE) {
+        if (path_is_selectable(s->remote_cands[i].stats.state)) {
             return true;
         }
     }
@@ -834,10 +833,8 @@ int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms) {
     path_manager_t *pm = &s->path_mgr;
     if (pm->switch_history_count == 0) return 0;
     
-    /* 获取最新记录的时间戳作为"当前时间" */
-    int latest_idx = (pm->switch_history_idx - 1 + MAX_SWITCH_HISTORY) % MAX_SWITCH_HISTORY;
-    uint64_t now = pm->switch_history[latest_idx].timestamp_ms;
-    uint64_t cutoff_time = now - window_ms;
+    uint64_t now = P_tick_ms();
+    uint64_t cutoff_time = (now > window_ms) ? (now - window_ms) : 0;
     
     int count = 0;
     for (int i = 0; i < pm->switch_history_count; i++) {
@@ -1114,16 +1111,17 @@ int path_manager_update_quality(p2p_session_t *s, int path_idx) {
         p->quality = PATH_QUALITY_BAD;
     }
     
-    /* 计算质量趋势（基于 RTT 样本） */
+    /* 计算质量趋势（基于 RTT 样本环形缓冲区，按时间序遍历） */
     if (p->rtt_sample_count >= 5) {
         int mid = p->rtt_sample_count / 2;
         uint32_t first_half_sum = 0, second_half_sum = 0;
+        int oldest = (p->rtt_sample_idx - p->rtt_sample_count + 10) % 10;
         
         for (int i = 0; i < mid; i++) {
-            first_half_sum += p->rtt_samples[i];
+            first_half_sum += p->rtt_samples[(oldest + i) % 10];
         }
         for (int i = mid; i < p->rtt_sample_count; i++) {
-            second_half_sum += p->rtt_samples[i];
+            second_half_sum += p->rtt_samples[(oldest + i) % 10];
         }
         
         float first_half_avg = (float)first_half_sum / mid;
@@ -1275,8 +1273,46 @@ int path_manager_failover(p2p_session_t *s, int failed_path) {
     int new_path = path_manager_select_best_path(s);
     
     if (new_path >= -1 && new_path != failed_path) {
+        int old_path = pm->active_path;
         pm->active_path = new_path;
         pm->total_switches++;
+        pm->total_failovers++;
+        
+        /* 记录故障转移到切换历史（与 switch_path 共用历史缓冲区） */
+        uint64_t now_ms = P_tick_ms();
+        int idx = pm->switch_history_idx;
+        path_switch_record_t *rec = &pm->switch_history[idx];
+        rec->from_path = old_path;
+        rec->to_path = new_path;
+        rec->timestamp_ms = now_ms;
+        rec->reason = "failover";
+        
+        path_stats_t *fs = path_manager_get_stats(s, old_path);
+        if (fs) {
+            rec->from_type = path_idx_to_type(s, old_path);
+            rec->from_rtt_ms = fs->rtt_ms;
+            rec->from_loss_rate = fs->loss_rate;
+        } else {
+            rec->from_type = P2P_PATH_NONE;
+            rec->from_rtt_ms = 0;
+            rec->from_loss_rate = 0.0f;
+        }
+        
+        path_stats_t *ts = path_manager_get_stats(s, new_path);
+        if (ts) {
+            rec->to_type = path_idx_to_type(s, new_path);
+            rec->to_rtt_ms = ts->rtt_ms;
+            rec->to_loss_rate = ts->loss_rate;
+        } else {
+            rec->to_type = P2P_PATH_NONE;
+            rec->to_rtt_ms = 0;
+            rec->to_loss_rate = 0.0f;
+        }
+        
+        pm->switch_history_idx = (idx + 1) % MAX_SWITCH_HISTORY;
+        if (pm->switch_history_count < MAX_SWITCH_HISTORY)
+            pm->switch_history_count++;
+        
         return new_path;
     }
     

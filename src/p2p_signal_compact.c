@@ -63,7 +63,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
         int idx = p2p_upsert_remote_candidate(s, &caddr, cand_type, false);
         if (idx < 0) {
-            print("E:", LA_S("Failed to push remote candidate", LA_S29, 55));
+            print("E:", LA_S("Failed to push remote candidate", LA_S30, 55));
             return;
         }
         p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
@@ -601,7 +601,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     // 标记进入 REGISTERED 状态（该状态将停止周期发送 REGISTER）
     ctx->state = SIGNAL_COMPACT_REGISTERED;
-    print("I:", LA_F("REGISTERED: peer=%s", LA_F160, 251), ctx->peer_online ? "online" : "offline");
+    print("I:", LA_F("REGISTERED: peer=%s", LA_F159, 251), ctx->peer_online ? "online" : "offline");
 
     // 如果已获得和对方建立的 session id（也就是 SIG_PKT_PEER_INFO 先到达）
     // + 进入 ICE 阶段，开始向对端发送后续候选队列和 FIN 包
@@ -755,7 +755,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                 // 维护分配远端候选列表的空间（作为首个 PEER_INFO 包，候选队列基准 base_index 肯定是 0）
                 // + 注意，seq=0 的 PEER_INFO 包的 base_index 字段值可以不为 0（协议上 base_index !=0 说明是对方公网地址发生变更的通知）
                 if (p2p_remote_cands_reserve(s, cand_cnt) != E_NONE) {
-                    print("E:", LA_F("Failed to reserve remote candidates (cnt=%d)", LA_F133, 224), cand_cnt);
+                    print("E:", LA_F("Failed to reserve remote candidates (cnt=%d)", LA_F132, 224), cand_cnt);
                     return;
                 }
 
@@ -776,7 +776,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             print("V:", LA_F("%s NOTIFY: accepted", LA_F5, 96), PROTO);
 
             if (p2p_remote_cands_reserve(s, 1) != E_NONE) {
-                print("E: %s", LA_S("Failed to reserve remote candidates (cnt=1)", LA_S30, 56));
+                print("E: %s", LA_S("Failed to reserve remote candidates (cnt=1)", LA_S31, 56));
                 return;
             }
 
@@ -799,13 +799,13 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                 // 标记旧的活跃路径为失效（地址已变更）
                 if (s->path_mgr.active_path >= 0 && s->path_mgr.active_path < s->remote_cand_cnt) {
                     path_manager_set_path_state(s, s->path_mgr.active_path, PATH_STATE_FAILED);
-                    print("V:", LA_F("Marked old path (idx=%d) as FAILED due to addr change", LA_F146, 237),
+                    print("V:", LA_F("Marked old path (idx=%d) as FAILED due to addr change", LA_F145, 237),
                            s->path_mgr.active_path);
                 }
 
                 // 立即打洞新地址（nat_on_punch 收到回复后会自动注册新路径）
                 if (nat_punch(s, 0) != E_NONE) {
-                    print("E: %s", LA_S("Failed to send punch packet for new peer addr", LA_S33, 59));
+                    print("E: %s", LA_S("Failed to send punch packet for new peer addr", LA_S34, 59));
                 }
             }
             else {
@@ -837,7 +837,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             // 维护分配远端候选列表的空间
             // + 这里 payload[8](base_index) + cand_cnt，表示该包至少需要的远端候选数量; 1 为至少包含一个对方的公网地址
             if (p2p_remote_cands_reserve(s, 1 + payload[sizeof(uint64_t)] + cand_cnt) != E_NONE) {
-                print("E:", LA_F("Failed to reserve remote candidates (base=%u cnt=%d)", LA_F132, 223), payload[sizeof(uint64_t)], cand_cnt);
+                print("E:", LA_F("Failed to reserve remote candidates (base=%u cnt=%d)", LA_F131, 223), payload[sizeof(uint64_t)], cand_cnt);
                 return;
             }
 
