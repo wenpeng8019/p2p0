@@ -317,7 +317,7 @@ static inline int unpack_candidate(p2p_candidate_entry_t *c, const uint8_t *buf)
 /* ============================================================================
  * 动态候选数组辅助函数
  *
- * 向 local_cands / remote_cands 追加新候选，容量不足时自动翻倍扩容。
+ * 向 local_cands / remote_cands 追加新候选，容量不足时自动翻倍扩容
  * 返回新候选槽位索引，或负值错误码（E_OUT_OF_MEMORY）
  * ============================================================================ */
 
@@ -326,7 +326,7 @@ static inline ret_t p2p_cand_push_local(p2p_session_t *s) {
         int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
         p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_candidate_entry_t));
         if (!p) {
-            print("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F129, 221), nc);
+            print("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F134, 230), nc);
             return E_OUT_OF_MEMORY;
         }
         s->local_cands    = p;
@@ -340,7 +340,7 @@ static inline ret_t p2p_cand_push_remote(p2p_session_t *s) {
         int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
         p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
         if (!p) {
-            print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F130, 222), nc);
+            print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F135, 231), nc);
             return E_OUT_OF_MEMORY;
         }
         if (nc > s->remote_cand_cap) {
@@ -397,7 +397,7 @@ static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     while (nc < need) nc *= 2;
     p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
     if (!p) {
-        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F130, 222), nc);
+        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F135, 231), nc);
         return E_OUT_OF_MEMORY;
     }
     memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));

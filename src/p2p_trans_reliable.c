@@ -20,7 +20,7 @@ void reliable_init(reliable_t *r) {
     r->rto = RELIABLE_RTO_INIT;
     r->srtt = 0;
     r->rttvar = 0;
-    printf(LA_F("Reliable transport initialized rto=%d win=%d", LA_F41, 247),
+    printf(LA_F("Reliable transport initialized rto=%d win=%d", LA_F186, 282),
                 RELIABLE_RTO_INIT, RELIABLE_WINDOW);
 }
 
@@ -36,11 +36,11 @@ int reliable_window_avail(const reliable_t *r) {
  */
 int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
     if (r->send_count >= RELIABLE_WINDOW) {
-        print("W:", LA_F("Send window full, dropping packet send_count=%d", LA_F171, 263), r->send_count);
+        print("W:", LA_F("Send window full, dropping packet send_count=%d", LA_F198, 294), r->send_count);
         return -1;
     }
     if (len > P2P_MAX_PAYLOAD) {
-        print("W:", LA_F("Packet too large len=%d max=%d", LA_F150, 242), len, P2P_MAX_PAYLOAD);
+        print("W:", LA_F("Packet too large len=%d max=%d", LA_F158, 254), len, P2P_MAX_PAYLOAD);
         return -1;
     }
 
@@ -55,7 +55,7 @@ int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
 
     r->send_seq++;
     r->send_count++;
-    print("V:", LA_F("Packet queued seq=%u len=%d inflight=%d", LA_F149, 241),
+    print("V:", LA_F("Packet queued seq=%u len=%d inflight=%d", LA_F157, 253),
                     e->seq, len, r->send_count);
     return 0;
 }
@@ -80,7 +80,7 @@ int reliable_recv_pkt(reliable_t *r, uint8_t *buf, int *out_len) {
  */
 int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int len) {
     if (!seq_in_window(seq, r->recv_base, RELIABLE_WINDOW)) {
-        printf(LA_F("Out-of-window packet discarded seq=%u base=%u", LA_F53, 257),
+        printf(LA_F("Out-of-window packet discarded seq=%u base=%u", LA_F156, 252),
                       seq, r->recv_base);
         return 0;  // 超出窗口，忽略
     }
@@ -90,7 +90,7 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
         memcpy(r->recv_data[idx], payload, len);
         r->recv_lens[idx] = len;
         r->recv_bitmap[idx] = 1;
-        print("V:", LA_F("Data stored in recv buffer seq=%u len=%d base=%u", LA_F125, 217),
+        print("V:", LA_F("Data stored in recv buffer seq=%u len=%d base=%u", LA_F129, 225),
                         seq, len, r->recv_base);
     }
 
@@ -132,13 +132,13 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
                 r->rto = r->srtt + 4 * r->rttvar;
                 if (r->rto < 50) r->rto = 50;
                 if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-                printf(LA_F("RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d", LA_F42, 248),
+                printf(LA_F("RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d", LA_F168, 264),
                               rtt, r->srtt, r->rttvar, r->rto);
             }
         }
         r->send_base++;
     }
-    printf(LA_F("ACK processed ack_seq=%u send_base=%u inflight=%d", LA_F36, 242),
+    printf(LA_F("ACK processed ack_seq=%u send_base=%u inflight=%d", LA_F117, 213),
                   ack_seq, r->send_base, r->send_count);
 
     // SACK 位图：第 i 位 = ack_seq + 1 + i
@@ -189,7 +189,7 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
         build_ack_payload(r, ack_payload);
         uint16_t ack_seq = nget_s(ack_payload);
         uint32_t sack = nget_l(ack_payload + 2);
-        printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F223, 420),
+        printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F236, 332),
                       ack_seq, sack, r->recv_base,
                       addr ? inet_ntoa(addr->sin_addr) : "?",
                       addr ? ntohs(addr->sin_port) : 0);
@@ -260,7 +260,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
             e->retx_count++;
             r->rto = r->rto * 2;
             if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-            print("W:", LA_F("retry seq=%u retx=%d rto=%d", LA_F206, 300),
+            print("W:", LA_F("retry seq=%u retx=%d rto=%d", LA_F235, 331),
                          e->seq, e->retx_count, r->rto);
         }
     }

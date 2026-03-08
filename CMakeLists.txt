@@ -6,7 +6,7 @@ option(WITH_DTLS    "Enable MbedTLS DTLS support" OFF)
 option(WITH_OPENSSL "Enable OpenSSL DTLS support" OFF)
 option(WITH_SCTP    "Enable usrsctp support" OFF)
 option(THREADED     "Enable internal threading" ON)
-option(I18N_ENABLED "Enable i18n multi-language support" OFF)
+option(I18N_ENABLED "Enable i18n multi-language support" ON)
 
 # --- Platform Detection ---
 if(WIN32)
