@@ -166,6 +166,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     // 初始化基础传输层（reliable ARQ）
     reliable_init(&s->reliable);
+    s->reliable.session = s;  // 设置回溯指针
 
     // 初始化路径管理器（多路径并行支持）
     p2p_path_strategy_t strategy = (p2p_path_strategy_t)(cfg->path_strategy);
@@ -210,7 +211,13 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     else print("I: %s", LA_S("No advanced transport layer enabled, using simple reliable layer", LA_S43, 69));
 
     // 执行传输模块的初始化处理
-    if (s->trans && s->trans->init) s->trans->init(s);
+    if (s->trans && s->trans->init) {
+        if (s->trans->init(s) != 0) {
+            print("E:", LA_F("Transport layer '%s' init failed, falling back to simple reliable", 0, 0), s->trans->name);
+            s->trans = NULL;  // 降级到基础 reliable 层
+            s->transport_data = NULL;  // 清除残留指针，防止悬垂引用
+        }
+    }
 
     // 初始化数据流层
     stream_init(&s->stream, cfg->nagle);
@@ -277,6 +284,12 @@ p2p_destroy(p2p_handle_t hdl) {
             
             print("I: %s", LA_S("Sending UNREGISTER packet to COMPACT signaling server", LA_S62, 88));
             p2p_signal_compact_disconnect(s);
+        }
+
+        // 关闭高级传输层（在 socket 关闭前，以便发送 close_notify 等协议包）
+        if (s->trans && s->trans->close) {
+            s->trans->close(s);
+            s->trans = NULL;
         }
 
         print("I: %s", LA_S("Close P2P UDP socket", LA_S17, 43));
@@ -693,8 +706,7 @@ p2p_update(p2p_handle_t hdl) {
                     // 如果 RTT 更新了，同步到路径管理器
                     if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0) {
                         if (s->path_mgr.active_path >= -1) {
-                            path_manager_update_metrics(s, s->path_mgr.active_path, (uint32_t)s->reliable.srtt, true);
-                            path_manager_update_quality(s, s->path_mgr.active_path);  /* 更新路径质量评估 */
+                            path_manager_update_rtt(s, s->path_mgr.active_path, (uint32_t)s->reliable.srtt, true);
                         }
                     }
                 }
@@ -826,13 +838,14 @@ p2p_update(p2p_handle_t hdl) {
             if (addr) {
                 s->path = P2P_PATH_PUNCH;  // 目前只有 PUNCH
                 s->active_addr = *addr;
-                s->path_mgr.active_path = best_path;
+                path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
                 print("I:", LA_F("Selected path: PUNCH (idx=%d)", LA_F191, 287), best_path);
             }
         } else {
             // 降级：路径管理器无可用路径，使用传统方式
             s->path = P2P_PATH_PUNCH;
             s->active_addr = s->nat.peer_addr;
+            s->path_mgr.active_path = -2;  // -2=无路径管理器管理的路径
         }
 
         // 触发连接建立回调
@@ -855,7 +868,7 @@ p2p_update(p2p_handle_t hdl) {
             if (addr) {
                 s->path = P2P_PATH_PUNCH;
                 s->active_addr = *addr;
-                s->path_mgr.active_path = best_path;
+                path_manager_switch_path(s, best_path, "nat_recovery", now_ms);
                 s->state = P2P_STATE_CONNECTED; // 恢复为 CONNECTED 状态
                 print("I:", LA_F("Path recovered: switched to PUNCH", LA_F161, 257));
             }
@@ -885,7 +898,7 @@ p2p_update(p2p_handle_t hdl) {
         
         if (relay_available) {
             /* 设置 RELAY 路径 */
-            path_manager_enable_relay(s, &relay_addr);
+            path_manager_enable_signaling(s, &relay_addr);
             print("I: %s", LA_S("Added RELAY path to path manager", LA_S11, 37));
         }
         
@@ -896,7 +909,7 @@ p2p_update(p2p_handle_t hdl) {
             if (addr) {
                 s->path = (best_path == PATH_IDX_SIGNALING) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                 s->active_addr = *addr;
-                s->path_mgr.active_path = best_path;
+                path_manager_switch_path(s, best_path, "nat_punch_failed", now_ms);
                 s->state = P2P_STATE_RELAY;
                 print("I: %s", LA_S("Using path: RELAY", LA_S69, 95));
             }
@@ -905,6 +918,7 @@ p2p_update(p2p_handle_t hdl) {
             s->state = P2P_STATE_RELAY;
             s->path = P2P_PATH_SIGNALING;
             s->active_addr = relay_available ? relay_addr : s->nat.peer_addr;
+            s->path_mgr.active_path = -2;  // -2=无路径管理器管理的路径
         }
     }
 
@@ -936,7 +950,7 @@ p2p_update(p2p_handle_t hdl) {
             if (addr) {
                 s->path = (best_path == PATH_IDX_SIGNALING) ? P2P_PATH_SIGNALING : P2P_PATH_PUNCH;
                 s->active_addr = *addr;
-                s->path_mgr.active_path = best_path;
+                path_manager_switch_path(s, best_path, "nat_timeout", now_ms);
                 s->state = P2P_STATE_RELAY;
                 print("I: %s", LA_S("Switched to backup path: RELAY", LA_S68, 94));
             }
@@ -944,6 +958,7 @@ p2p_update(p2p_handle_t hdl) {
             // 无备用路径：NAT 层会继续尝试恢复
             s->state = P2P_STATE_RELAY;
             s->nat.state = NAT_RELAY;
+            s->path_mgr.active_path = -2;  // -2=无路径管理器管理的路径
         }
     }
 
@@ -956,12 +971,21 @@ p2p_update(p2p_handle_t hdl) {
         
         // 如果使用高级传输层（DTLS、SCTP、PseudoTCP）
         if (s->trans && s->trans->send_data) {
-            // 由高级传输模块自行处理流的数据
-            n = ring_read(&s->stream.send_ring, buf, sizeof(buf));
-            if (n > 0) {
-                s->trans->send_data(s, buf, n);
-                s->stream.pending_bytes -= n;
-                s->stream.send_offset += n;
+            // 传输层就绪检查：DTLS 握手完成前不 drain 数据，避免丢失
+            int ready = !s->trans->is_ready || s->trans->is_ready(s);
+            if (ready) {
+                // 由高级传输模块自行处理流的数据
+                n = ring_read(&s->stream.send_ring, buf, sizeof(buf));
+                if (n > 0) {
+                    int sent = s->trans->send_data(s, buf, n);
+                    if (sent > 0) {
+                        s->stream.pending_bytes -= n;
+                        s->stream.send_offset += n;
+                    } else {
+                        // send_data 失败，数据已从 ring 消费，记录丢失
+                        print("W:", LA_F("transport send_data failed, %d bytes dropped", 0, 0), n);
+                    }
+                }
             }
         } 
         // 使用基础 reliable 层
@@ -969,8 +993,10 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     // reliable 周期 tick：发送/重传数据包 + 发 ACK
-    if (!s->trans || !s->trans->on_packet) {
-        int is_relay = (s->state == P2P_STATE_RELAY);
+    // 注：仅在无高级传输层时调用。PseudoTCP 虽然 on_packet==NULL（复用 reliable 收包），
+    //     但它有自己的 tick（cwnd 控制），不能再调 reliable_tick，否则双重发送且绕过拥塞控制。
+    if (!s->trans) {
+        int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
         reliable_tick(&s->reliable, s->sock, &s->active_addr, is_relay);
     }
 
@@ -978,6 +1004,17 @@ p2p_update(p2p_handle_t hdl) {
     if (s->trans && s->trans->tick) {
         if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
             s->trans->tick(s);
+        }
+    }
+    
+    // [CRITICAL] 同步高级传输层统计到路径管理器（修复 SCTP/DTLS RTT 监控缺失）
+    if (s->trans && s->trans->get_stats && s->path_mgr.active_path >= -1) {
+        uint32_t rtt_ms = 0;
+        float loss_rate = 0.0f;
+        
+        if (s->trans->get_stats(s, &rtt_ms, &loss_rate) == 0 && rtt_ms > 0) {
+            // success=true 表示使用传输层的 RTT，loss_rate 由传输层内部管理
+            path_manager_update_rtt(s, s->path_mgr.active_path, rtt_ms, true);
         }
     }
 
@@ -1018,7 +1055,7 @@ p2p_update(p2p_handle_t hdl) {
     if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
 
         // 路径健康检查（检测超时、失效路径）
-        path_manager_health_check(s, now_ms);
+        path_manager_tick(s, now_ms);
         
         // 检查 failover 后的状态同步：如果活跃地址与路径管理器不一致，自动同步
         if (s->path_mgr.active_path >= -1) {  // -1=RELAY, >=0=候选

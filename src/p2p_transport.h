@@ -66,11 +66,15 @@ typedef struct reliable {
     uint8_t      recv_bitmap[RELIABLE_WINDOW];          /* 接收位图（标记已收到的包） */
     uint8_t      recv_data[RELIABLE_WINDOW][P2P_MAX_PAYLOAD]; /* 乱序数据缓存 */
     int          recv_lens[RELIABLE_WINDOW];            /* 各槽位数据长度 */
+    bool         need_ack;                              /* 收到新数据，需要发送 ACK */
 
     /* ======================== RTT 估计 ======================== */
     int          srtt;                                  /* 平滑 RTT (毫秒) */
     int          rttvar;                                /* RTT 方差 */
     int          rto;                                   /* 当前重传超时 (毫秒) */
+
+    /* ======================== 回溯指针 ======================== */
+    struct p2p_session *session;                         /* 所属会话（消除 offsetof hack） */
 } reliable_t;
 
 /* ------------------------------ p2p_trans_reliable.c ------------------------------ */
@@ -140,6 +144,13 @@ typedef struct p2p_transport_ops {
     /* 处理来自底层的 UDP 包 */
     void (*on_packet)(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from);
     int  (*is_ready)(struct p2p_session *s);
+    
+    /* 获取传输层统计（用于路径管理器）
+     * @param rtt_ms    输出：当前 RTT（毫秒）
+     * @param loss_rate 输出：丢包率（0.0-1.0）
+     * @return          0=成功，-1=失败（数据不可用）
+     */
+    int (*get_stats)(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate);
 } p2p_transport_ops_t;
 
 // 已知的传输层具体实现

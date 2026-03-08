@@ -76,6 +76,12 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
 static void p2p_pseudotcp_tick(struct p2p_session *s) {
     reliable_t *r = &s->reliable;
     uint64_t now = P_tick_ms();
+    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
+    uint8_t pkt_type = is_relay ? P2P_PKT_RELAY_DATA : P2P_PKT_DATA;
+
+    /* 中继模式：预取 session_id 用于包头 */
+    uint64_t sid = 0;
+    if (is_relay) sid = s->sig_compact_ctx.session_id;
 
     /* 
      * 在 PseudoTCP 模式下，根据 cwnd 限制在途数据包数量
@@ -96,7 +102,14 @@ static void p2p_pseudotcp_tick(struct p2p_session *s) {
 
         if (e->send_time == 0 || now - e->send_time >= (uint64_t)r->rto) {
             /* 发送/重传数据包 */
-            udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
+            if (is_relay) {
+                uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
+                nwrite_ll(relay_pkt, sid);
+                memcpy(relay_pkt + sizeof(uint64_t), e->data, e->len);
+                udp_send_packet(s->sock, &s->active_addr, pkt_type, 0, e->seq, relay_pkt, (int)(sizeof(uint64_t) + e->len));
+            } else {
+                udp_send_packet(s->sock, &s->active_addr, pkt_type, 0, e->seq, e->data, e->len);
+            }
             
             if (e->send_time != 0) {
                 /* 通过超时检测到丢包 */
@@ -109,6 +122,17 @@ static void p2p_pseudotcp_tick(struct p2p_session *s) {
         }
     }
 }
+/*
+ * 获取传输层统计
+ * PseudoTCP 复用基础 reliable 层，直接读取其 SRTT
+ */
+static int pseudotcp_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate) {
+    if (s->reliable.srtt <= 0) return -1;
+    *rtt_ms = (uint32_t)s->reliable.srtt;
+    *loss_rate = 0.0f;  /* 丢包由拥塞控制内部处理 */
+    return 0;
+}
+
 /*
  * PseudoTCP 传输层实现
  */
@@ -127,10 +151,25 @@ static void pseudotcp_tick(struct p2p_session *s) {
     reliable_tick_ack(&s->reliable, s->sock, &s->active_addr, is_relay_mode);
 }
 
+static int pseudotcp_is_ready(struct p2p_session *s) {
+    return (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY);
+}
+
+static void pseudotcp_close(struct p2p_session *s) {
+    /* PseudoTCP 无动态资源，重置拥塞控制状态即可 */
+    s->tcp.cwnd = 0;
+    s->tcp.ssthresh = 0;
+    s->tcp.dup_acks = 0;
+    s->tcp.cc_state = 0;
+}
+
 const p2p_transport_ops_t p2p_trans_pseudotcp = {
     .name = "PseudoTCP",
     .init = pseudotcp_init,
+    .close = pseudotcp_close,
     .send_data = pseudotcp_send,
     .tick = pseudotcp_tick,
-    .on_packet = NULL /* 暂时由通用逻辑分发 */
+    .on_packet = NULL,    /* 复用基础 reliable 层的收包逻辑 */
+    .is_ready = pseudotcp_is_ready,
+    .get_stats = pseudotcp_get_stats
 };

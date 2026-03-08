@@ -172,7 +172,17 @@ static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, ui
      * SCTP 已内置可靠性，因此直接封装为 P2P_PKT_DATA
      * 不需要上层再做 ARQ 处理
      */
-    udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, buffer, (int)length);
+    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
+    if (is_relay) {
+        uint8_t relay_pkt[sizeof(uint64_t) + P2P_MTU];
+        nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
+        if (length > P2P_MTU) return -1;
+        memcpy(relay_pkt + sizeof(uint64_t), buffer, length);
+        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_RELAY_DATA, 0, 0,
+                        relay_pkt, (int)(sizeof(uint64_t) + length));
+    } else {
+        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, buffer, (int)length);
+    }
     return 0;
 }
 
@@ -314,7 +324,7 @@ static void sctp_tick(p2p_session_t *s) {
  * @param from    发送方地址
  */
 static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {
-    if (type != P2P_PKT_DATA) return;
+    if (type != P2P_PKT_DATA && type != P2P_PKT_RELAY_DATA) return;
     (void)from; (void)s; (void)payload;
     
     print("V:", LA_F("[SCTP] received encapsulated packet, length %d", LA_F219, 315), len);
@@ -332,6 +342,33 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
 }
 
 /*
+ * 获取 SCTP 传输层统计
+ *
+ * 完整实现应通过 usrsctp_opt_info() 查询 SCTP_STATUS：
+ *   struct sctp_status status;
+ *   socklen_t len = sizeof(status);
+ *   if (usrsctp_opt_info(sctp_sock, 0, SCTP_STATUS, &status, &len) == 0) {
+ *       *rtt_ms = status.sstat_primary.spinfo_srtt;
+ *       *loss_rate = 0.0f;  // SCTP 内部管理重传
+ *       return 0;
+ *   }
+ */
+static int sctp_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate) {
+    (void)s; (void)rtt_ms; (void)loss_rate;
+    return -1;  /* 骨架实现：统计暂不可用 */
+}
+
+static void sctp_close(p2p_session_t *s) {
+    (void)s;
+    /*
+     * 完整实现：
+     * usrsctp_close(s->sctp_sock);
+     * usrsctp_deregister_address(s);
+     * usrsctp_finish();  // 仅在最后一个实例关闭时
+     */
+}
+
+/*
  * ============================================================================
  * 传输层操作表
  * ============================================================================
@@ -344,10 +381,22 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
  *   - p2p_trans_pseudotcp: TCP 风格拥塞控制
  *   - p2p_trans_sctp:      SCTP 多流可靠/不可靠混合
  */
+/*
+ * SCTP 就绪检查（骨架实现）
+ * 完整实现应检查 usrsctp 关联是否建立（SCTP_COMM_UP 已触发）
+ */
+static int sctp_is_ready(struct p2p_session *s) {
+    (void)s;
+    return 0;  /* 骨架实现：始终未就绪，防止误发数据 */
+}
+
 const p2p_transport_ops_t p2p_trans_sctp = {
-    .name = "SCTP-usrsctp",   /* 传输层名称 */
-    .init = sctp_init,        /* 初始化 */
-    .send_data = sctp_send,   /* 发送数据 */
-    .tick = sctp_tick,        /* 周期处理 */
-    .on_packet = sctp_on_packet  /* 接收处理 */
+    .name = "SCTP-usrsctp",      /* 传输层名称 */
+    .init = sctp_init,           /* 初始化 */
+    .close = sctp_close,         /* 关闭清理 */
+    .send_data = sctp_send,      /* 发送数据 */
+    .tick = sctp_tick,           /* 周期处理 */
+    .on_packet = sctp_on_packet, /* 接收处理 */
+    .is_ready = sctp_is_ready,   /* 就绪检查 */
+    .get_stats = sctp_get_stats  /* 统计查询 */
 };

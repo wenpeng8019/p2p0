@@ -213,8 +213,20 @@ typedef struct {
  */
 static int p2p_dtls_send(void *ctx, const unsigned char *buf, size_t len) {
     p2p_session_t *s = (p2p_session_t *)ctx;
-    int ret = udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, buf, (int)len);
-    if (ret < 0) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
+    
+    if (is_relay) {
+        uint8_t relay_pkt[sizeof(uint64_t) + P2P_MTU];
+        nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
+        if (len > P2P_MTU) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+        memcpy(relay_pkt + sizeof(uint64_t), buf, len);
+        int ret = udp_send_packet(s->sock, &s->active_addr, P2P_PKT_RELAY_DATA, 0, 0,
+                                  relay_pkt, (int)(sizeof(uint64_t) + len));
+        if (ret < 0) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    } else {
+        int ret = udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, buf, (int)len);
+        if (ret < 0) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    }
     return (int)len;  /* MbedTLS 期望返回发送的字节数 */
 }
 
@@ -263,6 +275,10 @@ static int p2p_dtls_recv(void *ctx, unsigned char *buf, size_t len) {
  */
 static int dtls_init(p2p_session_t *s) {
     p2p_dtls_ctx_t *dtls = calloc(1, sizeof(p2p_dtls_ctx_t));
+    if (!dtls) {
+        print("E: %s", LA_S("Failed to allocate DTLS context", 0, 0));
+        return -1;
+    }
     s->transport_data = dtls;
     
     /* 初始化 MbedTLS 各组件 */
@@ -276,13 +292,18 @@ static int dtls_init(p2p_session_t *s) {
      * CTR-DRBG (Counter-mode Deterministic Random Bit Generator)
      * 种子 "p2p" 仅用于个性化，实际随机性来自熵源
      */
-    mbedtls_ctr_drbg_seed(
+    int ret;
+    ret = mbedtls_ctr_drbg_seed(
         &dtls->ctr_drbg,
         mbedtls_entropy_func,
         &dtls->entropy,
         (const unsigned char *)"p2p",
         3
     );
+    if (ret != 0) {
+        print("E:", LA_F("ctr_drbg_seed failed: -0x%x", 0, 0), -ret);
+        goto fail_cleanup;
+    }
     
     /*
      * 配置 SSL：
@@ -290,10 +311,14 @@ static int dtls_init(p2p_session_t *s) {
      *   - 传输：DTLS（数据报）
      *   - 预设：默认（包含常用密码套件）
      */
-    mbedtls_ssl_config_defaults(&dtls->conf,
+    ret = mbedtls_ssl_config_defaults(&dtls->conf,
                                 s->cfg.dtls_server ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT,
                                 MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                 MBEDTLS_SSL_PRESET_DEFAULT);
+    if (ret != 0) {
+        print("E:", LA_F("ssl_config_defaults failed: -0x%x", 0, 0), -ret);
+        goto fail_cleanup;
+    }
                                 
     /*
      * 认证模式：
@@ -339,10 +364,10 @@ static int dtls_init(p2p_session_t *s) {
         mbedtls_ssl_conf_dtls_cookies(&dtls->conf, NULL, NULL, NULL);
     }
 
-    int ret;
-    if ((ret = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F237, 333), -ret);
-        return -1;
+    int ret2;
+    if ((ret2 = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
+        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F237, 333), -ret2);
+        goto fail_cleanup;
     }
     
     /* 设置 BIO 回调（数据发送/接收） */
@@ -352,6 +377,15 @@ static int dtls_init(p2p_session_t *s) {
     mbedtls_ssl_set_timer_cb(&dtls->ssl, &dtls->timer, p2p_dtls_set_timer, p2p_dtls_get_timer);
 
     return 0;
+
+fail_cleanup:
+    mbedtls_ssl_free(&dtls->ssl);
+    mbedtls_ssl_config_free(&dtls->conf);
+    mbedtls_ctr_drbg_free(&dtls->ctr_drbg);
+    mbedtls_entropy_free(&dtls->entropy);
+    free(dtls);
+    s->transport_data = NULL;
+    return -1;
 }
 
 /*
@@ -431,7 +465,8 @@ static void dtls_tick(p2p_session_t *s) {
  */
 static void dtls_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->transport_data;
-    if (!dtls || type != P2P_PKT_DATA) return;
+    if (!dtls) return;
+    if (type != P2P_PKT_DATA && type != P2P_PKT_RELAY_DATA) return;
     (void)from;
 
     /* 检查数据长度 */
@@ -518,6 +553,16 @@ static int dtls_is_ready(p2p_session_t *s) {
  *
  * 注意：DTLS 本身不提供可靠性，如需可靠传输应与 SCTP 组合使用。
  */
+/*
+ * DTLS 是加密层，不跟踪应用级 RTT。
+ * 路径管理器通过 on_packet_recv 时间戳维护路径活性。
+ * 如需 RTT 监控，应组合 SCTP over DTLS 或添加应用层 ping 机制。
+ */
+static int dtls_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate) {
+    (void)s; (void)rtt_ms; (void)loss_rate;
+    return -1;
+}
+
 const p2p_transport_ops_t p2p_trans_dtls = {
     .name      = "DTLS-MbedTLS",   /* 传输层名称 */
     .init      = dtls_init,        /* 初始化 */
@@ -525,5 +570,6 @@ const p2p_transport_ops_t p2p_trans_dtls = {
     .send_data = dtls_send,        /* 发送数据 */
     .on_packet = dtls_on_packet,   /* 接收处理 */
     .is_ready  = dtls_is_ready,    /* 就绪检查 */
-    .close     = dtls_close        /* 关闭清理 */
+    .close     = dtls_close,       /* 关闭清理 */
+    .get_stats = dtls_get_stats    /* 统计查询（加密层无 RTT） */
 };

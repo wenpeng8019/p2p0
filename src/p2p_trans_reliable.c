@@ -90,6 +90,7 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
         memcpy(r->recv_data[idx], payload, len);
         r->recv_lens[idx] = len;
         r->recv_bitmap[idx] = 1;
+        r->need_ack = true;  // 标记需要发送 ACK
         print("V:", LA_F("Data stored in recv buffer seq=%u len=%d base=%u", LA_F129, 225),
                         seq, len, r->recv_base);
     }
@@ -115,7 +116,7 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
             r->send_count--;
 
             // PseudoTCP：在 ACK 时更新窗口（仅当启用拥塞控制时，避免 cwnd=0 除零崩溃）
-            struct p2p_session *s = (struct p2p_session *)((char *)r - offsetof(struct p2p_session, reliable));
+            struct p2p_session *s = r->session;
             if (s->cfg.use_pseudotcp)
                 p2p_pseudotcp_on_ack(s, ack_seq);
 
@@ -184,26 +185,27 @@ static int build_ack_payload(const reliable_t *r, uint8_t *buf) {
  * 仅在需要时发送 ACK
  */
 void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode) {
-    if (r->recv_base > 0 || r->recv_bitmap[r->recv_base % RELIABLE_WINDOW]) {
-        uint8_t ack_payload[6];
-        build_ack_payload(r, ack_payload);
-        uint16_t ack_seq = nget_s(ack_payload);
-        uint32_t sack = nget_l(ack_payload + 2);
-        printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F236, 332),
-                      ack_seq, sack, r->recv_base,
-                      addr ? inet_ntoa(addr->sin_addr) : "?",
-                      addr ? ntohs(addr->sin_port) : 0);
-        // 中继模式使用 RELAY_ACK，直连P2P使用 ACK
-        uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_ACK : P2P_PKT_ACK;
-        if (is_relay_mode) {
-            struct p2p_session *s = (struct p2p_session *)((char *)r - offsetof(struct p2p_session, reliable));
-            uint8_t relay_ack[sizeof(uint64_t) + 6];
-            nwrite_ll(relay_ack, s->sig_compact_ctx.session_id);
-            memcpy(relay_ack + sizeof(uint64_t), ack_payload, 6);
-            udp_send_packet(sock, addr, pkt_type, 0, 0, relay_ack, (int)(sizeof(uint64_t) + 6));
-        } else {
-            udp_send_packet(sock, addr, pkt_type, 0, 0, ack_payload, 6);
-        }
+    if (!r->need_ack) return;  // 没有新数据时不发 ACK，避免空闲时 100 ACK/s 洪泛
+    r->need_ack = false;
+
+    uint8_t ack_payload[6];
+    build_ack_payload(r, ack_payload);
+    uint16_t ack_seq = nget_s(ack_payload);
+    uint32_t sack = nget_l(ack_payload + 2);
+    printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F236, 332),
+                  ack_seq, sack, r->recv_base,
+                  addr ? inet_ntoa(addr->sin_addr) : "?",
+                  addr ? ntohs(addr->sin_port) : 0);
+    // 中继模式使用 RELAY_ACK，直连P2P使用 ACK
+    uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_ACK : P2P_PKT_ACK;
+    if (is_relay_mode) {
+        struct p2p_session *s = r->session;
+        uint8_t relay_ack[sizeof(uint64_t) + 6];
+        nwrite_ll(relay_ack, s->sig_compact_ctx.session_id);
+        memcpy(relay_ack + sizeof(uint64_t), ack_payload, 6);
+        udp_send_packet(sock, addr, pkt_type, 0, 0, relay_ack, (int)(sizeof(uint64_t) + 6));
+    } else {
+        udp_send_packet(sock, addr, pkt_type, 0, 0, ack_payload, 6);
     }
 }
 
@@ -223,8 +225,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
     /* 中继模式：预取 session_id 用于包头 */
     uint64_t sid = 0;
     if (is_relay_mode) {
-        struct p2p_session *s = (struct p2p_session *)((char *)r - offsetof(struct p2p_session, reliable));
-        sid = s->sig_compact_ctx.session_id;
+        sid = r->session->sig_compact_ctx.session_id;
     }
 
     /* 遍历所有未确认的发送条目 */

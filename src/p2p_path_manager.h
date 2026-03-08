@@ -149,9 +149,16 @@ typedef struct {
 } path_threshold_config_t;
 
 /*
- * 路径索引特殊值
+ * 路径索引特殊值（内部索引，不是 p2p_path_t 类型枚举）
+ * 
+ * 说明：路径管理器使用整数索引标识路径在数据结构中的位置：
+ *   - active_path >= 0：路径在 remote_cands[active_path] 数组中
+ *   - active_path == -1：特殊路径（SIGNALING），在 path_mgr.signaling 结构中，不在数组里
+ *   - active_path == -2：无有效路径
+ * 
+ * 通过 path_idx_to_type() 转换为公共 API 的 p2p_path_t 枚举类型。
  */
-#define PATH_IDX_SIGNALING (-1)  // 信令转发(SIGNALING)路径（不在候选列表中，非TURN）
+#define PATH_IDX_SIGNALING (-1)  // 信令转发(SIGNALING)路径索引（不在候选数组中，非 TURN relay）
 
 /*
  * 路径管理
@@ -166,12 +173,12 @@ typedef struct {
     /* 当前活跃路径（索引语义见上）*/
     int                 active_path;                // -1=PATH_IDX_SIGNALING, >=0=候选索引
     
-    /* 信令转发(SIGNALING)特殊处理（不是候选，非TURN） */
+    /* 信令转发(SIGNALING)特殊处理（不是候选，非 TURN relay） */
     struct {
         bool                active;                 // 是否启用
         struct sockaddr_in  addr;                   // 信令服务器地址
         path_stats_t        stats;                  // 统计信息
-    } relay;
+    } signaling;
     
     /* 自动切换参数 */
     uint64_t            path_switch_cooldown_ms;    // 切换冷却时间（避免频繁切换）
@@ -246,7 +253,7 @@ void path_stats_init(path_stats_t *st, int cost_score);
  * @param addr      信令服务器地址
  * @return          0=成功，-1=失败
  */
-int path_manager_enable_relay(p2p_session_t *s, struct sockaddr_in *addr);
+int path_manager_enable_signaling(p2p_session_t *s, struct sockaddr_in *addr);
 
 /*
  * 配置 TURN 支持
@@ -311,27 +318,21 @@ int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms);
 int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms, uint32_t size);
 
 /*
- * 更新路径性能指标（RTT/丢包率 EWMA）
+ * 更新路径管理器的 RTT 数据（支持基础 reliable 层和高级传输层）
  *
  * @param s         会话指针
  * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
  * @param rtt_ms    往返延迟（毫秒）
  * @param success   是否成功（用于计算丢包率）
  * @return          0=成功，-1=失败
- */
-int path_manager_update_metrics(p2p_session_t *s, int path_idx, uint32_t rtt_ms, bool success);
-
-/*
- * 更新路径质量评估
  *
- * @param s         会话指针
- * @param path_idx  路径索引
- * @return          0=成功，-1=失败
+ * @note 质量评估会自动触发（有节流保护），无需单独调用刷新函数
+ * @note 支持基础 reliable 层和高级传输层（DTLS/SCTP）的统计同步
  */
-int path_manager_update_quality(p2p_session_t *s, int path_idx);
+int path_manager_update_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms, bool success);
 
 /*
- * 路径健康检查（周期性调用，驱动超时检测与故障恢复）
+ * 路径管理器周期性维护（驱动超时检测与故障恢复）
  *
  * - 检查所有路径的超时状态，将失效路径标记为 FAILED
  * - 尝试恢复 RECOVERING 状态的路径
@@ -340,7 +341,7 @@ int path_manager_update_quality(p2p_session_t *s, int path_idx);
  * @param s         会话指针
  * @param now_ms    当前时间（毫秒）
  */
-void path_manager_health_check(p2p_session_t *s, uint64_t now_ms);
+void path_manager_tick(p2p_session_t *s, uint64_t now_ms);
 
 /* ============================================================================
  * 操作执行

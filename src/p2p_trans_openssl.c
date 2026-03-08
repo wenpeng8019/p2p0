@@ -41,9 +41,18 @@ static unsigned int psk_server_cb(SSL *ssl, const char *identity, unsigned char 
 
 static int openssl_init(p2p_session_t *s) {
     p2p_openssl_ctx_t *os = calloc(1, sizeof(p2p_openssl_ctx_t));
+    if (!os) {
+        print("E: %s", LA_S("Failed to allocate OpenSSL context", 0, 0));
+        return -1;
+    }
     s->transport_data = os;
 
     os->ctx = SSL_CTX_new(DTLS_method());
+    if (!os->ctx) {
+        print("E: %s", LA_S("SSL_CTX_new failed", 0, 0));
+        free(os); s->transport_data = NULL;
+        return -1;
+    }
     SSL_CTX_set_verify(os->ctx, SSL_VERIFY_NONE, NULL);
 
     /* Support PSK */
@@ -53,11 +62,24 @@ static int openssl_init(p2p_session_t *s) {
     }
 
     os->ssl = SSL_new(os->ctx);
+    if (!os->ssl) {
+        print("E: %s", LA_S("SSL_new failed", 0, 0));
+        SSL_CTX_free(os->ctx); free(os); s->transport_data = NULL;
+        return -1;
+    }
     SSL_set_ex_data(os->ssl, 0, s);
     
     /* 使用 Memory BIO 以便手动注入/提取包 */
     os->read_bio = BIO_new(BIO_s_mem());
     os->write_bio = BIO_new(BIO_s_mem());
+    if (!os->read_bio || !os->write_bio) {
+        print("E: %s", LA_S("BIO_new failed", 0, 0));
+        if (os->read_bio) BIO_free(os->read_bio);
+        if (os->write_bio) BIO_free(os->write_bio);
+        SSL_free(os->ssl); SSL_CTX_free(os->ctx);
+        free(os); s->transport_data = NULL;
+        return -1;
+    }
     BIO_set_mem_eof_return(os->read_bio, -1);
     BIO_set_mem_eof_return(os->write_bio, -1);
 
@@ -72,6 +94,24 @@ static int openssl_init(p2p_session_t *s) {
     return 0;
 }
 
+/* OpenSSL BIO 输出 + 中继封装辅助函数 */
+static void openssl_flush_write_bio(p2p_session_t *s, BIO *write_bio) {
+    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
+    char enc_buf[P2P_MTU];
+    int enc_len;
+    while ((enc_len = BIO_read(write_bio, enc_buf, sizeof(enc_buf))) > 0) {
+        if (is_relay) {
+            uint8_t relay_pkt[sizeof(uint64_t) + P2P_MTU];
+            nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
+            memcpy(relay_pkt + sizeof(uint64_t), enc_buf, enc_len);
+            udp_send_packet(s->sock, &s->active_addr, P2P_PKT_RELAY_DATA, 0, 0,
+                            relay_pkt, (int)(sizeof(uint64_t) + enc_len));
+        } else {
+            udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, enc_buf, enc_len);
+        }
+    }
+}
+
 static int openssl_send(p2p_session_t *s, const void *buf, int len) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->transport_data;
     if (!os || !os->ssl) return -1;
@@ -80,11 +120,7 @@ static int openssl_send(p2p_session_t *s, const void *buf, int len) {
     if (ret <= 0) return 0;
 
     /* 检查是否有加密包需要从 write_bio 发出 (即写往底层 UDP) */
-    char enc_buf[P2P_MTU];
-    int enc_len;
-    while ((enc_len = BIO_read(os->write_bio, enc_buf, sizeof(enc_buf))) > 0) {
-        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, enc_buf, enc_len);
-    }
+    openssl_flush_write_bio(s, os->write_bio);
 
     return ret;
 }
@@ -103,11 +139,7 @@ static void openssl_tick(p2p_session_t *s) {
     }
 
     /* 检查是否有加密包需要从 write_bio 发出 (例如握手包或重传) */
-    char enc_buf[P2P_MTU];
-    int enc_len;
-    while ((enc_len = BIO_read(os->write_bio, enc_buf, sizeof(enc_buf))) > 0) {
-        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, enc_buf, enc_len);
-    }
+    openssl_flush_write_bio(s, os->write_bio);
 }
 
 static int openssl_is_ready(p2p_session_t *s) {
@@ -117,7 +149,8 @@ static int openssl_is_ready(p2p_session_t *s) {
 
 static void openssl_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->transport_data;
-    if (!os || type != P2P_PKT_DATA) return;
+    if (!os) return;
+    if (type != P2P_PKT_DATA && type != P2P_PKT_RELAY_DATA) return;
     (void)from;
 
     /* 注入底层收到的加密包到 read_bio */
@@ -137,10 +170,18 @@ static void openssl_on_packet(struct p2p_session *s, uint8_t type, const uint8_t
 static void openssl_close(p2p_session_t *s) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->transport_data;
     if (!os) return;
+    /* 注意：SSL_free 会自动释放通过 SSL_set_bio 关联的 BIO，
+     * 因此不需要单独 BIO_free(read_bio/write_bio) */
     if (os->ssl) SSL_free(os->ssl);
     if (os->ctx) SSL_CTX_free(os->ctx);
     free(os);
     s->transport_data = NULL;
+}
+
+/* DTLS 加密层不跟踪 RTT，参见 p2p_trans_mbedtls.c 的说明 */
+static int openssl_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate) {
+    (void)s; (void)rtt_ms; (void)loss_rate;
+    return -1;
 }
 
 const p2p_transport_ops_t p2p_trans_openssl = {
@@ -150,5 +191,6 @@ const p2p_transport_ops_t p2p_trans_openssl = {
     .send_data = openssl_send,
     .on_packet = openssl_on_packet,
     .is_ready  = openssl_is_ready,
-    .close     = openssl_close
+    .close     = openssl_close,
+    .get_stats = openssl_get_stats
 };
