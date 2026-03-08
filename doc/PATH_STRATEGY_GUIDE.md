@@ -372,7 +372,7 @@ path_quality_t quality = path_manager_get_quality(&pm, path_chn);
 float score = path_manager_get_quality_score(&pm, path_chn);
 
 // 预测质量趋势（-1.0 到 1.0）
-float trend = path_manager_predict_trend(&pm, path_chn);
+float trend = path_manager_get_quality_trend(&pm, path_chn);
 
 // 获取稳定性（0-100）
 int stability = pm.paths[path_chn].stability_score;
@@ -439,7 +439,7 @@ if (s->path_mgr.active_path >= 0) {
 
 ```c
 // 预测路径质量趋势
-float trend = path_manager_predict_trend(&s->path_mgr, s->path_mgr.active_path);
+float trend = path_manager_get_quality_trend(&s->path_mgr, s->path_mgr.active_path);
 
 if (trend < -0.3) {
     printf("网络质量正在改善\n");
@@ -456,7 +456,7 @@ if (trend < -0.3) {
 // 获取路径详细信息
 path_info_t *path = path_manager_get_active_path(&s->path_mgr);
 if (path) {
-    printf("路径: %s\n", path_type_str(path->type));
+    printf("路径: %s\n", p2p_path_type_str(path->type));
     printf("RTT: %u ms (min: %u, max: %u)\n", 
            path->rtt_ms, path->rtt_min, path->rtt_max);
     printf("丢包率: %.2f%%\n", path->loss_rate * 100);
@@ -504,10 +504,10 @@ int count = path_manager_get_switch_history(&pm, history, 20);
 for (int i = 0; i < count; i++) {
     printf("切换 #%d: %s(%dms, %.1f%%) → %s(%dms, %.1f%%) | %s\n",
         i + 1,
-        path_type_str(history[i].from_type),
+        p2p_path_type_str(history[i].from_type),
         history[i].from_rtt_ms,
         history[i].from_loss_rate * 100,
-        path_type_str(history[i].to_type),
+        p2p_path_type_str(history[i].to_type),
         history[i].to_rtt_ms,
         history[i].to_loss_rate * 100,
         history[i].reason);
@@ -548,7 +548,7 @@ switch (result) {
 
 ```c
 // 分析最近 30 秒的切换频率
-int switches = path_manager_analyze_switch_frequency(&pm, 30000);
+int switches = path_manager_get_switch_frequency(&pm, 30000);
 
 if (switches > 5) {
     printf("⚠️  路径抖动检测：30秒内切换 %d 次\n", switches);
