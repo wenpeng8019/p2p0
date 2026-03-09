@@ -99,15 +99,41 @@ LDFLAGS += -lpthread
 endif
 endif
 
+# --- i18n code generation ---
+# Usage:  make                    (debug: SID-based stable IDs)
+#         make I18N_NDEBUG=1      (release: compact sequential IDs)
+#         make i18n               (force re-run i18n extraction)
+I18N_SCRIPT  = i18n/i18n.sh
+I18N_FLAGS   =
+ifdef I18N_NDEBUG
+	I18N_FLAGS += --ndebug
+endif
+
+# Stamp file breaks the dependency cycle: i18n.sh rewrites *.c (updating mtime),
+# but the stamp only updates after a successful run, not on every source change.
+I18N_STAMP   = $(BUILDDIR)/.i18n_stamp
+
 # Generate object file list after all source modifications
 OBJS     = $(patsubst %.c,$(TMPDIR)/%.o,$(SRCS))
 
 # Static library target
 LIBP2P   = $(BUILDDIR)/libp2p.a
 
-.PHONY: all clean
+.PHONY: all clean i18n
 
 all: $(LIBP2P)
+
+# i18n: explicit target always re-runs extraction
+i18n:
+	$(I18N_SCRIPT) $(SRCDIR) $(I18N_FLAGS)
+	@mkdir -p $(BUILDDIR) && touch $(I18N_STAMP)
+
+# Stamp rule: run i18n.sh when script itself changes or stamp is missing.
+# Source file changes don't auto-trigger (avoids mtime cycle from rewrite).
+# Use 'make i18n' to manually refresh after adding/removing LA_* calls.
+$(I18N_STAMP): $(I18N_SCRIPT) | $(BUILDDIR)
+	$(I18N_SCRIPT) $(SRCDIR) $(I18N_FLAGS)
+	@touch $@
 
 $(LIBP2P): $(OBJS) $(MBEDTLS_DEP) | $(BUILDDIR)
 	ar rcs $@ $(OBJS)
@@ -115,7 +141,7 @@ $(LIBP2P): $(OBJS) $(MBEDTLS_DEP) | $(BUILDDIR)
 $(MBEDTLS_LIBS):
 	$(MAKE) -C $(MBEDTLS_DIR) library
 
-$(TMPDIR)/%.o: $(SRCDIR)/%.c include/p2p.h $(SRCDIR)/p2p_internal.h | $(TMPDIR)
+$(TMPDIR)/%.o: $(SRCDIR)/%.c include/p2p.h $(SRCDIR)/p2p_internal.h $(I18N_STAMP) | $(TMPDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILDDIR):
