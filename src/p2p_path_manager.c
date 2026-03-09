@@ -11,6 +11,7 @@
  *   path_manager 仅做决策与状态驱动，所有 API 第一个参数为 p2p_session_t *s。
  *
  *   路径用 cost_score 分类：0=直连(LAN/PUNCH)  5=信令转发(SIGNALING)  >=8=TURN。
+ *   注意：SIGNALING 虽 cost_score=5，但优先级最低（最终兜底），低于 TURN。
  *
  *
  * 【状态机】
@@ -31,13 +32,14 @@
  *
  * 【路径选择策略】
  *
- *   1. CONNECTION_FIRST — 按成本优先级：直连 > TURN候选 > 信令转发(SIGNALING) > 其他TURN。
+ *   SIGNALING（信令服务）不是专用中转，始终作为最终兜底，优先级低于 TURN。
+ *   TURN 路径仅在 use_as_last_resort 且所有直连/中继路径失效时启用。
+ *
+ *   1. CONNECTION_FIRST — 按成本优先级：直连 > 中继候选 > TURN > 信令转发(SIGNALING)。
  *   2. PERFORMANCE_FIRST — 加权评分 0.5×RTT + 0.3×loss + 0.2×jitter，
- *      中继路径 ×0.8 成本惩罚，选最高分。
+ *      中继/TURN ×0.8、SIGNALING ×0.5 成本惩罚，选最高分。
  *   3. HYBRID — 直连良好(RTT<100ms, loss<1%)则用直连；
  *      中继显著更优(RTT差>阈值 或 loss>阈值)才切换；否则优先直连。
- *
- *   TURN 路径仅在 use_as_last_resort 且所有非 TURN 路径失效时启用。
  *
  *
  * 【RTT 测量 — TCP EWMA 算法】
@@ -95,7 +97,7 @@ static void update_quality(path_stats_t *p);
  *   LAN 候选（stats.is_lan）→ P2P_PATH_LAN
  *   其他候选 → P2P_PATH_PUNCH
  */
-static p2p_path_t path_idx_to_type(p2p_session_t *s, int path_idx) {
+p2p_path_t path_manager_get_path_type(p2p_session_t *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
         return P2P_PATH_SIGNALING;
     if (path_idx < 0 || path_idx >= s->remote_cand_cnt)
@@ -271,8 +273,9 @@ static bool path_is_turn(const path_stats_t *stats) {
 }
 
 /*
- * 判断是否应该使用TURN
- *   遍历候选列表，检查是否所有非TURN路径都失效
+ * 判断是否应该使用TURN（last_resort 模式下的前置检查）
+ *   遍历候选列表，检查是否所有直连/中继路径都失效
+ *   SIGNALING 不阻止 TURN 启用，因为 SIGNALING 优先级低于 TURN
  */
 static bool should_use_turn(p2p_session_t *s) {
     path_manager_t *pm = &s->path_mgr;
@@ -281,28 +284,21 @@ static bool should_use_turn(p2p_session_t *s) {
     // 策略上，如果 TURN 不是作为最后手段，则总是可用
     if (!pm->turn_config.use_as_last_resort) return true;
     
-    /* 检查是否存在非 TURN 的可用路径 */
-    
-    /* 信令转发(SIGNALING)可用？ */
-    if (pm->signaling.active && path_is_selectable(pm->signaling.stats.state)) {
-        return false; // 有非TURN备选，不需要TURN
-    }
-    
-    // 检查候选中是否存在非 TURN 的可用路径
+    /* 检查是否存在非 TURN 的可用直连/中继路径（不含 SIGNALING） */
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         path_stats_t *st = &s->remote_cands[i].stats;
-        if (path_is_turn(st)) continue;         // 跳过TURN自身
+        if (path_is_turn(st)) continue;
         if (path_is_selectable(st->state)) {
-            return false; // 存在非 TURN 备选
+            return false; // 存在直连/中继备选
         }
     }
     
-    return true; // 所有非 TURN 路径失效，需要启用 TURN
+    return true; // 所有直连/中继路径失效，可以启用 TURN
 }
 
 /*
  * 策略 1: CONNECTION_FIRST（P2P 直连优先）
- *   优先选直连(cost=0)，其次RELAY(cost=5)，最后TURN(cost>=8)
+ *   优先级：直连 > 中继候选 > TURN > 信令转发(SIGNALING)
  */
 static int select_path_connection_first(p2p_session_t *s) {
     path_manager_t *pm = &s->path_mgr;
@@ -340,14 +336,13 @@ static int select_path_connection_first(p2p_session_t *s) {
     }
 
     /* 检查信令转发(SIGNALING) */
-    bool relay_ok = pm->signaling.active && path_is_selectable(pm->signaling.stats.state);
+    bool signaling_ok = pm->signaling.active && path_is_selectable(pm->signaling.stats.state);
 
-    /* 优先级：直连 > 中继候选 > 信令转发(SIGNALING) > TURN */
+    /* 优先级：直连 > 中继候选 > TURN > 信令转发(SIGNALING) */
     if (best_direct >= 0) return best_direct;
     if (best_relay_cand >= 0) return best_relay_cand;
-    if (relay_ok) return PATH_IDX_SIGNALING;
 
-    /* 最终尝试 TURN（last_resort） */
+    /* TURN：非 last_resort 模式下在主循环中已收集 */
     if (best_turn >= 0) return best_turn;
     if (pm->turn_config.use_as_last_resort) {
         /* last_resort 模式：重新扫描找RTT最低的TURN */
@@ -364,6 +359,10 @@ static int select_path_connection_first(p2p_session_t *s) {
         }
         if (turn_fallback >= 0) return turn_fallback;
     }
+
+    /* 信令转发(SIGNALING)：最终兜底 */
+    if (signaling_ok) return PATH_IDX_SIGNALING;
+
     return -2; /* 无可用路径 */
 }
 
@@ -399,13 +398,13 @@ static int select_path_performance_first(p2p_session_t *s) {
         }
     }
 
-    /* 评估信令转发(SIGNALING) */
+    /* 评估信令转发(SIGNALING)：最终兜底，惩罚系数大于 TURN（×0.5 vs ×0.8） */
     if (pm->signaling.active && path_is_selectable(pm->signaling.stats.state)) {
         path_stats_t *rst = &pm->signaling.stats;
         float rtt_score = 1.0f - fminf((float)rst->rtt_ms / 500.0f, 1.0f);
         float loss_score = 1.0f - rst->loss_rate;
         float jitter_score = 1.0f - fminf((float)rst->rtt_variance / 100.0f, 1.0f);
-        float score = (0.5f * rtt_score + 0.3f * loss_score + 0.2f * jitter_score) * 0.8f;
+        float score = (0.5f * rtt_score + 0.3f * loss_score + 0.2f * jitter_score) * 0.5f;
 
         if (score > best_score) {
             best_path = PATH_IDX_SIGNALING;
@@ -422,7 +421,7 @@ static int select_path_performance_first(p2p_session_t *s) {
 static int select_path_hybrid(p2p_session_t *s) {
     path_manager_t *pm = &s->path_mgr;
     int best_direct = -2;
-    int best_relay = -2;    /* 包括TURN候选和信令转发(SIGNALING) */
+    int best_relay = -2;    /* 非 TURN 中继候选（不含 SIGNALING） */
     int best_turn = -2;
     uint32_t direct_rtt = UINT32_MAX;
     float direct_loss = 1.0f;
@@ -456,16 +455,6 @@ static int select_path_hybrid(p2p_session_t *s) {
         }
     }
 
-    /* 考虑信令转发(SIGNALING) */
-    if (pm->signaling.active && path_is_selectable(pm->signaling.stats.state)) {
-        path_stats_t *rst = &pm->signaling.stats;
-        if (rst->rtt_ms < relay_rtt) {
-            relay_rtt = rst->rtt_ms;
-            relay_loss = rst->loss_rate;
-            best_relay = PATH_IDX_SIGNALING;
-        }
-    }
-
     /* 决策逻辑 */
     if (best_direct >= 0) {
         /* 直连性能良好：RTT < 100ms 且 loss < 1% → 用直连 */
@@ -473,11 +462,11 @@ static int select_path_hybrid(p2p_session_t *s) {
             return best_direct;
 
         /* 没有中继替代方案：仍用直连 */
-        if (best_relay < -1)
+        if (best_relay < 0)
             return best_direct;
 
         /* 根据当前活跃路径类型取对应阈值（无活跃路径时使用标准PUNCH阈值） */
-        p2p_path_t cur_type = path_idx_to_type(s, pm->active_path);
+        p2p_path_t cur_type = path_manager_get_path_type(s, pm->active_path);
         if (cur_type == P2P_PATH_NONE) cur_type = P2P_PATH_PUNCH;
         const path_threshold_config_t *thr = &pm->thresholds[cur_type];
 
@@ -494,12 +483,16 @@ static int select_path_hybrid(p2p_session_t *s) {
     }
 
     /* 无直连：用中继 */
-    if (best_relay >= -1)
+    if (best_relay >= 0)
         return best_relay;
 
-    /* TURN 兜底 */
+    /* TURN */
     if (best_turn >= 0 && should_use_turn(s))
         return best_turn;
+
+    /* 信令转发(SIGNALING)：最终兜底 */
+    if (pm->signaling.active && path_is_selectable(pm->signaling.stats.state))
+        return PATH_IDX_SIGNALING;
 
     return -2; /* 无可用路径 */
 }
@@ -530,7 +523,7 @@ static bool should_debounce_switch(p2p_session_t *s,
     path_manager_t *pm = &s->path_mgr;
     
     // 1. 冷却期检查：根据目标路径类型取对应的冷却时间
-    p2p_path_t target_type = path_idx_to_type(s, target_path);
+    p2p_path_t target_type = path_manager_get_path_type(s, target_path);
     uint64_t cooldown = pm->thresholds[target_type].cooldown_ms;
     if (cooldown == 0) cooldown = DEFAULT_COOLDOWN_MS;
     if (now_ms - pm->last_switch_time < cooldown) {
@@ -585,7 +578,7 @@ static void record_switch(p2p_session_t *s, int from_path, int to_path,
 
     path_stats_t *fs = path_manager_get_stats(s, from_path);
     if (fs) {
-        rec->from_type = path_idx_to_type(s, from_path);
+        rec->from_type = path_manager_get_path_type(s, from_path);
         rec->from_rtt_ms = fs->rtt_ms;
         rec->from_loss_rate = fs->loss_rate;
     } else {
@@ -596,7 +589,7 @@ static void record_switch(p2p_session_t *s, int from_path, int to_path,
 
     path_stats_t *ts = path_manager_get_stats(s, to_path);
     if (ts) {
-        rec->to_type = path_idx_to_type(s, to_path);
+        rec->to_type = path_manager_get_path_type(s, to_path);
         rec->to_rtt_ms = ts->rtt_ms;
         rec->to_loss_rate = ts->loss_rate;
     } else {
@@ -999,16 +992,32 @@ int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms,
     return 0;
 }
 
-int path_manager_update_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms, bool success) {
+int path_manager_on_data_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms) {
     path_stats_t *p = path_manager_get_stats(s, path_idx);
     if (!p) return -1;
 
-    // 实时更新 RTT 和丢包率统计（基于 EWMA 平滑算法）
-    update_metrics(p, rtt_ms, success);
+    // 实时更新 RTT 统计（基于 EWMA 平滑算法）
+    update_metrics(p, rtt_ms, true);
     
     // 定期更新路径质量评估，有节流保护（1秒最多更新一次）
     update_quality(p);
     
+    return 0;
+}
+
+int path_manager_on_data_loss_rate(p2p_session_t *s, int path_idx, float loss_rate) {
+    path_stats_t *p = path_manager_get_stats(s, path_idx);
+    if (!p) return -1;
+
+    p->data_loss_rate = loss_rate;
+
+    // 综合丢包率 = max(探测层, 数据层)
+    float probe_loss = (p->total_packets_sent > 0)
+        ? (float)p->total_packets_lost / (float)p->total_packets_sent
+        : 0.0f;
+    p->loss_rate = fmaxf(probe_loss, p->data_loss_rate);
+    
+    update_quality(p);
     return 0;
 }
 
@@ -1040,9 +1049,12 @@ static void update_metrics(path_stats_t *p, uint32_t rtt_ms, bool success) {
         p->consecutive_timeouts = 0;
     }
     
-    // 重新计算丢包率（基于已有计数器，计数器在 on_packet_send/loss 中更新）
+    // 重新计算丢包率：综合 = max(探测层, 数据层)
     if (p->total_packets_sent > 0) {
-        p->loss_rate = (float)p->total_packets_lost / (float)p->total_packets_sent;
+        float probe_loss = (float)p->total_packets_lost / (float)p->total_packets_sent;
+        p->loss_rate = fmaxf(probe_loss, p->data_loss_rate);
+    } else if (p->data_loss_rate > 0.0f) {
+        p->loss_rate = p->data_loss_rate;
     }
 }
 

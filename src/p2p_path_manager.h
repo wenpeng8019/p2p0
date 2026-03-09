@@ -1,17 +1,5 @@
 /*
  * 多路径管理器 (Multi-Path Manager)
- *
- * 功能：
- *   - 并行维护多条传输路径（LAN/PUNCH/RELAY/TURN）
- *   - 根据策略自动选择最优路径
- *   - 支持路径动态切换和故障转移
- *   - 实时监控路径质量:（RTT、丢包率、抖动）
- *
- * 设计原则：
- *   - 路径独立：多条路径并行工作，互不影响
- *   - 策略可配：支持直连优先、性能优先、混合模式
- *   - 平滑切换：路径切换对应用层透明
- *   - 故障恢复：失效路径自动探测恢复
  */
 
 #ifndef P2P_PATH_MANAGER_H
@@ -60,7 +48,8 @@ typedef struct {
     uint32_t            rtt_min;                    // 最小 RTT（基线）
     uint32_t            rtt_max;                    // 最大 RTT
     uint32_t            rtt_variance;               // 延迟抖动
-    float               loss_rate;                  // 丢包率（0.0-1.0）
+    float               loss_rate;                  // 综合丢包率（0.0-1.0），取 probe 和 data 两层的最大值
+    float               data_loss_rate;             // 数据层丢包率（来自 reliable/SCTP/DTLS 传输层）
     uint64_t            bandwidth_bps;              // 估计带宽（bps）
     
     /* RTT 平滑（EWMA: Exponentially Weighted Moving Average） */
@@ -280,10 +269,35 @@ int path_manager_add_turn_path(p2p_session_t *s, struct sockaddr_in *addr);
 
 /* ============================================================================
  * 状态驱动（外部事件 → 驱动内部状态机）
+ *
+ * 两组统计接口：
+ *   Group 1 — 探测层（probe, 面向所有路径）：
+ *     path_manager_on_packet_recv / path_manager_on_packet_send / path_manager_on_packet_ack
+ *     用于 NAT punch/alive 包在各路径上的 RTT 测量和丢包检测。
+ *     丢包由 path_manager_tick 扫描 pending 队列超时判定。
+ *
+ *   Group 2 — 数据层（data, 面向当前活跃路径）：
+ *     path_manager_on_packet_recv / path_manager_on_data_rtt / path_manager_on_data_loss_rate
+ *     用于 DATA 传输包的接收统计、RTT 同步和数据层丢包率上报。
+ *     RTT 来自 reliable 层 SRTT 或高级传输层 get_stats。
+ *     丢包率来自高级传输层 get_stats（基础 reliable 层无聚合丢包计数）。
  * ============================================================================ */
 
+ /*
+ * 记录数据包接收（更新路径活跃时间和流量统计）
+ *
+ * @param s         会话指针
+ * @param path_idx  接收路径索引
+ * @param now_ms    当前时间（毫秒）
+ * @param size      包大小（字节），0表示不计入流量统计
+ * @return          0=成功，-1=失败
+ */
+int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms, uint32_t size);
+
+/* ---- Group 1: 探测层统计（全路径 punch/alive 包） ---- */
+
 /*
- * 记录数据包发送（开始 RTT 测量）
+ * 记录探测包发送（开始 per-path RTT 测量）
  *
  * @param s         会话指针
  * @param path_idx  发送路径索引
@@ -295,7 +309,7 @@ int path_manager_add_turn_path(p2p_session_t *s, struct sockaddr_in *addr);
 int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size);
 
 /*
- * 记录数据包确认（完成 RTT 测量）
+ * 记录探测包确认（完成 per-path RTT 测量）
  *
  * @param s         会话指针
  * @param seq       确认的序列号
@@ -304,30 +318,35 @@ int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, ui
  */
 int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms);
 
-/*
- * 记录数据包接收（更新路径活跃时间和流量统计）
- *
- * @param s         会话指针
- * @param path_idx  接收路径索引
- * @param now_ms    当前时间（毫秒）
- * @param size      包大小（字节），0表示不计入流量统计
- * @return          0=成功，-1=失败
- */
-int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms, uint32_t size);
+/* ---- Group 2: 数据层统计（活跃路径 DATA 包） ---- */
 
 /*
- * 更新路径管理器的 RTT 数据（支持基础 reliable 层和高级传输层）
+ * 更新活跃路径的 RTT（来自 reliable 层 SRTT 或高级传输层 get_stats）
  *
  * @param s         会话指针
  * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
  * @param rtt_ms    往返延迟（毫秒）
- * @param success   是否成功（用于计算丢包率）
  * @return          0=成功，-1=失败
  *
  * @note 质量评估会自动触发（有节流保护），无需单独调用刷新函数
- * @note 支持基础 reliable 层和高级传输层（DTLS/SCTP）的统计同步
  */
-int path_manager_update_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms, bool success);
+int path_manager_on_data_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms);
+
+/*
+ * 上报数据层丢包率（来自高级传输层 get_stats）
+ *
+ * 基础 reliable 层不暴露聚合丢包计数，因此该接口仅由 SCTP/DTLS 等
+ * 高级传输层调用。路径管理器会取 probe 丢包率和 data 丢包率的最大值
+ * 作为综合 loss_rate，用于质量评估和路径选择。
+ *
+ * @param s         会话指针
+ * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
+ * @param loss_rate 数据层丢包率（0.0-1.0）
+ * @return          0=成功，-1=失败
+ */
+int path_manager_on_data_loss_rate(p2p_session_t *s, int path_idx, float loss_rate);
+
+//-----------------------------------------------------------------------------
 
 /*
  * 路径管理器周期性维护（驱动超时检测与故障恢复）
@@ -379,6 +398,15 @@ int path_manager_switch_path(p2p_session_t *s, int target_path,
  * @return          统计指针，或 NULL（无效索引）
  */
 path_stats_t* path_manager_get_stats(p2p_session_t *s, int path_idx);
+
+/*
+ * 将路径索引转换为路径类型枚举
+ *
+ * @param s         会话指针
+ * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
+ * @return          P2P_PATH_LAN / P2P_PATH_PUNCH / P2P_PATH_RELAY / P2P_PATH_SIGNALING / P2P_PATH_NONE
+ */
+p2p_path_t path_manager_get_path_type(p2p_session_t *s, int path_idx);
 
 /*
  * 获取路径地址
