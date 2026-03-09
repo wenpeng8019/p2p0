@@ -1171,7 +1171,7 @@ PEER_INFO / PEER_INFO_ACK 序列规则：
 
 | 威胁 | 解决方案 |
 |------|---------|
-| **窃听** | 启用 DTLS/TLS 加密（库已支持，见 `use_dtls` 配置） |
+| **窃听** | 启用 DTLS/TLS 加密（库已支持，见 `dtls_backend` 配置） |
 | **身份冒用** | 添加认证 token、签名机制 |
 | **重放攻击** | 添加 nonce/timestamp 验证 |
 | **DDoS** | Rate limiting、IP 白名单 |

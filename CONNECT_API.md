@@ -63,7 +63,8 @@ typedef struct {
     
     /* 传输选项 */
     bool        use_pseudotcp;              // 1 = 启用拥塞控制
-    bool        use_dtls;                   // 1 = 启用 DTLS 加密
+    int         dtls_backend;               // 0=disabled, 1=mbedtls, 2=openssl
+    int         dtls_role;                  // 0=auto, 1=server, 2=client
     bool        enable_tcp;                 // 1 = 尝试 TCP 打洞
     
     /* 事件回调 */

@@ -169,7 +169,7 @@ cfg.gist_id = "abc123";
 cfg.use_ice = true;
 cfg.stun_server = "stun.l.google.com";
 cfg.stun_port = 19302;
-cfg.use_dtls = true; // 加密传输
+cfg.dtls_backend = 1; // DTLS 加密 (1=mbedtls, 2=openssl)
 
 // 混合策略
 cfg.path_strategy = 2; // HYBRID

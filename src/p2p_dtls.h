@@ -73,7 +73,7 @@ typedef struct p2p_dtls_ops {
 /* ============================================================================
  * 加密层包类型（定义在 p2pp.h）
  *
- *   P2P_PKT_CRYPTO       直连: [P2P_HDR: type=0x23] [DTLS record]
+ *   P2P_PKT_CRYPTO       直连: [P2P_HDR: type=0x22] [DTLS record]
  *   P2P_PKT_RELAY_CRYPTO 中继: [P2P_HDR: type=0xA2] [session_id(8B) | DTLS record]
  * ============================================================================ */
 
