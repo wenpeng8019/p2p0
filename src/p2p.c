@@ -176,27 +176,10 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     path_manager_init(s, strategy);
     print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F160, 256), strategy);
 
-    // 初始化传输层（可选的高级传输模块）
-    // + 这里的 s->trans 只用于高级传输模块（DTLS/OpenSSL/SCTP/PseudoTCP）
+    // 初始化传输层（可靠性模块，与加密层正交）
     s->trans = NULL;
     
-    if (cfg->use_dtls) {
-#ifdef WITH_DTLS
-        print("I: %s", LA_S("DTLS (MbedTLS) enabled as transport layer", 0, 0));
-        s->trans = &p2p_trans_dtls;
-#else
-        print("W: %s", LA_S("DTLS (MbedTLS) requested but library not linked", LA_S28, 51));
-#endif
-    } 
-    else if (cfg->use_openssl) {
-#ifdef WITH_OPENSSL
-        print("I: %s", LA_S("OpenSSL DTLS enabled as transport layer", 0, 0));
-        s->trans = &p2p_trans_openssl;
-#else
-        print("W: %s", LA_S("OpenSSL requested but library not linked", LA_S50, 71));
-#endif
-    }
-    else if (cfg->use_sctp) {
+    if (cfg->use_sctp) {
 #ifdef WITH_SCTP
         print("I: %s", LA_S("SCTP (usrsctp) enabled as transport layer", LA_S64, 563));
         s->trans = &p2p_trans_sctp;
@@ -214,10 +197,33 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     if (s->trans && s->trans->init) {
         if (s->trans->init(s) != 0) {
             print("E:", LA_F("Transport layer '%s' init failed, falling back to simple reliable", LA_F213, 583), s->trans->name);
-            s->trans = NULL;  // 降级到基础 reliable 层
-            s->transport_data = NULL;  // 清除残留指针，防止悬垂引用
+            s->trans = NULL;
+            s->trans_data = NULL;
         }
     }
+
+    // 初始化加密层（与传输层正交，DTLS 后端选择）
+    s->dtls = NULL;
+    s->dtls_data = NULL;
+    
+    if (cfg->dtls_backend == 1) {
+#ifdef WITH_DTLS
+        print("I: %s", LA_S("DTLS (MbedTLS) enabled as encryption layer", 0, 0));
+        s->dtls = &p2p_dtls_mbedtls;
+#else
+        print("W: %s", LA_S("DTLS (MbedTLS) requested but library not linked", LA_S28, 51));
+#endif
+    }
+    else if (cfg->dtls_backend == 2) {
+#ifdef WITH_OPENSSL
+        print("I: %s", LA_S("OpenSSL DTLS enabled as encryption layer", 0, 0));
+        s->dtls = &p2p_dtls_openssl;
+#else
+        print("W: %s", LA_S("OpenSSL requested but library not linked", LA_S50, 71));
+#endif
+    }
+
+    // 注：DTLS init 延迟到 p2p_connect()，因为自动角色需要知道 remote_peer_id
 
     // 初始化数据流层
     stream_init(&s->stream, cfg->nagle);
@@ -286,6 +292,12 @@ p2p_destroy(p2p_handle_t hdl) {
             p2p_signal_compact_disconnect(s);
         }
 
+        // 关闭加密层
+        if (s->dtls && s->dtls->close) {
+            s->dtls->close(s);
+            s->dtls = NULL;
+        }
+
         // 关闭高级传输层（在 socket 关闭前，以便发送 close_notify 等协议包）
         if (s->trans && s->trans->close) {
             s->trans->close(s);
@@ -338,6 +350,15 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         memset(s->remote_peer_id, 0, sizeof(s->remote_peer_id));
         strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
     } else s->remote_peer_id[0] = '\0';
+
+    // 初始化 DTLS 加密层（需要 remote_peer_id 以确定自动角色）
+    if (s->dtls && s->dtls->init) {
+        if (s->dtls->init(s) != 0) {
+            print("E:", LA_F("Crypto layer '%s' init failed, continuing without encryption", LA_F129, 625), s->dtls->name);
+            s->dtls = NULL;
+            s->dtls_data = NULL;
+        }
+    }
 
     // 初始化相关状态
     s->signal_sent = false;
@@ -639,8 +660,33 @@ p2p_update(p2p_handle_t hdl) {
         // 获取 payload
         const uint8_t *payload = buf + P2P_HDR_SIZE;
         int payload_len = n - P2P_HDR_SIZE;
+        uint8_t crypto_dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];  /* 解密输出缓冲区 */
 
         switch (hdr.type) {
+
+            // --------------------
+            // 加密层（DTLS 密文解包 → 解密 → 重新派发）
+            // --------------------
+
+            case P2P_PKT_RELAY_CRYPTO:
+                if (!compact_on_relay_packet(s, hdr.type, &payload, &payload_len, &from)) break;
+                /* fall through — payload 现在是 DTLS 记录 */
+            case P2P_PKT_CRYPTO: {
+                if (!s->dtls) break;
+                int dec_len = s->dtls->decrypt_recv(s, payload, payload_len,
+                                                      crypto_dec_buf, sizeof(crypto_dec_buf));
+                if (dec_len >= P2P_HDR_SIZE) {
+                    /* 解析内层 P2P 包头 */
+                    hdr.type = crypto_dec_buf[0];
+                    hdr.flags = crypto_dec_buf[1];
+                    hdr.seq = (uint16_t)((crypto_dec_buf[2] << 8) | crypto_dec_buf[3]);
+                    payload = crypto_dec_buf + P2P_HDR_SIZE;
+                    payload_len = dec_len - P2P_HDR_SIZE;
+                    if (hdr.type == P2P_PKT_DATA) goto handle_data;
+                    if (hdr.type == P2P_PKT_ACK) goto handle_ack;
+                }
+                break;
+            }
 
             // --------------------
             // 数据传输（P2P 直连 或 服务器中继）
@@ -996,8 +1042,7 @@ p2p_update(p2p_handle_t hdl) {
     // 注：仅在无高级传输层时调用。PseudoTCP 虽然 on_packet==NULL（复用 reliable 收包），
     //     但它有自己的 tick（cwnd 控制），不能再调 reliable_tick，否则双重发送且绕过拥塞控制。
     if (!s->trans) {
-        int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
-        reliable_tick(&s->reliable, s->sock, &s->active_addr, is_relay);
+        reliable_tick(&s->reliable);
     }
 
     // 传输模块周期 tick（重传，拥塞控制等）
@@ -1005,6 +1050,11 @@ p2p_update(p2p_handle_t hdl) {
         if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
             s->trans->tick(s);
         }
+    }
+
+    // 加密层周期 tick（DTLS 握手推进、重传定时器）
+    if (s->dtls && s->dtls->tick) {
+        s->dtls->tick(s);
     }
     
     // [CRITICAL] 同步高级传输层统计到路径管理器（Group 2: 数据层 RTT + 丢包率）

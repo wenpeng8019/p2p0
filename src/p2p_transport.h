@@ -97,11 +97,11 @@ int  reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int l
 /* 处理收到的 ACK（释放已确认数据包） */
 int  reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits);
 
-/* 定时 ACK 处理（检查超时重传） */
-void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode);
+/* 定时 ACK 处理 */
+void reliable_tick_ack(reliable_t *r);
 
 /* 周期 tick：发送队列中尚未发出的包、重传超时包、发送 ACK */
-void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode);
+void reliable_tick(reliable_t *r);
 
 /* 查询发送窗口剩余空间 */
 int  reliable_window_avail(const reliable_t *r);
@@ -151,13 +151,11 @@ typedef struct p2p_transport_ops {
      * @return          0=成功，-1=失败（数据不可用）
      */
     int (*get_stats)(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate);
-} p2p_transport_ops_t;
+} p2p_trans_ops_t;
 
 // 已知的传输层具体实现
 // 注：reliable 作为基础传输层，直接调用 reliable_* 函数，无需 VTable
-extern const p2p_transport_ops_t p2p_trans_pseudotcp; /* 拥塞控制 */
-extern const p2p_transport_ops_t p2p_trans_dtls;      /* DTLS (MbedTLS) */
-extern const p2p_transport_ops_t p2p_trans_openssl;   /* DTLS (OpenSSL) */
-extern const p2p_transport_ops_t p2p_trans_sctp;      /* SCTP (usrsctp) */
+extern const p2p_trans_ops_t p2p_trans_pseudotcp; /* 拥塞控制 */
+extern const p2p_trans_ops_t p2p_trans_sctp;      /* SCTP (usrsctp) */
 
 #endif /* P2P_TRANSPORT_H */

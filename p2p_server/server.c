@@ -1555,13 +1555,15 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             fflush(stdout);
         }
     }
-    // SIG_PKT_PEER_INFO/P2P_PKT_RELAY_DATA/P2P_PKT_RELAY_ACK: relay 转发给对方
+    // SIG_PKT_PEER_INFO/P2P_PKT_RELAY_DATA/P2P_PKT_RELAY_ACK/P2P_PKT_RELAY_CRYPTO: relay 转发给对方
     // 格式：所有包都包含 session_id(4) 在 payload 开头
     else if (hdr->type == SIG_PKT_PEER_INFO ||
-             hdr->type == P2P_PKT_RELAY_DATA || hdr->type == P2P_PKT_RELAY_ACK) {
+             hdr->type == P2P_PKT_RELAY_DATA || hdr->type == P2P_PKT_RELAY_ACK ||
+             hdr->type == P2P_PKT_RELAY_CRYPTO) {
 
         const char* PROTO = (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
-                           (hdr->type == P2P_PKT_RELAY_DATA) ? "RELAY_DATA" : "RELAY_ACK";
+                           (hdr->type == P2P_PKT_RELAY_DATA) ? "RELAY_DATA" :
+                           (hdr->type == P2P_PKT_RELAY_ACK) ? "RELAY_ACK" : "RELAY_CRYPTO";
 
         // 调试打印协议包信息
         printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
@@ -1606,7 +1608,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         if (hdr->type == SIG_PKT_PEER_INFO) {
             printf(LA_F("[UDP] V: Relay %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
                    PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
-        } else if (hdr->type == P2P_PKT_RELAY_DATA) {
+        } else if (hdr->type == P2P_PKT_RELAY_DATA || hdr->type == P2P_PKT_RELAY_CRYPTO) {
             printf(LA_F("[UDP] V: Relay %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
                    PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
         } else {

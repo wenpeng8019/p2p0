@@ -356,7 +356,7 @@ int main(int argc, char *argv[]) {
     SetConsoleOutputCP(65001);
     SetConsoleCP(65001);
 #endif
-    int use_dtls = 0, use_openssl = 0, use_pseudo = 0, use_compact = 0;
+    int dtls_backend = 0, use_pseudo = 0, use_compact = 0;
     int disable_lan = 0, lan_punch = 0, skip_host = 0, use_chinese = 0, show_help = 0;
     const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
     const char *my_name = "unnamed", *target_name = NULL;
@@ -364,8 +364,8 @@ int main(int argc, char *argv[]) {
     int server_port = 9333;
 
     for (int i = 1; i < argc; i++) {
-        if      (strcmp(argv[i], "--dtls")          == 0) use_dtls = 1;
-        else if (strcmp(argv[i], "--openssl")        == 0) use_openssl = 1;
+        if      (strcmp(argv[i], "--dtls")          == 0) dtls_backend = 1;
+        else if (strcmp(argv[i], "--openssl")        == 0) dtls_backend = 2;
         else if (strcmp(argv[i], "--pseudo")         == 0) use_pseudo = 1;
         else if (strcmp(argv[i], "--compact")        == 0) use_compact = 1;
         else if (strcmp(argv[i], "--disable-lan")    == 0) disable_lan = 1;
@@ -417,8 +417,7 @@ int main(int argc, char *argv[]) {
     }
 
     p2p_config_t cfg = {0};
-    cfg.use_dtls       = use_dtls;
-    cfg.use_openssl    = use_openssl;
+    cfg.dtls_backend   = dtls_backend;
     cfg.use_pseudotcp  = use_pseudo;
     cfg.use_ice        = !use_compact;
     cfg.stun_server    = "stun.l.google.com";

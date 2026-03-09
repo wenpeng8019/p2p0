@@ -1115,10 +1115,11 @@ p2p_signaling_payload_t (76B header + N×32B candidates)
 | **0x20-0x2F** | **数据传输** | | |
 | 0x20 | P2P_PKT_DATA | 应用数据 |
 | 0x21 | P2P_PKT_ACK | 数据确认 |
-| 0x22 | P2P_PKT_FIN | 连接关闭 |
-| **0x30-0x3F** | **路由探测** | | |
-| 0x30 | P2P_PKT_ROUTE_PROBE | 路由探测包 |
-| 0x31 | P2P_PKT_ROUTE_PROBE_ACK | 路由探测确认 |
+| 0x22 | P2P_PKT_CRYPTO | DTLS 加密包 |
+| **0x30-0x3F** | **会话控制 / 路由探测** | | |
+| 0x30 | P2P_PKT_FIN | 连接关闭 |
+| 0x38 | P2P_PKT_ROUTE_PROBE | 路由探测包 |
+| 0x39 | P2P_PKT_ROUTE_PROBE_ACK | 路由探测确认 |
 
 ### COMPACT 信令协议 (0x80-0xBF)
 

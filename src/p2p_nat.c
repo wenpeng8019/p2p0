@@ -165,8 +165,8 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
 /*
  * 发送 FIN 包通知对端主动断开连接
  *
- * 协议：P2P_PKT_FIN (0x03)
- * 包头: [type=0x03 | flags=0 | seq=0]
+ * 协议：P2P_PKT_FIN (0x30)
+ * 包头: [type=0x30 | flags=0 | seq=0]
  * 负载: 无
  */
 void nat_send_fin(p2p_session_t *s) {
@@ -367,8 +367,8 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 }
 
 /*
- * 协议：P2P_PKT_FIN (0x22)
- * 包头: [type=0x22 | flags=0 | seq=0]
+ * 协议：P2P_PKT_FIN (0x30)
+ * 包头: [type=0x30 | flags=0 | seq=0]
  * 负载: 无
  * 
  * 处理 FIN 包（连接断开）

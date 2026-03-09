@@ -28,7 +28,7 @@
  *     0x01-0x0F: 打洞和安全协议
  *     0x10-0x1F: 保活协议
  *     0x20-0x2F: 数据传输协议
- *     0x30-0x3F: 路由探测协议
+ *     0x30-0x3F: 会话控制和路由探测协议
  *   0x80-0xFF: COMPACT 信令协议（本节）
 */
 
@@ -150,7 +150,10 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 /* 数据传输 (peer-to-peer) */
 #define P2P_PKT_DATA            0x20        // 数据包
 #define P2P_PKT_ACK             0x21        // 确认包
-#define P2P_PKT_FIN             0x22        // 结束包 (无需应答)
+#define P2P_PKT_CRYPTO          0x22        // DTLS 加密包（握手/密文数据）
+
+/* 会话控制 */
+#define P2P_PKT_FIN             0x30        // 结束包（无需应答）
 
 /* ============================================================================
  * COMPACT 模式信令服务协议 (UDP)
@@ -273,6 +276,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 /* COMPACT 服务器中继扩展协议 - 0xA0-0xBF */
 #define P2P_PKT_RELAY_DATA      0xA0        // 中继服务器转发的数据（P2P 打洞失败后的降级方案）
 #define P2P_PKT_RELAY_ACK       0xA1        // 中继服务器转发的 ACK 确认包
+#define P2P_PKT_RELAY_CRYPTO    0xA2        // 中继服务器转发的 DTLS 加密包
 
 /* REGISTER_ACK status 码 */
 #define SIG_REGACK_PEER_OFFLINE 0           // 成功，对端离线
@@ -294,7 +298,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_MSG_ERR_TIMEOUT         0xFF    // 服务器转发请求超时
 
 /* PEER_INFO 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_PEER_INFO_FIN       0x01        // 候选列表发送完毕
+#define SIG_PEER_INFO_FIN           0x01    // 候选列表发送完毕
 
 /*
  * COMPACT 模式精简候选结构 (7 bytes)

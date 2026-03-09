@@ -74,6 +74,7 @@
 #include "p2p_route.h"          /* 路由表管理 */
 #include "p2p_stream.h"         /* 流式数据传输 */
 #include "p2p_transport.h"      /* 传输层抽象接口 */
+#include "p2p_dtls.h"          /* DTLS 加密层接口 */
 #include "p2p_udp.h"            /* UDP 传输层常量 (P2P_MTU, P2P_MAX_PAYLOAD) */
 #include "p2p_stun.h"           /* STUN 协议实现 */
 #include "p2p_crypto.h"         /* 加密功能 */
@@ -162,14 +163,14 @@ typedef struct p2p_session {
 
     /* ======================== 传输层实例 ======================== */
     /*
-     * 可插拔传输层架构，支持多种实现：
-     *   - simple:    无加密直接传输
-     *   - mbedtls:   DTLS 加密 (MbedTLS)
-     *   - sctp:      SCTP 协议 (usrsctp)
-     *   - pseudotcp: 模拟 TCP 拥塞控制
+     * 可插拔传输层 + 加密层（正交组合）：
+     *   传输层: simple(reliable) / pseudotcp / sctp  — 管可靠性
+     *   加密层: disabled / mbedtls / openssl         — 管加密
      */
-    const p2p_transport_ops_t*  trans;              // 传输层操作函数表
-    void*                       transport_data;     // 传输层私有数据
+    const p2p_trans_ops_t*      trans;              // 传输层操作函数表（reliable/pseudotcp/sctp）
+    void*                       trans_data;         // 传输层私有数据
+    const p2p_dtls_ops_t*       dtls;               // DTLS 加密层操作函数表（与传输层正交）
+    void*                       dtls_data;          // DTLS 加密层私有数据（SSL 上下文等）
 
     /* ======================== PseudoTCP 拥塞控制 ======================== */
     /*
@@ -327,7 +328,7 @@ static inline ret_t p2p_cand_push_local(p2p_session_t *s) {
         int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
         p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_candidate_entry_t));
         if (!p) {
-            print("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F134, 230), nc);
+            print("E:", LA_F("Failed to realloc memory for local candidates (capacity: %d)", LA_F135, 230), nc);
             return E_OUT_OF_MEMORY;
         }
         s->local_cands    = p;
@@ -341,7 +342,7 @@ static inline ret_t p2p_cand_push_remote(p2p_session_t *s) {
         int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
         p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
         if (!p) {
-            print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F135, 231), nc);
+            print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F136, 231), nc);
             return E_OUT_OF_MEMORY;
         }
         if (nc > s->remote_cand_cap) {
@@ -398,7 +399,7 @@ static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     while (nc < need) nc *= 2;
     p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
     if (!p) {
-        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F135, 231), nc);
+        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F136, 231), nc);
         return E_OUT_OF_MEMORY;
     }
     memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));

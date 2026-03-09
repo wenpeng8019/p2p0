@@ -166,17 +166,7 @@ static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, ui
 
     if (!s || length > P2P_MTU) return -1;
 
-    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
-    if (is_relay) {
-        uint8_t relay_pkt[sizeof(uint64_t) + P2P_MTU];
-        nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
-        memcpy(relay_pkt + sizeof(uint64_t), buffer, length);
-        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_RELAY_DATA, 0, 0,
-                        relay_pkt, (int)(sizeof(uint64_t) + length));
-    } else {
-        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0,
-                        buffer, (int)length);
-    }
+    dtls_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, 0, buffer, (int)length);
     return 0;
 }
 

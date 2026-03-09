@@ -20,7 +20,7 @@
  * - 检测到丢包时：cwnd 减半（乘性减）
  */
 
-#define MSS 1200           /* 最大分段大小，单位：字节 */
+#define MSS 1200                /* 最大分段大小，单位：字节 */
 #define INITIAL_CWND (2 * MSS)  /* 初始拥塞窗口 */
 #define MIN_CWND (2 * MSS)      /* 最小拥塞窗口 */
 
@@ -79,12 +79,6 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
 static void p2p_pseudotcp_tick(struct p2p_session *s) {
     reliable_t *r = &s->reliable;
     uint64_t now = P_tick_ms();
-    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
-    uint8_t pkt_type = is_relay ? P2P_PKT_RELAY_DATA : P2P_PKT_DATA;
-
-    /* 中继模式：预取 session_id 用于包头 */
-    uint64_t sid = 0;
-    if (is_relay) sid = s->sig_compact_ctx.session_id;
 
     /* 
      * 在 PseudoTCP 模式下，根据 cwnd 限制在途数据包数量
@@ -105,14 +99,7 @@ static void p2p_pseudotcp_tick(struct p2p_session *s) {
 
         if (e->send_time == 0 || now - e->send_time >= (uint64_t)r->rto) {
             /* 发送/重传数据包 */
-            if (is_relay) {
-                uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
-                nwrite_ll(relay_pkt, sid);
-                memcpy(relay_pkt + sizeof(uint64_t), e->data, e->len);
-                udp_send_packet(s->sock, &s->active_addr, pkt_type, 0, e->seq, relay_pkt, (int)(sizeof(uint64_t) + e->len));
-            } else {
-                udp_send_packet(s->sock, &s->active_addr, pkt_type, 0, e->seq, e->data, e->len);
-            }
+            dtls_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
             
             if (e->send_time != 0) {
                 /* 通过超时检测到丢包 */
@@ -150,8 +137,7 @@ static int pseudotcp_send(struct p2p_session *s, const void *buf, int len) {
 
 static void pseudotcp_tick(struct p2p_session *s) {
     p2p_pseudotcp_tick(s);
-    int is_relay_mode = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
-    reliable_tick_ack(&s->reliable, s->sock, &s->active_addr, is_relay_mode);
+    reliable_tick_ack(&s->reliable);
 }
 
 static int pseudotcp_is_ready(struct p2p_session *s) {
@@ -166,7 +152,7 @@ static void pseudotcp_close(struct p2p_session *s) {
     s->tcp.cc_state = 0;
 }
 
-const p2p_transport_ops_t p2p_trans_pseudotcp = {
+const p2p_trans_ops_t p2p_trans_pseudotcp = {
     .name = "PseudoTCP",
     .init = pseudotcp_init,
     .close = pseudotcp_close,

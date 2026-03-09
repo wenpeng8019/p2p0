@@ -1,5 +1,5 @@
 /*
- * DTLS 传输层实现（基于 MbedTLS）
+ * DTLS 加密层实现（基于 MbedTLS）— p2p_dtls_ops_t
  *
  * ============================================================================
  * DTLS (Datagram Transport Layer Security) 协议概述
@@ -213,21 +213,8 @@ typedef struct {
  */
 static int p2p_dtls_send(void *ctx, const unsigned char *buf, size_t len) {
     p2p_session_t *s = (p2p_session_t *)ctx;
-    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
-    
-    if (is_relay) {
-        uint8_t relay_pkt[sizeof(uint64_t) + P2P_MTU];
-        nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
-        if (len > P2P_MTU) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-        memcpy(relay_pkt + sizeof(uint64_t), buf, len);
-        int ret = udp_send_packet(s->sock, &s->active_addr, P2P_PKT_RELAY_DATA, 0, 0,
-                                  relay_pkt, (int)(sizeof(uint64_t) + len));
-        if (ret < 0) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-    } else {
-        int ret = udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, buf, (int)len);
-        if (ret < 0) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-    }
-    return (int)len;  /* MbedTLS 期望返回发送的字节数 */
+    dtls_output_raw(s, &s->active_addr, buf, (int)len);
+    return (int)len;
 }
 
 /*
@@ -248,7 +235,7 @@ static int p2p_dtls_send(void *ctx, const unsigned char *buf, size_t len) {
  */
 static int p2p_dtls_recv(void *ctx, unsigned char *buf, size_t len) {
     p2p_session_t *s = (p2p_session_t *)ctx;
-    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->transport_data;
+    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     if (!dtls || dtls->recv_len <= 0) return MBEDTLS_ERR_SSL_WANT_READ;
 
     size_t to_copy = (len < (size_t)dtls->recv_len) ? len : (size_t)dtls->recv_len;
@@ -279,7 +266,7 @@ static int dtls_init(p2p_session_t *s) {
         print("E: %s", LA_S("Failed to allocate DTLS context", LA_S31, 561));
         return -1;
     }
-    s->transport_data = dtls;
+    s->dtls_data = dtls;
     
     /* 初始化 MbedTLS 各组件 */
     mbedtls_ssl_init(&dtls->ssl);
@@ -307,12 +294,23 @@ static int dtls_init(p2p_session_t *s) {
     
     /*
      * 配置 SSL：
-     *   - 角色：根据 dtls_server 配置决定是客户端还是服务端
+     *   - 角色：由 dtls_role 决定（0=自动，1=server，2=client）
+     *     自动模式下按 peer_id 字典序：ID 较大者为 server，较小者为 client
+     *     被动监听方（remote_peer_id 为空）始终为 server
      *   - 传输：DTLS（数据报）
      *   - 预设：默认（包含常用密码套件）
      */
+    int is_server;
+    if (s->cfg.dtls_role == 1)      is_server = 1;
+    else if (s->cfg.dtls_role == 2) is_server = 0;
+    else /* auto */                 is_server = (s->remote_peer_id[0] == '\0')
+                                              || strcmp(s->local_peer_id, s->remote_peer_id) > 0;
+    print("I:", LA_F("[MbedTLS] DTLS role: %s (mode=%s)", 0, 0),
+          is_server ? "server" : "client",
+          s->cfg.dtls_role == 0 ? "auto" : "forced");
+
     ret = mbedtls_ssl_config_defaults(&dtls->conf,
-                                s->cfg.dtls_server ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT,
+                                is_server ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT,
                                 MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                 MBEDTLS_SSL_PRESET_DEFAULT);
     if (ret != 0) {
@@ -360,7 +358,7 @@ static int dtls_init(p2p_session_t *s) {
      *
      * NULL 表示禁用 Cookie（仅用于测试，不安全！）
      */
-    if (s->cfg.dtls_server) {
+    if (is_server) {
         mbedtls_ssl_conf_dtls_cookies(&dtls->conf, NULL, NULL, NULL);
     }
 
@@ -384,35 +382,37 @@ fail_cleanup:
     mbedtls_ctr_drbg_free(&dtls->ctr_drbg);
     mbedtls_entropy_free(&dtls->entropy);
     free(dtls);
-    s->transport_data = NULL;
+    s->dtls_data = NULL;
     return -1;
 }
 
 /*
  * ============================================================================
- * 通过 DTLS 发送加密数据
+ * 加密并发送 P2P 数据包
  * ============================================================================
  *
- * 将应用层数据通过 DTLS 加密后发送。
- * 必须在握手完成后调用。
- *
- * @param s    P2P 会话
- * @param buf  要发送的明文数据
- * @param len  数据长度
- * @return     发送的字节数，0=需要重试，-1=失败
+ * 构造内部明文 [type|flags|seq|payload]，通过 DTLS 加密后发送。
+ * BIO 回调 p2p_dtls_send 会自动调用 dtls_output_raw 输出密文。
  */
-static int dtls_send(p2p_session_t *s, const void *buf, int len) {
-    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->transport_data;
-    if (!dtls) return -1;
-    
-    int ret = mbedtls_ssl_write(&dtls->ssl, (const unsigned char *)buf, len);
-    if (ret <= 0) {
-        /* WANT_READ/WANT_WRITE 表示需要更多 I/O 操作 */
-        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
-            return 0;
-        return -1;
-    }
-    return ret;
+static int mbedtls_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr,
+                                uint8_t type, uint8_t flags, uint16_t seq,
+                                const void *payload, int payload_len) {
+    (void)addr;  /* BIO 回调使用 s->active_addr */
+    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
+    if (!dtls || !dtls->handshake_done) return 0;
+
+    /* 构造内部 P2P 包: [type|flags|seq_hi|seq_lo|payload] */
+    uint8_t plain[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];
+    plain[0] = type;
+    plain[1] = flags;
+    plain[2] = (uint8_t)(seq >> 8);
+    plain[3] = (uint8_t)(seq & 0xFF);
+    if (payload_len > 0)
+        memcpy(plain + P2P_HDR_SIZE, payload, payload_len);
+
+    int ret = mbedtls_ssl_write(&dtls->ssl, plain, P2P_HDR_SIZE + payload_len);
+    if (ret <= 0) return (ret == MBEDTLS_ERR_SSL_WANT_WRITE) ? 0 : -1;
+    return payload_len;
 }
 
 /*
@@ -430,7 +430,7 @@ static int dtls_send(p2p_session_t *s, const void *buf, int len) {
  *   - 其他: 错误
  */
 static void dtls_tick(p2p_session_t *s) {
-    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->transport_data;
+    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     if (!dtls) return;
 
     if (!dtls->handshake_done) {
@@ -449,45 +449,41 @@ static void dtls_tick(p2p_session_t *s) {
 
 /*
  * ============================================================================
- * 处理接收的 DTLS 数据包
+ * 接收并解密 DTLS 记录
  * ============================================================================
  *
- * 处理流程：
- *   1. 将数据存入 recv_buf（供 p2p_dtls_recv 回调读取）
- *   2. 如果握手已完成，调用 mbedtls_ssl_read 解密应用数据
- *   3. 如果握手未完成，调用 dtls_tick 推进握手
+ * 将收到的 DTLS 密文喂入 MbedTLS，如果握手完成则解密应用数据。
  *
- * @param s       P2P 会话
- * @param type    数据包类型（必须是 P2P_PKT_DATA）
- * @param payload DTLS 记录数据
- * @param len     数据长度
- * @param from    发送方地址
+ * @return  >0: 解密后的字节数（含内部 P2P 头），0: 握手包，-1: 错误
  */
-static void dtls_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {
-    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->transport_data;
-    if (!dtls) return;
-    if (type != P2P_PKT_DATA && type != P2P_PKT_RELAY_DATA) return;
-    (void)from;
+static int mbedtls_decrypt_recv(p2p_session_t *s, const uint8_t *in, int in_len,
+                                uint8_t *out, int out_cap) {
+    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
+    if (!dtls) return -1;
 
-    /* 检查数据长度 */
-    if (len > (int)sizeof(dtls->recv_buf)) return;
-    
-    /* 存入接收缓冲区 */
-    memcpy(dtls->recv_buf, payload, len);
-    dtls->recv_len = len;
+    /* 将密文存入 recv_buf，供 p2p_dtls_recv BIO 回调读取 */
+    if (in_len > (int)sizeof(dtls->recv_buf)) return -1;
+    memcpy(dtls->recv_buf, in, in_len);
+    dtls->recv_len = in_len;
 
-    if (dtls->handshake_done) {
-        /* 握手已完成，解密应用数据 */
-        uint8_t app_buf[P2P_MTU];
-        int ret = mbedtls_ssl_read(&dtls->ssl, app_buf, sizeof(app_buf));
-        if (ret > 0) {
-            /* 将解密后的数据写入接收环形缓冲区 */
-            ring_write(&s->stream.recv_ring, app_buf, ret);
+    if (!dtls->handshake_done) {
+        /* 握手阶段：驱动状态机 */
+        int ret = mbedtls_ssl_handshake(&dtls->ssl);
+        if (ret == 0) {
+            dtls->handshake_done = 1;
+            print("I: %s", LA_S("DTLS handshake complete (MbedTLS)", LA_S29, 64));
+        } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            char ebuf[128];
+            mbedtls_strerror(ret, ebuf, sizeof(ebuf));
+            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F146, 241), ebuf, -ret);
         }
-    } else {
-        /* 握手进行中，推进握手状态机 */
-        dtls_tick(s);
+        return 0;  /* 握手包，无应用数据 */
     }
+
+    /* 解密应用数据 */
+    int ret = mbedtls_ssl_read(&dtls->ssl, out, out_cap);
+    if (ret > 0) return ret;
+    return 0;
 }
 
 /*
@@ -503,19 +499,15 @@ static void dtls_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
  *   5. 释放内存
  */
 static void dtls_close(p2p_session_t *s) {
-    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->transport_data;
+    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     if (!dtls) return;
-    
-    /* 可选：发送 close_notify
-     * mbedtls_ssl_close_notify(&dtls->ssl);
-     */
     
     mbedtls_ssl_free(&dtls->ssl);
     mbedtls_ssl_config_free(&dtls->conf);
     mbedtls_ctr_drbg_free(&dtls->ctr_drbg);
     mbedtls_entropy_free(&dtls->entropy);
     free(dtls);
-    s->transport_data = NULL;
+    s->dtls_data = NULL;
 }
 
 /*
@@ -529,47 +521,30 @@ static void dtls_close(p2p_session_t *s) {
  * @return   1=就绪，0=未就绪
  */
 static int dtls_is_ready(p2p_session_t *s) {
-    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->transport_data;
+    p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     return dtls && dtls->handshake_done;
 }
 
 /*
  * ============================================================================
- * 传输层操作表
+ * 加密层操作表
  * ============================================================================
  *
- * 注册为 P2P 传输层实现。
+ * 注册为 P2P 加密层实现（与传输层正交）。
+ * 传输层（reliable/pseudotcp/sctp）负责可靠性，
+ * 加密层（DTLS）负责加密，两者独立工作。
  *
- * 与其他传输层对比：
- * ┌─────────────────────┬───────────┬───────────┬─────────────┐
- * │ 传输层              │ 可靠性    │ 加密      │ 适用场景    │
- * ├─────────────────────┼───────────┼───────────┼─────────────┤
- * │ p2p_trans_compact    │ 无        │ 无        │ 低延迟      │
- * │ p2p_trans_reliable  │ ARQ       │ 无        │ 简单可靠    │
- * │ p2p_trans_pseudotcp │ TCP风格   │ 无        │ 拥塞控制    │
- * │ p2p_trans_sctp      │ SCTP      │ 无        │ 多流        │
- * │ p2p_trans_dtls      │ 无        │ TLS       │ 安全传输    │
- * └─────────────────────┴───────────┴───────────┴─────────────┘
- *
- * 注意：DTLS 本身不提供可靠性，如需可靠传输应与 SCTP 组合使用。
+ * 组合方式：
+ *   - reliable + DTLS:   ARQ 可靠性 + DTLS 加密
+ *   - pseudotcp + DTLS:  TCP 风格拥塞控制 + DTLS 加密
+ *   - sctp + DTLS:       SCTP 多流 + DTLS 加密（WebRTC DataChannel 标准）
  */
-/*
- * DTLS 是加密层，不跟踪应用级 RTT。
- * 路径管理器通过 on_packet_recv 时间戳维护路径活性。
- * 如需 RTT 监控，应组合 SCTP over DTLS 或添加应用层 ping 机制。
- */
-static int dtls_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate) {
-    (void)s; (void)rtt_ms; (void)loss_rate;
-    return -1;
-}
-
-const p2p_transport_ops_t p2p_trans_dtls = {
-    .name      = "DTLS-MbedTLS",   /* 传输层名称 */
-    .init      = dtls_init,        /* 初始化 */
-    .tick      = dtls_tick,        /* 周期处理 */
-    .send_data = dtls_send,        /* 发送数据 */
-    .on_packet = dtls_on_packet,   /* 接收处理 */
-    .is_ready  = dtls_is_ready,    /* 就绪检查 */
-    .close     = dtls_close,       /* 关闭清理 */
-    .get_stats = dtls_get_stats    /* 统计查询（加密层无 RTT） */
+const p2p_dtls_ops_t p2p_dtls_mbedtls = {
+    .name         = "DTLS-MbedTLS",
+    .init         = dtls_init,
+    .close        = dtls_close,
+    .tick         = dtls_tick,
+    .is_ready     = dtls_is_ready,
+    .encrypt_send = mbedtls_encrypt_send,
+    .decrypt_recv = mbedtls_decrypt_recv,
 };

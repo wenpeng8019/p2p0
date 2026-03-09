@@ -60,7 +60,6 @@
 
 #include "p2p_internal.h"
 #include "p2p_http.h"
-#include "p2p_crypto_extra.h"
 #include <ctype.h>
 
 /*

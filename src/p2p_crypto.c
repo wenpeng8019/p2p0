@@ -176,3 +176,89 @@ void p2p_hmac_sha1(const uint8_t* key, int key_len,
     SHA1Update(&ctx, digest, 20);
     SHA1Final(digest, &ctx);
 }
+
+
+/* ============================= Base64 ============================= */
+
+static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+int p2p_base64_encode(const uint8_t *src, size_t slen, char *dst, size_t dlen) {
+    size_t i, j = 0;
+    uint32_t triple;
+
+    if (dlen < ((slen + 2) / 3) * 4 + 1) return -1;
+
+    for (i = 0; i < slen - slen % 3; i += 3) {
+        triple = (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
+        dst[j++] = base64_table[(triple >> 18) & 0x3F];
+        dst[j++] = base64_table[(triple >> 12) & 0x3F];
+        dst[j++] = base64_table[(triple >> 6) & 0x3F];
+        dst[j++] = base64_table[triple & 0x3F];
+    }
+
+    if (slen % 3 == 1) {
+        triple = src[i] << 16;
+        dst[j++] = base64_table[(triple >> 18) & 0x3F];
+        dst[j++] = base64_table[(triple >> 12) & 0x3F];
+        dst[j++] = '=';
+        dst[j++] = '=';
+    } else if (slen % 3 == 2) {
+        triple = (src[i] << 16) | (src[i + 1] << 8);
+        dst[j++] = base64_table[(triple >> 18) & 0x3F];
+        dst[j++] = base64_table[(triple >> 12) & 0x3F];
+        dst[j++] = base64_table[(triple >> 6) & 0x3F];
+        dst[j++] = '=';
+    }
+
+    dst[j] = '\0';
+    return (int)j;
+}
+
+static int base64_decode_char(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+int p2p_base64_decode(const char *src, size_t slen, uint8_t *dst, size_t dlen) {
+    size_t i = 0, j = 0;
+    int values[4];
+
+    while (i < slen) {
+        int k = 0;
+        while (k < 4 && i < slen) {
+            if (src[i] == '=')
+                values[k++] = 0;
+            else
+                values[k++] = base64_decode_char(src[i]);
+            i++;
+        }
+        if (k < 4) break;
+        if (j + 3 > dlen) return -1;
+
+        dst[j++] = (values[0] << 2) | (values[1] >> 4);
+        if (src[i - 2] != '=') dst[j++] = (values[1] << 4) | (values[2] >> 2);
+        if (src[i - 1] != '=') dst[j++] = (values[2] << 6) | values[3];
+    }
+    return (int)j;
+}
+
+
+/* ============================= DES (简化 XOR) ============================= */
+
+/*
+ * 警告：这是简化实现，使用 XOR 密码而非真正的 DES。
+ * 生产环境应使用 AES-256 或启用 DTLS (dtls_backend)。
+ */
+int p2p_des_encrypt(const uint8_t *key, const uint8_t *input, size_t len, uint8_t *output) {
+    for (size_t i = 0; i < len; i++)
+        output[i] = input[i] ^ key[i % 8];
+    return (int)len;
+}
+
+int p2p_des_decrypt(const uint8_t *key, const uint8_t *input, size_t len, uint8_t *output) {
+    return p2p_des_encrypt(key, input, len, output);
+}

@@ -37,7 +37,7 @@ graph TD
 
     subgraph UtilsLayer ["核心工具层 (Core Utilities)"]
         E1["p2p_stream (流层 + 内置环形缓冲)"]
-        E2["p2p_crypto / p2p_crypto_extra"]
+        E2["p2p_crypto (CRC32/SHA1/Base64/DES)"]
         E3["p2p_thread (多线程支持)"]
     end
 
@@ -73,9 +73,10 @@ graph TD
 - **核心逻辑**: 实现 Transport VTable 的路由分发。
 
 ### 2.3 传输服务层 (Transport Services)
-- **模块**: `p2p_stream`, `p2p_trans_reliable`, `p2p_trans_pseudotcp`, `p2p_trans_mbedtls`, `p2p_trans_openssl`, `p2p_trans_sctp`
-- **职责**: 解决“UDP 不可靠”问题。提供乱序重组、重传计时器、流量控制以及端到端加密。
+- **模块**: `p2p_stream`, `p2p_trans_reliable`, `p2p_trans_pseudotcp`, `p2p_trans_sctp`
+- **职责**: 解决"UDP 不可靠"问题。提供乱序重组、重传计时器、流量控制。
 - **依赖**: 核心工具层（缓冲区管理）和输出抽象层（数据发送）。
+- **DTLS 加密层**: `p2p_dtls`（接口）、`p2p_dtls_mbedtls`、`p2p_dtls_openssl`（后端），与传输层正交。
 
 ### 2.4 信令与 NAT 穿透层 (Signaling & Connectivity)
 - **模块**: `p2p_signal`, `p2p_signal_pub`, `p2p_ice`, `p2p_nat`, `p2p_stun`, `p2p_turn`

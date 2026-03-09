@@ -45,8 +45,8 @@
 
 3. **Enable DTLS for end-to-end encryption:**
    ```c
-   cfg.use_dtls = true;
-   cfg.dtls_server = false;  // Or true for server role
+   cfg.dtls_backend = 1;    // 1=MbedTLS, 2=OpenSSL
+   cfg.dtls_role = 0;       // 0=auto (default), 1=force server, 2=force client
    ```
 
 4. **Regularly update dependencies:**

@@ -30,7 +30,7 @@ BUILDDIR = build
 TMPDIR   = $(BUILDDIR)/tmp
 SRCDIR   = src
 
-SRCS     = p2p_udp.c p2p_nat.c p2p_trans_reliable.c p2p_stream.c p2p_route.c p2p_probe.c p2p.c p2p_stun.c p2p_ice.c p2p_turn.c p2p_tcp_punch.c p2p_crypto.c p2p_trans_pseudotcp.c p2p_signal_relay.c p2p_signal_pubsub.c p2p_signal_compact.c p2p_crypto_extra.c p2p_http.c p2p_path_manager.c
+SRCS     = p2p_udp.c p2p_nat.c p2p_trans_reliable.c p2p_stream.c p2p_route.c p2p_probe.c p2p.c p2p_stun.c p2p_ice.c p2p_turn.c p2p_tcp_punch.c p2p_crypto.c p2p_trans_pseudotcp.c p2p_signal_relay.c p2p_signal_pubsub.c p2p_signal_compact.c p2p_http.c p2p_path_manager.c p2p_dtls.c
 
 # MbedTLS configuration (Prefer third_party/mbedtls if exists)
 MBEDTLS_DIR = third_party/mbedtls
@@ -58,14 +58,14 @@ endif
 
 # Optional DTLS support (MbedTLS)
 ifeq ($(WITH_DTLS), 1)
-	SRCS += p2p_trans_mbedtls.c
+	SRCS += p2p_dtls_mbedtls.c
 	CFLAGS += -DWITH_DTLS $(MBEDTLS_INC)
 	LDFLAGS += $(MBEDTLS_LIBS)
 endif
 
 # Optional DTLS support (OpenSSL)
 ifeq ($(WITH_OPENSSL), 1)
-	SRCS += p2p_trans_openssl.c
+	SRCS += p2p_dtls_openssl.c
 	ifeq ($(shell pkg-config --exists openssl 2>/dev/null && echo yes), yes)
 		CFLAGS  += -DWITH_OPENSSL $(shell pkg-config --cflags openssl)
 		LDFLAGS += $(shell pkg-config --libs openssl)

@@ -77,25 +77,25 @@ set(LIB_SRCS
     src/p2p_crypto.c
     src/p2p_trans_pseudotcp.c
     src/p2p_signal_relay.c
-    src/p2p_crypto_extra.c
     src/p2p_signal_pubsub.c
     src/p2p_signal_compact.c
     src/p2p_http.c
     src/p2p_path_manager.c
+    src/p2p_dtls.c
 )
 
-# --- i18n code generation for p2p core library ---
-add_custom_command(
-    OUTPUT
-        ${CMAKE_SOURCE_DIR}/src/.LANG.h
-        ${CMAKE_SOURCE_DIR}/src/.LANG.c
-    COMMAND ${CMAKE_SOURCE_DIR}/i18n/i18n.sh ${CMAKE_SOURCE_DIR}/src
-    DEPENDS
-        ${LIB_SRCS}
-        ${CMAKE_SOURCE_DIR}/i18n/i18n.sh
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Generating i18n language files for p2p core library"
-)
+# --- i18n code generation for p2p core library (DISABLED) ---
+# add_custom_command(
+#     OUTPUT
+#         ${CMAKE_SOURCE_DIR}/src/.LANG.h
+#         ${CMAKE_SOURCE_DIR}/src/.LANG.c
+#     COMMAND ${CMAKE_SOURCE_DIR}/i18n/i18n.sh ${CMAKE_SOURCE_DIR}/src
+#     DEPENDS
+#         ${LIB_SRCS}
+#         ${CMAKE_SOURCE_DIR}/i18n/i18n.sh
+#     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+#     COMMENT "Generating i18n language files for p2p core library"
+# )
 
 # When I18N_ENABLED, compile the generated table + runtime into the library
 #
@@ -123,7 +123,7 @@ endif()
 # --- MbedTLS Integration ---
 if(WITH_DTLS)
     add_definitions(-DWITH_DTLS)
-    list(APPEND LIB_SRCS src/p2p_trans_mbedtls.c)
+    list(APPEND LIB_SRCS src/p2p_dtls_mbedtls.c)
     
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls/CMakeLists.txt")
         # Build vendored mbedtls
@@ -146,7 +146,7 @@ endif()
 # --- OpenSSL Integration ---
 if(WITH_OPENSSL)
     add_definitions(-DWITH_OPENSSL)
-    list(APPEND LIB_SRCS src/p2p_trans_openssl.c)
+    list(APPEND LIB_SRCS src/p2p_dtls_openssl.c)
     find_package(OpenSSL REQUIRED)
     include_directories(${OPENSSL_INCLUDE_DIR})
     set(OPENSSL_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
@@ -183,11 +183,11 @@ endif()
 # p2p_static depends on this target so i18n.sh runs before any source is compiled.
 # (src/.LANG.h is only #include'd when I18N_ENABLED, so it is only mandatory then,
 #  but running i18n.sh unconditionally keeps source IDs fresh.)
-add_custom_target(p2p_core_i18n_gen DEPENDS
-    ${CMAKE_SOURCE_DIR}/src/.LANG.h
-    ${CMAKE_SOURCE_DIR}/src/.LANG.c
-)
-add_dependencies(p2p_static p2p_core_i18n_gen)
+# add_custom_target(p2p_core_i18n_gen DEPENDS
+#     ${CMAKE_SOURCE_DIR}/src/.LANG.h
+#     ${CMAKE_SOURCE_DIR}/src/.LANG.c
+# )
+# add_dependencies(p2p_static p2p_core_i18n_gen)
 
 # --- Signaling Server ---
 add_subdirectory(p2p_server)

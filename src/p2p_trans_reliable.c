@@ -184,29 +184,20 @@ static int build_ack_payload(const reliable_t *r, uint8_t *buf) {
  * 周期性 tick：重传 + 发送 ACK + 刷新待处理数据
  * 仅在需要时发送 ACK
  */
-void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode) {
+void reliable_tick_ack(reliable_t *r) {
     if (!r->need_ack) return;  // 没有新数据时不发 ACK，避免空闲时 100 ACK/s 洪泛
     r->need_ack = false;
 
+    struct p2p_session *s = r->session;
     uint8_t ack_payload[6];
     build_ack_payload(r, ack_payload);
     uint16_t ack_seq = nget_s(ack_payload);
     uint32_t sack = nget_l(ack_payload + 2);
     printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F240, 332),
                   ack_seq, sack, r->recv_base,
-                  addr ? inet_ntoa(addr->sin_addr) : "?",
-                  addr ? ntohs(addr->sin_port) : 0);
-    // 中继模式使用 RELAY_ACK，直连P2P使用 ACK
-    uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_ACK : P2P_PKT_ACK;
-    if (is_relay_mode) {
-        struct p2p_session *s = r->session;
-        uint8_t relay_ack[sizeof(uint64_t) + 6];
-        nwrite_ll(relay_ack, s->sig_compact_ctx.session_id);
-        memcpy(relay_ack + sizeof(uint64_t), ack_payload, 6);
-        udp_send_packet(sock, addr, pkt_type, 0, 0, relay_ack, (int)(sizeof(uint64_t) + 6));
-    } else {
-        udp_send_packet(sock, addr, pkt_type, 0, 0, ack_payload, 6);
-    }
+                  inet_ntoa(s->active_addr.sin_addr),
+                  ntohs(s->active_addr.sin_port));
+    dtls_send_packet(s, &s->active_addr, P2P_PKT_ACK, 0, 0, ack_payload, 6);
 }
 
 /*
@@ -217,16 +208,10 @@ void reliable_tick_ack(reliable_t *r, int sock, const struct sockaddr_in *addr, 
  *   2. 对超过 RTO 未确认的包进行指数退避重传
  *   3. 和 reliable_tick_ack 一起发送 ACK
  */
-void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int is_relay_mode) {
-    if (!addr) return;
+void reliable_tick(reliable_t *r) {
+    struct p2p_session *s = r->session;
+    if (!s) return;
     uint64_t now = P_tick_ms();
-    uint8_t pkt_type = is_relay_mode ? P2P_PKT_RELAY_DATA : P2P_PKT_DATA;
-
-    /* 中继模式：预取 session_id 用于包头 */
-    uint64_t sid = 0;
-    if (is_relay_mode) {
-        sid = r->session->sig_compact_ctx.session_id;
-    }
 
     /* 遍历所有未确认的发送条目 */
     int window = (uint16_t)(r->send_seq - r->send_base);
@@ -237,26 +222,12 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
 
         if (e->send_time == 0) {
             /* 首次发送 */
-            if (is_relay_mode) {
-                uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
-                nwrite_ll(relay_pkt, sid);
-                memcpy(relay_pkt + sizeof(uint64_t), e->data, e->len);
-                udp_send_packet(sock, addr, pkt_type, 0, e->seq, relay_pkt, (int)(sizeof(uint64_t) + e->len));
-            } else {
-                udp_send_packet(sock, addr, pkt_type, 0, e->seq, e->data, e->len);
-            }
+            dtls_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
             e->send_time = now;
             e->retx_count = 0;
         } else if ((int)(now - e->send_time) >= r->rto) {
             /* 超时重传 + 指数退避 */
-            if (is_relay_mode) {
-                uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
-                nwrite_ll(relay_pkt, sid);
-                memcpy(relay_pkt + sizeof(uint64_t), e->data, e->len);
-                udp_send_packet(sock, addr, pkt_type, 0, e->seq, relay_pkt, (int)(sizeof(uint64_t) + e->len));
-            } else {
-                udp_send_packet(sock, addr, pkt_type, 0, e->seq, e->data, e->len);
-            }
+            dtls_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
             e->send_time = now;
             e->retx_count++;
             r->rto = r->rto * 2;
@@ -267,7 +238,7 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
     }
 
     /* 发送 ACK */
-    reliable_tick_ack(r, sock, addr, is_relay_mode);
+    reliable_tick_ack(r);
 }
 
 /*
@@ -278,5 +249,5 @@ void reliable_tick(reliable_t *r, int sock, const struct sockaddr_in *addr, int 
  *   - reliable_on_data()     → p2p_update() 接收 DATA 包
  *   - reliable_on_ack()      → p2p_update() 接收 ACK 包
  *
- * 不再暴露为 p2p_transport_ops_t 对象，避免不必要的 VTable 间接调用。
+ * 不再暴露为 p2p_trans_ops_t 对象，避免不必要的 VTable 间接调用。
  */

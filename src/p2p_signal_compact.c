@@ -1028,8 +1028,9 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
 bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
                              const uint8_t **payload, int *len,
                              const struct sockaddr_in *from) {
-    assert(type == P2P_PKT_RELAY_DATA || type == P2P_PKT_RELAY_ACK);
-    const char* PROTO = type == P2P_PKT_RELAY_DATA ? "RELAY_DATA" : "RELAY_ACK";
+    assert(type == P2P_PKT_RELAY_DATA || type == P2P_PKT_RELAY_ACK || type == P2P_PKT_RELAY_CRYPTO);
+    const char* PROTO = type == P2P_PKT_RELAY_DATA ? "RELAY_DATA" :
+                         type == P2P_PKT_RELAY_ACK ? "RELAY_ACK" : "RELAY_CRYPTO";
 
     printf(LA_F("Recv %s pkt from %s:%d, len=%d", LA_F182, 278),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), *len);

@@ -217,12 +217,18 @@ typedef struct {
     bool                    enable_tcp;                 // 是否尝试 TCP 打洞/回退
     uint16_t                tcp_port;                   // TCP 监听端口 (0 = any)
 
-    /* 传输质量 */
+    /* 传输层 */
     bool                    use_pseudotcp;              // 是否启用拥塞控制 (AIMD)
-    bool                    use_dtls;                   // 是否启用 MbedTLS DTLS
-    bool                    use_openssl;                // 是否启用 OpenSSL DTLS
     bool                    use_sctp;                   // 是否启用 usrsctp (SCTP)
-    bool                    dtls_server;                // 是否作为 DTLS 服务端 (握手被动方)
+
+    /* 加密层（与传输层正交，管加密） */
+    int                     dtls_backend;               // 0=disabled, 1=mbedtls, 2=openssl
+    int                     dtls_role;                  // DTLS 握手角色：
+                                                        //   0 = 自动（默认）：按 peer_id 字典序决定，
+                                                        //       ID 较大者为 server（被动方），较小者为 client（主动方）；
+                                                        //       被动监听方（remote_peer_id 为空）始终为 server
+                                                        //   1 = 强制 server（握手被动方，等待 ClientHello）
+                                                        //   2 = 强制 client（握手主动方，发送 ClientHello）
 
     /* 其他选项 */
     bool                    threaded;                   // false = 手动更新, true = 内部线程
