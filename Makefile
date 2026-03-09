@@ -78,6 +78,19 @@ ifeq ($(WITH_OPENSSL), 1)
 		LDFLAGS += -lssl -lcrypto
 	endif
 endif
+
+# Optional SCTP support (usrsctp)
+ifeq ($(WITH_SCTP), 1)
+	SRCS += p2p_trans_sctp.c
+	USRSCTP_DIR = third_party/usrsctp/usrsctplib
+	ifeq ($(wildcard $(USRSCTP_DIR)/usrsctp.h),)
+		$(error usrsctp not found at $(USRSCTP_DIR))
+	endif
+	CFLAGS  += -DWITH_SCTP -I$(USRSCTP_DIR)
+	# usrsctp 需要单独编译为静态库，参见 CMakeLists.txt
+	LDFLAGS += -lusrsctp
+endif
+
 ifdef THREADED
 CFLAGS  += -DP2P_THREADED
 SRCS    += p2p_thread.c

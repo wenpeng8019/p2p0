@@ -123,280 +123,382 @@
  * 本实现说明
  * ============================================================================
  *
- * 当前为骨架实现，完整功能需要：
- *   1. 链接 usrsctp 库
- *   2. 初始化 usrsctp 并注册输出回调
- *   3. 创建 SCTP socket 并建立关联
- *   4. 处理接收和发送
+ * 实现说明：
+ *   - 使用 AF_CONN 虚拟地址族，SCTP 数据包封装在 UDP 中传输
+ *   - 单线程模式使用 usrsctp_init_nothreads + usrsctp_handle_timers
+ *   - 多线程模式使用 usrsctp_init（usrsctp 内部管理定时器线程）
+ *   - 接收使用 upcall 回调，将数据写入 stream.recv_ring
  */
 
 #define MOD_TAG "SCTP"
 
 #include "p2p_internal.h"
+#include <usrsctp.h>
+
+#ifndef htonl
+#include <arpa/inet.h>
+#endif
+
+/* SCTP 端口（双方使用相同端口，AF_CONN 下无实际意义） */
+#define SCTP_LOCAL_PORT  5000
+
+/* PPID: 二进制数据（区分 WebRTC DataChannel 的文本/二进制/控制） */
+#define PPID_BINARY  htonl(53)
+
+/* usrsctp 全局初始化引用计数（多个 session 共享同一个 usrsctp 实例） */
+static int g_sctp_ref_count = 0;
 
 /*
  * SCTP 上下文结构
- * 
- * 在完整实现中应包含：
- *   - struct socket *sctp_sock: usrsctp socket 句柄
- *   - 关联状态、流配置等
  */
 typedef struct {
-    int state;  /* 连接状态：0=未连接，1=连接中，2=已连接 */
-    /* struct socket *sctp_sock; */  /* usrsctp socket（需要 usrsctp.h） */
+    struct socket *sock;        /* usrsctp socket 句柄 */
+    int            state;       /* 0=未连接, 1=连接中, 2=已连接 */
+    uint64_t       last_tick;   /* 上次 handle_timers 时间戳 (ms) */
 } p2p_sctp_ctx_t;
 
-/*
- * ============================================================================
- * SCTP 出站数据包回调
- * ============================================================================
- *
- * usrsctp 通过此回调发送数据包。
- * 我们将 SCTP 数据包封装到 UDP 中传输。
- *
- * 数据流向：
- *   usrsctp 内部 → p2p_sctp_out() → UDP 发送
- *
- * @param addr    用户上下文（p2p_session 指针）
- * @param buffer  SCTP 数据包
- * @param length  数据包长度
- * @param tos     服务类型（DSCP，通常忽略）
- * @param set_df  Don't Fragment 标志
- * @return        0=成功
- */
+/* ============================================================================
+ * 出站回调：usrsctp → UDP
+ * ============================================================================ */
 static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df) {
     p2p_session_t *s = (p2p_session_t *)addr;
     (void)tos; (void)set_df;
-    
-    /*
-     * SCTP 已内置可靠性，因此直接封装为 P2P_PKT_DATA
-     * 不需要上层再做 ARQ 处理
-     */
+
+    if (!s || length > P2P_MTU) return -1;
+
     int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
     if (is_relay) {
         uint8_t relay_pkt[sizeof(uint64_t) + P2P_MTU];
         nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
-        if (length > P2P_MTU) return -1;
         memcpy(relay_pkt + sizeof(uint64_t), buffer, length);
         udp_send_packet(s->sock, &s->active_addr, P2P_PKT_RELAY_DATA, 0, 0,
                         relay_pkt, (int)(sizeof(uint64_t) + length));
     } else {
-        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0, buffer, (int)length);
+        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_DATA, 0, 0,
+                        buffer, (int)length);
     }
     return 0;
 }
 
-/*
- * ============================================================================
+/* ============================================================================
+ * Upcall 回调：usrsctp 有数据可读时调用
+ * ============================================================================ */
+static void sctp_upcall(struct socket *sock, void *arg, int flags) {
+    p2p_session_t *s = (p2p_session_t *)arg;
+    (void)flags;
+    if (!s) return;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    if (!ctx) return;
+
+    int events = usrsctp_get_events(sock);
+
+    /* 处理可读事件 */
+    if (events & SCTP_EVENT_READ) {
+        for (;;) {
+            uint8_t buf[P2P_MTU];
+            struct sockaddr_conn from;
+            socklen_t fromlen = sizeof(from);
+            struct sctp_rcvinfo rcvinfo;
+            socklen_t infolen = sizeof(rcvinfo);
+            unsigned int infotype = 0;
+            int msg_flags = 0;
+
+            ssize_t n = usrsctp_recvv(sock, buf, sizeof(buf),
+                                      (struct sockaddr *)&from, &fromlen,
+                                      &rcvinfo, &infolen, &infotype, &msg_flags);
+            if (n <= 0) break;
+
+            if (msg_flags & MSG_NOTIFICATION) {
+                /* 处理 SCTP 事件通知 */
+                union sctp_notification *notif = (union sctp_notification *)buf;
+                if ((size_t)n >= sizeof(notif->sn_header)) {
+                    switch (notif->sn_header.sn_type) {
+                    case SCTP_ASSOC_CHANGE: {
+                        struct sctp_assoc_change *sac = &notif->sn_assoc_change;
+                        if (sac->sac_state == SCTP_COMM_UP) {
+                            ctx->state = 2;
+                            print("I:", LA_S("[SCTP] association established", LA_S8, 557));
+                        } else if (sac->sac_state == SCTP_COMM_LOST ||
+                                   sac->sac_state == SCTP_SHUTDOWN_COMP ||
+                                   sac->sac_state == SCTP_CANT_STR_ASSOC) {
+                            ctx->state = 0;
+                            print("W:", LA_F("[SCTP] association lost/shutdown (state=%u)", LA_F220, 584),
+                                  sac->sac_state);
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            /* 应用数据 → stream recv_ring */
+            ring_write(&s->stream.recv_ring, buf, (int)n);
+        }
+    }
+}
+
+/* ============================================================================
+ * 订阅 SCTP 事件通知
+ * ============================================================================ */
+static void sctp_subscribe_events(struct socket *sock) {
+    uint16_t event_types[] = {
+        SCTP_ASSOC_CHANGE,
+        SCTP_PEER_ADDR_CHANGE,
+        SCTP_SHUTDOWN_EVENT,
+        SCTP_SEND_FAILED_EVENT,
+        SCTP_SENDER_DRY_EVENT,
+    };
+    for (int i = 0; i < (int)(sizeof(event_types) / sizeof(event_types[0])); i++) {
+        struct sctp_event event;
+        memset(&event, 0, sizeof(event));
+        event.se_assoc_id = SCTP_ALL_ASSOC;
+        event.se_type = event_types[i];
+        event.se_on = 1;
+        usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_EVENT,
+                           &event, sizeof(event));
+    }
+}
+
+/* ============================================================================
  * 初始化 SCTP 传输层
- * ============================================================================
- *
- * 完整实现步骤：
- *
- *   1. usrsctp_init(0, p2p_sctp_out, NULL)
- *      初始化 usrsctp 库，注册出站回调
- *      第一个参数为本地 SCTP 端口（0=自动分配）
- *
- *   2. usrsctp_register_address(s)
- *      注册会话地址，用于回调时识别数据归属
- *
- *   3. usrsctp_socket(AF_CONN, SOCK_STREAM, IPPROTO_SCTP, ...)
- *      创建 SCTP socket
- *      AF_CONN 表示使用连接地址族（非真实网络地址）
- *
- *   4. usrsctp_setsockopt(...)
- *      配置 socket 选项：
- *        - SCTP_NODELAY: 禁用 Nagle 算法
- *        - SCTP_RECVRCVINFO: 接收消息元信息
- *        - SCTP_ENABLE_STREAM_RESET: 启用流重置
- *
- *   5. usrsctp_bind() / usrsctp_connect() 或 usrsctp_listen() / usrsctp_accept()
- *      建立 SCTP 关联（类似 TCP 连接）
- *
- * @param s  P2P 会话
- * @return   0=成功，-1=失败
- */
+ * ============================================================================ */
 static int sctp_init(p2p_session_t *s) {
-    (void)s;
-    print("I:", LA_S("[SCTP] usrsctp wrapper initialized (skeleton)", LA_S8, 34));
-    
-    /*
-     * 完整实现示例：
-     *
-     * usrsctp_init(0, p2p_sctp_out, NULL);
-     * usrsctp_sysctl_set_sctp_blackhole(2);  // 不回复 ABORT
-     * usrsctp_sysctl_set_sctp_no_csum_on_loopback(0);
-     * 
-     * usrsctp_register_address(s);
-     * 
-     * struct socket *sock = usrsctp_socket(
-     *     AF_CONN, SOCK_STREAM, IPPROTO_SCTP,
-     *     sctp_receive_cb,  // 接收回调
-     *     NULL, 0, s);
-     * 
-     * if (!sock) return -1;
-     * 
-     * s->sctp_ctx = sock;
-     */
-    
+    p2p_sctp_ctx_t *ctx = calloc(1, sizeof(p2p_sctp_ctx_t));
+    if (!ctx) return -1;
+    s->transport_data = ctx;
+
+    /* 全局初始化（仅首次） */
+    if (g_sctp_ref_count == 0) {
+#ifdef P2P_THREADED
+        usrsctp_init(0, p2p_sctp_out, NULL);
+#else
+        usrsctp_init_nothreads(0, p2p_sctp_out, NULL);
+#endif
+        usrsctp_sysctl_set_sctp_blackhole(2);           /* 静默丢弃未知关联的包 */
+        usrsctp_sysctl_set_sctp_no_csum_on_loopback(0); /* 始终校验 CRC32c */
+        usrsctp_sysctl_set_sctp_ecn_enable(0);          /* 关闭 ECN（UDP 封装无 ECN 支持） */
+    }
+    g_sctp_ref_count++;
+
+    usrsctp_register_address(s);
+
+    /* 创建 SCTP socket（AF_CONN: 应用管理传输，非内核协议栈） */
+    struct socket *sock = usrsctp_socket(
+        AF_CONN, SOCK_STREAM, IPPROTO_SCTP,
+        NULL,   /* receive_cb = NULL，使用 upcall 模式 */
+        NULL,   /* send_cb */
+        0,      /* sb_threshold */
+        s       /* ulp_info */
+    );
+    if (!sock) {
+        print("E:", LA_S("[SCTP] usrsctp_socket failed", LA_S10, 559));
+        goto fail;
+    }
+    ctx->sock = sock;
+
+    /* 设置 upcall（数据可读时回调） */
+    usrsctp_set_upcall(sock, sctp_upcall, s);
+
+    /* 设为非阻塞 */
+    usrsctp_set_non_blocking(sock, 1);
+
+    /* 配置 socket 选项 */
+    int on = 1;
+    usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_NODELAY, &on, sizeof(on));
+    usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_RECVRCVINFO, &on, sizeof(on));
+
+    /* 配置初始流参数 */
+    struct sctp_initmsg initmsg;
+    memset(&initmsg, 0, sizeof(initmsg));
+    initmsg.sinit_num_ostreams  = 1;     /* P2P 只需 1 条流 */
+    initmsg.sinit_max_instreams = 1;
+    initmsg.sinit_max_attempts  = 3;
+    initmsg.sinit_max_init_timeo = 5000; /* 5 秒 */
+    usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_INITMSG,
+                       &initmsg, sizeof(initmsg));
+
+    /* 启用流重置（WebRTC DataChannel 要求） */
+    struct sctp_assoc_value av;
+    memset(&av, 0, sizeof(av));
+    av.assoc_value = SCTP_ENABLE_RESET_STREAM_REQ |
+                     SCTP_ENABLE_RESET_ASSOC_REQ  |
+                     SCTP_ENABLE_CHANGE_ASSOC_REQ;
+    usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_ENABLE_STREAM_RESET,
+                       &av, sizeof(av));
+
+    /* 订阅事件通知 */
+    sctp_subscribe_events(sock);
+
+    /* 构造本地地址并 bind */
+    struct sockaddr_conn sconn;
+    memset(&sconn, 0, sizeof(sconn));
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    sconn.sconn_len = sizeof(sconn);
+#endif
+    sconn.sconn_family = AF_CONN;
+    sconn.sconn_port = htons(SCTP_LOCAL_PORT);
+    sconn.sconn_addr = s;
+
+    if (usrsctp_bind(sock, (struct sockaddr *)&sconn, sizeof(sconn)) < 0) {
+        print("E:", LA_F("[SCTP] bind failed: %s", LA_F221, 585), strerror(errno));
+        goto fail;
+    }
+
+    /* 发起连接（对端地址也用同一个 session 指针，AF_CONN 下地址仅做路由标识） */
+    struct sockaddr_conn peer;
+    memset(&peer, 0, sizeof(peer));
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    peer.sconn_len = sizeof(peer);
+#endif
+    peer.sconn_family = AF_CONN;
+    peer.sconn_port = htons(SCTP_LOCAL_PORT);
+    peer.sconn_addr = s;
+
+    ctx->state = 1; /* 连接中 */
+    int ret = usrsctp_connect(sock, (struct sockaddr *)&peer, sizeof(peer));
+    if (ret < 0 && errno != EINPROGRESS) {
+        print("E:", LA_F("[SCTP] connect failed: %s", LA_F222, 586), strerror(errno));
+        goto fail;
+    }
+
+    ctx->last_tick = P_tick_ms();
+    print("I:", LA_S("[SCTP] usrsctp initialized, connecting...", LA_S9, 558));
     return 0;
+
+fail:
+    if (ctx->sock) {
+        usrsctp_close(ctx->sock);
+        ctx->sock = NULL;
+    }
+    usrsctp_deregister_address(s);
+    g_sctp_ref_count--;
+    if (g_sctp_ref_count == 0) usrsctp_finish();
+    free(ctx);
+    s->transport_data = NULL;
+    return -1;
 }
 
-/*
- * ============================================================================
+/* ============================================================================
  * 发送数据
- * ============================================================================
- *
- * 通过 SCTP 发送应用层数据。
- *
- * 完整实现应调用 usrsctp_sendv()：
- *
- *   struct sctp_sendv_spa spa;
- *   memset(&spa, 0, sizeof(spa));
- *   spa.sendv_flags = SCTP_SEND_SNDINFO_VALID;
- *   spa.sendv_sndinfo.snd_ppid = htonl(PPID);    // 协议标识
- *   spa.sendv_sndinfo.snd_sid = stream_id;       // 流 ID
- *   spa.sendv_sndinfo.snd_flags = SCTP_EOR;      // 消息结束标志
- *
- *   usrsctp_sendv(sock, buf, len, NULL, 0, &spa, sizeof(spa),
- *                 SCTP_SENDV_SPA, 0);
- *
- * PPID (Payload Protocol Identifier) 常见值：
- *   - 50: WebRTC String
- *   - 51: WebRTC Binary
- *   - 53: WebRTC String Empty
- *   - 54: WebRTC Binary Empty
- *
- * @param s    P2P 会话
- * @param buf  要发送的数据
- * @param len  数据长度
- * @return     发送的字节数，-1=失败
- */
+ * ============================================================================ */
 static int sctp_send(p2p_session_t *s, const void *buf, int len) {
-    (void)s; (void)buf;
-    print("V:", LA_F("[SCTP] sending %d bytes", LA_F220, 316), len);
-    
-    /* 
-     * 完整实现：
-     * return usrsctp_sendv(s->sctp_sock, buf, len, NULL, 0, 
-     *                      &spa, sizeof(spa), SCTP_SENDV_SPA, 0);
-     */
-    
-    return len;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    if (!ctx || !ctx->sock || ctx->state != 2) return -1;
+
+    struct sctp_sendv_spa spa;
+    memset(&spa, 0, sizeof(spa));
+    spa.sendv_flags = SCTP_SEND_SNDINFO_VALID;
+    spa.sendv_sndinfo.snd_sid = 0;             /* 流 0 */
+    spa.sendv_sndinfo.snd_flags = SCTP_EOR;    /* 完整消息 */
+    spa.sendv_sndinfo.snd_ppid = PPID_BINARY;
+
+    ssize_t sent = usrsctp_sendv(ctx->sock, buf, (size_t)len,
+                                 NULL, 0,
+                                 &spa, sizeof(spa),
+                                 SCTP_SENDV_SPA, 0);
+    if (sent < 0) {
+        if (errno == EWOULDBLOCK) return 0; /* 发送缓冲区满，下次重试 */
+        print("W:", LA_F("[SCTP] sendv failed: %s", LA_F223, 587), strerror(errno));
+        return -1;
+    }
+    return (int)sent;
 }
 
-/*
- * ============================================================================
+/* ============================================================================
  * 周期性处理
- * ============================================================================
- *
- * usrsctp 内部使用线程处理定时器，通常不需要外部 tick。
- *
- * 但在单线程模式下，可能需要：
- *   - 手动触发超时检查
- *   - 处理心跳
- *   - 检查关联状态
- */
+ * ============================================================================ */
 static void sctp_tick(p2p_session_t *s) {
-    (void)s;
-    /*
-     * 单线程模式下可能需要：
-     * usrsctp_handle_timers();
-     */
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    if (!ctx) return;
+
+#ifndef P2P_THREADED
+    /* 单线程模式：手动驱动 usrsctp 定时器 */
+    uint64_t now = P_tick_ms();
+    uint32_t elapsed = (uint32_t)(now - ctx->last_tick);
+    if (elapsed > 0) {
+        usrsctp_handle_timers(elapsed);
+        ctx->last_tick = now;
+    }
+#endif
 }
 
-/*
- * ============================================================================
- * 处理接收的数据包
- * ============================================================================
- *
- * 接收 UDP 层传入的 SCTP 数据包，交给 usrsctp 处理。
- *
- * 数据流向：
- *   UDP 接收 → sctp_on_packet() → usrsctp_conninput() → usrsctp 内部处理
- *                                                            ↓
- *                                               sctp_receive_cb() 回调应用层
- *
- * @param s       P2P 会话
- * @param type    数据包类型
- * @param payload 数据负载（SCTP 数据包）
- * @param len     负载长度
- * @param from    发送方地址
- */
-static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from) {
+/* ============================================================================
+ * 处理入站 SCTP 数据包（UDP → usrsctp）
+ * ============================================================================ */
+static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload,
+                           int len, const struct sockaddr_in *from) {
     if (type != P2P_PKT_DATA && type != P2P_PKT_RELAY_DATA) return;
-    (void)from; (void)s; (void)payload;
-    
-    print("V:", LA_F("[SCTP] received encapsulated packet, length %d", LA_F219, 315), len);
-    
-    /*
-     * 完整实现：
-     * usrsctp_conninput(s, payload, len, 0);
-     *
-     * usrsctp 内部会：
-     * 1. 解析 SCTP 包头
-     * 2. 验证 Verification Tag 和校验和
-     * 3. 处理各种 Chunk（DATA、SACK、HEARTBEAT 等）
-     * 4. 对于 DATA Chunk，触发接收回调
-     */
+    (void)from;
+
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    if (!ctx) return;
+
+    /* 将 UDP 中提取出的 SCTP 数据包送入 usrsctp 协议栈 */
+    usrsctp_conninput(s, payload, (size_t)len, 0);
 }
 
-/*
- * 获取 SCTP 传输层统计
- *
- * 完整实现应通过 usrsctp_opt_info() 查询 SCTP_STATUS：
- *   struct sctp_status status;
- *   socklen_t len = sizeof(status);
- *   if (usrsctp_opt_info(sctp_sock, 0, SCTP_STATUS, &status, &len) == 0) {
- *       *rtt_ms = status.sstat_primary.spinfo_srtt;
- *       *loss_rate = 0.0f;  // SCTP 内部管理重传
- *       return 0;
- *   }
- */
+/* ============================================================================
+ * 获取传输层统计
+ * ============================================================================ */
 static int sctp_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate) {
-    (void)s; (void)rtt_ms; (void)loss_rate;
-    return -1;  /* 骨架实现：统计暂不可用 */
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    if (!ctx || !ctx->sock || ctx->state != 2) return -1;
+
+    struct sctp_status status;
+    memset(&status, 0, sizeof(status));
+    socklen_t len = sizeof(status);
+    if (usrsctp_getsockopt(ctx->sock, IPPROTO_SCTP, SCTP_STATUS,
+                           &status, &len) != 0)
+        return -1;
+
+    *rtt_ms = status.sstat_primary.spinfo_srtt;
+    *loss_rate = 0.0f;  /* SCTP 内部管理重传，无直接丢包率指标 */
+    return (*rtt_ms > 0) ? 0 : -1;
 }
 
+/* ============================================================================
+ * 关闭
+ * ============================================================================ */
 static void sctp_close(p2p_session_t *s) {
-    (void)s;
-    /*
-     * 完整实现：
-     * usrsctp_close(s->sctp_sock);
-     * usrsctp_deregister_address(s);
-     * usrsctp_finish();  // 仅在最后一个实例关闭时
-     */
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    if (!ctx) return;
+
+    if (ctx->sock) {
+        usrsctp_close(ctx->sock);
+        ctx->sock = NULL;
+    }
+    usrsctp_deregister_address(s);
+
+    g_sctp_ref_count--;
+    if (g_sctp_ref_count == 0) {
+        usrsctp_finish();
+    }
+
+    free(ctx);
+    s->transport_data = NULL;
 }
 
-/*
- * ============================================================================
- * 传输层操作表
- * ============================================================================
- *
- * 注册为 P2P 传输层实现，可通过配置选择使用。
- *
- * 与其他传输层对比：
- *   - p2p_trans_compact:    无可靠性，最低延迟
- *   - p2p_trans_reliable:  ARQ 可靠性，简单实现
- *   - p2p_trans_pseudotcp: TCP 风格拥塞控制
- *   - p2p_trans_sctp:      SCTP 多流可靠/不可靠混合
- */
-/*
- * SCTP 就绪检查（骨架实现）
- * 完整实现应检查 usrsctp 关联是否建立（SCTP_COMM_UP 已触发）
- */
+/* ============================================================================
+ * 就绪检查
+ * ============================================================================ */
 static int sctp_is_ready(struct p2p_session *s) {
-    (void)s;
-    return 0;  /* 骨架实现：始终未就绪，防止误发数据 */
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    return ctx && ctx->state == 2;
 }
 
+/* ============================================================================
+ * 传输层操作表
+ * ============================================================================ */
 const p2p_transport_ops_t p2p_trans_sctp = {
-    .name = "SCTP-usrsctp",      /* 传输层名称 */
-    .init = sctp_init,           /* 初始化 */
-    .close = sctp_close,         /* 关闭清理 */
-    .send_data = sctp_send,      /* 发送数据 */
-    .tick = sctp_tick,           /* 周期处理 */
-    .on_packet = sctp_on_packet, /* 接收处理 */
-    .is_ready = sctp_is_ready,   /* 就绪检查 */
-    .get_stats = sctp_get_stats  /* 统计查询 */
+    .name      = "SCTP-usrsctp",
+    .init      = sctp_init,
+    .close     = sctp_close,
+    .send_data = sctp_send,
+    .tick      = sctp_tick,
+    .on_packet = sctp_on_packet,
+    .is_ready  = sctp_is_ready,
+    .get_stats = sctp_get_stats
 };
