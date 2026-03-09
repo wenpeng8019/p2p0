@@ -186,6 +186,7 @@ typedef struct p2p_session {
         uint32_t                sack;               // SACK 位图
         uint64_t                last_ack;           // 上次收到 ACK 的时间戳
         int                     cc_state;           // 拥塞控制状态 TCP_STATE_*
+        float                   loss_rate;          // EWMA 丢包率估计（0.0-1.0）
     } tcp;
 
     /* ======================== 定时器 ======================== */

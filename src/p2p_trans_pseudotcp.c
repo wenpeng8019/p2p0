@@ -29,6 +29,7 @@ static void p2p_pseudotcp_init(struct p2p_session *s) {
     s->tcp.ssthresh = 65535;
     s->tcp.dup_acks = 0;
     s->tcp.cc_state = 0; /* 慢启动阶段 */
+    s->tcp.loss_rate = 0.0f;
 }
 
 /* 
@@ -50,6 +51,7 @@ void p2p_pseudotcp_on_ack(struct p2p_session *s, uint16_t ack_seq) {
     }
     s->tcp.dup_acks = 0;
     s->tcp.last_ack = P_tick_ms();
+    s->tcp.loss_rate *= 0.98f;  /* EWMA 衰减：收到 ACK → 丢包率趋向 0 */
 }
 
 /* 
@@ -64,7 +66,8 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
     if (s->tcp.ssthresh < MIN_CWND) s->tcp.ssthresh = MIN_CWND;
     s->tcp.cwnd = MIN_CWND;
     s->tcp.dup_acks = 0;
-    print("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F229, 325), s->tcp.ssthresh, s->tcp.cwnd);
+    s->tcp.loss_rate = s->tcp.loss_rate * 0.98f + 0.02f;  /* EWMA 上报：检测到丢包 */
+    print("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F232, 325), s->tcp.ssthresh, s->tcp.cwnd);
 }
 
 /*
@@ -129,7 +132,7 @@ static void p2p_pseudotcp_tick(struct p2p_session *s) {
 static int pseudotcp_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate) {
     if (s->reliable.srtt <= 0) return -1;
     *rtt_ms = (uint32_t)s->reliable.srtt;
-    *loss_rate = 0.0f;  /* 丢包由拥塞控制内部处理 */
+    *loss_rate = s->tcp.loss_rate;
     return 0;
 }
 
