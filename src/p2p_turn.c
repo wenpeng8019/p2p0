@@ -59,7 +59,7 @@
 int p2p_turn_allocate(p2p_session_t *s) {
     if (!s->cfg.turn_server) return -1;
     
-    print("I:", LA_F("Sending Allocate Request to %s:%d", LA_F199, 295),
+    print("I:", LA_F("Sending Allocate Request to %s:%d", LA_F295, 295),
                  s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
     
     uint8_t buf[256];
@@ -120,7 +120,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
     
     struct hostent *he = gethostbyname(s->cfg.turn_server);
     if (!he) {
-        print("E:", LA_F("Failed to resolve TURN server: %s", LA_F139, 235), s->cfg.turn_server);
+        print("E:", LA_F("Failed to resolve TURN server: %s", LA_F235, 235), s->cfg.turn_server);
         return -1;
     }
     memcpy(&turn_addr.sin_addr, he->h_addr_list[0], he->h_length);
@@ -153,7 +153,7 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
     
     /* 处理 Allocate Success Response */
     if (type == TURN_ALLOCATE_SUCCESS) {
-        print("I: %s", LA_S("Allocation successful!", LA_S14, 38));
+        print("I: %s", LA_S("Allocation successful!", LA_S38, 38));
         
         /*
          * 解析 RELAYED-ADDRESS / XOR-RELAYED-ADDRESS 属性
@@ -215,7 +215,7 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                             c->addr = relay_addr;
                             /* RFC 5245: Relay 候选优先级使用标准公式计算 */
                             c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
-                            print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F144, 240),
+                            print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F240, 240),
                                          inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                                          c->priority);
                             /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */

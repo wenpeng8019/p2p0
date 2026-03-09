@@ -11,18 +11,18 @@ else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unknown-pragmas")
 endif()
 
-# Run i18n.sh before building to (re)generate .LANG.h and .LANG.c (DISABLED)
-# add_custom_command(
-#     OUTPUT
-#         ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.h
-#         ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
-#     COMMAND ${CMAKE_SOURCE_DIR}/i18n/i18n.sh ${CMAKE_CURRENT_SOURCE_DIR}
-#     DEPENDS
-#         ${CMAKE_CURRENT_SOURCE_DIR}/server.c
-#         ${CMAKE_SOURCE_DIR}/i18n/i18n.sh
-#     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-#     COMMENT "Generating i18n language files for p2p_server"
-# )
+# i18n code generation: Debug → SID-based stable IDs; Release → --ndebug compact IDs
+add_custom_command(
+    OUTPUT
+        ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
+    COMMAND ${I18N_SCRIPT} ${CMAKE_CURRENT_SOURCE_DIR} ${I18N_NDEBUG_FLAG}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/server.c
+        ${I18N_SCRIPT}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Generating i18n language files for p2p_server"
+)
 
 add_executable(p2p_server
     server.c

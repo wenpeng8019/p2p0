@@ -84,18 +84,36 @@ set(LIB_SRCS
     src/p2p_dtls.c
 )
 
-# --- i18n code generation for p2p core library (DISABLED) ---
-# add_custom_command(
-#     OUTPUT
-#         ${CMAKE_SOURCE_DIR}/src/.LANG.h
-#         ${CMAKE_SOURCE_DIR}/src/.LANG.c
-#     COMMAND ${CMAKE_SOURCE_DIR}/i18n/i18n.sh ${CMAKE_SOURCE_DIR}/src
-#     DEPENDS
-#         ${LIB_SRCS}
-#         ${CMAKE_SOURCE_DIR}/i18n/i18n.sh
-#     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-#     COMMENT "Generating i18n language files for p2p core library"
-# )
+# --- i18n --ndebug auto-detection ---
+# Debug build → SID-based stable IDs (default)
+# Release/RelWithDebInfo/MinSizeRel → compact sequential IDs (--ndebug)
+set(I18N_NDEBUG_FLAG "")
+if(CMAKE_BUILD_TYPE)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _bt)
+    if(NOT _bt STREQUAL "DEBUG")
+        set(I18N_NDEBUG_FLAG "--ndebug")
+    endif()
+endif()
+
+# Cross-platform i18n command
+if(WIN32)
+    set(I18N_SCRIPT "${CMAKE_SOURCE_DIR}/i18n/i18n.bat")
+else()
+    set(I18N_SCRIPT "${CMAKE_SOURCE_DIR}/i18n/i18n.sh")
+endif()
+
+# --- i18n code generation for p2p core library ---
+add_custom_command(
+    OUTPUT
+        ${CMAKE_SOURCE_DIR}/src/.LANG.h
+        ${CMAKE_SOURCE_DIR}/src/.LANG.c
+    COMMAND ${I18N_SCRIPT} src ${I18N_NDEBUG_FLAG}
+    DEPENDS
+        ${LIB_SRCS}
+        ${I18N_SCRIPT}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Generating i18n language files for p2p core library"
+)
 
 # When I18N_ENABLED, compile the generated table + runtime into the library
 #
@@ -179,15 +197,13 @@ if(THREADED)
     target_link_libraries(p2p_static Threads::Threads)
 endif()
 
-# Run i18n.sh on src/ to assign IDs in source files and generate src/.LANG.h/.LANG.c.
-# p2p_static depends on this target so i18n.sh runs before any source is compiled.
-# (src/.LANG.h is only #include'd when I18N_ENABLED, so it is only mandatory then,
-#  but running i18n.sh unconditionally keeps source IDs fresh.)
-# add_custom_target(p2p_core_i18n_gen DEPENDS
-#     ${CMAKE_SOURCE_DIR}/src/.LANG.h
-#     ${CMAKE_SOURCE_DIR}/src/.LANG.c
-# )
-# add_dependencies(p2p_static p2p_core_i18n_gen)
+# i18n.sh generates src/.LANG.h/.LANG.c before any source is compiled.
+# Debug → SID-based stable IDs; Release → compact sequential IDs (--ndebug).
+add_custom_target(p2p_core_i18n_gen DEPENDS
+    ${CMAKE_SOURCE_DIR}/src/.LANG.h
+    ${CMAKE_SOURCE_DIR}/src/.LANG.c
+)
+add_dependencies(p2p_static p2p_core_i18n_gen)
 
 # --- Signaling Server ---
 add_subdirectory(p2p_server)
