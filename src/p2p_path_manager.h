@@ -68,7 +68,8 @@ typedef struct {
     uint32_t            rtt_rttvar;                 // RTT 方差
     
     /* RTT 样本统计 */
-    uint32_t            rtt_samples[10];            // RTT 样本环形缓冲区
+#define RTT_SAMPLE_COUNT    10                      // 样本缓冲区容量
+    uint32_t            rtt_samples[RTT_SAMPLE_COUNT]; // RTT 样本环形缓冲区
     int                 rtt_sample_idx;             // 当前样本索引
     int                 rtt_sample_count;           // 有效样本数
     
@@ -194,9 +195,10 @@ typedef struct {
     uint64_t            total_failovers;            // 总故障转移次数
     uint64_t            start_time_ms;              // 管理器启动时间
     
-    /* 数据包跟踪（用于 RTT 测量）*/
-    packet_track_t      pending_packets[MAX_PENDING_PACKETS]; // 待确认数据包
-    int                 pending_count;              // 待确认数量
+    /* 数据包跟踪（环形队列，用于 RTT 测量）*/
+    packet_track_t      pending_packets[MAX_PENDING_PACKETS];
+    int                 pending_head;               // 队首索引
+    int                 pending_count;              // 队列长度
     
     /* 切换历史与防抖动 */
     path_switch_record_t switch_history[MAX_SWITCH_HISTORY]; // 切换历史环形缓冲区
