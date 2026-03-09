@@ -495,13 +495,13 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
                 /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 c->addr = mapped;
-                print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F238, 334),
+                print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F244, 334),
                              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                              c->priority);
                 /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
                 p2p_ice_send_local_candidate(s, c);
             } else {
-                print("W:", LA_F("✗ Cannot add Srflx candidate: realloc failed (OOM)", LA_F239, 335));
+                print("W:", LA_F("✗ Cannot add Srflx candidate: realloc failed (OOM)", LA_F245, 335));
             }
         }
         
@@ -644,7 +644,7 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
             /* 不要在这里重置 retry_count，保留重试计数 */
             print("I:", LA_F("Sending Test I to %s:%d (len=%d)", LA_F200, 296), s->cfg.stun_server, s->cfg.stun_port, len);
         } else {
-            print("E: %s", LA_S("Failed to build STUN request", LA_S30, 56));
+            print("E: %s", LA_S("Failed to build STUN request", LA_S35, 56));
         }
         break;
     }

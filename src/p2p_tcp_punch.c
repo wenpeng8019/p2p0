@@ -32,7 +32,7 @@ int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
                       s->cfg.tcp_port);
         loc.sin_port = 0;
         if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
-            print("E: %s", LA_S("Bind failed", LA_S15, 41));
+            print("E: %s", LA_S("Bind failed", LA_S17, 41));
              P_sock_close(sock);
              return -1;
         }

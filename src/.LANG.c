@@ -39,68 +39,75 @@ const char* lang_en[LA_NUM] = {
     [LA_S5] = "%s: triggered on CONNECTED state (unnecessary)",  /* SID:31 */
     [LA_S6] = "%s: TURN allocated, starting address exchange",  /* SID:32 */
     [LA_S7] = "[OpenSSL] DTLS handshake completed",  /* SID:33 */
-    [LA_S8] = "[SCTP] usrsctp wrapper initialized (skeleton)",  /* SID:34 */
-    [LA_S9] = "[SIGNALING] Server storage full, waiting for peer to come online",  /* SID:35 */
-    [LA_S10] = "[Trickle] TCP not connected, skipping single candidate send",  /* SID:36 */
-    [LA_S11] = "Added RELAY path to path manager",  /* SID:37 */
-    [LA_S12] = "Allocation successful!",  /* SID:38 */
-    [LA_S13] = "Answer already present, skipping offer re-publish",  /* SID:39 */
-    [LA_S14] = "Base64 decode failed",  /* SID:40 */
-    [LA_S15] = "Bind failed",  /* SID:41 */
-    [LA_S16] = "Channel ID validation failed",  /* SID:42 */
-    [LA_S17] = "Close P2P UDP socket",  /* SID:43 */
-    [LA_S18] = "Closing TCP connection to RELAY signaling server",  /* SID:44 */
-    [LA_S19] = "COMPACT mode requires explicit remote_peer_id",  /* SID:45 */
-    [LA_S20] = "Connection closed by server",  /* SID:46 */
-    [LA_S21] = "Connection closed while discarding",  /* SID:47 */
-    [LA_S22] = "Connection closed while reading payload",  /* SID:48 */
-    [LA_S23] = "Connection closed while reading sender",  /* SID:49 */
-    [LA_S24] = "Detecting local network addresses",  /* SID:50 */
-    [LA_S25] = "DTLS (MbedTLS) requested but library not linked",  /* SID:51 */
-    [LA_S26] = "Failed to allocate ACK payload buffer",  /* SID:52 */
-    [LA_S27] = "Failed to allocate discard buffer, closing connection",  /* SID:53 */
-    [LA_S28] = "Failed to allocate memory for candidate lists",  /* SID:54 */
-    [LA_S29] = "Failed to allocate memory for session",  /* SID:55 */
-    [LA_S30] = "Failed to build STUN request",  /* SID:56 */
-    [LA_S31] = "Failed to push remote candidate",  /* SID:57 */
-    [LA_S32] = "Failed to reserve remote candidates (cnt=1)",  /* SID:58 */
-    [LA_S33] = "Failed to send header",  /* SID:59 */
-    [LA_S34] = "Failed to send payload",  /* SID:60 */
-    [LA_S35] = "Failed to send punch packet for new peer addr",  /* SID:61 */
-    [LA_S36] = "Failed to send target name",  /* SID:62 */
-    [LA_S37] = "Gist GET failed",  /* SID:63 */
-    [LA_S38] = "Handshake complete",  /* SID:64 */
-    [LA_S39] = "Invalid channel_id format (security risk)",  /* SID:65 */
-    [LA_S40] = "Invalid signaling mode in configuration",  /* SID:66 */
-    [LA_S41] = "NAT connection recovered, upgrading from RELAY to CONNECTED",  /* SID:67 */
-    [LA_S42] = "NAT connection timeout, downgrading to relay mode",  /* SID:68 */
-    [LA_S43] = "No advanced transport layer enabled, using simple reliable layer",  /* SID:69 */
-    [LA_S44] = "No auth_key provided, using default key (insecure)",  /* SID:70 */
-    [LA_S45] = "OpenSSL requested but library not linked",  /* SID:71 */
-    [LA_S46] = "Out of memory",  /* SID:72 */
-    [LA_S47] = "P2P connected, closing signaling TCP connection",  /* SID:73 */
-    [LA_S48] = "P2P connection established",  /* SID:74 */
-    [LA_S49] = "P2P punch failed, adding relay path",  /* SID:75 */
-    [LA_S50] = "P2P punching in progress ...",  /* SID:76 */
-    [LA_S51] = "p2p_ice_send_local_candidate called in non-RELAY mode",  /* SID:77 */
-    [LA_S52] = "Path switch debounced, waiting for stability",  /* SID:78 */
-    [LA_S53] = "PseudoTCP enabled as transport layer",  /* SID:79 */
-    [LA_S54] = "PUBSUB (PUB): gathering candidates, waiting for STUN before publishing",  /* SID:80 */
-    [LA_S55] = "PUBSUB (SUB): waiting for offer from any peer",  /* SID:81 */
-    [LA_S56] = "PUBSUB mode requires gh_token and gist_id",  /* SID:82 */
-    [LA_S57] = "Received FIN packet, connection closed",  /* SID:83 */
-    [LA_S58] = "RELAY/COMPACT mode requires server_host",  /* SID:84 */
-    [LA_S59] = "SCTP (usrsctp) requested but library not linked",  /* SID:85 */
-    [LA_S60] = "Sending FIN packet to peer before closing",  /* SID:86 */
-    [LA_S61] = "Sending FIN packet to peer on destroy",  /* SID:87 */
-    [LA_S62] = "Sending UNREGISTER packet to COMPACT signaling server",  /* SID:88 */
-    [LA_S63] = "Signal payload deserialization failed",  /* SID:89 */
-    [LA_S64] = "Skipping local Host candidates on --public-only",  /* SID:90 */
-    [LA_S65] = "Starting internal thread",  /* SID:91 */
-    [LA_S66] = "Stopping internal thread",  /* SID:92 */
-    [LA_S67] = "Storage full, waiting for peer to come online",  /* SID:93 */
-    [LA_S68] = "Switched to backup path: RELAY",  /* SID:94 */
-    [LA_S69] = "Using path: RELAY",  /* SID:95 */
+    [LA_S8] = "[SCTP] association established",  /* SID:557 */
+    [LA_S9] = "[SCTP] usrsctp initialized, connecting...",  /* SID:558 */
+    [LA_S10] = "[SCTP] usrsctp_socket failed",  /* SID:559 */
+    [LA_S11] = "[SIGNALING] Server storage full, waiting for peer to come online",  /* SID:35 */
+    [LA_S12] = "[Trickle] TCP not connected, skipping single candidate send",  /* SID:36 */
+    [LA_S13] = "Added SIGNALING path to path manager",  /* SID:37 */
+    [LA_S14] = "Allocation successful!",  /* SID:38 */
+    [LA_S15] = "Answer already present, skipping offer re-publish",  /* SID:39 */
+    [LA_S16] = "Base64 decode failed",  /* SID:40 */
+    [LA_S17] = "Bind failed",  /* SID:41 */
+    [LA_S18] = "BIO_new failed",  /* SID:560 */
+    [LA_S19] = "Channel ID validation failed",  /* SID:42 */
+    [LA_S20] = "Close P2P UDP socket",  /* SID:43 */
+    [LA_S21] = "Closing TCP connection to RELAY signaling server",  /* SID:44 */
+    [LA_S22] = "COMPACT mode requires explicit remote_peer_id",  /* SID:45 */
+    [LA_S23] = "Connection closed by server",  /* SID:46 */
+    [LA_S24] = "Connection closed while discarding",  /* SID:47 */
+    [LA_S25] = "Connection closed while reading payload",  /* SID:48 */
+    [LA_S26] = "Connection closed while reading sender",  /* SID:49 */
+    [LA_S27] = "Detecting local network addresses",  /* SID:50 */
+    [LA_S28] = "DTLS (MbedTLS) requested but library not linked",  /* SID:51 */
+    [LA_S29] = "Failed to allocate ACK payload buffer",  /* SID:52 */
+    [LA_S30] = "Failed to allocate discard buffer, closing connection",  /* SID:53 */
+    [LA_S31] = "Failed to allocate DTLS context",  /* SID:561 */
+    [LA_S32] = "Failed to allocate memory for candidate lists",  /* SID:54 */
+    [LA_S33] = "Failed to allocate memory for session",  /* SID:55 */
+    [LA_S34] = "Failed to allocate OpenSSL context",  /* SID:562 */
+    [LA_S35] = "Failed to build STUN request",  /* SID:56 */
+    [LA_S36] = "Failed to push remote candidate",  /* SID:57 */
+    [LA_S37] = "Failed to reserve remote candidates (cnt=1)",  /* SID:58 */
+    [LA_S38] = "Failed to send header",  /* SID:59 */
+    [LA_S39] = "Failed to send payload",  /* SID:60 */
+    [LA_S40] = "Failed to send punch packet for new peer addr",  /* SID:61 */
+    [LA_S41] = "Failed to send target name",  /* SID:62 */
+    [LA_S42] = "Gist GET failed",  /* SID:63 */
+    [LA_S43] = "Handshake complete",  /* SID:64 */
+    [LA_S44] = "Invalid channel_id format (security risk)",  /* SID:65 */
+    [LA_S45] = "Invalid signaling mode in configuration",  /* SID:66 */
+    [LA_S46] = "NAT connection recovered, upgrading from RELAY to CONNECTED",  /* SID:67 */
+    [LA_S47] = "NAT connection timeout, downgrading to relay mode",  /* SID:68 */
+    [LA_S48] = "No advanced transport layer enabled, using simple reliable layer",  /* SID:69 */
+    [LA_S49] = "No auth_key provided, using default key (insecure)",  /* SID:70 */
+    [LA_S50] = "OpenSSL requested but library not linked",  /* SID:71 */
+    [LA_S51] = "Out of memory",  /* SID:72 */
+    [LA_S52] = "P2P connected, closing signaling TCP connection",  /* SID:73 */
+    [LA_S53] = "P2P connection established",  /* SID:74 */
+    [LA_S54] = "P2P punch failed, adding relay path",  /* SID:75 */
+    [LA_S55] = "P2P punching in progress ...",  /* SID:76 */
+    [LA_S56] = "p2p_ice_send_local_candidate called in non-RELAY mode",  /* SID:77 */
+    [LA_S57] = "Path switch debounced, waiting for stability",  /* SID:78 */
+    [LA_S58] = "PseudoTCP enabled as transport layer",  /* SID:79 */
+    [LA_S59] = "PUBSUB (PUB): gathering candidates, waiting for STUN before publishing",  /* SID:80 */
+    [LA_S60] = "PUBSUB (SUB): waiting for offer from any peer",  /* SID:81 */
+    [LA_S61] = "PUBSUB mode requires gh_token and gist_id",  /* SID:82 */
+    [LA_S62] = "Received FIN packet, connection closed",  /* SID:83 */
+    [LA_S63] = "RELAY/COMPACT mode requires server_host",  /* SID:84 */
+    [LA_S64] = "SCTP (usrsctp) enabled as transport layer",  /* SID:563 */
+    [LA_S65] = "Sending FIN packet to peer before closing",  /* SID:86 */
+    [LA_S66] = "Sending FIN packet to peer on destroy",  /* SID:87 */
+    [LA_S67] = "Sending UNREGISTER packet to COMPACT signaling server",  /* SID:88 */
+    [LA_S68] = "Signal payload deserialization failed",  /* SID:89 */
+    [LA_S69] = "Skipping local Host candidates on --public-only",  /* SID:90 */
+    [LA_S70] = "SSL_CTX_new failed",  /* SID:564 */
+    [LA_S71] = "SSL_new failed",  /* SID:565 */
+    [LA_S72] = "Starting internal thread",  /* SID:91 */
+    [LA_S73] = "Stopping internal thread",  /* SID:92 */
+    [LA_S74] = "Storage full, waiting for peer to come online",  /* SID:93 */
+    [LA_S75] = "Switched to backup path: RELAY",  /* SID:94 */
+    [LA_S76] = "Using path: RELAY",  /* SID:95 */
     [LA_F0] = "  ... and %d more pairs",  /* SID:96 */
     [LA_F1] = "  [%d] %s/%d",  /* SID:97 */
     [LA_F2] = "  [%d] L=%s:%d -> R=%s:%d, pri=0x%016llx",  /* SID:98 */
@@ -119,8 +126,8 @@ const char* lang_en[LA_NUM] = {
     [LA_F15] = "%s sent, inst_id=%u, cands=%d",  /* SID:111 */
     [LA_F16] = "%s sent, seq=%u",  /* SID:112 */
     [LA_F17] = "%s sent, sid=%u, msg=%u, size=%d",  /* SID:113 */
-    [LA_F18] = "%s sent, size=%d (ses_id=%llu)",  /* SID:540 */
-    [LA_F19] = "%s sent, total=%d (ses_id=%llu)",  /* SID:541 */
+    [LA_F18] = "%s sent, size=%d (ses_id=%llu)",  /* SID:591 */
+    [LA_F19] = "%s sent, total=%d (ses_id=%llu)",  /* SID:592 */
     [LA_F20] = "%s seq=0: accepted cand_cnt=%d",  /* SID:116 */
     [LA_F21] = "%s seq=0: invalid(cand_cnt=%d flags=0x%02x)",  /* SID:117 */
     [LA_F22] = "%s, retry remaining candidates and FIN to peer",  /* SID:118 */
@@ -130,20 +137,20 @@ const char* lang_en[LA_NUM] = {
     [LA_F26] = "%s: Peer addr changed -> %s:%d, retrying punch",  /* SID:122 */
     [LA_F27] = "%s: RPC fail due to peer offline (sid=%u)",  /* SID:123 */
     [LA_F28] = "%s: RPC fail due to relay timeout (sid=%u)",  /* SID:124 */
-    [LA_F29] = "%s: SUCCESS: UDP reachable via TURN (RTT: %llu ms)",  /* SID:542 */
+    [LA_F29] = "%s: SUCCESS: UDP reachable via TURN (RTT: %llu ms)",  /* SID:593 */
     [LA_F30] = "%s: TURN allocation failed: ret=%d",  /* SID:126 */
     [LA_F31] = "%s: TURN allocation request sent",  /* SID:127 */
     [LA_F32] = "%s: UDP timeout, retry %d/%d",  /* SID:128 */
     [LA_F33] = "%s: UDP timeout: peer not responding",  /* SID:129 */
     [LA_F34] = "%s: accepted",  /* SID:130 */
-    [LA_F35] = "%s: accepted (ses_id=%llu)",  /* SID:543 */
+    [LA_F35] = "%s: accepted (ses_id=%llu)",  /* SID:594 */
     [LA_F36] = "%s: accepted for ack_seq=%u",  /* SID:132 */
     [LA_F37] = "%s: accepted from cand[%d]",  /* SID:133 */
     [LA_F38] = "%s: accepted seq=%u cand_cnt=%d flags=0x%02x",  /* SID:134 */
     [LA_F39] = "%s: accepted sid=%u, msg=%u",  /* SID:135 */
     [LA_F40] = "%s: accepted, RPC complete (sid=%u)",  /* SID:136 */
     [LA_F41] = "%s: accepted, RPC finished (sid=%u)",  /* SID:137 */
-    [LA_F42] = "%s: accepted, len=%d (ses_id=%llu)",  /* SID:544 */
+    [LA_F42] = "%s: accepted, len=%d (ses_id=%llu)",  /* SID:595 */
     [LA_F43] = "%s: accepted, probe_mapped=%s:%d",  /* SID:139 */
     [LA_F44] = "%s: accepted, public=%s:%d max_cands=%d probe_port=%d relay=%s msg=%s",  /* SID:140 */
     [LA_F45] = "%s: accepted, waiting for response (sid=%u)",  /* SID:141 */
@@ -165,7 +172,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F61] = "%s: ignored (relay not supported)",  /* SID:157 */
     [LA_F62] = "%s: ignored for duplicated seq=%u, already acked",  /* SID:158 */
     [LA_F63] = "%s: ignored for seq=%u (expect=%d)",  /* SID:159 */
-    [LA_F64] = "%s: ignored for ses_id=%llu (local ses_id=%llu)",  /* SID:545 */
+    [LA_F64] = "%s: ignored for ses_id=%llu (local ses_id=%llu)",  /* SID:596 */
     [LA_F65] = "%s: ignored for sid=%u (current sid=%u)",  /* SID:161 */
     [LA_F66] = "%s: ignored in invalid state=%d",  /* SID:162 */
     [LA_F67] = "%s: ignored in state(%d)",  /* SID:163 */
@@ -178,11 +185,11 @@ const char* lang_en[LA_NUM] = {
     [LA_F74] = "%s: keep alive to %d reachable cand(s)",  /* SID:170 */
     [LA_F75] = "%s: new request (sid=%u) overrides pending request (sid=%u)",  /* SID:171 */
     [LA_F76] = "%s: no remote candidates to punch",  /* SID:172 */
-    [LA_F77] = "%s: no response for %llu ms, connection lost",  /* SID:546 */
+    [LA_F77] = "%s: no response for %llu ms, connection lost",  /* SID:597 */
     [LA_F78] = "%s: old request ignored (sid=%u <= last_sid=%u)",  /* SID:174 */
-    [LA_F79] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED",  /* SID:547 */
-    [LA_F80] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:548 */
-    [LA_F81] = "%s: punching %d/%d candidates (elapsed: %llu ms)",  /* SID:549 */
+    [LA_F79] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED",  /* SID:598 */
+    [LA_F80] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:599 */
+    [LA_F81] = "%s: punching %d/%d candidates (elapsed: %llu ms)",  /* SID:600 */
     [LA_F82] = "%s: punching additional cand<%s:%d>[%d] while connected",  /* SID:178 */
     [LA_F83] = "%s: punching remote cand<%s:%d>[%d]",  /* SID:179 */
     [LA_F84] = "%s: received FIN from peer, marking NAT as CLOSED",  /* SID:180 */
@@ -196,18 +203,18 @@ const char* lang_en[LA_NUM] = {
     [LA_F92] = "%s: send failed(%d)",  /* SID:188 */
     [LA_F93] = "%s: sent MSG(msg=0, sid=%u)",  /* SID:189 */
     [LA_F94] = "%s: sent, sid=%u, code=%u, size=%d",  /* SID:190 */
-    [LA_F95] = "%s: session mismatch(local=%llu pkt=%llu)",  /* SID:550 */
-    [LA_F96] = "%s: session mismatch(local=%llu, pkt=%llu)",  /* SID:551 */
+    [LA_F95] = "%s: session mismatch(local=%llu pkt=%llu)",  /* SID:601 */
+    [LA_F96] = "%s: session mismatch(local=%llu, pkt=%llu)",  /* SID:602 */
     [LA_F97] = "%s: skip and mark NAT as OPEN (lan_punch enabled)",  /* SID:193 */
     [LA_F98] = "%s: start punching all(%d) remote candidates",  /* SID:194 */
     [LA_F99] = "%s: started, sending first probe",  /* SID:195 */
     [LA_F100] = "%s: status error(%d)",  /* SID:196 */
-    [LA_F101] = "%s: sync complete (ses_id=%llu)",  /* SID:552 */
-    [LA_F102] = "%s: sync complete (ses_id=%llu, mask=0x%04x)",  /* SID:553 */
+    [LA_F101] = "%s: sync complete (ses_id=%llu)",  /* SID:603 */
+    [LA_F102] = "%s: sync complete (ses_id=%llu, mask=0x%04x)",  /* SID:604 */
     [LA_F103] = "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)",  /* SID:199 */
     [LA_F104] = "%s: timeout after %d retries , type unknown",  /* SID:200 */
-    [LA_F105] = "%s: timeout after %llu ms (ICE done), switching to RELAY",  /* SID:554 */
-    [LA_F106] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:555 */
+    [LA_F105] = "%s: timeout after %llu ms (ICE done), switching to RELAY",  /* SID:605 */
+    [LA_F106] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:606 */
     [LA_F107] = "%s: timeout, max(%d) attempts reached, reset to INIT",  /* SID:203 */
     [LA_F108] = "%s: timeout, peer did not respond",  /* SID:204 */
     [LA_F109] = "%s: timeout, retry %d/%d",  /* SID:205 */
@@ -216,7 +223,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F112] = "%s: tx confirmed: me->peer path is UP (echoed seq=%u)",  /* SID:208 */
     [LA_F113] = "%s: unexpected ack_seq=%u mask=0x%04x",  /* SID:209 */
     [LA_F114] = "%s:%04d: %s",  /* SID:210 */
-    [LA_F115] = "%s_ACK sent, seq=%u (ses_id=%llu)",  /* SID:556 */
+    [LA_F115] = "%s_ACK sent, seq=%u (ses_id=%llu)",  /* SID:607 */
     [LA_F116] = "%s_ACK sent, sid=%u",  /* SID:212 */
     [LA_F117] = "ACK processed ack_seq=%u send_base=%u inflight=%d",  /* SID:213 */
     [LA_F118] = "Added Remote Candidate: %d -> %s:%d",  /* SID:214 */
@@ -314,31 +321,37 @@ const char* lang_en[LA_NUM] = {
     [LA_F210] = "Test II: Timeout (need Test III)",  /* SID:306 */
     [LA_F211] = "Test III: Success! Detection completed %s",  /* SID:307 */
     [LA_F212] = "Test III: Timeout",  /* SID:308 */
-    [LA_F213] = "UDP hole-punch probing remote candidates (%d candidates)",  /* SID:309 */
-    [LA_F214] = "UDP hole-punch probing remote candidates round %d/%d",  /* SID:310 */
-    [LA_F215] = "Unknown ACK status %d",  /* SID:311 */
-    [LA_F216] = "Unknown signaling mode: %d",  /* SID:312 */
-    [LA_F217] = "Updating Gist field '%s'...",  /* SID:313 */
-    [LA_F218] = "Waiting for peer '%s' timed out (%dms), giving up",  /* SID:314 */
-    [LA_F219] = "[SCTP] received encapsulated packet, length %d",  /* SID:315 */
-    [LA_F220] = "[SCTP] sending %d bytes",  /* SID:316 */
-    [LA_F221] = "[SIGNALING] Failed to send candidates, will retry (ret=%d)",  /* SID:317 */
-    [LA_F222] = "[SIGNALING] Sent candidates (cached, peer offline) %d to %s",  /* SID:318 */
-    [LA_F223] = "[SIGNALING] Sent candidates, forwarded [%d-%d] to %s (forwarded=%d)",  /* SID:319 */
-    [LA_F224] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:320 */
-    [LA_F225] = "[Trickle] Sent 1 candidate to %s (online=%s)",  /* SID:321 */
-    [LA_F226] = "[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()",  /* SID:322 */
-    [LA_F227] = "[lan_punch] starting NAT punch(Host candidate %d)",  /* SID:323 */
-    [LA_F228] = "[prflx] Received New Remote Candidate %s:%d (Peer Reflexive - symmetric NAT)",  /* SID:324 */
-    [LA_F229] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:325 */
-    [LA_F230] = "recv error %d",  /* SID:326 */
-    [LA_F231] = "recv error %d while discarding",  /* SID:327 */
-    [LA_F232] = "recv error %d while reading payload",  /* SID:328 */
-    [LA_F233] = "recv error %d while reading sender",  /* SID:329 */
-    [LA_F234] = "relay_tick: recv header complete, magic=0x%x, type=%d, length=%u",  /* SID:330 */
-    [LA_F235] = "retry seq=%u retx=%d rto=%d",  /* SID:331 */
-    [LA_F236] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:332 */
-    [LA_F237] = "ssl_setup failed: -0x%x",  /* SID:333 */
-    [LA_F238] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:334 */
-    [LA_F239] = "✗ Cannot add Srflx candidate: realloc failed (OOM)",  /* SID:335 */
+    [LA_F213] = "Transport layer '%s' init failed, falling back to simple reliable",  /* SID:583 */
+    [LA_F214] = "UDP hole-punch probing remote candidates (%d candidates)",  /* SID:309 */
+    [LA_F215] = "UDP hole-punch probing remote candidates round %d/%d",  /* SID:310 */
+    [LA_F216] = "Unknown ACK status %d",  /* SID:311 */
+    [LA_F217] = "Unknown signaling mode: %d",  /* SID:312 */
+    [LA_F218] = "Updating Gist field '%s'...",  /* SID:313 */
+    [LA_F219] = "Waiting for peer '%s' timed out (%dms), giving up",  /* SID:314 */
+    [LA_F220] = "[SCTP] association lost/shutdown (state=%u)",  /* SID:584 */
+    [LA_F221] = "[SCTP] bind failed: %s",  /* SID:585 */
+    [LA_F222] = "[SCTP] connect failed: %s",  /* SID:586 */
+    [LA_F223] = "[SCTP] sendv failed: %s",  /* SID:587 */
+    [LA_F224] = "[SIGNALING] Failed to send candidates, will retry (ret=%d)",  /* SID:317 */
+    [LA_F225] = "[SIGNALING] Sent candidates (cached, peer offline) %d to %s",  /* SID:318 */
+    [LA_F226] = "[SIGNALING] Sent candidates, forwarded [%d-%d] to %s (forwarded=%d)",  /* SID:319 */
+    [LA_F227] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:320 */
+    [LA_F228] = "[Trickle] Sent 1 candidate to %s (online=%s)",  /* SID:321 */
+    [LA_F229] = "[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()",  /* SID:322 */
+    [LA_F230] = "[lan_punch] starting NAT punch(Host candidate %d)",  /* SID:323 */
+    [LA_F231] = "[prflx] Received New Remote Candidate %s:%d (Peer Reflexive - symmetric NAT)",  /* SID:324 */
+    [LA_F232] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:325 */
+    [LA_F233] = "ctr_drbg_seed failed: -0x%x",  /* SID:588 */
+    [LA_F234] = "recv error %d",  /* SID:326 */
+    [LA_F235] = "recv error %d while discarding",  /* SID:327 */
+    [LA_F236] = "recv error %d while reading payload",  /* SID:328 */
+    [LA_F237] = "recv error %d while reading sender",  /* SID:329 */
+    [LA_F238] = "relay_tick: recv header complete, magic=0x%x, type=%d, length=%u",  /* SID:330 */
+    [LA_F239] = "retry seq=%u retx=%d rto=%d",  /* SID:331 */
+    [LA_F240] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:332 */
+    [LA_F241] = "ssl_config_defaults failed: -0x%x",  /* SID:589 */
+    [LA_F242] = "ssl_setup failed: -0x%x",  /* SID:333 */
+    [LA_F243] = "transport send_data failed, %d bytes dropped",  /* SID:590 */
+    [LA_F244] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:334 */
+    [LA_F245] = "✗ Cannot add Srflx candidate: realloc failed (OOM)",  /* SID:335 */
 };

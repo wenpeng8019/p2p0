@@ -50,68 +50,75 @@ enum {
     LA_S5,  /* "%s: triggered on CONNECTED state (unnecessary)"  [p2p_probe.c] */
     LA_S6,  /* "%s: TURN allocated, starting address exchange"  [p2p_probe.c] */
     LA_S7,  /* "[OpenSSL] DTLS handshake completed"  [p2p_trans_openssl.c] */
-    LA_S8,  /* "[SCTP] usrsctp wrapper initialized (skeleton)"  [p2p_trans_sctp.c] */
-    LA_S9,  /* "[SIGNALING] Server storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
-    LA_S10,  /* "[Trickle] TCP not connected, skipping single candidate send"  [p2p_ice.c] */
-    LA_S11,  /* "Added RELAY path to path manager"  [p2p.c] */
-    LA_S12,  /* "Allocation successful!"  [p2p_turn.c] */
-    LA_S13,  /* "Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
-    LA_S14,  /* "Base64 decode failed"  [p2p_signal_pubsub.c] */
-    LA_S15,  /* "Bind failed"  [p2p_tcp_punch.c] */
-    LA_S16,  /* "Channel ID validation failed"  [p2p_signal_pubsub.c] */
-    LA_S17,  /* "Close P2P UDP socket"  [p2p.c] */
-    LA_S18,  /* "Closing TCP connection to RELAY signaling server"  [p2p.c] */
-    LA_S19,  /* "COMPACT mode requires explicit remote_peer_id"  [p2p.c] */
-    LA_S20,  /* "Connection closed by server"  [p2p_signal_relay.c] */
-    LA_S21,  /* "Connection closed while discarding"  [p2p_signal_relay.c] */
-    LA_S22,  /* "Connection closed while reading payload"  [p2p_signal_relay.c] */
-    LA_S23,  /* "Connection closed while reading sender"  [p2p_signal_relay.c] */
-    LA_S24,  /* "Detecting local network addresses"  [p2p_route.c] */
-    LA_S25,  /* "DTLS (MbedTLS) requested but library not linked"  [p2p.c] */
-    LA_S26,  /* "Failed to allocate ACK payload buffer"  [p2p_signal_relay.c] */
-    LA_S27,  /* "Failed to allocate discard buffer, closing connection"  [p2p_signal_relay.c] */
-    LA_S28,  /* "Failed to allocate memory for candidate lists"  [p2p.c] */
-    LA_S29,  /* "Failed to allocate memory for session"  [p2p.c] */
-    LA_S30,  /* "Failed to build STUN request"  [p2p_stun.c] */
-    LA_S31,  /* "Failed to push remote candidate"  [p2p_signal_compact.c] */
-    LA_S32,  /* "Failed to reserve remote candidates (cnt=1)"  [p2p_signal_compact.c] */
-    LA_S33,  /* "Failed to send header"  [p2p_signal_relay.c] */
-    LA_S34,  /* "Failed to send payload"  [p2p_signal_relay.c] */
-    LA_S35,  /* "Failed to send punch packet for new peer addr"  [p2p_signal_compact.c] */
-    LA_S36,  /* "Failed to send target name"  [p2p_signal_relay.c] */
-    LA_S37,  /* "Gist GET failed"  [p2p_signal_pubsub.c] */
-    LA_S38,  /* "Handshake complete"  [p2p_trans_mbedtls.c] */
-    LA_S39,  /* "Invalid channel_id format (security risk)"  [p2p_signal_pubsub.c] */
-    LA_S40,  /* "Invalid signaling mode in configuration"  [p2p.c] */
-    LA_S41,  /* "NAT connection recovered, upgrading from RELAY to CONNECTED"  [p2p.c] */
-    LA_S42,  /* "NAT connection timeout, downgrading to relay mode"  [p2p.c] */
-    LA_S43,  /* "No advanced transport layer enabled, using simple reliable layer"  [p2p.c] */
-    LA_S44,  /* "No auth_key provided, using default key (insecure)"  [p2p_signal_pubsub.c] */
-    LA_S45,  /* "OpenSSL requested but library not linked"  [p2p.c] */
-    LA_S46,  /* "Out of memory"  [p2p_signal_pubsub.c] */
-    LA_S47,  /* "P2P connected, closing signaling TCP connection"  [p2p_signal_relay.c] */
-    LA_S48,  /* "P2P connection established"  [p2p.c] */
-    LA_S49,  /* "P2P punch failed, adding relay path"  [p2p.c] */
-    LA_S50,  /* "P2P punching in progress ..."  [p2p.c] */
-    LA_S51,  /* "p2p_ice_send_local_candidate called in non-RELAY mode"  [p2p_ice.c] */
-    LA_S52,  /* "Path switch debounced, waiting for stability"  [p2p.c] */
-    LA_S53,  /* "PseudoTCP enabled as transport layer"  [p2p.c] */
-    LA_S54,  /* "PUBSUB (PUB): gathering candidates, waiting for STUN before publishing"  [p2p.c] */
-    LA_S55,  /* "PUBSUB (SUB): waiting for offer from any peer"  [p2p.c] */
-    LA_S56,  /* "PUBSUB mode requires gh_token and gist_id"  [p2p.c] */
-    LA_S57,  /* "Received FIN packet, connection closed"  [p2p.c] */
-    LA_S58,  /* "RELAY/COMPACT mode requires server_host"  [p2p.c] */
-    LA_S59,  /* "SCTP (usrsctp) requested but library not linked"  [p2p.c] */
-    LA_S60,  /* "Sending FIN packet to peer before closing"  [p2p.c] */
-    LA_S61,  /* "Sending FIN packet to peer on destroy"  [p2p.c] */
-    LA_S62,  /* "Sending UNREGISTER packet to COMPACT signaling server"  [p2p.c] */
-    LA_S63,  /* "Signal payload deserialization failed"  [p2p_signal_pubsub.c] */
-    LA_S64,  /* "Skipping local Host candidates on --public-only"  [p2p.c] */
-    LA_S65,  /* "Starting internal thread"  [p2p.c] */
-    LA_S66,  /* "Stopping internal thread"  [p2p.c] */
-    LA_S67,  /* "Storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
-    LA_S68,  /* "Switched to backup path: RELAY"  [p2p.c] */
-    LA_S69,  /* "Using path: RELAY"  [p2p.c] */
+    LA_S8,  /* "[SCTP] association established"  [p2p_trans_sctp.c] */
+    LA_S9,  /* "[SCTP] usrsctp initialized, connecting..."  [p2p_trans_sctp.c] */
+    LA_S10,  /* "[SCTP] usrsctp_socket failed"  [p2p_trans_sctp.c] */
+    LA_S11,  /* "[SIGNALING] Server storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
+    LA_S12,  /* "[Trickle] TCP not connected, skipping single candidate send"  [p2p_ice.c] */
+    LA_S13,  /* "Added SIGNALING path to path manager"  [p2p.c] */
+    LA_S14,  /* "Allocation successful!"  [p2p_turn.c] */
+    LA_S15,  /* "Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
+    LA_S16,  /* "Base64 decode failed"  [p2p_signal_pubsub.c] */
+    LA_S17,  /* "Bind failed"  [p2p_tcp_punch.c] */
+    LA_S18,  /* "BIO_new failed"  [p2p_trans_openssl.c] */
+    LA_S19,  /* "Channel ID validation failed"  [p2p_signal_pubsub.c] */
+    LA_S20,  /* "Close P2P UDP socket"  [p2p.c] */
+    LA_S21,  /* "Closing TCP connection to RELAY signaling server"  [p2p.c] */
+    LA_S22,  /* "COMPACT mode requires explicit remote_peer_id"  [p2p.c] */
+    LA_S23,  /* "Connection closed by server"  [p2p_signal_relay.c] */
+    LA_S24,  /* "Connection closed while discarding"  [p2p_signal_relay.c] */
+    LA_S25,  /* "Connection closed while reading payload"  [p2p_signal_relay.c] */
+    LA_S26,  /* "Connection closed while reading sender"  [p2p_signal_relay.c] */
+    LA_S27,  /* "Detecting local network addresses"  [p2p_route.c] */
+    LA_S28,  /* "DTLS (MbedTLS) requested but library not linked"  [p2p.c] */
+    LA_S29,  /* "Failed to allocate ACK payload buffer"  [p2p_signal_relay.c] */
+    LA_S30,  /* "Failed to allocate discard buffer, closing connection"  [p2p_signal_relay.c] */
+    LA_S31,  /* "Failed to allocate DTLS context"  [p2p_trans_mbedtls.c] */
+    LA_S32,  /* "Failed to allocate memory for candidate lists"  [p2p.c] */
+    LA_S33,  /* "Failed to allocate memory for session"  [p2p.c] */
+    LA_S34,  /* "Failed to allocate OpenSSL context"  [p2p_trans_openssl.c] */
+    LA_S35,  /* "Failed to build STUN request"  [p2p_stun.c] */
+    LA_S36,  /* "Failed to push remote candidate"  [p2p_signal_compact.c] */
+    LA_S37,  /* "Failed to reserve remote candidates (cnt=1)"  [p2p_signal_compact.c] */
+    LA_S38,  /* "Failed to send header"  [p2p_signal_relay.c] */
+    LA_S39,  /* "Failed to send payload"  [p2p_signal_relay.c] */
+    LA_S40,  /* "Failed to send punch packet for new peer addr"  [p2p_signal_compact.c] */
+    LA_S41,  /* "Failed to send target name"  [p2p_signal_relay.c] */
+    LA_S42,  /* "Gist GET failed"  [p2p_signal_pubsub.c] */
+    LA_S43,  /* "Handshake complete"  [p2p_trans_mbedtls.c] */
+    LA_S44,  /* "Invalid channel_id format (security risk)"  [p2p_signal_pubsub.c] */
+    LA_S45,  /* "Invalid signaling mode in configuration"  [p2p.c] */
+    LA_S46,  /* "NAT connection recovered, upgrading from RELAY to CONNECTED"  [p2p.c] */
+    LA_S47,  /* "NAT connection timeout, downgrading to relay mode"  [p2p.c] */
+    LA_S48,  /* "No advanced transport layer enabled, using simple reliable layer"  [p2p.c] */
+    LA_S49,  /* "No auth_key provided, using default key (insecure)"  [p2p_signal_pubsub.c] */
+    LA_S50,  /* "OpenSSL requested but library not linked"  [p2p.c] */
+    LA_S51,  /* "Out of memory"  [p2p_signal_pubsub.c] */
+    LA_S52,  /* "P2P connected, closing signaling TCP connection"  [p2p_signal_relay.c] */
+    LA_S53,  /* "P2P connection established"  [p2p.c] */
+    LA_S54,  /* "P2P punch failed, adding relay path"  [p2p.c] */
+    LA_S55,  /* "P2P punching in progress ..."  [p2p.c] */
+    LA_S56,  /* "p2p_ice_send_local_candidate called in non-RELAY mode"  [p2p_ice.c] */
+    LA_S57,  /* "Path switch debounced, waiting for stability"  [p2p.c] */
+    LA_S58,  /* "PseudoTCP enabled as transport layer"  [p2p.c] */
+    LA_S59,  /* "PUBSUB (PUB): gathering candidates, waiting for STUN before publishing"  [p2p.c] */
+    LA_S60,  /* "PUBSUB (SUB): waiting for offer from any peer"  [p2p.c] */
+    LA_S61,  /* "PUBSUB mode requires gh_token and gist_id"  [p2p.c] */
+    LA_S62,  /* "Received FIN packet, connection closed"  [p2p.c] */
+    LA_S63,  /* "RELAY/COMPACT mode requires server_host"  [p2p.c] */
+    LA_S64,  /* "SCTP (usrsctp) enabled as transport layer"  [p2p.c] */
+    LA_S65,  /* "Sending FIN packet to peer before closing"  [p2p.c] */
+    LA_S66,  /* "Sending FIN packet to peer on destroy"  [p2p.c] */
+    LA_S67,  /* "Sending UNREGISTER packet to COMPACT signaling server"  [p2p.c] */
+    LA_S68,  /* "Signal payload deserialization failed"  [p2p_signal_pubsub.c] */
+    LA_S69,  /* "Skipping local Host candidates on --public-only"  [p2p.c] */
+    LA_S70,  /* "SSL_CTX_new failed"  [p2p_trans_openssl.c] */
+    LA_S71,  /* "SSL_new failed"  [p2p_trans_openssl.c] */
+    LA_S72,  /* "Starting internal thread"  [p2p.c] */
+    LA_S73,  /* "Stopping internal thread"  [p2p.c] */
+    LA_S74,  /* "Storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
+    LA_S75,  /* "Switched to backup path: RELAY"  [p2p.c] */
+    LA_S76,  /* "Using path: RELAY"  [p2p.c] */
 
     /* Formats (LA_F) - Format strings for validation */
     LA_F0,  /* "  ... and %d more pairs" (%d)  [p2p_ice.c] */
@@ -327,35 +334,41 @@ enum {
     LA_F210,  /* "Test II: Timeout (need Test III)"  [p2p_stun.c] */
     LA_F211,  /* "Test III: Success! Detection completed %s" (%s)  [p2p_stun.c] */
     LA_F212,  /* "Test III: Timeout"  [p2p_stun.c] */
-    LA_F213,  /* "UDP hole-punch probing remote candidates (%d candidates)" (%d)  [p2p_ice.c] */
-    LA_F214,  /* "UDP hole-punch probing remote candidates round %d/%d" (%d,%d)  [p2p_ice.c] */
-    LA_F215,  /* "Unknown ACK status %d" (%d)  [p2p_signal_relay.c] */
-    LA_F216,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
-    LA_F217,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
-    LA_F218,  /* "Waiting for peer '%s' timed out (%dms), giving up" (%s,%d)  [p2p_signal_relay.c] */
-    LA_F219,  /* "[SCTP] received encapsulated packet, length %d" (%d)  [p2p_trans_sctp.c] */
-    LA_F220,  /* "[SCTP] sending %d bytes" (%d)  [p2p_trans_sctp.c] */
-    LA_F221,  /* "[SIGNALING] Failed to send candidates, will retry (ret=%d)" (%d)  [p2p_signal_relay.c] */
-    LA_F222,  /* "[SIGNALING] Sent candidates (cached, peer offline) %d to %s" (%d,%s)  [p2p_signal_relay.c] */
-    LA_F223,  /* "[SIGNALING] Sent candidates, forwarded [%d-%d] to %s (forwarded=%d)" (%d,%d,%s,%d)  [p2p_signal_relay.c] */
-    LA_F224,  /* "[Trickle] Immediately probing new candidate %s:%d" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
-    LA_F225,  /* "[Trickle] Sent 1 candidate to %s (online=%s)" (%s,%s)  [p2p_ice.c] */
-    LA_F226,  /* "[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()" (%d)  [p2p_ice.c] */
-    LA_F227,  /* "[lan_punch] starting NAT punch(Host candidate %d)" (%d)  [p2p_ice.c] */
-    LA_F228,  /* "[prflx] Received New Remote Candidate %s:%d (Peer Reflexive - symmetric NAT)" (%s,%d)  [p2p_ice.c] */
-    LA_F229,  /* "congestion detected, new ssthresh: %u, cwnd: %u" (%u,%u)  [p2p_trans_pseudotcp.c] */
-    LA_F230,  /* "recv error %d" (%d)  [p2p_signal_relay.c] */
-    LA_F231,  /* "recv error %d while discarding" (%d)  [p2p_signal_relay.c] */
-    LA_F232,  /* "recv error %d while reading payload" (%d)  [p2p_signal_relay.c] */
-    LA_F233,  /* "recv error %d while reading sender" (%d)  [p2p_signal_relay.c] */
-    LA_F234,  /* "relay_tick: recv header complete, magic=0x%x, type=%d, length=%u" (%x,%d,%u)  [p2p_signal_relay.c] */
-    LA_F235,  /* "retry seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
-    LA_F236,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
-    LA_F237,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_trans_mbedtls.c] */
-    LA_F238,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
-    LA_F239,  /* "✗ Cannot add Srflx candidate: realloc failed (OOM)"  [p2p_stun.c] */
+    LA_F213,  /* "Transport layer '%s' init failed, falling back to simple reliable" (%s)  [p2p.c] */
+    LA_F214,  /* "UDP hole-punch probing remote candidates (%d candidates)" (%d)  [p2p_ice.c] */
+    LA_F215,  /* "UDP hole-punch probing remote candidates round %d/%d" (%d,%d)  [p2p_ice.c] */
+    LA_F216,  /* "Unknown ACK status %d" (%d)  [p2p_signal_relay.c] */
+    LA_F217,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
+    LA_F218,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
+    LA_F219,  /* "Waiting for peer '%s' timed out (%dms), giving up" (%s,%d)  [p2p_signal_relay.c] */
+    LA_F220,  /* "[SCTP] association lost/shutdown (state=%u)" (%u)  [p2p_trans_sctp.c] */
+    LA_F221,  /* "[SCTP] bind failed: %s" (%s)  [p2p_trans_sctp.c] */
+    LA_F222,  /* "[SCTP] connect failed: %s" (%s)  [p2p_trans_sctp.c] */
+    LA_F223,  /* "[SCTP] sendv failed: %s" (%s)  [p2p_trans_sctp.c] */
+    LA_F224,  /* "[SIGNALING] Failed to send candidates, will retry (ret=%d)" (%d)  [p2p_signal_relay.c] */
+    LA_F225,  /* "[SIGNALING] Sent candidates (cached, peer offline) %d to %s" (%d,%s)  [p2p_signal_relay.c] */
+    LA_F226,  /* "[SIGNALING] Sent candidates, forwarded [%d-%d] to %s (forwarded=%d)" (%d,%d,%s,%d)  [p2p_signal_relay.c] */
+    LA_F227,  /* "[Trickle] Immediately probing new candidate %s:%d" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
+    LA_F228,  /* "[Trickle] Sent 1 candidate to %s (online=%s)" (%s,%s)  [p2p_ice.c] */
+    LA_F229,  /* "[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()" (%d)  [p2p_ice.c] */
+    LA_F230,  /* "[lan_punch] starting NAT punch(Host candidate %d)" (%d)  [p2p_ice.c] */
+    LA_F231,  /* "[prflx] Received New Remote Candidate %s:%d (Peer Reflexive - symmetric NAT)" (%s,%d)  [p2p_ice.c] */
+    LA_F232,  /* "congestion detected, new ssthresh: %u, cwnd: %u" (%u,%u)  [p2p_trans_pseudotcp.c] */
+    LA_F233,  /* "ctr_drbg_seed failed: -0x%x" (%x)  [p2p_trans_mbedtls.c] */
+    LA_F234,  /* "recv error %d" (%d)  [p2p_signal_relay.c] */
+    LA_F235,  /* "recv error %d while discarding" (%d)  [p2p_signal_relay.c] */
+    LA_F236,  /* "recv error %d while reading payload" (%d)  [p2p_signal_relay.c] */
+    LA_F237,  /* "recv error %d while reading sender" (%d)  [p2p_signal_relay.c] */
+    LA_F238,  /* "relay_tick: recv header complete, magic=0x%x, type=%d, length=%u" (%x,%d,%u)  [p2p_signal_relay.c] */
+    LA_F239,  /* "retry seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F240,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
+    LA_F241,  /* "ssl_config_defaults failed: -0x%x" (%x)  [p2p_trans_mbedtls.c] */
+    LA_F242,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_trans_mbedtls.c] */
+    LA_F243,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
+    LA_F244,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
+    LA_F245,  /* "✗ Cannot add Srflx candidate: realloc failed (OOM)"  [p2p_stun.c] */
 
-    LA_NUM = 335
+    LA_NUM = 348
 };
 
 /* 格式字符串起始位置（用于验证） */

@@ -362,7 +362,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
     /* 仅用于 RELAY 模式（TCP 信令） */
     if (s->signaling_mode != P2P_SIGNALING_MODE_RELAY) {
         /* COMPACT 模式不应调用此函数，候选通过 p2p_signal_compact 模块发送 */
-        print("E: %s", LA_S("p2p_ice_send_local_candidate called in non-RELAY mode", LA_S51, 77));
+        print("E: %s", LA_S("p2p_ice_send_local_candidate called in non-RELAY mode", LA_S56, 77));
         return -1;
     }
 
@@ -380,7 +380,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
      * 如果未连接，返回失败。批量重发由 p2p_update() 的定期逻辑处理。
      */
     if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
-        print("W: %s", LA_S("[Trickle] TCP not connected, skipping single candidate send", LA_S10, 36));
+        print("W: %s", LA_S("[Trickle] TCP not connected, skipping single candidate send", LA_S12, 36));
         return -1;
     }
 
@@ -408,12 +408,12 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
      */
     int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
     if (ret < 0) {
-        print("W:", LA_F("[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()", LA_F226, 322), ret);
+        print("W:", LA_F("[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()", LA_F229, 322), ret);
         return -1;
     }
 
     /* 发送成功（无论对端在线与否）*/
-    print("I:", LA_F("[Trickle] Sent 1 candidate to %s (online=%s)", LA_F225, 321), s->remote_peer_id,
+    print("I:", LA_F("[Trickle] Sent 1 candidate to %s (online=%s)", LA_F228, 321), s->remote_peer_id,
            ret > 0 ? LA_W("yes", LA_W24, 25) : LA_W("no (cached)", LA_W7, 8));
     return ret > 0 ? ret : 0;
 }
@@ -643,7 +643,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
         int idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
         if (idx >= 0) {
             matched_idx = idx;
-            print("I:", LA_F("[prflx] Received New Remote Candidate %s:%d (Peer Reflexive - symmetric NAT)", LA_F228, 324),
+            print("I:", LA_F("[prflx] Received New Remote Candidate %s:%d (Peer Reflexive - symmetric NAT)", LA_F231, 324),
                          inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         } else {
             /* OOM，直接用该地址建立连接 */
@@ -744,7 +744,7 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
      * 与跨 NAT 场景完全相同，只是目标地址是 LAN 私网 IP。 */
     if (s->cfg.lan_punch) {
         if (s->nat.state == NAT_INIT) {
-            print("I:", LA_F("[lan_punch] starting NAT punch(Host candidate %d)", LA_F227, 323), s->remote_cand_cnt);
+            print("I:", LA_F("[lan_punch] starting NAT punch(Host candidate %d)", LA_F230, 323), s->remote_cand_cnt);
             nat_punch(s, -1);
         }
         s->ice_state = P2P_ICE_STATE_COMPLETED;  /* ICE 阶段结束，由 nat_tick 接管 */
@@ -862,10 +862,10 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
 
     /* 第 1 轮打 INFO，此后每隔 1s（2 轮）打一次 DEBUG */
     if (s->ice_check_count == 1) {
-        print("I:", LA_F("UDP hole-punch probing remote candidates (%d candidates)", LA_F213, 309),
+        print("I:", LA_F("UDP hole-punch probing remote candidates (%d candidates)", LA_F214, 309),
                s->remote_cand_cnt);
     } else if (s->ice_check_count % 2 == 0) {
-        printf(LA_F("UDP hole-punch probing remote candidates round %d/%d", LA_F214, 310),
+        printf(LA_F("UDP hole-punch probing remote candidates round %d/%d", LA_F215, 310),
                s->ice_check_count, P2P_ICE_MAX_CHECKS);
     }
 }

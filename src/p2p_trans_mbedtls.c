@@ -276,7 +276,7 @@ static int p2p_dtls_recv(void *ctx, unsigned char *buf, size_t len) {
 static int dtls_init(p2p_session_t *s) {
     p2p_dtls_ctx_t *dtls = calloc(1, sizeof(p2p_dtls_ctx_t));
     if (!dtls) {
-        print("E: %s", LA_S("Failed to allocate DTLS context", 0, 0));
+        print("E: %s", LA_S("Failed to allocate DTLS context", LA_S31, 561));
         return -1;
     }
     s->transport_data = dtls;
@@ -301,7 +301,7 @@ static int dtls_init(p2p_session_t *s) {
         3
     );
     if (ret != 0) {
-        print("E:", LA_F("ctr_drbg_seed failed: -0x%x", 0, 0), -ret);
+        print("E:", LA_F("ctr_drbg_seed failed: -0x%x", LA_F233, 588), -ret);
         goto fail_cleanup;
     }
     
@@ -316,7 +316,7 @@ static int dtls_init(p2p_session_t *s) {
                                 MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                 MBEDTLS_SSL_PRESET_DEFAULT);
     if (ret != 0) {
-        print("E:", LA_F("ssl_config_defaults failed: -0x%x", 0, 0), -ret);
+        print("E:", LA_F("ssl_config_defaults failed: -0x%x", LA_F241, 589), -ret);
         goto fail_cleanup;
     }
                                 
@@ -366,7 +366,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret2;
     if ((ret2 = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F237, 333), -ret2);
+        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F242, 333), -ret2);
         goto fail_cleanup;
     }
     
@@ -437,7 +437,7 @@ static void dtls_tick(p2p_session_t *s) {
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            print("I: %s", LA_S("Handshake complete", LA_S38, 64));
+            print("I: %s", LA_S("Handshake complete", LA_S43, 64));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));

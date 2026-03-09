@@ -39,7 +39,7 @@ void route_final(route_ctx_t *rt) {
 // 检测获取本地所有有效的网络地址
 ret_t route_detect_local(route_ctx_t *rt) {
 
-    printf("%s", LA_S("Detecting local network addresses", LA_S24, 50));
+    printf("%s", LA_S("Detecting local network addresses", LA_S27, 50));
 
     rt->addr_count = 0;
 

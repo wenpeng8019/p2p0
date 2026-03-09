@@ -153,7 +153,7 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
     
     /* 处理 Allocate Success Response */
     if (type == TURN_ALLOCATE_SUCCESS) {
-        print("I: %s", LA_S("Allocation successful!", LA_S12, 38));
+        print("I: %s", LA_S("Allocation successful!", LA_S14, 38));
         
         /*
          * 解析 RELAYED-ADDRESS / XOR-RELAYED-ADDRESS 属性

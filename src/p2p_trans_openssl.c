@@ -42,14 +42,14 @@ static unsigned int psk_server_cb(SSL *ssl, const char *identity, unsigned char 
 static int openssl_init(p2p_session_t *s) {
     p2p_openssl_ctx_t *os = calloc(1, sizeof(p2p_openssl_ctx_t));
     if (!os) {
-        print("E: %s", LA_S("Failed to allocate OpenSSL context", 0, 0));
+        print("E: %s", LA_S("Failed to allocate OpenSSL context", LA_S34, 562));
         return -1;
     }
     s->transport_data = os;
 
     os->ctx = SSL_CTX_new(DTLS_method());
     if (!os->ctx) {
-        print("E: %s", LA_S("SSL_CTX_new failed", 0, 0));
+        print("E: %s", LA_S("SSL_CTX_new failed", LA_S70, 564));
         free(os); s->transport_data = NULL;
         return -1;
     }
@@ -63,7 +63,7 @@ static int openssl_init(p2p_session_t *s) {
 
     os->ssl = SSL_new(os->ctx);
     if (!os->ssl) {
-        print("E: %s", LA_S("SSL_new failed", 0, 0));
+        print("E: %s", LA_S("SSL_new failed", LA_S71, 565));
         SSL_CTX_free(os->ctx); free(os); s->transport_data = NULL;
         return -1;
     }
@@ -73,7 +73,7 @@ static int openssl_init(p2p_session_t *s) {
     os->read_bio = BIO_new(BIO_s_mem());
     os->write_bio = BIO_new(BIO_s_mem());
     if (!os->read_bio || !os->write_bio) {
-        print("E: %s", LA_S("BIO_new failed", 0, 0));
+        print("E: %s", LA_S("BIO_new failed", LA_S18, 560));
         if (os->read_bio) BIO_free(os->read_bio);
         if (os->write_bio) BIO_free(os->write_bio);
         SSL_free(os->ssl); SSL_CTX_free(os->ctx);

@@ -63,7 +63,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
         int idx = p2p_upsert_remote_candidate(s, &caddr, cand_type, false);
         if (idx < 0) {
-            print("E:", LA_S("Failed to push remote candidate", LA_S31, 57));
+            print("E:", LA_S("Failed to push remote candidate", LA_S36, 57));
             return;
         }
         p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
@@ -776,7 +776,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             print("V:", LA_F("%s NOTIFY: accepted", LA_F5, 101), PROTO);
 
             if (p2p_remote_cands_reserve(s, 1) != E_NONE) {
-                print("E: %s", LA_S("Failed to reserve remote candidates (cnt=1)", LA_S32, 58));
+                print("E: %s", LA_S("Failed to reserve remote candidates (cnt=1)", LA_S37, 58));
                 return;
             }
 
@@ -805,7 +805,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
                 // 立即打洞新地址（nat_on_punch 收到回复后会自动注册新路径）
                 if (nat_punch(s, 0) != E_NONE) {
-                    print("E: %s", LA_S("Failed to send punch packet for new peer addr", LA_S35, 61));
+                    print("E: %s", LA_S("Failed to send punch packet for new peer addr", LA_S40, 61));
                 }
             }
             else {
