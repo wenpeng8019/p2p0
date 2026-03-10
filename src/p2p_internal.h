@@ -118,13 +118,14 @@ typedef struct p2p_session {
 
     /* ======================== p2p 链路 ======================== */
     nat_ctx_t                   nat;                // NAT 穿透上下文
+    turn_ctx_t                  turn;               // TURN 中继上下文
     route_ctx_t                 route;              // 路由表上下文
     reliable_t                  reliable;           // 可靠传输层状态
     stream_t                    stream;             // 流传输层状态
     path_manager_t              path_mgr;           // 路径管理器（多路径并行支持）
     p2p_probe_ctx_t             probe_ctx;          // 探测上下文
 
-    /* ======================== ICE 状态 ======================== */
+    /* ======================== 候选队列 ======================== */
     p2p_candidate_entry_t*      local_cands;        // 本地候选地址（动态分配）
     int                         local_cand_cnt;     // 本地候选数量
     int                         local_cand_cap;     // 本地候选容量
@@ -142,7 +143,7 @@ typedef struct p2p_session {
     uint64_t                    last_signal_time;   // 上次发送信令的时间戳 (ms)
     bool                        signal_sent;        // 是否已发送初始信令
 
-    /* ======================== 信令上下文 ======================== */
+    /* ===== 信令上下文/ICE（Interactive Connectivity Establishment） ===== */
     /*
      * 信令模块负责在两个对等体之间交换连接信息（候选地址、密钥等）。
      * 支持三种模式：

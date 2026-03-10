@@ -8,6 +8,9 @@
 /* CRC32 — STUN Fingerprint 校验 */
 uint32_t p2p_crc32(const uint8_t *data, int len);
 
+/* MD5 — TURN long-term credential 密钥派生: key = MD5(user:realm:pass) */
+void p2p_md5(const uint8_t *data, int len, uint8_t digest[16]);
+
 /* HMAC-SHA1 — STUN Message-Integrity 签名 */
 void p2p_hmac_sha1(const uint8_t* key, int key_len,
                    const uint8_t* data, int data_len,

@@ -27,7 +27,7 @@
 #define PEER_INFO_INTERVAL_MS           500     /* PEER_INFO 重发间隔 */
 #define MAX_REGISTER_ATTEMPTS           10      /* 最大 REGISTER 重发次数 */
 #define REGISTER_KEEPALIVE_INTERVAL_MS  20000   /* REGISTERED 状态保活重注册间隔（防服务器超时清除槽位） */
-#define TRICKLE_BATCH_MS                100     /* TURN trickle 攒批窗口（多个 TURN 响应在此窗口内合并为一个包） */
+#define TRICKLE_BATCH_MS                1000    /* TURN trickle 攒批窗口（多个 TURN 响应在此窗口内合并为一个包） */
 #define MAX_CANDS_PER_PACKET            10      /* 每个 PEER_INFO 包最大候选数 */
 #define NAT_PROBE_MAX_RETRIES           3       /* NAT_PROBE 最大发送次数 */
 #define NAT_PROBE_INTERVAL_MS           1000    /* NAT_PROBE 重发间隔 */

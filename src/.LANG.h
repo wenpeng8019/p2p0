@@ -51,7 +51,7 @@ enum {
     LA_S35,  /* "[SIGNALING] Server storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
     LA_S36,  /* "[Trickle] TCP not connected, skipping single candidate send"  [p2p_ice.c] */
     LA_S37,  /* "Added SIGNALING path to path manager"  [p2p.c] */
-    LA_S38,  /* "Allocation successful!"  [p2p_turn.c] */
+    LA_S38,  /* "TURN auth required but no credentials configured"  [p2p_turn.c] */
     LA_S39,  /* "Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
     LA_S40,  /* "Base64 decode failed"  [p2p_signal_pubsub.c] */
     LA_S41,  /* "Bind failed"  [p2p_tcp_punch.c] */
@@ -642,6 +642,14 @@ enum {
     LA_F626,  /* "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u" (%d,%u)  [p2p_signal_compact.c] */
     LA_F627,  /* "PEER_INFO(trickle): seq overflow, cannot trickle more"  [p2p_signal_compact.c] */
     LA_F628,  /* "Requested Relay Candidate from TURN %s" (%s)  [p2p.c] */
+    LA_F629,  /* "TURN Allocated relay %s:%u (lifetime=%us)" (%s,%u,%u)  [p2p_turn.c] */
+    LA_F630,  /* "TURN 401 Unauthorized (realm=%s), authenticating..." (%s)  [p2p_turn.c] */
+    LA_F631,  /* "TURN Allocate failed with error %d" (%d)  [p2p_turn.c] */
+    LA_F632,  /* "TURN CreatePermission failed (error=%d)" (%d)  [p2p_turn.c] */
+    LA_F633,  /* "TURN Refresh ok (lifetime=%us)" (%u)  [p2p_turn.c] */
+    LA_F634,  /* "TURN Refresh failed (error=%d)" (%d)  [p2p_turn.c] */
+    LA_F635,  /* "TURN Data Indication from %s:%u (%d bytes)" (%s,%u,%d)  [p2p_turn.c] */
+    LA_F636,  /* "TURN CreatePermission for %s" (%s)  [p2p_turn.c] */
 
     LA_NUM
 };

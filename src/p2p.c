@@ -92,6 +92,7 @@ static void disconnect(p2p_session_t *s) {
     s->nat.state = NAT_CLOSED;
     s->turn_pending = 0;
     s->ice_exchange_done = false;
+    p2p_turn_final(s);
 
     // COMPACT 信令模式：取消与对方在服务器上的注册，UNREGISTER
     // + COMPACT 信令的 unregister 等价于 disconnect & logout
@@ -125,6 +126,7 @@ static void peer_disconnect(p2p_session_t *s) {
     s->state = P2P_STATE_CLOSED;
     s->turn_pending = 0;
     s->ice_exchange_done = false;
+    p2p_turn_final(s);
 
     // 停止信道外 NAT 探测（回到 READY 状态）
     if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT
@@ -236,6 +238,9 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     // 初始化虚拟链路层（基于 NAT 穿透的 P2P）
     nat_init(&s->nat);
+
+    // 初始化 TURN 中继上下文
+    p2p_turn_init(&s->turn);
 
     // 初始化基础传输层（reliable ARQ）
     reliable_init(&s->reliable);
@@ -705,7 +710,21 @@ p2p_update(p2p_handle_t hdl) {
                 printf(LA_F("Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F269, 269),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), msg_type, n);
                 p2p_stun_handle_packet(s, buf, n, &from);  // 处理 Binding Response
-                p2p_turn_handle_packet(s, buf, n, &from);  // 处理 Allocate Success 等
+
+                // TURN 响应处理（Allocate/Refresh/CreatePermission/Data Indication）
+                const uint8_t *inner_data = NULL;
+                int inner_len = 0;
+                struct sockaddr_in inner_peer = {0};
+                int turn_ret = p2p_turn_handle_packet(s, buf, n, &from,
+                                                      &inner_data, &inner_len, &inner_peer);
+                if (turn_ret == 1 && inner_data && inner_len >= P2P_HDR_SIZE) {
+                    // Data Indication: 内层为完整 P2P 包，重新注入主派发循环
+                    memmove(buf, inner_data, inner_len);
+                    n = inner_len;
+                    from = inner_peer;
+                    goto dispatch_p2p;
+                }
+
                 continue;
             }
         }
@@ -714,6 +733,7 @@ p2p_update(p2p_handle_t hdl) {
         // P2P 协议（见 p2pp.h）
         // --------------------
 
+        dispatch_p2p:
         if (n < P2P_HDR_SIZE) continue;
 
         // 获取 header
@@ -911,6 +931,9 @@ p2p_update(p2p_handle_t hdl) {
         p2p_ice_tick(s, now_ms);
     }
 
+    /* TURN 定时维护（Refresh 续期、权限同步） */
+    p2p_turn_tick(s, now_ms);
+
     /* ========================================================================
      * 阶段 4：NAT 层维护（打洞、保活）
      * ======================================================================== */
@@ -936,6 +959,7 @@ p2p_update(p2p_handle_t hdl) {
     //   所以，对方可能先于自己获得对方（也就是自己）的候选地址，并先完成 NAT 穿透（对方发包过来），此时自己还未开始打洞（PUNCHING）
     if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING) &&
         s->nat.state == NAT_CONNECTED) {
+
 
         print("I: %s", LA_S("P2P connection established", LA_S74, 74));
         s->state = P2P_STATE_CONNECTED;

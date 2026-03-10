@@ -45,7 +45,6 @@ const char* lang_en[LA_NUM] = {
     [LA_S35] = "[SIGNALING] Server storage full, waiting for peer to come online",  /* SID:35 */
     [LA_S36] = "[Trickle] TCP not connected, skipping single candidate send",  /* SID:36 */
     [LA_S37] = "Added SIGNALING path to path manager",  /* SID:37 */
-    [LA_S38] = "Allocation successful!",  /* SID:38 */
     [LA_S39] = "Answer already present, skipping offer re-publish",  /* SID:39 */
     [LA_S40] = "Base64 decode failed",  /* SID:40 */
     [LA_S41] = "Bind failed",  /* SID:41 */
@@ -107,6 +106,7 @@ const char* lang_en[LA_NUM] = {
     [LA_S92] = "Stopping internal thread",  /* SID:92 */
     [LA_S93] = "Storage full, waiting for peer to come online",  /* SID:93 */
     [LA_S94] = "Switched to backup path: RELAY",  /* SID:94 */
+    [LA_S38] = "TURN auth required but no credentials configured",  /* SID:38 */
     [LA_S95] = "Using path: RELAY",  /* SID:95 */
     [LA_F96] = "  ... and %d more pairs",  /* SID:96 */
     [LA_F97] = "  [%d] %s/%d",  /* SID:97 */
@@ -302,6 +302,14 @@ const char* lang_en[LA_NUM] = {
     [LA_F300] = "Sent initial offer(%d) to %s)",  /* SID:300 */
     [LA_F301] = "Start internal thread failed(%d)",  /* SID:301 */
     [LA_F302] = "Synced path after failover",  /* SID:302 */
+    [LA_F630] = "TURN 401 Unauthorized (realm=%s), authenticating...",  /* SID:630 */
+    [LA_F631] = "TURN Allocate failed with error %d",  /* SID:631 */
+    [LA_F629] = "TURN Allocated relay %s:%u (lifetime=%us)",  /* SID:629 */
+    [LA_F632] = "TURN CreatePermission failed (error=%d)",  /* SID:632 */
+    [LA_F636] = "TURN CreatePermission for %s",  /* SID:636 */
+    [LA_F635] = "TURN Data Indication from %s:%u (%d bytes)",  /* SID:635 */
+    [LA_F634] = "TURN Refresh failed (error=%d)",  /* SID:634 */
+    [LA_F633] = "TURN Refresh ok (lifetime=%us)",  /* SID:633 */
     [LA_F303] = "Test I: Mapped address: %s:%d",  /* SID:303 */
     [LA_F304] = "Test I: Timeout",  /* SID:304 */
     [LA_F305] = "Test II: Success! Detection completed %s",  /* SID:305 */

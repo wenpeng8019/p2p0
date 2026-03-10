@@ -16,18 +16,26 @@
  */
 void dtls_output_raw(p2p_session_t *s, const struct sockaddr_in *addr,
                        const void *dtls_record, int record_len) {
-    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
 
-    /* 使用 udp_send_to 避免 P2P_MTU 限制（DTLS 记录含额外开销） */
     uint8_t pkt[P2P_HDR_SIZE + sizeof(uint64_t) + P2P_MTU + 64];
 
-    if (is_relay) {
+    /* TURN 中继: CRYPTO 包通过 Send Indication 发送 */
+    if (s->path == P2P_PATH_RELAY && s->turn.state == TURN_ALLOCATED) {
+        p2p_pkt_hdr_encode(pkt, P2P_PKT_CRYPTO, 0, 0);
+        memcpy(pkt + P2P_HDR_SIZE, dtls_record, record_len);
+        p2p_turn_send_indication(s, addr, pkt, P2P_HDR_SIZE + record_len);
+        return;
+    }
+
+    /* Compact 信令转发: RELAY_CRYPTO + session_id */
+    if (s->path == P2P_PATH_SIGNALING) {
         p2p_pkt_hdr_encode(pkt, P2P_PKT_RELAY_CRYPTO, 0, 0);
         nwrite_ll(pkt + P2P_HDR_SIZE, s->sig_compact_ctx.session_id);
         memcpy(pkt + P2P_HDR_SIZE + sizeof(uint64_t), dtls_record, record_len);
         udp_send_to(s->sock, addr, pkt,
                     P2P_HDR_SIZE + (int)sizeof(uint64_t) + record_len);
     } else {
+        /* 直连: CRYPTO */
         p2p_pkt_hdr_encode(pkt, P2P_PKT_CRYPTO, 0, 0);
         memcpy(pkt + P2P_HDR_SIZE, dtls_record, record_len);
         udp_send_to(s->sock, addr, pkt, P2P_HDR_SIZE + record_len);
@@ -39,6 +47,12 @@ void dtls_output_raw(p2p_session_t *s, const struct sockaddr_in *addr,
  *
  * 所有传输模块（reliable / pseudotcp / sctp）统一调用此函数替代 udp_send_packet。
  * 调用者始终传递"基础"类型（DATA / ACK），中继封装和加密由本函数处理。
+ *
+ * 发送路径:
+ *   1. DTLS 加密 → encrypt_send → dtls_output_raw
+ *   2. TURN 中继（P2P_PATH_RELAY + TURN_ALLOCATED）→ Send Indication
+ *   3. Compact 信令转发（P2P_PATH_SIGNALING）→ session_id 封装
+ *   4. 直连 → udp_send_packet
  */
 int dtls_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
                        uint8_t type, uint8_t flags, uint16_t seq,
@@ -49,9 +63,18 @@ int dtls_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
         return s->dtls->encrypt_send(s, addr, type, flags, seq, payload, payload_len);
     }
 
-    /* 明文路径: 处理中继封装 */
-    int is_relay = (s->path == P2P_PATH_RELAY || s->path == P2P_PATH_SIGNALING);
-    if (is_relay) {
+    /* TURN 中继路径: 将原始 P2P 包通过 Send Indication 发送 */
+    if (s->path == P2P_PATH_RELAY && s->turn.state == TURN_ALLOCATED) {
+        uint8_t pkt[P2P_MTU];
+        if (P2P_HDR_SIZE + payload_len > P2P_MTU) return -1;
+        p2p_pkt_hdr_encode(pkt, type, flags, seq);
+        if (payload_len > 0 && payload)
+            memcpy(pkt + P2P_HDR_SIZE, payload, payload_len);
+        return p2p_turn_send_indication(s, addr, pkt, P2P_HDR_SIZE + payload_len);
+    }
+
+    /* Compact 信令转发路径: 封装 session_id */
+    if (s->path == P2P_PATH_SIGNALING) {
         uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
         nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
         memcpy(relay_pkt + sizeof(uint64_t), payload, payload_len);

@@ -125,7 +125,86 @@
 
 struct p2p_session;
 
-int p2p_turn_allocate(struct p2p_session *s);
-void p2p_turn_handle_packet(struct p2p_session *s, const uint8_t *buf, int len, const struct sockaddr_in *from);
+/* ============================================================================
+ * TURN 状态机
+ * ============================================================================
+ *
+ *  TURN_IDLE ──→ TURN_ALLOCATING ──→ (401 Unauthorized?)
+ *                                          │
+ *                                          ↓
+ *                                    TURN_AUTHENTICATING ──→ TURN_ALLOCATED
+ *                                          │                      │
+ *                                          ↓                      ↓
+ *                                     TURN_FAILED          (定期 Refresh)
+ */
+typedef enum {
+    TURN_IDLE = 0,           // 未启动
+    TURN_ALLOCATING,         // 首次 Allocate 已发送（无认证）
+    TURN_AUTHENTICATING,     // 收到 401 后带认证重发中
+    TURN_ALLOCATED,          // 分配成功
+    TURN_FAILED              // 分配失败
+} turn_state_t;
 
+/* 最大中继权限数 */
+#define TURN_MAX_PERMISSIONS 16
+
+/* ============================================================================
+ * TURN 会话上下文
+ * ============================================================================ */
+typedef struct {
+    struct sockaddr_in server_addr;                   // 已解析的 TURN 服务器地址
+    struct sockaddr_in relay_addr;                    // 已分配的中继地址
+    uint8_t tsx_id[12];                               // 当前事务 ID
+    char realm[128];                                  // 认证域（401 响应中获取）
+    char nonce[128];                                  // 随机数（401 响应中获取）
+    uint8_t key[16];                                  // 长期凭证密钥 MD5(user:realm:pass)
+    turn_state_t state;                               // 当前状态
+    bool has_key;                                     // 密钥是否已计算
+    uint32_t lifetime;                                // 分配生存时间（秒）
+    uint64_t alloc_time_ms;                           // 分配成功时间
+    uint64_t last_refresh_ms;                         // 上次 Refresh 时间
+    struct sockaddr_in perms[TURN_MAX_PERMISSIONS];   // 已授权的对端地址（仅 IP 部分有意义）
+    int perm_count;                                   // 已授权数量
+    int perm_cand_synced;                             // 已同步 CreatePermission 的远端候选数
+    uint64_t last_perm_ms;                            // 上次 Permission 创建/刷新时间
+} turn_ctx_t;
+
+/* ============================================================================
+ * API
+ * ============================================================================ */
+
+/* 初始化 TURN 上下文 */
+void p2p_turn_init(turn_ctx_t *t);
+
+/* 释放 TURN 分配（发送 Refresh lifetime=0）并清零上下文 */
+void p2p_turn_final(struct p2p_session *s);
+
+/* 定时维护（权限同步、Refresh 续期） */
+void p2p_turn_tick(struct p2p_session *s, uint64_t now_ms);
+
+//-----------------------------------------------------------------------------
+
+/* 发起 TURN Allocate 请求（首次无认证） */
+int  p2p_turn_allocate(struct p2p_session *s);
+
+/* 通过 TURN 中继发送数据（Send Indication，无需认证） */
+int  p2p_turn_send_indication(struct p2p_session *s, const struct sockaddr_in *peer_addr,
+                              const uint8_t *data, int len);
+
+//-----------------------------------------------------------------------------
+
+/*
+ * 处理来自 TURN 服务器的响应
+ *
+ * 返回值:
+ *   0 = 控制消息已处理（Allocate/Refresh/CreatePermission 响应）
+ *   1 = Data Indication: 中继数据已提取到 out_data/out_len, 对端地址在 out_peer
+ *  -1 = 非 TURN 消息（未处理）
+ */
+int  p2p_turn_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
+                            const struct sockaddr_in *from,
+                            const uint8_t **out_data, int *out_len,
+                            struct sockaddr_in *out_peer);
+
+///////////////////////////////////////////////////////////////////////////////
 #endif /* P2P_TURN_H */
