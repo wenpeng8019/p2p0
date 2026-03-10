@@ -135,7 +135,7 @@ typedef struct compact_pair {
     bool                    req_pending;                        // 是否有发起的请求正在转发中
     uint16_t                req_sid;                            // 请求序列号
     uint8_t                 req_msg;                            // 请求消息类型
-    uint8_t                 req_data[P2P_MSG_DATA_MAX];         // 请求数据缓冲区
+    uint8_t                 req_data[P2P_MSG_DATA_MAX];         // 请求数据缓冲区，todo 和 pear 对等，保留一份即可
     int                     req_data_len;                       // 请求数据长度
     time_t                  req_sent_time;                      // MSG_REQ 最后转发给对端的时间
     int                     req_retry;                          // MSG_REQ 转发给对端的重传次数
@@ -146,7 +146,7 @@ typedef struct compact_pair {
     uint16_t                resp_sid;                           // 响应序列号（= 对应请求的 sid）
     uint8_t                 resp_flags;                         // 响应 flags（0=正常, PEER_OFFLINE, TIMEOUT）
     uint8_t                 resp_msg;                           // 响应消息类型
-    uint8_t                 resp_data[P2P_MSG_DATA_MAX];        // 响应数据缓存
+    uint8_t                 resp_data[P2P_MSG_DATA_MAX];        // 响应数据缓存，todo，和 pear 对等，保留一份即可
     int                     resp_data_len;                      // 响应数据长度
     time_t                  resp_sent_time;                     // MSG_RESP 最后转发给本端的时间
     int                     resp_retry;                         // MSG_RESP 转发给本端的重传次数
@@ -1224,6 +1224,12 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             check_addr_change(udp_fd, local, from);
             local->last_active = time(NULL);
 
+            // 对端有 pending 的地址变更通知 → 移到队尾并重置超时（ACK 前重传地址变更无意义）
+            if (local->peer && local->peer != (compact_pair_t*)(void*)-1
+                    && local->peer->next_info0_pending) {
+                enqueue_info0_pending(local->peer, local->peer->info0_base_index, local->last_active);
+            }
+
             if (local->peer == (compact_pair_t*)(void*)-1) {
                 local->peer = NULL;
             }
@@ -1305,7 +1311,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 如果是 instance_id 变更（客户端重启），必须重置旧会话
         if (existing) {
-            
+
             printf(LA_F("[UDP] I: %s from '%.*s': new instance(old=%u new=%u), resetting session\n", LA_F75, 75),
                    PROTO, P2P_PEER_ID_MAX, local_peer_id, local->instance_id, instance_id);
 
@@ -1410,12 +1416,10 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                        P2P_PEER_ID_MAX, local_peer_id, remote->candidate_count,
                        P2P_PEER_ID_MAX, remote_peer_id, local->candidate_count);
             }
-            else { assert(local->peer == remote && remote->peer == local);
-                // 地址变更通知已在 check_addr_change() 中统一处理
-            }
-        } else {
-            printf(LA_F("[UDP] V: %s: waiting for peer '%.*s' to register\n", LA_F85, 85), PROTO, P2P_PEER_ID_MAX, remote_peer_id);
-        }
+            // 地址变更通知已在 check_addr_change() 中统一处理
+            else assert(local->peer == remote && remote->peer == local);
+
+        } else printf(LA_F("[UDP] V: %s: waiting for peer '%.*s' to register\n", LA_F85, 85), PROTO, P2P_PEER_ID_MAX, remote_peer_id);
     }
 
     // SIG_PKT_UNREGISTER: [local_peer_id(32)][remote_peer_id(32)]
