@@ -166,7 +166,7 @@ static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, ui
 
     if (!s || length > P2P_MTU) return -1;
 
-    dtls_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, 0, buffer, (int)length);
+    p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, 0, buffer, (int)length);
     return 0;
 }
 

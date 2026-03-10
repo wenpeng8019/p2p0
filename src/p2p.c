@@ -286,7 +286,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     
     if (cfg->dtls_backend == 1) {
 #ifdef WITH_DTLS
-        print("I: %s", LA_S("DTLS (MbedTLS) enabled as encryption layer", 0, 0));
+        print("I: %s", LA_S("DTLS (MbedTLS) enabled as encryption layer", LA_S637, 637));
         s->dtls = &p2p_dtls_mbedtls;
 #else
         print("W: %s", LA_S("DTLS (MbedTLS) requested but library not linked", LA_S51, 51));

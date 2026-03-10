@@ -197,7 +197,7 @@ void reliable_tick_ack(reliable_t *r) {
                   ack_seq, sack, r->recv_base,
                   inet_ntoa(s->active_addr.sin_addr),
                   ntohs(s->active_addr.sin_port));
-    dtls_send_packet(s, &s->active_addr, P2P_PKT_ACK, 0, 0, ack_payload, 6);
+    p2p_send_packet(s, &s->active_addr, P2P_PKT_ACK, 0, 0, ack_payload, 6);
 }
 
 /*
@@ -222,12 +222,12 @@ void reliable_tick(reliable_t *r) {
 
         if (e->send_time == 0) {
             /* 首次发送 */
-            dtls_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
+            p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
             e->send_time = now;
             e->retx_count = 0;
         } else if ((int)(now - e->send_time) >= r->rto) {
             /* 超时重传 + 指数退避 */
-            dtls_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
+            p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
             e->send_time = now;
             e->retx_count++;
             r->rto = r->rto * 2;

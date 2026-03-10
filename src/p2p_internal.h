@@ -411,6 +411,23 @@ static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     return E_NONE;
 }
 
+/* ============================================================================
+ * 通道发送接口 (p2p_channel.c)
+ *
+ * 所有传输模块（reliable / pseudotcp / sctp）通过 p2p_send_packet 发送:
+ *   - 自动处理加密（如果 s->dtls 已就绪）
+ *   - 自动处理中继封装（TURN / Compact 信令）
+ *   - 调用者总是传"基础"包类型（DATA / ACK）
+ * ============================================================================ */
+
+int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
+                    uint8_t type, uint8_t flags, uint16_t seq,
+                    const void *payload, int payload_len);
+
+/* 发送原始 DTLS 记录（加密模块的握手/加密输出使用） */
+void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
+                  const void *dtls_record, int record_len);                  
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #pragma clang diagnostic pop

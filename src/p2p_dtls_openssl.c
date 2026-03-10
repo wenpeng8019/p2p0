@@ -39,12 +39,12 @@ static unsigned int psk_server_cb(SSL *ssl, const char *identity, unsigned char 
     return len;
 }
 
-/* 刷新 write_bio: 通过 dtls_output_raw 发送 DTLS 记录 */
+/* 刷新 write_bio: 通过 p2p_send_dtls_record 发送 DTLS 记录 */
 static void openssl_flush_bio(p2p_session_t *s, BIO *write_bio) {
     char enc_buf[P2P_MTU + 64];
     int enc_len;
     while ((enc_len = BIO_read(write_bio, enc_buf, sizeof(enc_buf))) > 0) {
-        dtls_output_raw(s, &s->active_addr, enc_buf, enc_len);
+        p2p_send_dtls_record(s, &s->active_addr, enc_buf, enc_len);
     }
 }
 
@@ -154,7 +154,7 @@ static int openssl_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr
     char enc_buf[P2P_MTU + 64];
     int enc_len;
     while ((enc_len = BIO_read(os->write_bio, enc_buf, sizeof(enc_buf))) > 0) {
-        dtls_output_raw(s, addr, enc_buf, enc_len);
+        p2p_send_dtls_record(s, addr, enc_buf, enc_len);
     }
     return payload_len;
 }

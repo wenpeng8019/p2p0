@@ -213,7 +213,7 @@ typedef struct {
  */
 static int p2p_dtls_send(void *ctx, const unsigned char *buf, size_t len) {
     p2p_session_t *s = (p2p_session_t *)ctx;
-    dtls_output_raw(s, &s->active_addr, buf, (int)len);
+    p2p_send_dtls_record(s, &s->active_addr, buf, (int)len);
     return (int)len;
 }
 
@@ -392,7 +392,7 @@ fail_cleanup:
  * ============================================================================
  *
  * 构造内部明文 [type|flags|seq|payload]，通过 DTLS 加密后发送。
- * BIO 回调 p2p_dtls_send 会自动调用 dtls_output_raw 输出密文。
+ * BIO 回调 p2p_dtls_send 会自动调用 p2p_send_dtls_record 输出密文。
  */
 static int mbedtls_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr,
                                 uint8_t type, uint8_t flags, uint16_t seq,

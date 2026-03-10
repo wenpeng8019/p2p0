@@ -81,7 +81,7 @@ set(LIB_SRCS
     src/p2p_signal_compact.c
     src/p2p_http.c
     src/p2p_path_manager.c
-    src/p2p_dtls.c
+    src/p2p_channel.c
 )
 
 # --- i18n --ndebug auto-detection ---
