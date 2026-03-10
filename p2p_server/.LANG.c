@@ -65,24 +65,24 @@ const char* lang_en[LA_NUM] = {
     [LA_F280] = "[TCP] V: %s sent to '%s'\n",  /* SID:280 */
     [LA_F50] = "[TCP] V: Peer '%s' disconnected\n",  /* SID:50 */
     [LA_F41] = "[TCP] W: Client '%s' timeout (inactive for %ld seconds)\n",  /* SID:41 */
-    [LA_F74] = "[UDP] E: %s sent, status=error (no slot available)\n",  /* SID:74 */
     [LA_F67] = "[UDP] E: %s seq=0 from client %s (server-only, dropped)\n",  /* SID:67 */
     [LA_F64] = "[UDP] E: %s: bad payload(len=%zu)\n",  /* SID:64 */
     [LA_F281] = "[UDP] E: %s: data too large (len=%d)\n",  /* SID:281 */
     [LA_F64] = "[UDP] E: %s: invalid instance_id=0 from %s\n",  /* SID:64 */
     [LA_F282] = "[UDP] E: %s: invalid relay flag from client\n",  /* SID:282 */
     [LA_F63] = "[UDP] E: %s: invalid seq=%u\n",  /* SID:63 */
+    [LA_F74] = "[UDP] E: REGISTER_ACK sent, status=error (no slot available)\n",  /* SID:74 */
     [LA_F82] = "[UDP] E: Relay %s: bad payload(len=%zu)\n",  /* SID:82 */
-    [LA_F75] = "[UDP] I: %s from '%s': new instance(old=%u new=%u), resetting session\n",  /* SID:75 */
-    [LA_F68] = "[UDP] I: Pairing complete: '%s'(%d cands) <-> '%s'(%d cands)\n",  /* SID:68 */
+    [LA_F75] = "[UDP] I: %s from '%.*s': new instance(old=%u new=%u), resetting session\n",  /* SID:75 */
+    [LA_F68] = "[UDP] I: Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n",  /* SID:68 */
     [LA_F288] = "[UDP] V: %s accepted from %s, sid=%u\n",  /* SID:288 */
     [LA_F289] = "[UDP] V: %s accepted from %s, target='%s', sid=%u, msg=%u, len=%d\n",  /* SID:289 */
     [LA_F290] = "[UDP] V: %s received and %s sent for '%s'\n",  /* SID:290 */
-    [LA_F75] = "[UDP] V: %s sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d\n",  /* SID:75 */
-    [LA_F73] = "[UDP] V: %s: accepted, local='%s', remote='%s', inst_id=%u, cands=%d\n",  /* SID:73 */
+    [LA_F73] = "[UDP] V: %s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n",  /* SID:73 */
     [LA_F86] = "[UDP] V: %s: accepted, releasing slot for '%s' -> '%s'\n",  /* SID:86 */
     [LA_F296] = "[UDP] V: %s: no matching pending msg (sid=%u)\n",  /* SID:296 */
-    [LA_F85] = "[UDP] V: %s: waiting for peer '%s' to register\n",  /* SID:85 */
+    [LA_F85] = "[UDP] V: %s: waiting for peer '%.*s' to register\n",  /* SID:85 */
+    [LA_F75] = "[UDP] V: REGISTER_ACK sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d\n",  /* SID:75 */
     [LA_F301] = "[UDP] W: %s: already has pending msg, rejecting sid=%u\n",  /* SID:301 */
     [LA_F302] = "[UDP] W: %s: no matching pending msg (sid=%u, expected=%u)\n",  /* SID:302 */
     [LA_F303] = "[UDP] W: %s: peer '%s' not online, rejecting sid=%u\n",  /* SID:303 */

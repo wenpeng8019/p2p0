@@ -90,14 +90,14 @@ enum {
     _LA_65,
     LA_F66,  /* "[UDP] W: PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
     LA_F67,  /* "[UDP] E: %s seq=0 from client %s (server-only, dropped)\n" (%s,%s)  [server.c] */
-    LA_F68,  /* "[UDP] I: Pairing complete: '%s'(%d cands) <-> '%s'(%d cands)\n" (%s,%d,%s,%d)  [server.c] */
+    LA_F68,  /* "[UDP] I: Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n" (%d,%d)  [server.c] */
     _LA_69,
     _LA_70,
     _LA_71,
     LA_F72,  /* "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %ld seconds)\n" (%s,%s,%l)  [server.c] */
-    LA_F73,  /* "[UDP] V: %s: accepted, local='%s', remote='%s', inst_id=%u, cands=%d\n" (%s,%s,%s,%u,%d)  [server.c] */
-    LA_F74,  /* "[UDP] E: %s sent, status=error (no slot available)\n" (%s)  [server.c] */
-    LA_F75,  /* "[UDP] V: %s sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d\n" (%s,%s,%d,%s,%s,%d,%d)  [server.c] */
+    LA_F73,  /* "[UDP] V: %s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n" (%s,%u,%d)  [server.c] */
+    LA_F74,  /* "[UDP] E: REGISTER_ACK sent, status=error (no slot available)\n"  [server.c] */
+    LA_F75,  /* "[UDP] V: REGISTER_ACK sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d\n" (%s,%d,%s,%s,%d,%d)  [server.c] */
     _LA_76,
     _LA_77,
     _LA_78,
@@ -107,7 +107,7 @@ enum {
     LA_F82,  /* "[UDP] E: Relay %s: bad payload(len=%zu)\n" (%s)  [server.c] */
     _LA_83,
     _LA_84,
-    LA_F85,  /* "[UDP] V: %s: waiting for peer '%s' to register\n" (%s,%s)  [server.c] */
+    LA_F85,  /* "[UDP] V: %s: waiting for peer '%.*s' to register\n" (%s)  [server.c] */
     LA_F86,  /* "[UDP] V: %s: accepted, releasing slot for '%s' -> '%s'\n" (%s,%s,%s)  [server.c] */
     LA_F87,  /* "[UDP] W: Unknown packet type 0x%02x from %s\n" (%s)  [server.c] */
     _LA_88,
