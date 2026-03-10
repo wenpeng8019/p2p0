@@ -14,8 +14,11 @@
 enum {
     LA_PRED = LA_PREDEFINED,  /* 基础 ID，后续 ID 从此开始递增 */
 
+    /* Words (LA_W) */
     LA_W1,  /* "disabled"  [server.c] */
     LA_W2,  /* "enabled"  [server.c] */
+
+    /* Strings (LA_S) */
     LA_S3,  /* "               - TCP: RELAY mode signaling (stateful/long connection)"  [server.c] */
     LA_S4,  /* "               - UDP: COMPACT mode signaling (stateless)"  [server.c] */
     LA_S5,  /* "               Used to detect symmetric NAT (port consistency)"  [server.c] */
@@ -26,13 +29,19 @@ enum {
     LA_S10,  /* "[SERVER] NAT probe disabled (bind failed)"  [server.c] */
     LA_S11,  /* "[SERVER] Received shutdown signal, exiting gracefully..."  [server.c] */
     LA_S12,  /* "[SERVER] Shutting down..."  [server.c] */
+
+    /* Formats (LA_F) */
     LA_F13,  /* "[TCP] E: Invalid magic from peer '%s'\n" (%s)  [server.c] */
+
+    /* Strings (LA_S) */
     LA_S14,  /* "[TCP] Max peers reached, rejecting connection\n"  [server.c] */
     LA_S15,  /* "[TCP] User list truncated (too many users)\n"  [server.c] */
     LA_S16,  /* "Error: Too many arguments"  [server.c] */
     LA_S17,  /* "Examples:"  [server.c] */
     LA_S18,  /* "Parameters:"  [server.c] */
     _LA_19,
+
+    /* Formats (LA_F) */
     LA_F20,  /* "  %s                    # Default config (port 8888, no probe, no relay)" (%s)  [server.c] */
     LA_F21,  /* "  %s 9000               # Listen on port 9000" (%s)  [server.c] */
     LA_F22,  /* "  %s 9000 9001          # Listen 9000, probe port 9001" (%s)  [server.c] */
