@@ -125,7 +125,9 @@ int p2p_turn_allocate(p2p_session_t *s) {
     }
     memcpy(&turn_addr.sin_addr, he->h_addr_list[0], he->h_length);
 
-    return udp_send_to(s->sock, &turn_addr, buf, 28);
+    int ret = udp_send_to(s->sock, &turn_addr, buf, 28);
+    if (ret == 0) s->turn_pending++;
+    return ret;
 }
 
 /* ----------------------------------------------------------------------------
@@ -218,8 +220,18 @@ void p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                             print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F240, 240),
                                          inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                                          c->priority);
-                            /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
-                            p2p_ice_send_local_candidate(s, c);
+
+                            /* 标记 TURN 异步收集完成 */
+                            if (s->turn_pending > 0) s->turn_pending--;
+
+                            /* 按信令模式分发候选交换 */
+                            if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+                                /* COMPACT: 追加 Trickle PEER_INFO + FIN */
+                                p2p_signal_compact_trickle_turn(s);
+                            } else {
+                                /* RELAY/PUBSUB: 标准 Trickle ICE 即时送达 */
+                                p2p_ice_send_local_candidate(s, c);
+                            }
                         }
                     }
                     

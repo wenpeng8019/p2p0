@@ -293,8 +293,13 @@ typedef struct {
     uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配），在 PEER_INFO(seq=0) 中首次获得 */
 
     /* PEER_INFO 序列化同步控制 */
-    uint16_t            candidates_mask;                    /* 后续候选队列对方确认的窗口 mask，用于全部完成确认 */
-    uint16_t            candidates_acked;                   /* 后续候选队列对方确认的窗口，同时意味着最多发 16 个包 */
+    uint16_t            candidates_mask;                    /* 后续候选队列 seq 窗口 mask，用于全部完成确认，同时意味着最多发 16 个包 */
+    uint16_t            candidates_acked;                   /* 后续候选队列对方确认的窗口 */
+    uint16_t            trickle_idx_base;                   /* trickle 候选队列在 local_cands 中的起始索引 */
+    uint8_t             trickle_seq_base;                   /* trickle 候选队列包的窗口 seq base（首批/trickle 分界） */
+    uint8_t             trickle_seq_next;                   /* 下一个 trickle 包的 seq（累加目标，flush 后自增） */
+    uint8_t             trickle_queue[17];                  /* trickle 候选队列包队列，记录每个包所携带的候选队列数量（1-based，索引 1-16） */
+    uint64_t            trickle_last_pack_time;             /* 上次打包发送 trickle 包的时间，用于累积批发送 trickle 候选队列 */
     bool                remote_candidates_0;
     uint16_t            remote_candidates_mask;
     uint16_t            remote_candidates_done;
@@ -390,6 +395,12 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
  * @return =0 成功，!=0 错误码
  */
 ret_t p2p_signal_compact_disconnect(struct p2p_session *s);
+
+/*
+ * TURN Allocate 完成后，Trickle 发送中继候选到对端
+ * 在已发窗口后追加 PEER_INFO + FIN，完成 COMPACT 模式的异步候选交换
+ */
+void p2p_signal_compact_trickle_turn(struct p2p_session *s);
 
 /*
  * 通过信令中继服务向对端发送数据（P2P 打洞失败时的降级方案）

@@ -62,6 +62,79 @@ static ret_t resolve_host(const char *host, uint16_t port, struct sockaddr_in *o
     return E_NONE;
 }
 
+/*
+ * 主动断开 — 通过 NAT 层和信令层双通道通知对端
+ *
+ * NAT FIN:  UDP 直连（不可靠，重复发送提高成功率）
+ * 信令 FIN: 通过信令服务器转发（COMPACT: UNREGISTER → PEER_OFF）
+ *
+ * 由 p2p_close 调用；p2p_destroy 作为兜底也会调用
+ */
+static void disconnect(p2p_session_t *s) {
+
+    assert(s->state != P2P_STATE_CLOSED);
+
+    int prev_state = s->state;
+    s->state = P2P_STATE_CLOSED;
+
+    // NAT 层 FIN（仅在已连接状态，重复发送提高 UDP 可靠性）
+    if (prev_state == P2P_STATE_CONNECTED || prev_state == P2P_STATE_RELAY) {
+
+        print("V: %s", LA_S("Sending FIN packet to peer before closing", LA_S86, 86));
+        for (int i = 0; i < 3; i++) {
+            if (i) P_usleep(5 * 1000); // 5ms 间隔重发
+            nat_send_fin(s);
+        }
+
+        // 触发回调
+        if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
+    }
+    s->nat.state = NAT_CLOSED;
+    s->turn_pending = 0;
+    s->ice_exchange_done = false;
+
+    // COMPACT 信令模式：取消与对方在服务器上的注册，UNREGISTER
+    // + COMPACT 信令的 unregister 等价于 disconnect & logout
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+
+        if (s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
+            print("I: %s", LA_S("Sending UNREGISTER packet to COMPACT signaling server", LA_S88, 88));
+            p2p_signal_compact_disconnect(s);
+        }
+    } 
+    // RELAY 信令模式：
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+
+        // todo 目前无 peer-level disconnect 协议，仅依赖 NAT FIN 
+    }
+}
+
+/*
+ * 被动关闭 — 对端断开时的状态转换和回调
+ */
+static void peer_disconnect(p2p_session_t *s) {
+
+    // 信令信令层的 FIN 信号会统一转换为 NAT 层的 FIN 信号
+    assert(s->nat.state == NAT_CLOSED);
+
+    assert(s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY ||
+           s->state == P2P_STATE_CLOSING);
+
+    print("I: %s", LA_S("Received FIN packet, connection closed", LA_S83, 83));
+
+    s->state = P2P_STATE_CLOSED;
+    s->turn_pending = 0;
+    s->ice_exchange_done = false;
+
+    // 停止信道外 NAT 探测（回到 READY 状态）
+    if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT
+        && s->probe_ctx.state != P2P_PROBE_STATE_OFFLINE) {
+        s->probe_ctx.state = P2P_PROBE_STATE_READY;
+    }
+
+    if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 p2p_handle_t
@@ -274,23 +347,16 @@ p2p_destroy(p2p_handle_t hdl) {
     }
 #endif
 
+    // 重置信道外 NAT 探测
+    probe_reset(s);
+
+    // 兜底：如果没有调用过 p2p_close，执行 disconnect
+    if (s->state != P2P_STATE_CLOSED) {
+        disconnect(s);
+    }
+
     //  COMPACT 模式的 server UDP 套接口和 NAT p2p 是同一个
     if (s->sock != P_INVALID_SOCKET) {
-
-        // 发送 FIN 包，断开 P2P 连接
-        if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
-
-            print("I: %s", LA_S("Sending FIN packet to peer on destroy", LA_S87, 87));
-            nat_send_fin(s);
-        }
-
-        // COMPACT 模式：主动通知信令服务器释放配对槽位（通过封装好的函数）
-        if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT &&
-            s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
-            
-            print("I: %s", LA_S("Sending UNREGISTER packet to COMPACT signaling server", LA_S88, 88));
-            p2p_signal_compact_disconnect(s);
-        }
 
         // 关闭加密层
         if (s->dtls && s->dtls->close) {
@@ -308,16 +374,13 @@ p2p_destroy(p2p_handle_t hdl) {
         P_sock_close(s->sock);
     }
 
-    // RELAY 模式：关闭 TCP 长连接
+    // RELAY 信令模式：关闭 TCP 长连接（断开和服务器的连接, logout）
     if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY
         && s->sig_relay_ctx.state != SIGNAL_DISCONNECTED) {
 
         print("I: %s", LA_S("Closing TCP connection to RELAY signaling server", LA_S44, 44));
         p2p_signal_relay_close(&s->sig_relay_ctx);
     }
-
-    // 重置探测状态
-    probe_reset(s);
 
     free(s->local_cands);
     free(s->remote_cands);
@@ -412,6 +475,13 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 s->state = P2P_STATE_ERROR;
                 UNLOCK(s);
                 return -1;
+            }
+
+            // TURN：异步收集 Relay 候选（响应到达后 trickle 发送给对端）
+            if (!s->cfg.lan_punch && s->cfg.turn_server) {
+                if (p2p_turn_allocate(s) == 0) {
+                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F628, 628), s->cfg.turn_server);
+                }
             }
 
             break;
@@ -524,26 +594,19 @@ p2p_close(p2p_handle_t hdl) {
 
     LOCK(s);
 
-    // 发送 FIN 包通知对端断开连接（仅在已连接状态）
-    if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
-
-        print("V: %s", LA_S("Sending FIN packet to peer before closing", LA_S86, 86));
-        nat_send_fin(s);
+    if (s->state == P2P_STATE_INIT || s->state == P2P_STATE_CLOSED) {
+        UNLOCK(s);
+        return;
     }
 
-    // 标记连接状态为 CLOSING，等待对端确认（收到 FIN 包）后转为 CLOSED
-    int prev_state = s->state;
-    s->state = P2P_STATE_CLOSING;
-    
-    // 主动关闭 P2P 直连，但信令连接还在，回到 READY 状态（如果服务器支持）
-    if ((prev_state == P2P_STATE_CONNECTED || prev_state == P2P_STATE_RELAY) &&
-        s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT) {
+    // 停止信道外 NAT 探测（回到 READY 状态）
+    if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT
+        && s->probe_ctx.state != P2P_PROBE_STATE_OFFLINE) {
         s->probe_ctx.state = P2P_PROBE_STATE_READY;
     }
     
-    // 触发回调（仅在从连接状态转换时）
-    if ((prev_state == P2P_STATE_CONNECTED || prev_state == P2P_STATE_RELAY)
-        && s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
+    // 主动断开（NAT FIN + 信令层 disconnect）
+    disconnect(s);
     
     UNLOCK(s);
 }
@@ -968,18 +1031,12 @@ p2p_update(p2p_handle_t hdl) {
         }
     }
 
-    // 转换：CONNECTED/RELAY → CLOSED（收到 FIN 包主动断开）
-    if (s->nat.state == NAT_CLOSED && 
-        (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)) {
-        print("I: %s", LA_S("Received FIN packet, connection closed", LA_S83, 83));
-        s->state = P2P_STATE_CLOSED;
-        
-        // P2P 直连断开，但信令连接还在，回到 READY 状态（如果服务器支持）
-        if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT) {
-            s->probe_ctx.state = P2P_PROBE_STATE_READY;
-        }
-        
-        if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
+    // 转换：CONNECTED/RELAY/CLOSING → CLOSED
+    // + NAT FIN 和信令 PEER_OFF 都归一化为 NAT_CLOSED，统一在此处理
+    if (s->nat.state == NAT_CLOSED
+        && (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY|| 
+            s->state == P2P_STATE_CLOSING)) {
+        peer_disconnect(s);
     }
 
     // 转换：CONNECTED → RELAY（NAT 连接超时断开，降级到中继模式）
@@ -1203,6 +1260,9 @@ p2p_probe_state_t
 p2p_probe(p2p_handle_t hdl) {
     if (!hdl) return P2P_PROBE_STATE_OFFLINE;
     p2p_session_t *s = (p2p_session_t*)hdl;
+
+    // 已关闭：信令通道已断，返回 OFFLINE
+    if (s->state == P2P_STATE_CLOSED) return P2P_PROBE_STATE_OFFLINE;
 
     // 已直连时无需探测
     if (s->state == P2P_STATE_CONNECTED) return P2P_PROBE_STATE_CONNECTED;

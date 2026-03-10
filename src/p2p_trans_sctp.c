@@ -177,7 +177,7 @@ static void sctp_upcall(struct socket *sock, void *arg, int flags) {
     p2p_session_t *s = (p2p_session_t *)arg;
     (void)flags;
     if (!s) return;
-    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx) return;
 
     int events = usrsctp_get_events(sock);
@@ -258,7 +258,7 @@ static void sctp_subscribe_events(struct socket *sock) {
 static int sctp_init(p2p_session_t *s) {
     p2p_sctp_ctx_t *ctx = calloc(1, sizeof(p2p_sctp_ctx_t));
     if (!ctx) return -1;
-    s->transport_data = ctx;
+    s->trans_data = ctx;
 
     /* 全局初始化（仅首次） */
     if (g_sctp_ref_count == 0) {
@@ -367,7 +367,7 @@ fail:
     g_sctp_ref_count--;
     if (g_sctp_ref_count == 0) usrsctp_finish();
     free(ctx);
-    s->transport_data = NULL;
+    s->trans_data = NULL;
     return -1;
 }
 
@@ -375,7 +375,7 @@ fail:
  * 发送数据
  * ============================================================================ */
 static int sctp_send(p2p_session_t *s, const void *buf, int len) {
-    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx || !ctx->sock || ctx->state != 2) return -1;
 
     struct sctp_sendv_spa spa;
@@ -401,7 +401,7 @@ static int sctp_send(p2p_session_t *s, const void *buf, int len) {
  * 周期性处理
  * ============================================================================ */
 static void sctp_tick(p2p_session_t *s) {
-    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx) return;
 
 #ifndef P2P_THREADED
@@ -423,7 +423,7 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
     if (type != P2P_PKT_DATA && type != P2P_PKT_RELAY_DATA) return;
     (void)from;
 
-    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx) return;
 
     /* 将 UDP 中提取出的 SCTP 数据包送入 usrsctp 协议栈 */
@@ -434,7 +434,7 @@ static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *p
  * 获取传输层统计
  * ============================================================================ */
 static int sctp_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_rate) {
-    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx || !ctx->sock || ctx->state != 2) return -1;
 
     struct sctp_status status;
@@ -453,7 +453,7 @@ static int sctp_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_r
  * 关闭
  * ============================================================================ */
 static void sctp_close(p2p_session_t *s) {
-    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx) return;
 
     if (ctx->sock) {
@@ -468,21 +468,21 @@ static void sctp_close(p2p_session_t *s) {
     }
 
     free(ctx);
-    s->transport_data = NULL;
+    s->trans_data = NULL;
 }
 
 /* ============================================================================
  * 就绪检查
  * ============================================================================ */
 static int sctp_is_ready(struct p2p_session *s) {
-    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->transport_data;
+    p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     return ctx && ctx->state == 2;
 }
 
 /* ============================================================================
  * 传输层操作表
  * ============================================================================ */
-const p2p_transport_ops_t p2p_trans_sctp = {
+const p2p_trans_ops_t p2p_trans_sctp = {
     .name      = "SCTP-usrsctp",
     .init      = sctp_init,
     .close     = sctp_close,

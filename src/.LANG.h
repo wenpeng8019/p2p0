@@ -100,7 +100,7 @@ enum {
     LA_S84,  /* "RELAY/COMPACT mode requires server_host"  [p2p.c] */
     _LA_85,
     LA_S86,  /* "Sending FIN packet to peer before closing"  [p2p.c] */
-    LA_S87,  /* "Sending FIN packet to peer on destroy"  [p2p.c] */
+    _LA_87,
     LA_S88,  /* "Sending UNREGISTER packet to COMPACT signaling server"  [p2p.c] */
     LA_S89,  /* "Signal payload deserialization failed"  [p2p_signal_pubsub.c] */
     LA_S90,  /* "Skipping local Host candidates on --public-only"  [p2p.c] */
@@ -639,6 +639,9 @@ enum {
     _LA_623,
     _LA_624,
     LA_F625,  /* "Crypto layer '%s' init failed, continuing without encryption" (%s)  [p2p.c] */
+    LA_F626,  /* "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u" (%d,%u)  [p2p_signal_compact.c] */
+    LA_F627,  /* "PEER_INFO(trickle): seq overflow, cannot trickle more"  [p2p_signal_compact.c] */
+    LA_F628,  /* "Requested Relay Candidate from TURN %s" (%s)  [p2p.c] */
 
     LA_NUM
 };

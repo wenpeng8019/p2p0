@@ -98,7 +98,6 @@ const char* lang_en[LA_NUM] = {
     [LA_S84] = "RELAY/COMPACT mode requires server_host",  /* SID:84 */
     [LA_S563] = "SCTP (usrsctp) enabled as transport layer",  /* SID:563 */
     [LA_S86] = "Sending FIN packet to peer before closing",  /* SID:86 */
-    [LA_S87] = "Sending FIN packet to peer on destroy",  /* SID:87 */
     [LA_S88] = "Sending UNREGISTER packet to COMPACT signaling server",  /* SID:88 */
     [LA_S89] = "Signal payload deserialization failed",  /* SID:89 */
     [LA_S90] = "Skipping local Host candidates on --public-only",  /* SID:90 */
@@ -250,6 +249,8 @@ const char* lang_en[LA_NUM] = {
     [LA_F250] = "Open P2P UDP socket on port %d",  /* SID:250 */
     [LA_F251] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:251 */
     [LA_F252] = "Out-of-window packet discarded seq=%u base=%u",  /* SID:252 */
+    [LA_F626] = "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u",  /* SID:626 */
+    [LA_F627] = "PEER_INFO(trickle): seq overflow, cannot trickle more",  /* SID:627 */
     [LA_F253] = "Packet queued seq=%u len=%d inflight=%d",  /* SID:253 */
     [LA_F254] = "Packet too large len=%d max=%d",  /* SID:254 */
     [LA_F255] = "Passive peer learned remote ID '%s' from OFFER",  /* SID:255 */
@@ -281,6 +282,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F281] = "Register to COMPACT signaling server at %s:%d",  /* SID:281 */
     [LA_F282] = "Reliable transport initialized rto=%d win=%d",  /* SID:282 */
     [LA_F283] = "Requested Relay Candidate from %s",  /* SID:283 */
+    [LA_F628] = "Requested Relay Candidate from TURN %s",  /* SID:628 */
     [LA_F284] = "Requested Srflx Candidate from %s",  /* SID:284 */
     [LA_F285] = "Resend %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d",  /* SID:285 */
     [LA_F286] = "Resolve COMPACT signaling server address: %s:%d failed(%d)",  /* SID:286 */

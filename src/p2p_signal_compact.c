@@ -27,6 +27,7 @@
 #define PEER_INFO_INTERVAL_MS           500     /* PEER_INFO 重发间隔 */
 #define MAX_REGISTER_ATTEMPTS           10      /* 最大 REGISTER 重发次数 */
 #define REGISTER_KEEPALIVE_INTERVAL_MS  20000   /* REGISTERED 状态保活重注册间隔（防服务器超时清除槽位） */
+#define TRICKLE_BATCH_MS                100     /* TURN trickle 攒批窗口（多个 TURN 响应在此窗口内合并为一个包） */
 #define MAX_CANDS_PER_PACKET            10      /* 每个 PEER_INFO 包最大候选数 */
 #define NAT_PROBE_MAX_RETRIES           3       /* NAT_PROBE 最大发送次数 */
 #define NAT_PROBE_INTERVAL_MS           1000    /* NAT_PROBE 重发间隔 */
@@ -94,19 +95,38 @@ static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payloa
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    const int cand_unit = PEER_INFO_CAND_UNIT;
-    int start = ctx->candidates_cached + (int)(seq - 1) * cand_unit;
-    if (start > s->local_cand_cnt) start = s->local_cand_cnt;
+    int base_index, cnt;
 
-    int remaining = s->local_cand_cnt - start, cnt;
-    if (remaining > cand_unit) cnt = cand_unit;
-    else { cnt = remaining; *r_flags |= SIG_PEER_INFO_FIN; }
+    // 对于 trickle 候选队列的前面部分，也就是首批一次性发送的候选队列
+    // + 此时 ICE 包的候选队列数量都是以 PEER_INFO_CAND_UNIT 为单位的
+    if (seq < ctx->trickle_seq_base) {
 
-    payload[sizeof(uint64_t)] = (uint8_t)start;
+        const int cand_unit = PEER_INFO_CAND_UNIT;
+        base_index = ctx->candidates_cached + (int)(seq - 1) * cand_unit;
+        if (base_index > s->local_cand_cnt) base_index = s->local_cand_cnt;
+
+        int remaining = (int)ctx->trickle_idx_base - base_index;
+        if (remaining > cand_unit) cnt = cand_unit;
+        else cnt = remaining;
+    }
+    // 对于 trickle 候选队列部分
+    else {
+        base_index = ctx->trickle_idx_base;
+        for(int i=ctx->trickle_seq_base; i<seq; i++)
+            base_index += ctx->trickle_queue[i];
+        cnt = ctx->trickle_queue[seq];
+    }
+
+    // 对于最后一个 PEER_INFO 包，设置 FIN 标志
+    if (seq == 16 || (!s->turn_pending && base_index + cnt >= s->local_cand_cnt)) {
+        *r_flags |= SIG_PEER_INFO_FIN;
+    }
+
+    payload[sizeof(uint64_t)] = (uint8_t)base_index;
     payload[sizeof(uint64_t) + 1] = (uint8_t)cnt;
 
     int offset = sizeof(uint64_t) + 2; // 负载头：[session_id(8)][base_index(1)][candidate_count(1)]
-    for (int i = 0; i < cnt; i++) { int idx = start + i;
+    for (int i = 0; i < cnt; i++) { int idx = base_index + i;
         payload[offset] = (uint8_t)s->local_cands[idx].type;
         memcpy(payload + offset + 1, &s->local_cands[idx].addr.sin_addr.s_addr, 4);
         memcpy(payload + offset + 5, &s->local_cands[idx].addr.sin_port, 2);
@@ -129,7 +149,8 @@ static void send_register(p2p_session_t *s) {
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     assert(ctx->state == SIGNAL_COMPACT_REGISTERING);
 
-    // 默认计算 REGISTER/MTU 包中最多能承载的候选数量
+    // 默认计算 REGISTER:MTU 包中最多能承载的候选数量
+    // + 该值随后会根据 SIG_PKT_REGISTER_ACK 的 max_candidates 值进行修正
     const int header_size = P2P_PEER_ID_MAX * 2 + 4 + 1;
     assert(P2P_MAX_PAYLOAD >= header_size);
     int n = P2P_MAX_PAYLOAD - header_size; if (n < 0) n = 0;
@@ -186,16 +207,26 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
     assert(ctx->state == SIGNAL_COMPACT_ICE && ctx->session_id);
 
     // 计算剩余候选数量
+    // + 注意，此时的剩余数量，是此刻的剩余数量；因为候选队列可能是动态增加的（如 TURN Allocate 后追加的 Relay 候选）
     int cand_remain = s->local_cand_cnt - ctx->candidates_cached;
     if (cand_remain < 0) cand_remain = 0;
 
     // 至少发送一个包（即使没有剩余候选），以确保对方收到 FIN 信号
     const int cand_unit = PEER_INFO_CAND_UNIT;
-    int pkt_cnt = cand_remain == 0 ? 1 : (cand_remain + cand_unit - 1) / cand_unit;     // 单位 ceil 取整
-    if (pkt_cnt >= 16) { pkt_cnt = 16;                                                  // 目前协议设计最多支持 16 个包（seq=1-16）
+    int pkt_cnt = cand_remain == 0 ? 1 : (cand_remain + cand_unit - 1) / cand_unit; // 单位 ceil 取整
+    if (pkt_cnt >= 16) { pkt_cnt = 16;                                              // 目前协议设计最多支持 16 个包（seq=1-16）
         ctx->candidates_mask = 0xFFFFu;
-    } else ctx->candidates_mask = (uint16_t)((1u << pkt_cnt) - 1u);                     // 计算候选确认窗口的 mask
-    
+        ctx->trickle_seq_base = 17;                                                 // 无 trickle 空间（seq 溢出区）
+    } else {
+        ctx->trickle_seq_base = (uint8_t)(pkt_cnt + 1);                             // trickle_seq_base 从下一个 seq 开始
+        ctx->candidates_mask = (uint16_t)((1u << pkt_cnt) - 1u);                    // 计算候选确认窗口的 mask
+    }
+    ctx->trickle_seq_next = ctx->trickle_seq_base;                                   // 初始 trickle_seq_next = trickle_seq_base
+
+    // 记录首批候选的分界点（trickle 候选从此索引开始）
+    ctx->trickle_idx_base = (uint16_t)s->local_cand_cnt;
+    memset(ctx->trickle_queue, 0, sizeof(ctx->trickle_queue));
+
     // 初始重置确认状态
     ctx->candidates_acked = 0;
 
@@ -215,7 +246,55 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
         udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
     }
 
+    // 首批发完后，如果还有 TURN 异步收集未完成，启动攒批计时器
+    if (s->turn_pending > 0)
+        ctx->trickle_last_pack_time = P_tick_ms();
+
     print("V:", LA_F("%s sent, total=%d (ses_id=%" PRIu64 ")", 0, 0), PROTO, pkt_cnt, ctx->session_id);
+}
+
+/*
+ * 向对方发送新收集到的中继候选（Trickle ICE）
+ *
+ * 行为：
+ *   1. 在现有候选窗口后追加一个 PEER_INFO 包（seq = 已发包数 + 1）
+ *   2. 扩展 candidates_mask，将新包纳入确认窗口
+ *   3. 当所有 TURN 收集完毕（turn_pending==0）且候选已全部打包时，pack 自动附带 FIN
+ *   4. 如果当前状态已到 READY（前序包均已确认），回退到 ICE 以等待新包确认
+ *   5. 支持攒批：多个 TURN 响应在 TRICKLE_BATCH_MS 窗口内合并为一个包
+ */
+
+/* 将攒批累积的 trickle 候选打包发送（trickle_turn 和 tick flush 共用） */
+static void send_trickle_candidates(p2p_session_t *s) {
+    const char* PROTO = "PEER_INFO(trickle)";
+
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    uint16_t seq = ctx->trickle_seq_next;
+    assert(seq <= 16 && ctx->trickle_queue[seq] > 0);
+
+    // 扩展确认窗口
+    ctx->candidates_mask |= (uint16_t)(1u << (seq - 1));
+    ctx->trickle_seq_next++;
+    if (ctx->state == SIGNAL_COMPACT_READY) ctx->state = SIGNAL_COMPACT_ICE;
+
+    int new_cands = ctx->trickle_queue[seq];
+
+    uint8_t payload[P2P_MAX_PAYLOAD];
+    nwrite_ll(payload, ctx->session_id);
+
+    uint8_t flags = 0;
+    int payload_len = pack_local_candidates(s, seq, payload, &flags);
+
+    printf(LA_F("Send %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d", LA_F289, 289),
+           PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+           seq, flags, payload_len);
+
+    udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
+
+    ctx->last_send_time = P_tick_ms();
+    ctx->trickle_last_pack_time = s->turn_pending > 0 ? ctx->last_send_time : 0;
+    print("I:", LA_F("%s: trickled %d cand(s), seq=%u (ses_id=%" PRIu64 ")", 0, 0),
+          PROTO, new_cands, seq, ctx->session_id);
 }
 
 /*
@@ -429,8 +508,34 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     print("V:", LA_F("%s sent, inst_id=%u", LA_F110, 110), PROTO, ctx->instance_id);
 
     ctx->state = SIGNAL_COMPACT_INIT;
-    s->ice_exchange_done = false;   // 重置 ICE 交换状态
+    ctx->session_id = 0;            // 清除会话 ID（防止处理延迟到达的 PEER_OFF）
     return E_NONE;
+}
+
+void p2p_signal_compact_trickle_turn(p2p_session_t *s) {
+
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    if (ctx->state != SIGNAL_COMPACT_ICE && ctx->state != SIGNAL_COMPACT_READY) return;
+    if (!ctx->session_id) return;
+
+    uint16_t seq = ctx->trickle_seq_next;
+    if (seq > 16) {
+        print("W:", LA_F("PEER_INFO(trickle): seq overflow, cannot trickle more", LA_F627, 627));
+        return;
+    }
+
+    // O(1) 累加：每次 TURN 响应带来 1 个新候选
+    ctx->trickle_queue[seq]++;
+
+    // 攒批间隔控制（固定窗口策略）
+    uint64_t now = P_tick_ms();
+    if (ctx->trickle_last_pack_time && (now - ctx->trickle_last_pack_time) < TRICKLE_BATCH_MS) {
+        print("V:", LA_F("PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u", LA_F626, 626),
+              ctx->trickle_queue[seq], seq);
+        return;
+    }
+
+    send_trickle_candidates(s);
 }
 
 /*
@@ -986,13 +1091,16 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
 
     ctx->candidates_mask = 0;
     ctx->candidates_acked = 0;
+    ctx->trickle_idx_base = 0;
+    ctx->trickle_seq_base = 0;
+    ctx->trickle_seq_next = 0;
+    memset(ctx->trickle_queue, 0, sizeof(ctx->trickle_queue));
+    ctx->trickle_last_pack_time = 0;
     ctx->remote_candidates_mask = 0;
     ctx->remote_candidates_done = 0;
     ctx->remote_candidates_0 = false;
     ctx->remote_addr_notify_seq = 0;
     s->remote_cand_cnt = 0;
-
-    s->ice_exchange_done = false;  // 重置 ICE 交换状态
 
     // 清理 MSG RPC 状态（A 端：发送请求，B 端：接收请求）
     ctx->rpc_last_sid = 0;  // 重置最后完成的 sid
@@ -1006,6 +1114,13 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     probe_reset(s);
     // 设置为 OFFLINE（信令未就绪，等待重新配对）
     s->probe_ctx.state = P2P_PROBE_STATE_OFFLINE;
+
+    // 标记 NAT 为已关闭（主循环的 do_disconnected 统一处理 P2P 状态转换和回调）
+    if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY || 
+        s->state == P2P_STATE_CLOSING) {
+
+        s->nat.state = NAT_CLOSED;
+    }
 
     print("I:", LA_F("%s: peer disconnected (ses_id=%" PRIu64 "), reset to REGISTERED", 0, 0), PROTO, session_id);
 }
@@ -1620,11 +1735,17 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
             ctx->session_id = 0;
             ctx->candidates_mask = 0;
             ctx->candidates_acked = 0;
+            ctx->trickle_idx_base = 0;
+            ctx->trickle_seq_base = 0;
+            ctx->trickle_seq_next = 0;
+            memset(ctx->trickle_queue, 0, sizeof(ctx->trickle_queue));
+            ctx->trickle_last_pack_time = 0;
             ctx->remote_candidates_mask = 0;
             ctx->remote_candidates_done = 0;
             ctx->remote_candidates_0 = false;
             s->remote_cand_cnt = 0;
             s->ice_exchange_done = false;
+            s->turn_pending = 0;
 
             // 先 UNREGISTER，再立即发起新一轮 REGISTER（新 instance_id）
             if (p2p_signal_compact_disconnect(s) != E_NONE) {
@@ -1636,7 +1757,17 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
                 return;
             }
 
+            // 重新发起 TURN Allocate（上一轮分配已随 ICE 重置失效）
+            if (!s->cfg.lan_punch && s->cfg.turn_server)
+                p2p_turn_allocate(s);
+
             return;
+        }
+
+        // 如果有待发送的 trickle 候选，且超过了攒批间隔时间窗口
+        if (ctx->trickle_last_pack_time && now - ctx->trickle_last_pack_time >= TRICKLE_BATCH_MS
+            && ctx->trickle_seq_next <= 16 && ctx->trickle_queue[ctx->trickle_seq_next] > 0) {
+            send_trickle_candidates(s);
         }
 
         if (now - ctx->last_send_time < PEER_INFO_INTERVAL_MS) return;
