@@ -644,8 +644,8 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                         ctx->total_candidates_acked = 0;
                         ctx->next_candidate_index   = 0;
                         ctx->waiting_for_peer       = false;
-                        s->signal_sent              = false;
-                        s->last_cand_cnt_sent       = 0;
+                        s->ice_ctx.signal_sent              = false;
+                        s->ice_ctx.last_cand_cnt_sent       = 0;
                         
                         print("I:", LA_F("Passive peer learned remote ID '%s' from OFFER", LA_F255, 255), ctx->read_sender);
                     }
@@ -666,15 +666,15 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     /* OFFER：总是重置（新连接）
                      * FORWARD：仅当 ICE 已 FAILED 时重置（避免在 CHECKING 时反复重置导致永远无法完成） */
                     bool should_reset = (ctx->read_hdr.type == P2P_RLY_OFFER) || 
-                                       (s->ice_state == P2P_ICE_STATE_FAILED);
+                                       (s->ice_ctx.state == P2P_ICE_STATE_FAILED);
                     
-                    if (should_reset && (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_INIT)) {
-                        printf(LA_F("%s received (ice_state=%d), resetting ICE and clearing %d stale candidates", LA_F105, 105),
-                               ctx->read_hdr.type == P2P_RLY_OFFER ? "OFFER" : "FORWARD", s->ice_state, s->remote_cand_cnt);
+                    if (should_reset && (s->remote_cand_cnt > 0 || s->ice_ctx.state != P2P_ICE_STATE_INIT)) {
+                        printf(LA_F("%s received (ice_ctx.state=%d), resetting ICE and clearing %d stale candidates", LA_F105, 105),
+                               ctx->read_hdr.type == P2P_RLY_OFFER ? "OFFER" : "FORWARD", s->ice_ctx.state, s->remote_cand_cnt);
                         s->remote_cand_cnt = 0;
-                        s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
-                        s->ice_check_count = 0;
-                        s->ice_check_last_ms = 0;
+                        s->ice_ctx.state = P2P_ICE_STATE_GATHERING_DONE;
+                        s->ice_ctx.check_count = 0;
+                        s->ice_ctx.check_last_ms = 0;
                         
                         /* 重置候选发送索引（对端已清空，需从头重发） */
                         ctx->next_candidate_index = 0;
@@ -698,7 +698,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                                    rc->cand.type, inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
 
                             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
-                            if (s->ice_state == P2P_ICE_STATE_CHECKING) {
+                            if (s->ice_ctx.state == P2P_ICE_STATE_CHECKING) {
 
                                 print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F320, 320),
                                              inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
@@ -810,10 +810,10 @@ void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
         // 注意：waiting_for_peer=true 时，只有收到 FORWARD 清除该标志后才会继续发送
         if (unsent_count > 0 &&
             !ctx->waiting_for_peer &&                        // 不在等待对端上线状态
-            (!s->signal_sent ||                              // 从未发送过
-             (now - s->last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) || // 超过重发间隔（Trickle ICE）
-             (s->local_cand_cnt > s->last_cand_cnt_sent) ||  // 有新候选收集到（如 STUN 响应）
-             s->cands_pending_send                           // 有待发送的候选（之前 TCP 发送失败）
+            (!s->ice_ctx.signal_sent ||                              // 从未发送过
+             (now - s->ice_ctx.last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) || // 超过重发间隔（Trickle ICE）
+             (s->local_cand_cnt > s->ice_ctx.last_cand_cnt_sent) ||  // 有新候选收集到（如 STUN 响应）
+             s->ice_ctx.cands_pending_send                           // 有待发送的候选（之前 TCP 发送失败）
             )) {
 
             // 从 next_candidate_index 开始发送剩余候选（断点续传）
@@ -846,10 +846,10 @@ void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                      *   <0: 失败（-1=超时, -2=容量不足, -3=服务器错误）
                      */
                     if (ret >= 0) {
-                        s->signal_sent = true;
-                        s->last_signal_time = now;
-                        s->last_cand_cnt_sent = s->local_cand_cnt;
-                        s->cands_pending_send = false;  /* 清除待发送标志 */
+                        s->ice_ctx.signal_sent = true;
+                        s->ice_ctx.last_signal_time = now;
+                        s->ice_ctx.last_cand_cnt_sent = s->local_cand_cnt;
+                        s->ice_ctx.cands_pending_send = false;  /* 清除待发送标志 */
 
                         if (ret > 0) {
                             print("I:", LA_F("[SIGNALING] Sent candidates, forwarded [%d-%d] to %s (forwarded=%d)", LA_F319, 319),
@@ -865,7 +865,7 @@ void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                         /* waiting_for_peer 已在 send_connect() 中设置为 true */
                         print("W: %s", LA_S("[SIGNALING] Server storage full, waiting for peer to come online", LA_S35, 35));
                     } else {
-                        s->cands_pending_send = true;  /* TCP 发送失败（-1/-3），标记待重发 */
+                        s->ice_ctx.cands_pending_send = true;  /* TCP 发送失败（-1/-3），标记待重发 */
                         print("W:", LA_F("[SIGNALING] Failed to send candidates, will retry (ret=%d)", LA_F317, 317), ret);
                     }
                 }

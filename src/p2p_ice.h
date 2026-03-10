@@ -54,7 +54,7 @@
  *                   - 对端上线后收到完整候选列表
  *
  *      返回值 < 0:  发送失败（网络错误/服务器断开）
- *                   - 标记 cands_pending_send = true
+ *                   - 标记 ice_ctx.cands_pending_send = true
  *                   - 下次 tick 时重试
  *
  *   3. 离线场景的时序：
@@ -134,6 +134,8 @@
 #include <stdc.h>
 #include "p2pp.h"
 
+struct p2p_session;
+
 /* ============================================================================
  * 候选地址类型（RFC 5245 Section 4.1.1）
  * ============================================================================ */
@@ -160,26 +162,49 @@ typedef enum {
 } p2p_ice_state_t;
 
 /* ============================================================================
+ * ICE 上下文
+ *
+ * ICE 模块是非 COMPACT 信令模式（RELAY / PUBSUB）下的候选交换子模块，
+ * 负责标准 ICE 规范的收集、交换、连通性检查流程。
+ * ============================================================================ */
+typedef struct ice_ctx {
+    p2p_ice_state_t state;              // ICE 协商状态
+    uint64_t        check_last_ms;      // 上次连通性检查时间
+    int             check_count;        // 已发送检查轮数
+    int             last_cand_cnt_sent; // 上次发送时的候选数量
+    bool            cands_pending_send; // 有待发送的候选（TCP 发送失败时置 1）
+    uint64_t        last_signal_time;   // 上次发送信令的时间戳 (ms)
+    bool            signal_sent;        // 是否已发送初始信令
+} ice_ctx_t;
+
+/* ============================================================================
  * ICE 模块 API
  * ============================================================================ */
 
-struct p2p_session;
-struct p2p_signaling_payload;
+/* 初始化 ICE 上下文（p2p_create / p2p_connect 时调用） */
+void p2p_ice_init(ice_ctx_t *ctx);
+
+/* 析构 ICE 上下文（disconnect 时调用） */
+void p2p_ice_reset(ice_ctx_t *ctx);
+
+/* ICE 状态机定时处理（发送连通性检查） */
+void p2p_ice_tick(struct p2p_session *s, uint64_t now_ms);
+
+//-----------------------------------------------------------------------------
 
 /* 收集本地候选地址（Host + Srflx + Relay） */
 int p2p_ice_gather_candidates(struct p2p_session *s);
 
-/* ICE 状态机定时处理（发送连通性检查） */
-void p2p_ice_tick(struct p2p_session *s, uint64_t now_ms);
+/* Trickle ICE: 发送单个本地候选 */
+int  p2p_ice_send_local_candidate(struct p2p_session *s, p2p_candidate_entry_t *c);
+
+//-----------------------------------------------------------------------------
 
 /* 处理 Trickle ICE 候选（增量添加） */
 void p2p_ice_on_remote_candidates(struct p2p_session *s, const uint8_t *payload, int len);
 
 /* 连通性检查成功回调 */
 void p2p_ice_on_check_success(struct p2p_session *s, const struct sockaddr_in *from);
-
-/* Trickle ICE: 发送单个本地候选 */
-int  p2p_ice_send_local_candidate(struct p2p_session *s, p2p_candidate_entry_t *c);
 
 /* ============================================================================
  * 优先级计算（RFC 5245 Section 4.1.2）
@@ -219,4 +244,5 @@ uint32_t p2p_ice_calc_priority(p2p_ice_cand_type_t type, uint16_t local_pref, ui
  */
 uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controlled_prio, int is_controlling);
 
+///////////////////////////////////////////////////////////////////////////////
 #endif /* P2P_ICE_H */

@@ -406,7 +406,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 
                 // ICE 候选交换完成后
                 // + 只有在 ICE 候选交换完成后才判定打洞超时，否则可能还有新候选在路上，该状态值由信令层负责设置维护
-                if (s->ice_exchange_done) {
+                if (s->ice_done) {
 
                     print("W:", LA_F("%s: timeout after %" PRIu64 " ms (ICE done), switching to RELAY", 0, 0),
                           TASK_NAT, now_ms - n->punch_start);

@@ -10,7 +10,7 @@ chcp 65001 >nul
 ::   test_all.bat compact      — 仅 COMPACT 集成测试
 ::   test_all.bat relay        — 仅 Relay 集成测试
 ::   test_all.bat stun         — 仅 STUN 集成测试
-::   test_all.bat ice          — 仅 ICE 集成测试
+::   test_all.bat ice_ctx          — 仅 ICE 集成测试
 ::   test_all.bat turn         — 仅 TURN 集成测试
 ::   test_all.bat nat          — 仅 NAT 打洞测试
 ::   test_all.bat pubsub       — 仅 PUBSUB 测试（需要 GitHub token）
@@ -50,7 +50,7 @@ if /i "%CMD%"=="all"     goto :run_all
 if /i "%CMD%"=="compact" goto :run_compact
 if /i "%CMD%"=="relay"   goto :run_relay
 if /i "%CMD%"=="stun"    goto :run_stun
-if /i "%CMD%"=="ice"     goto :run_ice
+if /i "%CMD%"=="ice_ctx"     goto :run_ice
 if /i "%CMD%"=="turn"    goto :run_turn
 if /i "%CMD%"=="nat"     goto :run_nat
 if /i "%CMD%"=="pubsub"  goto :run_pubsub

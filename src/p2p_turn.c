@@ -319,7 +319,7 @@ void p2p_turn_init(turn_ctx_t *t) {
     t->state = TURN_IDLE;
 }
 
-void p2p_turn_final(p2p_session_t *s) {
+void p2p_turn_reset(p2p_session_t *s) {
     turn_ctx_t *t = &s->turn;
 
     /* 主动释放 TURN 分配（Refresh lifetime=0，RFC 5766 Section 5） */
@@ -342,6 +342,7 @@ void p2p_turn_final(p2p_session_t *s) {
     }
 
     memset(t, 0, sizeof(*t));
+    t->state = TURN_IDLE;
 }
 
 /* ============================================================================

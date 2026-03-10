@@ -962,7 +962,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             (ctx->remote_candidates_done & ctx->remote_candidates_mask) == ctx->remote_candidates_mask) {
 
             // 标记 ICE 候选交换完成（供 NAT 层判断打洞超时使用）
-            s->ice_exchange_done = true;
+            s->ice_done = true;
 
             print("I:", LA_F("%s: sync complete (ses_id=%" PRIu64 ", mask=0x%04x)", 0, 0),
                   TASK_ICE_REMOTE, ctx->session_id, (unsigned)ctx->remote_candidates_mask);
@@ -1744,7 +1744,7 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
             ctx->remote_candidates_done = 0;
             ctx->remote_candidates_0 = false;
             s->remote_cand_cnt = 0;
-            s->ice_exchange_done = false;
+            s->ice_done = false;
             s->turn_pending = 0;
 
             // 先 UNREGISTER，再立即发起新一轮 REGISTER（新 instance_id）

@@ -38,6 +38,20 @@
 
 #include "p2p_internal.h"
 
+/* ============================================================================
+ * ICE 上下文生命周期
+ * ============================================================================ */
+
+void p2p_ice_init(ice_ctx_t *ctx) {
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->state = P2P_ICE_STATE_INIT;
+}
+
+void p2p_ice_reset(ice_ctx_t *ctx) {
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->state = P2P_ICE_STATE_INIT;
+}
+
 /* p2p_cand_type_t → p2p_ice_cand_type_t（值完全相同，可以强转） */
 static inline p2p_ice_cand_type_t cand_type_to_ice(p2p_cand_type_t t) {
     return (p2p_ice_cand_type_t)t;
@@ -569,7 +583,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
     }
 
     /* 进入 GATHERING 状态 */
-    s->ice_state = P2P_ICE_STATE_GATHERING;
+    s->ice_ctx.state = P2P_ICE_STATE_GATHERING;
 
     return 0;
 }
@@ -624,7 +638,7 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
  *   5. 如需认证，发送 AUTH 包
  */
 void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) {
-    if (s->ice_state == P2P_ICE_STATE_COMPLETED) return;
+    if (s->ice_ctx.state == P2P_ICE_STATE_COMPLETED) return;
 
     /* 查找对应的远端候选 */
     int matched_idx = -1;
@@ -686,7 +700,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     s->active_addr = *from;
 
     /* 更新状态 */
-    s->ice_state = P2P_ICE_STATE_COMPLETED;
+    s->ice_ctx.state = P2P_ICE_STATE_COMPLETED;
     s->state = P2P_STATE_CONNECTED;
     s->path = P2P_PATH_PUNCH; 
 
@@ -732,9 +746,9 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 #define P2P_ICE_CHECK_INTERVAL_MS 500
 
 void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
-    if (s->ice_state == P2P_ICE_STATE_INIT ||
-        s->ice_state == P2P_ICE_STATE_COMPLETED ||
-        s->ice_state == P2P_ICE_STATE_FAILED) return;
+    if (s->ice_ctx.state == P2P_ICE_STATE_INIT ||
+        s->ice_ctx.state == P2P_ICE_STATE_COMPLETED ||
+        s->ice_ctx.state == P2P_ICE_STATE_FAILED) return;
 
     /* 等待有远端候选再开始 */
     if (s->remote_cand_cnt <= 0) return;
@@ -747,29 +761,29 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
             print("I:", LA_F("[lan_punch] starting NAT punch(Host candidate %d)", LA_F323, 323), s->remote_cand_cnt);
             nat_punch(s, -1);
         }
-        s->ice_state = P2P_ICE_STATE_COMPLETED;  /* ICE 阶段结束，由 nat_tick 接管 */
+        s->ice_ctx.state = P2P_ICE_STATE_COMPLETED;  /* ICE 阶段结束，由 nat_tick 接管 */
         return;
     }
 
     /* 标记状态为 CHECKING */
-    if (s->ice_state == P2P_ICE_STATE_GATHERING ||
-        s->ice_state == P2P_ICE_STATE_GATHERING_DONE) {
-        s->ice_state = P2P_ICE_STATE_CHECKING;
-        s->ice_check_last_ms = 0;
-        s->ice_check_count   = 0;
+    if (s->ice_ctx.state == P2P_ICE_STATE_GATHERING ||
+        s->ice_ctx.state == P2P_ICE_STATE_GATHERING_DONE) {
+        s->ice_ctx.state = P2P_ICE_STATE_CHECKING;
+        s->ice_ctx.check_last_ms = 0;
+        s->ice_ctx.check_count   = 0;
     }
 
     /* 已超过最大重试次数 → FAILED */
-    if (s->ice_check_count >= P2P_ICE_MAX_CHECKS) {
-        print("W:", LA_F("Connectivity checks timed out (sent %d rounds), giving up", LA_F224, 224), s->ice_check_count);
-        s->ice_state = P2P_ICE_STATE_FAILED;
+    if (s->ice_ctx.check_count >= P2P_ICE_MAX_CHECKS) {
+        print("W:", LA_F("Connectivity checks timed out (sent %d rounds), giving up", LA_F224, 224), s->ice_ctx.check_count);
+        s->ice_ctx.state = P2P_ICE_STATE_FAILED;
         return;
     }
 
-    if (now_ms - s->ice_check_last_ms < P2P_ICE_CHECK_INTERVAL_MS) return;
+    if (now_ms - s->ice_ctx.check_last_ms < P2P_ICE_CHECK_INTERVAL_MS) return;
 
-    s->ice_check_last_ms = now_ms;
-    s->ice_check_count++;
+    s->ice_ctx.check_last_ms = now_ms;
+    s->ice_ctx.check_count++;
 
     /*
      * TODO: 标准 ICE 检查列表实现（当前为简化版）
@@ -861,12 +875,12 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
     }
 
     /* 第 1 轮打 INFO，此后每隔 1s（2 轮）打一次 DEBUG */
-    if (s->ice_check_count == 1) {
+    if (s->ice_ctx.check_count == 1) {
         print("I:", LA_F("UDP hole-punch probing remote candidates (%d candidates)", LA_F309, 309),
                s->remote_cand_cnt);
-    } else if (s->ice_check_count % 2 == 0) {
+    } else if (s->ice_ctx.check_count % 2 == 0) {
         printf(LA_F("UDP hole-punch probing remote candidates round %d/%d", LA_F310, 310),
-               s->ice_check_count, P2P_ICE_MAX_CHECKS);
+               s->ice_ctx.check_count, P2P_ICE_MAX_CHECKS);
     }
 }
 

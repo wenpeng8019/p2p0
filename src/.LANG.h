@@ -118,7 +118,7 @@ enum {
     LA_F102,  /* "%s NOTIFY: ignored old notify base=%u (current=%u)" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F103,  /* "%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)" (%s,%u,%d)  [p2p_signal_compact.c] */
     LA_F104,  /* "%s msg=0: accepted, echo reply (sid=%u, len=%d)" (%s,%u,%d)  [p2p_signal_compact.c] */
-    LA_F105,  /* "%s received (ice_state=%d), resetting ICE and clearing %d stale candidates" (%s,%d,%d)  [p2p_signal_relay.c] */
+    LA_F105,  /* "%s received (ice_ctx.state=%d), resetting ICE and clearing %d stale candidates" (%s,%d,%d)  [p2p_signal_relay.c] */
     LA_F106,  /* "%s resent, %d/%d" (%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F107,  /* "%s sent to %s:%d" (%s,%s,%d)  [p2p_nat.c] */
     LA_F108,  /* "%s sent to %s:%d for %s, seq=%d, path=%d" (%s,%s,%d,%s,%d,%d)  [p2p_nat.c] */

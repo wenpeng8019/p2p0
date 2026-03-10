@@ -117,7 +117,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F102] = "%s NOTIFY: ignored old notify base=%u (current=%u)",  /* SID:102 */
     [LA_F103] = "%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)",  /* SID:103 */
     [LA_F104] = "%s msg=0: accepted, echo reply (sid=%u, len=%d)",  /* SID:104 */
-    [LA_F105] = "%s received (ice_state=%d), resetting ICE and clearing %d stale candidates",  /* SID:105 */
+    [LA_F105] = "%s received (ice_ctx.state=%d), resetting ICE and clearing %d stale candidates",  /* SID:105 */
     [LA_F106] = "%s resent, %d/%d",  /* SID:106 */
     [LA_F107] = "%s sent to %s:%d",  /* SID:107 */
     [LA_F108] = "%s sent to %s:%d for %s, seq=%d, path=%d",  /* SID:108 */

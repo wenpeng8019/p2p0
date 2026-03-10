@@ -91,8 +91,9 @@ static void disconnect(p2p_session_t *s) {
     }
     s->nat.state = NAT_CLOSED;
     s->turn_pending = 0;
-    s->ice_exchange_done = false;
-    p2p_turn_final(s);
+    s->ice_done = false;
+    p2p_turn_reset(s);
+    p2p_ice_reset(&s->ice_ctx);
 
     // COMPACT 信令模式：取消与对方在服务器上的注册，UNREGISTER
     // + COMPACT 信令的 unregister 等价于 disconnect & logout
@@ -125,8 +126,9 @@ static void peer_disconnect(p2p_session_t *s) {
 
     s->state = P2P_STATE_CLOSED;
     s->turn_pending = 0;
-    s->ice_exchange_done = false;
-    p2p_turn_final(s);
+    s->ice_done = false;
+    p2p_turn_reset(s);
+    p2p_ice_reset(&s->ice_ctx);
 
     // 停止信道外 NAT 探测（回到 READY 状态）
     if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT
@@ -239,9 +241,6 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 初始化虚拟链路层（基于 NAT 穿透的 P2P）
     nat_init(&s->nat);
 
-    // 初始化 TURN 中继上下文
-    p2p_turn_init(&s->turn);
-
     // 初始化基础传输层（reliable ARQ）
     reliable_init(&s->reliable);
     s->reliable.session = s;  // 设置回溯指针
@@ -311,18 +310,18 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     //----------------------------
 
-    s->signaling_mode = cfg->signaling_mode;
-    s->signal_sent = false;
+    p2p_ice_init(&s->ice_ctx);
 
+    p2p_turn_init(&s->turn);
+
+    s->signaling_mode = cfg->signaling_mode;
     s->state = P2P_STATE_INIT;
     s->path = P2P_PATH_NONE;
-
     s->nat_type = P2P_NAT_UNKNOWN;
-    s->ice_state = P2P_ICE_STATE_INIT;
-
-    s->last_update = P_tick_ms();
 
     //----------------------------
+
+    s->last_update = P_tick_ms();
 
 #ifdef P2P_THREADED
     if (cfg->threaded) {
@@ -428,10 +427,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         }
     }
 
-    // 初始化相关状态
-    s->signal_sent = false;
-    s->cands_pending_send = false;
-
     ret_t ret;
     switch (s->signaling_mode) {
 
@@ -534,7 +529,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                     print("E:", LA_F("Send offer to RELAY signaling server failed(%d)", LA_F293, 293), ret);
                     // todo
                 }
-                s->signal_sent = true;
+                s->ice_ctx.signal_sent = true;
             }
             // 被动模式：等待任意对等方的 offer
             else if (!remote_peer_id) {

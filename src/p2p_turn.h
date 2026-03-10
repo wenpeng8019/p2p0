@@ -152,21 +152,23 @@ typedef enum {
  * TURN 会话上下文
  * ============================================================================ */
 typedef struct {
-    struct sockaddr_in server_addr;                   // 已解析的 TURN 服务器地址
-    struct sockaddr_in relay_addr;                    // 已分配的中继地址
-    uint8_t tsx_id[12];                               // 当前事务 ID
-    char realm[128];                                  // 认证域（401 响应中获取）
-    char nonce[128];                                  // 随机数（401 响应中获取）
-    uint8_t key[16];                                  // 长期凭证密钥 MD5(user:realm:pass)
-    turn_state_t state;                               // 当前状态
-    bool has_key;                                     // 密钥是否已计算
-    uint32_t lifetime;                                // 分配生存时间（秒）
-    uint64_t alloc_time_ms;                           // 分配成功时间
-    uint64_t last_refresh_ms;                         // 上次 Refresh 时间
-    struct sockaddr_in perms[TURN_MAX_PERMISSIONS];   // 已授权的对端地址（仅 IP 部分有意义）
-    int perm_count;                                   // 已授权数量
-    int perm_cand_synced;                             // 已同步 CreatePermission 的远端候选数
-    uint64_t last_perm_ms;                            // 上次 Permission 创建/刷新时间
+    struct sockaddr_in  server_addr;                    // 已解析的 TURN 服务器地址
+    struct sockaddr_in  relay_addr;                     // 已分配的中继地址
+    uint8_t             tsx_id[12];                     // 当前事务 ID
+    char                realm[128];                     // 认证域（401 响应中获取）
+    char                nonce[128];                     // 随机数（401 响应中获取）
+    uint8_t             key[16];                        // 长期凭证密钥 MD5(user:realm:pass)
+
+    turn_state_t        state;                          // 当前状态
+    bool                has_key;                        // 密钥是否已计算
+    uint32_t            lifetime;                       // 分配生存时间（秒）
+    uint64_t            alloc_time_ms;                  // 分配成功时间
+    uint64_t            last_refresh_ms;                // 上次 Refresh 时间
+
+    struct sockaddr_in  perms[TURN_MAX_PERMISSIONS];    // 已授权的对端地址（仅 IP 部分有意义）
+    int                 perm_count;                     // 已授权数量
+    int                 perm_cand_synced;               // 已同步 CreatePermission 的远端候选数
+    uint64_t            last_perm_ms;                   // 上次 Permission 创建/刷新时间
 } turn_ctx_t;
 
 /* ============================================================================
@@ -177,7 +179,7 @@ typedef struct {
 void p2p_turn_init(turn_ctx_t *t);
 
 /* 释放 TURN 分配（发送 Refresh lifetime=0）并清零上下文 */
-void p2p_turn_final(struct p2p_session *s);
+void p2p_turn_reset(struct p2p_session *s);
 
 /* 定时维护（权限同步、Refresh 续期） */
 void p2p_turn_tick(struct p2p_session *s, uint64_t now_ms);

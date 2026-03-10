@@ -118,45 +118,11 @@ typedef struct p2p_session {
 
     /* ======================== p2p 链路 ======================== */
     nat_ctx_t                   nat;                // NAT 穿透上下文
-    turn_ctx_t                  turn;               // TURN 中继上下文
     route_ctx_t                 route;              // 路由表上下文
     reliable_t                  reliable;           // 可靠传输层状态
     stream_t                    stream;             // 流传输层状态
     path_manager_t              path_mgr;           // 路径管理器（多路径并行支持）
     p2p_probe_ctx_t             probe_ctx;          // 探测上下文
-
-    /* ======================== 候选队列 ======================== */
-    p2p_candidate_entry_t*      local_cands;        // 本地候选地址（动态分配）
-    int                         local_cand_cnt;     // 本地候选数量
-    int                         local_cand_cap;     // 本地候选容量
-    p2p_remote_candidate_entry_t* remote_cands;     // 远端候选地址（动态分配，含运行时状态）
-    int                         remote_cand_cnt;    // 远端候选数量
-    int                         remote_cand_cap;    // 远端候选容量
-    int                         turn_pending;       // TURN Allocate 待响应计数（>0 表示还有异步收集未完成）
-    bool                        ice_exchange_done;  // ICE 候选交换是否完成（由信令层设置，NAT 层判断超时用）
-
-    p2p_ice_state_t             ice_state;          // ICE 协商状态
-    uint64_t                    ice_check_last_ms;  // 上次连通性检查时间
-    int                         ice_check_count;    // 已发送检查轮数
-    int                         last_cand_cnt_sent; // 上次发送时的候选数量
-    bool                        cands_pending_send; // 有待发送的候选（TCP 发送失败时置 1）
-    uint64_t                    last_signal_time;   // 上次发送信令的时间戳 (ms)
-    bool                        signal_sent;        // 是否已发送初始信令
-
-    /* ===== 信令上下文/ICE（Interactive Connectivity Establishment） ===== */
-    /*
-     * 信令模块负责在两个对等体之间交换连接信息（候选地址、密钥等）。
-     * 支持三种模式：
-     *   - sig_compact_ctx: COMPACT模式，UDP 无状态信令
-     *   - sig_relay_ctx:  ICE模式，TCP 中继信令
-     *   - sig_pubsub_ctx: PUBSUB模式，通过 GitHub Gist
-     */
-    char                        local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识
-    char                        remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
-    p2p_signal_compact_ctx_t    sig_compact_ctx;    // COMPACT 模式信令上下文
-    p2p_signal_relay_ctx_t      sig_relay_ctx;      // RELAY 模式信令上下文
-    p2p_signal_pubsub_ctx_t     sig_pubsub_ctx;     // PUB/SUB 模式信令上下文
-    p2p_signaling_t             signaling_mode;     // 信令模式
 
     /* ======================== 传输层实例 ======================== */
     /*
@@ -168,6 +134,35 @@ typedef struct p2p_session {
     void*                       trans_data;         // 传输层私有数据
     const p2p_dtls_ops_t*       dtls;               // DTLS 加密层操作函数表（与传输层正交）
     void*                       dtls_data;          // DTLS 加密层私有数据（SSL 上下文等）
+
+    /* ======================== 候选队列 ======================== */
+    p2p_candidate_entry_t*      local_cands;        // 本地候选地址（动态分配）
+    int                         local_cand_cnt;     // 本地候选数量
+    int                         local_cand_cap;     // 本地候选容量
+    p2p_remote_candidate_entry_t* remote_cands;     // 远端候选地址（动态分配，含运行时状态）
+    int                         remote_cand_cnt;    // 远端候选数量
+    int                         remote_cand_cap;    // 远端候选容量
+    int                         turn_pending;       // TURN Allocate 待响应计数（>0 表示还有异步收集未完成）
+    bool                        ice_done;           // ICE 候选交换是否完成（由信令层设置，NAT 层判断超时用）
+
+    /* ===== 信令上下文/ICE（Interactive Connectivity Establishment）交换 ===== */
+    /*
+     * 信令模块负责在两个对等体之间交换连接信息（候选地址、密钥等）。
+     * 支持三种模式：
+     *   - sig_compact_ctx: COMPACT模式，UDP 无状态信令
+     *   - sig_relay_ctx:  ICE模式，TCP 中继信令
+     *   - sig_pubsub_ctx: PUBSUB模式，通过 GitHub Gist
+     */
+    char                        local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识
+    char                        remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
+    p2p_signaling_t             signaling_mode;     // 信令模式
+    p2p_signal_compact_ctx_t    sig_compact_ctx;    // COMPACT 模式信令上下文
+    p2p_signal_relay_ctx_t      sig_relay_ctx;      // RELAY 模式信令上下文
+    p2p_signal_pubsub_ctx_t     sig_pubsub_ctx;     // PUB/SUB 模式信令上下文
+    ice_ctx_t                   ice_ctx;            // ICE 上下文（RELAY/PUBSUB 信令模式）
+
+    /* ======================== 中继服务 ======================== */
+    turn_ctx_t                  turn;               // TURN 中继上下文
 
     /* ======================== NAT 检测 ======================== */
     int                         nat_type;           // NAT 类型，即 p2p_nat_type() 返回值，也就是支持负值状态

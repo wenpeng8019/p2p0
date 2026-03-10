@@ -193,12 +193,12 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         
         /* SUB 收到首个 offer（或发送者改变），重置 ICE 避免残留旧连接状态 */
         if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
-            if (s->remote_cand_cnt > 0 || s->ice_state != P2P_ICE_STATE_INIT) {
+            if (s->remote_cand_cnt > 0 || s->ice_ctx.state != P2P_ICE_STATE_INIT) {
                 printf(LA_F("First offer, resetting ICE and clearing %d stale candidates", LA_F237, 237), s->remote_cand_cnt);
                 s->remote_cand_cnt = 0;
-                s->ice_state = P2P_ICE_STATE_GATHERING_DONE;
-                s->ice_check_count = 0;
-                s->ice_check_last_ms = 0;
+                s->ice_ctx.state = P2P_ICE_STATE_GATHERING_DONE;
+                s->ice_ctx.check_count = 0;
+                s->ice_ctx.check_last_ms = 0;
             }
         }
         
@@ -214,7 +214,7 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
                  c->cand.type, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
             
             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
-            if (s->ice_state == P2P_ICE_STATE_CHECKING) {
+            if (s->ice_ctx.state == P2P_ICE_STATE_CHECKING) {
 
                 printf(LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F320, 320),
                               inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
@@ -691,9 +691,9 @@ void p2p_signal_pubsub_tick_send(p2p_signal_pubsub_ctx_t *ctx, struct p2p_sessio
     uint64_t resend_interval = 5000;  /* SIGNAL_RESEND_INTERVAL_PUBSUB_MS */
     
     /* 检查是否需要（重）发送 */
-    if (!s->signal_sent ||
-        (now - s->last_signal_time >= resend_interval) ||
-        (s->local_cand_cnt > s->last_cand_cnt_sent)) {
+    if (!s->ice_ctx.signal_sent ||
+        (now - s->ice_ctx.last_signal_time >= resend_interval) ||
+        (s->local_cand_cnt > s->ice_ctx.last_cand_cnt_sent)) {
         
         uint8_t pkt[2048];
         int n = pack_signaling_payload_hdr(
@@ -711,11 +711,11 @@ void p2p_signal_pubsub_tick_send(p2p_signal_pubsub_ctx_t *ctx, struct p2p_sessio
         
         if (n > 0) {
             p2p_signal_pubsub_send(ctx, s->remote_peer_id, pkt, n);
-            s->signal_sent = true;
-            s->last_signal_time = now;
-            s->last_cand_cnt_sent = s->local_cand_cnt;
+            s->ice_ctx.signal_sent = true;
+            s->ice_ctx.last_signal_time = now;
+            s->ice_ctx.last_cand_cnt_sent = s->local_cand_cnt;
             print("I: [SIGNALING] %s offer with %d to %s\n",
-                s->last_cand_cnt_sent > 0 ? LA_W("Resent", LA_W15, 15) : LA_W("Published", LA_W12, 12),
+                  s->ice_ctx.last_cand_cnt_sent > 0 ? LA_W("Resent", LA_W15, 15) : LA_W("Published", LA_W12, 12),
                 s->local_cand_cnt,
                 s->remote_peer_id);
         }
