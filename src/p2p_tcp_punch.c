@@ -28,11 +28,11 @@ int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
     loc.sin_port = htons(s->cfg.tcp_port);
     if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
         /* 如果端口被占用，尝试随机端口并更新配置 */
-        printf(LA_F("Bind failed to %d, port busy, trying random port", LA_F218, 218), 
+        printf(LA_F("Bind failed to %d, port busy, trying random port", LA_F208, 208), 
                       s->cfg.tcp_port);
         loc.sin_port = 0;
         if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
-            print("E: %s", LA_S("Bind failed", LA_S41, 41));
+            print("E: %s", LA_S("Bind failed", LA_S42, 42));
              P_sock_close(sock);
              return -1;
         }
@@ -41,14 +41,14 @@ int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
         struct sockaddr_in bound;
         socklen_t blen = sizeof(bound);
         getsockname(sock, (struct sockaddr *)&bound, &blen);
-        printf(LA_F("Bound to :%d", LA_F219, 219), ntohs(bound.sin_port));
+        printf(LA_F("Bound to :%d", LA_F209, 209), ntohs(bound.sin_port));
     }
 
     /* 设置为非阻塞 */
     P_sock_nonblock(sock, true);
 
     /* 进行三次握手的"同时发起"尝试 */
-    print("I:", LA_F("Attempting Simultaneous Open to %s:%d", LA_F216, 216),
+    print("I:", LA_F("Attempting Simultaneous Open to %s:%d", LA_F206, 206),
                  inet_ntoa(remote->sin_addr), ntohs(remote->sin_port));
     
     int ret = connect(sock, (struct sockaddr *)remote, sizeof(*remote));

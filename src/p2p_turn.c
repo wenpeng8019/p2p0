@@ -279,7 +279,7 @@ static int allocate_auth(p2p_session_t *s) {
 
     if (!t->has_key) {
         if (!s->cfg.turn_user || !s->cfg.turn_pass) {
-            print("E: %s", LA_S("TURN auth required but no credentials configured", LA_S38, 38));
+            print("E: %s", LA_S("TURN auth required but no credentials configured", LA_S101, 101));
             t->state = TURN_FAILED;
             if (s->turn_pending > 0) s->turn_pending--;
             return -1;
@@ -361,12 +361,12 @@ int p2p_turn_allocate(p2p_session_t *s) {
     turn_ctx_t *t = &s->turn;
 
     if (!resolve_server(t, s->cfg.turn_server, s->cfg.turn_port)) {
-        print("E:", LA_F("Failed to resolve TURN server: %s", LA_F235, 235), s->cfg.turn_server);
+        print("E:", LA_F("Failed to resolve TURN server: %s", LA_F226, 226), s->cfg.turn_server);
         t->state = TURN_FAILED;
         return -1;
     }
 
-    print("I:", LA_F("Sending Allocate Request to %s:%d", LA_F295, 295),
+    print("I:", LA_F("Sending Allocate Request to %s:%d", LA_F289, 289),
                  s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
 
     uint8_t buf[64];
@@ -489,7 +489,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
         t->last_perm_ms   = t->alloc_time_ms;
         t->state          = TURN_ALLOCATED;
 
-        print("I:", LA_F("TURN Allocated relay %s:%u (lifetime=%us)", LA_F629, 629),
+        print("I:", LA_F("TURN Allocated relay %s:%u (lifetime=%us)", LA_F299, 299),
               inet_ntoa(relay.sin_addr), ntohs(relay.sin_port), lifetime);
 
         /* 将中继地址加入本地 ICE 候选 */
@@ -500,7 +500,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
             c->addr = relay;
             c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
 
-            print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F240, 240),
+            print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F231, 231),
                   inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
 
             if (s->turn_pending > 0) s->turn_pending--;
@@ -554,7 +554,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
 
         /* 401: 首次认证挑战 */
         if (error_code == 401 && t->state == TURN_ALLOCATING && realm[0] && nonce[0]) {
-            print("I:", LA_F("TURN 401 Unauthorized (realm=%s), authenticating...", LA_F630, 630), realm);
+            print("I:", LA_F("TURN 401 Unauthorized (realm=%s), authenticating...", LA_F297, 297), realm);
             strncpy(t->realm, realm, sizeof(t->realm) - 1);
             strncpy(t->nonce, nonce, sizeof(t->nonce) - 1);
             t->has_key = false;  /* realm 变化需重新计算 key */
@@ -570,7 +570,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
             return 0;
         }
 
-        print("E:", LA_F("TURN Allocate failed with error %d", LA_F631, 631), error_code);
+        print("E:", LA_F("TURN Allocate failed with error %d", LA_F298, 298), error_code);
         t->state = TURN_FAILED;
         if (s->turn_pending > 0) s->turn_pending--;
         return 0;
@@ -599,7 +599,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
                 error_code = (buf[off+2] & 0x07) * 100 + buf[off+3];
             off += (al + 3) & ~3;
         }
-        print("E:", LA_F("TURN CreatePermission failed (error=%d)", LA_F632, 632), error_code);
+        print("E:", LA_F("TURN CreatePermission failed (error=%d)", LA_F300, 300), error_code);
         return 0;
     }
 
@@ -622,7 +622,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
         }
         t->lifetime = lifetime;
         t->last_refresh_ms = P_tick_ms();
-        print("V:", LA_F("TURN Refresh ok (lifetime=%us)", LA_F633, 633), lifetime);
+        print("V:", LA_F("TURN Refresh ok (lifetime=%us)", LA_F304, 304), lifetime);
         return 0;
     }
 
@@ -652,7 +652,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
             turn_refresh(s);
             return 0;
         }
-        print("E:", LA_F("TURN Refresh failed (error=%d)", LA_F634, 634), error_code);
+        print("E:", LA_F("TURN Refresh failed (error=%d)", LA_F303, 303), error_code);
         return 0;
     }
 
@@ -690,7 +690,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
         }
 
         if (data && data_len > 0 && peer.sin_family == AF_INET) {
-            print("V:", LA_F("TURN Data Indication from %s:%u (%d bytes)", LA_F635, 635),
+            print("V:", LA_F("TURN Data Indication from %s:%u (%d bytes)", LA_F302, 302),
                   inet_ntoa(peer.sin_addr), ntohs(peer.sin_port), data_len);
 
             if (out_data)  *out_data = data;
@@ -725,7 +725,7 @@ static int turn_create_permission(p2p_session_t *s, const struct sockaddr_in *pe
     /* 去重：同一 IP 不重复发送（端口无关，RFC 5766 Section 9.1） */
     if (has_permission(t, peer_addr)) return 0;
 
-    print("V:", LA_F("TURN CreatePermission for %s", LA_F636, 636),
+    print("V:", LA_F("TURN CreatePermission for %s", LA_F301, 301),
           inet_ntoa(((struct sockaddr_in *)peer_addr)->sin_addr));
 
     uint8_t buf[768];

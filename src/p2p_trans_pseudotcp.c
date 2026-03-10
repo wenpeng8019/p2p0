@@ -67,7 +67,7 @@ void p2p_pseudotcp_on_loss(struct p2p_session *s) {
     s->tcp.cwnd = MIN_CWND;
     s->tcp.dup_acks = 0;
     s->tcp.loss_rate = s->tcp.loss_rate * 0.98f + 0.02f;  /* EWMA 上报：检测到丢包 */
-    print("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F325, 325), s->tcp.ssthresh, s->tcp.cwnd);
+    print("W:", LA_F("congestion detected, new ssthresh: %u, cwnd: %u", LA_F332, 332), s->tcp.ssthresh, s->tcp.cwnd);
 }
 
 /*

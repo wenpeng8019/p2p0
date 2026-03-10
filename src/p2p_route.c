@@ -39,7 +39,7 @@ void route_final(route_ctx_t *rt) {
 // 检测获取本地所有有效的网络地址
 ret_t route_detect_local(route_ctx_t *rt) {
 
-    printf("%s", LA_S("Detecting local network addresses", LA_S50, 50));
+    printf("%s", LA_S("Detecting local network addresses", LA_S52, 52));
 
     rt->addr_count = 0;
 
@@ -118,10 +118,10 @@ ret_t route_detect_local(route_ctx_t *rt) {
     freeifaddrs(ifa_list);
 #endif
 
-    print("I:", LA_F("Local address detection done: %d address(es)", LA_F247, 247), rt->addr_count);
+    print("I:", LA_F("Local address detection done: %d address(es)", LA_F238, 238), rt->addr_count);
     if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
         for (i = 0; i < rt->addr_count; i++) {
-            print("V:", LA_F("  [%d] %s/%d", LA_F97, 97), i,
+            print("V:", LA_F("  [%d] %s/%d", LA_F104, 104), i,
                   inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
         }
     }
