@@ -14,6 +14,7 @@
 enum {
     LA_PRED = LA_PREDEFINED,  /* 基础 ID，后续 ID 从此开始递增 */
 
+    /* Words (LA_W) */
     LA_W1,  /* "CLOSED"  [p2p_ping.c] */
     LA_W2,  /* "CLOSING"  [p2p_ping.c] */
     LA_W3,  /* "CONNECTED"  [p2p_ping.c] */
@@ -23,6 +24,8 @@ enum {
     LA_W7,  /* "REGISTERING"  [p2p_ping.c] */
     LA_W8,  /* "RELAY"  [p2p_ping.c] */
     LA_W9,  /* "UNKNOWN"  [p2p_ping.c] */
+
+    /* Strings (LA_S) */
     LA_S10,  /* "  --cn              Use Chinese language"  [p2p_ping.c] */
     LA_S11,  /* "  --compact         Use COMPACT mode (UDP signaling, default is ICE/TCP)"  [p2p_ping.c] */
     LA_S12,  /* "  --disable-lan     Disable LAN shortcut (force NAT punch test)"  [p2p_ping.c] */
@@ -50,6 +53,8 @@ enum {
     LA_S34,  /* "Failed to initialize connection"  [p2p_ping.c] */
     LA_S35,  /* "Options:"  [p2p_ping.c] */
     LA_S36,  /* "Use one of: --server or --github"  [p2p_ping.c] */
+
+    /* Formats (LA_F) */
     LA_F37,  /* "Running in %s mode (connecting to %s)..." (%s,%s)  [p2p_ping.c] */
     LA_F38,  /* "Running in %s mode (waiting for connection)..." (%s)  [p2p_ping.c] */
     LA_F39,  /* "Usage: %s [options]" (%s)  [p2p_ping.c] */

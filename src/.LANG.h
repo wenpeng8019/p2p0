@@ -365,6 +365,7 @@ enum {
     LA_F344,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
     LA_F345,  /* "✗ Cannot add Srflx candidate: realloc failed (OOM)"  [p2p_stun.c] */
     LA_F346,  /* "%s: invalid session_id=0" (%s)  [p2p_signal_compact.c] */
+    LA_F347,  /* "%s skipped: session_id=0" (%s)  [p2p_signal_compact.c] */
 
     LA_NUM
 };

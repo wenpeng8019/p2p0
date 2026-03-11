@@ -333,13 +333,14 @@ typedef struct {
  *   总大小: 4(包头) + 18(payload) = 22 字节
  *
  * ALIVE:
- *   payload: [local_peer_id(32)][remote_peer_id(32)]
- *   包头: type=0x82, flags=0, seq=0
+ *   payload: [session_id(8)]
+ *   包头: type=0x86, flags=0, seq=0
+ *   - session_id: 本端会话 ID（网络字节序，64位，来自 REGISTER_ACK）
  *   用于客户端在 REGISTERED 状态定期发送，保持服务器槽位活跃
  *
  * ALIVE_ACK:
  *   payload: 空（仅包头）
- *   包头: type=0x83, flags=0, seq=0
+ *   包头: type=0x87, flags=0, seq=0
  *   服务器回复确认，表示槽位仍然有效
  *
  * PEER_INFO:

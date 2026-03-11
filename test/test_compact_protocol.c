@@ -61,6 +61,7 @@ typedef struct {
 #pragma pack(push, 1)
 typedef struct {
     uint8_t status;          // 0=离线, 1=在线, >=2=error
+    uint64_t session_id;     // 本端会话 ID（REGISTER_ACK 下发）
     uint8_t max_candidates;  // 服务器缓存能力
     uint32_t public_ip;      // 客户端的公网 IP
     uint16_t public_port;    // 客户端的公网端口
@@ -92,6 +93,7 @@ TEST(register_ack_basic) {
     ack.public_ip = htonl(0x01020304);  // 1.2.3.4
     ack.public_port = htons(12345);
     ack.probe_port = htons(3479);  // 探测端口
+    ack.session_id = 0x1122334455667788ULL;
     
     // 验证字段
     ASSERT_EQ(ack.status, SIG_REGACK_PEER_ONLINE);
@@ -99,6 +101,7 @@ TEST(register_ack_basic) {
     ASSERT_EQ(ntohl(ack.public_ip), 0x01020304);
     ASSERT_EQ(ntohs(ack.public_port), 12345);
     ASSERT_EQ(ntohs(ack.probe_port), 3479);
+    ASSERT_EQ(ack.session_id, 0x1122334455667788ULL);
     TEST_LOG("  ✓ REGISTER_ACK format correct: peer_online=1, max=5, public=1.2.3.4:12345, probe_port=3479");
 }
 
@@ -926,9 +929,9 @@ TEST(protocol_number_verification) {
 TEST(packet_size_verification) {
     TEST_LOG("Testing packet size calculations");
     
-    // REGISTER_ACK: 4(header) + 10(payload) = 14 bytes
+    // REGISTER_ACK: 4(header) + 18(payload) = 22 bytes
     size_t register_ack_size = sizeof(test_pkt_hdr_t) + sizeof(test_register_ack_t);
-    TEST_LOG("  REGISTER_ACK size: %zu bytes (expected 14)", register_ack_size);
+    TEST_LOG("  REGISTER_ACK size: %zu bytes (expected 22)", register_ack_size);
     
     // 候选结构: 7 bytes (type + ip + port)
     size_t candidate_size = sizeof(test_candidate_t);

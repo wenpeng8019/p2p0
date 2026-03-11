@@ -128,6 +128,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F120] = "%s sent, sid=%u, msg=%u, size=%d",  /* SID:120 */
     [LA_F121] = "%s seq=0: accepted cand_cnt=%d",  /* SID:121 */
     [LA_F122] = "%s seq=0: invalid(cand_cnt=%d flags=0x%02x)",  /* SID:122 */
+    [LA_F347] = "%s skipped: session_id=0",  /* SID:347 */
     [LA_F123] = "%s, retry remaining candidates and FIN to peer",  /* SID:123 */
     [LA_F124] = "%s, sent on %s",  /* SID:124 */
     [LA_F125] = "%s: %s timeout after %d retries (sid=%u)",  /* SID:125 */

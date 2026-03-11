@@ -97,7 +97,7 @@ enum {
     LA_F72,  /* "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %ld seconds)\n" (%s,%s,%l)  [server.c] */
     LA_F73,  /* "[UDP] V: %s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n" (%s,%u,%d)  [server.c] */
     LA_F74,  /* "[UDP] E: REGISTER_ACK sent, status=error (no slot available)\n"  [server.c] */
-    LA_F75,  /* "[UDP] V: REGISTER_ACK sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d\n" (%s,%d,%s,%s,%d,%d)  [server.c] */
+    LA_F75,  /* "[UDP] I: %s from '%.*s': new instance(old=%u new=%u), resetting session\n" (%s,%u,%u)  [server.c] */
     _LA_76,
     _LA_77,
     _LA_78,
@@ -311,8 +311,8 @@ enum {
     _LA_286,
     _LA_287,
     LA_F288,  /* "[UDP] V: %s accepted from %s, sid=%u\n" (%s,%s,%u)  [server.c] */
-    LA_F289,  /* "[UDP] V: %s accepted from %s, target='%s', sid=%u, msg=%u, len=%d\n" (%s,%s,%s,%u,%u,%d)  [server.c] */
-    LA_F290,  /* "[UDP] V: %s received and %s sent for '%s'\n" (%s,%s,%s)  [server.c] */
+    _LA_289,
+    _LA_290,
     _LA_291,
     _LA_292,
     _LA_293,
@@ -327,7 +327,6 @@ enum {
     LA_F302,  /* "[UDP] W: %s: no matching pending msg (sid=%u, expected=%u)\n" (%s,%u,%u)  [server.c] */
     LA_F303,  /* "[UDP] W: %s: peer '%s' not online, rejecting sid=%u\n" (%s,%s,%u)  [server.c] */
     LA_F304,  /* "[UDP] W: %s: requester not found for %s\n" (%s,%s)  [server.c] */
-    LA_F305,  /* "[UDP] W: %s: target mismatch (expected='%s', got='%s')\n" (%s,%s,%s)  [server.c] */
 
     LA_NUM
 };

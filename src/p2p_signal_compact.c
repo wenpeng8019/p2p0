@@ -1638,31 +1638,31 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
             /*
              * 发送 ALIVE 保活包
              *
-             * 协议：SIG_PKT_ALIVE (0x0A)
-             * 包头: [type=0x0A | flags=0 | seq=0]
-             * 负载: [local_peer_id(32)][remote_peer_id(32)]
-             *   - local_peer_id: 本地 peer_id
-             *   - remote_peer_id: 远端 peer_id
+             * 协议：SIG_PKT_ALIVE (0x86)
+             * 包头: [type=0x86 | flags=0 | seq=0]
+             * 负载: [session_id(8)]
+             *   - session_id: 本端会话 ID（来自 REGISTER_ACK）
              * 说明: 保活包，维持服务器上的注册状态
              */
-            {
-                const char* PROTO = "ALIVE";
+            {   const char* PROTO = "ALIVE";
 
-                uint8_t payload[P2P_PEER_ID_MAX * 2];
-                memset(payload, 0, sizeof(payload));
-                memcpy(payload, ctx->local_peer_id, strnlen(ctx->local_peer_id, P2P_PEER_ID_MAX));
-                memcpy(payload + P2P_PEER_ID_MAX, ctx->remote_peer_id, strnlen(ctx->remote_peer_id, P2P_PEER_ID_MAX));
+                if (ctx->session_id) {
 
-                // 调试打印协议包信息
-                printf(LA_F("Send %s pkt to %s:%d, seq=0, flags=0, len=%d", LA_F284, 284),
-                       PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
-                       (int)sizeof(payload));
+                    uint8_t payload[8];
+                    nwrite_ll(payload, ctx->session_id);
 
-                udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_ALIVE, 0, 0, payload, (int)sizeof(payload));
-                ctx->last_send_time = now;
+                    // 调试打印协议包信息
+                    printf(LA_F("Send %s pkt to %s:%d, seq=0, flags=0, len=%d", LA_F284, 284),
+                                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+                                (int)sizeof(payload));
 
-                print("V:", LA_F("%s, sent on %s", LA_F124, 124),
-                      PROTO, ctx->state == SIGNAL_COMPACT_REGISTERED ? "REGISTERED" : "READY");
+                    udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_ALIVE, 0, 0, payload, (int)sizeof(payload));
+                    ctx->last_send_time = now;
+
+                    print("V:", LA_F("%s, sent on %s", LA_F124, 124),
+                          PROTO, ctx->state == SIGNAL_COMPACT_REGISTERED ? "REGISTERED" : "READY");
+                }
+                 else print("W:", LA_F("%s skipped: session_id=0", LA_F347, 347), PROTO); 
             }
         }
     }

@@ -76,18 +76,14 @@ const char* lang_en[LA_NUM] = {
     [LA_F75] = "[UDP] I: %s from '%.*s': new instance(old=%u new=%u), resetting session\n",  /* SID:75 */
     [LA_F68] = "[UDP] I: Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n",  /* SID:68 */
     [LA_F288] = "[UDP] V: %s accepted from %s, sid=%u\n",  /* SID:288 */
-    [LA_F289] = "[UDP] V: %s accepted from %s, target='%s', sid=%u, msg=%u, len=%d\n",  /* SID:289 */
-    [LA_F290] = "[UDP] V: %s received and %s sent for '%s'\n",  /* SID:290 */
     [LA_F73] = "[UDP] V: %s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n",  /* SID:73 */
     [LA_F86] = "[UDP] V: %s: accepted, releasing slot for '%s' -> '%s'\n",  /* SID:86 */
     [LA_F296] = "[UDP] V: %s: no matching pending msg (sid=%u)\n",  /* SID:296 */
     [LA_F85] = "[UDP] V: %s: waiting for peer '%.*s' to register\n",  /* SID:85 */
-    [LA_F75] = "[UDP] V: REGISTER_ACK sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d\n",  /* SID:75 */
     [LA_F301] = "[UDP] W: %s: already has pending msg, rejecting sid=%u\n",  /* SID:301 */
     [LA_F302] = "[UDP] W: %s: no matching pending msg (sid=%u, expected=%u)\n",  /* SID:302 */
     [LA_F303] = "[UDP] W: %s: peer '%s' not online, rejecting sid=%u\n",  /* SID:303 */
     [LA_F304] = "[UDP] W: %s: requester not found for %s\n",  /* SID:304 */
-    [LA_F305] = "[UDP] W: %s: target mismatch (expected='%s', got='%s')\n",  /* SID:305 */
     [LA_F66] = "[UDP] W: PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:66 */
     [LA_F72] = "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %ld seconds)\n",  /* SID:72 */
     [LA_F87] = "[UDP] W: Unknown packet type 0x%02x from %s\n",  /* SID:87 */
