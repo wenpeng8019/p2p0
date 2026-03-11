@@ -815,7 +815,7 @@ static void send_msg_resp_ack_to_responder(sock_t udp_fd, const struct sockaddr_
     nwrite_s(pkt + 12, sid);
 
     // 调试打印协议包信息
-    printf("Send %s pkt to %s:%d, seq=0, flags=0, len=10, sid=%u, session_id=%" PRIu64 "\n",
+    printf("Send %s pkt to %s:%d, seq=0, flags=0, len=14, sid=%u, session_id=%" PRIu64 "\n",
            PROTO, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), sid, session_id);
 
     sendto(udp_fd, (const char *)pkt, 14, 0, (struct sockaddr *)addr, sizeof(*addr));
@@ -1911,12 +1911,12 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 验证 session_id 和 sid 不为 0
         if (session_id == 0 || sid == 0) {
-            printf(LA_F("[UDP] E: %s: invalid session_id=%" PRIu64 " or sid=%u\n", LA_F64, 64), 
+            printf(LA_F("[UDP] E: %s: invalid session_id=%" PRIu64 " or sid=%u\n", 0, 0), 
                    PROTO, session_id, sid);
             return;
         }
 
-        printf(LA_F("[UDP] V: %s accepted from %s, session_id=%" PRIu64 ", sid=%u\n", LA_F288, 288), 
+        printf(LA_F("[UDP] V: %s accepted from %s, session_id=%" PRIu64 ", sid=%u\n", 0, 0), 
                PROTO, from_str, session_id, sid);
 
         // 根据 session_id 查找 requester
