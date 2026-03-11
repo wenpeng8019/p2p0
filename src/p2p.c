@@ -89,9 +89,13 @@ static void disconnect(p2p_session_t *s) {
         // 触发回调
         if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
     }
+
     s->nat.state = NAT_CLOSED;
+    
+    s->remote_cand_cnt = 0;
+    s->remote_ice_done = false;
     s->turn_pending = 0;
-    s->ice_done = false;
+
     p2p_turn_reset(s);
     p2p_ice_reset(&s->ice_ctx);
 
@@ -125,8 +129,11 @@ static void peer_disconnect(p2p_session_t *s) {
     print("I: %s", LA_S("Received FIN packet, connection closed", LA_S88, 88));
 
     s->state = P2P_STATE_CLOSED;
+
+    s->remote_cand_cnt = 0;
+    s->remote_ice_done = false;
     s->turn_pending = 0;
-    s->ice_done = false;
+
     p2p_turn_reset(s);
     p2p_ice_reset(&s->ice_ctx);
 

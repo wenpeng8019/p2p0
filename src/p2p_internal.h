@@ -142,8 +142,8 @@ typedef struct p2p_session {
     p2p_remote_candidate_entry_t* remote_cands;     // 远端候选地址（动态分配，含运行时状态）
     int                         remote_cand_cnt;    // 远端候选数量
     int                         remote_cand_cap;    // 远端候选容量
+    bool                        remote_ice_done;    // 远端候选是否同步完成（由信令层设置，NAT 层判断超时用）
     int                         turn_pending;       // TURN Allocate 待响应计数（>0 表示还有异步收集未完成）
-    bool                        ice_done;           // ICE 候选交换是否完成（由信令层设置，NAT 层判断超时用）
 
     /* ===== 信令上下文/ICE（Interactive Connectivity Establishment）交换 ===== */
     /*

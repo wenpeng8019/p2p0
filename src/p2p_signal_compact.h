@@ -62,8 +62,9 @@ struct p2p_session;
  *   序列化传输剩余候选，并发送 FIN 包明确结束，否则对端无法判断是否还有更多候选。
  *
  * REGISTER_ACK:
- *   [status(1)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
+ *   [status(1)][session_id(8)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
  *   status: 0=成功/对端离线, 1=成功/对端在线, >=2=错误码
+ *   session_id: 本端会话 ID（网络字节序，64位，注册成功后立即分配）
  *   max_candidates: 服务器为对端缓存的最大候选数量（0=不支持缓存）
  *   public_ip/port: 客户端的公网地址（服务器主端口观察到的 UDP 源地址）
  *   probe_port: NAT 探测端口号（0=不支持探测，>0=探测端口）
@@ -281,16 +282,16 @@ typedef struct {
     uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
     int                 register_attempts;                  /* REGISTER 总共尝试次数 */
 
+    /* 和对方的会话 */
+    uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配），在 REGISTER_ACK 中首次获得 */
+    bool                peer_online;                        /* 对端是否在线；REGISTER_ACK 和 PEER_INFO 都会导致 online 为 true */
+
     /* REGISTER_ACK 返回的信息 */
     int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量 */
     struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器主端口探测到的）*/
     bool                relay_support;                      /* 服务器是否支持中继 */
     bool                msg_support;                        /* 服务器是否支持 RPC */
     uint16_t            probe_port;                         /* NAT 探测端口（0=不支持探测）*/
-
-    /* 和对方的会话 */
-    bool                peer_online;                        /* 对端是否在线；REGISTER_ACK 和 PEER_INFO 都会导致 online 为 true */
-    uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配），在 PEER_INFO(seq=0) 中首次获得 */
 
     /* PEER_INFO 序列化同步控制 */
     uint16_t            candidates_mask;                    /* 后续候选队列 seq 窗口 mask，用于全部完成确认，同时意味着最多发 16 个包 */

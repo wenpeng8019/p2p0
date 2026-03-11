@@ -36,7 +36,7 @@
 #define P2P_MTU         1200              
 #define P2P_HDR_SIZE    4                           /* 包头大小 */
 #define P2P_MAX_PAYLOAD (P2P_MTU - P2P_HDR_SIZE)    /* 1196 */
-#define P2P_MSG_DATA_MAX  (P2P_MAX_PAYLOAD - P2P_PEER_ID_MAX - 3)  /* MSG_REQ data: 1196-32-3=1161 */
+#define P2P_MSG_DATA_MAX  (P2P_MAX_PAYLOAD - 11)    /* MSG RPC data upper bound: relay path needs [session_id(8)+sid(2)+msg(1)] */
 
 typedef struct {
     uint8_t             type;               // 包类型（0x01-0x7F: P2P协议, 0x80-0xFF: 信令协议）
@@ -173,14 +173,14 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        · max_candidates > 0: 支持缓存，最大缓存数量
  *      - 收到 ACK 后停止 REGISTER，进入 REGISTERED 状态
  *
- *   2. 候选同步阶段（序列化 + 确认 + session_id 分配）：
- *      - 双方上线后，服务器发送 PEER_INFO(seq=0)，包含缓存的对端候选，**首次分配 session_id**
+ *   2. 候选同步阶段（序列化 + 确认）：
+ *      - 双方上线后，服务器发送 PEER_INFO(seq=0)，包含缓存的对端候选
  *      - 客户端收到后发送 PEER_INFO_ACK（携带 session_id）确认
  *      - 客户端通过 PEER_INFO(seq=1,2,3,...) 继续同步剩余候选（携带 session_id）
  *      - 对端通过 PEER_INFO_ACK 确认，未确认则重发
  *      - 允许乱序：seq>0 可能先于 seq=0 到达，接收端按 seq 位图去重并最终收敛
  *
- *   3. 离线缓存流程（含 session_id 分配）：
+ *   3. 离线缓存流程：
  *
  *      Alice (在线)           Server                    Bob (离线)
  *        |                       |                          |
@@ -207,7 +207,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 
 /* COMPACT 信令协议 (客户端 <-> 信令服务器) - 0x80-0x9F */
 #define SIG_PKT_REGISTER        0x80        // 注册到信令服务器（含本地候选列表）
-#define SIG_PKT_REGISTER_ACK    0x81        // 注册确认（告知缓存能力、公网地址、探测端口、中继支持）
+#define SIG_PKT_REGISTER_ACK    0x81        // 注册确认（告知 session_id、本端缓存能力、公网地址、探测端口、中继支持）
 #define SIG_PKT_UNREGISTER      0x82        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
                                             // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
 #define SIG_PKT_PEER_INFO       0x83        // 候选列表同步包（序列化传输）
@@ -239,7 +239,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   A                      Server                      B
  *   │                         │                        │
  *   ├── MSG_REQ(sid) ────────►│  A 重发直到收到 REQ_ACK  │
- *   │   [target_id][sid]      │  Server 查找 B 的注册槽  │
+ *   │   [session_id][sid]     │  Server 查找 A 的会话槽  │
  *   │   [msg][data]           │  msg=消息类型            │
  *   │                         │                        │
  *   │◄── MSG_REQ_ACK ─────────┤  status=0 成功/1 B不在线 │
@@ -264,7 +264,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   ├── MSG_RESP_ACK ────────►│  流程完成                │
  *   │   [sid]                 │                         │
  */
-#define SIG_PKT_MSG_REQ         0x88        // MSG 请求：A→Server（含目标 peer_id + payload）；Server→B relay（含 session_id，flags=SIG_MSG_FLAG_RELAY）
+#define SIG_PKT_MSG_REQ         0x88        // MSG 请求：A→Server（[session_id][sid][msg][data]）；Server→B relay（含 session_id，flags=SIG_MSG_FLAG_RELAY）
 #define SIG_PKT_MSG_REQ_ACK     0x89        // MSG 请求确认：Server→A（已缓存并开始中转，或失败状态）
 #define SIG_PKT_MSG_RESP        0x8A        // MSG 应答：B→Server（应答内容）；Server→A relay（转发 B 的应答）
 #define SIG_PKT_MSG_RESP_ACK    0x8B        // MSG 应答确认：Server→B（B 停止重发）；A→Server（A 停止重发）
@@ -322,14 +322,15 @@ typedef struct {
  *   包头: type=0x80, flags=0, seq=0
  *
  * REGISTER_ACK:
- *   payload: [status(1)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
+ *   payload: [status(1)][session_id(8)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
  *   包头: type=0x81, flags=见下, seq=0
  *   - status: 0=对端离线, 1=对端在线, >=2=错误码
+ *   - session_id: 本端会话 ID（网络字节序，64位，注册成功后立即分配）
  *   - max_candidates: 服务器为该对端缓存的最大候选数量（0=不支持缓存）
  *   - public_ip/port: 客户端的公网地址（服务器主端口观察到的 UDP 源地址）
  *   - probe_port: NAT 探测端口（0=不支持探测）
  *   - flags: 包头的 flags 字段可设置 SIG_REGACK_FLAG_RELAY (0x01) 表示服务器支持中继
- *   总大小: 4(包头) + 10(payload) = 14 字节
+ *   总大小: 4(包头) + 18(payload) = 22 字节
  *
  * ALIVE:
  *   payload: [local_peer_id(32)][remote_peer_id(32)]
@@ -344,14 +345,14 @@ typedef struct {
  * PEER_INFO:
  *   payload: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
  *   包头: type=0x84, flags=见下, seq=序列号
- *   - session_id: 会话 ID（网络字节序，64位，服务器在 seq=0 时分配，客户端在 seq>0 时使用收到的值）
+ *   - session_id: 会话 ID（网络字节序，64位，来自 REGISTER_ACK）
  *   - base_index: 本批候选的起始索引（0-based）
  *   - candidate_count: 本批候选数量，0 表示结束标识（配合 FIN 标志）
- *   - seq=0: 服务器发送，base_index=0，包含缓存的对端候选，**首次分配 session_id**
+ *   - seq=0: 服务器发送，base_index=0，包含缓存的对端候选
  *   - seq=0 且 base_index!=0: 地址变更通知（candidate_count=1）
  *       * base_index 作为 8 位循环通知序号（1..255 循环）
  *       * 接收端按循环序比较新旧，旧通知可忽略但仍需 ACK
- *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用服务器分配的 session_id
+ *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用 REGISTER_ACK 中的 session_id
  *   - flags: 包头的 flags 字段可设置 SIG_PEER_INFO_FIN (0x01) 表示候选列表发送完毕
  *   - seq 窗口: 0..16（0 为服务器首包，1..16 为后续候选批次）
  *   - 乱序处理: 允许 seq>0 先于 seq=0 到达；接收端按序号位图去重，重复包仅 ACK 不重复入表
@@ -375,9 +376,9 @@ typedef struct {
  *   - seq: 复制请求包的 seq，用于客户端匹配响应
  *
  * MSG_REQ (A → Server):
- *   payload: [target_peer_id(32)][sid(2)][msg(1)][data(N)]
+ *   payload: [session_id(8)][sid(2)][msg(1)][data(N)]
  *   包头: type=0x88, flags=0, seq=0
- *   - target_peer_id: 目标对端 peer_id（必须已在服务器注册且在线）
+ *   - session_id: A 的会话 ID（来自 REGISTER_ACK）
  *   - sid: A 生成的 16 位序列号（每次 connect() 范围内唯一，用于匹配应答）
  *   - msg: 应用层消息 ID（协议层透传，由应用自定义）
  *   - A 重发此包直到收到 MSG_REQ_ACK

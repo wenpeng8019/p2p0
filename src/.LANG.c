@@ -147,7 +147,6 @@ const char* lang_en[LA_NUM] = {
     [LA_F139] = "%s: accepted, RPC complete (sid=%u)",  /* SID:139 */
     [LA_F140] = "%s: accepted, RPC finished (sid=%u)",  /* SID:140 */
     [LA_F141] = "%s: accepted, probe_mapped=%s:%d",  /* SID:141 */
-    [LA_F142] = "%s: accepted, public=%s:%d max_cands=%d probe_port=%d relay=%s msg=%s",  /* SID:142 */
     [LA_F143] = "%s: accepted, waiting for response (sid=%u)",  /* SID:143 */
     [LA_F144] = "%s: already connected, ignoring batch punch request",  /* SID:144 */
     [LA_F145] = "%s: bad payload(len=%d cand_cnt=%d)",  /* SID:145 */
@@ -157,7 +156,6 @@ const char* lang_en[LA_NUM] = {
     [LA_F149] = "%s: discovered unsynced prflx cand<%s:%d>[%d]",  /* SID:149 */
     [LA_F150] = "%s: duplicate request ignored (sid=%u, already processing)",  /* SID:150 */
     [LA_F151] = "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)",  /* SID:151 */
-    [LA_F152] = "%s: entered, %s arrived after PEER_INFO",  /* SID:152 */
     [LA_F153] = "%s: entered, %s arrived after REGISTERED",  /* SID:153 */
     [LA_F154] = "%s: exchange timeout, retry %d/%d",  /* SID:154 */
     [LA_F155] = "%s: exchange timeout: peer not responding",  /* SID:155 */
@@ -176,10 +174,12 @@ const char* lang_en[LA_NUM] = {
     [LA_F168] = "%s: invalid for non-relay req",  /* SID:168 */
     [LA_F169] = "%s: invalid in non-COMPACT mode",  /* SID:169 */
     [LA_F170] = "%s: invalid seq=%u",  /* SID:170 */
+    [LA_F346] = "%s: invalid session_id=0",  /* SID:346 */
     [LA_F171] = "%s: keep alive to %d reachable cand(s)",  /* SID:171 */
     [LA_F172] = "%s: new request (sid=%u) overrides pending request (sid=%u)",  /* SID:172 */
     [LA_F173] = "%s: no remote candidates to punch",  /* SID:173 */
     [LA_F174] = "%s: old request ignored (sid=%u <= last_sid=%u)",  /* SID:174 */
+    [LA_F153] = "%s: peer online, proceeding to ICE",  /* SID:153 */
     [LA_F175] = "%s: punching additional cand<%s:%d>[%d] while connected",  /* SID:175 */
     [LA_F176] = "%s: punching remote cand<%s:%d>[%d]",  /* SID:176 */
     [LA_F177] = "%s: received FIN from peer, marking NAT as CLOSED",  /* SID:177 */

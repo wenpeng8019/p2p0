@@ -160,7 +160,7 @@ enum {
     LA_F139,  /* "%s: accepted, RPC complete (sid=%u)" (%s,%u)  [p2p_signal_compact.c] */
     LA_F140,  /* "%s: accepted, RPC finished (sid=%u)" (%s,%u)  [p2p_signal_compact.c] */
     LA_F141,  /* "%s: accepted, probe_mapped=%s:%d" (%s,%s,%d)  [p2p_signal_compact.c] */
-    LA_F142,  /* "%s: accepted, public=%s:%d max_cands=%d probe_port=%d relay=%s msg=%s" (%s,%s,%d,%d,%d,%s,%s)  [p2p_signal_compact.c] */
+    _LA_142,
     LA_F143,  /* "%s: accepted, waiting for response (sid=%u)" (%s,%u)  [p2p_signal_compact.c] */
     LA_F144,  /* "%s: already connected, ignoring batch punch request" (%s)  [p2p_nat.c] */
     LA_F145,  /* "%s: bad payload(len=%d cand_cnt=%d)" (%s,%d,%d)  [p2p_signal_compact.c] */
@@ -170,8 +170,8 @@ enum {
     LA_F149,  /* "%s: discovered unsynced prflx cand<%s:%d>[%d]" (%s,%s,%d,%d)  [p2p_nat.c] */
     LA_F150,  /* "%s: duplicate request ignored (sid=%u, already processing)" (%s,%u)  [p2p_signal_compact.c] */
     LA_F151,  /* "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)" (%s,%u,%u,%d)  [p2p_signal_compact.c] */
-    LA_F152,  /* "%s: entered, %s arrived after PEER_INFO" (%s,%s)  [p2p_signal_compact.c] */
-    LA_F153,  /* "%s: entered, %s arrived after REGISTERED" (%s,%s)  [p2p_signal_compact.c] */
+    _LA_152,
+    LA_F153,  /* "%s: peer online, proceeding to ICE" (%s)  [p2p_signal_compact.c] */
     LA_F154,  /* "%s: exchange timeout, retry %d/%d" (%s,%d,%d)  [p2p_probe.c] */
     LA_F155,  /* "%s: exchange timeout: peer not responding" (%s)  [p2p_probe.c] */
     LA_F156,  /* "%s: failed to RE-REGISTER after timeout" (%s)  [p2p_signal_compact.c] */
@@ -364,6 +364,7 @@ enum {
     LA_F343,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
     LA_F344,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
     LA_F345,  /* "✗ Cannot add Srflx candidate: realloc failed (OOM)"  [p2p_stun.c] */
+    LA_F346,  /* "%s: invalid session_id=0" (%s)  [p2p_signal_compact.c] */
 
     LA_NUM
 };
