@@ -195,7 +195,7 @@ static uint64_t generate_session_id(void) {
         
         // 安全限制：虽然冲突概率极低（1/2^64），但在极端情况下提供保护
         if (++attempts > 1000) {
-            fprintf(stderr, "[SERVER] FATAL: Cannot generate unique session_id after 1000 attempts\n");
+            print("F:", "Cannot generate unique session_id after 1000 attempts\n");
             exit(1);
         }
     } while (existing);
@@ -630,6 +630,8 @@ static void cleanup_relay_clients(void) {
 // 发送 REGISTER_ACK: [hdr(4)][status(1)][session_id(8)][instance_id(4)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] = 26字节
 // status: SIG_REGACK_PEER_OFFLINE(0) / SIG_REGACK_PEER_ONLINE(1) / 2(error)
 static void send_register_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str, uint8_t status, uint64_t session_id, uint32_t instance_id) {
+    const char* PROTO = "REGISTER_ACK";
+
     uint8_t ack[26];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)ack;
     hdr->type = SIG_PKT_REGISTER_ACK;
@@ -647,41 +649,47 @@ static void send_register_ack(sock_t udp_fd, const struct sockaddr_in *to, const
         memcpy(ack + 22, &to->sin_port, 2);
         uint16_t probe = htons(g_probe_port);
         memcpy(ack + 24, &probe, 2);
+
+        print("V:", LA_F("Send %s: status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d, ses_id=%" PRIu64 ", inst_id=%u\n", 0, 0),
+              PROTO, status ? "peer_online" : "peer_offline", MAX_CANDIDATES,
+              g_relay_enabled ? "yes" : "no",
+              inet_ntoa(to->sin_addr), ntohs(to->sin_port), 
+              g_probe_port, session_id, instance_id);
     } else {
+        
         ack[4] = status;
         memset(ack + 5, 0, 21);
+        print("V:", LA_F("Send %s: status=error (no slot available)\n", 0), PROTO);
     }
 
-    printf("Send REGISTER_ACK pkt to %s, seq=0, flags=0x%02x, status=%u, len=26, ses_id=%" PRIu64 ", inst_id=%u\n",
-           to_str, hdr->flags, ack[4], session_id, instance_id);
-    sendto(udp_fd, (const char *)ack, 26, 0, (const struct sockaddr *)to, sizeof(*to));
-
-    if (status <= 1) {
-         printf(LA_F("[UDP] V: REGISTER_ACK sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d, ses_id=%" PRIu64 ", inst_id=%u\n", 0),
-               status ? "peer_online" : "peer_offline",
-               MAX_CANDIDATES,
-               g_relay_enabled ? "yes" : "no",
-             inet_ntoa(to->sin_addr), ntohs(to->sin_port), g_probe_port, session_id, instance_id);
-    } else {
-        printf(LA_F("[UDP] E: REGISTER_ACK sent, status=error (no slot available)\n", LA_F74, 74));
-    }
+    ssize_t n = sendto(udp_fd, (const char *)ack, sizeof(ack), 0, (const struct sockaddr *)to, sizeof(*to));
+    if (n != sizeof(ack))
+        print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", 0), PROTO, to_str, P_sock_errno());
+    else
+        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n", LA_F333, 333), PROTO, to_str, hdr->flags, (int)n);     
 }
 
 // 发送 PEER_OFF 通知: [hdr(4)][session_id(8)] = 12字节
 // 并标记对端已断开 (peer->peer = -1)
 static void send_peer_off(sock_t udp_fd, compact_pair_t *peer, const char *reason) {
+    const char* PROTO = "PEER_OFF";
+
     uint8_t pkt[4 + 8];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
     hdr->type = SIG_PKT_PEER_OFF; hdr->flags = 0; hdr->seq = htons(0);
     nwrite_ll(pkt + 4, peer->session_id);
 
-    printf("Send PEER_OFF pkt to %s:%d, seq=0, flags=0, len=12, session_id=%" PRIu64 "\n",
-           inet_ntoa(peer->addr.sin_addr), ntohs(peer->addr.sin_port), peer->session_id);
-    sendto(udp_fd, (const char *)pkt, sizeof(pkt), 0,
-           (struct sockaddr *)&peer->addr, sizeof(peer->addr));
+    print("V:", LA_F("Send %s: peer='%s', reason=%s, ses_id=%" PRIu64 "\n", 0),
+          PROTO, peer->local_peer_id, reason, peer->session_id);
 
-    printf("[UDP] V: PEER_OFF sent to '%s' (ses_id=%" PRIu64 ") [%s]\n",
-           peer->local_peer_id, peer->session_id, reason);
+    ssize_t n = sendto(udp_fd, (const char *)pkt, sizeof(pkt), 0,
+           (struct sockaddr *)&peer->addr, sizeof(peer->addr));
+    if (n != (ssize_t)sizeof(pkt))
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", 0),
+              PROTO, inet_ntoa(peer->addr.sin_addr), ntohs(peer->addr.sin_port), P_sock_errno());
+    else
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F334, 334),
+               PROTO, inet_ntoa(peer->addr.sin_addr), ntohs(peer->addr.sin_port), (int)n);
 
     peer->peer = (compact_pair_t*)(void*)-1;
 }
@@ -734,21 +742,24 @@ static void send_peer_info_seq0(sock_t udp_fd, compact_pair_t *pair, uint8_t bas
         resp_len += sizeof(p2p_compact_candidate_t);
     }
 
-    // 调试打印协议包信息
-    printf("Send %s pkt to %s:%d, seq=0, flags=0, base_index=%u, cands=%d, len=%d, session_id=%" PRIu64 "\n",
-           PROTO, inet_ntoa(pair->addr.sin_addr), ntohs(pair->addr.sin_port),
-           base_index, cand_cnt, resp_len, pair->session_id);
+    print("V:", LA_F("Send %s: base_index=%u, cands=%d, ses_id=%" PRIu64 ", peer='%s'\n", 0),
+          PROTO, base_index, cand_cnt, pair->session_id, pair->local_peer_id);
 
-    sendto(udp_fd, (const char *)pkt, resp_len, 0, (struct sockaddr *)&pair->addr, sizeof(pair->addr));
-
-    printf("[UDP] V: %s sent to '%s', base_index=%u, cands=%d (ses_id=%" PRIu64 ")\n",
-           PROTO, pair->local_peer_id, base_index, cand_cnt, pair->session_id);
+    ssize_t n = sendto(udp_fd, (const char *)pkt, resp_len, 0, (struct sockaddr *)&pair->addr, sizeof(pair->addr));
+    if (n != resp_len)
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", 0),
+              PROTO, inet_ntoa(pair->addr.sin_addr), ntohs(pair->addr.sin_port), P_sock_errno());
+    else
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F334, 334),
+               PROTO, inet_ntoa(pair->addr.sin_addr), ntohs(pair->addr.sin_port), (int)n);
 }
 
 // 发送 MSG_REQ_ACK: [hdr(4)][session_id(8)][sid(2)][status(1)] = 15字节
 // status: 0=成功, 1=失败
 static void send_msg_req_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str, 
                              uint64_t session_id, uint16_t sid, uint8_t status) {
+    const char* PROTO = "MSG_REQ_ACK";
+
     uint8_t ack[4 + 8 + 2 + 1];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)ack;
     hdr->type = SIG_PKT_MSG_REQ_ACK;
@@ -758,9 +769,14 @@ static void send_msg_req_ack(sock_t udp_fd, const struct sockaddr_in *to, const 
     nwrite_s(ack + 12, sid);
     ack[14] = status;
 
-    printf("Send MSG_REQ_ACK pkt to %s, seq=0, flags=0, len=15, sid=%u, status=%u, session_id=%" PRIu64 "\n",
-           to_str, sid, status, session_id);
-    sendto(udp_fd, (const char *)ack, 15, 0, (const struct sockaddr *)to, sizeof(*to));
+    print("V:", LA_F("Send %s: ses_id=%" PRIu64 ", sid=%u, status=%u\n", 0),
+          PROTO, session_id, sid, status);
+
+    ssize_t n = sendto(udp_fd, (const char *)ack, sizeof(ack), 0, (const struct sockaddr *)to, sizeof(*to));
+    if (n != (ssize_t)sizeof(ack))
+        print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", 0), PROTO, to_str, P_sock_errno());
+    else
+        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F332, 332), PROTO, to_str, (int)n);
 }
 
 // 发送 MSG_REQ 给对端（Server→对端 relay）
@@ -787,15 +803,18 @@ static void send_msg_req_to_peer(sock_t udp_fd, compact_pair_t *pair) {
         n += pair->rpc_data_len;
     }
 
-    // 调试打印协议包信息
-    printf("Send %s pkt to %s:%d, seq=0, flags=0x%02x, len=%d, sid=%u, msg=%u, session_id=%" PRIu64 "\n",
-           PROTO, inet_ntoa(pair->peer->addr.sin_addr), ntohs(pair->peer->addr.sin_port),
-           hdr->flags, n, pair->rpc_sid, pair->rpc_code, pair->peer->session_id);
+    print("V:", LA_F("Send %s: ses_id=%" PRIu64 ", sid=%u, msg=%u, data_len=%d, peer='%s'\n", 0),
+          PROTO, pair->peer->session_id, pair->rpc_sid, pair->rpc_code, pair->rpc_data_len,
+          pair->peer->local_peer_id);
 
-    sendto(udp_fd, (const char *)pkt, n, 0, (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
-
-    printf("[UDP] V: %s sent to '%s' (relay), sid=%u, msg=%u, retries=%d (ses_id=%" PRIu64 ")\n",
-           PROTO, pair->peer->local_peer_id, pair->rpc_sid, pair->rpc_code, pair->rpc_retry, pair->peer->session_id);
+    ssize_t sent = sendto(udp_fd, (const char *)pkt, n, 0, (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
+    if (sent != n)
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", 0),
+              PROTO, inet_ntoa(pair->peer->addr.sin_addr), ntohs(pair->peer->addr.sin_port), P_sock_errno());
+    else
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n", LA_F335, 335),
+               PROTO, inet_ntoa(pair->peer->addr.sin_addr), ntohs(pair->peer->addr.sin_port),
+               hdr->flags, (int)sent, pair->rpc_retry);
 }
 
 // 发送 MSG_RESP_ACK 给 B 端（Server→B）
@@ -814,13 +833,16 @@ static void send_msg_resp_ack_to_responder(sock_t udp_fd, const struct sockaddr_
     nwrite_ll(pkt + 4, session_id);
     nwrite_s(pkt + 12, sid);
 
-    // 调试打印协议包信息
-    printf("Send %s pkt to %s:%d, seq=0, flags=0, len=14, sid=%u, session_id=%" PRIu64 "\n",
-           PROTO, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), sid, session_id);
+    print("V:", LA_F("Send %s: ses_id=%" PRIu64 ", sid=%u, peer='%s'\n", 0),
+          PROTO, session_id, sid, peer_id);
 
-    sendto(udp_fd, (const char *)pkt, 14, 0, (struct sockaddr *)addr, sizeof(*addr));
-
-    printf("[UDP] V: %s sent to '%s', sid=%u (ses_id=%" PRIu64 ")\n", PROTO, peer_id, sid, session_id);
+    ssize_t n = sendto(udp_fd, (const char *)pkt, sizeof(pkt), 0, (struct sockaddr *)addr, sizeof(*addr));
+    if (n != (ssize_t)sizeof(pkt))
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", 0),
+              PROTO, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), P_sock_errno());
+    else
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F334, 334),
+               PROTO, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), (int)n);
 }
 
 // 发送 MSG_RESP 给请求方（Server→A，从缓存的 rpc_* 字段构建）
@@ -851,15 +873,17 @@ static void send_msg_resp_to_requester(sock_t udp_fd, compact_pair_t *pair) {
         }
     }
 
-    // 调试打印协议包信息
-    printf("Send %s pkt to %s:%d, seq=0, flags=0x%02x, len=%d, sid=%u, session_id=%" PRIu64 "\n",
-           PROTO, inet_ntoa(pair->addr.sin_addr), ntohs(pair->addr.sin_port),
-           pair->rpc_flags, n, pair->rpc_sid, pair->session_id);
+    print("V:", LA_F("Send %s: ses_id=%" PRIu64 ", sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d\n", 0),
+          PROTO, pair->session_id, pair->rpc_sid, pair->local_peer_id, pair->rpc_flags, pair->rpc_code, pair->rpc_data_len);
 
-    sendto(udp_fd, (const char *)pkt, n, 0, (struct sockaddr *)&pair->addr, sizeof(pair->addr));
-
-    printf("[UDP] V: %s sent to '%s', sid=%u, flags=0x%02x, retries=%d (ses_id=%" PRIu64 ")\n",
-           PROTO, pair->local_peer_id, pair->rpc_sid, pair->rpc_flags, pair->rpc_retry, pair->session_id);
+    ssize_t sent = sendto(udp_fd, (const char *)pkt, n, 0, (struct sockaddr *)&pair->addr, sizeof(pair->addr));
+    if (sent != n)
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", 0),
+                PROTO, inet_ntoa(pair->addr.sin_addr), ntohs(pair->addr.sin_port), P_sock_errno());
+    else
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n", LA_F335, 335),
+                PROTO, inet_ntoa(pair->addr.sin_addr), ntohs(pair->addr.sin_port),
+                pair->rpc_flags, (int)sent, pair->rpc_retry);
 }
 
 //-----------------------------------------------------------------------------
@@ -937,7 +961,7 @@ static void retry_info0_pending(sock_t udp_fd, uint64_t now) {
         if (q->info0_retry >= PEER_INFO0_MAX_RETRY) {
             
             // 超过最大重传次数，从链表移除（放弃）
-            printf(LA_F("[UDP] W: PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n", LA_F66, 66),
+            print("W:", LA_F("PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n", LA_F66, 66),
                    q->local_peer_id, q->remote_peer_id, q->info0_retry);
 
             q->next_info0_pending = NULL;
@@ -983,7 +1007,7 @@ static void retry_info0_pending(sock_t udp_fd, uint64_t now) {
                 g_info0_pending_rear = q;
             }
 
-            printf(LA_F("[UDP] V: PEER_INFO resent, %s <-> %s, attempt %d/%d (ses_id=%" PRIu64 ")\n", 0),
+            print("V:", LA_F("PEER_INFO resent, %s <-> %s, attempt %d/%d (ses_id=%" PRIu64 ")\n", 0),
                    q->local_peer_id, q->remote_peer_id,
                    q->info0_retry, PEER_INFO0_MAX_RETRY, q->session_id);
 
@@ -1070,8 +1094,8 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
 
             // 检查对端是否离线
             if (!PEER_ONLINE(q)) {
-                printf("[UDP] W: MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%" PRIu64 ")\n",
-                       q->local_peer_id, q->rpc_sid, q->session_id);
+                print("W:", LA_F("MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%" PRIu64 ")\n", 0),
+                      q->local_peer_id, q->rpc_sid, q->session_id);
 
                 // 已从链表移除（next_rpc_pending=NULL），transition 内部的 remove 是 no-op
                 if (g_rpc_pending_head == (void*)-1) {
@@ -1082,8 +1106,8 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
             }
             // 超过最大重传次数，发送超时错误
             else if (q->rpc_retry >= MSG_REQ_MAX_RETRY) {
-                printf("[UDP] W: MSG_REQ timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%" PRIu64 ")\n",
-                       q->rpc_retry, q->local_peer_id, q->rpc_sid, q->session_id);
+                print("W:", LA_F("MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%" PRIu64 ")\n", 0),
+                      q->rpc_retry, q->local_peer_id, q->rpc_sid, q->session_id);
 
                 if (g_rpc_pending_head == (void*)-1) {
                     g_rpc_pending_head = NULL;
@@ -1106,6 +1130,10 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
                     g_rpc_pending_rear->next_rpc_pending = q;
                     g_rpc_pending_rear = q;
                 }
+                print("V:", LA_F("MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%" PRIu64 ")\n", 0),
+                      q->local_peer_id, q->peer->local_peer_id,
+                      q->rpc_sid, q->rpc_retry, MSG_REQ_MAX_RETRY, q->session_id);
+
                 if (g_rpc_pending_head == q) return;
             }
         }
@@ -1114,8 +1142,8 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
 
             // 超过最大重传次数，放弃
             if (q->rpc_retry >= MSG_RESP_MAX_RETRY) {
-                printf("[UDP] W: MSG_RESP gave up after %d retries, sid=%u (ses_id=%" PRIu64 ")\n",
-                       q->rpc_retry, q->rpc_sid, q->session_id);
+                print("W:", LA_F("MSG_RESP gave up after %d retries, sid=%u (ses_id=%" PRIu64 ")\n", 0),
+                      q->rpc_retry, q->rpc_sid, q->session_id);
 
                 if (g_rpc_pending_head == (void*)-1) {
                     g_rpc_pending_head = NULL;
@@ -1138,6 +1166,9 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
                     g_rpc_pending_rear->next_rpc_pending = q;
                     g_rpc_pending_rear = q;
                 }
+                print("V:", LA_F("MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%" PRIu64 ")\n", 0),
+                      q->local_peer_id, q->rpc_sid, q->rpc_retry, MSG_RESP_MAX_RETRY, q->session_id);
+
                 if (g_rpc_pending_head == q) return;
             }
         }
@@ -1202,8 +1233,8 @@ static bool check_addr_change(sock_t udp_fd, compact_pair_t *pair, const struct 
             send_peer_info_seq0(udp_fd, pair->peer, pair->peer->addr_notify_seq);
             enqueue_info0_pending(pair->peer, pair->peer->addr_notify_seq, P_tick_ms());
 
-            printf("[UDP] I: Address changed for '%s', notifying '%s' (ses_id=%" PRIu64 ")\n",
-                   pair->local_peer_id, pair->peer->local_peer_id, pair->peer->session_id);
+            print("I:", LA_F("Addr changed for '%s', notifying '%s' (ses_id=%" PRIu64 ")\n", 0),
+                  pair->local_peer_id, pair->peer->local_peer_id, pair->peer->session_id);
         }
         // 首包未确认（info0_acked == 0）或已放弃（info0_acked == -1）
         else if (pair->peer->info0_acked == 0) {
@@ -1211,14 +1242,12 @@ static bool check_addr_change(sock_t udp_fd, compact_pair_t *pair, const struct 
             // 设置 addr_notify_seq = 1 标记有延期通知
             if (pair->peer->addr_notify_seq == 0) pair->peer->addr_notify_seq = 1;
             
-            printf("[UDP] I: Address changed for '%s', defer notification until first ACK (ses_id=%" PRIu64 ")\n",
-                   pair->local_peer_id, pair->peer->session_id);
+            print("I:", LA_F("Addr changed for '%s', defer notification until first ACK (ses_id=%" PRIu64 ")\n", 0),
+                  pair->local_peer_id, pair->peer->session_id);
         }
         // info0_acked == -1：首包已放弃，不再发送任何通知
-        else {
-            printf("[UDP] W: Address changed for '%s', but first info packet was abandoned (ses_id=%" PRIu64 ")\n",
+        else print("W:", LA_F("Addr changed for '%s', but first info packet was abandoned (ses_id=%" PRIu64 ")\n", 0),
                    pair->local_peer_id, pair->peer->session_id);
-        }
     }
 
     return true;
@@ -1241,12 +1270,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     switch (hdr->type) {
     case SIG_PKT_REGISTER: { const char* PROTO = "REGISTER";
 
-        // 调试打印协议包信息
-        printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len <= P2P_PEER_ID_MAX * 2 + 4) {
-            printf(LA_F("[UDP] E: %s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
+            print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
             return;
         }
 
@@ -1254,7 +1282,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         uint32_t instance_id = 0;
         nread_l(&instance_id, payload + P2P_PEER_ID_MAX * 2);
         if (instance_id == 0) {
-            printf(LA_F("[UDP] E: %s: invalid instance_id=0 from %s\n", LA_F64, 64), PROTO, from_str);
+            print("E:", LA_F("%s: invalid instance_id=0 from %s\n", LA_F64, 64), PROTO, from_str);
             return;
         }
 
@@ -1297,7 +1325,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             cand_offset += sizeof(p2p_compact_candidate_t);
         }
 
-        printf(LA_F("[UDP] V: %s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n", LA_F73, 73),
+        print("V:", LA_F("%s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n", LA_F73, 73),
                PROTO, P2P_PEER_ID_MAX, local_peer_id, P2P_PEER_ID_MAX, remote_peer_id, instance_id, candidate_count);
 
         // 如果配对不存在（首次注册），分配一个空位
@@ -1345,7 +1373,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         // 如果是 instance_id 变更（客户端重启），必须重置旧会话
         if (existing) {
 
-            printf(LA_F("[UDP] I: %s from '%.*s': new instance(old=%u new=%u), resetting session\n", LA_F75, 75),
+            print("I:", LA_F("%s from '%.*s': new instance(old=%u new=%u), resetting session\n", LA_F75, 75),
                    PROTO, P2P_PEER_ID_MAX, local_peer_id, local->instance_id, instance_id);
 
             // 通知对端下线（如果对端在线且有 session_id）
@@ -1405,10 +1433,9 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         local->last_active = P_tick_ms();
 
         // 发送 REGISTER_ACK（无需确认重发，客户端会在收到 ACK 前一直重试注册请求）
-        {
-            uint8_t status = (remote_idx >= 0) ? SIG_REGACK_PEER_ONLINE : SIG_REGACK_PEER_OFFLINE;
-            send_register_ack(udp_fd, from, from_str, status, local->session_id, instance_id);
-        }
+        send_register_ack(udp_fd, from, from_str, 
+                          (remote_idx >= 0) ? SIG_REGACK_PEER_ONLINE : SIG_REGACK_PEER_OFFLINE,
+                          local->session_id, instance_id);
 
         if (remote_idx >= 0) {
 
@@ -1441,14 +1468,14 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 send_peer_info_seq0(udp_fd, remote, 0);
                 enqueue_info0_pending(remote, 0, local->last_active);
 
-                printf(LA_F("[UDP] I: Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n", LA_F68, 68),
+                print("I:", LA_F("Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n", LA_F68, 68),
                        P2P_PEER_ID_MAX, local_peer_id, remote->candidate_count,
                        P2P_PEER_ID_MAX, remote_peer_id, local->candidate_count);
             }
             // 地址变更通知已在 check_addr_change() 中统一处理
             else assert(local->peer == remote && remote->peer == local);
 
-        } else printf(LA_F("[UDP] V: %s: waiting for peer '%.*s' to register\n", LA_F85, 85), PROTO, P2P_PEER_ID_MAX, remote_peer_id);
+        } else print("V:", LA_F("%s: waiting for peer '%.*s' to register\n", LA_F85, 85), PROTO, P2P_PEER_ID_MAX, remote_peer_id);
     } break;
 
     // SIG_PKT_UNREGISTER: [local_peer_id(32)][remote_peer_id(32)]
@@ -1456,12 +1483,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 【服务端可选实现】如果不处理此包类型，客户端自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制。
     case SIG_PKT_UNREGISTER: { const char* PROTO = "UNREGISTER";
 
-        // 调试打印协议包信息
-        printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < P2P_PEER_ID_MAX * 2) {
-            printf(LA_F("[UDP] E: %s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
+            print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
             return;
         }
 
@@ -1475,7 +1501,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             memcpy(local_peer_id, pair->local_peer_id, P2P_PEER_ID_MAX);
             memcpy(remote_peer_id, pair->remote_peer_id, P2P_PEER_ID_MAX);
 
-            printf(LA_F("[UDP] V: %s: accepted, releasing slot for '%s' -> '%s'\n", LA_F86, 86),
+            print("V:", LA_F("%s: accepted, releasing slot for '%s' -> '%s'\n", LA_F86, 86),
                    PROTO, local_peer_id, remote_peer_id);
 
             // 向对端发送 PEER_OFF 通知（如果对端在线且有 session_id）
@@ -1517,7 +1543,13 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 客户端定期发送以保持槽位活跃，更新 last_active 时间
     case SIG_PKT_ALIVE: { const char* PROTO = "ALIVE";
 
-        if (payload_len < 8) return;
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
+               PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
+
+        if (payload_len < 8) {
+            print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
+            return;
+        }
 
         uint64_t session_id = nget_ll(payload);
 
@@ -1525,6 +1557,9 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         compact_pair_t *pair = NULL;
         HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), pair);        
         if (pair && pair->valid) {
+
+            print("V:", LA_F("%s accepted, peer='%s', ses_id=%" PRIu64 "\n", 0),
+                  PROTO, pair->local_peer_id, session_id);
 
             pair->last_active = P_tick_ms();
             check_addr_change(udp_fd, pair, from);
@@ -1535,13 +1570,14 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 uint8_t ack[4];
                 p2p_pkt_hdr_encode(ack, SIG_PKT_ALIVE_ACK, 0, 0);
 
-                // 调试打印协议包信息
-                printf("Send %s pkt to %s, seq=0, flags=0, len=4\n", ACK_PROTO, from_str);
+                print("V:", LA_F("Send %s: ses_id=%" PRIu64 ", peer='%s'\n", 0),
+                      ACK_PROTO, session_id, pair->local_peer_id);
 
-                sendto(udp_fd, (const char *)ack, 4, 0, (struct sockaddr *)from, sizeof(*from));
-
-                printf(LA_F("[UDP] V: %s received and %s sent for '%s' (ses_id=%" PRIu64 ")\n", 0),
-                       PROTO, ACK_PROTO, pair->local_peer_id, session_id);
+                ssize_t n = sendto(udp_fd, (const char *)ack, sizeof(ack), 0, (struct sockaddr *)from, sizeof(*from));
+                if (n != (ssize_t)sizeof(ack))
+                    print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", 0), ACK_PROTO, from_str, P_sock_errno());
+                else
+                    printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F332, 332), ACK_PROTO, from_str, (int)n);
             }
         }
     } break;
@@ -1550,25 +1586,27 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 格式: [hdr(4)][session_id(8)]，确认序号使用 hdr->seq
     case SIG_PKT_PEER_INFO_ACK: { const char* PROTO = "PEER_INFO_ACK";
 
-        // 调试打印协议包信息
-        printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 8) {  // session_id(8)
-            printf(LA_F("[UDP] E: %s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
+            print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
             return;
         }
 
         uint64_t session_id = nget_ll(payload);
         uint16_t ack_seq = ntohs(hdr->seq);
         if (ack_seq > 16) {
-            printf(LA_F("[UDP] E: %s: invalid seq=%u\n", LA_F63, 63), PROTO, ack_seq);
+            print("E:", LA_F("%s: invalid seq=%u\n", LA_F63, 63), PROTO, ack_seq);
             return;
         }
 
         // 通过 session_id 查找对应的配对记录
         compact_pair_t *pair = NULL;
         HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), pair);
+
+        print("V:", LA_F("%s accepted, seq=%u, ses_id=%" PRIu64 "\n", 0),
+              PROTO, ack_seq, session_id);
 
         // ack_seq=0 的 ACK 是对服务器发送的首个 PEER_INFO 的确认，服务器需要处理
         if (ack_seq == 0) {
@@ -1581,7 +1619,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 if (is_first_ack) {
                     pair->info0_acked = true;
 
-                    printf(LA_F("[UDP] V: %s: confirmed '%s', retries=%d (ses_id=%" PRIu64 ")\n", 0),
+                    print("V:", LA_F("%s: confirmed '%s', retries=%d (ses_id=%" PRIu64 ")\n", 0),
                            PROTO, pair->local_peer_id, pair->info0_retry, session_id);
                 }
 
@@ -1600,11 +1638,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                     send_peer_info_seq0(udp_fd, pair, pair->addr_notify_seq);
                     enqueue_info0_pending(pair, pair->addr_notify_seq, P_tick_ms());
 
-                    printf("[UDP] I: Sending deferred address change notification to '%s' (ses_id=%" PRIu64 ")\n",
-                           pair->local_peer_id, session_id);
+                    print("I:", LA_F("Addr changed for '%s', deferred notifying '%s' (ses_id=%" PRIu64 ")\n", 0),
+                          pair->peer->local_peer_id, pair->local_peer_id, pair->peer->session_id);
                 }
             }
-            else printf(LA_F("[UDP] W: %s for unknown ses_id=%" PRIu64 "\n", 0), PROTO, session_id);
+            else print("W:", LA_F("%s for unknown ses_id=%" PRIu64 "\n", 0), PROTO, session_id);
         }
         // ack_seq≠0 的 ACK 是客户端之间的确认，服务器只负责 relay 转发
         else {
@@ -1616,10 +1654,10 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
                        (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
                 
-                printf(LA_F("[UDP] V: Relay %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
+                print("V:", LA_F("Relay %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
                        PROTO, ack_seq, pair->local_peer_id, pair->remote_peer_id, session_id);
             }
-            else printf(LA_F("[UDP] W: Cannot relay %s: ses_id=%" PRIu64 " (peer unavailable)\n", 0), PROTO, session_id);
+            else print("W:", LA_F("Cannot relay %s: ses_id=%" PRIu64 " (peer unavailable)\n", 0), PROTO, session_id);
         }
 
     } break;
@@ -1634,19 +1672,18 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                            (hdr->type == P2P_PKT_RELAY_DATA) ? "RELAY_DATA" :
                            (hdr->type == P2P_PKT_RELAY_ACK) ? "RELAY_ACK" : "RELAY_CRYPTO";
 
-        // 调试打印协议包信息
-        printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
-
-        // SIG_PKT_PEER_INFO 特殊处理：seq=0 是服务器维护的包，不应该出现在这里
-        if (hdr->type == SIG_PKT_PEER_INFO && hdr->seq == 0) {
-            printf(LA_F("[UDP] E: %s seq=0 from client %s (server-only, dropped)\n", LA_F67, 67), PROTO, from_str);
-            return;
-        }
 
         // 所有需要 relay 的包格式都是 [session_id(8)][...]
         if (payload_len < P2P_PEER_ID_MAX) {
-            printf(LA_F("[UDP] E: Relay %s: bad payload(len=%zu)\n", LA_F82, 82), PROTO, payload_len);
+            print("E:", LA_F("[Relay] %s: bad payload(len=%zu)\n", LA_F82, 82), PROTO, payload_len);
+            return;
+        }
+
+        // SIG_PKT_PEER_INFO 特殊处理：seq=0 是服务器维护的包，不应该出现在这里
+        if (hdr->type == SIG_PKT_PEER_INFO && hdr->seq == 0) {
+            print("E:", LA_F("[Relay] %s seq=0 from client %s (server-only, dropped)\n", LA_F67, 67), PROTO, from_str);
             return;
         }
 
@@ -1656,30 +1693,33 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         compact_pair_t *pair = NULL;
         HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), pair);
         if (!pair || !pair->valid) {
-            printf(LA_F("[UDP] W: Relay %s for unknown ses_id=%" PRIu64 " (dropped)\n", 0), PROTO, session_id);
+            print("W:", LA_F("[Relay] %s for unknown ses_id=%" PRIu64 " (dropped)\n", 0), PROTO, session_id);
             return;
         }
 
         // 对方不存在，丢弃
         if (!PEER_ONLINE(pair)) {
-            printf(LA_F("[UDP] W: Relay %s for ses_id=%" PRIu64 ": peer unavailable (dropped)\n", 0), PROTO, session_id);
+            print("W:", LA_F("[Relay] %s for ses_id=%" PRIu64 ": peer unavailable (dropped)\n", 0), PROTO, session_id);
             return;
         }
 
         check_addr_change(udp_fd, pair, from);
+
+        print("V:", LA_F("%s accepted, '%s' -> '%s', ses_id=%" PRIu64 "\n", 0),
+              PROTO, pair->local_peer_id, pair->remote_peer_id, session_id);
 
         // 转发给对方
         sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
                (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
 
         if (hdr->type == SIG_PKT_PEER_INFO) {
-            printf(LA_F("[UDP] V: Relay %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
+            print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
                    PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
         } else if (hdr->type == P2P_PKT_RELAY_DATA || hdr->type == P2P_PKT_RELAY_CRYPTO) {
-            printf(LA_F("[UDP] V: Relay %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
+            print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
                    PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
         } else {
-            printf(LA_F("[UDP] V: Relay %s: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
+            print("V:", LA_F("[Relay] %s: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", 0),
                    PROTO, pair->local_peer_id, pair->remote_peer_id, session_id);
         }
     } break;
@@ -1689,24 +1729,23 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // B→Server（不会有这种情况，B 只发 MSG_RESP）
     case SIG_PKT_MSG_REQ: { const char* PROTO = "MSG_REQ";
 
-        // 调试打印协议包信息
-        printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 11) {
-            printf(LA_F("[UDP] E: %s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
+            print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
             return;
         }
 
         // MSG_REQ 只能是 A→Server（flags=0）
         if (hdr->flags & SIG_MSG_FLAG_RELAY) {
-            printf(LA_F("[UDP] E: %s: invalid relay flag from client\n", LA_F282, 282), PROTO);
+            print("E:", LA_F("%s: invalid relay flag from client\n", LA_F282, 282), PROTO);
             return;
         }
 
         int msg_data_len = (int)(payload_len - 11);
         if (msg_data_len > P2P_MSG_DATA_MAX) {
-            printf(LA_F("[UDP] E: %s: data too large (len=%d)\n", LA_F281, 281), PROTO, msg_data_len);
+            print("E:", LA_F("%s: data too large (len=%d)\n", LA_F281, 281), PROTO, msg_data_len);
             return;
         }
 
@@ -1716,7 +1755,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 验证 session_id 和 sid 不为 0
         if (session_id == 0 || sid == 0) {
-            printf(LA_F("[UDP] E: %s: invalid session_id=%" PRIu64 " or sid=%u\n", 0, 0), 
+            print("E:", LA_F("%s: invalid session_id=%" PRIu64 " or sid=%u\n", 0, 0), 
                    PROTO, session_id, sid);
             return;
         }
@@ -1729,22 +1768,20 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         compact_pair_t *requester = NULL;
         HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), requester);
         if (!requester || !requester->valid) {
-            printf(LA_F("[UDP] W: %s: requester not found for ses_id=%" PRIu64 "\n", 0), PROTO, session_id);
+            print("W:", LA_F("%s: requester not found for ses_id=%" PRIu64 "\n", 0), PROTO, session_id);
             return;
         }
 
-        printf(LA_F("[UDP] V: %s accepted from %s, ses_id=%" PRIu64 ", sid=%u, msg=%u, len=%d\n", 0),
-               PROTO, from_str, session_id, sid, msg, msg_data_len);
+        print("V:", LA_F("%s: accepted, ses_id=%" PRIu64 ", sid=%u, msg=%u, len=%d\n", 0),
+               PROTO, session_id, sid, msg, msg_data_len);
 
         // 先检查对端是否在线（如果对端下线，pending RPC 会在 UNREGISTER/超时时清理）
         if (!PEER_ONLINE(requester)) {
 
-            printf(LA_F("[UDP] W: %s: peer '%s' not online, rejecting sid=%u\n", LA_F303, 303),
+            print("W:", LA_F("%s: peer '%s' not online, rejecting sid=%u\n", LA_F303, 303),
                    PROTO, requester->remote_peer_id, sid);
 
             send_msg_req_ack(udp_fd, from, from_str, session_id, sid, 1);
-
-            printf("[UDP] V: MSG_REQ_ACK sent, status=peer_offline, sid=%u\n", sid);
             return;
         }
 
@@ -1756,30 +1793,33 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
             // 如果是重传同一个 sid（客户端未收到 ACK 前重传）→ 幂等处理
             if (sid == requester->rpc_sid) {
+
                 // REQ 阶段：立即回复成功 ACK
                 if (requester->rpc_state == RPC_STATE_REQ_PENDING) {
+
                     send_msg_req_ack(udp_fd, from, from_str, requester->session_id, sid, 0);
-                    printf("[UDP] V: MSG_REQ retransmit, resend ACK, sid=%u (ses_id=%" PRIu64 ")\n",
-                           sid, requester->session_id);
+
+                    print("V:", LA_F("%s retransmit, resend ACK, sid=%u (ses_id=%" PRIu64 ")\n", 0),
+                          PROTO, sid, requester->session_id);
                 }
                 // RESP 阶段：客户端重传旧请求，忽略（等待 RESP_ACK）
                 else {
-                    printf("[UDP] V: MSG_REQ retransmit during RESP phase, ignoring, sid=%u (ses_id=%" PRIu64 ")\n",
-                           sid, requester->session_id);
+                    print("V:", LA_F("%s retransmit during RESP phase, ignoring, sid=%u (ses_id=%" PRIu64 ")\n", 0),
+                          PROTO, sid, requester->session_id);
                 }
                 return;
             }
 
             // 如果 sid 过时
             if (!uint16_circle_newer(sid, requester->rpc_sid)) {
-                printf("[UDP] V: %s: obsolete sid=%u (current=%u), ignoring\n", 
-                       PROTO, sid, requester->rpc_sid);
+                print("V:", LA_F("%s: obsolete sid=%u (current=%u), ignoring\n", 0),
+                      PROTO, sid, requester->rpc_sid);
                 return;
             }
 
             // 如果是新的 sid（客户端中断旧请求发起新请求）→ 取消旧的，接受新请求
-            printf("[UDP] I: MSG_REQ new sid=%u > pending sid=%u (state=%d), canceling old RPC (ses_id=%" PRIu64 ")\n",
-                    sid, requester->rpc_sid, requester->rpc_state, requester->session_id);
+            print("I:", LA_F("%s new sid=%u > pending sid=%u (state=%d), canceling old RPC (ses_id=%" PRIu64 ")\n", 0),
+                  PROTO, sid, requester->rpc_sid, requester->rpc_state, requester->session_id);
             
             // 清理旧的 RPC 状态（无论是 REQ 还是 RESP）
             remove_rpc_pending(requester);
@@ -1790,8 +1830,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // IDLE 状态下，验证新 sid 比最后完成的 rpc_sid 更新（rpc_sid=0 时无须检查）
         if (requester->rpc_sid != 0 && !uint16_circle_newer(sid, requester->rpc_sid)) {
-            printf("[UDP] V: %s: obsolete sid=%u (last=%u) in IDLE state, ignoring\n",
-                   PROTO, sid, requester->rpc_sid);
+            print("V:", LA_F("%s: obsolete sid=%u (last=%u) in IDLE state, ignoring\n", 0),
+                  PROTO, sid, requester->rpc_sid);
             return;
         }
 
@@ -1800,22 +1840,16 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         requester->rpc_state = RPC_STATE_REQ_PENDING;
         requester->rpc_code = msg;
         requester->rpc_data_len = msg_data_len;
-        if (msg_data_len > 0) {
-            memcpy(requester->rpc_data, msg_data, msg_data_len);
-        }
+        if (msg_data_len > 0) memcpy(requester->rpc_data, msg_data, msg_data_len);
 
         // 发送 REQ_ACK status=0（成功，开始中转）
-        {
-            send_msg_req_ack(udp_fd, from, from_str, requester->session_id, sid, 0);
-            printf("[UDP] V: MSG_REQ_ACK sent, status=success, sid=%u (ses_id=%" PRIu64 ")\n",
-                   sid, requester->session_id);
-        }
+        send_msg_req_ack(udp_fd, from, from_str, requester->session_id, sid, 0);
 
         // 立即向对端转发 MSG_REQ
         enqueue_rpc_pending(requester, P_tick_ms());
         send_msg_req_to_peer(udp_fd, requester);
 
-        printf(LA_F("[UDP] I: %s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%" PRIu64 ")\n", 0),
+        print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%" PRIu64 ")\n", 0),
                PROTO, requester->local_peer_id, requester->peer->local_peer_id,
                sid, msg, requester->session_id);
     } break;
@@ -1824,18 +1858,17 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 格式: [session_id(8)][sid(2)][code(1)][data(N)]，code=响应码
     case SIG_PKT_MSG_RESP: { const char* PROTO = "MSG_RESP";
 
-        // 调试打印协议包信息
-        printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 11) {  // session_id(8) + sid(2) + code(1) 响应码
-            printf(LA_F("[UDP] E: %s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
+            print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
             return;
         }
 
         int resp_len = (int)(payload_len - 11);
         if (resp_len > P2P_MSG_DATA_MAX) {
-            printf(LA_F("[UDP] E: %s: data too large (len=%d)\n", LA_F281, 281), PROTO, resp_len);
+            print("E:", LA_F("%s: data too large (len=%d)\n", LA_F281, 281), PROTO, resp_len);
             return;
         }
 
@@ -1843,8 +1876,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         uint64_t session_id = nget_ll(payload);
         uint16_t sid = nget_s(payload + 8);
         if (session_id == 0 || sid == 0) {
-            printf(LA_F("[UDP] E: %s: invalid session_id=%" PRIu64 " or sid=%u\n", 0, 0), 
-                   PROTO, session_id, sid);
+            print("E:", LA_F("%s: invalid session_id=%" PRIu64 " or sid=%u\n", 0, 0), 
+                  PROTO, session_id, sid);
             return;
         }
         
@@ -1852,13 +1885,13 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         compact_pair_t *responder = NULL;
         HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), responder);        
         if (!responder || !responder->valid) {
-            printf(LA_F("[UDP] W: %s: unknown session_id=%" PRIu64 "\n", 0), PROTO, session_id);
+            print("W:", LA_F("%s: unknown session_id=%" PRIu64 "\n", 0), PROTO, session_id);
             return;
         }
 
         if (!PEER_ONLINE(responder)) {
-            printf(LA_F("[UDP] W: %s: peer '%s' not online for session_id=%" PRIu64 "\n", 0, 0),
-                   PROTO, responder->remote_peer_id, session_id);
+            print("W:", LA_F("%s: peer '%s' not online for session_id=%" PRIu64 "\n", 0, 0),
+                  PROTO, responder->remote_peer_id, session_id);
             return;
         }
 
@@ -1866,8 +1899,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         uint8_t resp_code = payload[10];
         const uint8_t *resp_data = payload + 11;
 
-        printf(LA_F("[UDP] V: %s accepted from %s, session_id=%" PRIu64 ", sid=%u, code=%u, len=%d\n", 0),
-               PROTO, from_str, session_id, sid, resp_code, resp_len);
+        print("V:", LA_F("%s: accepted, ses_id=%" PRIu64 ", sid=%u, code=%u, len=%d\n", 0),
+              PROTO, session_id, sid, resp_code, resp_len);
 
         // MSG_RESP 来自响应方（B），检查 B 的地址变更
         check_addr_change(udp_fd, responder, from);
@@ -1880,29 +1913,28 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 检查是否有匹配的挂起请求（REQ 阶段）
         if (requester->rpc_state != RPC_STATE_REQ_PENDING || requester->rpc_sid != sid) {
-            printf(LA_F("[UDP] W: %s: no matching pending msg (sid=%u, expected=%u)\n", LA_F302, 302),
-                   PROTO, sid, requester->rpc_sid);
+            print("W:", LA_F("%s: no matching pending msg (sid=%u, expected=%u)\n", LA_F302, 302),
+                  PROTO, sid, requester->rpc_sid);
             return;
         }
 
         // 缓存响应数据并从 REQ 链表移到 RESP 链表，同时发送给请求方
         transition_to_resp_pending(udp_fd, requester, P_tick_ms(), 0, resp_code, resp_data, resp_len);
 
-        printf(LA_F("[UDP] I: %s forwarded: '%s' -> '%s', sid=%u (ses_id=%" PRIu64 ")\n", 0),
-               PROTO, responder->local_peer_id, requester->local_peer_id,
-               sid, requester->session_id);
+        print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u (ses_id=%" PRIu64 ")\n", 0),
+              PROTO, responder->local_peer_id, requester->local_peer_id,
+              sid, requester->session_id);
     } break;
 
     // SIG_PKT_MSG_RESP_ACK: A→Server（A 确认收到 MSG_RESP）
     // 格式: [session_id(8)][sid(2)]
     case SIG_PKT_MSG_RESP_ACK: { const char* PROTO = "MSG_RESP_ACK";
 
-        // 调试打印协议包信息
-        printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 10) {  // session_id(8) + sid(2)
-            printf(LA_F("[UDP] E: %s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
+            print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
             return;
         }
 
@@ -1911,25 +1943,25 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 验证 session_id 和 sid 不为 0
         if (session_id == 0 || sid == 0) {
-            printf(LA_F("[UDP] E: %s: invalid session_id=%" PRIu64 " or sid=%u\n", 0, 0), 
+            print("E:", LA_F("%s: invalid session_id=%" PRIu64 " or sid=%u\n", 0, 0), 
                    PROTO, session_id, sid);
             return;
         }
 
-        printf(LA_F("[UDP] V: %s accepted from %s, session_id=%" PRIu64 ", sid=%u\n", 0, 0), 
-               PROTO, from_str, session_id, sid);
+        print("V:", LA_F("%s: accepted, ses_id=%" PRIu64 ", sid=%u\n", 0),
+               PROTO, session_id, sid);
 
         // 根据 session_id 查找 requester
         compact_pair_t *requester = NULL;
         HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), requester);
         if (!requester || !requester->valid) {
-            printf(LA_F("[UDP] W: %s: unknown session_id=%" PRIu64 "\n", 0), PROTO, session_id);
+            print("W:", LA_F("%s: unknown session_id=%" PRIu64 "\n", 0), PROTO, session_id);
             return;
         }
 
         // 检查是否有匹配的挂起响应转发
         if (requester->rpc_state != RPC_STATE_RESP_PENDING || requester->rpc_sid != sid) {
-            printf(LA_F("[UDP] V: %s: no matching pending msg (sid=%u)\n", LA_F296, 296), PROTO, sid);
+            print("V:", LA_F("%s: no matching pending msg (sid=%u)\n", LA_F296, 296), PROTO, sid);
             return;
         }
 
@@ -1937,12 +1969,12 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         remove_rpc_pending(requester);
         requester->rpc_state = RPC_STATE_IDLE;
 
-        printf(LA_F("[UDP] V: %s: RPC complete for '%s', sid=%u (ses_id=%" PRIu64 ")\n", 0),
+        print("I:", LA_F("%s: RPC complete for '%s', sid=%u (ses_id=%" PRIu64 ")\n", 0),
                PROTO, requester->local_peer_id, sid, requester->session_id);
     } break;
     
     default:
-        printf(LA_F("[UDP] W: Unknown packet type 0x%02x from %s\n", LA_F87, 87), hdr->type, from_str);
+        print("W:", LA_F("Unknown packet type 0x%02x from %s\n", LA_F87, 87), hdr->type, from_str);
         break;
     } // switch
 }
@@ -1955,7 +1987,7 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
         if (!g_compact_pairs[i].valid || 
             (now - g_compact_pairs[i].last_active) <= COMPACT_PAIR_TIMEOUT * 1000) continue;
 
-        printf(LA_F("[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %.1f seconds)\n", LA_F72, 72), 
+        print("W:", LA_F("Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n", LA_F72, 72), 
                g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id,
                (now - g_compact_pairs[i].last_active) / 1000.0);
         
@@ -1995,6 +2027,42 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
     }
 }
 
+// 处理 NAT 探测请求
+static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct sockaddr_in *from) {
+
+    char from_str[64];
+    snprintf(from_str, sizeof(from_str), "%s:%d", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
+    // NAT_PROBE: [hdr(4)] = 4 bytes
+    if (len < 4 || buf[0] != SIG_PKT_NAT_PROBE) return;
+    const char* PROTO = "NAT_PROBE";
+
+    uint16_t req_seq = ((uint16_t)buf[2] << 8) | buf[3];
+
+    printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F330, 330),
+           PROTO, from_str, req_seq, buf[1], len);
+
+    // 构造应答包（NAT_PROBE_ACK）
+    // [hdr(4)][probe_ip(4)][probe_port(2)] = 10 bytes
+    const char* PROTO_ACK = "NAT_PROBE_ACK";
+    buf[0] = SIG_PKT_NAT_PROBE_ACK;
+    buf[1] = 0;                                     /* flags */
+    buf[2] = (uint8_t)(req_seq >> 8);               /* seq hi (复制请求的 seq) */
+    buf[3] = (uint8_t)(req_seq & 0xFF);             /* seq lo */
+    memcpy(buf + 4, &from->sin_addr.s_addr, 4);     /* probe_ip   */
+    memcpy(buf + 8, &from->sin_port, 2);            /* probe_port */
+
+    print("V:", LA_F("Send %s: mapped=%s:%d\n", 0),
+          PROTO_ACK, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
+    ssize_t n = sendto(probe_fd, (const char *)buf, 10, 0, (struct sockaddr *)from, sizeof(*from));
+    if (n != 10)
+        print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", 0), PROTO_ACK, from_str, P_sock_errno());
+    else
+        printf(LA_F("[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n", LA_F331, 331),
+               PROTO_ACK, from_str, req_seq, (int)n);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifdef MOD_TAG
@@ -2009,7 +2077,7 @@ BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
         case CTRL_C_EVENT:
         case CTRL_BREAK_EVENT:
         case CTRL_CLOSE_EVENT:
-            printf("\n%s\n", LA_S("[SERVER] Received shutdown signal, exiting gracefully...", LA_S11, 11));
+            print("I: \n%s\n", LA_S("Received shutdown signal, exiting gracefully...", LA_S11, 11));
             g_running = 0;
             return TRUE;
         default:
@@ -2019,7 +2087,7 @@ BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
 #else
 void signal_handler(int signum) {
     if (signum == SIGINT || signum == SIGTERM) {
-        printf("\n%s\n", LA_S("[SERVER] Received shutdown signal, exiting gracefully...", LA_S11, 11));
+        print("I: \n%s\n", LA_S("Received shutdown signal, exiting gracefully...", LA_S11, 11));
         g_running = 0;
     }
 }
@@ -2068,18 +2136,18 @@ int main(int argc, char *argv[]) {
 
     // 验证端口范围
     if (port <= 0 || port > 65535) {
-        fprintf(stderr, "Error: Invalid port number %d (range: 1-65535)\n\n", port);
+        print("E:", LA_F("Invalid port number %d (range: 1-65535)\n", LA_F328, 328), port);
         ARGS_print(argv[0]);
         return 1;
     }
     if (g_probe_port < 0 || g_probe_port > 65535) {
-        fprintf(stderr, "Error: Invalid probe port %d (range: 0-65535)\n\n", g_probe_port);
+        print("E:", LA_F("Invalid probe port %d (range: 0-65535)\n", LA_F329, 329), g_probe_port);
         ARGS_print(argv[0]);
         return 1;
     }
     
     if (P_net_init() != E_NONE) {
-        fprintf(stderr, "%s", LA_S("[SERVER] WSAStartup failed\n", 0));
+        print("E: %s", LA_S("net init failed\n", 0));
         return 1;
     }
 
@@ -2087,20 +2155,17 @@ int main(int argc, char *argv[]) {
     P_rand_init();
 
     // 打印服务器配置信息
-    printf(LA_F("[SERVER] Starting P2P signal server on port %d", LA_F34, 34), port);
-    printf("\n");
-    printf(LA_F("[SERVER] NAT probe: %s (port %d)", LA_F32, 32), 
-           g_probe_port > 0 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1), 
-           g_probe_port);
-    printf("\n");
-    printf(LA_F("[SERVER] Relay support: %s", LA_F33, 33), 
-           g_relay_enabled ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
-    printf("\n");
+    print("I:", LA_F("Starting P2P signal server on port %d\n", LA_F34, 34), port);
+    print("I:", LA_F("NAT probe: %s (port %d)\n", LA_F32, 32), 
+          g_probe_port > 0 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1), 
+          g_probe_port);
+    print("I:", LA_F("Relay support: %s\n", LA_F33, 33), 
+          g_relay_enabled ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
 
     // 注册信号处理
 #ifdef _WIN32
     if (!SetConsoleCtrlHandler(console_ctrl_handler, TRUE)) {
-        fprintf(stderr, "%s", LA_S("[SERVER] Failed to set console ctrl handler\n", 0));
+        print("W:", "%s", LA_S("Failed to set console ctrl handler\n", 0));
     }
 #else
     signal(SIGINT, signal_handler);
@@ -2110,7 +2175,7 @@ int main(int argc, char *argv[]) {
     // 创建 TCP 监听套接字（用于 Relay 信令模式）
     sock_t listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd == P_INVALID_SOCKET) {
-        perror("TCP socket");
+        print("E:", "TCP socket failed(%d)\n", P_sock_errno());
         return 1;
     }
     int sockopt = 1;
@@ -2119,7 +2184,7 @@ int main(int argc, char *argv[]) {
     // 创建 UDP 套接字（用于 COMPACT 信令模式）
     sock_t udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (udp_fd == P_INVALID_SOCKET) {
-        perror("UDP socket");
+        print("E:", "UDP socket failed(%d)\n", P_sock_errno());
         return 1;
     }
     setsockopt(udp_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&sockopt, sizeof(sockopt));
@@ -2129,7 +2194,7 @@ int main(int argc, char *argv[]) {
     if (g_probe_port > 0) {
         probe_fd = socket(AF_INET, SOCK_DGRAM, 0);
         if (probe_fd == P_INVALID_SOCKET) {
-            perror("probe UDP socket");
+            print("E:", "probe UDP socket failed(%d)\n", P_sock_errno());
             return 1;
         }
         setsockopt(probe_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&sockopt, sizeof(sockopt));
@@ -2142,11 +2207,11 @@ int main(int argc, char *argv[]) {
     addr.sin_port = htons((unsigned short)port);
        if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
        
-        perror("TCP bind");
+        print("E:", "TCP bind failed(%d)\n", P_sock_errno());
         return 1;
     }
     if (bind(udp_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("UDP bind");
+        print("E:", "UDP bind failed(%d)\n", P_sock_errno());
         return 1;
     }
 
@@ -2157,21 +2222,21 @@ int main(int argc, char *argv[]) {
         probe_addr.sin_addr.s_addr = INADDR_ANY;
         probe_addr.sin_port = htons((unsigned short)g_probe_port);
         if (bind(probe_fd, (struct sockaddr *)&probe_addr, sizeof(probe_addr)) < 0) {
-            perror("probe UDP bind");
+
+            print("E:", LA_F("probe UDP bind failed(%d)\n", LA_F336, 336), P_sock_errno());
             P_sock_close(probe_fd);
             probe_fd = P_INVALID_SOCKET;
             g_probe_port = 0;  /* 绑定失败，禁用探测功能 */
-            printf("%s\n", LA_S("[SERVER] NAT probe disabled (bind failed)", LA_S10, 10));
-        } else {
-            printf(LA_F("[SERVER] NAT probe socket listening on port %d", LA_F31, 31), g_probe_port);
-            printf("\n");
+            print("W: %s", LA_S("NAT probe disabled (bind failed)\n", LA_S10, 10));
+        } 
+        else {
+            print("I:", LA_F("NAT probe socket listening on port %d\n", LA_F31, 31), g_probe_port);
         }
     }
 
     // 启动 TCP 监听（用于 Relay 模式与客户端连接）
     listen(listen_fd, 10);
-    printf(LA_F("P2P Signaling Server listening on port %d (TCP + UDP)...", LA_F27, 27), port);
-    printf("\n");
+    print("I:", LA_F("P2P Signaling Server listening on port %d (TCP + UDP)...\n", LA_F27, 27), port);
 
     // 主循环
     fd_set read_fds;
@@ -2221,7 +2286,7 @@ int main(int argc, char *argv[]) {
         int sel_ret = select(max_fd + 1, &read_fds, NULL, NULL, &tv);
         if (sel_ret < 0) {
             if (P_sock_is_interrupted()) continue;  // 被信号打断，继续循环
-            perror("select");
+            print("E:", LA_F("select failed(%d)\n", LA_F337, 337), P_sock_errno());
             break;
         }
 
@@ -2243,13 +2308,13 @@ int main(int argc, char *argv[]) {
                     g_relay_clients[i].pending_count = 0;
                     g_relay_clients[i].pending_sender[0] = '\0';
                     strncpy(g_relay_clients[i].name, "unknown", P2P_PEER_ID_MAX);
-                    printf(LA_F("[TCP] New connection from %s:%d\n", LA_F47, 47), 
-                           inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                    print("V:", LA_F("[TCP] New connection from %s:%d\n", LA_F47, 47), 
+                          inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
                     break;
                 }
             }
             if (i == MAX_PEERS) {
-                printf("%s", LA_S("[TCP] Max peers reached, rejecting connection\n", LA_S14, 14));
+                print("W: %s", LA_S("[TCP] Max peers reached, rejecting connection\n", LA_S14, 14));
                 P_sock_close(client_fd);
             }
         }
@@ -2269,26 +2334,8 @@ int main(int argc, char *argv[]) {
 
             uint8_t buf[64]; struct sockaddr_in from; socklen_t from_len = sizeof(from);
             size_t n = recvfrom(probe_fd, (char *)buf, sizeof(buf), 0, (struct sockaddr *)&from, &from_len);
-
-            // NAT_PROBE: [hdr(4)] = 4 bytes
-            if (n >= 4 && buf[0] == SIG_PKT_NAT_PROBE) {
-
-                uint16_t req_seq = ((uint16_t)buf[2] << 8) | buf[3];  // 从包头读取 seq
-
-                // 构造应答包（NAT_PROBE_ACK）
-                // [hdr(4)][probe_ip(4)][probe_port(2)] = 10 bytes
-                buf[0] = SIG_PKT_NAT_PROBE_ACK;
-                buf[1] = 0;                                     /* flags */
-                buf[2] = (uint8_t)(req_seq >> 8);               /* seq hi (复制请求的 seq) */
-                buf[3] = (uint8_t)(req_seq & 0xFF);             /* seq lo */
-                memcpy(buf + 4, &from.sin_addr.s_addr, 4);      /* probe_ip   */
-                memcpy(buf + 8, &from.sin_port, 2);             /* probe_port */
-                sendto(probe_fd, (const char *)buf, 10, 0, (struct sockaddr *)&from, sizeof(from));
-
-                printf(LA_F("[PROBE] NAT_PROBE_ACK -> %s:%d (seq=%u, mapped=%s:%d)\n", LA_F30, 30),
-                       inet_ntoa(from.sin_addr), ntohs(from.sin_port),
-                       req_seq,
-                       inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+            if (n > 0) {
+                handle_probe(probe_fd, buf, n, &from);
             }
         }
 
@@ -2304,7 +2351,7 @@ int main(int argc, char *argv[]) {
     } // while (g_running)
 
     // 清理资源
-    printf("\n%s\n", LA_S("[SERVER] Shutting down...", LA_S12, 12));
+    print("I: \n%s", LA_S("Shutting down...\n", LA_S12, 12));
     
     // 关闭所有客户端连接
     for (int i = 0; i < MAX_PEERS; i++) {
@@ -2320,6 +2367,6 @@ int main(int argc, char *argv[]) {
     
     P_net_cleanup();
 
-    printf("%s\n", LA_S("[SERVER] Goodbye!", LA_S9, 9));
+    print("I: %s", LA_S("Goodbye!\n", LA_S9, 9));
     return 0;
 }

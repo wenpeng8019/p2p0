@@ -8,18 +8,37 @@
 const char* lang_en[LA_NUM] = {
     [LA_W1] = "disabled",  /* SID:1 */
     [LA_W2] = "enabled",  /* SID:2 */
-    [LA_S9] = "[SERVER] Goodbye!",  /* SID:9 */
-    [LA_S10] = "[SERVER] NAT probe disabled (bind failed)",  /* SID:10 */
-    [LA_S11] = "[SERVER] Received shutdown signal, exiting gracefully...",  /* SID:11 */
-    [LA_S12] = "[SERVER] Shutting down...",  /* SID:12 */
     [LA_S14] = "[TCP] Max peers reached, rejecting connection\n",  /* SID:14 */
     [LA_S15] = "[TCP] User list truncated (too many users)\n",  /* SID:15 */
-    [LA_F27] = "P2P Signaling Server listening on port %d (TCP + UDP)...",  /* SID:27 */
-    [LA_F30] = "[PROBE] NAT_PROBE_ACK -> %s:%d (seq=%u, mapped=%s:%d)\n",  /* SID:30 */
-    [LA_F31] = "[SERVER] NAT probe socket listening on port %d",  /* SID:31 */
-    [LA_F32] = "[SERVER] NAT probe: %s (port %d)",  /* SID:32 */
-    [LA_F33] = "[SERVER] Relay support: %s",  /* SID:33 */
-    [LA_F34] = "[SERVER] Starting P2P signal server on port %d",  /* SID:34 */
+    [LA_S9] = "Goodbye!\n",  /* SID:9 */
+    [LA_S10] = "NAT probe disabled (bind failed)\n",  /* SID:10 */
+    [LA_S11] = "Received shutdown signal, exiting gracefully...",  /* SID:11 */
+    [LA_S12] = "Shutting down...\n",  /* SID:12 */
+    [LA_F75] = "%s from '%.*s': new instance(old=%u new=%u), resetting session\n",  /* SID:75 */
+    [LA_F73] = "%s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n",  /* SID:73 */
+    [LA_F86] = "%s: accepted, releasing slot for '%s' -> '%s'\n",  /* SID:86 */
+    [LA_F64] = "%s: bad payload(len=%zu)\n",  /* SID:64 */
+    [LA_F281] = "%s: data too large (len=%d)\n",  /* SID:281 */
+    [LA_F64] = "%s: invalid instance_id=0 from %s\n",  /* SID:64 */
+    [LA_F282] = "%s: invalid relay flag from client\n",  /* SID:282 */
+    [LA_F63] = "%s: invalid seq=%u\n",  /* SID:63 */
+    [LA_F296] = "%s: no matching pending msg (sid=%u)\n",  /* SID:296 */
+    [LA_F302] = "%s: no matching pending msg (sid=%u, expected=%u)\n",  /* SID:302 */
+    [LA_F303] = "%s: peer '%s' not online, rejecting sid=%u\n",  /* SID:303 */
+    [LA_F85] = "%s: waiting for peer '%.*s' to register\n",  /* SID:85 */
+    [LA_F328] = "Invalid port number %d (range: 1-65535)\n",  /* SID:328 */
+    [LA_F329] = "Invalid probe port %d (range: 0-65535)\n",  /* SID:329 */
+    [LA_F31] = "NAT probe socket listening on port %d\n",  /* SID:31 */
+    [LA_F32] = "NAT probe: %s (port %d)\n",  /* SID:32 */
+    [LA_F27] = "P2P Signaling Server listening on port %d (TCP + UDP)...\n",  /* SID:27 */
+    [LA_F66] = "PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:66 */
+    [LA_F68] = "Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n",  /* SID:68 */
+    [LA_F33] = "Relay support: %s\n",  /* SID:33 */
+    [LA_F34] = "Starting P2P signal server on port %d\n",  /* SID:34 */
+    [LA_F72] = "Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n",  /* SID:72 */
+    [LA_F87] = "Unknown packet type 0x%02x from %s\n",  /* SID:87 */
+    [LA_F67] = "[Relay] %s seq=0 from client %s (server-only, dropped)\n",  /* SID:67 */
+    [LA_F82] = "[Relay] %s: bad payload(len=%zu)\n",  /* SID:82 */
     [LA_F35] = "[TCP]   → Forwarded OFFER from '%s' (%d candidates, %d bytes)\n",  /* SID:35 */
     [LA_F36] = "[TCP]   → Sent empty OFFER from '%s' (storage full, reverse connect)\n",  /* SID:36 */
     [LA_F37] = "[TCP] All pending candidates flushed to '%s'\n",  /* SID:37 */
@@ -48,26 +67,12 @@ const char* lang_en[LA_NUM] = {
     [LA_F280] = "[TCP] V: %s sent to '%s'\n",  /* SID:280 */
     [LA_F50] = "[TCP] V: Peer '%s' disconnected\n",  /* SID:50 */
     [LA_F41] = "[TCP] W: Client '%s' timeout (inactive for %.1f seconds)\n",  /* SID:41 */
-    [LA_F67] = "[UDP] E: %s seq=0 from client %s (server-only, dropped)\n",  /* SID:67 */
-    [LA_F64] = "[UDP] E: %s: bad payload(len=%zu)\n",  /* SID:64 */
-    [LA_F281] = "[UDP] E: %s: data too large (len=%d)\n",  /* SID:281 */
-    [LA_F64] = "[UDP] E: %s: invalid instance_id=0 from %s\n",  /* SID:64 */
-    [LA_F282] = "[UDP] E: %s: invalid relay flag from client\n",  /* SID:282 */
-    [LA_F63] = "[UDP] E: %s: invalid seq=%u\n",  /* SID:63 */
-    [LA_F64] = "[UDP] E: %s: invalid sid=0\n",  /* SID:64 */
-    [LA_F74] = "[UDP] E: REGISTER_ACK sent, status=error (no slot available)\n",  /* SID:74 */
-    [LA_F82] = "[UDP] E: Relay %s: bad payload(len=%zu)\n",  /* SID:82 */
-    [LA_F75] = "[UDP] I: %s from '%.*s': new instance(old=%u new=%u), resetting session\n",  /* SID:75 */
-    [LA_F68] = "[UDP] I: Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n",  /* SID:68 */
-    [LA_F288] = "[UDP] V: %s accepted from %s, sid=%u\n",  /* SID:288 */
-    [LA_F73] = "[UDP] V: %s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n",  /* SID:73 */
-    [LA_F86] = "[UDP] V: %s: accepted, releasing slot for '%s' -> '%s'\n",  /* SID:86 */
-    [LA_F296] = "[UDP] V: %s: no matching pending msg (sid=%u)\n",  /* SID:296 */
-    [LA_F85] = "[UDP] V: %s: waiting for peer '%.*s' to register\n",  /* SID:85 */
-    [LA_F302] = "[UDP] W: %s: no matching pending msg (sid=%u, expected=%u)\n",  /* SID:302 */
-    [LA_F303] = "[UDP] W: %s: peer '%s' not online, rejecting sid=%u\n",  /* SID:303 */
-    [LA_F304] = "[UDP] W: %s: requester not found for %s\n",  /* SID:304 */
-    [LA_F66] = "[UDP] W: PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:66 */
-    [LA_F72] = "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %.1f seconds)\n",  /* SID:72 */
-    [LA_F87] = "[UDP] W: Unknown packet type 0x%02x from %s\n",  /* SID:87 */
+    [LA_F330] = "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:330 */
+    [LA_F331] = "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n",  /* SID:331 */
+    [LA_F332] = "[UDP] %s send to %s, seq=0, flags=0, len=%d\n",  /* SID:332 */
+    [LA_F333] = "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n",  /* SID:333 */
+    [LA_F334] = "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n",  /* SID:334 */
+    [LA_F335] = "[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n",  /* SID:335 */
+    [LA_F336] = "probe UDP bind failed(%d)\n",  /* SID:336 */
+    [LA_F337] = "select failed(%d)\n",  /* SID:337 */
 };

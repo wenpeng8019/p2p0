@@ -25,10 +25,10 @@ enum {
     _LA_8,
 
     /* Strings (LA_S) */
-    LA_S9,  /* "[SERVER] Goodbye!"  [server.c] */
-    LA_S10,  /* "[SERVER] NAT probe disabled (bind failed)"  [server.c] */
-    LA_S11,  /* "[SERVER] Received shutdown signal, exiting gracefully..."  [server.c] */
-    LA_S12,  /* "[SERVER] Shutting down..."  [server.c] */
+    LA_S9,  /* "Goodbye!\n"  [server.c] */
+    LA_S10,  /* "NAT probe disabled (bind failed)\n"  [server.c] */
+    LA_S11,  /* "Received shutdown signal, exiting gracefully..."  [server.c] */
+    LA_S12,  /* "Shutting down...\n"  [server.c] */
 
     /* Formats (LA_F) */
     LA_F13,  /* "[TCP] E: Invalid magic from peer '%s'\n" (%s)  [server.c] */
@@ -49,14 +49,14 @@ enum {
     _LA_26,
 
     /* Formats (LA_F) */
-    LA_F27,  /* "P2P Signaling Server listening on port %d (TCP + UDP)..." (%d)  [server.c] */
+    LA_F27,  /* "P2P Signaling Server listening on port %d (TCP + UDP)...\n" (%d)  [server.c] */
     _LA_28,
     _LA_29,
-    LA_F30,  /* "[PROBE] NAT_PROBE_ACK -> %s:%d (seq=%u, mapped=%s:%d)\n" (%s,%d,%u,%s,%d)  [server.c] */
-    LA_F31,  /* "[SERVER] NAT probe socket listening on port %d" (%d)  [server.c] */
-    LA_F32,  /* "[SERVER] NAT probe: %s (port %d)" (%s,%d)  [server.c] */
-    LA_F33,  /* "[SERVER] Relay support: %s" (%s)  [server.c] */
-    LA_F34,  /* "[SERVER] Starting P2P signal server on port %d" (%d)  [server.c] */
+    _LA_30,
+    LA_F31,  /* "NAT probe socket listening on port %d\n" (%d)  [server.c] */
+    LA_F32,  /* "NAT probe: %s (port %d)\n" (%s,%d)  [server.c] */
+    LA_F33,  /* "Relay support: %s\n" (%s)  [server.c] */
+    LA_F34,  /* "Starting P2P signal server on port %d\n" (%d)  [server.c] */
     LA_F35,  /* "[TCP]   → Forwarded OFFER from '%s' (%d candidates, %d bytes)\n" (%s,%d,%d)  [server.c] */
     LA_F36,  /* "[TCP]   → Sent empty OFFER from '%s' (storage full, reverse connect)\n" (%s)  [server.c] */
     LA_F37,  /* "[TCP] All pending candidates flushed to '%s'\n" (%s)  [server.c] */
@@ -85,31 +85,31 @@ enum {
     LA_F60,  /* "[TCP] Unknown message type %d from %s\n" (%d,%s)  [server.c] */
     _LA_61,
     _LA_62,
-    LA_F63,  /* "[UDP] E: %s: invalid seq=%u\n" (%s,%u)  [server.c] */
-    LA_F64,  /* "[UDP] E: %s: invalid sid=0\n" (%s)  [server.c] */
+    LA_F63,  /* "%s: invalid seq=%u\n" (%s,%u)  [server.c] */
+    LA_F64,  /* "%s: invalid instance_id=0 from %s\n" (%s,%s)  [server.c] */
     _LA_65,
-    LA_F66,  /* "[UDP] W: PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
-    LA_F67,  /* "[UDP] E: %s seq=0 from client %s (server-only, dropped)\n" (%s,%s)  [server.c] */
-    LA_F68,  /* "[UDP] I: Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n" (%d,%d)  [server.c] */
+    LA_F66,  /* "PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
+    LA_F67,  /* "[Relay] %s seq=0 from client %s (server-only, dropped)\n" (%s,%s)  [server.c] */
+    LA_F68,  /* "Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n" (%d,%d)  [server.c] */
     _LA_69,
     _LA_70,
     _LA_71,
-    LA_F72,  /* "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %.1f seconds)\n" (%s,%s)  [server.c] */
-    LA_F73,  /* "[UDP] V: %s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n" (%s,%u,%d)  [server.c] */
-    LA_F74,  /* "[UDP] E: REGISTER_ACK sent, status=error (no slot available)\n"  [server.c] */
-    LA_F75,  /* "[UDP] I: %s from '%.*s': new instance(old=%u new=%u), resetting session\n" (%s,%u,%u)  [server.c] */
+    LA_F72,  /* "Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n" (%s,%s)  [server.c] */
+    LA_F73,  /* "%s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n" (%s,%u,%d)  [server.c] */
+    _LA_74,
+    LA_F75,  /* "%s from '%.*s': new instance(old=%u new=%u), resetting session\n" (%s,%u,%u)  [server.c] */
     _LA_76,
     _LA_77,
     _LA_78,
     _LA_79,
     _LA_80,
     _LA_81,
-    LA_F82,  /* "[UDP] E: Relay %s: bad payload(len=%zu)\n" (%s)  [server.c] */
+    LA_F82,  /* "[Relay] %s: bad payload(len=%zu)\n" (%s)  [server.c] */
     _LA_83,
     _LA_84,
-    LA_F85,  /* "[UDP] V: %s: waiting for peer '%.*s' to register\n" (%s)  [server.c] */
-    LA_F86,  /* "[UDP] V: %s: accepted, releasing slot for '%s' -> '%s'\n" (%s,%s,%s)  [server.c] */
-    LA_F87,  /* "[UDP] W: Unknown packet type 0x%02x from %s\n" (%s)  [server.c] */
+    LA_F85,  /* "%s: waiting for peer '%.*s' to register\n" (%s)  [server.c] */
+    LA_F86,  /* "%s: accepted, releasing slot for '%s' -> '%s'\n" (%s,%s,%s)  [server.c] */
+    LA_F87,  /* "Unknown packet type 0x%02x from %s\n" (%s)  [server.c] */
     _LA_88,
     _LA_89,
     _LA_90,
@@ -303,14 +303,14 @@ enum {
     _LA_278,
     _LA_279,
     LA_F280,  /* "[TCP] V: %s sent to '%s'\n" (%s,%s)  [server.c] */
-    LA_F281,  /* "[UDP] E: %s: data too large (len=%d)\n" (%s,%d)  [server.c] */
-    LA_F282,  /* "[UDP] E: %s: invalid relay flag from client\n" (%s)  [server.c] */
+    LA_F281,  /* "%s: data too large (len=%d)\n" (%s,%d)  [server.c] */
+    LA_F282,  /* "%s: invalid relay flag from client\n" (%s)  [server.c] */
     _LA_283,
     _LA_284,
     _LA_285,
     _LA_286,
     _LA_287,
-    LA_F288,  /* "[UDP] V: %s accepted from %s, sid=%u\n" (%s,%s,%u)  [server.c] */
+    _LA_288,
     _LA_289,
     _LA_290,
     _LA_291,
@@ -318,21 +318,54 @@ enum {
     _LA_293,
     _LA_294,
     _LA_295,
-    LA_F296,  /* "[UDP] V: %s: no matching pending msg (sid=%u)\n" (%s,%u)  [server.c] */
+    LA_F296,  /* "%s: no matching pending msg (sid=%u)\n" (%s,%u)  [server.c] */
     _LA_297,
     _LA_298,
     _LA_299,
     _LA_300,
     _LA_301,
-    LA_F302,  /* "[UDP] W: %s: no matching pending msg (sid=%u, expected=%u)\n" (%s,%u,%u)  [server.c] */
-    LA_F303,  /* "[UDP] W: %s: peer '%s' not online, rejecting sid=%u\n" (%s,%s,%u)  [server.c] */
-    LA_F304,  /* "[UDP] W: %s: requester not found for %s\n" (%s,%s)  [server.c] */
+    LA_F302,  /* "%s: no matching pending msg (sid=%u, expected=%u)\n" (%s,%u,%u)  [server.c] */
+    LA_F303,  /* "%s: peer '%s' not online, rejecting sid=%u\n" (%s,%s,%u)  [server.c] */
+    _LA_304,
+    _LA_305,
+    _LA_306,
+    _LA_307,
+    _LA_308,
+    _LA_309,
+    _LA_310,
+    _LA_311,
+    _LA_312,
+    _LA_313,
+    _LA_314,
+    _LA_315,
+    _LA_316,
+    _LA_317,
+    _LA_318,
+    _LA_319,
+    _LA_320,
+    _LA_321,
+    _LA_322,
+    _LA_323,
+    _LA_324,
+    _LA_325,
+    _LA_326,
+    _LA_327,
+    LA_F328,  /* "Invalid port number %d (range: 1-65535)\n" (%d)  [server.c] */
+    LA_F329,  /* "Invalid probe port %d (range: 0-65535)\n" (%d)  [server.c] */
+    LA_F330,  /* "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n" (%s,%s,%u)  [server.c] */
+    LA_F331,  /* "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n" (%s,%s,%u,%d)  [server.c] */
+    LA_F332,  /* "[UDP] %s send to %s, seq=0, flags=0, len=%d\n" (%s,%s,%d)  [server.c] */
+    LA_F333,  /* "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n" (%s,%s,%d)  [server.c] */
+    LA_F334,  /* "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n" (%s,%s,%d,%d)  [server.c] */
+    LA_F335,  /* "[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n" (%s,%s,%d,%d,%d)  [server.c] */
+    LA_F336,  /* "probe UDP bind failed(%d)\n" (%d)  [server.c] */
+    LA_F337,  /* "select failed(%d)\n" (%d)  [server.c] */
 
     LA_NUM
 };
 
 /* 格式字符串起始位置（用于验证） */
-#define LA_FMT_START LA_F27
+#define LA_FMT_START LA_F75
 
 /* 字符串表 */
 extern const char* lang_en[LA_NUM];
