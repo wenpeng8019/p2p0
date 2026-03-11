@@ -2163,12 +2163,7 @@ int main(int argc, char *argv[]) {
         struct timeval tv = {1, 0};
         int sel_ret = select(max_fd + 1, &read_fds, NULL, NULL, &tv);
         if (sel_ret < 0) {
-#ifdef _WIN32
-            int err = WSAGetLastError();
-            if (err == WSAEINTR) continue;  // 被信号打断，继续循环
-#else
-            if (errno == EINTR) continue;   // 被信号打断，继续循环
-#endif
+            if (P_sock_is_interrupted()) continue;  // 被信号打断，继续循环
             perror("select");
             break;
         }
