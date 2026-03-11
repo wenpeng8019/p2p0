@@ -1318,9 +1318,10 @@ void compact_on_request(struct p2p_session *s, uint8_t flags,
  * 说明: 该请求已经被服务器代理接管，并确保完成向对端的转发
  * 所以收到该消息后，自己就可以停止重发请求了，接下来只需要等待 MSG_RESP 即可知道请求的最终结果
  *
- * 协议：SIG_PKT_MSG_REQ_ACK (0x21)
- * 包头: [type=0x21 | flags=0 | seq=0]
- * 负载: [sid(2)][status(1)]
+ * 协议：SIG_PKT_MSG_REQ_ACK (0x89)
+ * 包头: [type=0x89 | flags=0 | seq=0]
+ * 负载: [session_id(8)][sid(2)][status(1)]
+ *   - session_id: A端的会话 ID（用于验证响应合法性）
  *   - sid: 序列号，与 MSG_REQ 中的 sid 对应
  *   - status: 0=已缓存开始中转, 1=B不在线（失败）
  */
@@ -1332,15 +1333,23 @@ void compact_on_request_ack(struct p2p_session *s,
     printf(LA_F("Recv %s pkt from %s:%d, len=%d", LA_F271, 271),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
 
-    if (len < 3) {
+    if (len < 11) {
         print("E:", LA_F("%s: bad payload(len=%d)", LA_F146, 146), PROTO, len);
         return;
     }
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    uint16_t sid = nget_s(payload);
-    uint8_t status = payload[2];
+    uint64_t session_id = nget_ll(payload);
+    uint16_t sid = nget_s(payload + 8);
+    uint8_t status = payload[10];
+
+    // 验证 session_id 是否匹配
+    if (session_id != ctx->session_id) {
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", LA_F999, 999),
+              PROTO, session_id, ctx->session_id);
+        return;
+    }
 
     if (ctx->req_sid != sid) {
         print("V:", LA_F("%s: ignored for sid=%u (current sid=%u)", LA_F162, 162), PROTO, sid, ctx->req_sid);
@@ -1386,11 +1395,12 @@ void compact_on_request_ack(struct p2p_session *s,
 /*
  * 处理 MSG_RESP，服务器代理转发的，对端（对自己向对端请求的）消息响应
  *
- * 协议：SIG_PKT_MSG_RESP (0x22)
- * 包头: [type=0x22 | flags=见下 | seq=0]
+ * 协议：SIG_PKT_MSG_RESP (0x8A)
+ * 包头: [type=0x8A | flags=见下 | seq=0]
  * 负载:
- * > [sid(2)][code(1)][data(N)] （正常响应）
- * > [sid(2)]（错误响应）
+ * > [session_id(8)][sid(2)][code(1)][data(N)] （正常响应）
+ * > [session_id(8)][sid(2)]（错误响应）
+ *   - session_id: A端的会话 ID（用于验证响应合法性）
  *   - sid: 序列号，与 MSG_REQ 中的 sid 对应
  *   - code: 响应消息 ID（正常响应时）
  *   - data: 响应数据（正常响应时）
@@ -1406,35 +1416,45 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
     printf(LA_F("Recv %s pkt from %s:%d, flags=0x%02x, len=%d", LA_F270, 270),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), flags, len);
 
-    // 检查最小负载长度：至少需要 sid(2)
-    if (len < 2) {
+    // 检查最小负载长度：session_id(8) + sid(2) = 10
+    if (len < 10) {
         print("E:", LA_F("%s: bad payload(len=%d)", LA_F146, 146), PROTO, len);
         return;
     }
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    uint16_t sid = nget_s(payload);
+    uint64_t session_id = nget_ll(payload);
+    uint16_t sid = nget_s(payload + 8);
+
+    // 验证 session_id 是否匹配
+    if (session_id != ctx->session_id) {
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", LA_F999, 999),
+              PROTO, session_id, ctx->session_id);
+        return;
+    }
 
     /*
      * 发送 MSG_RESP_ACK 确认包
      * 服务器收到该确认后，将会停止重发该响应到本地，即结束整个请求-响应流程
      *
-     * 协议：SIG_PKT_MSG_RESP_ACK (0x23)
-     * 包头: [type=0x23 | flags=0 | seq=0]
-     * 负载: [sid(2)]
+     * 协议：SIG_PKT_MSG_RESP_ACK (0x8B)
+     * 包头: [type=0x8B | flags=0 | seq=0]
+     * 负载: [session_id(8)][sid(2)]
+     *   - session_id: A端的会话 ID（用于 O(1) 哈希查找）
      *   - sid: 序列号，与 MSG_RESP 中的 sid 一致
      * 说明: A端确认收到B端的响应，幂等操作，即使已处理过也补发
      */
     {
-        uint8_t ack[2];
-        nwrite_s(ack, sid);
+        uint8_t ack[10]; int n = 0;
+        nwrite_ll(ack + n, ctx->session_id); n += 8;
+        nwrite_s(ack + n, sid); n += 2;
 
         // 调试打印协议包信息
-         printf(LA_F("Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=2", LA_F286, 286),
-                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port));
+         printf(LA_F("Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=%d", LA_F286, 286),
+                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), n);
 
-        udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_MSG_RESP_ACK, 0, 0, ack, 2);
+        udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_MSG_RESP_ACK, 0, 0, ack, n);
 
         print("V:", LA_F("%s_ACK sent, sid=%u", LA_F202, 202), PROTO, sid);
     }
@@ -1465,13 +1485,14 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
     else {
 
         // 正常响应：需要包含 code 和可选的 data
-        if (len < 3) {
+        // 最小长度：session_id(8) + sid(2) + code(1) = 11
+        if (len < 11) {
             print("E:", LA_F("%s: bad payload(len=%d)", LA_F146, 146), PROTO, len);
             return;
         }
-        res_code = payload[2];
-        res_data = payload + 3;
-        res_size = len - 3;
+        res_code = payload[10];
+        res_data = payload + 11;
+        res_size = len - 11;
     }
 
     ctx->req_state  = 0;
@@ -1498,7 +1519,8 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
  *
  * 协议：SIG_PKT_MSG_RESP_ACK (0x8B) - B 端接收
  * 包头: [type=0x8B | flags=0 | seq=0]
- * 负载: [sid(2)]
+ * 负载: [session_id(8)][sid(2)]
+ *   - session_id: B端的会话 ID（用于 O(1) 哈希查找）
  *   - sid: 序列号，与 MSG_RESP 中的 sid 对应
  */
 void compact_on_response_ack(struct p2p_session *s,
@@ -1509,14 +1531,22 @@ void compact_on_response_ack(struct p2p_session *s,
     printf(LA_F("Recv %s pkt from %s:%d, len=%d", LA_F271, 271),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
 
-    if (len < 2) {
+    if (len < 10) {
         print("E:", LA_F("%s: bad payload(len=%d)", LA_F146, 146), PROTO, len);
         return;
     }
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    uint16_t sid = nget_s(payload);
+    uint64_t session_id = nget_ll(payload);
+    uint16_t sid = nget_s(payload + 8);
+
+    // 验证 session_id 是否匹配（可选，增强安全性）
+    if (session_id != ctx->session_id) {
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", LA_F999, 999),
+              PROTO, session_id, ctx->session_id);
+        // 继续处理，因为 sid 匹配更重要
+    }
     if (ctx->resp_sid != sid) {
         print("V:", LA_F("%s: ignored for sid=%u (current sid=%u)", LA_F162, 162), PROTO, sid, ctx->resp_sid);
         return;

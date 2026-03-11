@@ -17,14 +17,14 @@ enum {
     /* Words (LA_W) */
     LA_W1,  /* "disabled"  [server.c] */
     LA_W2,  /* "enabled"  [server.c] */
+    _LA_3,
+    _LA_4,
+    _LA_5,
+    _LA_6,
+    _LA_7,
+    _LA_8,
 
     /* Strings (LA_S) */
-    LA_S3,  /* "               - TCP: RELAY mode signaling (stateful/long connection)"  [server.c] */
-    LA_S4,  /* "               - UDP: COMPACT mode signaling (stateless)"  [server.c] */
-    LA_S5,  /* "               Used to detect symmetric NAT (port consistency)"  [server.c] */
-    LA_S6,  /* "  port         Signaling server listen port (default: 8888)"  [server.c] */
-    LA_S7,  /* "  probe_port   NAT type detection port (default: 0=disabled)"  [server.c] */
-    LA_S8,  /* "  relay        Enable data relay support (COMPACT mode fallback)"  [server.c] */
     LA_S9,  /* "[SERVER] Goodbye!"  [server.c] */
     LA_S10,  /* "[SERVER] NAT probe disabled (bind failed)"  [server.c] */
     LA_S11,  /* "[SERVER] Received shutdown signal, exiting gracefully..."  [server.c] */
@@ -36,21 +36,21 @@ enum {
     /* Strings (LA_S) */
     LA_S14,  /* "[TCP] Max peers reached, rejecting connection\n"  [server.c] */
     LA_S15,  /* "[TCP] User list truncated (too many users)\n"  [server.c] */
-    LA_S16,  /* "Error: Too many arguments"  [server.c] */
-    LA_S17,  /* "Examples:"  [server.c] */
-    LA_S18,  /* "Parameters:"  [server.c] */
+    _LA_16,
+    _LA_17,
+    _LA_18,
     _LA_19,
+    _LA_20,
+    _LA_21,
+    _LA_22,
+    _LA_23,
+    _LA_24,
+    _LA_25,
+    _LA_26,
 
     /* Formats (LA_F) */
-    LA_F20,  /* "  %s                    # Default config (port 8888, no probe, no relay)" (%s)  [server.c] */
-    LA_F21,  /* "  %s 9000               # Listen on port 9000" (%s)  [server.c] */
-    LA_F22,  /* "  %s 9000 9001          # Listen 9000, probe port 9001" (%s)  [server.c] */
-    LA_F23,  /* "  %s 9000 9001 relay    # Listen 9000, probe 9001, enable relay" (%s)  [server.c] */
-    LA_F24,  /* "Error: Invalid port number '%s' (range: 1-65535)" (%s)  [server.c] */
-    LA_F25,  /* "Error: Invalid probe port '%s' (range: 0-65535)" (%s)  [server.c] */
-    LA_F26,  /* "Error: Unknown option '%s' (expected: 'relay')" (%s)  [server.c] */
     LA_F27,  /* "P2P Signaling Server listening on port %d (TCP + UDP)..." (%d)  [server.c] */
-    LA_F28,  /* "Usage: %s [port] [probe_port] [relay]" (%s)  [server.c] */
+    _LA_28,
     _LA_29,
     LA_F30,  /* "[PROBE] NAT_PROBE_ACK -> %s:%d (seq=%u, mapped=%s:%d)\n" (%s,%d,%u,%s,%d)  [server.c] */
     LA_F31,  /* "[SERVER] NAT probe socket listening on port %d" (%d)  [server.c] */
@@ -86,7 +86,7 @@ enum {
     _LA_61,
     _LA_62,
     LA_F63,  /* "[UDP] E: %s: invalid seq=%u\n" (%s,%u)  [server.c] */
-    LA_F64,  /* "[UDP] E: %s: invalid instance_id=0 from %s\n" (%s,%s)  [server.c] */
+    LA_F64,  /* "[UDP] E: %s: invalid sid=0\n" (%s)  [server.c] */
     _LA_65,
     LA_F66,  /* "[UDP] W: PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
     LA_F67,  /* "[UDP] E: %s seq=0 from client %s (server-only, dropped)\n" (%s,%s)  [server.c] */
@@ -323,7 +323,7 @@ enum {
     _LA_298,
     _LA_299,
     _LA_300,
-    LA_F301,  /* "[UDP] W: %s: already has pending msg, rejecting sid=%u\n" (%s,%u)  [server.c] */
+    _LA_301,
     LA_F302,  /* "[UDP] W: %s: no matching pending msg (sid=%u, expected=%u)\n" (%s,%u,%u)  [server.c] */
     LA_F303,  /* "[UDP] W: %s: peer '%s' not online, rejecting sid=%u\n" (%s,%s,%u)  [server.c] */
     LA_F304,  /* "[UDP] W: %s: requester not found for %s\n" (%s,%s)  [server.c] */
@@ -332,7 +332,7 @@ enum {
 };
 
 /* 格式字符串起始位置（用于验证） */
-#define LA_FMT_START LA_F20
+#define LA_FMT_START LA_F27
 
 /* 字符串表 */
 extern const char* lang_en[LA_NUM];

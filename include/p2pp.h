@@ -243,8 +243,8 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   │   [msg][data]           │  msg=消息类型            │
  *   │                         │                        │
  *   │◄── MSG_REQ_ACK ─────────┤  status=0 成功/1 B不在线 │
- *   │   [sid][status]         │  A 停止重发              │
- *   │                         │                         │
+ *   │   [session_id][sid]     │  A 停止重发              │
+ *   │   [status]              │                         │
  *   │                         ├── MSG_REQ ─────────────►│  Server 重发直到收到 RESP
  *   │                         │   [session_id][sid]     │  (relay 标志位=1)
  *   │                         │   [msg][data]           │  B 循环比较 sid：
@@ -255,14 +255,14 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   │                         │   [code][data]          │  code=响应码
  *   │                         │                         │
  *   │                         ├── MSG_RESP_ACK ────────►│  Server 每次收到 RESP 都回 ACK
- *   │                         │   [sid]                 │  B 收到 ACK 后停止重发
+ *   │                         │   [session_id][sid]     │  B 收到 ACK 后停止重发
  *   │                         │                         │
  *   │◄── MSG_RESP ────────────┤  Server 转发第一次 RESP 给 A
- *   │   [sid][code]           │  后续重发直到收到 A 的 ACK
- *   │   [data]                │  (flags 可能标识特殊错误) │
+ *   │   [session_id][sid]     │  后续重发直到收到 A 的 ACK
+ *   │   [code][data]          │  (flags 可能标识特殊错误) │
  *   │                         │                         │
  *   ├── MSG_RESP_ACK ────────►│  流程完成                │
- *   │   [sid]                 │                         │
+ *   │   [session_id][sid]     │                         │
  */
 #define SIG_PKT_MSG_REQ         0x88        // MSG 请求：A→Server（[session_id][sid][msg][data]）；Server→B relay（含 session_id，flags=SIG_MSG_FLAG_RELAY）
 #define SIG_PKT_MSG_REQ_ACK     0x89        // MSG 请求确认：Server→A（已缓存并开始中转，或失败状态）
@@ -431,8 +431,9 @@ typedef struct {
  *   - Server 重发此包直到收到 MSG_RESP
  *
  * MSG_REQ_ACK (Server → A):
- *   payload: [sid(2)][status(1)]
+ *   payload: [session_id(8)][sid(2)][status(1)]
  *   包头: type=0x89, flags=0, seq=0
+ *   - session_id: A 的会话 ID（用于 A 端验证响应合法性）
  *   - sid: 对应的 MSG_REQ 序列号
  *   - status: 0=已缓存并开始向 B 中转；1=目标 B 不在线
  *   - A 收到此包后停止重发
@@ -444,18 +445,26 @@ typedef struct {
  *   - B 重发此包直到收到 Server → B 的 MSG_RESP_ACK
  *
  * MSG_RESP_ACK (Server → B):
- *   payload: [sid(2)]
+ *   payload: [session_id(8)][sid(2)]
  *   包头: type=0x8B, flags=0, seq=0
+ *   - session_id: B 的会话 ID（用于 O(1) 哈希查找）
+ *   - sid: 对应的 MSG_REQ 序列号
  *   - Server 确认收到 B 的 MSG_RESP，B 停止重发
  *
  * MSG_RESP (Server → A, relay):
- *   payload: [sid(2)][msg(1)][data(N)]
+ *   payload: [session_id(8)][sid(2)][msg(1)][data(N)]
  *   包头: type=0x8A, flags=0, seq=0
+ *   - session_id: A 的会话 ID（用于 A 端验证响应合法性）
+ *   - sid: 对应的 MSG_REQ 序列号
+ *   - msg: 响应码
+ *   - data: 响应数据
  *   - Server 重发此包直到收到 A → Server 的 MSG_RESP_ACK
  *
  * MSG_RESP_ACK (A → Server):
- *   payload: [sid(2)]
+ *   payload: [session_id(8)][sid(2)]
  *   包头: type=0x8B, flags=0, seq=0
+ *   - session_id: A 的会话 ID（用于 O(1) 哈希查找）
+ *   - sid: 对应的 MSG_REQ 序列号
  *   - A 收到 Server 转发的 MSG_RESP 后发送，流程完成
  */
 
