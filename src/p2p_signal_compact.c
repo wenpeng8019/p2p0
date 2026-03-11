@@ -1346,7 +1346,7 @@ void compact_on_request_ack(struct p2p_session *s,
 
     // 验证 session_id 是否匹配
     if (session_id != ctx->session_id) {
-        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", LA_F999, 999),
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", 0, 0),
               PROTO, session_id, ctx->session_id);
         return;
     }
@@ -1429,7 +1429,7 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
 
     // 验证 session_id 是否匹配
     if (session_id != ctx->session_id) {
-        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", LA_F999, 999),
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", 0, 0),
               PROTO, session_id, ctx->session_id);
         return;
     }
@@ -1543,9 +1543,9 @@ void compact_on_response_ack(struct p2p_session *s,
 
     // 验证 session_id 是否匹配（可选，增强安全性）
     if (session_id != ctx->session_id) {
-        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", LA_F999, 999),
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")", 0, 0),
               PROTO, session_id, ctx->session_id);
-        // 继续处理，因为 sid 匹配更重要
+        return;
     }
     if (ctx->resp_sid != sid) {
         print("V:", LA_F("%s: ignored for sid=%u (current sid=%u)", LA_F162, 162), PROTO, sid, ctx->resp_sid);

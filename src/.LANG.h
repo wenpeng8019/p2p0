@@ -304,7 +304,7 @@ enum {
     LA_F283,  /* "Send %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
     LA_F284,  /* "Send %s pkt to %s:%d, seq=0, flags=0, len=%d" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F285,  /* "Send %s_ACK pkt to %s:%d, seq=%u, flags=0, len=%d" (%s,%s,%d,%u,%d)  [p2p_signal_compact.c] */
-    LA_F286,  /* "Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=2" (%s,%s,%d)  [p2p_signal_compact.c] */
+    LA_F286,  /* "Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=%d" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F287,  /* "Send offer to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
     LA_F288,  /* "Send window full, dropping packet send_count=%d" (%d)  [p2p_trans_reliable.c] */
     LA_F289,  /* "Sending Allocate Request to %s:%d" (%s,%d)  [p2p_turn.c] */

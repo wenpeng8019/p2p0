@@ -293,7 +293,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F283] = "Send %s pkt to %s:%d, seq=%u, flags=0x%02x, len=%d",  /* SID:283 */
     [LA_F284] = "Send %s pkt to %s:%d, seq=0, flags=0, len=%d",  /* SID:284 */
     [LA_F285] = "Send %s_ACK pkt to %s:%d, seq=%u, flags=0, len=%d",  /* SID:285 */
-    [LA_F286] = "Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=2",  /* SID:286 */
+    [LA_F286] = "Send %s_ACK pkt to %s:%d, seq=0, flags=0, len=%d",  /* SID:286 */
     [LA_F287] = "Send offer to RELAY signaling server failed(%d)",  /* SID:287 */
     [LA_F288] = "Send window full, dropping packet send_count=%d",  /* SID:288 */
     [LA_F289] = "Sending Allocate Request to %s:%d",  /* SID:289 */
