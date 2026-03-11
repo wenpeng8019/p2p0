@@ -758,7 +758,7 @@ static void send_msg_req_ack(sock_t udp_fd, const struct sockaddr_in *to, const 
     nwrite_s(ack + 12, sid);
     ack[14] = status;
 
-    printf("Send MSG_REQ_ACK pkt to %s, seq=0, flags=0, len=11, sid=%u, status=%u, session_id=%" PRIu64 "\n",
+    printf("Send MSG_REQ_ACK pkt to %s, seq=0, flags=0, len=15, sid=%u, status=%u, session_id=%" PRIu64 "\n",
            to_str, sid, status, session_id);
     sendto(udp_fd, (const char *)ack, 15, 0, (const struct sockaddr *)to, sizeof(*to));
 }
@@ -1554,7 +1554,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         printf("Received %s pkt from %s, seq=%u, flags=0x%02x, len=%zu\n",
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < P2P_PEER_ID_MAX) {
+        if (payload_len < 8) {  // session_id(8)
             printf(LA_F("[UDP] E: %s: bad payload(len=%zu)\n", LA_F64, 64), PROTO, payload_len);
             return;
         }
@@ -1989,6 +1989,7 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
         g_compact_pairs[i].info0_sent_time = 0;
         g_compact_pairs[i].rpc_sid = 0;
         g_compact_pairs[i].rpc_state = RPC_STATE_IDLE;
+        g_compact_pairs[i].rpc_data_len = 0;
         g_compact_pairs[i].next_rpc_pending = NULL;
         g_compact_pairs[i].valid = false;
     }
@@ -2186,15 +2187,11 @@ int main(int argc, char *argv[]) {
             last_cleanup = now;
         }
         
-        // 检查并重传未确认的 PEER_INFO 包（每秒检查一次）
-        if (g_info0_pending_head && (now - last_compact_retry_check) >= COMPACT_RETRY_INTERVAL_MS) {
-            retry_info0_pending(udp_fd, now);
+        // 检查并重传未确认的 PEER_INFO 包 + MSG RPC 包（每秒检查一次）
+        if ((now - last_compact_retry_check) >= COMPACT_RETRY_INTERVAL_MS) {
+            if (g_info0_pending_head) retry_info0_pending(udp_fd, now);
+            if (g_rpc_pending_head)   retry_rpc_pending(udp_fd, now);
             last_compact_retry_check = now;
-        }
-
-        // 检查并重传 MSG RPC 包（每秒检查一次）
-        if (g_rpc_pending_head && (now - last_compact_retry_check) >= COMPACT_RETRY_INTERVAL_MS) {
-            retry_rpc_pending(udp_fd, now);
         }
 
         // 设置要监听的套接口 fd
