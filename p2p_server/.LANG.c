@@ -64,7 +64,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F60] = "[TCP] Unknown message type %d from %s\n",  /* SID:60 */
     [LA_F280] = "[TCP] V: %s sent to '%s'\n",  /* SID:280 */
     [LA_F50] = "[TCP] V: Peer '%s' disconnected\n",  /* SID:50 */
-    [LA_F41] = "[TCP] W: Client '%s' timeout (inactive for %ld seconds)\n",  /* SID:41 */
+    [LA_F41] = "[TCP] W: Client '%s' timeout (inactive for %.1f seconds)\n",  /* SID:41 */
     [LA_F67] = "[UDP] E: %s seq=0 from client %s (server-only, dropped)\n",  /* SID:67 */
     [LA_F64] = "[UDP] E: %s: bad payload(len=%zu)\n",  /* SID:64 */
     [LA_F281] = "[UDP] E: %s: data too large (len=%d)\n",  /* SID:281 */
@@ -85,6 +85,6 @@ const char* lang_en[LA_NUM] = {
     [LA_F303] = "[UDP] W: %s: peer '%s' not online, rejecting sid=%u\n",  /* SID:303 */
     [LA_F304] = "[UDP] W: %s: requester not found for %s\n",  /* SID:304 */
     [LA_F66] = "[UDP] W: PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:66 */
-    [LA_F72] = "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %ld seconds)\n",  /* SID:72 */
+    [LA_F72] = "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %.1f seconds)\n",  /* SID:72 */
     [LA_F87] = "[UDP] W: Unknown packet type 0x%02x from %s\n",  /* SID:87 */
 };

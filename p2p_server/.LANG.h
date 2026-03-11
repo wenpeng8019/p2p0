@@ -63,7 +63,7 @@ enum {
     LA_F38,  /* "[TCP] Cached %d candidates for offline user '%s' (total=%d/%d)\n" (%d,%s,%d,%d)  [server.c] */
     LA_F39,  /* "[TCP] Cached %d candidates for offline user '%s', storage now FULL (%d/%d)\n" (%d,%s,%d,%d)  [server.c] */
     LA_F40,  /* "[TCP] Cannot allocate slot for offline user '%s'\n" (%s)  [server.c] */
-    LA_F41,  /* "[TCP] W: Client '%s' timeout (inactive for %ld seconds)\n" (%s,%l)  [server.c] */
+    LA_F41,  /* "[TCP] W: Client '%s' timeout (inactive for %.1f seconds)\n" (%s)  [server.c] */
     LA_F42,  /* "[TCP] Failed to receive payload from %s\n" (%s)  [server.c] */
     LA_F43,  /* "[TCP] Failed to receive target name from %s\n" (%s)  [server.c] */
     LA_F44,  /* "[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n" (%s,%d,%d)  [server.c] */
@@ -94,7 +94,7 @@ enum {
     _LA_69,
     _LA_70,
     _LA_71,
-    LA_F72,  /* "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %ld seconds)\n" (%s,%s,%l)  [server.c] */
+    LA_F72,  /* "[UDP] W: Timeout for pair '%s' -> '%s' (inactive for %.1f seconds)\n" (%s,%s)  [server.c] */
     LA_F73,  /* "[UDP] V: %s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n" (%s,%u,%d)  [server.c] */
     LA_F74,  /* "[UDP] E: REGISTER_ACK sent, status=error (no slot available)\n"  [server.c] */
     LA_F75,  /* "[UDP] I: %s from '%.*s': new instance(old=%u new=%u), resetting session\n" (%s,%u,%u)  [server.c] */
