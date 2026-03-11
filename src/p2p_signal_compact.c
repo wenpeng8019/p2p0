@@ -641,7 +641,7 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
  *
  * 协议：SIG_PKT_REGISTER_ACK (0x81)
  * 包头: [type=0x81 | flags=见下 | seq=0]
- * 负载: [status(1) | session_id(8) | max_candidates(1) | public_ip(4) | public_port(2) | probe_port(2)]
+ * 负载: [status(1) | session_id(8) | instance_id(4) | max_candidates(1) | public_ip(4) | public_port(2) | probe_port(2)]
  *   - status: 0=对端离线, 1=对端在线, >=2=错误码
  *   - session_id: 本端会话 ID（网络字节序，64位）
  *   - max_candidates: 服务器缓存的最大候选数量（0=不支持缓存）
@@ -657,7 +657,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     printf(LA_F("Recv %s pkt from %s:%d, seq=%u, flags=0x%02x, len=%d", LA_F272, 272),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, flags, len);
 
-    if (len < 18) {
+    if (len < 22) {
         print("E:", LA_F("%s: bad payload(len=%d)", LA_F146, 146), PROTO, len);
         return;
     }
@@ -675,10 +675,19 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
+    // 验证 echo instance_id（确保 ACK 对应当前注册请求）
+    uint32_t ack_instance_id = 0;
+    nread_l(&ack_instance_id, payload + 9);
+    if (ack_instance_id != ctx->instance_id) {
+        print("V:", LA_F("%s: stale ACK(ack_inst=%u local_inst=%u), ignored", LA_F348, 348),
+              PROTO, ack_instance_id, ctx->instance_id);
+        return;
+    }
+
     ctx->relay_support = (flags & SIG_REGACK_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
     ctx->msg_support   = (flags & SIG_REGACK_FLAG_MSG)   != 0;      // 服务器是否支持 MSG RPC
     uint64_t ack_session_id = nget_ll(payload + 1);
-    uint8_t max_candidates = payload[9];
+    uint8_t max_candidates = payload[13];
 
     if (ctx->candidates_cached > max_candidates)      // 计算服务器实际缓存的候选数量，作为后续发送 PEER_INFO 包的基准
         ctx->candidates_cached = max_candidates;
@@ -693,11 +702,11 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     // 解析自己的公网地址（服务器主端口探测到的 UDP 源地址）
     memset(&ctx->public_addr, 0, sizeof(ctx->public_addr));
     ctx->public_addr.sin_family = AF_INET;
-    memcpy(&ctx->public_addr.sin_addr.s_addr, payload + 10, 4);
-    memcpy(&ctx->public_addr.sin_port, payload + 14, 2);
+    memcpy(&ctx->public_addr.sin_addr.s_addr, payload + 14, 4);
+    memcpy(&ctx->public_addr.sin_port, payload + 18, 2);
 
     // 解析服务器提供的 NAT 探测端口，0 表示服务器不支持
-    nread_s(&ctx->probe_port, payload + 16);
+    nread_s(&ctx->probe_port, payload + 20);
 
     // REGISTER_ACK 直接下发本端 session_id
     if (!ctx->session_id) ctx->session_id = ack_session_id;

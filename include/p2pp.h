@@ -167,7 +167,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 由于 UDP 包大小限制，候选列表需要分批传输。通过序列化的 PEER_INFO 包完成可靠同步：
  *
  *   1. 注册阶段（仅发送一次）：
- *      - 客户端发送 REGISTER（含 UDP 包可容纳的最大候选列表）
+ *      - 客户端发送 REGISTER（含 instance_id 与 UDP 包可容纳的最大候选列表）
  *      - 服务器回复 REGISTER_ACK（告知缓存能力 max_candidates）
  *        · max_candidates = 0: 不支持缓存
  *        · max_candidates > 0: 支持缓存，最大缓存数量
@@ -206,7 +206,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 
 /* COMPACT 信令协议 (客户端 <-> 信令服务器) - 0x80-0x9F */
-#define SIG_PKT_REGISTER        0x80        // 注册到信令服务器（含本地候选列表）
+#define SIG_PKT_REGISTER        0x80        // 注册到信令服务器（含本地候选列表与 instance_id）
 #define SIG_PKT_REGISTER_ACK    0x81        // 注册确认（告知 session_id、本端缓存能力、公网地址、探测端口、中继支持）
 #define SIG_PKT_UNREGISTER      0x82        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
                                             // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
@@ -318,19 +318,31 @@ typedef struct {
  * COMPACT 模式消息格式（以下均为 payload 部分，前面需加 4 字节包头）:
  *
  * REGISTER:
- *   payload: [local_peer_id(32)][remote_peer_id(32)][candidate_count(1)][candidates(N*7)]
+ *   payload: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
  *   包头: type=0x80, flags=0, seq=0
+ *   - instance_id: 本次 connect() 的实例 ID（网络字节序，32位，必须非 0）
+ *   - 语义:
+ *       * instance_id 相同: 视为 REGISTER 重传（例如客户端未收到 REGISTER_ACK）
+ *       * instance_id 不同: 视为同一 peer_key 的新实例（客户端重启/重连），服务端重置旧会话状态
  *
  * REGISTER_ACK:
- *   payload: [status(1)][session_id(8)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
+ *   payload: [status(1)][session_id(8)][instance_id(4)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
  *   包头: type=0x81, flags=见下, seq=0
  *   - status: 0=对端离线, 1=对端在线, >=2=错误码
  *   - session_id: 本端会话 ID（网络字节序，64位，注册成功后立即分配）
+ *   - instance_id: 回显客户端 REGISTER 中的 instance_id（网络字节序，32位）
+ *     客户端收到后应比较 instance_id 与当前实例是否一致，不一致则丢弃此 ACK
  *   - max_candidates: 服务器为该对端缓存的最大候选数量（0=不支持缓存）
  *   - public_ip/port: 客户端的公网地址（服务器主端口观察到的 UDP 源地址）
  *   - probe_port: NAT 探测端口（0=不支持探测）
  *   - flags: 包头的 flags 字段可设置 SIG_REGACK_FLAG_RELAY (0x01) 表示服务器支持中继
- *   总大小: 4(包头) + 18(payload) = 22 字节
+ *   总大小: 4(包头) + 22(payload) = 26 字节
+ *
+ * UNREGISTER:
+ *   payload: [local_peer_id(32)][remote_peer_id(32)]
+ *   包头: type=0x88, flags=0, seq=0
+ *   客户端主动断开时发送，请求服务器立即释放配对槽位
+ *   服务器收到后会向对端发送 PEER_OFF 通知
  *
  * ALIVE:
  *   payload: [session_id(8)]
@@ -342,6 +354,13 @@ typedef struct {
  *   payload: 空（仅包头）
  *   包头: type=0x87, flags=0, seq=0
  *   服务器回复确认，表示槽位仍然有效
+ *
+ * PEER_OFF:
+ *   payload: [session_id(8)]
+ *   包头: type=0x89, flags=0, seq=0
+ *   服务器下行通知：对端已离线/断开连接
+ *   - session_id: 已断开的会话 ID（网络字节序，64位）
+ *   客户端收到此包后应停止该会话的所有传输和重传
  *
  * PEER_INFO:
  *   payload: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
@@ -376,6 +395,27 @@ typedef struct {
  *   - probe_ip/port: 服务器在探测端口观察到的客户端源地址（第二次映射）
  *   - seq: 复制请求包的 seq，用于客户端匹配响应
  *
+ * RELAY_DATA:
+ *   payload: [session_id(8)][data(N)]
+ *   包头: type=0xA0, flags=0, seq=数据序列号
+ *   - session_id: 会话 ID（网络字节序，64位，用于服务器查找目标对端）
+ *   - data: 实际数据内容（UDP 保留消息边界，无需 data_len 字段）
+ *   用于在 P2P 打洞失败后，通过服务器中继转发数据
+ *
+ * RELAY_ACK:
+ *   payload: [session_id(8)][ack_seq(2)][sack(4)]
+ *   包头: type=0xA1, flags=0, seq=0
+ *   - session_id: 会话 ID（网络字节序，64位）
+ *   - ack_seq: 累积确认序列号（网络字节序）
+ *   - sack: 选择性确认位图（网络字节序）
+ * 
+ * RELAY_CRYPTO:
+ *   payload: [session_id(8)][crypto_data(N)]
+ *   包头: type=0xA2, flags=0, seq=0
+ *   - session_id: 会话 ID（网络字节序，64位）
+ *   - crypto_data: DTLS 握手或加密数据（UDP 保留消息边界，无需 data_len 字段）
+ *     用于在 P2P 打洞失败后，通过服务器中继转发 DTLS 握手和加密数据
+ * 
  * MSG_REQ (A → Server):
  *   payload: [session_id(8)][sid(2)][msg(1)][data(N)]
  *   包头: type=0x88, flags=0, seq=0
@@ -417,33 +457,6 @@ typedef struct {
  *   payload: [sid(2)]
  *   包头: type=0x8B, flags=0, seq=0
  *   - A 收到 Server 转发的 MSG_RESP 后发送，流程完成
- *
- * UNREGISTER:
- *   payload: [local_peer_id(32)][remote_peer_id(32)]
- *   包头: type=0x88, flags=0, seq=0
- *   客户端主动断开时发送，请求服务器立即释放配对槽位
- *   服务器收到后会向对端发送 PEER_OFF 通知
- *
- * PEER_OFF:
- *   payload: [session_id(8)]
- *   包头: type=0x89, flags=0, seq=0
- *   服务器下行通知：对端已离线/断开连接
- *   - session_id: 已断开的会话 ID（网络字节序，64位）
- *   客户端收到此包后应停止该会话的所有传输和重传
- *
- * RELAY_DATA:
- *   payload: [session_id(8)][data(N)]
- *   包头: type=0xA0, flags=0, seq=数据序列号
- *   - session_id: 会话 ID（网络字节序，64位，用于服务器查找目标对端）
- *   - data: 实际数据内容（UDP 保留消息边界，无需 data_len 字段）
- *   用于在 P2P 打洞失败后，通过服务器中继转发数据
- *
- * RELAY_ACK:
- *   payload: [session_id(8)][ack_seq(2)][sack(4)]
- *   包头: type=0xA1, flags=0, seq=0
- *   - session_id: 会话 ID（网络字节序，64位）
- *   - ack_seq: 累积确认序列号（网络字节序）
- *   - sack: 选择性确认位图（网络字节序）
  */
 
 /* ============================================================================

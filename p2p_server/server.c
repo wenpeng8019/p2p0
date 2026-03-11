@@ -634,10 +634,10 @@ static void cleanup_relay_clients(void) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// 发送 REGISTER_ACK: [hdr(4)][status(1)][session_id(8)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] = 22字节
+// 发送 REGISTER_ACK: [hdr(4)][status(1)][session_id(8)][instance_id(4)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] = 26字节
 // status: SIG_REGACK_PEER_OFFLINE(0) / SIG_REGACK_PEER_ONLINE(1) / 2(error)
-static void send_register_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str, uint8_t status, uint64_t session_id) {
-    uint8_t ack[22];
+static void send_register_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str, uint8_t status, uint64_t session_id, uint32_t instance_id) {
+    uint8_t ack[26];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)ack;
     hdr->type = SIG_PKT_REGISTER_ACK;
     hdr->flags = 0;
@@ -648,26 +648,27 @@ static void send_register_ack(sock_t udp_fd, const struct sockaddr_in *to, const
         if (g_msg_enabled)   hdr->flags |= SIG_REGACK_FLAG_MSG;
         ack[4] = status;
         nwrite_ll(ack + 5, session_id);
-        ack[13] = MAX_CANDIDATES;
-        memcpy(ack + 14, &to->sin_addr.s_addr, 4);
-        memcpy(ack + 18, &to->sin_port, 2);
+        nwrite_l(ack + 13, instance_id);
+        ack[17] = MAX_CANDIDATES;
+        memcpy(ack + 18, &to->sin_addr.s_addr, 4);
+        memcpy(ack + 22, &to->sin_port, 2);
         uint16_t probe = htons(g_probe_port);
-        memcpy(ack + 20, &probe, 2);
+        memcpy(ack + 24, &probe, 2);
     } else {
         ack[4] = status;
-        memset(ack + 5, 0, 17);
+        memset(ack + 5, 0, 21);
     }
 
-    printf("Send REGISTER_ACK pkt to %s, seq=0, flags=0x%02x, status=%u, len=22, ses_id=%" PRIu64 "\n",
-           to_str, hdr->flags, ack[4], session_id);
-    sendto(udp_fd, (const char *)ack, 22, 0, (const struct sockaddr *)to, sizeof(*to));
+    printf("Send REGISTER_ACK pkt to %s, seq=0, flags=0x%02x, status=%u, len=26, ses_id=%" PRIu64 ", inst_id=%u\n",
+           to_str, hdr->flags, ack[4], session_id, instance_id);
+    sendto(udp_fd, (const char *)ack, 26, 0, (const struct sockaddr *)to, sizeof(*to));
 
     if (status <= 1) {
-         printf(LA_F("[UDP] V: REGISTER_ACK sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d, ses_id=%" PRIu64 "\n", 0),
+         printf(LA_F("[UDP] V: REGISTER_ACK sent, status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d, ses_id=%" PRIu64 ", inst_id=%u\n", 0),
                status ? "peer_online" : "peer_offline",
                MAX_CANDIDATES,
                g_relay_enabled ? "yes" : "no",
-             inet_ntoa(to->sin_addr), ntohs(to->sin_port), g_probe_port, session_id);
+             inet_ntoa(to->sin_addr), ntohs(to->sin_port), g_probe_port, session_id, instance_id);
     } else {
         printf(LA_F("[UDP] E: REGISTER_ACK sent, status=error (no slot available)\n", LA_F74, 74));
     }
@@ -1261,7 +1262,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 local->peer = NULL;
             }
             uint8_t status = (local->peer != NULL) ? SIG_REGACK_PEER_ONLINE : SIG_REGACK_PEER_OFFLINE;
-            send_register_ack(udp_fd, from, from_str, status, local->session_id);
+            send_register_ack(udp_fd, from, from_str, status, local->session_id, instance_id);
             return;
         }
 
@@ -1330,7 +1331,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             }
             // 无法分配槽位，发送错误 ACK
             if (i == MAX_PEERS) {
-                send_register_ack(udp_fd, from, from_str, 2, 0);
+                send_register_ack(udp_fd, from, from_str, 2, 0, instance_id);
                 return;
             }
         }
@@ -1395,7 +1396,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         // 发送 REGISTER_ACK（无需确认重发，客户端会在收到 ACK 前一直重试注册请求）
         {
             uint8_t status = (remote_idx >= 0) ? SIG_REGACK_PEER_ONLINE : SIG_REGACK_PEER_OFFLINE;
-            send_register_ack(udp_fd, from, from_str, status, local->session_id);
+            send_register_ack(udp_fd, from, from_str, status, local->session_id, instance_id);
         }
 
         if (remote_idx >= 0) {

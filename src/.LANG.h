@@ -366,6 +366,7 @@ enum {
     LA_F345,  /* "✗ Cannot add Srflx candidate: realloc failed (OOM)"  [p2p_stun.c] */
     LA_F346,  /* "%s: invalid session_id=0" (%s)  [p2p_signal_compact.c] */
     LA_F347,  /* "%s skipped: session_id=0" (%s)  [p2p_signal_compact.c] */
+    LA_F348,  /* "%s: stale ACK(ack_inst=%u local_inst=%u), ignored" (%s,%u,%u)  [p2p_signal_compact.c] */
 
     LA_NUM
 };

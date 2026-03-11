@@ -62,6 +62,7 @@ typedef struct {
 typedef struct {
     uint8_t status;          // 0=离线, 1=在线, >=2=error
     uint64_t session_id;     // 本端会话 ID（REGISTER_ACK 下发）
+    uint32_t instance_id;    // 回显客户端的 instance_id
     uint8_t max_candidates;  // 服务器缓存能力
     uint32_t public_ip;      // 客户端的公网 IP
     uint16_t public_port;    // 客户端的公网端口
@@ -929,9 +930,9 @@ TEST(protocol_number_verification) {
 TEST(packet_size_verification) {
     TEST_LOG("Testing packet size calculations");
     
-    // REGISTER_ACK: 4(header) + 18(payload) = 22 bytes
+    // REGISTER_ACK: 4(header) + 22(payload) = 26 bytes
     size_t register_ack_size = sizeof(test_pkt_hdr_t) + sizeof(test_register_ack_t);
-    TEST_LOG("  REGISTER_ACK size: %zu bytes (expected 22)", register_ack_size);
+    TEST_LOG("  REGISTER_ACK size: %zu bytes (expected 26)", register_ack_size);
     
     // 候选结构: 7 bytes (type + ip + port)
     size_t candidate_size = sizeof(test_candidate_t);

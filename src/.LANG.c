@@ -195,6 +195,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F186] = "%s: sent MSG(msg=0, sid=%u)",  /* SID:186 */
     [LA_F187] = "%s: sent, sid=%u, code=%u, size=%d",  /* SID:187 */
     [LA_F188] = "%s: skip and mark NAT as OPEN (lan_punch enabled)",  /* SID:188 */
+    [LA_F348] = "%s: stale ACK(ack_inst=%u local_inst=%u), ignored",  /* SID:348 */
     [LA_F189] = "%s: start punching all(%d) remote candidates",  /* SID:189 */
     [LA_F190] = "%s: started, sending first probe",  /* SID:190 */
     [LA_F191] = "%s: status error(%d)",  /* SID:191 */
