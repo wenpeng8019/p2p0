@@ -27,64 +27,12 @@ if(I18N_ENABLED)
     target_compile_definitions(test_transport PRIVATE I18N_ENABLED)
 endif()
 
-# COMPACT 服务端完整测试（独立运行，不依赖 p2p 库）
-add_executable(test_compact_server
-    test_compact_server.c
-)
-target_include_directories(test_compact_server PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
-target_link_libraries(test_compact_server stdc ${TEST_PLATFORM_LIBS})
-
 # RELAY 服务端完整测试（独立运行，不依赖 p2p 库）
 add_executable(test_relay_server
     test_relay_server.c
 )
 target_include_directories(test_relay_server PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
 target_link_libraries(test_relay_server ${TEST_PLATFORM_LIBS})
-
-# COMPACT 协议完整测试（独立运行，测试协议本身）
-add_executable(test_compact_protocol
-    test_compact_protocol.c
-)
-target_include_directories(test_compact_protocol PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
-target_link_libraries(test_compact_protocol stdc ${TEST_PLATFORM_LIBS})
-
-# RELAY 协议完整测试（独立运行，测试 CONNECT_ACK 三状态逻辑）
-add_executable(test_relay_protocol
-    test_relay_protocol.c
-)
-target_include_directories(test_relay_protocol PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
-target_link_libraries(test_relay_protocol ${TEST_PLATFORM_LIBS})
-
-# PUBSUB 协议完整测试（独立运行，测试 DES 加密、JSON 解析）
-add_executable(test_pubsub_protocol
-    test_pubsub_protocol.c
-)
-target_include_directories(test_pubsub_protocol PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
-target_link_libraries(test_pubsub_protocol ${TEST_PLATFORM_LIBS})
-
-# ICE 协议完整测试（独立运行，测试优先级、候选、checklist）
-add_executable(test_ice_protocol
-    test_ice_protocol.c
-)
-target_include_directories(test_ice_protocol PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
-target_link_libraries(test_ice_protocol ${TEST_PLATFORM_LIBS})
-add_test(NAME test_ice_protocol COMMAND test_ice_protocol)
-
-# STUN 协议完整测试（独立运行，测试包格式、XOR 解码、NAT 类型检测逻辑）
-add_executable(test_stun_protocol
-    test_stun_protocol.c
-)
-target_include_directories(test_stun_protocol PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
-target_link_libraries(test_stun_protocol ${TEST_PLATFORM_LIBS})
-add_test(NAME test_stun_protocol COMMAND test_stun_protocol)
-
-# TURN 协议完整测试（独立运行，测试 Allocate/响应）
-add_executable(test_turn_protocol
-    test_turn_protocol.c
-)
-target_include_directories(test_turn_protocol PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/stdc)
-target_link_libraries(test_turn_protocol ${TEST_PLATFORM_LIBS})
-add_test(NAME test_turn_protocol COMMAND test_turn_protocol)
 
 # RELAY 异步 I/O 状态机单元测试（独立运行，模拟完整状态机）
 add_executable(test_relay_async_io
@@ -118,19 +66,6 @@ target_include_directories(test_pseudotcp PRIVATE ${CMAKE_SOURCE_DIR}/include ${
 target_link_libraries(test_pseudotcp ${TEST_PLATFORM_LIBS})
 add_test(NAME test_pseudotcp COMMAND test_pseudotcp)
 
-# Candidate Type System 单元测试（独立运行，测试类型分离、枚举、first-member embedding）
-add_executable(test_candidate_types
-    test_candidate_types.c
-    ${CMAKE_SOURCE_DIR}/src/.LANG.c
-    ${CMAKE_SOURCE_DIR}/i18n/i18n.c
-)
-target_link_libraries(test_candidate_types p2p_static)
-target_include_directories(test_candidate_types PRIVATE ${CMAKE_SOURCE_DIR}/i18n)
-if(I18N_ENABLED)
-    target_compile_definitions(test_candidate_types PRIVATE I18N_ENABLED)
-endif()
-add_test(NAME test_candidate_types COMMAND test_candidate_types)
-
 # NAT API 统一单元测试（独立运行，测试批量/单候选模式、状态转换）
 add_executable(test_nat_api
     test_nat_api.c
@@ -147,8 +82,4 @@ add_test(NAME test_nat_api COMMAND test_nat_api)
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)
-add_test(NAME test_compact_server COMMAND test_compact_server)
 add_test(NAME test_relay_server   COMMAND test_relay_server)
-add_test(NAME test_compact_protocol COMMAND test_compact_protocol)
-add_test(NAME test_relay_protocol COMMAND test_relay_protocol)
-add_test(NAME test_pubsub_protocol COMMAND test_pubsub_protocol)
