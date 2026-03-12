@@ -81,7 +81,7 @@ static void on_instrument_log(uint16_t rid, uint8_t chn, const char* tag, char *
         case LOG_SLOT_ERROR:   color = "\033[31m"; break;
         default:               color = "\033[37m"; break;
     }
-    printf("%s    [SERVER] %s: %s\033[0m\n", color, tag, txt);
+    fprintf(stdout, "%s    [SERVER] %s: %s\033[0m\n", color, tag, txt);
 }
 
 // 清空日志缓存
