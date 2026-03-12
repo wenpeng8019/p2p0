@@ -35,6 +35,10 @@ ret_t udp_send_to(sock_t sock, const struct sockaddr_in *addr,
                   const void *buf, int len) {
     ssize_t n = sendto(sock, (const char *)buf, len, 0,
                        (const struct sockaddr *)addr, sizeof(*addr));
+    if (n != len) {
+        int e = P_sock_errno();
+        return e ? E_EXTERNAL(e) : E_UNKNOWN;
+    }
     return (int)n;
 }
 
@@ -44,9 +48,9 @@ ret_t udp_recv_from(sock_t sock, struct sockaddr_in *from,
     ssize_t n = recvfrom(sock, (char *)buf, max_len, 0,
                          (struct sockaddr *)from, &fromlen);
     if (n < 0) {
+        if (P_sock_is_wouldblock()) return E_BUSY;
         int e = P_sock_errno();
-        if (e == EAGAIN || e == EWOULDBLOCK) return 0;
-        return -1;
+        return e ? E_EXTERNAL(e) : E_UNKNOWN;
     }
     return (int)n;
 }
@@ -55,11 +59,12 @@ ret_t udp_send_packet(sock_t sock, const struct sockaddr_in *addr,
                       uint8_t type, uint8_t flags, uint16_t seq,
                       const void *payload, int payload_len) {
     uint8_t buf[P2P_MTU];
-    if (P2P_HDR_SIZE + payload_len > P2P_MTU) return -1;
+    int total = P2P_HDR_SIZE + payload_len;
+    if (total > P2P_MTU) return E_INVALID;
 
     p2p_pkt_hdr_encode(buf, type, flags, seq);
     if (payload_len > 0 && payload)
         memcpy(buf + P2P_HDR_SIZE, payload, payload_len);
 
-    return udp_send_to(sock, addr, buf, P2P_HDR_SIZE + payload_len);
+    return udp_send_to(sock, addr, buf, total);
 }

@@ -494,22 +494,26 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
 
         /* 将中继地址加入本地 ICE 候选 */
         int idx = p2p_cand_push_local(s);
-        if (idx >= 0) {
-            p2p_candidate_entry_t *c = &s->local_cands[idx];
-            c->type = P2P_CAND_RELAY;
-            c->addr = relay;
-            c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
-
-            print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F231, 231),
-                  inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
-
-            if (s->turn_pending > 0) s->turn_pending--;
-
-            if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
-                p2p_signal_compact_trickle_turn(s);
-            else
-                p2p_ice_send_local_candidate(s, c);
+        if (idx < 0) {
+            print("E: %s", "Push TURN relay candidate failed(OOM)");
+            return -1;
         }
+        
+        p2p_candidate_entry_t *c = &s->local_cands[idx];
+        c->type = P2P_CAND_RELAY;
+        c->addr = relay;
+        c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
+
+        print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F231, 231),
+                inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+
+        if (s->turn_pending > 0) s->turn_pending--;
+
+        if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+            p2p_signal_compact_trickle_turn(s);
+        else
+            p2p_ice_send_local_candidate(s, c);
+
         return 0;
     }
 

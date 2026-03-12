@@ -208,8 +208,13 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
               unpack_candidate(&parsed, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
 
             int idx = p2p_upsert_remote_candidate(s, &parsed.addr, parsed.type, false);
-              if (idx < 0) break;  /* OOM */
-              p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
+            if (idx < 0) {
+                 print("E:", LA_S("%s: unpack upsert remote cand<%s:%d> failed(OOM)\n", LA_S62, 62),
+                       inet_ntoa(parsed.addr.sin_addr), ntohs(parsed.addr.sin_port));
+                break;
+            }
+
+            p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
             print("I:", LA_F("Received remote candidate: type=%d, address=%s:%d", LA_F265, 265),
                  c->cand.type, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
             

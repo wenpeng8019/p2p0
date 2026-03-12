@@ -220,7 +220,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     int remote_cnt_before = s->remote_cand_cnt;
     int cand_idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
     if (cand_idx < 0) {
-        print("E:", LA_F("%s: failed to track cand<%s:%d>, dropping", LA_F158, 158),
+        print("E:", LA_F("%s: track upsert remote cand<%s:%d> failed(OOM), dropping", LA_F158, 158),
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return;
     }
@@ -311,7 +311,7 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     int cand_idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
     if (cand_idx < 0) {
-        print("E:", LA_F("%s: failed to track cand<%s:%d>, dropping", LA_F158, 158),
+        print("E:", LA_F("%s: track upsert remote cand<%s:%d> failed(OOM), dropping", LA_F158, 158),
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return;
     }

@@ -489,7 +489,11 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                     if (sa->sin_family != AF_INET) continue;
 
                     int idx = p2p_cand_push_local(s);
-                    if (idx < 0) break;
+                    if (idx < 0) {
+                        print("E:", LA_S("Push host cand<%s:%d> failed(OOM)\n", LA_S351, 351),
+                                  inet_ntoa(sa->sin_addr), ntohs(sa->sin_port));
+                        return idx;
+                    }
                     p2p_candidate_entry_t *c = &s->local_cands[idx];
                     c->type = P2P_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
@@ -497,7 +501,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                     host_index++;
                     memcpy(&c->addr, sa, sizeof(struct sockaddr_in));
                     c->addr.sin_port = loc.sin_port;
-                    print("I:", LA_F("Gathered Host Candidate: %s:%d (priority=0x%08x)",LA_F230, 230
+                    print("I:", LA_F("Gathered host cand<%s:%d> (priority=0x%08x)",LA_F230, 230),
                            inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                     p2p_ice_send_local_candidate(s, c);
                 }
@@ -513,18 +517,22 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                 if (ifa->ifa_flags & IFF_LOOPBACK) continue;
 
                 int idx = p2p_cand_push_local(s);
-                if (idx >= 0) {
-                    p2p_candidate_entry_t *c = &s->local_cands[idx];
-                    c->type = P2P_CAND_HOST;
-                    uint16_t local_pref = (uint16_t)(65535 - host_index);
-                    c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
-                    host_index++;
-                    memcpy(&c->addr, ifa->ifa_addr, sizeof(struct sockaddr_in));
-                    c->addr.sin_port = loc.sin_port;
-                    print("I:", LA_F("Gathered Host Candidate: %s:%d (priority=0x%08x)", LA_F230, 230),
-                           inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
-                    p2p_ice_send_local_candidate(s, c);
+                if (idx < 0) {
+                    print("E:", LA_S("Push host cand<%s:%d> failed(OOM)\n", LA_S351, 351),
+                          inet_ntoa(((struct sockaddr_in *)ifa->ifa_addr)->sin_addr),
+                          ntohs(((struct sockaddr_in *)ifa->ifa_addr)->sin_port));
+                    return idx;
                 }
+                p2p_candidate_entry_t *c = &s->local_cands[idx];
+                c->type = P2P_CAND_HOST;
+                uint16_t local_pref = (uint16_t)(65535 - host_index);
+                c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
+                host_index++;
+                memcpy(&c->addr, ifa->ifa_addr, sizeof(struct sockaddr_in));
+                c->addr.sin_port = loc.sin_port;
+                print("I:", LA_F("Gathered host cand<%s:%d> (priority=0x%08x)", LA_F230, 230),
+                        inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                p2p_ice_send_local_candidate(s, c);
             }
             freeifaddrs(ifaddr);
         }
@@ -614,11 +622,15 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
         offset += 6;
 
         int idx = p2p_upsert_remote_candidate(s, &caddr, (int)ctype, false);
-        if (idx >= 0) {
-            p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
-            print("I:", LA_F("Received New Remote Candidate: %d -> %s:%d", LA_F261, 261),
-                   c->cand.type, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
+        if (idx < 0) {
+            print("E:", LA_F("Upsert remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F353, 353),
+                   inet_ntoa(caddr.sin_addr), ntohs(caddr.sin_port), ctype);
+            return;
         }
+
+        p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
+        print("I:", LA_F("Recv New Remote Candidate<%s:%d> (type=%d)", LA_F261, 261),
+              inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port), c->cand.type);
     }
 }
 
@@ -640,7 +652,7 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
 void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) {
     if (s->ice_ctx.state == P2P_ICE_STATE_COMPLETED) return;
 
-    /* 查找对应的远端候选 */
+    // 查找对应的远端候选
     int matched_idx = -1;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         if (s->remote_cands[i].cand.addr.sin_addr.s_addr == from->sin_addr.s_addr &&
@@ -655,16 +667,17 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
      * 只要 IP 与某个已知候选匹配（或任意来源），均接受。 */
     if (matched_idx < 0) {
         int idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
-        if (idx >= 0) {
-            matched_idx = idx;
-            print("I:", LA_F("[prflx] Received New Remote Candidate %s:%d (Peer Reflexive - symmetric NAT)", LA_F331, 331),
-                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-        } else {
-            /* OOM，直接用该地址建立连接 */
-            matched_idx = -2;
+        if (idx < 0) {
+            print("E:", LA_F("Upsert remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F353, 353),
+                   inet_ntoa(from->sin_addr), ntohs(from->sin_port), P2P_CAND_PRFLX);
+            return;
         }
+        matched_idx = idx;
+        print("I:", LA_F("Recv New Remote Candidate<%s:%d> (Peer Reflexive - symmetric NAT)", LA_F331, 331),
+                        inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 
+    // fixme: matched_idx < 0 == P2P_ICE_CAND_PRFLX ?
     const char *cand_type_str = "Unknown";
     const char *connection_desc = "";
     p2p_ice_cand_type_t ctype = (matched_idx >= 0)

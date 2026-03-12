@@ -691,6 +691,12 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                         p2p_candidate_entry_t c;
                         unpack_candidate(&c, ctx->read_payload + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
                         int idx = p2p_upsert_remote_candidate(s, &c.addr, c.type, false);
+                        if (idx < 0) {
+                            print("E:", LA_S("%s: unpack upsert remote cand<%s:%d> failed(OOM)\n", LA_S62, 62),
+                                  inet_ntoa(c.addr.sin_addr), ntohs(c.addr.sin_port));
+                            break;
+                        }
+                        
                         if (idx >= 0) {
                             p2p_remote_candidate_entry_t *rc = &s->remote_cands[idx];
 

@@ -461,9 +461,13 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             if (!s->cfg.skip_host_candidates) {
                 for (int i = 0; i < s->route.addr_count; i++) {
                     int idx = p2p_cand_push_local(s);
-                    if (idx < 0) break;
-                    p2p_candidate_entry_t *c = &s->local_cands[idx];
+                    if (idx < 0) {
+                        print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S352, 352),
+                              inet_ntoa(s->route.local_addrs[i].sin_addr), ntohs(s->route.local_addrs[i].sin_port));
+                        return idx;
+                    }
 
+                    p2p_candidate_entry_t *c = &s->local_cands[idx];
                     c->type = P2P_CAND_HOST;
                     c->addr = s->route.local_addrs[i];
                     c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
