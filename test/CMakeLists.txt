@@ -90,6 +90,16 @@ target_include_directories(test_compact_server_instrument PRIVATE
 target_link_libraries(test_compact_server_instrument stdc ${TEST_PLATFORM_LIBS})
 # 注：此测试需要手动运行 server，不加入自动测试
 
+# COMPACT REGISTER 协议单元测试
+add_executable(test_compact_register
+    test_compact_register.c
+)
+target_include_directories(test_compact_register PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_compact_register stdc ${TEST_PLATFORM_LIBS})
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)

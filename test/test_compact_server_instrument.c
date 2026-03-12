@@ -158,6 +158,7 @@ static void parse_register_ack(const uint8_t *buf, int len) {
 }
 
 int main(int argc, char *argv[]) {
+
     int server_port = DEFAULT_SERVER_PORT;
     const char *server_host = DEFAULT_SERVER_HOST;
     const char *server_path = NULL;
@@ -184,6 +185,7 @@ int main(int argc, char *argv[]) {
     printf("\n");
     
     // 1. 启动 instrument 监听
+    instrument_local();  // 本地模式：不广播自己的日志
     printf("[1] Starting instrument listener...\n");
     ret_t ret = instrument_listen(on_instrument_log);
     if (ret != E_NONE) {
