@@ -59,7 +59,10 @@ static int g_tests_failed = 0;
 ///////////////////////////////////////////////////////////////////////////////
 
 static void on_instrument_log(uint16_t rid, uint8_t chn, const char* tag, char *txt, int len) {
-    (void)rid; (void)len;
+    (void)len;
+    
+    // 忽略本地进程的日志（rid=0），只收集 server 子进程的
+    if (rid == 0) return;
     
     // 保存日志（注意：instrument 回调在独立线程，简单测试允许 race）
     int idx = g_log_count;
@@ -81,7 +84,7 @@ static void on_instrument_log(uint16_t rid, uint8_t chn, const char* tag, char *
         case LOG_SLOT_ERROR:   color = "\033[31m"; break;
         default:               color = "\033[37m"; break;
     }
-    fprintf(stdout, "%s    [SERVER] %s: %s\033[0m\n", color, tag, txt);
+    printf("%s    [SERVER] %s: %s\033[0m\n", color, tag, txt);
 }
 
 // 清空日志缓存
