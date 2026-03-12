@@ -45,6 +45,7 @@
 ARGS_I(false, port,       'p', "port",       "Signaling server listen port (TCP+UDP)");
 ARGS_I(false, probe_port, 'P', "probe-port", "NAT type detection port (0=disabled)");
 ARGS_B(false, relay,      'r', "relay",      "Enable data relay support (COMPACT mode fallback)");
+ARGS_B(false, msg,        'm', "msg",        "Enable MSG RPC support");
 ARGS_B(false, cn,         0,   "cn",         "Use Chinese language");
 
 #define DEFAULT_PORT                    9333
@@ -171,11 +172,6 @@ static compact_pair_t*      g_info0_pending_rear = NULL;
 // MSG RPC 待确认链表（统一管理 REQ 和 RESP 阶段，通过 rpc_state 区分）
 static compact_pair_t*      g_rpc_pending_head = NULL;
 static compact_pair_t*      g_rpc_pending_rear = NULL;
-
-// 服务器配置（运行时参数）
-static int                  g_probe_port = 0;                   // compact 模式 NAT 探测端口（0=不支持探测）
-static bool                 g_relay_enabled = false;            // compact 模式是否支持中继功能
-static bool                 g_msg_enabled = true;               // compact 模式是否支持 MSG RPC（默认启用）
 
 // 全局运行状态标志（用于信号处理）
 static volatile sig_atomic_t g_running = 1;
@@ -639,22 +635,22 @@ static void send_register_ack(sock_t udp_fd, const struct sockaddr_in *to, const
     hdr->seq = 0;
 
     if (status <= 1) {
-        if (g_relay_enabled) hdr->flags |= SIG_REGACK_FLAG_RELAY;
-        if (g_msg_enabled)   hdr->flags |= SIG_REGACK_FLAG_MSG;
+        if (ARGS_relay.i64)    hdr->flags |= SIG_REGACK_FLAG_RELAY;
+        if (ARGS_msg.i64)      hdr->flags |= SIG_REGACK_FLAG_MSG;
         ack[4] = status;
         nwrite_ll(ack + 5, session_id);
         nwrite_l(ack + 13, instance_id);
         ack[17] = MAX_CANDIDATES;
         memcpy(ack + 18, &to->sin_addr.s_addr, 4);
         memcpy(ack + 22, &to->sin_port, 2);
-        uint16_t probe = htons(g_probe_port);
+        uint16_t probe = htons((uint16_t)ARGS_probe_port.i64);
         memcpy(ack + 24, &probe, 2);
 
-        print("V:", LA_F("Send %s: status=%s, max_cands=%d, relay=%s, public=%s:%d, probe=%d, ses_id=%" PRIu64 ", inst_id=%u\n", 0, 0),
+        print("V:", LA_F("Send %s: status=%s, max_cands=%d, relay=%s, msg=%s, public=%s:%d, probe=%d, ses_id=%" PRIu64 ", inst_id=%u\n", 0, 0),
               PROTO, status ? "peer_online" : "peer_offline", MAX_CANDIDATES,
-              g_relay_enabled ? "yes" : "no",
+              ARGS_relay.i64 ? "yes" : "no", ARGS_msg.i64 ? "yes" : "no",
               inet_ntoa(to->sin_addr), ntohs(to->sin_port), 
-              g_probe_port, session_id, instance_id);
+              (int)ARGS_probe_port.i64, session_id, instance_id);
     } else {
         
         ack[4] = status;
@@ -2119,6 +2115,7 @@ int main(int argc, char *argv[]) {
             &ARGS_DEF_port,
             &ARGS_DEF_probe_port,
             &ARGS_DEF_relay,
+            &ARGS_DEF_msg,
             &ARGS_DEF_cn,
             NULL);
 
@@ -2131,8 +2128,6 @@ int main(int argc, char *argv[]) {
 
     // 获取参数值（设置默认值）
     int port = ARGS_port.i64 ? (int)ARGS_port.i64 : DEFAULT_PORT;
-    g_probe_port = (int)ARGS_probe_port.i64;  // 默认 0
-    g_relay_enabled = (bool)ARGS_relay.i64;
 
     // 验证端口范围
     if (port <= 0 || port > 65535) {
@@ -2140,8 +2135,8 @@ int main(int argc, char *argv[]) {
         ARGS_print(argv[0]);
         return 1;
     }
-    if (g_probe_port < 0 || g_probe_port > 65535) {
-        print("E:", LA_F("Invalid probe port %d (range: 0-65535)\n", LA_F25, 25), g_probe_port);
+    if (ARGS_probe_port.i64 < 0 || ARGS_probe_port.i64 > 65535) {
+        print("E:", LA_F("Invalid probe port %d (range: 0-65535)\n", LA_F25, 25), (int)ARGS_probe_port.i64);
         ARGS_print(argv[0]);
         return 1;
     }
@@ -2157,10 +2152,10 @@ int main(int argc, char *argv[]) {
     // 打印服务器配置信息
     print("I:", LA_F("Starting P2P signal server on port %d\n", LA_F34, 34), port);
     print("I:", LA_F("NAT probe: %s (port %d)\n", LA_F27, 27), 
-          g_probe_port > 0 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1), 
-          g_probe_port);
+          ARGS_probe_port.i64 > 0 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1), 
+          (int)ARGS_probe_port.i64);
     print("I:", LA_F("Relay support: %s\n", LA_F31, 31), 
-          g_relay_enabled ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
+          ARGS_relay.i64 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
 
     // 注册信号处理
 #ifdef _WIN32
@@ -2191,7 +2186,7 @@ int main(int argc, char *argv[]) {
 
     // 创建 NAT 探测 UDP 套接字（可选，仅当配置了 probe_port 时）
     sock_t probe_fd = P_INVALID_SOCKET;
-    if (g_probe_port > 0) {
+    if (ARGS_probe_port.i64 > 0) {
         probe_fd = socket(AF_INET, SOCK_DGRAM, 0);
         if (probe_fd == P_INVALID_SOCKET) {
             print("E:", "probe UDP socket failed(%d)\n", P_sock_errno());
@@ -2204,7 +2199,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons((unsigned short)port);
+    addr.sin_port = htons((uint16_t)port);
        if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
        
         print("E:", "TCP bind failed(%d)\n", P_sock_errno());
@@ -2220,17 +2215,17 @@ int main(int argc, char *argv[]) {
         struct sockaddr_in probe_addr = {0};
         probe_addr.sin_family = AF_INET;
         probe_addr.sin_addr.s_addr = INADDR_ANY;
-        probe_addr.sin_port = htons((unsigned short)g_probe_port);
+        probe_addr.sin_port = htons((uint16_t)ARGS_probe_port.i64);
         if (bind(probe_fd, (struct sockaddr *)&probe_addr, sizeof(probe_addr)) < 0) {
 
             print("E:", LA_F("probe UDP bind failed(%d)\n", LA_F75, 75), P_sock_errno());
             P_sock_close(probe_fd);
             probe_fd = P_INVALID_SOCKET;
-            g_probe_port = 0;  /* 绑定失败，禁用探测功能 */
+            ARGS_probe_port.i64 = 0;  /* 绑定失败，禁用探测功能 */
             print("W: %s", LA_S("NAT probe disabled (bind failed)\n", LA_S6, 6));
         } 
         else {
-            print("I:", LA_F("NAT probe socket listening on port %d\n", LA_F26, 26), g_probe_port);
+            print("I:", LA_F("NAT probe socket listening on port %d\n", LA_F26, 26), (int)ARGS_probe_port.i64);
         }
     }
 
