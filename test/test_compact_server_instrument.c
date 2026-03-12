@@ -5,16 +5,16 @@
  *
  * 测试流程：
  *   1. 启动 instrument 监听（UDP 广播）
- *   2. 等待接收 server 启动日志
+ *   2. 启动 server 子进程并验证收到启动日志
  *   3. 发送 REGISTER 包到 server
  *   4. 接收 REGISTER_ACK 并显示 server 处理日志
+ *   5. 终止 server 进程并清理
  *
  * 用法：
- *   1. 先在 DEBUG 模式编译并启动 p2p_server：
- *      ./p2p_server -p 9333
+ *   ./test_compact_server_instrument <server_path> [port]
  *
- *   2. 运行本测试：
- *      ./test_compact_server_instrument [server_port]
+ * 示例：
+ *   ./test_compact_server_instrument ../p2p_server/p2p_server 9333
  *
  * 注意：server 必须在 DEBUG 模式编译（未定义 NDEBUG）才会输出 instrument 日志。
  */
@@ -26,6 +26,9 @@
 #include <p2pp.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 // 默认配置
 #define DEFAULT_SERVER_PORT     9333
@@ -35,11 +38,14 @@
 
 // 测试状态
 static volatile int g_log_count = 0;
+static volatile int g_startup_log_received = 0;
 static volatile int g_register_ack_received = 0;
+static pid_t g_server_pid = 0;
 
 // instrument 日志回调
-static void on_instrument_log(uint8_t chn, const char* tag, char *txt, int len) {
+static void on_instrument_log(uint16_t rid, uint8_t chn, const char* tag, char *txt, int len) {
     (void)len;
+    (void)rid;
     
     // 显示带颜色的日志
     const char* level_name;
@@ -56,6 +62,11 @@ static void on_instrument_log(uint8_t chn, const char* tag, char *txt, int len) 
     
     printf("%s[SERVER %s] %s: %s\033[0m\n", color, level_name, tag, txt);
     g_log_count++;
+    
+    // 检测启动日志（server 启动时通常会输出 "listening" 或 "started" 相关信息）
+    if (!g_startup_log_received && g_log_count >= 1) {
+        g_startup_log_received = 1;
+    }
 }
 
 // 构造 REGISTER 包
@@ -149,21 +160,26 @@ static void parse_register_ack(const uint8_t *buf, int len) {
 int main(int argc, char *argv[]) {
     int server_port = DEFAULT_SERVER_PORT;
     const char *server_host = DEFAULT_SERVER_HOST;
+    const char *server_path = NULL;
     
     // 解析命令行参数
-    if (argc > 1) {
-        server_port = atoi(argv[1]);
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <server_path> [port]\n", argv[0]);
+        fprintf(stderr, "Example: %s ../p2p_server/p2p_server 9333\n", argv[0]);
+        return 1;
+    }
+    server_path = argv[1];
+    if (argc > 2) {
+        server_port = atoi(argv[2]);
         if (server_port <= 0 || server_port > 65535) {
-            fprintf(stderr, "Invalid port: %s\n", argv[1]);
+            fprintf(stderr, "Invalid port: %s\n", argv[2]);
             return 1;
         }
     }
-    if (argc > 2) {
-        server_host = argv[2];
-    }
     
     printf("=== COMPACT Server Instrument Test ===\n");
-    printf("Server: %s:%d\n", server_host, server_port);
+    printf("Server path: %s\n", server_path);
+    printf("Server addr: %s:%d\n", server_host, server_port);
     printf("Instrument port: %d\n", INSTRUMENT_PORT);
     printf("\n");
     
@@ -177,17 +193,46 @@ int main(int argc, char *argv[]) {
     }
     printf("    Listening on UDP port %d (broadcast)\n", INSTRUMENT_PORT);
     
-    // 等待一段时间接收 server 的启动日志
-    printf("\n[2] Waiting for server logs (2 seconds)...\n");
-    P_usleep(2000 * 1000);
-    printf("    Received %d log messages so far\n", g_log_count);
+    // 2. 启动 server 子进程
+    printf("\n[2] Starting server process...\n");
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", server_port);
     
-    // 2. 创建 UDP socket 发送 REGISTER
-    printf("\n[3] Creating UDP socket...\n");
+    g_server_pid = fork();
+    if (g_server_pid < 0) {
+        fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+        return 1;
+    } else if (g_server_pid == 0) {
+        // 子进程：执行 server
+        execl(server_path, server_path, "-p", port_str, NULL);
+        // execl 失败才会到这里
+        fprintf(stderr, "Failed to exec '%s': %s\n", server_path, strerror(errno));
+        _exit(127);
+    }
+    printf("    Server PID: %d\n", g_server_pid);
+    
+    // 3. 等待 server 启动日志
+    printf("\n[3] Waiting for server startup logs...\n");
+    int wait_ms = 0;
+    while (!g_startup_log_received && wait_ms < 5000) {
+        P_usleep(100 * 1000);  // 100ms
+        wait_ms += 100;
+    }
+    
+    if (g_startup_log_received) {
+        printf("    Received %d log messages (startup confirmed)\n", g_log_count);
+    } else {
+        fprintf(stderr, "    Timeout waiting for startup logs (received %d)\n", g_log_count);
+        fprintf(stderr, "    Note: Server must be built in DEBUG mode (NDEBUG not defined)\n");
+        // 继续测试，可能 server 没有启动日志
+    }
+    
+    // 4. 创建 UDP socket 发送 REGISTER
+    printf("\n[4] Creating UDP socket...\n");
     sock_t sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock == P_INVALID_SOCKET) {
         fprintf(stderr, "Failed to create socket: %d\n", P_sock_errno());
-        return 1;
+        goto cleanup;
     }
     
     // 解析服务器地址
@@ -198,11 +243,11 @@ int main(int argc, char *argv[]) {
     if (inet_pton(AF_INET, server_host, &server_addr.sin_addr) <= 0) {
         fprintf(stderr, "Invalid server address: %s\n", server_host);
         P_sock_close(sock);
-        return 1;
+        goto cleanup;
     }
     
-    // 3. 构造并发送 REGISTER 包
-    printf("\n[4] Sending REGISTER packet...\n");
+    // 5. 构造并发送 REGISTER 包
+    printf("\n[5] Sending REGISTER packet...\n");
     printf("    Local Peer ID:  %s\n", TEST_LOCAL_PEER_ID);
     printf("    Remote Peer ID: %s\n", TEST_REMOTE_PEER_ID);
     
@@ -217,7 +262,7 @@ int main(int argc, char *argv[]) {
     if (pkt_len < 0) {
         fprintf(stderr, "Failed to build REGISTER packet\n");
         P_sock_close(sock);
-        return 1;
+        goto cleanup;
     }
     
     ssize_t sent = sendto(sock, (const char*)pkt, pkt_len, 0,
@@ -225,12 +270,12 @@ int main(int argc, char *argv[]) {
     if (sent != pkt_len) {
         fprintf(stderr, "Failed to send REGISTER: %d\n", P_sock_errno());
         P_sock_close(sock);
-        return 1;
+        goto cleanup;
     }
     printf("    Sent %zd bytes to %s:%d\n", sent, server_host, server_port);
     
-    // 4. 等待 REGISTER_ACK 和 server 日志
-    printf("\n[5] Waiting for REGISTER_ACK...\n");
+    // 6. 等待 REGISTER_ACK
+    printf("\n[6] Waiting for REGISTER_ACK...\n");
     
     // 设置接收超时
     P_sock_rcvtimeo(sock, 3000);  // 3 秒超时
@@ -255,18 +300,48 @@ int main(int argc, char *argv[]) {
         printf("    Timeout waiting for REGISTER_ACK\n");
     }
     
-    // 5. 继续等待 server 日志
-    printf("\n[6] Waiting for more server logs (2 seconds)...\n");
-    P_usleep(2000 * 1000);
+    // 7. 等待更多 server 日志
+    printf("\n[7] Waiting for more server logs (1 second)...\n");
+    P_usleep(1000 * 1000);
     
-    // 6. 显示统计
+    P_sock_close(sock);
+    sock = P_INVALID_SOCKET;
+
+cleanup:
+    // 8. 终止 server 进程
+    if (g_server_pid > 0) {
+        printf("\n[8] Terminating server process (PID %d)...\n", g_server_pid);
+        kill(g_server_pid, SIGTERM);
+        
+        // 等待进程退出
+        int status;
+        int wait_result = waitpid(g_server_pid, &status, WNOHANG);
+        if (wait_result == 0) {
+            // 进程还在运行，等待一下
+            P_usleep(500 * 1000);
+            wait_result = waitpid(g_server_pid, &status, WNOHANG);
+            if (wait_result == 0) {
+                // 强制终止
+                printf("    Server not responding, sending SIGKILL...\n");
+                kill(g_server_pid, SIGKILL);
+                waitpid(g_server_pid, &status, 0);
+            }
+        }
+        printf("    Server terminated\n");
+    }
+    
+    if (sock != P_INVALID_SOCKET) {
+        P_sock_close(sock);
+    }
+    
+    // 9. 显示统计
     printf("\n===== Test Summary =====\n");
+    printf("Startup log received:  %s\n", g_startup_log_received ? "YES" : "NO");
     printf("Log messages received: %d\n", g_log_count);
     printf("REGISTER_ACK received: %s\n", g_register_ack_received ? "YES" : "NO");
     printf("========================\n");
     
-    // 清理
-    P_sock_close(sock);
-    
-    return g_register_ack_received ? 0 : 1;
+    // 测试结果：需要收到启动日志和 REGISTER_ACK
+    int success = g_startup_log_received && g_register_ack_received;
+    return success ? 0 : 1;
 }
