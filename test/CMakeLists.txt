@@ -79,6 +79,17 @@ if(I18N_ENABLED)
 endif()
 add_test(NAME test_nat_api COMMAND test_nat_api)
 
+# COMPACT 服务器 instrument 监控测试（独立运行，测试 server 日志监控）
+add_executable(test_compact_server_instrument
+    test_compact_server_instrument.c
+)
+target_include_directories(test_compact_server_instrument PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_compact_server_instrument stdc ${TEST_PLATFORM_LIBS})
+# 注：此测试需要手动运行 server，不加入自动测试
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)
