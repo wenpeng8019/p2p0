@@ -355,7 +355,7 @@ int main(int argc, char *argv[]) {
 #endif
 
     /* 初始化语言系统 */
-    lang_init();
+    LA_init();
 
     // 设置语言钩子
     P_lang = lang_cstr;

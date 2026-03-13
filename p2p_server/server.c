@@ -2091,7 +2091,7 @@ void signal_handler(int signum) {
 
 int main(int argc, char *argv[]) {
 
-    lang_init();  /* 注册默认英文字符串表 */
+    LA_init();  /* 注册默认英文字符串表 */
 
     // 设置命令行帮助信息
     ARGS_usage(NULL,

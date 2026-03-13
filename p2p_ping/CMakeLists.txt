@@ -15,7 +15,7 @@ add_custom_command(
     OUTPUT
         ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.h
         ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
-    COMMAND ${I18N_SCRIPT} ${CMAKE_CURRENT_SOURCE_DIR} ${I18N_NDEBUG_FLAG}
+    COMMAND ${I18N_SCRIPT} ${CMAKE_CURRENT_SOURCE_DIR} --name ping ${I18N_NDEBUG_FLAG}
     DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/p2p_ping.c
         ${I18N_SCRIPT}
@@ -26,6 +26,7 @@ add_custom_command(
 add_executable(p2p_ping 
     p2p_ping.c 
     ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
+    ${CMAKE_SOURCE_DIR}/src/.LANG.c
     ${CMAKE_SOURCE_DIR}/i18n/i18n.c
 )
 target_include_directories(p2p_ping PRIVATE 

@@ -4,7 +4,7 @@
 
 #include "LANG.h"
 
-int lang_rid;
+int LA_server;
 
 /* 字符串表 */
 static const char* s_lang_en[LA_NUM] = {
@@ -87,6 +87,6 @@ static const char* s_lang_en[LA_NUM] = {
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/
-void lang_init(void) {
+void LA_server_init(void) {
     LA_RID = lang_def(s_lang_en, sizeof(s_lang_en) / sizeof(s_lang_en[0]), LA_FMT_START);
 }

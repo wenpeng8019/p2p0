@@ -125,14 +125,14 @@ all: $(LIBP2P)
 
 # i18n: explicit target always re-runs extraction
 i18n:
-	$(I18N_SCRIPT) $(SRCDIR) $(I18N_FLAGS)
+	$(I18N_SCRIPT) $(SRCDIR) --name p2p $(I18N_FLAGS)
 	@mkdir -p $(BUILDDIR) && touch $(I18N_STAMP)
 
 # Stamp rule: run i18n.sh when script itself changes or stamp is missing.
 # Source file changes don't auto-trigger (avoids mtime cycle from rewrite).
 # Use 'make i18n' to manually refresh after adding/removing LA_* calls.
 $(I18N_STAMP): $(I18N_SCRIPT) | $(BUILDDIR)
-	$(I18N_SCRIPT) $(SRCDIR) $(I18N_FLAGS)
+	$(I18N_SCRIPT) $(SRCDIR) --name p2p $(I18N_FLAGS)
 	@touch $@
 
 $(LIBP2P): $(OBJS) $(MBEDTLS_DEP) | $(BUILDDIR)

@@ -158,7 +158,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     static int s_initialized = 0;
     if (!s_initialized) {
 
-        lang_init();
+        LA_init();
 
 #if P_WIN
         // Initialize Winsock on Windows (no-op on POSIX)

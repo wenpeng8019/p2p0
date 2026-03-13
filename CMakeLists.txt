@@ -107,7 +107,7 @@ add_custom_command(
     OUTPUT
         ${CMAKE_SOURCE_DIR}/src/.LANG.h
         ${CMAKE_SOURCE_DIR}/src/.LANG.c
-    COMMAND ${I18N_SCRIPT} src ${I18N_NDEBUG_FLAG}
+    COMMAND ${I18N_SCRIPT} src --name p2p ${I18N_NDEBUG_FLAG}
     DEPENDS
         ${LIB_SRCS}
         ${I18N_SCRIPT}
