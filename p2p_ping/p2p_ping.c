@@ -12,16 +12,31 @@
  *   - --echo 选项可自动回复收到的消息
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <signal.h>
-#include <time.h>
+#include <stdc.h>
 
 #include <p2p.h>
-#include "../stdc/stdc.h"  /* 跨平台兼容层 */
 #include "LANG.h"
 #include "LANG.cn.h"
+
+// 命令行参数定义（使用 stdc ARGS 宏）
+ARGS_B(false, dtls,         0,   "dtls",         "Enable DTLS (MbedTLS)");
+ARGS_B(false, openssl,      0,   "openssl",      "Enable DTLS (OpenSSL)");
+ARGS_B(false, pseudo,       0,   "pseudo",       "Enable PseudoTCP");
+ARGS_B(false, compact,      0,   "compact",      "Use COMPACT mode (UDP signaling, default is ICE/TCP)");
+ARGS_B(false, disable_lan,  0,   "disable-lan",  "Disable LAN shortcut (force NAT punch test)");
+ARGS_B(false, lan_punch,    0,   "lan-punch",    "Test PUNCH/PUNCH_ACK state machine over LAN");
+ARGS_B(false, public_only,  0,   "public-only",  "Skip host candidates");
+ARGS_B(false, cn,           0,   "cn",           "Use Chinese language");
+ARGS_B(false, echo,         0,   "echo",         "Auto-echo received messages back to sender");
+ARGS_S(false, server,       's', "server",       "Signaling server IP[:PORT]");
+ARGS_S(false, github,       0,   "github",       "GitHub Token for Public Signaling");
+ARGS_S(false, gist,         0,   "gist",         "GitHub Gist ID for Public Signaling");
+ARGS_S(false, name,         'n', "name",         "Your Peer Name");
+ARGS_S(false, to,           't', "to",           "Target Peer Name (if specified: active role)");
+ARGS_S(false, turn,         0,   "turn",         "TURN server address");
+ARGS_S(false, turn_user,    0,   "turn-user",    "TURN username");
+ARGS_S(false, turn_pass,    0,   "turn-pass",    "TURN password");
+ARGS_I(false, log,          'l', "log",          "Log level (0-5)");
 
 /*
  * TUI 专有头文件（不适合移植到 p2p_platform.h，原因见下）：
@@ -284,26 +299,6 @@ static void on_sigwinch(int sig) {
  * 主程序
  * ============================================================================ */
 
-static void print_help(const char *prog) {
-    printf(LA_F("Usage: %s [options]", LA_F39, 39), prog);
-    printf("\n");
-    printf("%s\n", LA_S("Options:", LA_S35, 35));
-    printf("%s\n", LA_S("  --dtls            Enable DTLS (MbedTLS)", LA_S13, 13));
-    printf("%s\n", LA_S("  --openssl         Enable DTLS (OpenSSL)", LA_S19, 19));
-    printf("%s\n", LA_S("  --pseudo          Enable PseudoTCP", LA_S20, 20));
-    printf("%s\n", LA_S("  --server IP       Standard Signaling Server IP", LA_S21, 21));
-    printf("%s\n", LA_S("  --compact         Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S11, 11));
-    printf("%s\n", LA_S("  --github TOKEN    GitHub Token for Public Signaling", LA_S16, 16));
-    printf("%s\n", LA_S("  --gist ID         GitHub Gist ID for Public Signaling", LA_S15, 15));
-    printf("%s\n", LA_S("  --name NAME       Your Peer Name", LA_S18, 18));
-    printf("%s\n", LA_S("  --to TARGET       Target Peer Name (if specified: active role; if omitted: passive role)", LA_S22, 22));
-    printf("%s\n", LA_S("  --disable-lan     Disable LAN shortcut (force NAT punch test)", LA_S12, 12));
-    printf("%s\n", LA_S("  --lan-punch       Test PUNCH/PUNCH_ACK state machine over LAN (skips STUN/TURN, uses nat_start_punch)", LA_S17, 17));
-    printf("%s\n", LA_S("  --verbose-punch   Enable verbose NAT punch logging", LA_S23, 23));
-    printf("%s\n", LA_S("  --echo             Auto-echo received messages back to sender", LA_S14, 14));
-    printf("%s\n", LA_S("  --cn              Use Chinese language", LA_S10, 10));
-}
-
 static const char* state_name(p2p_state_t state) {
     switch (state) {
         case P2P_STATE_INIT:        return LA_W("INIT", LA_W5, 5);
@@ -356,59 +351,62 @@ int main(int argc, char *argv[]) {
     SetConsoleOutputCP(65001);
     SetConsoleCP(65001);
 #endif
-    int dtls_backend = 0, use_pseudo = 0, use_compact = 0;
-    int disable_lan = 0, lan_punch = 0, skip_host = 0, use_chinese = 0, show_help = 0;
-    const char *server_ip = NULL, *gh_token = NULL, *gist_id = NULL;
-    const char *my_name = "unnamed", *target_name = NULL;
-    const char *turn_server = NULL, *turn_user = NULL, *turn_pass = NULL;
-    int server_port = 9333;
-
-    for (int i = 1; i < argc; i++) {
-        if      (strcmp(argv[i], "--dtls")          == 0) dtls_backend = 1;
-        else if (strcmp(argv[i], "--openssl")        == 0) dtls_backend = 2;
-        else if (strcmp(argv[i], "--pseudo")         == 0) use_pseudo = 1;
-        else if (strcmp(argv[i], "--compact")        == 0) use_compact = 1;
-        else if (strcmp(argv[i], "--disable-lan")    == 0) disable_lan = 1;
-        else if (strcmp(argv[i], "--lan-punch")      == 0) lan_punch = 1;
-        else if (strcmp(argv[i], "--public-only")    == 0) skip_host = 1;
-        else if (strcmp(argv[i], "--cn")             == 0) use_chinese = 1;
-        else if (strcmp(argv[i], "--echo")           == 0) g_echo_mode = 1;
-        else if (strcmp(argv[i], "--server") == 0 && i+1 < argc) server_ip  = argv[++i];
-        else if (strcmp(argv[i], "--github") == 0 && i+1 < argc) gh_token   = argv[++i];
-        else if (strcmp(argv[i], "--gist")   == 0 && i+1 < argc) gist_id    = argv[++i];
-        else if (strcmp(argv[i], "--name")   == 0 && i+1 < argc) my_name    = argv[++i];
-        else if (strcmp(argv[i], "--to")     == 0 && i+1 < argc) target_name = argv[++i];
-        else if (strcmp(argv[i], "--turn")      == 0 && i+1 < argc) turn_server = argv[++i];
-        else if (strcmp(argv[i], "--turn-user") == 0 && i+1 < argc) turn_user   = argv[++i];
-        else if (strcmp(argv[i], "--turn-pass") == 0 && i+1 < argc) turn_pass   = argv[++i];
-        else if (strcmp(argv[i], "--log") == 0 && i+1 < argc) p2p_set_log_level(strtol(argv[++i], NULL, 10));
-        else if (strcmp(argv[i], "--help")   == 0) show_help = 1;
-    }
-    g_my_name = my_name;
 
     /* 初始化语言系统 */
     lang_init();
-    
+
+    /* 解析命令行参数 */
+    ARGS_parse(argc, argv,
+        &ARGS_DEF_dtls,
+        &ARGS_DEF_openssl,
+        &ARGS_DEF_pseudo,
+        &ARGS_DEF_compact,
+        &ARGS_DEF_disable_lan,
+        &ARGS_DEF_lan_punch,
+        &ARGS_DEF_public_only,
+        &ARGS_DEF_cn,
+        &ARGS_DEF_echo,
+        &ARGS_DEF_server,
+        &ARGS_DEF_github,
+        &ARGS_DEF_gist,
+        &ARGS_DEF_name,
+        &ARGS_DEF_to,
+        &ARGS_DEF_turn,
+        &ARGS_DEF_turn_user,
+        &ARGS_DEF_turn_pass,
+        &ARGS_DEF_log,
+        NULL);
+
     /* 加载中文语言表 */
-    if (use_chinese) {
+    if (ARGS_cn.i64) {
         if (!lang_load(lang_cn, LA_NUM)) {
             fprintf(stderr, "Warning: Failed to load Chinese language table\n");
         }
     }
-    
-    if (show_help)  { print_help(argv[0]); return 0; }
+
+    /* 设置日志级别 */
+    if (ARGS_log.i64) p2p_set_log_level((int)ARGS_log.i64);
+
+    /* Echo 模式 */
+    g_echo_mode = ARGS_echo.i64 ? 1 : 0;
+
+    /* 名称 */
+    const char *my_name = ARGS_name.str ? ARGS_name.str : "unnamed";
+    const char *target_name = ARGS_to.str;
+    g_my_name = my_name;
 
     printf("%s\n\n", LA_S("=== P2P Ping Diagnostic Tool ===", LA_S26, 26));
 
     /* 解析 IP:PORT 格式 */
+    int server_port = 9333;
     char server_host_buf[256] = {0};
-    const char *server_host = server_ip;
-    if (server_ip) {
-        const char *colon = strchr(server_ip, ':');
+    const char *server_host = ARGS_server.str;
+    if (ARGS_server.str) {
+        const char *colon = strchr(ARGS_server.str, ':');
         if (colon) {
-            size_t len = (size_t)(colon - server_ip);
+            size_t len = (size_t)(colon - ARGS_server.str);
             if (len < sizeof(server_host_buf)) {
-                memcpy(server_host_buf, server_ip, len);
+                memcpy(server_host_buf, ARGS_server.str, len);
                 server_host_buf[len] = '\0';
                 server_host  = server_host_buf;
                 server_port  = (int)strtol(colon + 1, NULL, 10);
@@ -416,56 +414,59 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    /* DTLS backend: 1=MbedTLS, 2=OpenSSL */
+    int dtls_backend = ARGS_dtls.i64 ? 1 : (ARGS_openssl.i64 ? 2 : 0);
+
     p2p_config_t cfg = {0};
     cfg.dtls_backend   = dtls_backend;
-    cfg.use_pseudotcp  = use_pseudo;
-    cfg.use_ice        = !use_compact;
+    cfg.use_pseudotcp  = ARGS_pseudo.i64 ? 1 : 0;
+    cfg.use_ice        = !ARGS_compact.i64;
     cfg.stun_server    = "stun.l.google.com";
     cfg.stun_port      = 3478;
-    cfg.turn_server    = turn_server;
-    cfg.turn_port      = turn_server ? 3478 : 0;
-    cfg.turn_user      = turn_user;
-    cfg.turn_pass      = turn_pass;
+    cfg.turn_server    = ARGS_turn.str;
+    cfg.turn_port      = ARGS_turn.str ? 3478 : 0;
+    cfg.turn_user      = ARGS_turn_user.str;
+    cfg.turn_pass      = ARGS_turn_pass.str;
     cfg.server_host    = server_host;
     cfg.server_port    = server_port;
-    cfg.gh_token       = gh_token;
-    cfg.gist_id        = gist_id;
+    cfg.gh_token       = ARGS_github.str;
+    cfg.gist_id        = ARGS_gist.str;
     cfg.bind_port      = 0;
-    cfg.language       = use_chinese ? P2P_LANG_ZH : P2P_LANG_EN;
-    cfg.disable_lan_shortcut = disable_lan;
-    cfg.lan_punch            = lan_punch;
-    cfg.skip_host_candidates = skip_host;
+    cfg.language       = ARGS_cn.i64 ? P2P_LANG_ZH : P2P_LANG_EN;
+    cfg.disable_lan_shortcut = ARGS_disable_lan.i64 ? 1 : 0;
+    cfg.lan_punch            = ARGS_lan_punch.i64 ? 1 : 0;
+    cfg.skip_host_candidates = ARGS_public_only.i64 ? 1 : 0;
     cfg.on_disconnected      = on_disconnected;
     cfg.userdata             = NULL;
 
-    if (server_ip)
+    if (ARGS_server.str)
         cfg.signaling_mode = cfg.use_ice ? P2P_SIGNALING_MODE_RELAY : P2P_SIGNALING_MODE_COMPACT;
-    else if (gh_token && gist_id)
+    else if (ARGS_github.str && ARGS_gist.str)
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 
     p2p_handle_t hdl = p2p_create(my_name, &cfg);
-    if (!hdl) { printf("%s\n", LA_S("Failed to create session", LA_S33, 33)); return 1; }
+    if (!hdl) { print("E:", LA_F("Failed to create sessions\n", LA_F33, 33)); return 1; }
 
     const char *mode_name = NULL;
-    if (server_ip) mode_name = cfg.use_ice ? "ICE RELAY" : "COMPACT";
-    else if (gh_token && gist_id) mode_name = "PUBSUB";
+    if (ARGS_server.str) mode_name = cfg.use_ice ? "RELAY" : "COMPACT";
+    else if (ARGS_github.str && ARGS_gist.str) mode_name = "PUBSUB";
     else {
-        printf("%s\n%s\n", LA_S("Error: No connection mode specified.", LA_S32, 32), LA_S("Use one of: --server or --github", LA_S36, 36));
-        print_help(argv[0]);
+        print("E: No signaling mode. Use --server or --github\n");
+        ARGS_print(argv[0]);
         return 1;
     }
 
-    if (disable_lan)    printf("%s\n", LA_S("[TEST] LAN shortcut disabled - forcing NAT punch", LA_S31, 31));
-    if (lan_punch)      printf("%s\n", LA_S("[TEST] LAN punch mode: PUNCH/PUNCH_ACK over Host candidates (nat_start_punch)", LA_S30, 30));
-    if (g_echo_mode)    printf("%s\n", LA_S("[Chat] Echo mode enabled: received messages will be echoed back.", LA_S27, 27));
+    if (ARGS_disable_lan.i64) print("I:", LA_F("[TEST] LAN shortcut disabled - forcing NAT punch\n", LA_F31, 31));
+    if (ARGS_lan_punch.i64)   print("I:", LA_F("[TEST] LAN punch mode: PUNCH/PUNCH_ACK over Host candidates (nat_start_punch)\n", LA_F30, 30));
+    if (g_echo_mode)          print("I:", LA_F("[Chat] Echo mode enabled: received messages will be echoed back.\n", LA_F27, 27));
 
     if (p2p_connect(hdl, target_name) < 0) {
-        printf("%s\n", LA_S("Failed to initialize connection", LA_S34, 34));
+        print("E:", LA_F("Failed to initialize connection\n", LA_F34, 34));
         return 1;
     }
 
-    if (target_name) { printf(LA_F("Running in %s mode (connecting to %s)...", LA_F37, 37), mode_name, target_name); printf("\n\n"); }
-    else             { printf(LA_F("Running in %s mode (waiting for connection)...", LA_F38, 38), mode_name); printf("\n\n"); }
+    if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F37, 37), mode_name, target_name); }
+    else             { print("I:", LA_F("Running in %s mode (waiting for connection)...", LA_F38, 38), mode_name); }
 
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
@@ -483,8 +484,7 @@ int main(int argc, char *argv[]) {
             /* 首次连接成功：初始化 TUI，降低日志等级 */
             if (!g_first_connect_done) {
                 g_first_connect_done = 1;
-                printf("%s\n", LA_S("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.", LA_S28, 28));
-                fflush(stdout);
+                print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F28, 28));
                 tui_init();
                 tui_println(LA_S("--- Connected ---", LA_S24, 24));
             }

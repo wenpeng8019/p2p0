@@ -263,12 +263,12 @@ enum {
     LA_F242,  /* "Open P2P UDP socket on port %d failed(%d)" (%d,%d)  [p2p.c] */
     LA_F243,  /* "Out-of-window packet discarded seq=%u base=%u" (%u,%u)  [p2p_trans_reliable.c] */
     LA_F244,  /* "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n" (%d,%u)  [p2p_signal_compact.c] */
-    LA_F245,  /* "PEER_INFO(trickle): seq overflow, cannot trickle more\n"  [p2p_signal_compact.c] */
+    LA_F245,  /* "% PEER_INFO(trickle): seq overflow, cannot trickle more\n"  [p2p_signal_compact.c] */
     LA_F246,  /* "Packet queued seq=%u len=%d inflight=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
     LA_F247,  /* "Packet too large len=%d max=%d" (%d,%d)  [p2p_trans_reliable.c] */
     LA_F248,  /* "Passive peer learned remote ID '%s' from OFFER" (%s)  [p2p_signal_relay.c] */
     LA_F249,  /* "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)" (%d)  [p2p.c] */
-    LA_F250,  /* "Path recovered: switched to PUNCH"  [p2p.c] */
+    LA_F250,  /* "% Path recovered: switched to PUNCH"  [p2p.c] */
     LA_F251,  /* "Path switched to better route (idx=%d)" (%d)  [p2p.c] */
     LA_F252,  /* "Peer '%s' is now online (FORWARD received), resuming" (%s)  [p2p_signal_relay.c] */
     LA_F253,  /* "Peer offline, cached %d candidates" (%d)  [p2p_signal_relay.c] */
@@ -314,7 +314,7 @@ enum {
     LA_F293,  /* "Sent connect request to '%s' (%d bytes)" (%s,%d)  [p2p_signal_relay.c] */
     LA_F294,  /* "Sent initial offer(%d) to %s)" (%d,%s)  [p2p.c] */
     LA_F295,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
-    LA_F296,  /* "Synced path after failover"  [p2p.c] */
+    LA_F296,  /* "% Synced path after failover"  [p2p.c] */
     LA_F297,  /* "TURN 401 Unauthorized (realm=%s), authenticating..." (%s)  [p2p_turn.c] */
     LA_F298,  /* "TURN Allocate failed with error %d" (%d)  [p2p_turn.c] */
     LA_F299,  /* "TURN Allocated relay %s:%u (lifetime=%us)" (%s,%u,%u)  [p2p_turn.c] */
@@ -324,11 +324,11 @@ enum {
     LA_F303,  /* "TURN Refresh failed (error=%d)" (%d)  [p2p_turn.c] */
     LA_F304,  /* "TURN Refresh ok (lifetime=%us)" (%u)  [p2p_turn.c] */
     LA_F305,  /* "Test I: Mapped address: %s:%d" (%s,%d)  [p2p_stun.c] */
-    LA_F306,  /* "Test I: Timeout"  [p2p_stun.c] */
+    LA_F306,  /* "% Test I: Timeout"  [p2p_stun.c] */
     LA_F307,  /* "Test II: Success! Detection completed %s" (%s)  [p2p_stun.c] */
-    LA_F308,  /* "Test II: Timeout (need Test III)"  [p2p_stun.c] */
+    LA_F308,  /* "% Test II: Timeout (need Test III)"  [p2p_stun.c] */
     LA_F309,  /* "Test III: Success! Detection completed %s" (%s)  [p2p_stun.c] */
-    LA_F310,  /* "Test III: Timeout"  [p2p_stun.c] */
+    LA_F310,  /* "% Test III: Timeout"  [p2p_stun.c] */
     LA_F311,  /* "Transport layer '%s' init failed, falling back to simple reliable" (%s)  [p2p.c] */
     LA_F312,  /* "UDP hole-punch probing remote candidates (%d candidates)" (%d)  [p2p_ice.c] */
     LA_F313,  /* "UDP hole-punch probing remote candidates round %d/%d" (%d,%d)  [p2p_ice.c] */
@@ -363,7 +363,7 @@ enum {
     LA_F342,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
     LA_F343,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
     LA_F344,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
-    LA_F345,  /* "✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
+    LA_F345,  /* "% ✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
     LA_F346,  /* "%s: invalid session_id=0\n" (%s)  [p2p_signal_compact.c] */
     LA_F347,  /* "%s skipped: session_id=0\n" (%s)  [p2p_signal_compact.c] */
     LA_F348,  /* "%s: stale ACK(ack_inst=%u local_inst=%u), ignored\n" (%s,%u,%u)  [p2p_signal_compact.c] */

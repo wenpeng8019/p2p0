@@ -255,12 +255,12 @@ const char* lang_en[LA_NUM] = {
     [LA_F242] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:242 */
     [LA_F243] = "Out-of-window packet discarded seq=%u base=%u",  /* SID:243 */
     [LA_F244] = "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n",  /* SID:244 */
-    [LA_F245] = "PEER_INFO(trickle): seq overflow, cannot trickle more\n",  /* SID:245 */
+    [LA_F245] = "% PEER_INFO(trickle): seq overflow, cannot trickle more\n",  /* SID:245 */
     [LA_F246] = "Packet queued seq=%u len=%d inflight=%d",  /* SID:246 */
     [LA_F247] = "Packet too large len=%d max=%d",  /* SID:247 */
     [LA_F248] = "Passive peer learned remote ID '%s' from OFFER",  /* SID:248 */
     [LA_F249] = "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)",  /* SID:249 */
-    [LA_F250] = "Path recovered: switched to PUNCH",  /* SID:250 */
+    [LA_F250] = "% Path recovered: switched to PUNCH",  /* SID:250 */
     [LA_F251] = "Path switched to better route (idx=%d)",  /* SID:251 */
     [LA_F252] = "Peer '%s' is now online (FORWARD received), resuming",  /* SID:252 */
     [LA_F253] = "Peer offline, cached %d candidates",  /* SID:253 */
@@ -297,7 +297,7 @@ const char* lang_en[LA_NUM] = {
     [LA_F293] = "Sent connect request to '%s' (%d bytes)",  /* SID:293 */
     [LA_F294] = "Sent initial offer(%d) to %s)",  /* SID:294 */
     [LA_F295] = "Start internal thread failed(%d)",  /* SID:295 */
-    [LA_F296] = "Synced path after failover",  /* SID:296 */
+    [LA_F296] = "% Synced path after failover",  /* SID:296 */
     [LA_F297] = "TURN 401 Unauthorized (realm=%s), authenticating...",  /* SID:297 */
     [LA_F298] = "TURN Allocate failed with error %d",  /* SID:298 */
     [LA_F299] = "TURN Allocated relay %s:%u (lifetime=%us)",  /* SID:299 */
@@ -307,11 +307,11 @@ const char* lang_en[LA_NUM] = {
     [LA_F303] = "TURN Refresh failed (error=%d)",  /* SID:303 */
     [LA_F304] = "TURN Refresh ok (lifetime=%us)",  /* SID:304 */
     [LA_F305] = "Test I: Mapped address: %s:%d",  /* SID:305 */
-    [LA_F306] = "Test I: Timeout",  /* SID:306 */
+    [LA_F306] = "% Test I: Timeout",  /* SID:306 */
     [LA_F307] = "Test II: Success! Detection completed %s",  /* SID:307 */
-    [LA_F308] = "Test II: Timeout (need Test III)",  /* SID:308 */
+    [LA_F308] = "% Test II: Timeout (need Test III)",  /* SID:308 */
     [LA_F309] = "Test III: Success! Detection completed %s",  /* SID:309 */
-    [LA_F310] = "Test III: Timeout",  /* SID:310 */
+    [LA_F310] = "% Test III: Timeout",  /* SID:310 */
     [LA_F311] = "Transport layer '%s' init failed, falling back to simple reliable",  /* SID:311 */
     [LA_F312] = "UDP hole-punch probing remote candidates (%d candidates)",  /* SID:312 */
     [LA_F313] = "UDP hole-punch probing remote candidates round %d/%d",  /* SID:313 */
@@ -359,5 +359,5 @@ const char* lang_en[LA_NUM] = {
     [LA_F342] = "ssl_setup failed: -0x%x",  /* SID:342 */
     [LA_F343] = "transport send_data failed, %d bytes dropped",  /* SID:343 */
     [LA_F344] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:344 */
-    [LA_F345] = "✗ Add Srflx candidate failed(OOM)",  /* SID:345 */
+    [LA_F345] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:345 */
 };
