@@ -105,4 +105,7 @@ enum {
 /* 字符串表 */
 extern const char* lang_en[LA_NUM];
 
+#define LA_RID lang_rid
+extern int lang_rid;
+
 #endif /* LANG_H__ */

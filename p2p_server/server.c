@@ -2122,7 +2122,7 @@ int main(int argc, char *argv[]) {
         // 处理中文语言
         if (ARGS_cn.i64) {
             FILE *fp = fopen("lang.zh", "r");
-            if (fp) { lang_load_fp(fp); fclose(fp); }
+            if (fp) { lang_load_fp(LA_RID, fp); fclose(fp); }
         }
     }
 

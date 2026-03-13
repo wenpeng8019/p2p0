@@ -1,8 +1,6 @@
 #ifndef LANG_H_
 #define LANG_H_
 
-#include <i18n.h>
-
 typedef enum server_pred_ids {
     /* 预定义字符串 ID（在此添加项目特定的预定义字符串）*/
     /* 示例：
@@ -25,9 +23,11 @@ typedef enum server_pred_ids {
 /* 包含自动生成的语言 ID 定义（必须在 LA_PREDEFINED 之后）*/
 #include ".LANG.h"
 
+#include <i18n.h>
+
 /* 语言初始化函数（自动生成，请勿修改）*/
 static inline void lang_init(void) {
-    lang_def(lang_en, sizeof(lang_en) / sizeof(lang_en[0]), LA_FMT_START);
+    LA_RID = lang_def(lang_en, sizeof(lang_en) / sizeof(lang_en[0]), LA_FMT_START);
 }
 
 #endif /* LANG_H_ */

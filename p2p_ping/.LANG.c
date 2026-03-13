@@ -4,6 +4,8 @@
 
 #include ".LANG.h"
 
+int lang_rid;
+
 /* 字符串表 */
 const char* lang_en[LA_NUM] = {
     [LA_W1] = "CLOSED",  /* SID:1 */
@@ -15,17 +17,36 @@ const char* lang_en[LA_NUM] = {
     [LA_W7] = "REGISTERING",  /* SID:7 */
     [LA_W8] = "RELAY",  /* SID:8 */
     [LA_W9] = "UNKNOWN",  /* SID:9 */
-    [LA_S24] = "--- Connected ---",  /* SID:24 */
-    [LA_S25] = "--- Peer disconnected ---",  /* SID:25 */
-    [LA_S26] = "=== P2P Ping Diagnostic Tool ===",  /* SID:26 */
-    [LA_S29] = "[EVENT] Connection closed",  /* SID:29 */
-    [LA_F33] = "% Failed to create sessions\n",  /* SID:33 */
-    [LA_F34] = "% Failed to initialize connection\n",  /* SID:34 */
-    [LA_F37] = "Running in %s mode (connecting to %s)...",  /* SID:37 */
-    [LA_F38] = "Running in %s mode (waiting for connection)...",  /* SID:38 */
-    [LA_F27] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:27 */
-    [LA_F28] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:28 */
-    [LA_F40] = "[STATE] %s (%d) -> %s (%d)",  /* SID:40 */
-    [LA_F30] = "% [TEST] LAN punch mode: PUNCH/PUNCH_ACK over Host candidates (nat_start_punch)\n",  /* SID:30 */
-    [LA_F31] = "% [TEST] LAN shortcut disabled - forcing NAT punch\n",  /* SID:31 */
+    [LA_S10] = "--- Connected ---",  /* SID:10 */
+    [LA_S11] = "--- Peer disconnected ---",  /* SID:11 */
+    [LA_S12] = "[EVENT] Connection closed",  /* SID:12 */
+    [LA_S13] = "Auto-echo received messages back to sender",  /* SID:13 */
+    [LA_S14] = "Disable LAN shortcut (force NAT punch test)",  /* SID:14 */
+    [LA_S15] = "Enable DTLS (MbedTLS)",  /* SID:15 */
+    [LA_S16] = "Enable DTLS (OpenSSL)",  /* SID:16 */
+    [LA_S17] = "Enable PseudoTCP",  /* SID:17 */
+    [LA_S18] = "GitHub Gist ID for Public Signaling",  /* SID:18 */
+    [LA_S19] = "GitHub Token for Public Signaling",  /* SID:19 */
+    [LA_S20] = "Log level (0-5)",  /* SID:20 */
+    [LA_S21] = "Signaling server IP[:PORT]",  /* SID:21 */
+    [LA_S22] = "Skip host candidates",  /* SID:22 */
+    [LA_S23] = "Target Peer Name (if specified: active role)",  /* SID:23 */
+    [LA_S24] = "Test PUNCH/PUNCH_ACK state machine over LAN",  /* SID:24 */
+    [LA_S25] = "TURN password",  /* SID:25 */
+    [LA_S26] = "TURN server address",  /* SID:26 */
+    [LA_S27] = "TURN username",  /* SID:27 */
+    [LA_S28] = "Use Chinese language",  /* SID:28 */
+    [LA_S29] = "Use COMPACT mode (UDP signaling, default is ICE/TCP)",  /* SID:29 */
+    [LA_S30] = "Your Peer Name",  /* SID:30 */
+    [LA_F31] = "% === P2P Ping Diagnostic Tool ===\n",  /* SID:31 */
+    [LA_F32] = "% Failed to create sessions\n",  /* SID:32 */
+    [LA_F33] = "% Failed to initialize connection\n",  /* SID:33 */
+    [LA_F34] = "% No signaling mode.\nUse --server or --github\n",  /* SID:34 */
+    [LA_F35] = "Running in %s mode (connecting to %s)...",  /* SID:35 */
+    [LA_F36] = "Running in %s mode (waiting for connection)...",  /* SID:36 */
+    [LA_F37] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:37 */
+    [LA_F38] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:38 */
+    [LA_F39] = "[STATE] %s (%d) -> %s (%d)",  /* SID:39 */
+    [LA_F40] = "% [TEST] LAN punch mode: PUNCH/PUNCH_ACK over Host candidates (nat_start_punch)\n",  /* SID:40 */
+    [LA_F41] = "% [TEST] LAN shortcut disabled - forcing NAT punch\n",  /* SID:41 */
 };

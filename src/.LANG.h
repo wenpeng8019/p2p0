@@ -386,4 +386,8 @@ enum {
 /* 字符串表 */
 extern const char* lang_en[LA_NUM];
 
+/* 语言实例 ID（多实例支持） */
+#define LA_RID lang_rid
+extern int lang_rid;
+
 #endif /* LANG_H__ */

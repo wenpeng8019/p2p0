@@ -4,6 +4,8 @@
 
 #include ".LANG.h"
 
+int lang_rid;
+
 /* 字符串表 */
 const char* lang_en[LA_NUM] = {
     [LA_W1] = "disabled",  /* SID:1 */
