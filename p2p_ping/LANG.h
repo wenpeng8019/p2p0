@@ -3,7 +3,7 @@
 
 #include <i18n.h>
 
-typedef enum {
+enum {
     /* 预定义字符串 ID（在此添加项目特定的预定义字符串）*/
     /* 示例：
     LA_CUSTOM0,

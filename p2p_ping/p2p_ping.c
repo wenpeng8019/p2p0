@@ -13,30 +13,30 @@
  */
 
 #include <stdc.h>
-
 #include <p2p.h>
+
 #include "LANG.h"
 #include "LANG.cn.h"
 
 // 命令行参数定义（使用 stdc ARGS 宏）
-ARGS_B(false, dtls,         0,   "dtls",         "Enable DTLS (MbedTLS)");
-ARGS_B(false, openssl,      0,   "openssl",      "Enable DTLS (OpenSSL)");
-ARGS_B(false, pseudo,       0,   "pseudo",       "Enable PseudoTCP");
-ARGS_B(false, compact,      0,   "compact",      "Use COMPACT mode (UDP signaling, default is ICE/TCP)");
-ARGS_B(false, disable_lan,  0,   "disable-lan",  "Disable LAN shortcut (force NAT punch test)");
-ARGS_B(false, lan_punch,    0,   "lan-punch",    "Test PUNCH/PUNCH_ACK state machine over LAN");
-ARGS_B(false, public_only,  0,   "public-only",  "Skip host candidates");
-ARGS_B(false, cn,           0,   "cn",           "Use Chinese language");
-ARGS_B(false, echo,         0,   "echo",         "Auto-echo received messages back to sender");
-ARGS_S(false, server,       's', "server",       "Signaling server IP[:PORT]");
-ARGS_S(false, github,       0,   "github",       "GitHub Token for Public Signaling");
-ARGS_S(false, gist,         0,   "gist",         "GitHub Gist ID for Public Signaling");
-ARGS_S(false, name,         'n', "name",         "Your Peer Name");
-ARGS_S(false, to,           't', "to",           "Target Peer Name (if specified: active role)");
-ARGS_S(false, turn,         0,   "turn",         "TURN server address");
-ARGS_S(false, turn_user,    0,   "turn-user",    "TURN username");
-ARGS_S(false, turn_pass,    0,   "turn-pass",    "TURN password");
-ARGS_I(false, log,          'l', "log",          "Log level (0-5)");
+ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable 启动 DTLS (MbedTLS)", 0 ,0));
+ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", 0 ,0));
+ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", 0 ,0));
+ARGS_B(false, compact,      0,   "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", 0 ,0));
+ARGS_B(false, disable_lan,  0,   "disable-lan",  LA_CS("Disable LAN shortcut (force NAT punch test)", 0 ,0));
+ARGS_B(false, lan_punch,    0,   "lan-punch",    LA_CS("Test PUNCH/PUNCH_ACK state machine over LAN", 0 ,0));
+ARGS_B(false, public_only,  0,   "public-only",  LA_CS("Skip host candidates", 0 ,0));
+ARGS_B(false, cn,           0,   "cn",           LA_CS("Use Chinese language", 0 ,0));
+ARGS_B(false, echo,         0,   "echo",         LA_CS("Auto-echo received messages back to sender", 0 ,0));
+ARGS_S(false, server,       's', "server",       LA_CS("Signaling server IP[:PORT]", 0 ,0));
+ARGS_S(false, github,       0,   "github",       LA_CS("GitHub Token for Public Signaling", 0 ,0));
+ARGS_S(false, gist,         0,   "gist",         LA_CS("GitHub Gist ID for Public Signaling", 0 ,0));
+ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", 0 ,0));
+ARGS_S(false, to,           't', "to",           LA_CS("Target Peer Name (if specified: active role)", 0 ,0));
+ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", 0 ,0));
+ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", 0 ,0));
+ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", 0 ,0));
+ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", 0 ,0));
 
 /*
  * TUI 专有头文件（不适合移植到 p2p_platform.h，原因见下）：
@@ -354,6 +354,9 @@ int main(int argc, char *argv[]) {
 
     /* 初始化语言系统 */
     lang_init();
+
+    // 设置语言钩子
+    P_lang = lang_cstr;
 
     /* 解析命令行参数 */
     ARGS_parse(argc, argv,
