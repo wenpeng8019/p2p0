@@ -99,6 +99,16 @@ target_include_directories(test_compact_peer_info PRIVATE
 )
 target_link_libraries(test_compact_peer_info stdc ${TEST_PLATFORM_LIBS})
 
+# COMPACT 生命周期协议单元测试 (ALIVE/UNREGISTER/PEER_OFF)
+add_executable(test_compact_lifecycle
+    test_compact_lifecycle.c
+)
+target_include_directories(test_compact_lifecycle PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_compact_lifecycle stdc ${TEST_PLATFORM_LIBS})
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)
