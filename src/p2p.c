@@ -155,8 +155,11 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     ret_t ret;
 
-    static int net_initialized = 0;
-    if (!net_initialized) {
+    static int s_initialized = 0;
+    if (!s_initialized) {
+
+        lang_init();
+
 #if P_WIN
         // Initialize Winsock on Windows (no-op on POSIX)
         if ((ret = P_net_init()) != E_NONE) {
@@ -166,7 +169,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 #endif
         // Initialize random number generator (thread-safe, idempotent)
         P_rand_init();
-        net_initialized = 1;
+        s_initialized = 1;
     }
 
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {

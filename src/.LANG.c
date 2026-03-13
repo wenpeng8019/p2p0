@@ -2,12 +2,12 @@
  * Auto-generated language strings
  */
 
-#include ".LANG.h"
+#include "LANG.h"
 
 int lang_rid;
 
 /* 字符串表 */
-const char* lang_en[LA_NUM] = {
+static const char* s_lang_en[LA_NUM] = {
     [LA_W1] = "alive",  /* SID:1 */
     [LA_W2] = "bytes",  /* SID:2 */
     [LA_W3] = "Detecting...",  /* SID:3 */
@@ -363,3 +363,8 @@ const char* lang_en[LA_NUM] = {
     [LA_F344] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:344 */
     [LA_F345] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:345 */
 };
+
+/* 语言初始化函数（自动生成，请勿修改）*/
+void lang_init(void) {
+    LA_RID = lang_def(s_lang_en, sizeof(s_lang_en) / sizeof(s_lang_en[0]), LA_FMT_START);
+}

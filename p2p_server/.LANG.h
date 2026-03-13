@@ -102,10 +102,4 @@ enum {
 /* 格式字符串起始位置（用于验证） */
 #define LA_FMT_START LA_F10
 
-/* 字符串表 */
-extern const char* lang_en[LA_NUM];
-
-#define LA_RID lang_rid
-extern int lang_rid;
-
 #endif /* LANG_H__ */

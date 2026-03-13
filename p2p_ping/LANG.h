@@ -23,12 +23,12 @@ enum {
 /* 包含自动生成的语言 ID 定义（必须在 LA_PREDEFINED 之后）*/
 #include ".LANG.h"
 
+#define LA_RID lang_rid
+extern int lang_rid;
+
 #include <i18n.h>
 
 /* 语言初始化函数（自动生成，请勿修改）*/
-static inline int lang_init(void) {
-    LA_RID = lang_def(lang_en, sizeof(lang_en) / sizeof(lang_en[0]), LA_FMT_START);
-    return LA_RID;
-}
+void lang_init(void);
 
 #endif /* LANG_H_ */

@@ -2,12 +2,12 @@
  * Auto-generated language strings
  */
 
-#include ".LANG.h"
+#include "LANG.h"
 
 int lang_rid;
 
 /* 字符串表 */
-const char* lang_en[LA_NUM] = {
+static const char* s_lang_en[LA_NUM] = {
     [LA_W1] = "CLOSED",  /* SID:1 */
     [LA_W2] = "CLOSING",  /* SID:2 */
     [LA_W3] = "CONNECTED",  /* SID:3 */
@@ -50,3 +50,8 @@ const char* lang_en[LA_NUM] = {
     [LA_F40] = "% [TEST] LAN punch mode: PUNCH/PUNCH_ACK over Host candidates (nat_start_punch)\n",  /* SID:40 */
     [LA_F41] = "% [TEST] LAN shortcut disabled - forcing NAT punch\n",  /* SID:41 */
 };
+
+/* 语言初始化函数（自动生成，请勿修改）*/
+void lang_init(void) {
+    LA_RID = lang_def(s_lang_en, sizeof(s_lang_en) / sizeof(s_lang_en[0]), LA_FMT_START);
+}

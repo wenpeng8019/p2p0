@@ -2,12 +2,12 @@
  * Auto-generated language strings
  */
 
-#include ".LANG.h"
+#include "LANG.h"
 
 int lang_rid;
 
 /* 字符串表 */
-const char* lang_en[LA_NUM] = {
+static const char* s_lang_en[LA_NUM] = {
     [LA_W1] = "disabled",  /* SID:1 */
     [LA_W2] = "enabled",  /* SID:2 */
     [LA_S3] = "[TCP] Max peers reached, rejecting connection\n",  /* SID:3 */
@@ -85,3 +85,8 @@ const char* lang_en[LA_NUM] = {
     [LA_F75] = "probe UDP bind failed(%d)\n",  /* SID:75 */
     [LA_F76] = "select failed(%d)\n",  /* SID:76 */
 };
+
+/* 语言初始化函数（自动生成，请勿修改）*/
+void lang_init(void) {
+    LA_RID = lang_def(s_lang_en, sizeof(s_lang_en) / sizeof(s_lang_en[0]), LA_FMT_START);
+}
