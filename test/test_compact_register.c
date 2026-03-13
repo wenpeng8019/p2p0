@@ -177,21 +177,31 @@ static int send_register_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_
     // 设置超时
     P_sock_rcvtimeo(g_sock, timeout_ms);
     
-    // 接收
+    // 接收（跳过非 REGISTER_ACK 的包，如 PEER_INFO）
     uint8_t recv_buf[256];
     struct sockaddr_in from;
-    socklen_t from_len = sizeof(from);
-    ssize_t recv_len = recvfrom(g_sock, (char*)recv_buf, sizeof(recv_buf), 0,
-                                 (struct sockaddr*)&from, &from_len);
+    socklen_t from_len;
+    ssize_t recv_len;
     
-    if (recv_len <= 0) {
+    for (int retry = 0; retry < 5; retry++) {
+        from_len = sizeof(from);
+        recv_len = recvfrom(g_sock, (char*)recv_buf, sizeof(recv_buf), 0,
+                            (struct sockaddr*)&from, &from_len);
+        if (recv_len <= 0) {
+            ack->received = 0;
+            return 0;
+        }
+        if (recv_buf[0] == SIG_PKT_REGISTER_ACK) break;
+        // 收到其他包（如 PEER_INFO），继续接收
+    }
+    
+    if (recv_buf[0] != SIG_PKT_REGISTER_ACK) {
         ack->received = 0;
-        return 0;
+        return -2;
     }
     
     // 解析
     ack->received = 1;
-    if (recv_buf[0] != SIG_PKT_REGISTER_ACK) return -2;
     
     ack->flags = recv_buf[1];
     ack->status = recv_buf[4];
@@ -329,27 +339,28 @@ static void test_register_peer_online(void) {
     // 等待 PEER_INFO 包
     P_usleep(200 * 1000);
     
-    // 检查是否收到 PEER_INFO
+    // 检查是否收到 PEER_INFO（同时清空缓冲区中的其他包）
     uint8_t recv_buf[256];
     int got_peer_info = 0;
-    for (int i = 0; i < 5; i++) {
-        int n = recv_packet(recv_buf, sizeof(recv_buf), 200);
-        if (n > 0 && recv_buf[0] == SIG_PKT_PEER_INFO) {
+    for (int i = 0; i < 10; i++) {
+        int n = recv_packet(recv_buf, sizeof(recv_buf), 100);
+        if (n <= 0) break;
+        if (recv_buf[0] == SIG_PKT_PEER_INFO) {
             got_peer_info = 1;
             printf("    Received PEER_INFO, len=%d\n", n);
-            break;
         }
     }
     
-    if (!got_peer_info) {
-        // PEER_INFO 可能已经发给 Alice 了，但我们的 socket 可能收不到（取决于源端口）
-        // 检查 server 日志
-        if (find_log("Pairing complete") < 0) {
-            TEST_FAIL(TEST_NAME, "Pairing complete log not found");
-            return;
-        }
+    // 等待日志收集
+    P_usleep(100 * 1000);
+    
+    if (got_peer_info) {
+        // 收到 PEER_INFO 就说明配对成功
+        TEST_PASS(TEST_NAME);
+        return;
     }
     
+    // PEER_INFO 可能发给 Alice 了（我们用的是 Bob 的视角），检查 server 日志
     if (find_log("Pairing complete") >= 0) {
         TEST_PASS(TEST_NAME);
     } else {
@@ -457,6 +468,11 @@ static void test_register_bad_payload(void) {
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
+    // 先清空 socket 缓冲区
+    P_sock_rcvtimeo(g_sock, 50);
+    uint8_t drain_buf[256];
+    while (recvfrom(g_sock, (char*)drain_buf, sizeof(drain_buf), 0, NULL, NULL) > 0);
+    
     // 构造一个太短的 REGISTER 包（只有包头 + 部分 payload）
     uint8_t pkt[20];
     pkt[0] = SIG_PKT_REGISTER;
@@ -503,6 +519,11 @@ static void test_register_invalid_instance_id(void) {
     const char *TEST_NAME = "register_invalid_instance_id";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
+    
+    // 先清空 socket 缓冲区
+    P_sock_rcvtimeo(g_sock, 50);
+    uint8_t drain_buf[256];
+    while (recvfrom(g_sock, (char*)drain_buf, sizeof(drain_buf), 0, NULL, NULL) > 0);
     
     uint8_t pkt[256];
     int len = build_register(pkt, sizeof(pkt), "invalid_client", PEER_UNKNOWN, 0, 0, NULL);
