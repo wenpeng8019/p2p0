@@ -1,15 +1,15 @@
 #ifndef LANG_H_
 #define LANG_H_
 
-typedef enum server_pred_ids {
+enum {
     /* 预定义字符串 ID（在此添加项目特定的预定义字符串）*/
     /* 示例：
     SID_CUSTOM0,
     SID_CUSTOM1,
     */
-
-    PRED_NUM
-} server_pred_ids_t;
+    
+    PRED_NUM,
+};
 
 /* 预定义字符串内容（对应上面的枚举）*/
 /* 示例：

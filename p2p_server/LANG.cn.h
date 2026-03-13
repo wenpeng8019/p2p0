@@ -2,95 +2,88 @@
  * Auto-generated language strings
  */
 
-#include ".LANG.h"
+#include "LANG.h"
 
 /* Embedded cn language table */
-static const char* lang_cn[LA_NUM] = {
-    [LA_W0] = "disabled",  /* SID:1 new */
-    [LA_W1] = "enabled",  /* SID:2 new */
-    [LA_S0] = "               - TCP: RELAY mode signaling (stateful/long connection)",  /* SID:3 new */
-    [LA_S1] = "               - UDP: COMPACT mode signaling (stateless)",  /* SID:4 new */
-    [LA_S2] = "               Used to detect symmetric NAT (port consistency)",  /* SID:5 new */
-    [LA_S3] = "  port         Signaling server listen port (default: 8888)",  /* SID:6 new */
-    [LA_S4] = "  probe_port   NAT type detection port (default: 0=disabled)",  /* SID:7 new */
-    [LA_S5] = "  relay        Enable data relay support (COMPACT mode fallback)",  /* SID:8 new */
-    [LA_S6] = "[SERVER] Goodbye!",  /* SID:9 new */
-    [LA_S7] = "[SERVER] NAT probe disabled (bind failed)",  /* SID:10 new */
-    [LA_S8] = "[SERVER] Received shutdown signal, exiting gracefully...",  /* SID:11 new */
-    [LA_S9] = "[SERVER] Shutting down...",  /* SID:12 new */
-    [LA_S10] = "[TCP] Invalid magic from peer\n",  /* SID:13 new */
-    [LA_S11] = "[TCP] Max peers reached, rejecting connection\n",  /* SID:14 new */
-    [LA_S12] = "[TCP] User list truncated (too many users)\n",  /* SID:15 new */
-    [LA_S13] = "Error: Too many arguments",  /* SID:16 new */
-    [LA_S14] = "Examples:",  /* SID:17 new */
-    [LA_S15] = "Parameters:",  /* SID:18 new */
-    [LA_F0] = "      [%d] type=%d, %s:%d\n",  /* SID:19 new */
-    [LA_F1] = "  %s                    # Default config (port 8888, no probe, no relay)",  /* SID:20 new */
-    [LA_F2] = "  %s 9000               # Listen on port 9000",  /* SID:21 new */
-    [LA_F3] = "  %s 9000 9001          # Listen 9000, probe port 9001",  /* SID:22 new */
-    [LA_F4] = "  %s 9000 9001 relay    # Listen 9000, probe 9001, enable relay",  /* SID:23 new */
-    [LA_F5] = "Error: Invalid port number '%s' (range: 1-65535)",  /* SID:24 new */
-    [LA_F6] = "Error: Invalid probe port '%s' (range: 0-65535)",  /* SID:25 new */
-    [LA_F7] = "Error: Unknown option '%s' (expected: 'relay')",  /* SID:26 new */
-    [LA_F8] = "P2P Signaling Server listening on port %d (TCP + UDP)...",  /* SID:27 new */
-    [LA_F9] = "Usage: %s [port] [probe_port] [relay]",  /* SID:28 new */
-    [LA_F10] = "[DEBUG] Received %d bytes: magic=0x%08X, type=%d, length=%d (expected magic=0x%08X)\n",  /* SID:29 new */
-    [LA_F11] = "[PROBE] NAT_PROBE_ACK -> %s:%d (seq=%u, mapped=%s:%d)\n",  /* SID:30 new */
-    [LA_F12] = "[SERVER] NAT probe socket listening on port %d",  /* SID:31 new */
-    [LA_F13] = "[SERVER] NAT probe: %s (port %d)",  /* SID:32 new */
-    [LA_F14] = "[SERVER] Relay support: %s",  /* SID:33 new */
-    [LA_F15] = "[SERVER] Starting P2P signal server on port %d",  /* SID:34 new */
-    [LA_F16] = "[TCP]   → Forwarded OFFER from '%s' (%d candidates, %d bytes)\n",  /* SID:35 new */
-    [LA_F17] = "[TCP]   → Sent empty OFFER from '%s' (storage full, reverse connect)\n",  /* SID:36 new */
-    [LA_F18] = "[TCP] All pending candidates flushed to '%s'\n",  /* SID:37 new */
-    [LA_F19] = "[TCP] Cached %d candidates for offline user '%s' (total=%d/%d)\n",  /* SID:38 new */
-    [LA_F20] = "[TCP] Cached %d candidates for offline user '%s', storage now FULL (%d/%d)\n",  /* SID:39 new */
-    [LA_F21] = "[TCP] Cannot allocate slot for offline user '%s'\n",  /* SID:40 new */
-    [LA_F22] = "[TCP] Client '%s' timed out (no activity for %ld seconds)\n",  /* SID:41 new */
-    [LA_F23] = "[TCP] Failed to receive payload from %s\n",  /* SID:42 new */
-    [LA_F24] = "[TCP] Failed to receive target name from %s\n",  /* SID:43 new */
-    [LA_F25] = "[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n",  /* SID:44 new */
-    [LA_F26] = "[TCP] Flushing %d pending candidates from '%s' to '%s'...\n",  /* SID:45 new */
-    [LA_F27] = "[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n",  /* SID:46 new */
-    [LA_F28] = "[TCP] New connection from %s:%d\n",  /* SID:47 new */
-    [LA_F29] = "[TCP] New sender '%s' replaces old sender '%s' (discarding %d old candidates)\n",  /* SID:48 new */
-    [LA_F30] = "[TCP] Payload too large (%u bytes) from %s\n",  /* SID:49 new */
-    [LA_F31] = "[TCP] Peer %s disconnected\n",  /* SID:50 new */
-    [LA_F32] = "[TCP] Peer '%s' logged in\n",  /* SID:51 new */
-    [LA_F33] = "[TCP] Relaying %s from %s to %s (%u bytes)\n",  /* SID:52 new */
-    [LA_F34] = "[TCP] Sent %s with %d candidates to '%s' (from '%s')\n",  /* SID:53 new */
-    [LA_F35] = "[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n",  /* SID:54 new */
-    [LA_F36] = "[TCP] Storage full for '%s' (cached=%d, dropped=%d)\n",  /* SID:55 new */
-    [LA_F37] = "[TCP] Storage full indication flushed to '%s'\n",  /* SID:56 new */
-    [LA_F38] = "[TCP] Storage full, connection intent from '%s' to '%s' noted\n",  /* SID:57 new */
-    [LA_F39] = "[TCP] Storage full, flushing connection intent from '%s' to '%s' (sending empty OFFER)...\n",  /* SID:58 new */
-    [LA_F40] = "[TCP] Target %s offline, caching candidates...\n",  /* SID:59 new */
-    [LA_F41] = "[TCP] Unknown message type %d from %s\n",  /* SID:60 new */
-    [LA_F42] = "[UDP] Assigned session_id=%llu for %s -> %s\n",  /* SID:88 new */
-    [LA_F43] = "[UDP] Cannot relay PEER_INFO_ACK: sid=%llu (peer unavailable)\n",  /* SID:89 new */
-    [LA_F44] = "[UDP] Invalid PEER_INFO_ACK from %s (size %zu)\n",  /* SID:63 new */
-    [LA_F45] = "[UDP] Invalid REGISTER from %s (payload too short)\n",  /* SID:64 new */
-    [LA_F46] = "[UDP] Invalid UNREGISTER from %s (payload too short)\n",  /* SID:65 new */
-    [LA_F47] = "[UDP] PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:66 new */
-    [LA_F48] = "[UDP] PEER_INFO seq=0 from client %s (server-only, dropped)\n",  /* SID:67 new */
-    [LA_F49] = "[UDP] PEER_INFO(seq=0) bilateral: %s(%d cands) <-> %s(%d cands)\n",  /* SID:68 new */
-    [LA_F50] = "[UDP] PEER_INFO_ACK for unknown sid=%llu from %s\n",  /* SID:90 new */
-    [LA_F51] = "[UDP] PEER_INFO_ACK(seq=0) confirmed: sid=%llu (%s <-> %s, %d retransmits)\n",  /* SID:91 new */
-    [LA_F52] = "[UDP] PEER_OFF sent to %s (sid=%llu)%s\n",  /* SID:92 new */
-    [LA_F53] = "[UDP] Peer pair (%s → %s) timed out\n",  /* SID:72 new */
-    [LA_F54] = "[UDP] REGISTER from %s: local='%s', remote='%s', candidates=%d\n",  /* SID:73 new */
-    [LA_F55] = "[UDP] REGISTER_ACK to %s: error (no slot available)\n",  /* SID:74 new */
-    [LA_F56] = "[UDP] REGISTER_ACK to %s: ok, peer_online=%d, max_cands=%d, relay=%s, public=%s:%d, probe_port=%d\n",  /* SID:75 new */
-    [LA_F57] = "[UDP] Relay 0x%02x for sid=%llu: peer unavailable (dropped)\n",  /* SID:93 new */
-    [LA_F58] = "[UDP] Relay 0x%02x for unknown sid=%llu from %s (dropped)\n",  /* SID:94 new */
-    [LA_F59] = "[UDP] Relay ACK: sid=%llu (%s -> %s)\n",  /* SID:95 new */
-    [LA_F60] = "[UDP] Relay DATA seq=%u: sid=%llu (%s -> %s)\n",  /* SID:96 new */
-    [LA_F61] = "[UDP] Relay PEER_INFO seq=%u: sid=%llu (%s -> %s)\n",  /* SID:97 new */
-    [LA_F62] = "[UDP] Relay PEER_INFO_ACK seq=%u: sid=%llu (%s -> %s)\n",  /* SID:98 new */
-    [LA_F63] = "[UDP] Relay packet too short: type=0x%02x from %s (size %zu)\n",  /* SID:82 new */
-    [LA_F64] = "[UDP] Retransmit PEER_INFO (sid=%llu): %s <-> %s (attempt %d/%d)\n",  /* SID:99 new */
-    [LA_F65] = "[UDP] Sent PEER_INFO(seq=0) to %s:%d (peer='%s') with %d cands%s\n",  /* SID:84 new */
-    [LA_F66] = "[UDP] Target pair (%s → %s) not found (waiting for peer registration)\n",  /* SID:85 new */
-    [LA_F67] = "[UDP] UNREGISTER: releasing slot for '%s' -> '%s'\n",  /* SID:86 new */
-    [LA_F68] = "[UDP] Unknown signaling packet type %d from %s\n",  /* SID:87 new */
+static const char* s_lang_cn[LA_NUM] = {
+    [LA_W1] = "已禁用",  /* SID:1 */
+    [LA_W2] = "已启用",  /* SID:2 */
+    [LA_S3] = "[TCP] 用户列表已截断（用户过多）\n",  /* SID:3 */
+    [LA_S4] = "收到关闭信号，正在优雅退出...",  /* SID:4 */
+    [LA_S5] = "正在关闭...\n",  /* SID:5 */
+    [LA_F6] = "%s 来自 '%.*s'：新实例(旧=%u 新=%u)，重置会话\n",  /* SID:6 */
+    [LA_F7] = "%s：已接受，本地='%.*s'，远端='%.*s'，inst_id=%u，cands=%d\n",  /* SID:7 */
+    [LA_F8] = "%s：已接受，释放 '%s' -> '%s' 的槽位\n",  /* SID:8 */
+    [LA_F9] = "%s：无效载荷(len=%zu)\n",  /* SID:9 */
+    [LA_F10] = "%s：数据过大(len=%d)\n",  /* SID:10 */
+    [LA_F11] = "%s：来自 %s 的 instance_id=0 无效\n",  /* SID:11 */
+    [LA_F12] = "%s：来自客户端的中继标志无效\n",  /* SID:12 */
+    [LA_F13] = "%s：无效 seq=%u\n",  /* SID:13 */
+    [LA_F14] = "%s：未找到匹配的待处理消息(sid=%u)\n",  /* SID:14 */
+    [LA_F15] = "%s：未找到匹配的待处理消息(sid=%u，期望=%u)\n",  /* SID:15 */
+    [LA_F16] = "%s：过期 sid=%u(当前=%u)，已忽略\n",  /* SID:16 */
+    [LA_F17] = "%s：空闲状态下过期 sid=%u(上次=%u)，已忽略\n",  /* SID:17 */
+    [LA_F18] = "%s：节点 '%s' 不在线，拒绝 sid=%u\n",  /* SID:18 */
+    [LA_F19] = "%s：等待节点 '%.*s' 注册\n",  /* SID:19 */
+    [LA_F20] = "% 再见！\n",  /* SID:20 */
+    [LA_F21] = "无效端口号 %d（范围：1-65535）\n",  /* SID:21 */
+    [LA_F22] = "无效探测端口 %d（范围：0-65535）\n",  /* SID:22 */
+    [LA_F23] = "% NAT 探测已禁用（绑定失败）\n",  /* SID:23 */
+    [LA_F24] = "NAT 探测套接字在端口 %d 上监听\n",  /* SID:24 */
+    [LA_F25] = "NAT 探测：%s（端口 %d）\n",  /* SID:25 */
+    [LA_F26] = "P2P 信令服务器在端口 %d 上监听（TCP + UDP）...\n",  /* SID:26 */
+    [LA_F27] = "PEER_INFO 重传失败：%s <-> %s（%d 次尝试后放弃）\n",  /* SID:27 */
+    [LA_F28] = "配对完成：'%.*s'(%d 候选) <-> '%.*s'(%d 候选)\n",  /* SID:28 */
+    [LA_F29] = "中继支持：%s\n",  /* SID:29 */
+    [LA_F30] = "发送 %s：映射地址=%s:%d\n",  /* SID:30 */
+    [LA_F31] = "发送 %s：状态=错误（无可用槽位）\n",  /* SID:31 */
+    [LA_F32] = "在端口 %d 上启动 P2P 信令服务器\n",  /* SID:32 */
+    [LA_F33] = "超时并清理配对 '%s' -> '%s'（不活跃 %.1f 秒）\n",  /* SID:33 */
+    [LA_F34] = "来自 %s 的未知数据包类型 0x%02x\n",  /* SID:34 */
+    [LA_F35] = "[中继] %s seq=0 来自客户端 %s（仅服务端使用，已丢弃）\n",  /* SID:35 */
+    [LA_F36] = "[中继] %s：无效载荷(len=%zu)\n",  /* SID:36 */
+    [LA_F37] = "[TCP]   → 转发来自 '%s' 的 OFFER（%d 候选，%d 字节）\n",  /* SID:37 */
+    [LA_F38] = "[TCP]   → 发送来自 '%s' 的空 OFFER（存储已满，反向连接）\n",  /* SID:38 */
+    [LA_F39] = "[TCP] 所有待处理候选已刷新到 '%s'\n",  /* SID:39 */
+    [LA_F40] = "[TCP] 为离线用户 '%s' 缓存了 %d 个候选（总计=%d/%d）\n",  /* SID:40 */
+    [LA_F41] = "[TCP] 为离线用户 '%s' 缓存了 %d 个候选，存储已满（%d/%d）\n",  /* SID:41 */
+    [LA_F42] = "[TCP] 无法为离线用户 '%s' 分配槽位\n",  /* SID:42 */
+    [LA_F43] = "[TCP] 错误：来自节点 '%s' 的魔数无效\n",  /* SID:43 */
+    [LA_F44] = "[TCP] 从 %s 接收载荷失败\n",  /* SID:44 */
+    [LA_F45] = "[TCP] 从 %s 接收目标名称失败\n",  /* SID:45 */
+    [LA_F46] = "[TCP] 向 %s 发送 CONNECT_ACK 失败(sent_hdr=%d, sent_payload=%d)\n",  /* SID:46 */
+    [LA_F47] = "[TCP] 正在将 %d 个待处理候选从 '%s' 刷新到 '%s'...\n",  /* SID:47 */
+    [LA_F48] = "[TCP] 信息：节点 '%s' 已登录\n",  /* SID:48 */
+    [LA_F49] = "% [TCP] 已达最大节点数，拒绝连接\n",  /* SID:49 */
+    [LA_F50] = "[TCP] 将离线槽位中 %d 个待处理候选（发送方='%s'）合并到 '%s' 的在线槽位\n",  /* SID:50 */
+    [LA_F51] = "[TCP] 来自 %s:%d 的新连接\n",  /* SID:51 */
+    [LA_F52] = "[TCP] 新发送方 '%s' 替换旧发送方 '%s'（丢弃 %d 个旧候选）\n",  /* SID:52 */
+    [LA_F53] = "[TCP] 来自 %s 的载荷过大（%u 字节）\n",  /* SID:53 */
+    [LA_F54] = "[TCP] 从 %s 向 %s 中继 %s（%u 字节）\n",  /* SID:54 */
+    [LA_F55] = "[TCP] 向 '%s' 发送了 %s，包含 %d 个候选（来自 '%s'）\n",  /* SID:55 */
+    [LA_F56] = "[TCP] 向 %s 发送了 CONNECT_ACK(status=%d, candidates_acked=%d)\n",  /* SID:56 */
+    [LA_F57] = "[TCP] '%s' 的存储已满（已缓存=%d，已丢弃=%d）\n",  /* SID:57 */
+    [LA_F58] = "[TCP] 存储满指示已刷新到 '%s'\n",  /* SID:58 */
+    [LA_F59] = "[TCP] 存储已满，已记录 '%s' 到 '%s' 的连接意向\n",  /* SID:59 */
+    [LA_F60] = "[TCP] 存储已满，正在刷新 '%s' 到 '%s' 的连接意向（发送空 OFFER）...\n",  /* SID:60 */
+    [LA_F61] = "[TCP] 目标 %s 离线，正在缓存候选...\n",  /* SID:61 */
+    [LA_F62] = "[TCP] 来自 %s 的未知消息类型 %d\n",  /* SID:62 */
+    [LA_F63] = "[TCP] 详细：已向 '%s' 发送 %s\n",  /* SID:63 */
+    [LA_F64] = "[TCP] 详细：节点 '%s' 已断开\n",  /* SID:64 */
+    [LA_F65] = "[TCP] 警告：客户端 '%s' 超时（不活跃 %.1f 秒）\n",  /* SID:65 */
+    [LA_F66] = "[UDP] %s 从 %s 接收，seq=%u，flags=0x%02x，len=%zu\n",  /* SID:66 */
+    [LA_F67] = "[UDP] %s 向 %s 发送失败(%d)\n",  /* SID:67 */
+    [LA_F68] = "[UDP] %s 向 %s 发送，seq=%u，flags=0x00，len=%d\n",  /* SID:68 */
+    [LA_F69] = "[UDP] %s 向 %s 发送，seq=0，flags=0，len=%d\n",  /* SID:69 */
+    [LA_F70] = "[UDP] %s 向 %s 发送，seq=0，flags=0x%02x，len=%d\n",  /* SID:70 */
+    [LA_F71] = "[UDP] %s 向 %s:%d 发送失败(%d)\n",  /* SID:71 */
+    [LA_F72] = "[UDP] %s 向 %s:%d 发送，seq=0，flags=0，len=%d\n",  /* SID:72 */
+    [LA_F73] = "[UDP] %s 向 %s:%d 发送，seq=0，flags=0x%02x，len=%d，retries=%d\n",  /* SID:73 */
+    [LA_F74] = "% 网络初始化失败\n",  /* SID:74 */
+    [LA_F75] = "探测 UDP 绑定失败(%d)\n",  /* SID:75 */
+    [LA_F76] = "select 失败(%d)\n",  /* SID:76 */
 };
+
+static inline int lang_cn(void) {
+    return lang_load(LA_RID, s_lang_cn, LA_NUM);
+}

@@ -1,7 +1,30 @@
 /*
- * Auto-generated language IDs
+ * 自动生成的语言 ID 枚举（由 i18n.sh 生成）
  *
- * DO NOT EDIT - Regenerate with: ./i18n/i18n.sh
+ * 除「remove 操作」外请勿手动编辑，重新生成会覆盖所有改动。
+ *
+ * 条目状态:
+ *   (无标记)  — active:   正常使用中，源文件中有对应的 LA_W/S/F 调用
+ *   disabled  — disabled: 源文件扫描中未出现（如在未激活的 #ifdef 分支内），
+ *                         ID 和字符串保留，宏重新启用后自动恢复为 active
+ *   remove    — remove:   用户确认永久删除，下次生成时:
+ *                           Debug  模式 → 该位置变为 _LA_N 占位空洞
+ *                           Release 模式 → 该条目被完全移除
+ *
+ * 状态流转:
+ *   active ──(扫描消失)──→ disabled ──(扫描重现)──→ active
+ *                              │
+ *                     (用户手动改为 remove)
+ *                              ↓
+ *                           remove ──(下次生成)──→ 删除
+ *
+ * 操作说明:
+ *   若在枚举注释中看到 "disabled" 前缀，且确认该字符串不再需要，
+ *   将注释中的 "disabled" 改为 "remove"，然后重新运行 i18n.sh 即可。
+ *   示例:
+ *     LA_F99,  // disabled "some old string"
+ *     改为:
+ *     LA_F99,  // remove "some old string"
  */
 
 #ifndef LANG_H__
