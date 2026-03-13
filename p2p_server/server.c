@@ -1672,7 +1672,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         // 所有需要 relay 的包格式都是 [session_id(8)][...]
-        if (payload_len < P2P_PEER_ID_MAX) {
+        if (payload_len < 8) {  // session_id 8 bytes
             print("E:", LA_F("[Relay] %s: bad payload(len=%zu)\n", LA_F38, 38), PROTO, payload_len);
             return;
         }
