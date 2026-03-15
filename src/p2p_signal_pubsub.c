@@ -202,9 +202,9 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             }
         }
         
-        /* 添加远端 ICE 候选（步长 = sizeof(p2p_candidate_t) = 32）*/
+        /* 添加远端 ICE 候选 */
         for (int i = 0; i < payload.candidate_count; i++) {
-              p2p_candidate_entry_t parsed;
+              p2p_local_candidate_entry_t parsed;
               unpack_candidate(&parsed, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
 
             int idx = p2p_upsert_remote_candidate(s, &parsed.addr, parsed.type, false);
@@ -216,13 +216,13 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
 
             p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
             print("I:", LA_F("Received remote candidate: type=%d, address=%s:%d", LA_F276, 276),
-                 c->cand.type, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
+                 c->type, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             
             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
             if (s->ice_ctx.state == P2P_ICE_STATE_CHECKING) {
 
                 printf(LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F346, 346),
-                              inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
+                              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
                 nat_punch(s, idx);
             }
         }

@@ -130,7 +130,7 @@ typedef struct compact_pair {
     struct sockaddr_in      addr;                               // 公网地址（UDP 源地址）
     uint8_t                 addr_notify_seq;                    // 发给对端的地址变更通知序号（base_index，1..255 循环）
 
-    p2p_compact_candidate_t candidates[MAX_CANDIDATES];         // 候选列表
+    p2p_candidate_t          candidates[MAX_CANDIDATES];         // 候选列表（网络格式，直接收发）
     int                     candidate_count;                    // 候选数量
 
     // PEER_INFO(seq=0) 可靠传输（首包 + 地址变更通知）
@@ -697,7 +697,7 @@ static void send_peer_info_seq0(sock_t udp_fd, compact_pair_t *pair, uint8_t bas
 
     assert(pair && PEER_ONLINE(pair));
 
-    uint8_t pkt[4 + P2P_PEER_ID_MAX + 2 + MAX_CANDIDATES * sizeof(p2p_compact_candidate_t)];  // 包头 + session_id + base_index + candidates
+    uint8_t pkt[4 + P2P_PEER_ID_MAX + 2 + MAX_CANDIDATES * sizeof(p2p_candidate_t)];  // 包头 + session_id + base_index + candidates
     p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)pkt;
     resp_hdr->type = SIG_PKT_PEER_INFO;
     resp_hdr->flags = 0;
@@ -715,17 +715,17 @@ static void send_peer_info_seq0(sock_t udp_fd, compact_pair_t *pair, uint8_t bas
         pkt[13] = (uint8_t)cand_cnt;
         
         // 第一个候选：对端的公网地址（服务器观察到的 UDP 源地址）
-        pkt[resp_len] = 1; // srflx
-        memcpy(pkt + resp_len + 1, &pair->peer->addr.sin_addr.s_addr, 4);
-        memcpy(pkt + resp_len + 5, &pair->peer->addr.sin_port, 2);
-        resp_len += sizeof(p2p_compact_candidate_t);
+        p2p_candidate_t wire_cand;
+        wire_cand.type = 1; // srflx
+        sockaddr_to_p2p_wire(&pair->peer->addr, &wire_cand.addr);
+        wire_cand.priority = 0;
+        memcpy(pkt + resp_len, &wire_cand, sizeof(p2p_candidate_t));
+        resp_len += sizeof(p2p_candidate_t);
         
-        // 后续候选：对端注册时提供的候选列表
+        // 后续候选：对端注册时提供的候选列表（已是网络格式，直接复制）
         for (int i = 0; i < pair->peer->candidate_count; i++) {
-            pkt[resp_len] = pair->peer->candidates[i].type;
-            memcpy(pkt + resp_len + 1, &pair->peer->candidates[i].ip, 4);
-            memcpy(pkt + resp_len + 5, &pair->peer->candidates[i].port, 2);
-            resp_len += sizeof(p2p_compact_candidate_t);
+            memcpy(pkt + resp_len, &pair->peer->candidates[i], sizeof(p2p_candidate_t));
+            resp_len += sizeof(p2p_candidate_t);
         }
     }
     else {
@@ -733,10 +733,12 @@ static void send_peer_info_seq0(sock_t udp_fd, compact_pair_t *pair, uint8_t bas
         // 地址变更通知：仅发送 1 个公网候选地址（来自对端当前 UDP 源地址）
         cand_cnt = 1;
         pkt[13] = 1;
-        pkt[resp_len] = 1; // srflx
-        memcpy(pkt + resp_len + 1, &pair->peer->addr.sin_addr.s_addr, 4);
-        memcpy(pkt + resp_len + 5, &pair->peer->addr.sin_port, 2);
-        resp_len += sizeof(p2p_compact_candidate_t);
+        p2p_candidate_t wire_cand2;
+        wire_cand2.type = 1; // srflx
+        sockaddr_to_p2p_wire(&pair->peer->addr, &wire_cand2.addr);
+        wire_cand2.priority = 0;
+        memcpy(pkt + resp_len, &wire_cand2, sizeof(p2p_candidate_t));
+        resp_len += sizeof(p2p_candidate_t);
     }
 
     print("V:", LA_F("Send %s: base_index=%u, cands=%d, ses_id=%" PRIu64 ", peer='%s'\n", LA_F60, 60),
@@ -1307,7 +1309,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 解析候选列表
         int candidate_count = 0;
-        p2p_compact_candidate_t candidates[MAX_CANDIDATES];
+        p2p_candidate_t candidates[MAX_CANDIDATES];
         memset(candidates, 0, sizeof(candidates));
         size_t cand_offset = P2P_PEER_ID_MAX * 2 + 4;
         candidate_count = payload[cand_offset];
@@ -1315,11 +1317,9 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             candidate_count = MAX_CANDIDATES;
         }
         cand_offset++;
-        for (int i = 0; i < candidate_count && cand_offset + sizeof(p2p_compact_candidate_t) <= payload_len; i++) {
-            candidates[i].type = payload[cand_offset];
-            memcpy(&candidates[i].ip, payload + cand_offset + 1, sizeof(uint32_t));
-            memcpy(&candidates[i].port, payload + cand_offset + 5, sizeof(uint16_t));
-            cand_offset += sizeof(p2p_compact_candidate_t);
+        for (int i = 0; i < candidate_count && cand_offset + sizeof(p2p_candidate_t) <= payload_len; i++) {
+            memcpy(&candidates[i], payload + cand_offset, sizeof(p2p_candidate_t));
+            cand_offset += sizeof(p2p_candidate_t);
         }
 
         print("V:", LA_F("%s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n", LA_F17, 17),
@@ -1413,7 +1413,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         // 记录本端的候选列表
         local->candidate_count = candidate_count;
         if (candidate_count) {
-            memcpy(local->candidates, candidates, sizeof(p2p_compact_candidate_t) * candidate_count);
+            memcpy(local->candidates, candidates, sizeof(p2p_candidate_t) * candidate_count);
         }
 
         // 查找反向配对：构造反向 peer_key [remote_peer_id][local_peer_id]

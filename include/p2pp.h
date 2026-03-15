@@ -10,12 +10,70 @@
 #define P2PP_H
 
 #include <stdint.h>
+#include <string.h>
 #include <p2p.h>
 
 /* #pragma pack(push/pop) 受 MSVC / GCC / Clang 三大编译器支持，无需平台宏 */
+#pragma pack(push, 1)
 
 /* Peer ID 最大长度 */
 #define P2P_PEER_ID_MAX  32
+
+/* ============================================================================
+ * 可交换的候选地址定义
+ * ============================================================================
+ * 
+ * 采用平台无关的地址序列化格式 IPv4-mapped IPv6 统一编码（18 字节）：
+ *   IPv4 地址 a.b.c.d 存储为 ::ffff:a.b.c.d（前 10 字节 0，字节 10-11 为 0xFF）
+ *   IPv6 地址直接存储 16 字节
+ *
+ * 判断方式：ip[0..11] == {0,0,0,0, 0,0,0,0, 0,0,0xFF,0xFF} 则为 IPv4，
+ *          实际 IPv4 地址在 ip[12..15]。
+ */
+
+/*
+ * 转换函数见 p2p_common.h：sockaddr_to_p2p_wire() / sockaddr_from_p2p_wire()
+ */
+typedef struct {
+    uint16_t            port;                       // 端口（网络字节序）
+    uint8_t             ip[16];                     // IPv4-mapped IPv6 地址
+} p2p_sockaddr_t;
+
+/* IPv4-mapped 前缀: ::ffff:0:0 */
+static const uint8_t P2P_IPV4_MAPPED_PREFIX[12] = {
+    0,0,0,0, 0,0,0,0, 0,0,0xFF,0xFF
+};
+
+static inline int p2p_sockaddr_is_ipv4(const p2p_sockaddr_t *w) {
+    return memcmp(w->ip, P2P_IPV4_MAPPED_PREFIX, 12) == 0;
+}
+
+/* 读取 IPv4 地址（网络字节序），调用前应先用 p2p_sockaddr_is_ipv4 判断 */
+static inline uint32_t p2p_sockaddr_ipv4(const p2p_sockaddr_t *w) {
+    uint32_t v; memcpy(&v, &w->ip[12], 4); return v;
+}
+
+/*
+ * ICE 候选地址序列化格式（23 字节，在 pack(1) 块内 sizeof == 23 在所有平台保证）
+ *
+ * 用于信令协议网络传输，各字段均以大端字节序存储。
+ * 内部会话代码使用 p2p_local_candidate_entry_t（含 struct sockaddr_in），定义见 p2p_ice.h。
+ * 转换函数：pack_candidate() / unpack_candidate()，见 p2p_internal.h
+ *
+ * base_addr 仅 ICE 本地诊断使用（RFC 8445 raddr/rport），不参与线协议，
+ * 保留在 p2p_local_candidate_entry_t 中。
+ *
+ * 内存布局：
+ *   ┌──────────┬────────────────────┬──────────┐
+ *   │ type(1B) │    addr (18B)      │ prio(4B) │
+ *   └──────────┴────────────────────┴──────────┘
+ */
+typedef struct {
+    uint8_t             type;                       // 候选类型 (0=Host 1=Srflx 2=Relay 3=Prflx)
+    uint32_t            priority;                   // 候选优先级 htonl（RFC 8445: 32-bit）
+    p2p_sockaddr_t      addr;                       // 候选地址（18B）
+} p2p_candidate_t;
+
 
 /* ============================================================================
  * NAT UDP 包定义
@@ -301,24 +359,12 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PEER_INFO_FIN           0x01    // 候选列表发送完毕
 
 /*
- * COMPACT 模式精简候选结构 (7 bytes)
- * 用于 UDP 信令传输，省略了 priority 和 base_addr。
- * 
- * 布局: [type: 1B][ip: 4B][port: 2B]
- */
-#pragma pack(push, 1)
-typedef struct {
-    uint8_t             type;               // 候选类型 (p2p_cand_type_t, 见 p2p_common.h)
-    uint32_t            ip;                 // IP 地址（网络字节序）
-    uint16_t            port;               // 端口（网络字节序）
-} p2p_compact_candidate_t;
-#pragma pack(pop)
-
-/*
  * COMPACT 模式消息格式（以下均为 payload 部分，前面需加 4 字节包头）:
  *
+ * 候选地址统一使用 p2p_candidate_t（23 字节），COMPACT 和 RELAY 模式共享同一线格式。
+ *
  * REGISTER:
- *   payload: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
+ *   payload: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*23)]
  *   包头: type=0x80, flags=0, seq=0
  *   - instance_id: 本次 connect() 的实例 ID（网络字节序，32位，必须非 0）
  *   - 语义:
@@ -363,7 +409,7 @@ typedef struct {
  *   客户端收到此包后应停止该会话的所有传输和重传
  *
  * PEER_INFO:
- *   payload: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
+ *   payload: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*23)]
  *   包头: type=0x84, flags=见下, seq=序列号
  *   - session_id: 会话 ID（网络字节序，64位，来自 REGISTER_ACK）
  *   - base_index: 本批候选的起始索引（0-based）
@@ -492,8 +538,6 @@ typedef enum {
     P2P_RLY_CONNECT_ACK                     // 连接确认: Server -> Client
 } p2p_relay_type_t;
 
-#pragma pack(push, 1)
-
 /* RELAY 模式包头 (9 bytes) */
 typedef struct {
     uint32_t            magic;
@@ -544,40 +588,6 @@ typedef struct {
     int                 candidate_count;            // ICE 候选数量
 } p2p_signaling_payload_hdr_t;
 
-/*
- * 平台无关的 IPv4 地址序列化格式（12 字节）
- *
- * struct sockaddr_in 在不同平台上布局不同，不可直接用于网络传输：
- *   Linux / Windows : sin_family(2B) + sin_port(2B) + sin_addr(4B) + sin_zero[8] = 16B
- *   macOS / BSD     : sin_len(1B) + sin_family(1B) + sin_port(2B) + sin_addr(4B) + sin_zero[8] = 16B
- *
- * 本结构统一序列化为 3×uint32_t（大端），与平台无关。
- * 转换函数见 p2p_internal.h：sockaddr_to_p2p_wire() / sockaddr_from_p2p_wire()
- */
-typedef struct {
-    uint32_t            family;                     // 地址族   htonl(sin_family)
-    uint32_t            port;                       // 端口     htonl((uint32_t)sin_port)
-    uint32_t            ip;                         // IPv4     sin_addr.s_addr
-} p2p_sockaddr_t;
-
-/*
- * ICE 候选地址序列化格式（32 字节，在 pack(1) 块内 sizeof == 32 在所有平台保证）
- *
- * 用于信令协议网络传输，各字段均以大端字节序存储。
- * 内部会话代码使用 p2p_candidate_entry_t（含 struct sockaddr_in），定义见 p2p_ice.h。
- * 转换函数：pack_candidate() / unpack_candidate()，见 p2p_internal.h
- *
- * 内存布局：
- *   ┌──────────┬────────────────────┬────────────────────┬──────────┐
- *   │ type(4B) │    addr (12B)      │  base_addr (12B)   │ prio(4B) │
- *   └──────────┴────────────────────┴────────────────────┴──────────┘
- */
-typedef struct {
-    uint32_t            type;                       // 候选类型 htonl(0=Host 1=Srflx 2=Relay 3=Prflx)
-    p2p_sockaddr_t      addr;                       // 传输地址（12B）
-    p2p_sockaddr_t      base_addr;                  // 基础地址（12B）
-    uint32_t            priority;                   // 候选优先级 htonl
-} p2p_candidate_t;
 
 #pragma pack(pop)
 

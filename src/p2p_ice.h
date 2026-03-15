@@ -146,7 +146,7 @@ typedef enum {
     P2P_ICE_CAND_PRFLX                  // 对端反射地址（Peer Reflexive Candidate）
 } p2p_ice_cand_type_t;
 
-typedef struct p2p_candidate_entry        p2p_candidate_entry_t;
+typedef struct p2p_local_candidate_entry   p2p_local_candidate_entry_t;
 typedef struct p2p_remote_candidate_entry p2p_remote_candidate_entry_t;
 
 /* ============================================================================
@@ -196,7 +196,7 @@ void p2p_ice_tick(struct p2p_session *s, uint64_t now_ms);
 int p2p_ice_gather_candidates(struct p2p_session *s);
 
 /* Trickle ICE: 发送单个本地候选 */
-int  p2p_ice_send_local_candidate(struct p2p_session *s, p2p_candidate_entry_t *c);
+int  p2p_ice_send_local_candidate(struct p2p_session *s, p2p_local_candidate_entry_t *c);
 
 //-----------------------------------------------------------------------------
 

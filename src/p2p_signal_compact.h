@@ -48,7 +48,7 @@ struct p2p_session;
  * COMPACT 模式消息格式
  * ============================================================================
  *
- * 候选地址使用 p2p_compact_candidate_t（定义在 p2pp.h），每个 7 字节。
+ * 候选地址使用 p2p_candidate_t（定义在 p2pp.h），每个 23 字节。
  *
  * REGISTER:
  *   [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]

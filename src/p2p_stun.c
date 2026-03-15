@@ -494,7 +494,7 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
                 break;
             }
             
-            p2p_candidate_entry_t *c = &s->local_cands[idx];
+            p2p_local_candidate_entry_t *c = &s->local_cands[idx];
             c->type = P2P_CAND_SRFLX;
             /* RFC 5245: Srflx 候选优先级使用标准公式计算 */
             c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);

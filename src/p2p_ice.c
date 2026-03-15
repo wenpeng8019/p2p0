@@ -79,8 +79,8 @@ typedef enum {
 } p2p_pair_state_t;
 
 typedef struct {
-    p2p_candidate_entry_t local;        /* 本地候选 */
-    p2p_candidate_entry_t remote;       /* 远端候选 */
+    p2p_local_candidate_entry_t local;        /* 本地候选 */
+    p2p_local_candidate_entry_t remote;       /* 远端候选 */
     uint64_t        pair_priority;      /* 候选对优先级 */
     p2p_pair_state_t state;             /* 候选对状态 */
     int             nominated;          /* 是否被提名 */
@@ -263,8 +263,8 @@ static int pair_compare(const void *a, const void *b) {
  */
 static int p2p_ice_form_check_list(
     p2p_candidate_pair_t *pairs, int max_pairs,
-    const p2p_candidate_entry_t *local_cands, int local_cnt,
-    const p2p_candidate_entry_t *remote_cands, int remote_cnt,
+    const p2p_local_candidate_entry_t *local_cands, int local_cnt,
+    const p2p_local_candidate_entry_t *remote_cands, int remote_cnt,
     int is_controlling
 ) {
     int pair_cnt = 0;
@@ -371,7 +371,7 @@ static int p2p_ice_form_check_list(
  *            0 对端离线，候选已缓存在服务器（等待对端上线后推送）
  *           -1 TCP 发送失败（连接未建立或网络错误）
  */
-int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
+int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_local_candidate_entry_t *c) {
 
     /* 仅用于 RELAY 模式（TCP 信令） */
     if (s->signaling_mode != P2P_SIGNALING_MODE_RELAY) {
@@ -494,7 +494,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                                   inet_ntoa(sa->sin_addr), ntohs(sa->sin_port));
                         return idx;
                     }
-                    p2p_candidate_entry_t *c = &s->local_cands[idx];
+                    p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                     c->type = P2P_CAND_HOST;
                     uint16_t local_pref = (uint16_t)(65535 - host_index);
                     c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
@@ -523,7 +523,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                           ntohs(((struct sockaddr_in *)ifa->ifa_addr)->sin_port));
                     return idx;
                 }
-                p2p_candidate_entry_t *c = &s->local_cands[idx];
+                p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                 c->type = P2P_CAND_HOST;
                 uint16_t local_pref = (uint16_t)(65535 - host_index);
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
@@ -628,7 +628,7 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
 
         p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
         print("I:", LA_F("Recv New Remote Candidate<%s:%d> (type=%d)", LA_F282, 282),
-              inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port), c->cand.type);
+              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->type);
     }
 }
 
@@ -653,8 +653,8 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     // 查找对应的远端候选
     int matched_idx = -1;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        if (s->remote_cands[i].cand.addr.sin_addr.s_addr == from->sin_addr.s_addr &&
-            s->remote_cands[i].cand.addr.sin_port == from->sin_port) {
+        if (s->remote_cands[i].addr.sin_addr.s_addr == from->sin_addr.s_addr &&
+            s->remote_cands[i].addr.sin_port == from->sin_port) {
             matched_idx = i;
             break;
         }
@@ -679,7 +679,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     const char *cand_type_str = "Unknown";
     const char *connection_desc = "";
     p2p_ice_cand_type_t ctype = (matched_idx >= 0)
-                                ? cand_type_to_ice((p2p_cand_type_t)s->remote_cands[matched_idx].cand.type)
+                                ? cand_type_to_ice((p2p_cand_type_t)s->remote_cands[matched_idx].type)
                                 : P2P_ICE_CAND_PRFLX;
     switch (ctype) {
         case P2P_ICE_CAND_HOST:
@@ -812,7 +812,7 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
      *          s->check_list = calloc(max_pairs, sizeof(p2p_candidate_pair_t));
      *          if (s->check_list) {
      *              // 提取 remote_cands 中的基础候选（去掉 last_punch_send_ms）
-     *              p2p_candidate_entry_t *base_cands = calloc(s->remote_cand_cnt, sizeof(p2p_candidate_entry_t));
+     *              p2p_local_candidate_entry_t *base_cands = calloc(s->remote_cand_cnt, sizeof(p2p_local_candidate_entry_t));
      *              for (int i = 0; i < s->remote_cand_cnt; i++) {
      *                  base_cands[i] = s->remote_cands[i].cand;
      *              }

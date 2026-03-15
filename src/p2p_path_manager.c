@@ -103,7 +103,7 @@ p2p_path_t path_manager_get_path_type(p2p_session_t *s, int path_idx) {
     if (path_idx < 0 || path_idx >= s->remote_cand_cnt)
         return P2P_PATH_NONE;
     p2p_remote_candidate_entry_t *e = &s->remote_cands[path_idx];
-    if (e->cand.type == P2P_CAND_RELAY)
+    if (e->type == P2P_CAND_RELAY)
         return P2P_PATH_RELAY;
     if (e->stats.is_lan)
         return P2P_PATH_LAN;
@@ -671,7 +671,7 @@ const struct sockaddr_in* path_manager_get_addr(p2p_session_t *s, int path_idx) 
 
     // 对于候选路径
     if (path_idx >= 0 && path_idx < s->remote_cand_cnt)
-        return &s->remote_cands[path_idx].cand.addr;
+        return &s->remote_cands[path_idx].addr;
 
     return NULL;  // 无效索引
 }
@@ -688,7 +688,7 @@ int path_manager_find_by_addr(p2p_session_t *s, const struct sockaddr_in *addr) 
     
     // 查找候选路径
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        if (sockaddr_equal(&s->remote_cands[i].cand.addr, addr)) {
+        if (sockaddr_equal(&s->remote_cands[i].addr, addr)) {
             return i;
         }
     }

@@ -185,7 +185,7 @@ static int build_register(uint8_t *buf, int buf_size,
                           const char *remote_peer_id,
                           uint32_t instance_id,
                           int candidate_count,
-                          p2p_compact_candidate_t *candidates) {
+                          p2p_candidate_t *candidates) {
     if (buf_size < 4 + 32 + 32 + 4 + 1) return -1;
     
     int n = 0;
@@ -211,11 +211,8 @@ static int build_register(uint8_t *buf, int buf_size,
     buf[n++] = (uint8_t)candidate_count;
     
     for (int i = 0; i < candidate_count && candidates; i++) {
-        buf[n++] = candidates[i].type;
-        memcpy(buf + n, &candidates[i].ip, 4);
-        n += 4;
-        memcpy(buf + n, &candidates[i].port, 2);
-        n += 2;
+        memcpy(buf + n, &candidates[i], sizeof(p2p_candidate_t));
+        n += sizeof(p2p_candidate_t);
     }
     
     return n;
@@ -362,7 +359,7 @@ static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt)
 
 // 发送 REGISTER 并接收 REGISTER_ACK，返回 session_id
 static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
-                               uint32_t inst_id, int cand_count, p2p_compact_candidate_t *cands) {
+                               uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
     int len = build_register(pkt, sizeof(pkt), local, remote, inst_id, cand_count, cands);
     

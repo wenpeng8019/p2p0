@@ -33,10 +33,10 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
 
     int send_path = (int)(entry - s->remote_cands);
 
-    udp_send_packet(s->sock, &entry->cand.addr, P2P_PKT_PUNCH, 0, n->punch_seq, NULL, 0);
+    udp_send_packet(s->sock, &entry->addr, P2P_PKT_PUNCH, 0, n->punch_seq, NULL, 0);
 
     print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, path=%d", LA_F56, 56),
-          PROTO, inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port),
+          PROTO, inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port),
           reason, n->punch_seq, send_path);
 
     entry->last_punch_send_ms = now;
@@ -52,6 +52,11 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
  * 初始化打洞上下文
  */
 void nat_init(nat_ctx_t *n) {
+    memset(n, 0, sizeof(*n));
+    n->state = NAT_INIT;
+}
+
+void nat_reset(nat_ctx_t *n) {
     memset(n, 0, sizeof(*n));
     n->state = NAT_INIT;
 }
@@ -96,7 +101,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         n->punch_start = now;
         n->rx_confirmed = false;
         n->tx_confirmed = false;
-        n->peer_addr = s->remote_cands[0].cand.addr;  /* 默认值，收到 ACK 时会更新 */
+        n->peer_addr = s->remote_cands[0].addr;  /* 默认值，收到 ACK 时会更新 */
 
         print("I:", LA_F("%s: start punching all(%d) remote candidates", LA_F148, 148), TASK_NAT, s->remote_cand_cnt);
 
@@ -105,7 +110,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
 
             for (int i = 0; i < s->remote_cand_cnt; i++) {
                 const char *type_str = "Unknown";
-                switch ((p2p_cand_type_t)s->remote_cands[i].cand.type) {
+                switch ((p2p_cand_type_t)s->remote_cands[i].type) {
                     case P2P_CAND_HOST:  type_str = "Host";  break;
                     case P2P_CAND_SRFLX: type_str = "Srflx"; break;
                     case P2P_CAND_PRFLX: type_str = "Prflx"; break;
@@ -113,7 +118,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
                 }
 
                 print("V:", LA_F("  [%d]<%s:%d> (type: %s)", LA_F47, 47), i,
-                      inet_ntoa(s->remote_cands[i].cand.addr.sin_addr), ntohs(s->remote_cands[i].cand.addr.sin_port),
+                      inet_ntoa(s->remote_cands[i].addr.sin_addr), ntohs(s->remote_cands[i].addr.sin_port),
                       type_str);
             }
         }
@@ -139,11 +144,11 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
     if (n->state == NAT_CONNECTED) {
 
         print("I:", LA_F("%s: punching additional cand<%s:%d>[%d] while connected", LA_F130, 130), TASK_NAT,
-              inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port), idx);
+              inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port), idx);
     }
     else {
         print("I:", LA_F("%s: punching remote cand<%s:%d>[%d]", LA_F131, 131), TASK_NAT,
-              inet_ntoa(entry->cand.addr.sin_addr), ntohs(entry->cand.addr.sin_port), idx);
+              inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port), idx);
 
         // 首次或重新启动时初始化状态（INIT/CLOSED）
         if (n->state == NAT_INIT || n->state == NAT_CLOSED) {
@@ -151,7 +156,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
             n->punch_start = now;
             n->rx_confirmed = false;
             n->tx_confirmed = false;
-            n->peer_addr = s->remote_cands[0].cand.addr;
+            n->peer_addr = s->remote_cands[0].addr;
         }
     }
 
@@ -281,7 +286,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 双向均确认 → NAT_CONNECTED（tx_confirmed 由 nat_on_punch_ack 设置）
     if (n->rx_confirmed && n->tx_confirmed) {
         n->state = NAT_CONNECTED;
-        n->peer_addr = s->remote_cands[cand_idx].cand.addr;
+        n->peer_addr = s->remote_cands[cand_idx].addr;
         print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F96, 96),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
@@ -360,7 +365,7 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 双向均确认 → NAT_CONNECTED
     if (n->rx_confirmed && n->tx_confirmed) {
         n->state = NAT_CONNECTED;
-        n->peer_addr = s->remote_cands[cand_idx].cand.addr;
+        n->peer_addr = s->remote_cands[cand_idx].addr;
         print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F96, 96),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }

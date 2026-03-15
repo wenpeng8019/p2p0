@@ -48,34 +48,52 @@
  * 解析 PEER_INFO 负载，追加到 session 的 remote_cands[]
  * 注意：这里对方的候选列表顺序并未按对方原始顺序排序，而是 FIFO 追加到 remote_cands[] 中
  *
- * 格式: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
+ * 格式: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*23)]
  */
 static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, int cand_cnt) {
 
-    int offset = sizeof(uint64_t) + 2; // 负载头：[session_id(8)][base_index(1)][candidate_count(1)]
+    assert(s->remote_cand_cnt + cand_cnt <= s->remote_cand_cap);
+
+    int offset = sizeof(uint64_t) + 2; // 第一个 candidates 列表的起始位置
+
+    // 对于 peer_info0, 即由 server 维护的双方握手包
+    if (payload[sizeof(uint64_t)]/* base_index */ == 0) {
+
+        // 其首个地址候选（idx=0）肯定有效，即肯定是（服务器观察到的）对方公网地址
+        p2p_local_candidate_entry_t parsed;
+        unpack_candidate(&parsed, payload + offset);
+        assert((p2p_cand_type_t)parsed.type == P2P_CAND_SRFLX);
+
+        p2p_remote_candidate_entry_t *c = &s->remote_cands[0];
+        c->type = parsed.type;
+        c->priority = parsed.priority;
+        c->addr = parsed.addr;
+        c->last_punch_send_ms = 0;
+
+        --cand_cnt; offset += (int)sizeof(p2p_candidate_t);
+    }
+
+    if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
+
     for (int i = 0; i < cand_cnt; i++) {
 
-        int cand_type = (p2p_cand_type_t)payload[offset];
-        struct sockaddr_in caddr;
-        memset(&caddr, 0, sizeof(caddr));
-        caddr.sin_family = AF_INET;
-        memcpy(&caddr.sin_addr.s_addr, payload + offset + 1, 4);
-        memcpy(&caddr.sin_port, payload + offset + 5, 2);
+        p2p_local_candidate_entry_t parsed;
+        unpack_candidate(&parsed, payload + offset);
 
-        int idx = p2p_upsert_remote_candidate(s, &caddr, cand_type, false);
+        int idx = p2p_upsert_remote_candidate(s, &parsed.addr, parsed.type, false);
         if (idx < 0) {
             print("E:", LA_S("%s: unpack upsert remote cand<%s:%d> failed(OOM)\n", LA_S33, 33),
-                  TASK_ICE_REMOTE, inet_ntoa(caddr.sin_addr), ntohs(caddr.sin_port));
+                  TASK_ICE_REMOTE, inet_ntoa(parsed.addr.sin_addr), ntohs(parsed.addr.sin_port));
             return;
         }
         p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
-        offset += (int)sizeof(p2p_compact_candidate_t);
+        offset += (int)sizeof(p2p_candidate_t);
 
         print("I:", LA_F("%s: remote cand[%d]<%s:%d>, starting punch\n", LA_F133, 133),
-              TASK_ICE_REMOTE, idx, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
+              TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
 
         // idx:0 是对方的公网候选地址，也就是服务器观察到的地址
-        if (c->cand.type == P2P_CAND_SRFLX) {
+        if (c->type == P2P_CAND_SRFLX) {
 
             if (idx != 0)
                 print("W:", LA_F("%s: unexpected Srflx candidate at idx %d, expected idx 0\n", LA_F165, 165),
@@ -88,15 +106,15 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
                 print("W:", LA_F("%s: unexpected non-Srflx candidate at idx 0\n", LA_F167, 167),
                       TASK_ICE_REMOTE);
 
-            if (c->cand.type == P2P_CAND_RELAY) continue;
+            if (c->type == P2P_CAND_RELAY) continue;
 
-            assert(c->cand.type == P2P_CAND_HOST);
+            assert(c->type == P2P_CAND_HOST);
             if (instrument_enabled(P2P_INST_OPT_HOST_PUNCH_OFF)) continue;
         }
 
         if (nat_punch(s, idx) != E_NONE) {
             print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
-                  TASK_ICE_REMOTE, idx, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
+                  TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
         }
     }
 }
@@ -106,14 +124,14 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
  *   负载头后面的剩余空间就是候选列表，通过预定义、和 MTU 上限共同限制计算得出该单位大小
  */
 #define PEER_INFO_CAND_UNIT \
-    (((P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2) / (int)sizeof(p2p_compact_candidate_t)) < MAX_CANDS_PER_PACKET \
-     ? ((P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2) / (int)sizeof(p2p_compact_candidate_t)) \
+    (((P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2) / (int)sizeof(p2p_candidate_t)) < MAX_CANDS_PER_PACKET \
+     ? ((P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2) / (int)sizeof(p2p_candidate_t)) \
      : MAX_CANDS_PER_PACKET)
 
 /*
  * 构建 PEER_INFO 的候选队列，返回 payload 总长度
  *
- * 格式: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
+ * 格式: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*23)]
  */
 static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payload, uint8_t *r_flags) {
 
@@ -151,10 +169,7 @@ static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payloa
 
     int offset = sizeof(uint64_t) + 2; // 负载头：[session_id(8)][base_index(1)][candidate_count(1)]
     for (int i = 0; i < cnt; i++) { int idx = base_index + i;
-        payload[offset] = (uint8_t)s->local_cands[idx].type;
-        memcpy(payload + offset + 1, &s->local_cands[idx].addr.sin_addr.s_addr, 4);
-        memcpy(payload + offset + 5, &s->local_cands[idx].addr.sin_port, 2);
-        offset += (int)sizeof(p2p_compact_candidate_t);
+        offset += pack_candidate(&s->local_cands[idx], payload + offset);
     }
 
     return offset;
@@ -178,7 +193,7 @@ static void send_register(p2p_session_t *s) {
     const int header_size = P2P_PEER_ID_MAX * 2 + 4 + 1;
     assert(P2P_MAX_PAYLOAD >= header_size);
     int n = P2P_MAX_PAYLOAD - header_size; if (n < 0) n = 0;
-    int cand_cnt = n / (int)sizeof(p2p_compact_candidate_t)/* 7 */;
+    int cand_cnt = n / (int)sizeof(p2p_candidate_t)/* 23 */;
     if (cand_cnt > s->local_cand_cnt) cand_cnt = s->local_cand_cnt;
     ctx->candidates_cached = cand_cnt;
 
@@ -191,13 +206,10 @@ static void send_register(p2p_session_t *s) {
     // instance_id（4 字节大端序）
     nwrite_l(payload + n, ctx->instance_id); n += 4;
 
-    // candidates (每个 7 字节: type + ip + port)
+    // candidates (每个 23 字节: type + addr + priority)
     payload[n++] = (uint8_t)cand_cnt;
     for (int i = 0; i < cand_cnt; i++) {
-        payload[n] = (uint8_t)s->local_cands[i].type;
-        memcpy(payload + n + 1, &s->local_cands[i].addr.sin_addr.s_addr, 4);
-        memcpy(payload + n + 5, &s->local_cands[i].addr.sin_port, 2);
-        n += 7;
+        n += pack_candidate(&s->local_cands[i], payload + n);
     }
 
     print("V:", LA_F("%s sent, inst_id=%u, cands=%d\n", LA_F58, 58), PROTO, ctx->instance_id, cand_cnt);
@@ -759,7 +771,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         print("E:", LA_F("%s: session mismatch(local=%" PRIu64 " ack=%" PRIu64 ")\n", LA_F143, 143),
               PROTO, ctx->session_id, ack_session_id);
 
-        // 之前"提前"收到的 PEER_INFO 包都是无效的，以 REGISTER_ACK 为准
+        // 之前"提前"收到的 PEER_INFO 包都是无效的，以 REGISTER_ACK 的 ses_id 为准
         ctx->session_id = ack_session_id;
         ctx->peer_online = false;
 
@@ -770,7 +782,9 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         s->remote_cand_cnt = 0;
         s->remote_ice_done = false;
 
-        // todo 清除 nat/path 地址？
+        nat_reset(&s->nat);
+
+        // todo 清除 path 地址？
     }
 
     print("V:", LA_F("%s: accepted, public=%s:%d ses_id=%" PRIu64 " max_cands=%d probe_port=%d relay=%s msg=%s\n", LA_F90, 90),
@@ -871,7 +885,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
     }
 
     int cand_cnt = payload[sizeof(uint64_t) + 1];
-    if (len < (int)sizeof(uint64_t) + 2 + (int)sizeof(p2p_compact_candidate_t) * cand_cnt) {
+    if (len < (int)sizeof(uint64_t) + 2 + (int)sizeof(p2p_candidate_t) * cand_cnt) {
         print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F94, 94), PROTO, len, cand_cnt);
         return;
     }
@@ -962,20 +976,18 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             }
 
             p2p_remote_candidate_entry_t *c = &s->remote_cands[0];
-            c->cand.type = (p2p_cand_type_t)payload[sizeof(uint64_t)+2];
-            c->cand.priority = 0;
-            sockaddr_init_with_net(&c->cand.addr, (uint32_t *) (payload + sizeof(uint64_t) + 3),
+            c->type = (p2p_cand_type_t)payload[sizeof(uint64_t)+2];
+            c->priority = 0;
+            sockaddr_init_with_net(&c->addr, (uint32_t *) (payload + sizeof(uint64_t) + 3),
                                    (uint16_t *) (payload + sizeof(uint64_t) + 7));
             c->last_punch_send_ms = 0;
-            if (s->remote_cand_cnt == 0) {
-                s->remote_cand_cnt = 1;
-            }
+            if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
 
             // Trickle ICE：NAT 打洞已启动时，立即探测最新地址
             if (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_RELAY) {
 
                 print("I:", LA_F("%s: Peer addr changed -> %s:%d, retrying punch\n", LA_F71, 71),
-                      TASK_ICE_REMOTE, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port));
+                      TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
 
                 // 标记旧的活跃路径为失效（地址已变更）
                 if (s->path_mgr.active_path >= 0 && s->path_mgr.active_path < s->remote_cand_cnt) {
@@ -993,7 +1005,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             }
             else {
                 print("I:", LA_F("%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n", LA_F70, 70),
-                      TASK_ICE_REMOTE, inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port), (int)s->nat.state);
+                      TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), (int)s->nat.state);
             }
 
             ctx->remote_addr_notify_seq = base_index;

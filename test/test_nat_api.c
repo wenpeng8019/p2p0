@@ -53,10 +53,10 @@ static void add_test_candidate(p2p_session_t *s, const char *ip, uint16_t port, 
     
     p2p_remote_candidate_entry_t *c = &s->remote_cands[s->remote_cand_cnt++];
     memset(c, 0, sizeof(*c));
-    c->cand.type = type;
-    c->cand.addr.sin_family = AF_INET;
-    inet_pton(AF_INET, ip, &c->cand.addr.sin_addr);
-    c->cand.addr.sin_port = htons(port);
+    c->type = type;
+    c->addr.sin_family = AF_INET;
+    inet_pton(AF_INET, ip, &c->addr.sin_addr);
+    c->addr.sin_port = htons(port);
     c->last_punch_send_ms = 0;
 }
 

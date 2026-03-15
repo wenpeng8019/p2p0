@@ -234,7 +234,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     // 初始化候选地址数组（动态分配，初始容量 8）
     const int initial_cand_cap = 8;
-    s->local_cands  = (p2p_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_candidate_entry_t));
+    s->local_cands  = (p2p_local_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_local_candidate_entry_t));
     s->remote_cands = (p2p_remote_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_remote_candidate_entry_t));
     if (!s->local_cands || !s->remote_cands) {
         print("E:", LA_F("Failed to allocate memory for candidate lists", LA_F207, 207));
@@ -477,7 +477,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                         return idx;
                     }
 
-                    p2p_candidate_entry_t *c = &s->local_cands[idx];
+                    p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                     c->type = P2P_CAND_HOST;
                     c->addr = s->route.local_addrs[i];
                     c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口

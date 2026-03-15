@@ -499,7 +499,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
             return -1;
         }
         
-        p2p_candidate_entry_t *c = &s->local_cands[idx];
+        p2p_local_candidate_entry_t *c = &s->local_cands[idx];
         c->type = P2P_CAND_RELAY;
         c->addr = relay;
         c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
@@ -781,7 +781,7 @@ void p2p_turn_tick(p2p_session_t *s, uint64_t now_ms) {
 
     /* ---- 权限同步：为新的远端候选创建 Permission ---- */
     while (t->perm_cand_synced < s->remote_cand_cnt) {
-        const struct sockaddr_in *addr = &s->remote_cands[t->perm_cand_synced].cand.addr;
+        const struct sockaddr_in *addr = &s->remote_cands[t->perm_cand_synced].addr;
         turn_create_permission(s, addr);
         t->perm_cand_synced++;
     }

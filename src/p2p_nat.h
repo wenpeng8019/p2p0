@@ -48,6 +48,8 @@ typedef struct {
  */
 void nat_init(nat_ctx_t *n);
 
+void nat_reset(nat_ctx_t *n);
+
 /*
  * 周期调用，发送打洞包和心跳
  *

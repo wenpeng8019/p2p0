@@ -254,7 +254,7 @@
  *
  * 缓存单位：
  *   - pending_candidate_t 结构（~60 字节）
- *   - 包含：sender_name(32B) + p2p_candidate_t(32B) + timestamp(8B)
+ *   - 包含：sender_name(32B) + p2p_candidate_t(23B) + timestamp(8B)
  *
  * 缓存容量：
  *   - 服务器自行配置（取决于内存和并发用户数）

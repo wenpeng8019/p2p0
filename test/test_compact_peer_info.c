@@ -183,7 +183,7 @@ static int build_register(uint8_t *buf, int buf_size,
                           const char *remote_peer_id,
                           uint32_t instance_id,
                           int candidate_count,
-                          p2p_compact_candidate_t *candidates) {
+                          p2p_candidate_t *candidates) {
     if (buf_size < 4 + 32 + 32 + 4 + 1) return -1;
     
     int n = 0;
@@ -209,11 +209,8 @@ static int build_register(uint8_t *buf, int buf_size,
     buf[n++] = (uint8_t)candidate_count;
     
     for (int i = 0; i < candidate_count && candidates; i++) {
-        buf[n++] = candidates[i].type;
-        memcpy(buf + n, &candidates[i].ip, 4);
-        n += 4;
-        memcpy(buf + n, &candidates[i].port, 2);
-        n += 2;
+        memcpy(buf + n, &candidates[i], sizeof(p2p_candidate_t));
+        n += sizeof(p2p_candidate_t);
     }
     
     return n;
@@ -243,7 +240,7 @@ typedef struct {
     uint64_t session_id;
     uint8_t base_index;
     uint8_t candidate_count;
-    p2p_compact_candidate_t candidates[16];
+    p2p_candidate_t candidates[16];
 } peer_info_t;
 
 // 解析 PEER_INFO 包
@@ -266,17 +263,15 @@ static void parse_peer_info(const uint8_t *buf, int len, peer_info_t *info) {
     
     // 解析候选列表
     int offset = 14;
-    for (int i = 0; i < info->candidate_count && i < 16 && offset + 7 <= len; i++) {
-        info->candidates[i].type = buf[offset];
-        memcpy(&info->candidates[i].ip, buf + offset + 1, 4);
-        memcpy(&info->candidates[i].port, buf + offset + 5, 2);
-        offset += 7;
+    for (int i = 0; i < info->candidate_count && i < 16 && offset + (int)sizeof(p2p_candidate_t) <= len; i++) {
+        memcpy(&info->candidates[i], buf + offset, sizeof(p2p_candidate_t));
+        offset += sizeof(p2p_candidate_t);
     }
 }
 
 // 发送 REGISTER 并接收 REGISTER_ACK，返回 session_id
 static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
-                               uint32_t inst_id, int cand_count, p2p_compact_candidate_t *cands) {
+                               uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
     int len = build_register(pkt, sizeof(pkt), local, remote, inst_id, cand_count, cands);
     
@@ -519,13 +514,16 @@ static void test_peer_info_with_candidates(void) {
     }
     
     // Alice 带候选地址注册
-    p2p_compact_candidate_t alice_cands[2];
+    p2p_candidate_t alice_cands[2];
+    memset(alice_cands, 0, sizeof(alice_cands));
     alice_cands[0].type = 0;  // host
-    inet_pton(AF_INET, "192.168.1.100", &alice_cands[0].ip);
-    alice_cands[0].port = htons(12345);
+    memcpy(alice_cands[0].addr.ip, P2P_IPV4_MAPPED_PREFIX, 12);
+    inet_pton(AF_INET, "192.168.1.100", &alice_cands[0].addr.ip[12]);
+    alice_cands[0].addr.port = htons(12345);
     alice_cands[1].type = 1;  // srflx
-    inet_pton(AF_INET, "1.2.3.4", &alice_cands[1].ip);
-    alice_cands[1].port = htons(54321);
+    memcpy(alice_cands[1].addr.ip, P2P_IPV4_MAPPED_PREFIX, 12);
+    inet_pton(AF_INET, "1.2.3.4", &alice_cands[1].addr.ip[12]);
+    alice_cands[1].addr.port = htons(54321);
     
     uint32_t inst_alice = (uint32_t)P_tick_us() + 3000;
     uint32_t inst_bob = (uint32_t)P_tick_us() + 3001;

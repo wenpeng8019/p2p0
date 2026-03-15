@@ -684,11 +684,11 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                 /* 解析信令数据并注入 ICE 状态机 */
                 p2p_signaling_payload_hdr_t p;
                 if (payload_len >= 76 && unpack_signaling_payload_hdr(&p, ctx->read_payload) == 0 &&
-                    payload_len >= (size_t)(76 + p.candidate_count * 32)) {
+                    payload_len >= (size_t)(76 + p.candidate_count * sizeof(p2p_candidate_t))) {
                     
-                    /* 添加远端 ICE 候选（步长 = sizeof(p2p_candidate_t) = 32）*/
+                    /* 添加远端 ICE 候选 */
                     for (int i = 0; i < p.candidate_count; i++) {
-                        p2p_candidate_entry_t c;
+                        p2p_local_candidate_entry_t c;
                         unpack_candidate(&c, ctx->read_payload + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
                         int idx = p2p_upsert_remote_candidate(s, &c.addr, c.type, false);
                         if (idx < 0) {
@@ -701,13 +701,13 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                             p2p_remote_candidate_entry_t *rc = &s->remote_cands[idx];
 
                             print("I:", LA_F("Added Remote Candidate: %d -> %s:%d", LA_F172, 172),
-                                   rc->cand.type, inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
+                                   rc->type, inet_ntoa(rc->addr.sin_addr), ntohs(rc->addr.sin_port));
 
                             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
                             if (s->ice_ctx.state == P2P_ICE_STATE_CHECKING) {
 
                                 print("I:", LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F346, 346),
-                                             inet_ntoa(rc->cand.addr.sin_addr), ntohs(rc->cand.addr.sin_port));
+                                             inet_ntoa(rc->addr.sin_addr), ntohs(rc->addr.sin_port));
 
                                 nat_punch(s, idx);
                             }

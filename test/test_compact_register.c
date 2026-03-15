@@ -226,7 +226,7 @@ static int build_register(uint8_t *buf, int buf_size,
                           const char *remote_peer_id,
                           uint32_t instance_id,
                           int candidate_count,
-                          p2p_compact_candidate_t *candidates) {
+                          p2p_candidate_t *candidates) {
     if (buf_size < 4 + 32 + 32 + 4 + 1) return -1;
     
     int n = 0;
@@ -259,11 +259,8 @@ static int build_register(uint8_t *buf, int buf_size,
     
     // candidates
     for (int i = 0; i < candidate_count && candidates; i++) {
-        buf[n++] = candidates[i].type;
-        memcpy(buf + n, &candidates[i].ip, 4);
-        n += 4;
-        memcpy(buf + n, &candidates[i].port, 2);
-        n += 2;
+        memcpy(buf + n, &candidates[i], sizeof(p2p_candidate_t));
+        n += sizeof(p2p_candidate_t);
     }
     
     return n;
@@ -715,13 +712,16 @@ static void test_register_with_candidates(void) {
     clear_logs();
     
     // 构造候选列表（type: 0=host, 1=srflx）
-    p2p_compact_candidate_t candidates[2];
+    p2p_candidate_t candidates[2];
+    memset(candidates, 0, sizeof(candidates));
     candidates[0].type = 0;  // host
-    inet_pton(AF_INET, "192.168.1.100", &candidates[0].ip);
-    candidates[0].port = htons(12345);
+    memcpy(candidates[0].addr.ip, P2P_IPV4_MAPPED_PREFIX, 12);
+    inet_pton(AF_INET, "192.168.1.100", &candidates[0].addr.ip[12]);
+    candidates[0].addr.port = htons(12345);
     candidates[1].type = 1;  // srflx
-    inet_pton(AF_INET, "1.2.3.4", &candidates[1].ip);
-    candidates[1].port = htons(54321);
+    memcpy(candidates[1].addr.ip, P2P_IPV4_MAPPED_PREFIX, 12);
+    inet_pton(AF_INET, "1.2.3.4", &candidates[1].addr.ip[12]);
+    candidates[1].addr.port = htons(54321);
     
     uint8_t pkt[256];
     uint32_t inst_id = (uint32_t)P_tick_us() + 5000;
@@ -975,12 +975,14 @@ static void test_register_candidates_overflow(void) {
     clear_logs();
     
     // 构造 20 个候选地址（超过 MAX_CANDIDATES=16）
-    p2p_compact_candidate_t candidates[20];
+    p2p_candidate_t candidates[20];
+    memset(candidates, 0, sizeof(candidates));
     for (int i = 0; i < 20; i++) {
         candidates[i].type = (i < 10) ? 0 : 1;  // 前10个 host，后10个 srflx
+        memcpy(candidates[i].addr.ip, P2P_IPV4_MAPPED_PREFIX, 12);
         uint32_t ip = htonl(0xC0A80100 + i);    // 192.168.1.0 + i
-        memcpy(&candidates[i].ip, &ip, 4);
-        candidates[i].port = htons(10000 + i);
+        memcpy(&candidates[i].addr.ip[12], &ip, 4);
+        candidates[i].addr.port = htons(10000 + i);
     }
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 12000;

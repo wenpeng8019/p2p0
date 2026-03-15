@@ -2,7 +2,7 @@
  * 共享序列化工具（供库内部及 p2p_server 使用）
  *
  * 包含不依赖 LANG/i18n 宏和 p2p_session_t 的轻量工具：
- *   - ICE 候选地址基础结构体 p2p_candidate_entry_t
+ *   - ICE 候选地址基础结构体 p2p_local_candidate_entry_t
  *   - 序列号差值 seq_diff
  *   - sockaddr ↔ wire 格式转换
  *   - 信令负载头部 / 候选的序列化与反序列化
@@ -68,25 +68,28 @@ static inline bool sockaddr_equal(const struct sockaddr_in *a, const struct sock
 /*
  * struct sockaddr_in → p2p_sockaddr_t
  *
- * sin_port/sin_addr 已是网络字节序；统一用 htonl 写入确保跨平台一致性。
- * sin_port（uint16_t，大端）零扩展后再 htonl，与 sockaddr_from_p2p_wire 对称。
+ * IPv4 地址编码为 IPv4-mapped IPv6（::ffff:x.x.x.x）。
+ * sin_port 已是网络字节序，直接存储。
  */
 static inline void sockaddr_to_p2p_wire(const struct sockaddr_in *s, p2p_sockaddr_t *w) {
-    w->family = htonl((uint32_t)s->sin_family);
-    w->port   = htonl((uint32_t)s->sin_port);
-    w->ip     = s->sin_addr.s_addr;     /* 已是网络字节序，直接存储 */
+    memset(w, 0, sizeof(*w));
+    w->port    = s->sin_port;               /* 已是网络字节序 */
+    w->ip[10]  = 0xFF;                      /* IPv4-mapped 前缀 */
+    w->ip[11]  = 0xFF;
+    memcpy(&w->ip[12], &s->sin_addr.s_addr, 4);
 }
 
 /*
  * p2p_sockaddr_t → struct sockaddr_in
  *
  * 自动清零 sin_zero[8] 及 macOS 上的 sin_len 字段。
+ * 仅处理 IPv4-mapped 地址（ip[12..15]），IPv6 需另行处理。
  */
 static inline void sockaddr_from_p2p_wire(const p2p_sockaddr_t *w, struct sockaddr_in *s) {
     memset(s, 0, sizeof(*s));
-    s->sin_family      = (sa_family_t)ntohl(w->family);
-    s->sin_port        = (in_port_t)  ntohl(w->port);
-    s->sin_addr.s_addr = w->ip;
+    s->sin_family      = AF_INET;
+    s->sin_port        = w->port;           /* 已是网络字节序 */
+    memcpy(&s->sin_addr.s_addr, &w->ip[12], 4);
 }
 
 /* ============================================================================

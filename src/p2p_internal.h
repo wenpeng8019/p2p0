@@ -137,7 +137,7 @@ typedef struct p2p_session {
     void*                       dtls_data;          // DTLS 加密层私有数据（SSL 上下文等）
 
     /* ======================== 候选队列 ======================== */
-    p2p_candidate_entry_t*      local_cands;        // 本地候选地址（动态分配）
+    p2p_local_candidate_entry_t*   local_cands;        // 本地候选地址（动态分配）
     int                         local_cand_cnt;     // 本地候选数量
     int                         local_cand_cap;     // 本地候选容量
     p2p_remote_candidate_entry_t* remote_cands;     // 远端候选地址（动态分配，含运行时状态）
@@ -263,24 +263,26 @@ typedef enum {
  * 仅用于会话内部运算。网络传输使用 p2p_candidate_t（见 p2pp.h）。
  * 转换函数：pack_candidate() / unpack_candidate()，见下文。
  */
-struct p2p_candidate_entry {
+struct p2p_local_candidate_entry {
     p2p_cand_type_t    type;                    // 候选类型
+    uint32_t           priority;                // 候选优先级
     struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
     struct sockaddr_in base_addr;               // 基础地址（平台原生 16B）
-    uint32_t           priority;                // 候选优先级
 };
 
 /*
- * 远端候选地址（扩展类型）
+ * 远端候选地址
  *
- * 以 p2p_candidate_entry_t 作为首成员，保持与 pack_candidate()/unpack_candidate()
- * 共享同一基础序列化字段；额外运行时状态仅用于本地调度，不参与线协议。
+ * 与 p2p_local_candidate_entry_t 解耦；共享 type/priority/addr 字段布局，
+ * 但不包含 base_addr，额外运行时状态仅用于本地调度，不参与线协议。
  */
 struct p2p_remote_candidate_entry {
-    p2p_candidate_entry_t cand;                 // 可序列化基础候选字段
-    uint64_t              last_punch_send_ms;   // 最近一次发送 PUNCH 的时间（调度状态）
-    bool                  reachable;            // 是否已观测到可达（收到对端 PUNCH/探测成功）
-    path_stats_t          stats;                // 路径统计信息
+    p2p_cand_type_t    type;                    // 候选类型
+    uint32_t           priority;                // 候选优先级
+    struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
+    uint64_t           last_punch_send_ms;      // 最近一次发送 PUNCH 的时间（调度状态）
+    bool               reachable;               // 是否已观测到可达（收到对端 PUNCH/探测成功）
+    path_stats_t       stats;                   // 路径统计信息
 };
 
 /* ============================================================================
@@ -288,31 +290,30 @@ struct p2p_remote_candidate_entry {
  * ============================================================================ */
 
 /*
- * pack_candidate: p2p_candidate_entry_t（内部平台格式）→ 网络字节流
+ * pack_candidate: p2p_local_candidate_entry_t（内部平台格式）→ 网络字节流
  *
- * 格式（32 字节）：[type:4B][addr:12B][base_addr:12B][priority:4B]
+ * 格式（23 字节）：[type:1B][addr:18B][priority:4B]
  */
-static inline int pack_candidate(const p2p_candidate_entry_t *c, uint8_t *buf) {
+static inline int pack_candidate(const p2p_local_candidate_entry_t *c, uint8_t *buf) {
     p2p_candidate_t w;
-    w.type     = htonl((uint32_t)c->type);
+    w.type     = (uint8_t)c->type;
     sockaddr_to_p2p_wire(&c->addr, &w.addr);
-    sockaddr_to_p2p_wire(&c->base_addr, &w.base_addr);
     w.priority = htonl(c->priority);
     memcpy(buf, &w, sizeof(w));
-    return (int)sizeof(w);  /* 32 */
+    return (int)sizeof(w);  /* 23 */
 }
 
 /*
- * unpack_candidate: 网络字节流 → p2p_candidate_entry_t（内部平台格式）
+ * unpack_candidate: 网络字节流 → p2p_local_candidate_entry_t（内部平台格式）
  */
-static inline int unpack_candidate(p2p_candidate_entry_t *c, const uint8_t *buf) {
+static inline int unpack_candidate(p2p_local_candidate_entry_t *c, const uint8_t *buf) {
     p2p_candidate_t w;
     memcpy(&w, buf, sizeof(w));
-    c->type     = (int)ntohl(w.type);
+    c->type     = (int)w.type;
     sockaddr_from_p2p_wire(&w.addr, &c->addr);
-    sockaddr_from_p2p_wire(&w.base_addr, &c->base_addr);
+    memset(&c->base_addr, 0, sizeof(c->base_addr));  /* 线协议不含 base_addr */
     c->priority = ntohl(w.priority);
-    return (int)sizeof(w);  /* 32 */
+    return (int)sizeof(w);  /* 23 */
 }
 
 /* ============================================================================
@@ -325,7 +326,7 @@ static inline int unpack_candidate(p2p_candidate_entry_t *c, const uint8_t *buf)
 static inline ret_t p2p_cand_push_local(p2p_session_t *s) {
     if (s->local_cand_cnt >= s->local_cand_cap) {
         int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
-        p2p_candidate_entry_t *p = (p2p_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_candidate_entry_t));
+        p2p_local_candidate_entry_t *p = (p2p_local_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_local_candidate_entry_t));
         if (!p) return E_OUT_OF_MEMORY;
         s->local_cands    = p;
         s->local_cand_cap = nc;
@@ -350,20 +351,20 @@ static inline ret_t p2p_cand_push_remote(p2p_session_t *s) {
 static inline int p2p_find_remote_candidate_by_addr(const p2p_session_t *s, const struct sockaddr_in *addr) {
     if (!s || !addr) return -1;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        if (sockaddr_equal(&s->remote_cands[i].cand.addr, addr)) return i;
+        if (sockaddr_equal(&s->remote_cands[i].addr, addr)) return i;
     }
     return -1;
 }
 
 static inline ret_t p2p_upsert_remote_candidate(p2p_session_t *s,
-                                                 const struct sockaddr_in *addr,
-                                                 p2p_cand_type_t cand_type,
-                                                 bool from_punch) {
+                                                const struct sockaddr_in *addr,
+                                                p2p_cand_type_t cand_type,
+                                                bool from_punch) {
     if (!s || !addr) return E_INVALID;
 
     int idx = p2p_find_remote_candidate_by_addr(s, addr);
     if (idx >= 0) {
-        if (!from_punch) s->remote_cands[idx].cand.type = cand_type;
+        if (!from_punch) s->remote_cands[idx].type = cand_type;
         return idx;
     }
 
@@ -371,10 +372,9 @@ static inline ret_t p2p_upsert_remote_candidate(p2p_session_t *s,
     if (idx < 0) return idx;
 
     p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
-    c->cand.addr = *addr;
-    c->cand.base_addr = *addr;
-    c->cand.type = from_punch ? P2P_CAND_PRFLX : cand_type;
-    c->cand.priority = 0;
+    c->addr = *addr;
+    c->type = from_punch ? P2P_CAND_PRFLX : cand_type;
+    c->priority = 0;
     c->last_punch_send_ms = 0;
     c->reachable = false;
     path_stats_init(&c->stats, 0);  /* 初始化路径统计默认值（rtt_min=9999 等） */
