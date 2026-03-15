@@ -3,6 +3,9 @@
 -Wpedantic
 -std=c99
 -Iinclude
+-Isrc
+-Ii18n
+-Istdc
 -Ithird_party/mbedtls/include
 -Ithird_party/usrsctp/usrsctplib
 -I/opt/homebrew/Cellar/openssl@3/3.6.0/include

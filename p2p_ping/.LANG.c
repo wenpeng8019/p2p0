@@ -31,24 +31,22 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S21] = "Signaling server IP[:PORT]",  /* SID:21 */
     [LA_S22] = "Skip host candidates",  /* SID:22 */
     [LA_S23] = "Target Peer Name (if specified: active role)",  /* SID:23 */
-    [LA_S24] = "Test PUNCH/PUNCH_ACK state machine over LAN",  /* SID:24 */
-    [LA_S25] = "TURN password",  /* SID:25 */
-    [LA_S26] = "TURN server address",  /* SID:26 */
-    [LA_S27] = "TURN username",  /* SID:27 */
-    [LA_S28] = "Use Chinese language",  /* SID:28 */
-    [LA_S29] = "Use COMPACT mode (UDP signaling, default is ICE/TCP)",  /* SID:29 */
-    [LA_S30] = "Your Peer Name",  /* SID:30 */
-    [LA_F31] = "% === P2P Ping Diagnostic Tool ===\n",  /* SID:31 */
-    [LA_F32] = "% Failed to create sessions\n",  /* SID:32 */
-    [LA_F33] = "% Failed to initialize connection\n",  /* SID:33 */
-    [LA_F34] = "% No signaling mode.\nUse --server or --github\n",  /* SID:34 */
-    [LA_F35] = "Running in %s mode (connecting to %s)...",  /* SID:35 */
-    [LA_F36] = "Running in %s mode (waiting for connection)...",  /* SID:36 */
-    [LA_F37] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:37 */
-    [LA_F38] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:38 */
-    [LA_F39] = "[STATE] %s (%d) -> %s (%d)",  /* SID:39 */
-    [LA_F40] = "% [TEST] LAN punch mode: PUNCH/PUNCH_ACK over Host candidates (nat_start_punch)\n",  /* SID:40 */
-    [LA_F41] = "% [TEST] LAN shortcut disabled - forcing NAT punch\n",  /* SID:41 */
+    [LA_S24] = "TURN password",  /* SID:24 */
+    [LA_S25] = "TURN server address",  /* SID:25 */
+    [LA_S26] = "TURN username",  /* SID:26 */
+    [LA_S27] = "Use Chinese language",  /* SID:27 */
+    [LA_S28] = "Use COMPACT mode (UDP signaling, default is ICE/TCP)",  /* SID:28 */
+    [LA_S29] = "Your Peer Name",  /* SID:29 */
+    [LA_F30] = "% === P2P Ping Diagnostic Tool ===\n",  /* SID:30 */
+    [LA_F31] = "% Failed to create sessions\n",  /* SID:31 */
+    [LA_F32] = "% Failed to initialize connection\n",  /* SID:32 */
+    [LA_F33] = "% No signaling mode.\nUse --server or --github\n",  /* SID:33 */
+    [LA_F34] = "Running in %s mode (connecting to %s)...",  /* SID:34 */
+    [LA_F35] = "Running in %s mode (waiting for connection)...",  /* SID:35 */
+    [LA_F36] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:36 */
+    [LA_F37] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:37 */
+    [LA_F38] = "[STATE] %s (%d) -> %s (%d)",  /* SID:38 */
+    [LA_F39] = "% [TEST] LAN shortcut disabled - forcing NAT punch\n",  /* SID:39 */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

@@ -187,7 +187,7 @@ struct p2p_session;
  *      2) 若 probe_port > 0，发送 NAT_PROBE 到探测端口（使用包头 seq 匹配响应）
  *      3) 收到 NAT_PROBE_ACK，获得 Mapped_Addr2
  *      4) 比较 Mapped_Port1 vs Mapped_Port2，写入 nat_detected_result
- *      5) 若 probe_port == 0，结论为 P2P_NAT_UNSUPPORTED（无法探测）
+ *      5) 若 probe_port == 0，结论为 P2P_NAT_UNDETECTABLE（无法探测）
  *    - 整个探测在 REGISTERED 状态完成（等待 PEER_INFO 期间，不阻塞主流程）
  *    - 探测失败（超时）不影响 P2P 打洞，降级为普通打洞策略
  *

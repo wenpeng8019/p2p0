@@ -212,7 +212,7 @@ static void sctp_upcall(struct socket *sock, void *arg, int flags) {
                                    sac->sac_state == SCTP_SHUTDOWN_COMP ||
                                    sac->sac_state == SCTP_CANT_STR_ASSOC) {
                             ctx->state = 0;
-                            print("W:", LA_F("[SCTP] association lost/shutdown (state=%u)", LA_F315, 315),
+                            print("W:", LA_F("[SCTP] association lost/shutdown (state=%u)", LA_F338, 338),
                                   sac->sac_state);
                         }
                         break;
@@ -333,7 +333,7 @@ static int sctp_init(p2p_session_t *s) {
     sconn.sconn_addr = s;
 
     if (usrsctp_bind(sock, (struct sockaddr *)&sconn, sizeof(sconn)) < 0) {
-        print("E:", LA_F("[SCTP] bind failed: %s", LA_F316, 316), strerror(errno));
+        print("E:", LA_F("[SCTP] bind failed: %s", LA_F339, 339), strerror(errno));
         goto fail;
     }
 
@@ -350,7 +350,7 @@ static int sctp_init(p2p_session_t *s) {
     ctx->state = 1; /* 连接中 */
     int ret = usrsctp_connect(sock, (struct sockaddr *)&peer, sizeof(peer));
     if (ret < 0 && errno != EINPROGRESS) {
-        print("E:", LA_F("[SCTP] connect failed: %s", LA_F317, 317), strerror(errno));
+        print("E:", LA_F("[SCTP] connect failed: %s", LA_F340, 340), strerror(errno));
         goto fail;
     }
 
@@ -391,7 +391,7 @@ static int sctp_send(p2p_session_t *s, const void *buf, int len) {
                                  SCTP_SENDV_SPA, 0);
     if (sent < 0) {
         if (errno == EWOULDBLOCK) return 0; /* 发送缓冲区满，下次重试 */
-        print("W:", LA_F("[SCTP] sendv failed: %s", LA_F318, 318), strerror(errno));
+        print("W:", LA_F("[SCTP] sendv failed: %s", LA_F341, 341), strerror(errno));
         return -1;
     }
     return (int)sent;

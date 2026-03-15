@@ -1,25 +1,26 @@
 cmake_minimum_required(VERSION 3.10)
 project(p2p VERSION 0.1.0 LANGUAGES C)
 
-# --- Options ---
-option(WITH_DTLS    "Enable MbedTLS DTLS support" OFF)
-option(WITH_OPENSSL "Enable OpenSSL DTLS support" OFF)
-option(WITH_SCTP    "Enable usrsctp support" OFF)
-option(THREADED     "Enable internal threading" ON)
-option(I18N_ENABLED "Enable i18n multi-language support" ON)
+# --- 构建选项 ---
+option(WITH_DTLS    "启用 MbedTLS DTLS 支持" OFF)
+option(WITH_OPENSSL "启用 OpenSSL DTLS 支持" OFF)
+option(WITH_SCTP    "启用 usrsctp 支持" OFF)
+option(THREADED     "启用内部线程" ON)
+option(I18N_ENABLED "启用 i18n 多语言支持" ON)
+option(I18N_CN      "生成中文翻译头文件 (LANG.cn.h)" OFF)
 
-# --- Platform Detection ---
+# --- 平台检测 ---
 if(WIN32)
-    message(STATUS "Platform: Windows")
-    # Winsock2 is linked via #pragma comment in p2p_platform.h (MSVC),
-    # but we also add it explicitly for MinGW / cross-compilers.
+    message(STATUS "平台: Windows")
+    # Winsock2 在 p2p_platform.h 中通过 #pragma comment 链接 (MSVC)，
+    # 但为 MinGW / 交叉编译器显式添加。
     set(PLATFORM_LIBS ws2_32 winhttp iphlpapi)
 elseif(APPLE)
-    message(STATUS "Platform: macOS")
+    message(STATUS "平台: macOS")
     set(PLATFORM_LIBS "")
 elseif(UNIX)
-    message(STATUS "Platform: Linux/POSIX")
-    # clock_gettime lives in librt on older glibc (< 2.17)
+    message(STATUS "平台: Linux/POSIX")
+    # 旧版 glibc (< 2.17) 中 clock_gettime 在 librt
     find_library(RT_LIB rt)
     if(RT_LIB)
         set(PLATFORM_LIBS ${RT_LIB})
@@ -28,22 +29,22 @@ elseif(UNIX)
     endif()
 endif()
 
-# --- Compiler Configuration ---
+# --- 编译器配置 ---
 set(CMAKE_C_STANDARD 99)
 if(MSVC)
-    # /W3: Enable level 3 warnings
-    # /wd4068: Disable warning C4068 ("unknown pragma")
+    # /W3: 启用三级警告
+    # /wd4068: 禁用 C4068 警告 ("unknown pragma")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /W3 /utf-8 /wd4068 /std:c11")
-    # Disable "unsafe" CRT warnings that MSVC emits for standard POSIX functions
+    # 禁用 MSVC 对标准 POSIX 函数发出的 "不安全" CRT 警告
     add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_WINSOCK_DEPRECATED_NO_WARNINGS)
 else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unknown-pragmas -Wpedantic")
 endif()
 
-# --- Include Directories ---
+# --- 包含目录 ---
 include_directories(include)
 
-# --- i18n submodule check ---
+# --- i18n 子模块检查 ---
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/i18n/i18n.h")
     message(FATAL_ERROR
         "i18n submodule not found. Please run:\n"
@@ -52,7 +53,7 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/i18n/i18n.h")
 endif()
 include_directories(i18n)
 
-# --- stdc submodule check ---
+# --- stdc 子模块检查 ---
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/stdc/stdc.h")
     message(FATAL_ERROR
         "stdc submodule not found. Please run:\n"
@@ -61,7 +62,7 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/stdc/stdc.h")
 endif()
 add_subdirectory(stdc)
 
-# --- Source Files ---
+# --- 源文件 ---
 set(LIB_SRCS
     src/p2p_udp.c
     src/p2p_nat.c
@@ -82,11 +83,13 @@ set(LIB_SRCS
     src/p2p_http.c
     src/p2p_path_manager.c
     src/p2p_channel.c
+    src/p2p_instrument.c
+    src/p2p_instrument.h
 )
 
-# --- i18n --ndebug auto-detection ---
-# Debug build → SID-based stable IDs (default)
-# Release/RelWithDebInfo/MinSizeRel → compact sequential IDs (--ndebug)
+# --- i18n --ndebug 自动检测 ---
+# Debug 构建 → 基于 SID 的稳定 ID（默认）
+# Release/RelWithDebInfo/MinSizeRel → 紧凑连续 ID (--ndebug)
 set(I18N_NDEBUG_FLAG "")
 if(CMAKE_BUILD_TYPE)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" _bt)
@@ -95,41 +98,58 @@ if(CMAKE_BUILD_TYPE)
     endif()
 endif()
 
-# Cross-platform i18n command
+# 跨平台 i18n 命令
 if(WIN32)
     set(I18N_SCRIPT "${CMAKE_SOURCE_DIR}/i18n/i18n.bat")
 else()
     set(I18N_SCRIPT "${CMAKE_SOURCE_DIR}/i18n/i18n.sh")
 endif()
 
-# --- i18n code generation for p2p core library ---
-add_custom_command(
-    OUTPUT
-        ${CMAKE_SOURCE_DIR}/src/.LANG.h
-        ${CMAKE_SOURCE_DIR}/src/.LANG.c
-    COMMAND ${I18N_SCRIPT} src --name p2p ${I18N_NDEBUG_FLAG}
-    DEPENDS
-        ${LIB_SRCS}
-        ${I18N_SCRIPT}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Generating i18n language files for p2p core library"
-)
+# --import cn 中文翻译
+set(I18N_IMPORT_FLAG "")
+if(I18N_CN)
+    set(I18N_IMPORT_FLAG "--import" "cn")
+endif()
 
-# When I18N_ENABLED, compile the generated table + runtime into the library
-#
-# ARCHITECTURE NOTE: p2p_static itself does NOT link i18n.c
-# (p2p_ping / p2p_server each supply their own independent i18n instance).
-# The library sources use LA_W/LA_S/LA_F markers that expand to string literals
-# by default; with I18N_ENABLED they call lang_str() which is resolved at
-# link time by the consuming executable's i18n.c.
-#
-# To enable runtime translation for library logs, set I18N_ENABLED=ON and
-# ensure the consuming executable supplies a unified lang table that covers
-# both its own strings and the library's IDs (future architecture work).
+# --- p2p 核心库 i18n 代码生成 ---
+# I18N_ENABLED=ON:  跟踪源文件变化，修改时重新生成（构建时）
+# I18N_ENABLED=OFF: 文件不存在时生成一次（配置时）
 if(I18N_ENABLED)
-    message(STATUS "p2p core: I18N_ENABLED — library strings use LA_X markers (ID-based lookup at link time)")
+    # 开发模式：源文件变化时重新生成
+    add_custom_command(
+        OUTPUT
+            ${CMAKE_SOURCE_DIR}/src/.LANG.h
+            ${CMAKE_SOURCE_DIR}/src/.LANG.c
+        COMMAND ${I18N_SCRIPT} src --name p2p ${I18N_NDEBUG_FLAG} ${I18N_IMPORT_FLAG}
+        DEPENDS
+            ${LIB_SRCS}
+            ${I18N_SCRIPT}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Generating i18n language files for p2p core library"
+    )
 else()
-    message(STATUS "p2p core: API markers only — LA_X expands to string literals")
+    # 禁用模式：仅当文件不存在时生成（配置时检查）
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/src/.LANG.h" OR NOT EXISTS "${CMAKE_SOURCE_DIR}/src/.LANG.c")
+        message(STATUS "为 p2p 核心生成 i18n 文件（一次性，I18N_ENABLED=OFF）")
+        execute_process(
+            COMMAND ${I18N_SCRIPT} src --name p2p ${I18N_NDEBUG_FLAG} ${I18N_IMPORT_FLAG}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            RESULT_VARIABLE _i18n_result
+        )
+        if(NOT _i18n_result EQUAL 0)
+            message(WARNING "i18n generation failed for p2p core (exit ${_i18n_result})")
+        endif()
+    endif()
+endif()
+
+# 架构说明：p2p_static 本身不链接 i18n.c
+# （p2p_ping / p2p_server 各自提供独立的 i18n 实例）。
+# 库源码使用 LA_W/LA_S/LA_F 标记，默认展开为字符串字面量；
+# 启用 I18N_ENABLED 时调用 lang_str()，在链接时由可执行文件的 i18n.c 解析。
+if(I18N_ENABLED)
+    message(STATUS "p2p 核心: I18N_ENABLED — 库字符串使用 LA_X 标记（链接时 ID 查找）")
+else()
+    message(STATUS "p2p 核心: 仅 API 标记 — LA_X 展开为字符串字面量")
 endif()
 
 if(THREADED)
@@ -138,20 +158,20 @@ if(THREADED)
     find_package(Threads REQUIRED)
 endif()
 
-# --- MbedTLS Integration ---
+# --- MbedTLS 集成 ---
 if(WITH_DTLS)
     add_definitions(-DWITH_DTLS)
     list(APPEND LIB_SRCS src/p2p_dtls_mbedtls.c)
     
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls/CMakeLists.txt")
-        # Build vendored mbedtls
+        # 构建内置 mbedtls
         set(ENABLE_TESTING OFF CACHE BOOL "")
         set(ENABLE_PROGRAMS OFF CACHE BOOL "")
         add_subdirectory(third_party/mbedtls EXCLUDE_FROM_ALL)
         include_directories(third_party/mbedtls/include)
         set(DTLS_LIBRARIES mbedtls mbedx509 mbedcrypto)
     else()
-        # Fallback to system mbedtls (macOS/Homebrew focus)
+        # 回退到系统 mbedtls（主要针对 macOS/Homebrew）
         find_path(MBED_INC mbedtls/ssl.h PATHS /opt/homebrew/include)
         find_library(MBED_LIB mbedtls PATHS /opt/homebrew/lib)
         find_library(MBED_X509 mbedx509 PATHS /opt/homebrew/lib)
@@ -161,7 +181,7 @@ if(WITH_DTLS)
     endif()
 endif()
 
-# --- OpenSSL Integration ---
+# --- OpenSSL 集成 ---
 if(WITH_OPENSSL)
     add_definitions(-DWITH_OPENSSL)
     list(APPEND LIB_SRCS src/p2p_dtls_openssl.c)
@@ -170,7 +190,7 @@ if(WITH_OPENSSL)
     set(OPENSSL_LIBRARIES OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
-# --- usrsctp Integration ---
+# --- usrsctp 集成 ---
 if(WITH_SCTP)
     add_definitions(-DWITH_SCTP)
     list(APPEND LIB_SRCS src/p2p_trans_sctp.c)
@@ -183,7 +203,29 @@ if(WITH_SCTP)
     endif()
 endif()
 
-# --- Target Definition ---
+# --- 目标定义 ---
+
+# i18n 扫描辅助目标：确保条件编译的源文件也进入 compile_commands.json
+# i18n.sh 通过 compile_commands.json 获取每个文件的编译参数来预处理
+# 只包含条件编译的文件（其余已在 p2p_static 中），不参与实际链接
+add_library(p2p_i18n_extra OBJECT EXCLUDE_FROM_ALL
+    src/p2p_dtls_mbedtls.c
+    src/p2p_dtls_openssl.c
+    src/p2p_trans_sctp.c
+)
+target_include_directories(p2p_i18n_extra PRIVATE
+    src
+    ${CMAKE_SOURCE_DIR}/stdc
+    third_party/mbedtls/include
+    third_party/usrsctp/usrsctplib
+)
+target_compile_definitions(p2p_i18n_extra PRIVATE WITH_DTLS WITH_OPENSSL WITH_SCTP)
+# OpenSSL 头文件路径（系统包）
+find_path(_OPENSSL_INC openssl/ssl.h PATHS /opt/homebrew/include /usr/include /usr/local/include)
+if(_OPENSSL_INC)
+    target_include_directories(p2p_i18n_extra PRIVATE ${_OPENSSL_INC})
+endif()
+
 add_library(p2p_static STATIC ${LIB_SRCS})
 target_include_directories(p2p_static PRIVATE src)
 target_link_libraries(p2p_static stdc ${PLATFORM_LIBS})
@@ -197,20 +239,24 @@ if(THREADED)
     target_link_libraries(p2p_static Threads::Threads)
 endif()
 
-# i18n.sh generates src/.LANG.h/.LANG.c before any source is compiled.
-# Debug → SID-based stable IDs; Release → compact sequential IDs (--ndebug).
-add_custom_target(p2p_core_i18n_gen DEPENDS
-    ${CMAKE_SOURCE_DIR}/src/.LANG.h
-    ${CMAKE_SOURCE_DIR}/src/.LANG.c
-)
-add_dependencies(p2p_static p2p_core_i18n_gen)
+# i18n.sh 在编译任何源文件前生成 src/.LANG.h/.LANG.c
+# Debug → 基于 SID 的稳定 ID；Release → 紧凑连续 ID (--ndebug)
+# I18N_ENABLED=ON: 通过 custom_target 跟踪源文件变化
+# I18N_ENABLED=OFF: 文件已在配置时生成
+if(I18N_ENABLED)
+    add_custom_target(p2p_core_i18n_gen DEPENDS
+        ${CMAKE_SOURCE_DIR}/src/.LANG.h
+        ${CMAKE_SOURCE_DIR}/src/.LANG.c
+    )
+    add_dependencies(p2p_static p2p_core_i18n_gen)
+endif()
 
-# --- Signaling Server ---
+# --- 信令服务器 ---
 add_subdirectory(p2p_server)
 
-# --- p2p_ping Utility ---
+# --- p2p_ping 工具 ---
 add_subdirectory(p2p_ping)
 
-# --- Tests ---
+# --- 测试 ---
 enable_testing()
 add_subdirectory(test)

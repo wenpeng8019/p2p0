@@ -69,6 +69,7 @@
 
 #include "p2p_common.h"         /* pack/unpack_signaling_payload_hdr（服务端也可包含此头） */
 #include "LANG.h"               /* 多语言支持 */
+#include "p2p_instrument.h"     /* 内部调试协同 */
 
 #include "p2p_nat.h"            /* NAT 穿透与类型检测 */
 #include "p2p_route.h"          /* 路由表管理 */
@@ -215,15 +216,15 @@ static inline const char* p2p_nat_type_str(int type) {
     switch (type) {
         case P2P_NAT_DETECTING:         return LA_W("Detecting...", LA_W3, 3);
         case P2P_NAT_TIMEOUT:           return LA_W("Timeout (no response)", LA_W20, 20);
-        case P2P_NAT_UNKNOWN:           return LA_W("Unknown", LA_W22, 22);
+        case P2P_NAT_UNKNOWN:           return LA_W("Unknown", LA_W23, 23);
         case P2P_NAT_OPEN:              return LA_W("Open Internet (No NAT)", LA_W9, 9);
         case P2P_NAT_FULL_CONE:         return LA_W("Full Cone NAT", LA_W4, 4);
         case P2P_NAT_RESTRICTED:        return LA_W("Restricted Cone NAT", LA_W16, 16);
         case P2P_NAT_PORT_RESTRICTED:   return LA_W("Port Restricted Cone NAT", LA_W10, 10);
         case P2P_NAT_SYMMETRIC:         return LA_W("Symmetric NAT (port-random)", LA_W19, 19);
         case P2P_NAT_BLOCKED:           return LA_W("UDP Blocked (STUN unreachable)", LA_W21, 21);
-        case P2P_NAT_UNSUPPORTED:       return LA_W("Unsupported (no STUN/probe configured)", LA_W23, 23);
-        default:                        return LA_W("Unknown", LA_W22, 22);
+        case P2P_NAT_UNDETECTABLE:       return LA_W("Undetectable (no STUN/probe configured)", LA_W22, 22);
+        default:                        return LA_W("Unknown", LA_W23, 23);
     }
 }
 
@@ -251,8 +252,8 @@ static inline const char* p2p_path_type_str(int type) {
  */
 typedef enum {
     P2P_CAND_HOST  = 0,                         // 本地网卡地址（Host Candidate）
-    P2P_CAND_SRFLX,                             // STUN 反射地址（Server Reflexive Candidate）
-    P2P_CAND_RELAY,                             // TURN 中继地址（Relayed Candidate）
+    P2P_CAND_SRFLX,                             // Server 反射地址（Server Reflexive Candidate）
+    P2P_CAND_RELAY,                             // Server 中继地址（Relayed Candidate）
     P2P_CAND_PRFLX                              // 对端反射地址（Peer Reflexive Candidate）
 } p2p_cand_type_t;
 
@@ -391,7 +392,7 @@ static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
     while (nc < need) nc *= 2;
     p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
     if (!p) {
-        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F187, 187), nc);
+        print("E:", LA_F("Failed to realloc memory for remote candidates (capacity: %d)", LA_F210, 210), nc);
         return E_OUT_OF_MEMORY;
     }
     memset(p + s->remote_cand_cap, 0, (nc - s->remote_cand_cap) * sizeof(p2p_remote_candidate_entry_t));

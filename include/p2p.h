@@ -120,7 +120,7 @@ typedef enum {
     P2P_NAT_SYMMETRIC,                          // 对称型 NAT：不同目标端口映射到不同外部端口;
                                                 // 仅 COMPACT 模式（服务器有 probe_port）可检测
     P2P_NAT_BLOCKED,                            // UDP 不可达：无法联系 STUN 服务器（Test I 超时）
-    P2P_NAT_UNSUPPORTED,                        // 不支持检测：未配置 STUN 服务器；或使用 COMPACT 信令但服务器返回检测端口为 0
+    P2P_NAT_UNDETECTABLE,                       // 不支持检测：未配置 STUN 服务器；或使用 COMPACT 信令但服务器返回检测端口为 0
 } p2p_nat_type_t;
 
 /*
@@ -237,18 +237,9 @@ typedef struct {
     const char*             auth_key;                   // 安全握手密钥 (可选)
     
     /* 测试选项 */
-    bool                    disable_lan_shortcut;       // 禁止「连接成功后升级为 LAN 路径」的优化。
-                                                        // Host 候选照常收集，ICE 照常竞争（通常 Host 优先级最高）；
-                                                        // 但连接建立后不发 ROUTE_PROBE，不将 active_addr 切换到私网 IP。
-                                                        // 用途：在同 LAN 环境下强制保持"打洞路径"，测量 hairpin vs LAN 的延迟差异。
-    bool                    lan_punch;                  // 调试：在同 LAN 内验证 NAT 打洞流程（PUNCH→PUNCH_ACK→NAT_CONNECTED）。
-                                                        // 效果1：跳过 STUN/TURN，只收集 Host 候选（LAN IP），无需访问公网。
-                                                        // 效果2：ICE tick 不再自己发 PUNCH，改为调用 nat_start_punch，
-                                                        //        走与跨 NAT 完全相同的打洞状态机（重试/超时/候选轮询）。
-                                                        // 用途：本地两台机器 / 同机两进程之间验证打洞协议逻辑的正确性。
-    bool                    skip_host_candidates;       // 调试：跳过本地Host候选收集，只使用公网候选（Srflx/Relay）。
-                                                        // 用途：COMPACT模式快速测试UDP打洞，避免发送大量本地地址，加快配对速度。
-                                                        // 配合STUN使用，直接在服务器完成公网地址交换后立即开始打洞测试。
+    bool                    skip_host_candidates;       // 调试：跳过本地Host候选收集，只使用公网候选（Srflx/Relay）
+                                                        // 用途：COMPACT模式快速测试UDP打洞，避免发送大量本地地址，加快配对速度
+                                                        // 配合STUN使用，直接在服务器完成公网地址交换后立即开始打洞测试
 
     /* 语言选项（已废弃，保留字段以兼容旧 API） */
     p2p_language_t          language;                   // 旧系统语言选项，已无效；请用 lang_load_fp() 控制语言
@@ -261,7 +252,7 @@ typedef struct {
     p2p_on_disconnected_fn  on_disconnected;            // 连接断开回调 (可选)
     p2p_on_data_fn          on_data;                    // 数据到达回调 (可选)
     p2p_on_request_fn       on_request;                 // MSG RPC 请求到达（B 端，服务器可选）
-    p2p_on_response_fn       on_response;                // MSG RPC 应答到达（A 端，服务器可选）
+    p2p_on_response_fn      on_response;                // MSG RPC 应答到达（A 端，服务器可选）
     void*                   userdata;                   // 用户自定义数据，传递给回调函数
 } p2p_config_t;
 
@@ -396,7 +387,7 @@ p2p_probe(p2p_handle_t hdl);
  *     P2P_NAT_PORT_RESTRICTED(4)  端口受限锥形NAT
  *     P2P_NAT_SYMMETRIC      (5)  对称型NAT（仅COMPACT+probe_port可检测）
  *     P2P_NAT_BLOCKED        (6)  UDP 不可达（STUN 服务器无响应）
- *     P2P_NAT_UNSUPPORTED    (7)  不支持检测（无STUN配置 / 信令模式不支持）
+ *     P2P_NAT_UNDETECTABLE   (7)  不支持检测（无STUN配置 / 信令模式不支持）
  */
 int
 p2p_nat_type(p2p_handle_t hdl);

@@ -24,20 +24,19 @@
 ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable DTLS (MbedTLS)", LA_S15, 15));
 ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S16, 16));
 ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S17, 17));
-ARGS_B(false, compact,      0,   "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S29, 29));
+ARGS_B(false, compact,      0,   "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S28, 28));
 ARGS_B(false, disable_lan,  0,   "disable-lan",  LA_CS("Disable LAN shortcut (force NAT punch test)", LA_S14, 14));
-ARGS_B(false, lan_punch,    0,   "lan-punch",    LA_CS("Test PUNCH/PUNCH_ACK state machine over LAN", LA_S24, 24));
 ARGS_B(false, public_only,  0,   "public-only",  LA_CS("Skip host candidates", LA_S22, 22));
-ARGS_B(false, cn,           0,   "cn",           LA_CS("Use Chinese language", LA_S28, 28));
+ARGS_B(false, cn,           0,   "cn",           LA_CS("Use Chinese language", LA_S27, 27));
 ARGS_B(false, echo,         0,   "echo",         LA_CS("Auto-echo received messages back to sender", LA_S13, 13));
 ARGS_S(false, server,       's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S21, 21));
 ARGS_S(false, github,       0,   "github",       LA_CS("GitHub Token for Public Signaling", LA_S19, 19));
 ARGS_S(false, gist,         0,   "gist",         LA_CS("GitHub Gist ID for Public Signaling", LA_S18, 18));
-ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", LA_S30, 30));
+ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", LA_S29, 29));
 ARGS_S(false, to,           't', "to",           LA_CS("Target Peer Name (if specified: active role)", LA_S23, 23));
-ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S26, 26));
-ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S27, 27));
-ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S25, 25));
+ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S25, 25));
+ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S26, 26));
+ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S24, 24));
 ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", LA_S20, 20));
 
 /*
@@ -321,12 +320,12 @@ static void log_state_change(p2p_handle_t s) {
     if (state != last_state) {
         if (g_tui_active) {
             char line[128];
-            snprintf(line, sizeof(line), LA_F("[STATE] %s (%d) -> %s (%d)", LA_F39, 39),
+            snprintf(line, sizeof(line), LA_F("[STATE] %s (%d) -> %s (%d)", LA_F38, 38),
                      state_name(last_state), last_state,
                      state_name(state), state);
             tui_println(line);
         } else {
-            printf(LA_F("[STATE] %s (%d) -> %s (%d)", LA_F39, 39),
+            printf(LA_F("[STATE] %s (%d) -> %s (%d)", LA_F38, 38),
                    state_name(last_state), last_state,
                    state_name(state), state);
             printf("\n");
@@ -375,7 +374,6 @@ int main(int argc, char *argv[]) {
         &ARGS_DEF_pseudo,
         &ARGS_DEF_compact,
         &ARGS_DEF_disable_lan,
-        &ARGS_DEF_lan_punch,
         &ARGS_DEF_public_only,
         &ARGS_DEF_cn,
         &ARGS_DEF_echo,
@@ -401,7 +399,7 @@ int main(int argc, char *argv[]) {
     const char *target_name = ARGS_to.str;
     g_my_name = my_name;
 
-    print("I:", LA_F("=== P2P Ping Diagnostic Tool ===\n", LA_F31, 31));
+    print("I:", LA_F("=== P2P Ping Diagnostic Tool ===\n", LA_F30, 30));
 
     /* 解析 IP:PORT 格式 */
     int server_port = 9333;
@@ -439,8 +437,6 @@ int main(int argc, char *argv[]) {
     cfg.gist_id        = ARGS_gist.str;
     cfg.bind_port      = 0;
     cfg.language       = ARGS_cn.i64 ? P2P_LANG_ZH : P2P_LANG_EN;
-    cfg.disable_lan_shortcut = ARGS_disable_lan.i64 ? 1 : 0;
-    cfg.lan_punch            = ARGS_lan_punch.i64 ? 1 : 0;
     cfg.skip_host_candidates = ARGS_public_only.i64 ? 1 : 0;
     cfg.on_disconnected      = on_disconnected;
     cfg.userdata             = NULL;
@@ -451,28 +447,27 @@ int main(int argc, char *argv[]) {
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 
     p2p_handle_t hdl = p2p_create(my_name, &cfg);
-    if (!hdl) { print("E:", LA_F("Failed to create sessions\n", LA_F32, 32)); return 1; }
+    if (!hdl) { print("E:", LA_F("Failed to create sessions\n", LA_F31, 31)); return 1; }
 
     const char *mode_name = NULL;
     if (ARGS_server.str) mode_name = cfg.use_ice ? "RELAY" : "COMPACT";
     else if (ARGS_github.str && ARGS_gist.str) mode_name = "PUBSUB";
     else {
-        print("E:", LA_F("No signaling mode.\nUse --server or --github\n" ,LA_F34, 34));
+        print("E:", LA_F("No signaling mode.\nUse --server or --github\n" ,LA_F33, 33));
         ARGS_print(argv[0]);
         return 1;
     }
 
-    if (ARGS_disable_lan.i64) print("I:", LA_F("[TEST] LAN shortcut disabled - forcing NAT punch\n", LA_F41, 41));
-    if (ARGS_lan_punch.i64)   print("I:", LA_F("[TEST] LAN punch mode: PUNCH/PUNCH_ACK over Host candidates (nat_start_punch)\n", LA_F40, 40));
-    if (g_echo_mode)          print("I:", LA_F("[Chat] Echo mode enabled: received messages will be echoed back.\n", LA_F37, 37));
+    if (ARGS_disable_lan.i64) print("I:", LA_F("[TEST] LAN shortcut disabled - forcing NAT punch\n", LA_F39, 39));
+    if (g_echo_mode)          print("I:", LA_F("[Chat] Echo mode enabled: received messages will be echoed back.\n", LA_F36, 36));
 
     if (p2p_connect(hdl, target_name) < 0) {
-        print("E:", LA_F("Failed to initialize connection\n", LA_F33, 33));
+        print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
         return 1;
     }
 
-    if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F35, 35), mode_name, target_name); }
-    else             { print("I:", LA_F("Running in %s mode (waiting for connection)...", LA_F36, 36), mode_name); }
+    if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F34, 34), mode_name, target_name); }
+    else             { print("I:", LA_F("Running in %s mode (waiting for connection)...", LA_F35, 35), mode_name); }
 
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
@@ -490,7 +485,7 @@ int main(int argc, char *argv[]) {
             /* 首次连接成功：初始化 TUI，降低日志等级 */
             if (!g_first_connect_done) {
                 g_first_connect_done = 1;
-                print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F38, 38));
+                print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F37, 37));
                 tui_init();
                 tui_println(LA_S("--- Connected ---", LA_S10, 10));
             }

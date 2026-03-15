@@ -73,9 +73,6 @@ typedef struct {
     p2p_on_data_fn         on_data;         // 数据到达回调
     void*                  userdata;        // 用户数据
     
-    /* 调试选项 */
-    bool        disable_lan_shortcut;       // 禁止同子网直连
-    bool        verbose_nat_punch;          // 输出详细 NAT 打洞日志
 } p2p_config_t;
 ```
 

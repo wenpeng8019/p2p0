@@ -47,77 +47,119 @@ enum {
     LA_S5,  /* "Shutting down...\n"  [server.c] */
 
     /* Formats (LA_F) */
-    LA_F6,  /* "%s from '%.*s': new instance(old=%u new=%u), resetting session\n" (%s,%u,%u)  [server.c] */
-    LA_F7,  /* "%s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n" (%s,%u,%d)  [server.c] */
-    LA_F8,  /* "%s: accepted, releasing slot for '%s' -> '%s'\n" (%s,%s,%s)  [server.c] */
-    LA_F9,  /* "%s: bad payload(len=%zu)\n" (%s)  [server.c] */
-    LA_F10,  /* "%s: data too large (len=%d)\n" (%s,%d)  [server.c] */
-    LA_F11,  /* "%s: invalid instance_id=0 from %s\n" (%s,%s)  [server.c] */
-    LA_F12,  /* "%s: invalid relay flag from client\n" (%s)  [server.c] */
-    LA_F13,  /* "%s: invalid seq=%u\n" (%s,%u)  [server.c] */
-    LA_F14,  /* "%s: no matching pending msg (sid=%u)\n" (%s,%u)  [server.c] */
-    LA_F15,  /* "%s: no matching pending msg (sid=%u, expected=%u)\n" (%s,%u,%u)  [server.c] */
-    LA_F16,  /* "%s: obsolete sid=%u (current=%u), ignoring\n" (%s,%u,%u)  [server.c] */
-    LA_F17,  /* "%s: obsolete sid=%u (last=%u) in IDLE state, ignoring\n" (%s,%u,%u)  [server.c] */
-    LA_F18,  /* "%s: peer '%s' not online, rejecting sid=%u\n" (%s,%s,%u)  [server.c] */
-    LA_F19,  /* "%s: waiting for peer '%.*s' to register\n" (%s)  [server.c] */
-    LA_F20,  /* "% Goodbye!\n"  [server.c] */
-    LA_F21,  /* "Invalid port number %d (range: 1-65535)\n" (%d)  [server.c] */
-    LA_F22,  /* "Invalid probe port %d (range: 0-65535)\n" (%d)  [server.c] */
-    LA_F23,  /* "% NAT probe disabled (bind failed)\n"  [server.c] */
-    LA_F24,  /* "NAT probe socket listening on port %d\n" (%d)  [server.c] */
-    LA_F25,  /* "NAT probe: %s (port %d)\n" (%s,%d)  [server.c] */
-    LA_F26,  /* "P2P Signaling Server listening on port %d (TCP + UDP)...\n" (%d)  [server.c] */
-    LA_F27,  /* "PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
-    LA_F28,  /* "Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n" (%d,%d)  [server.c] */
-    LA_F29,  /* "Relay support: %s\n" (%s)  [server.c] */
-    LA_F30,  /* "Send %s: mapped=%s:%d\n" (%s,%s,%d)  [server.c] */
-    LA_F31,  /* "Send %s: status=error (no slot available)\n" (%s)  [server.c] */
-    LA_F32,  /* "Starting P2P signal server on port %d\n" (%d)  [server.c] */
-    LA_F33,  /* "Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n" (%s,%s)  [server.c] */
-    LA_F34,  /* "Unknown packet type 0x%02x from %s\n" (%s)  [server.c] */
-    LA_F35,  /* "[Relay] %s seq=0 from client %s (server-only, dropped)\n" (%s,%s)  [server.c] */
-    LA_F36,  /* "[Relay] %s: bad payload(len=%zu)\n" (%s)  [server.c] */
-    LA_F37,  /* "[TCP]   → Forwarded OFFER from '%s' (%d candidates, %d bytes)\n" (%s,%d,%d)  [server.c] */
-    LA_F38,  /* "[TCP]   → Sent empty OFFER from '%s' (storage full, reverse connect)\n" (%s)  [server.c] */
-    LA_F39,  /* "[TCP] All pending candidates flushed to '%s'\n" (%s)  [server.c] */
-    LA_F40,  /* "[TCP] Cached %d candidates for offline user '%s' (total=%d/%d)\n" (%d,%s,%d,%d)  [server.c] */
-    LA_F41,  /* "[TCP] Cached %d candidates for offline user '%s', storage now FULL (%d/%d)\n" (%d,%s,%d,%d)  [server.c] */
-    LA_F42,  /* "[TCP] Cannot allocate slot for offline user '%s'\n" (%s)  [server.c] */
-    LA_F43,  /* "[TCP] E: Invalid magic from peer '%s'\n" (%s)  [server.c] */
-    LA_F44,  /* "[TCP] Failed to receive payload from %s\n" (%s)  [server.c] */
-    LA_F45,  /* "[TCP] Failed to receive target name from %s\n" (%s)  [server.c] */
-    LA_F46,  /* "[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n" (%s,%d,%d)  [server.c] */
-    LA_F47,  /* "[TCP] Flushing %d pending candidates from '%s' to '%s'...\n" (%d,%s,%s)  [server.c] */
-    LA_F48,  /* "[TCP] I: Peer '%s' logged in\n" (%s)  [server.c] */
-    LA_F49,  /* "% [TCP] Max peers reached, rejecting connection\n"  [server.c] */
-    LA_F50,  /* "[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n" (%d,%s,%s)  [server.c] */
-    LA_F51,  /* "[TCP] New connection from %s:%d\n" (%s,%d)  [server.c] */
-    LA_F52,  /* "[TCP] New sender '%s' replaces old sender '%s' (discarding %d old candidates)\n" (%s,%s,%d)  [server.c] */
-    LA_F53,  /* "[TCP] Payload too large (%u bytes) from %s\n" (%u,%s)  [server.c] */
-    LA_F54,  /* "[TCP] Relaying %s from %s to %s (%u bytes)\n" (%s,%s,%s,%u)  [server.c] */
-    LA_F55,  /* "[TCP] Sent %s with %d candidates to '%s' (from '%s')\n" (%s,%d,%s,%s)  [server.c] */
-    LA_F56,  /* "[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n" (%s,%d,%d)  [server.c] */
-    LA_F57,  /* "[TCP] Storage full for '%s' (cached=%d, dropped=%d)\n" (%s,%d,%d)  [server.c] */
-    LA_F58,  /* "[TCP] Storage full indication flushed to '%s'\n" (%s)  [server.c] */
-    LA_F59,  /* "[TCP] Storage full, connection intent from '%s' to '%s' noted\n" (%s,%s)  [server.c] */
-    LA_F60,  /* "[TCP] Storage full, flushing connection intent from '%s' to '%s' (sending empty OFFER)...\n" (%s,%s)  [server.c] */
-    LA_F61,  /* "[TCP] Target %s offline, caching candidates...\n" (%s)  [server.c] */
-    LA_F62,  /* "[TCP] Unknown message type %d from %s\n" (%d,%s)  [server.c] */
-    LA_F63,  /* "[TCP] V: %s sent to '%s'\n" (%s,%s)  [server.c] */
-    LA_F64,  /* "[TCP] V: Peer '%s' disconnected\n" (%s)  [server.c] */
-    LA_F65,  /* "[TCP] W: Client '%s' timeout (inactive for %.1f seconds)\n" (%s)  [server.c] */
-    LA_F66,  /* "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n" (%s,%s,%u)  [server.c] */
-    LA_F67,  /* "[UDP] %s send to %s failed(%d)\n" (%s,%s,%d)  [server.c] */
-    LA_F68,  /* "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n" (%s,%s,%u,%d)  [server.c] */
-    LA_F69,  /* "[UDP] %s send to %s, seq=0, flags=0, len=%d\n" (%s,%s,%d)  [server.c] */
-    LA_F70,  /* "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n" (%s,%s,%d)  [server.c] */
-    LA_F71,  /* "[UDP] %s send to %s:%d failed(%d)\n" (%s,%s,%d,%d)  [server.c] */
-    LA_F72,  /* "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n" (%s,%s,%d,%d)  [server.c] */
-    LA_F73,  /* "[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n" (%s,%s,%d,%d,%d)  [server.c] */
-    LA_F74,  /* "% net init failed\n"  [server.c] */
-    LA_F75,  /* "probe UDP bind failed(%d)\n" (%d)  [server.c] */
-    LA_F76,  /* "select failed(%d)\n" (%d)  [server.c] */
+    LA_F6,  /* "%s accepted, '%s' -> '%s', ses_id=%llu\n" (%s,%s,%s,%l)  [server.c] */
+    LA_F7,  /* "%s accepted, peer='%s', ses_id=%llu\n" (%s,%s,%l)  [server.c] */
+    LA_F8,  /* "%s accepted, seq=%u, ses_id=%llu\n" (%s,%u,%l)  [server.c] */
+    LA_F9,  /* "%s for unknown ses_id=%llu\n" (%s,%l)  [server.c] */
+    LA_F10,  /* "%s forwarded: '%s' -> '%s', sid=%u (ses_id=%llu)\n" (%s,%s,%s,%u,%l)  [server.c] */
+    LA_F11,  /* "%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%llu)\n" (%s,%s,%s,%u,%u,%l)  [server.c] */
+    LA_F12,  /* "%s from '%.*s': new instance(old=%u new=%u), resetting session\n" (%s,%u,%u)  [server.c] */
+    LA_F13,  /* "%s new sid=%u > pending sid=%u (state=%d), canceling old RPC (ses_id=%llu)\n" (%s,%u,%u,%d,%l)  [server.c] */
+    LA_F14,  /* "%s retransmit during RESP phase, ignoring, sid=%u (ses_id=%llu)\n" (%s,%u,%l)  [server.c] */
+    LA_F15,  /* "%s retransmit, resend ACK, sid=%u (ses_id=%llu)\n" (%s,%u,%l)  [server.c] */
+    LA_F16,  /* "%s: RPC complete for '%s', sid=%u (ses_id=%llu)\n" (%s,%s,%u,%l)  [server.c] */
+    LA_F17,  /* "%s: accepted, local='%.*s', remote='%.*s', inst_id=%u, cands=%d\n" (%s,%u,%d)  [server.c] */
+    LA_F18,  /* "%s: accepted, releasing slot for '%s' -> '%s'\n" (%s,%s,%s)  [server.c] */
+    LA_F19,  /* "%s: accepted, ses_id=%llu, sid=%u, code=%u, len=%d\n" (%s,%l,%u,%u,%d)  [server.c] */
+    LA_F20,  /* "%s: accepted, ses_id=%llu, sid=%u, msg=%u, len=%d\n" (%s,%l,%u,%u,%d)  [server.c] */
+    LA_F21,  /* "%s: accepted, ses_id=%llu, sid=%u\n" (%s,%l,%u)  [server.c] */
+    LA_F22,  /* "%s: bad payload(len=%zu)\n" (%s)  [server.c] */
+    LA_F23,  /* "%s: confirmed '%s', retries=%d (ses_id=%llu)\n" (%s,%s,%d,%l)  [server.c] */
+    LA_F24,  /* "%s: data too large (len=%d)\n" (%s,%d)  [server.c] */
+    LA_F25,  /* "%s: invalid instance_id=0 from %s\n" (%s,%s)  [server.c] */
+    LA_F26,  /* "%s: invalid relay flag from client\n" (%s)  [server.c] */
+    LA_F27,  /* "%s: invalid seq=%u\n" (%s,%u)  [server.c] */
+    LA_F28,  /* "%s: invalid session_id=%llu or sid=%u\n" (%s,%l,%u)  [server.c] */
+    LA_F29,  /* "%s: no matching pending msg (sid=%u)\n" (%s,%u)  [server.c] */
+    LA_F30,  /* "%s: no matching pending msg (sid=%u, expected=%u)\n" (%s,%u,%u)  [server.c] */
+    LA_F31,  /* "%s: obsolete sid=%u (current=%u), ignoring\n" (%s,%u,%u)  [server.c] */
+    LA_F32,  /* "%s: obsolete sid=%u (last=%u) in IDLE state, ignoring\n" (%s,%u,%u)  [server.c] */
+    LA_F33,  /* "%s: peer '%s' not online for session_id=%llu\n" (%s,%s,%l)  [server.c] */
+    LA_F34,  /* "%s: peer '%s' not online, rejecting sid=%u\n" (%s,%s,%u)  [server.c] */
+    LA_F35,  /* "%s: requester not found for ses_id=%llu\n" (%s,%l)  [server.c] */
+    LA_F36,  /* "%s: unknown session_id=%llu\n" (%s,%l)  [server.c] */
+    LA_F37,  /* "%s: waiting for peer '%.*s' to register\n" (%s)  [server.c] */
+    LA_F38,  /* "Addr changed for '%s', but first info packet was abandoned (ses_id=%llu)\n" (%s,%l)  [server.c] */
+    LA_F39,  /* "Addr changed for '%s', defer notification until first ACK (ses_id=%llu)\n" (%s,%l)  [server.c] */
+    LA_F40,  /* "Addr changed for '%s', deferred notifying '%s' (ses_id=%llu)\n" (%s,%s,%l)  [server.c] */
+    LA_F41,  /* "Addr changed for '%s', notifying '%s' (ses_id=%llu)\n" (%s,%s,%l)  [server.c] */
+    LA_F42,  /* "Cannot relay %s: ses_id=%llu (peer unavailable)\n" (%s,%l)  [server.c] */
+    LA_F43,  /* "% Goodbye!\n"  [server.c] */
+    LA_F44,  /* "Invalid port number %d (range: 1-65535)\n" (%d)  [server.c] */
+    LA_F45,  /* "Invalid probe port %d (range: 0-65535)\n" (%d)  [server.c] */
+    LA_F46,  /* "MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%llu)\n" (%d,%s,%u,%l)  [server.c] */
+    LA_F47,  /* "MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%llu)\n" (%s,%u,%l)  [server.c] */
+    LA_F48,  /* "MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%llu)\n" (%s,%s,%u,%d,%d,%l)  [server.c] */
+    LA_F49,  /* "MSG_RESP gave up after %d retries, sid=%u (ses_id=%llu)\n" (%d,%u,%l)  [server.c] */
+    LA_F50,  /* "MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%llu)\n" (%s,%u,%d,%d,%l)  [server.c] */
+    LA_F51,  /* "% NAT probe disabled (bind failed)\n"  [server.c] */
+    LA_F52,  /* "NAT probe socket listening on port %d\n" (%d)  [server.c] */
+    LA_F53,  /* "NAT probe: %s (port %d)\n" (%s,%d)  [server.c] */
+    LA_F54,  /* "P2P Signaling Server listening on port %d (TCP + UDP)...\n" (%d)  [server.c] */
+    LA_F55,  /* "PEER_INFO resent, %s <-> %s, attempt %d/%d (ses_id=%llu)\n" (%s,%s,%d,%d,%l)  [server.c] */
+    LA_F56,  /* "PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
+    LA_F57,  /* "Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n" (%d,%d)  [server.c] */
+    LA_F58,  /* "Relay %s seq=%u: '%s' -> '%s' (ses_id=%llu)\n" (%s,%u,%s,%s,%l)  [server.c] */
+    LA_F59,  /* "Relay support: %s\n" (%s)  [server.c] */
+    LA_F60,  /* "Send %s: base_index=%u, cands=%d, ses_id=%llu, peer='%s'\n" (%s,%u,%d,%l,%s)  [server.c] */
+    LA_F61,  /* "Send %s: mapped=%s:%d\n" (%s,%s,%d)  [server.c] */
+    LA_F62,  /* "Send %s: peer='%s', reason=%s, ses_id=%llu\n" (%s,%s,%s,%l)  [server.c] */
+    LA_F63,  /* "Send %s: ses_id=%llu, peer='%s'\n" (%s,%l,%s)  [server.c] */
+    LA_F64,  /* "Send %s: ses_id=%llu, sid=%u, msg=%u, data_len=%d, peer='%s'\n" (%s,%l,%u,%u,%d,%s)  [server.c] */
+    LA_F65,  /* "Send %s: ses_id=%llu, sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d\n" (%s,%l,%u,%s,%u,%d)  [server.c] */
+    LA_F66,  /* "Send %s: ses_id=%llu, sid=%u, peer='%s'\n" (%s,%l,%u,%s)  [server.c] */
+    LA_F67,  /* "Send %s: ses_id=%llu, sid=%u, status=%u\n" (%s,%l,%u,%u)  [server.c] */
+    LA_F68,  /* "Send %s: status=%s, max_cands=%d, relay=%s, msg=%s, public=%s:%d, probe=%d, ses_id=%llu, inst_id=%u\n" (%s,%s,%d,%s,%s,%s,%d,%d,%l,%u)  [server.c] */
+    LA_F69,  /* "Send %s: status=error (no slot available)\n" (%s)  [server.c] */
+    LA_F70,  /* "Starting P2P signal server on port %d\n" (%d)  [server.c] */
+    LA_F71,  /* "Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n" (%s,%s)  [server.c] */
+    LA_F72,  /* "Unknown packet type 0x%02x from %s\n" (%s)  [server.c] */
+    LA_F73,  /* "[Relay] %s for ses_id=%llu: peer unavailable (dropped)\n" (%s,%l)  [server.c] */
+    LA_F74,  /* "[Relay] %s for unknown ses_id=%llu (dropped)\n" (%s,%l)  [server.c] */
+    LA_F75,  /* "[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%llu)\n" (%s,%u,%s,%s,%l)  [server.c] */
+    LA_F76,  /* "[Relay] %s seq=0 from client %s (server-only, dropped)\n" (%s,%s)  [server.c] */
+    LA_F77,  /* "[Relay] %s: '%s' -> '%s' (ses_id=%llu)\n" (%s,%s,%s,%l)  [server.c] */
+    LA_F78,  /* "[Relay] %s: bad payload(len=%zu)\n" (%s)  [server.c] */
+    LA_F79,  /* "[TCP]   → Forwarded OFFER from '%s' (%d candidates, %d bytes)\n" (%s,%d,%d)  [server.c] */
+    LA_F80,  /* "[TCP]   → Sent empty OFFER from '%s' (storage full, reverse connect)\n" (%s)  [server.c] */
+    LA_F81,  /* "[TCP] All pending candidates flushed to '%s'\n" (%s)  [server.c] */
+    LA_F82,  /* "[TCP] Cached %d candidates for offline user '%s' (total=%d/%d)\n" (%d,%s,%d,%d)  [server.c] */
+    LA_F83,  /* "[TCP] Cached %d candidates for offline user '%s', storage now FULL (%d/%d)\n" (%d,%s,%d,%d)  [server.c] */
+    LA_F84,  /* "[TCP] Cannot allocate slot for offline user '%s'\n" (%s)  [server.c] */
+    LA_F85,  /* "[TCP] E: Invalid magic from peer '%s'\n" (%s)  [server.c] */
+    LA_F86,  /* "[TCP] Failed to receive payload from %s\n" (%s)  [server.c] */
+    LA_F87,  /* "[TCP] Failed to receive target name from %s\n" (%s)  [server.c] */
+    LA_F88,  /* "[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n" (%s,%d,%d)  [server.c] */
+    LA_F89,  /* "[TCP] Flushing %d pending candidates from '%s' to '%s'...\n" (%d,%s,%s)  [server.c] */
+    LA_F90,  /* "[TCP] I: Peer '%s' logged in\n" (%s)  [server.c] */
+    LA_F91,  /* "% [TCP] Max peers reached, rejecting connection\n"  [server.c] */
+    LA_F92,  /* "[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n" (%d,%s,%s)  [server.c] */
+    LA_F93,  /* "[TCP] New connection from %s:%d\n" (%s,%d)  [server.c] */
+    LA_F94,  /* "[TCP] New sender '%s' replaces old sender '%s' (discarding %d old candidates)\n" (%s,%s,%d)  [server.c] */
+    LA_F95,  /* "[TCP] Payload too large (%u bytes) from %s\n" (%u,%s)  [server.c] */
+    LA_F96,  /* "[TCP] Relaying %s from %s to %s (%u bytes)\n" (%s,%s,%s,%u)  [server.c] */
+    LA_F97,  /* "[TCP] Sent %s with %d candidates to '%s' (from '%s')\n" (%s,%d,%s,%s)  [server.c] */
+    LA_F98,  /* "[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n" (%s,%d,%d)  [server.c] */
+    LA_F99,  /* "[TCP] Storage full for '%s' (cached=%d, dropped=%d)\n" (%s,%d,%d)  [server.c] */
+    LA_F100,  /* "[TCP] Storage full indication flushed to '%s'\n" (%s)  [server.c] */
+    LA_F101,  /* "[TCP] Storage full, connection intent from '%s' to '%s' noted\n" (%s,%s)  [server.c] */
+    LA_F102,  /* "[TCP] Storage full, flushing connection intent from '%s' to '%s' (sending empty OFFER)...\n" (%s,%s)  [server.c] */
+    LA_F103,  /* "[TCP] Target %s offline, caching candidates...\n" (%s)  [server.c] */
+    LA_F104,  /* "[TCP] Unknown message type %d from %s\n" (%d,%s)  [server.c] */
+    LA_F105,  /* "[TCP] V: %s sent to '%s'\n" (%s,%s)  [server.c] */
+    LA_F106,  /* "[TCP] V: Peer '%s' disconnected\n" (%s)  [server.c] */
+    LA_F107,  /* "[TCP] W: Client '%s' timeout (inactive for %.1f seconds)\n" (%s)  [server.c] */
+    LA_F108,  /* "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n" (%s,%s,%u)  [server.c] */
+    LA_F109,  /* "[UDP] %s send to %s failed(%d)\n" (%s,%s,%d)  [server.c] */
+    LA_F110,  /* "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n" (%s,%s,%u,%d)  [server.c] */
+    LA_F111,  /* "[UDP] %s send to %s, seq=0, flags=0, len=%d\n" (%s,%s,%d)  [server.c] */
+    LA_F112,  /* "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n" (%s,%s,%d)  [server.c] */
+    LA_F113,  /* "[UDP] %s send to %s:%d failed(%d)\n" (%s,%s,%d,%d)  [server.c] */
+    LA_F114,  /* "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n" (%s,%s,%d,%d)  [server.c] */
+    LA_F115,  /* "[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n" (%s,%s,%d,%d,%d)  [server.c] */
+    LA_F116,  /* "% net init failed\n"  [server.c] */
+    LA_F117,  /* "probe UDP bind failed(%d)\n" (%d)  [server.c] */
+    LA_F118,  /* "select failed(%d)\n" (%d)  [server.c] */
 
     LA_NUM
 };

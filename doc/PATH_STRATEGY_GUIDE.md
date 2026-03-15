@@ -231,13 +231,6 @@ switch (current_path) {
 // cfg.path_switch_cooldown_ms = 3000;     // 冷却时间 3 秒
 ```
 
-### 禁用某些路径
-
-```c
-// 禁用 LAN 路径升级（仅用于测试）
-cfg.disable_lan_shortcut = true;
-```
-
 ## 与旧代码兼容性
 
 **完全向后兼容**！

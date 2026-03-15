@@ -315,7 +315,7 @@ static int p2p_ice_form_check_list(
         pairs[0].state = P2P_PAIR_WAITING;
     }
     
-    print("I:", LA_F("Formed check list with %d candidate pairs", LA_F199, 199), pair_cnt);
+    print("I:", LA_F("Formed check list with %d candidate pairs", LA_F222, 222), pair_cnt);
     for (int i = 0; i < pair_cnt && i < 5; i++) {  /* 只打印前 5 个 */
         print("I:", LA_F("  [%d] L=%s:%d -> R=%s:%d, pri=0x%016llx", LA_F46, 46),
                i,
@@ -376,7 +376,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
     /* 仅用于 RELAY 模式（TCP 信令） */
     if (s->signaling_mode != P2P_SIGNALING_MODE_RELAY) {
         /* COMPACT 模式不应调用此函数，候选通过 p2p_signal_compact 模块发送 */
-        print("E:", LA_F("p2p_ice_send_local_candidate called in non-RELAY mode", LA_F343, 343));
+        print("E:", LA_F("p2p_ice_send_local_candidate called in non-RELAY mode", LA_F365, 365));
         return -1;
     }
 
@@ -394,7 +394,7 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
      * 如果未连接，返回失败。批量重发由 p2p_update() 的定期逻辑处理。
      */
     if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
-        print("W:", LA_F("[Trickle] TCP not connected, skipping single candidate send", LA_F325, 325));
+        print("W:", LA_F("[Trickle] TCP not connected, skipping single candidate send", LA_F348, 348));
         return -1;
     }
 
@@ -422,12 +422,12 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_candidate_entry_t *c) {
      */
     int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
     if (ret < 0) {
-        print("W:", LA_F("[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()", LA_F326, 326), ret);
+        print("W:", LA_F("[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()", LA_F349, 349), ret);
         return -1;
     }
 
     /* 发送成功（无论对端在线与否）*/
-    print("I:", LA_F("[Trickle] Sent 1 candidate to %s (online=%s)", LA_F324, 324), s->remote_peer_id,
+    print("I:", LA_F("[Trickle] Sent 1 candidate to %s (online=%s)", LA_F347, 347), s->remote_peer_id,
            ret > 0 ? LA_W("yes", LA_W25, 25) : LA_W("no (cached)", LA_W8, 8));
     return ret > 0 ? ret : 0;
 }
@@ -530,7 +530,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
                 host_index++;
                 memcpy(&c->addr, ifa->ifa_addr, sizeof(struct sockaddr_in));
                 c->addr.sin_port = loc.sin_port;
-                print("I:", LA_F("Gathered host cand<%s:%d> (priority=0x%08x)", LA_F201, 201),
+                print("I:", LA_F("Gathered host cand<%s:%d> (priority=0x%08x)", LA_F224, 224),
                         inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
                 p2p_ice_send_local_candidate(s, c);
             }
@@ -543,9 +543,8 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
     /*
      * Server Reflexive Candidate 是通过 STUN 服务器发现的公网地址。
      * 用于穿透 NAT，让位于不同 NAT 后的对端能够通信。
-     * lan_punch 模式下跳过：只用 Host 候选，PUNCH 流程在 LAN 内测试。
      */
-    if (!s->cfg.lan_punch && s->cfg.stun_server) {
+    if (!instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF) && s->cfg.stun_server) {
 
         uint8_t stun_buf[256];
         int slen = p2p_stun_build_binding_request(stun_buf, sizeof(stun_buf), NULL, NULL, NULL);
@@ -560,7 +559,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
             if (he) {
                 memcpy(&stun_addr.sin_addr, he->h_addr_list[0], he->h_length);
                 udp_send_to(s->sock, &stun_addr, stun_buf, slen);
-                print("I:", LA_F("Requested Srflx Candidate from %s", LA_F264, 264), s->cfg.stun_server);
+                print("I:", LA_F("Requested Srflx Candidate from %s", LA_F287, 287), s->cfg.stun_server);
             }
         }
     }
@@ -569,11 +568,10 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
     /*
      * Relay Candidate 是通过 TURN 服务器分配的中继地址。
      * 当直连和 STUN 穿透都失败时，使用中继作为最后的备选。
-     * lan_punch 模式下同样跳过。
      */
-    if (!s->cfg.lan_punch && s->cfg.turn_server) {
+    if (!instrument_enabled(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
         if (p2p_turn_allocate(s) == 0) {
-            print("I:", LA_F("Requested Relay Candidate from %s", LA_F262, 262), s->cfg.turn_server);
+            print("I:", LA_F("Requested Relay Candidate from %s", LA_F285, 285), s->cfg.turn_server);
         }
     }
 
@@ -623,13 +621,13 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
 
         int idx = p2p_upsert_remote_candidate(s, &caddr, (int)ctype, false);
         if (idx < 0) {
-            print("E:", LA_F("Upsert remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F309, 309),
+            print("E:", LA_F("Upsert remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F332, 332),
                    inet_ntoa(caddr.sin_addr), ntohs(caddr.sin_port), ctype);
             return;
         }
 
         p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
-        print("I:", LA_F("Recv New Remote Candidate<%s:%d> (type=%d)", LA_F259, 259),
+        print("I:", LA_F("Recv New Remote Candidate<%s:%d> (type=%d)", LA_F282, 282),
               inet_ntoa(c->cand.addr.sin_addr), ntohs(c->cand.addr.sin_port), c->cand.type);
     }
 }
@@ -668,12 +666,12 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     if (matched_idx < 0) {
         int idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
         if (idx < 0) {
-            print("E:", LA_F("Upsert remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F309, 309),
+            print("E:", LA_F("Upsert remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F332, 332),
                    inet_ntoa(from->sin_addr), ntohs(from->sin_port), P2P_CAND_PRFLX);
             return;
         }
         matched_idx = idx;
-        print("I:", LA_F("Recv New Remote Candidate<%s:%d> (Peer Reflexive - symmetric NAT)", LA_F258, 258),
+        print("I:", LA_F("Recv New Remote Candidate<%s:%d> (Peer Reflexive - symmetric NAT)", LA_F281, 281),
                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 
@@ -702,7 +700,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
             break;
     }
 
-    print("I:", LA_F("Nomination successful! Using! Using %s path %s:%d%s", LA_F217, 217),
+    print("I:", LA_F("Nomination successful! Using! Using %s path %s:%d%s", LA_F240, 240),
             cand_type_str, inet_ntoa(from->sin_addr), ntohs(from->sin_port), connection_desc);
 
     if (matched_idx >= 0) {
@@ -740,7 +738,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
         }
         if (answer_len > 0) {
             p2p_signal_relay_reply_connect(&s->sig_relay_ctx, s->sig_relay_ctx.incoming_peer_name, answer_buf, answer_len);
-            print("I:", LA_F("Sent answer to '%s'", LA_F276, 276), s->sig_relay_ctx.incoming_peer_name);
+            print("I:", LA_F("Sent answer to '%s'", LA_F299, 299), s->sig_relay_ctx.incoming_peer_name);
         }
     }
 }
@@ -766,12 +764,9 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
     /* 等待有远端候选再开始 */
     if (s->remote_cand_cnt <= 0) return;
 
-    /* lan_punch 模式：不走 ICE STUN 检查，移交给 nat_punch + nat_tick。
-     * nat_punch 会走完整的打洞状态机（重试/超时/候选轮询），
-     * 与跨 NAT 场景完全相同，只是目标地址是 LAN 私网 IP。 */
-    if (s->cfg.lan_punch) {
+    if (!instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
         if (s->nat.state == NAT_INIT) {
-            print("I:", LA_F("[lan_punch] starting NAT punch(Host candidate %d)", LA_F340, 340), s->remote_cand_cnt);
+            print("I:", LA_F("starting NAT punch(Host candidate %d)", LA_F375, 375), s->remote_cand_cnt);
             nat_punch(s, -1);
         }
         s->ice_ctx.state = P2P_ICE_STATE_COMPLETED;  /* ICE 阶段结束，由 nat_tick 接管 */
@@ -788,7 +783,7 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
 
     /* 已超过最大重试次数 → FAILED */
     if (s->ice_ctx.check_count >= P2P_ICE_MAX_CHECKS) {
-        print("W:", LA_F("Connectivity checks timed out (sent %d rounds), giving up", LA_F171, 171), s->ice_ctx.check_count);
+        print("W:", LA_F("Connectivity checks timed out (sent %d rounds), giving up", LA_F194, 194), s->ice_ctx.check_count);
         s->ice_ctx.state = P2P_ICE_STATE_FAILED;
         return;
     }
@@ -889,10 +884,10 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
 
     /* 第 1 轮打 INFO，此后每隔 1s（2 轮）打一次 DEBUG */
     if (s->ice_ctx.check_count == 1) {
-        print("I:", LA_F("UDP hole-punch probing remote candidates (%d candidates)", LA_F304, 304),
+        print("I:", LA_F("UDP hole-punch probing remote candidates (%d candidates)", LA_F327, 327),
                s->remote_cand_cnt);
     } else if (s->ice_ctx.check_count % 2 == 0) {
-        printf(LA_F("UDP hole-punch probing remote candidates round %d/%d", LA_F305, 305),
+        printf(LA_F("UDP hole-punch probing remote candidates round %d/%d", LA_F328, 328),
                s->ice_ctx.check_count, P2P_ICE_MAX_CHECKS);
     }
 }
