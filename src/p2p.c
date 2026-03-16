@@ -76,7 +76,7 @@ static void disconnect(p2p_session_t *s) {
     assert(s->state != P2P_STATE_CLOSED);
 
     int prev_state = s->state;
-    s->state = P2P_STATE_CLOSED;
+    p2p_session_reset(s, true);
 
     // NAT 层 FIN（仅在已连接状态，重复发送提高 UDP 可靠性）
     if (prev_state == P2P_STATE_CONNECTED || prev_state == P2P_STATE_RELAY) {
@@ -90,15 +90,6 @@ static void disconnect(p2p_session_t *s) {
         // 触发回调
         if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
     }
-
-    s->nat.state = NAT_CLOSED;
-    
-    s->remote_cand_cnt = 0;
-    s->remote_ice_done = false;
-    s->turn_pending = 0;
-
-    p2p_turn_reset(s);
-    p2p_ice_reset(&s->ice_ctx);
 
     // COMPACT 信令模式：取消与对方在服务器上的注册，UNREGISTER
     // + COMPACT 信令的 unregister 等价于 disconnect & logout
@@ -129,16 +120,12 @@ static void peer_disconnect(p2p_session_t *s) {
 
     print("I:", LA_F("Received FIN packet, connection closed", LA_F272, 272));
 
-    s->state = P2P_STATE_CLOSED;
-
-    s->remote_cand_cnt = 0;
-    s->remote_ice_done = false;
-    s->turn_pending = 0;
-
-    p2p_turn_reset(s);
-    p2p_ice_reset(&s->ice_ctx);
+    p2p_session_reset(s, true);
 
     // 停止信道外 NAT 探测（回到 READY 状态）
+    // + 注意，disconnect 并不会直接执行该操作，而是在 p2p_close 中执行，
+    //   因为 disconnect 也可能被 p2p_destroy 调用，此时需要执行 probe_reset，而非变为 READY 状态
+    //   另外，单纯的 p2p_session_reset(s, false)，即数据会话重置时，无需改变 probe_ctx 的状态（即它是信道外探测）
     if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT
         && s->probe_ctx.state != P2P_PROBE_STATE_OFFLINE) {
         s->probe_ctx.state = P2P_PROBE_STATE_READY;
@@ -481,7 +468,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                     c->type = P2P_CAND_HOST;
                     c->addr = s->route.local_addrs[i];
                     c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
-                    print("I:", LA_F("Append Host candidate: %s:%d", LA_F175, 175),
+                    print("I:", LA_F("Append Host candidate: %s:%d", LA_F210, 210),
                                  inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
                 }
             }
@@ -810,7 +797,7 @@ p2p_update(p2p_handle_t hdl) {
 
                 // 记录数据包接收（根据来源地址查找实际接收路径）
                 {
-                    int recv_path = path_manager_find_by_addr(s, &from);
+                    int recv_path = p2p_find_path_by_addr(s, &from);
                     if (recv_path >= -1)
                         path_manager_on_packet_recv(s, recv_path, now_ms, P2P_HDR_SIZE + payload_len);
                 }
@@ -850,8 +837,8 @@ p2p_update(p2p_handle_t hdl) {
                     
                     // 如果 RTT 更新了，同步到路径管理器（Group 2: 数据层 RTT）
                     if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0) {
-                        if (s->path_mgr.active_path >= -1) {
-                            path_manager_on_data_rtt(s, s->path_mgr.active_path, (uint32_t)s->reliable.srtt);
+                        if (s->active_path >= -1) {
+                            path_manager_on_data_rtt(s, s->active_path, (uint32_t)s->reliable.srtt);
                         }
                     }
                 }
@@ -983,7 +970,7 @@ p2p_update(p2p_handle_t hdl) {
         // 选择最佳路径
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
-            const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
+            const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
             if (addr) {
                 s->path = P2P_PATH_PUNCH;  // 目前只有 PUNCH
                 s->active_addr = *addr;
@@ -994,7 +981,7 @@ p2p_update(p2p_handle_t hdl) {
             // 降级：路径管理器无可用路径，使用传统方式
             s->path = P2P_PATH_PUNCH;
             s->active_addr = s->nat.peer_addr;
-            s->path_mgr.active_path = -2;  // -2=无路径管理器管理的路径
+            s->active_path = -2;  // -2=无路径管理器管理的路径
         }
 
         // 触发连接建立回调
@@ -1013,7 +1000,7 @@ p2p_update(p2p_handle_t hdl) {
         // 重新选择最佳路径（PUNCH 应当优先）
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
-            const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
+            const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
             if (addr) {
                 s->path = P2P_PATH_PUNCH;
                 s->active_addr = *addr;
@@ -1054,7 +1041,7 @@ p2p_update(p2p_handle_t hdl) {
         // 选择最佳可用路径
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
-            const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
+            const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
             if (addr) {
                 s->path = path_manager_get_path_type(s, best_path);
                 s->active_addr = *addr;
@@ -1067,7 +1054,7 @@ p2p_update(p2p_handle_t hdl) {
             s->state = P2P_STATE_RELAY;
             s->path = P2P_PATH_SIGNALING;
             s->active_addr = relay_available ? relay_addr : s->nat.peer_addr;
-            s->path_mgr.active_path = -2;  // -2=无路径管理器管理的路径
+            s->active_path = -2;  // -2=无路径管理器管理的路径
         }
     }
 
@@ -1084,12 +1071,12 @@ p2p_update(p2p_handle_t hdl) {
         print("W:", LA_F("NAT connection timeout, downgrading to relay mode", LA_F237, 237));
         
         // 标记当前活跃路径为失效
-        path_manager_set_path_state(s, s->path_mgr.active_path, PATH_STATE_FAILED);
+        path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
         
         // 尝试切换到中继路径
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
-            const struct sockaddr_in *addr = path_manager_get_addr(s, best_path);
+            const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
             if (addr) {
                 s->path = path_manager_get_path_type(s, best_path);
                 s->active_addr = *addr;
@@ -1101,7 +1088,7 @@ p2p_update(p2p_handle_t hdl) {
             // 无备用路径：NAT 层会继续尝试恢复
             s->state = P2P_STATE_RELAY;
             s->nat.state = NAT_RELAY;
-            s->path_mgr.active_path = -2;  // -2=无路径管理器管理的路径
+            s->active_path = -2;  // -2=无路径管理器管理的路径
         }
     }
 
@@ -1155,18 +1142,18 @@ p2p_update(p2p_handle_t hdl) {
     }
     
     // [CRITICAL] 同步高级传输层统计到路径管理器（Group 2: 数据层 RTT + 丢包率）
-    if (s->trans && s->trans->get_stats && s->path_mgr.active_path >= -1) {
+    if (s->trans && s->trans->get_stats && s->active_path >= -1) {
         uint32_t rtt_ms = 0;
         float loss_rate = 0.0f;
         
         if (s->trans->get_stats(s, &rtt_ms, &loss_rate) == 0) {
 
             if (rtt_ms > 0)
-                path_manager_on_data_rtt(s, s->path_mgr.active_path, rtt_ms);
+                path_manager_on_data_rtt(s, s->active_path, rtt_ms);
 
             // 上报数据层丢包率（之前被忽略，导致路径质量评估缺少数据层信息）
             if (loss_rate > 0.0f)
-                path_manager_on_data_loss_rate(s, s->path_mgr.active_path, loss_rate);
+                path_manager_on_data_loss_rate(s, s->active_path, loss_rate);
         }
     }
 
@@ -1210,19 +1197,19 @@ p2p_update(p2p_handle_t hdl) {
         path_manager_tick(s, now_ms);
         
         // 检查 failover 后的状态同步：如果活跃地址与路径管理器不一致，自动同步
-        if (s->path_mgr.active_path >= -1) {  // -1=SIGNALING, >=0=候选
-            const struct sockaddr_in *active_addr = path_manager_get_addr(s, s->path_mgr.active_path);
+        if (s->active_path >= -1) {  // -1=SIGNALING, >=0=候选
+            const struct sockaddr_in *active_addr = p2p_get_path_addr(s, s->active_path);
             
             if (active_addr && !sockaddr_equal(&s->active_addr, active_addr)) {
-                s->path = path_manager_get_path_type(s, s->path_mgr.active_path);
+                s->path = path_manager_get_path_type(s, s->active_path);
                 s->active_addr = *active_addr;
                 
                 print("I:", LA_F("Synced path after failover", LA_F310, 310));
                 
                 // 同步 NAT 状态
-                if (s->path_mgr.active_path == PATH_IDX_SIGNALING && s->nat.state != NAT_RELAY) {
+                if (s->active_path == PATH_IDX_SIGNALING && s->nat.state != NAT_RELAY) {
                     s->nat.state = NAT_RELAY;
-                } else if (s->path_mgr.active_path >= 0 && s->nat.state != NAT_CONNECTED) {
+                } else if (s->active_path >= 0 && s->nat.state != NAT_CONNECTED) {
                     s->nat.state = NAT_CONNECTED;
                 }
             }
@@ -1232,14 +1219,14 @@ p2p_update(p2p_handle_t hdl) {
         if (now_ms - s->path_mgr.last_reselect_ms > 5000) {
             s->path_mgr.last_reselect_ms = now_ms;
             
-            int current_path = s->path_mgr.active_path;
+            int current_path = s->active_path;
             int best_path = path_manager_select_best_path(s);
             
             // 如果找到更优路径
             if (best_path >= -1 && best_path != current_path) {
                 
-                path_stats_t *new_stats = path_manager_get_stats(s, best_path);
-                path_stats_t *old_stats = (current_path >= -1) ? path_manager_get_stats(s, current_path) : NULL;
+                path_stats_t *new_stats = p2p_get_path_stats(s, best_path);
+                path_stats_t *old_stats = (current_path >= -1) ? p2p_get_path_stats(s, current_path) : NULL;
                 
                 // 判断是否值得切换（性能提升显著）
                 // 根据当前活跃路径类型查抽切换阈值
@@ -1257,7 +1244,7 @@ p2p_update(p2p_handle_t hdl) {
                     int ret = path_manager_switch_path(s, best_path, "periodic reselect", now_ms);
                     if (ret == 0) {
                         /* 切换成功：同步上层状态 */
-                        const struct sockaddr_in *new_addr = path_manager_get_addr(s, best_path);
+                        const struct sockaddr_in *new_addr = p2p_get_path_addr(s, best_path);
                         if (new_addr) {
                             s->path = path_manager_get_path_type(s, best_path);
                             s->active_addr = *new_addr;

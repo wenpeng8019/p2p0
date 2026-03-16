@@ -182,7 +182,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F172] = "Added Remote Candidate: %d -> %s:%d",  /* SID:172 */
     [LA_F173] = "% Added SIGNALING path to path manager",  /* SID:173 */
     [LA_F174] = "% Answer already present, skipping offer re-publish",  /* SID:174 */
-    [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 */
+    [LA_F210] = "Append Host candidate: %s:%d",  /* SID:210 */
     [LA_F176] = "Attempting Simultaneous Open to %s:%d",  /* SID:176 */
     [LA_F177] = "Auto-send answer (with %d candidates) total sent %s",  /* SID:177 */
     [LA_F178] = "% BIO_new failed",  /* SID:178 */
@@ -386,6 +386,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

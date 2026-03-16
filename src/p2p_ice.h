@@ -147,7 +147,7 @@ typedef enum {
 } p2p_ice_cand_type_t;
 
 typedef struct p2p_local_candidate_entry   p2p_local_candidate_entry_t;
-typedef struct p2p_remote_candidate_entry p2p_remote_candidate_entry_t;
+typedef struct p2p_remote_candidate_entry  p2p_remote_candidate_entry_t;
 
 /* ============================================================================
  * ICE 状态机（RFC 5245 Section 7）

@@ -779,12 +779,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         ctx->remote_candidates_done = 0;
         ctx->remote_candidates_0 = false;
 
-        s->remote_cand_cnt = 0;
-        s->remote_ice_done = false;
-
-        nat_reset(&s->nat);
-
-        // todo 清除 path 地址？
+        p2p_session_reset(s, false);
     }
 
     print("V:", LA_F("%s: accepted, public=%s:%d ses_id=%" PRIu64 " max_cands=%d probe_port=%d relay=%s msg=%s\n", LA_F90, 90),
@@ -990,10 +985,10 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                       TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
 
                 // 标记旧的活跃路径为失效（地址已变更）
-                if (s->path_mgr.active_path >= 0 && s->path_mgr.active_path < s->remote_cand_cnt) {
-                    path_manager_set_path_state(s, s->path_mgr.active_path, PATH_STATE_FAILED);
+                if (s->active_path >= 0 && s->active_path < s->remote_cand_cnt) {
+                    path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
                     print("V:", LA_F("Marked old path (idx=%d) as FAILED due to addr change\n", LA_F235, 235),
-                           s->path_mgr.active_path);
+                           s->active_path);
                 }
 
                 // 立即打洞新地址（nat_on_punch 收到回复后会自动注册新路径）

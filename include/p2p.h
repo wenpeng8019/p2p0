@@ -455,6 +455,7 @@ p2p_response(p2p_handle_t hdl, uint8_t msg, const void *data, int len);
 }
 #endif
 
+#pragma ide diagnostic pop
 #pragma clang diagnostic pop
 #endif /* P2P_H */
 

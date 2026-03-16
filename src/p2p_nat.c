@@ -33,6 +33,11 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
 
     int send_path = (int)(entry - s->remote_cands);
 
+    // 状态: INIT → PROBING（首次发送 PUNCH 时进入探测状态）
+    if (entry->stats.state == PATH_STATE_INIT) {
+        entry->stats.state = PATH_STATE_PROBING;
+    }
+
     udp_send_packet(s->sock, &entry->addr, P2P_PKT_PUNCH, 0, n->punch_seq, NULL, 0);
 
     print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, path=%d", LA_F56, 56),
@@ -255,8 +260,8 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     }
     s->remote_cands[cand_idx].stats.is_lan = route_check_same_subnet(&s->route, from);
 
-    if (s->path_mgr.active_path < 0 || s->remote_cands[cand_idx].stats.is_lan) {
-        s->path_mgr.active_path = cand_idx;
+    if (s->active_path < 0 || s->remote_cands[cand_idx].stats.is_lan) {
+        s->active_path = cand_idx;
     }
 
     // 更新接收统计（防止超时误判）

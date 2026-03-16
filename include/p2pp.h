@@ -5,13 +5,14 @@
  * - COMPACT 模式 (UDP): 轻量级 NAT 穿透
  * - RELAY 模式 (TCP): 完整 ICE/SDP 交换
  */
-
 #ifndef P2PP_H
 #define P2PP_H
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
 #include <stdint.h>
 #include <string.h>
-#include <p2p.h>
 
 /* #pragma pack(push/pop) 受 MSVC / GCC / Clang 三大编译器支持，无需平台宏 */
 #pragma pack(push, 1)
@@ -70,10 +71,9 @@ static inline uint32_t p2p_sockaddr_ipv4(const p2p_sockaddr_t *w) {
  */
 typedef struct {
     uint8_t             type;                       // 候选类型 (0=Host 1=Srflx 2=Relay 3=Prflx)
-    uint32_t            priority;                   // 候选优先级 htonl（RFC 8445: 32-bit）
     p2p_sockaddr_t      addr;                       // 候选地址（18B）
+    uint32_t            priority;                   // 候选优先级 htonl（RFC 8445: 32-bit）
 } p2p_candidate_t;
-
 
 /* ============================================================================
  * NAT UDP 包定义
@@ -590,5 +590,6 @@ typedef struct {
 
 
 #pragma pack(pop)
-
+#pragma ide diagnostic pop
+#pragma clang diagnostic pop
 #endif /* P2PP_H */

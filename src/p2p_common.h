@@ -6,10 +6,6 @@
  *   - 序列号差值 seq_diff
  *   - sockaddr ↔ wire 格式转换
  *   - 信令负载头部 / 候选的序列化与反序列化
- *
- * 包含关系：
- *   p2p_server/server.c   → ../src/p2p_common.h
- *   src/*.c               → p2p_internal.h（已含 p2p_common.h）
  */
 
 #ifndef P2P_COMMON_H
@@ -72,8 +68,8 @@ static inline bool sockaddr_equal(const struct sockaddr_in *a, const struct sock
  * sin_port 已是网络字节序，直接存储。
  */
 static inline void sockaddr_to_p2p_wire(const struct sockaddr_in *s, p2p_sockaddr_t *w) {
-    memset(w, 0, sizeof(*w));
     w->port    = s->sin_port;               /* 已是网络字节序 */
+    memset(w->ip, 0, 10);
     w->ip[10]  = 0xFF;                      /* IPv4-mapped 前缀 */
     w->ip[11]  = 0xFF;
     memcpy(&w->ip[12], &s->sin_addr.s_addr, 4);
@@ -85,7 +81,7 @@ static inline void sockaddr_to_p2p_wire(const struct sockaddr_in *s, p2p_sockadd
  * 自动清零 sin_zero[8] 及 macOS 上的 sin_len 字段。
  * 仅处理 IPv4-mapped 地址（ip[12..15]），IPv6 需另行处理。
  */
-static inline void sockaddr_from_p2p_wire(const p2p_sockaddr_t *w, struct sockaddr_in *s) {
+static inline void sockaddr_from_p2p_wire(struct sockaddr_in *s, const p2p_sockaddr_t *w) {
     memset(s, 0, sizeof(*s));
     s->sin_family      = AF_INET;
     s->sin_port        = w->port;           /* 已是网络字节序 */

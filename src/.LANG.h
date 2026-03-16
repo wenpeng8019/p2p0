@@ -216,7 +216,7 @@ enum {
     LA_F172,  /* "Added Remote Candidate: %d -> %s:%d" (%d,%s,%d)  [p2p_signal_relay.c] */
     LA_F173,  /* "% Added SIGNALING path to path manager"  [p2p.c] */
     LA_F174,  /* "% Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
-    LA_F175,  /* "Append Host candidate: %s:%d" (%s,%d)  [p2p.c] */
+    LA_F175,  /* disabled "Append Host candidate: %s:%d" */
     LA_F176,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
     LA_F177,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
     LA_F178,  /* "% BIO_new failed"  [p2p_dtls_openssl.c] */

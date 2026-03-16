@@ -26,14 +26,35 @@ typedef enum {
     PATH_QUALITY_BAD = 0                            // 很差（RTT >= 500ms 或丢包 >= 10%）
 } path_quality_t;
 
-/* 路径状态 */
+/*
+ * 路径状态
+ *
+ * 状态机：
+ *
+ *     INIT ──→ PROBING ──→ ACTIVE ──→ DEGRADED
+ *                            ↑           ↓
+ *                            └───────────┘
+ *                            ↑
+ *     RECOVERING ──────────┘
+ *           ↓
+ *        FAILED ────→ RECOVERING (30s后)
+ *
+ * 状态变更位置:
+ *   INIT     → PROBING    : p2p_nat.c: nat_send_punch()
+ *   PROBING  → ACTIVE     : p2p_nat.c: nat_on_punch() / nat_on_punch_ack()
+ *   ACTIVE   ↔ DEGRADED   : p2p_path_manager.c: health_check_one_path()
+ *   *        → FAILED     : p2p_path_manager.c: health_check_one_path()
+ *   FAILED   → RECOVERING : p2p_path_manager.c: health_check_one_path()
+ *   RECOVERING → ACTIVE   : p2p_path_manager.c: health_check_one_path()
+ *   RECOVERING → FAILED   : p2p_path_manager.c: health_check_one_path()
+ */
 typedef enum {
-    PATH_STATE_INIT = 0,                            // 初始化
-    PATH_STATE_PROBING,                             // 探测中
-    PATH_STATE_ACTIVE,                              // 可用
-    PATH_STATE_DEGRADED,                            // 降级（高丢包/高延迟）
-    PATH_STATE_FAILED,                              // 失败
-    PATH_STATE_RECOVERING                           // 恢复中
+    PATH_STATE_INIT = 0,                            // 初始化（远端候选添加时的默认状态）
+    PATH_STATE_PROBING,                             // 探测中（已发送 PUNCH，等待响应）
+    PATH_STATE_ACTIVE,                              // 可用（双向可达）
+    PATH_STATE_DEGRADED,                            // 降级（RTT>300ms 或 loss>10%）
+    PATH_STATE_FAILED,                              // 失败（连续超时）
+    PATH_STATE_RECOVERING                           // 恢复中（FAILED 30s 后重新探测）
 } path_state_t;
 
 /*
@@ -148,6 +169,7 @@ typedef struct {
  * 
  * 通过 path_idx_to_type() 转换为公共 API 的 p2p_path_t 枚举类型。
  */
+#define PATH_IDX_NONE      (-2)  // 无有效路径
 #define PATH_IDX_SIGNALING (-1)  // 信令转发(SIGNALING)路径索引（不在候选数组中，非 TURN relay）
 
 /*
@@ -159,16 +181,6 @@ typedef struct {
 typedef struct {
     /* 路径选择策略 */
     p2p_path_strategy_t strategy;                   // 路径选择策略
-    
-    /* 当前活跃路径（索引语义见上）*/
-    int                 active_path;                // -1=PATH_IDX_SIGNALING, >=0=候选索引
-    
-    /* 信令转发(SIGNALING)特殊处理（不是候选，非 TURN relay） */
-    struct {
-        bool                active;                 // 是否启用
-        struct sockaddr_in  addr;                   // 信令服务器地址
-        path_stats_t        stats;                  // 统计信息
-    } signaling;
     
     /* 切换状态 */
     uint64_t            last_switch_time;           // 最后切换时间
@@ -217,6 +229,16 @@ typedef struct {
  * @return          0=成功，-1=失败
  */
 int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy);
+
+/*
+ * 重置路径管理器运行时状态
+ *
+ * 清除切换历史、待跟踪包、统计计数等运行时状态，保留策略、阈值等配置。
+ * 同时重置 active_path 为 PATH_IDX_NONE。
+ *
+ * @param s  会话指针
+ */
+void path_manager_reset(p2p_session_t *s);
 
 /*
  * 初始化路径统计（候选路径使用）
@@ -391,15 +413,6 @@ int path_manager_switch_path(p2p_session_t *s, int target_path,
  * ============================================================================ */
 
 /*
- * 获取路径统计
- *
- * @param s         会话指针
- * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
- * @return          统计指针，或 NULL（无效索引）
- */
-path_stats_t* path_manager_get_stats(p2p_session_t *s, int path_idx);
-
-/*
  * 将路径索引转换为路径类型枚举
  *
  * @param s         会话指针
@@ -407,32 +420,6 @@ path_stats_t* path_manager_get_stats(p2p_session_t *s, int path_idx);
  * @return          P2P_PATH_LAN / P2P_PATH_PUNCH / P2P_PATH_RELAY / P2P_PATH_SIGNALING / P2P_PATH_NONE
  */
 p2p_path_t path_manager_get_path_type(p2p_session_t *s, int path_idx);
-
-/*
- * 获取路径地址
- *
- * @param s         会话指针
- * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
- * @return          地址指针，或 NULL（无效索引）
- */
-const struct sockaddr_in* path_manager_get_addr(p2p_session_t *s, int path_idx);
-
-/*
- * 通过地址查找路径索引
- *
- * @param s         会话指针
- * @param addr      目标地址
- * @return          >=0=候选索引，-1(PATH_IDX_SIGNALING)=匹配SIGNALING地址，-2=未找到
- */
-int path_manager_find_by_addr(p2p_session_t *s, const struct sockaddr_in *addr);
-
-/*
- * 获取活跃路径索引
- *
- * @param s         会话指针
- * @return          路径索引（-1=SIGNALING, >=0=候选索引），或 -2（无活跃路径）
- * @note            直接访问 s->path_mgr.active_path 即可
- */
 
 /*
  * 检查是否有可用路径
