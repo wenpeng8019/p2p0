@@ -54,62 +54,113 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
     assert(s->remote_cand_cnt + cand_cnt <= s->remote_cand_cap);
 
-    int offset = sizeof(uint64_t) + 2; // 第一个 candidates 列表的起始位置
+    p2p_remote_candidate_entry_t*c;
+    int offset = sizeof(uint64_t) + 2;  // 第一个 candidates 列表的起始位置
 
     // 对于 peer_info0, 即由 server 维护的双方握手包
     if (payload[sizeof(uint64_t)]/* base_index */ == 0) {
 
-        // 其首个地址候选（idx=0）肯定有效，即肯定是（服务器观察到的）对方公网地址
-        p2p_local_candidate_entry_t parsed;
-        unpack_candidate(&parsed, payload + offset);
-        assert((p2p_cand_type_t)parsed.type == P2P_CAND_SRFLX);
+        unpack_candidate(c = &s->remote_cands[0], payload + offset);
+        if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
 
-        p2p_remote_candidate_entry_t *c = &s->remote_cands[0];
-        c->type = parsed.type;
-        c->priority = parsed.priority;
-        c->addr = parsed.addr;
-        c->last_punch_send_ms = 0;
+        // 其首个地址候选（idx=0）肯定有效，即肯定是（服务器观察到的）对方公网地址
+        if ((p2p_cand_type_t)c->type != P2P_CAND_SRFLX) {
+
+            print("W:", LA_F("%s: unexpected non-srflx cand in peer_info0, treating as srflx\n", LA_F165, 165),
+                  TASK_ICE_REMOTE);
+
+            c->type = P2P_CAND_SRFLX;
+        }
+
+        print("I:", LA_F("%s: peer_info0 srflx cand[%d]<%s:%d>%s\n", LA_F133, 133),
+                        TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                        instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
+                        instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
+
+        if (instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF)) --s->remote_cand_cnt;
+        else if (!instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
+
+            if (nat_punch(s, 0) != E_NONE) {
+                print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
+                    TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            }
+        }
 
         --cand_cnt; offset += (int)sizeof(p2p_candidate_t);
+    }
+    // 如果 peer_info0 以外的其他 info 包先到达，则需要保留 cand[0] 给对方（在 info0 中的）的公网地址
+    else if (s->remote_cand_cnt == 0 && !instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF)) {
+        memset(&s->remote_cands[0], 0, sizeof(p2p_remote_candidate_entry_t));
+        s->remote_cand_cnt = 1;
     }
 
     if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
 
-    for (int i = 0; i < cand_cnt; i++) {
+    for (int i = 0, idx; i < cand_cnt; i++, offset += (int)sizeof(p2p_candidate_t)) {
 
-        p2p_local_candidate_entry_t parsed;
-        unpack_candidate(&parsed, payload + offset);
+        unpack_candidate(c = &s->remote_cands[idx = s->remote_cand_cnt], payload + offset);
 
-        int idx = p2p_upsert_remote_candidate(s, &parsed.addr, parsed.type, false);
-        if (idx < 0) {
-            print("E:", LA_S("%s: unpack upsert remote cand<%s:%d> failed(OOM)\n", LA_S33, 33),
-                  TASK_ICE_REMOTE, inet_ntoa(parsed.addr.sin_addr), ntohs(parsed.addr.sin_port));
-            return;
+        if (p2p_find_remote_candidate_by_addr(s, &c->addr) >= 0) {
+            print("W:", LA_F("%s: duplicate remote cand<%s:%d> from signaling, skipped\n", LA_F165, 165),
+                  TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            continue;
         }
-        p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
-        offset += (int)sizeof(p2p_candidate_t);
+        ++s->remote_cand_cnt;
 
-        print("I:", LA_F("%s: remote cand[%d]<%s:%d>, starting punch\n", LA_F133, 133),
-              TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+        if (i == 0 && payload[sizeof(uint64_t)]/* base_index */ == 0) {
 
-        // idx:0 是对方的公网候选地址，也就是服务器观察到的地址
-        if (c->type == P2P_CAND_SRFLX) {
+            if ((p2p_cand_type_t)c->type != P2P_CAND_SRFLX) {
 
-            if (idx != 0)
-                print("W:", LA_F("%s: unexpected Srflx candidate at idx %d, expected idx 0\n", LA_F165, 165),
-                      TASK_ICE_REMOTE, idx);
+                print("W:", LA_F("%s: unexpected non-srflx cand in peer_info0, treating as srflx\n", LA_F165, 165),
+                      TASK_ICE_REMOTE);
+
+                c->type = P2P_CAND_SRFLX;
+            }
+        }
+        else if (c->type == P2P_CAND_RELAY) {
+
+            print("I:", LA_F("%s: remote relay cand[%d]<%s:%d>%s\n", LA_F133, 133),
+                  TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                  instrument_enabled(P2P_INST_OPT_RELAY_OFF) ? ", ignored due to instrument" : "");
+
+            if (instrument_enabled(P2P_INST_OPT_RELAY_OFF)) --s->remote_cand_cnt;
+
+            continue;
+        }
+        else if (c->type == P2P_CAND_SRFLX) {
+
+            print("I:", LA_F("%s: remote srflx cand[%d]<%s:%d>%s\n", LA_F133, 133),
+                        TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                        instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
+                        instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
+
+            if (instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF)) {
+                --s->remote_cand_cnt;
+                continue;
+            }
 
             if (instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF)) continue;
         }
-        else {
-            if (idx == 0)
-                print("W:", LA_F("%s: unexpected non-Srflx candidate at idx 0\n", LA_F167, 167),
-                      TASK_ICE_REMOTE);
+        else if (c->type == P2P_CAND_HOST) {
 
-            if (c->type == P2P_CAND_RELAY) continue;
+            print("I:", LA_F("%s: remote host cand[%d]<%s:%d>%s\n", LA_F133, 133),
+                  TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                     instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF) ? ", ignored due to instrument" : 
+                     instrument_enabled(P2P_INST_OPT_HOST_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
 
-            assert(c->type == P2P_CAND_HOST);
+            if (instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF)) {
+                --s->remote_cand_cnt;
+                continue;
+            }
+
             if (instrument_enabled(P2P_INST_OPT_HOST_PUNCH_OFF)) continue;
+        }
+        else {
+
+            print("E:", LA_F("%s: unexpected remote cand type %d, skipped\n", LA_F132, 132),
+                  TASK_ICE_REMOTE, c->type);
+            --s->remote_cand_cnt;
+            continue;
         }
 
         if (nat_punch(s, idx) != E_NONE) {
@@ -967,6 +1018,11 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
             if (p2p_remote_cands_reserve(s, 1) != E_NONE) {
                 print("E:", LA_F("Failed to reserve remote candidates (cnt=1)\n", LA_F213, 213));
+                return;
+            }
+
+            if (instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF)) {
+                print("I:", LA_F("%s NOTIFY: ignored srflx addr update due to instument\n", LA_F379, 379), PROTO);
                 return;
             }
 

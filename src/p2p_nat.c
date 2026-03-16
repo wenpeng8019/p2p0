@@ -18,6 +18,37 @@
 #define TASK_NAT                "NAT"
 
 /*
+ * 查找或添加远端候选（PRFLX 发现）
+ *
+ * 从已知 PUNCH/PUNCH_ACK 来源地址查找候选，若不存在则作为 PRFLX 添加。
+ * 返回候选索引，或负值表示 OOM。
+ */
+static int nat_upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
+    int idx = p2p_find_remote_candidate_by_addr(s, from);
+    if (idx >= 0) return idx;
+
+    // 新候选（NAT 映射出的 PRFLX）
+    idx = p2p_cand_push_remote(s);
+    if (idx < 0) {
+        print("E:", LA_F("%s: push remote cand<%s:%d> failed(OOM)", LA_F160, 160),
+              TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        return idx;
+    }
+    p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
+    c->addr = *from;
+    c->type = P2P_CAND_PRFLX;
+    c->priority = 0;
+
+    c->reachable = false;
+    c->last_punch_send_ms = 0;
+    path_stats_init(&c->stats, 0);
+
+    print("I:", LA_F("%s: discovered prflx cand<%s:%d>[%d]", LA_F98, 98),
+          TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port), idx);
+    return idx;
+}
+
+/*
  * 向指定候选发送打洞包
  *
  * 协议：P2P_PKT_PUNCH (0x01)
@@ -227,23 +258,13 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     nat_ctx_t *n = &s->nat;
     uint64_t now = P_tick_ms();
 
-    int remote_cnt_before = s->remote_cand_cnt;
-    int cand_idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
-    if (cand_idx < 0) {
-        print("E:", LA_F("%s: track upsert remote cand<%s:%d> failed(OOM), dropping", LA_F160, 160),
-              TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-        return;
-    }
+    int cand_idx = nat_upsert_prflx(s, from);
+    if (cand_idx < 0) return;
 
     print("V:", LA_F("%s: accepted from cand[%d]", LA_F85, 85), PROTO, cand_idx);
 
     // 更新最后接收时间（保活/心跳超时检测）
     n->last_recv_time = now;
-
-    if (cand_idx >= remote_cnt_before) {
-        print("I:", LA_F("%s: discovered unsynced prflx cand<%s:%d>[%d]", LA_F98, 98),
-              TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port), cand_idx);
-    }
 
     // 通知 ICE 层（如果启用）
     if (s->cfg.use_ice) {
@@ -319,12 +340,8 @@ void nat_on_punch_ack(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 更新最后接收时间
     n->last_recv_time = now;
 
-    int cand_idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
-    if (cand_idx < 0) {
-        print("E:", LA_F("%s: track upsert remote cand<%s:%d> failed(OOM), dropping", LA_F160, 160),
-              TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-        return;
-    }
+    int cand_idx = nat_upsert_prflx(s, from);
+    if (cand_idx < 0) return;
 
     // 更新路径为可达
     s->remote_cands[cand_idx].reachable = true;

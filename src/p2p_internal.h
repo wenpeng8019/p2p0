@@ -413,32 +413,6 @@ static inline int p2p_find_remote_candidate_by_addr(const p2p_session_t *s, cons
     return -1;
 }
 
-static inline ret_t p2p_upsert_remote_candidate(p2p_session_t *s,
-                                                const struct sockaddr_in *addr,
-                                                p2p_cand_type_t cand_type,
-                                                bool from_punch) {
-    if (!s || !addr) return E_INVALID;
-
-    int idx = p2p_find_remote_candidate_by_addr(s, addr);
-    if (idx >= 0) {
-        if (!from_punch) s->remote_cands[idx].type = cand_type;
-        return idx;
-    }
-
-    idx = p2p_cand_push_remote(s);
-    if (idx < 0) return idx;
-
-    p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
-    c->addr = *addr;
-    c->type = from_punch ? P2P_CAND_PRFLX : cand_type;
-    c->priority = 0;
-    c->last_punch_send_ms = 0;
-    c->reachable = false;
-    path_stats_init(&c->stats, 0);  /* 初始化路径统计默认值（rtt_min=9999 等） */
-
-    return idx;
-}
-
 /*
  * 为 remote_cands 保留目标（need）个槽位。新分配空间会被置 NULL
  * 返回 E_NONE，分配失败返回 E_OUT_OF_MEMORY

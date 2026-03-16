@@ -38,9 +38,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S28] = "%s: already running, cannot trigger again",  /* SID:28 */
     [LA_S29] = "%s: peer is OFFLINE",  /* SID:29 */
     [LA_S30] = "%s: peer is online, waiting echo",  /* SID:30 */
+    [LA_S33] = "%s: push remote cand<%s:%d> failed(OOM)\n",  /* SID:33 */
     [LA_S31] = "%s: triggered on CONNECTED state (unnecessary)",  /* SID:31 */
     [LA_S32] = "%s: TURN allocated, starting address exchange",  /* SID:32 */
-    [LA_S33] = "%s: unpack upsert remote cand<%s:%d> failed(OOM)\n",  /* SID:33 */
     [LA_S34] = "[SCTP] association established",  /* SID:34 */
     [LA_S35] = "[SCTP] usrsctp initialized, connecting...",  /* SID:35 */
     [LA_S36] = "[SCTP] usrsctp_socket failed",  /* SID:36 */
@@ -51,6 +51,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S41] = "Out of memory",  /* SID:41 */
     [LA_S42] = "Push host cand<%s:%d> failed(OOM)\n",  /* SID:42 */
     [LA_S43] = "Push local cand<%s:%d> failed(OOM)\n",  /* SID:43 */
+    [LA_S33] = "Push remote cand<%s:%d> failed(OOM)\n",  /* SID:33 */
     [LA_F44] = "  ... and %d more pairs",  /* SID:44 */
     [LA_F45] = "  [%d] %s/%d",  /* SID:45 */
     [LA_F46] = "  [%d] L=%s:%d -> R=%s:%d, pri=0x%016llx",  /* SID:46 */
@@ -105,7 +106,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F95] = "%s: bad payload(len=%d)\n",  /* SID:95 */
     [LA_F96] = "%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)",  /* SID:96 */
     [LA_F97] = "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n",  /* SID:97 */
-    [LA_F98] = "%s: discovered unsynced prflx cand<%s:%d>[%d]",  /* SID:98 */
+    [LA_F98] = "%s: discovered prflx cand<%s:%d>[%d]",  /* SID:98 */
+    [LA_F165] = "%s: duplicate remote cand<%s:%d> from signaling, skipped\n",  /* SID:165 */
     [LA_F99] = "%s: duplicate request ignored (sid=%u, already processing)\n",  /* SID:99 */
     [LA_F100] = "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n",  /* SID:100 */
     [LA_F101] = "%s: entered, %s arrived after REGISTERED\n",  /* SID:101 */
@@ -139,6 +141,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F129] = "%s: punching %d/%d candidates (elapsed: %llu ms)",  /* SID:129 */
     [LA_F130] = "%s: punching additional cand<%s:%d>[%d] while connected",  /* SID:130 */
     [LA_F131] = "%s: punching remote cand<%s:%d>[%d]",  /* SID:131 */
+    [LA_F160] = "%s: push remote cand<%s:%d> failed(OOM)",  /* SID:160 */
+    [LA_F160] = "%s: push remote cand<%s:%d> failed(OOM), dropping",  /* SID:160 */
     [LA_F132] = "%s: received FIN from peer, marking NAT as CLOSED",  /* SID:132 */
     [LA_F133] = "%s: remote cand[%d]<%s:%d>, starting punch\n",  /* SID:133 */
     [LA_F134] = "%s: restarting periodic check",  /* SID:134 */
@@ -167,7 +171,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F157] = "%s: timeout, max(%d) attempts reached, reset to INIT\n",  /* SID:157 */
     [LA_F158] = "%s: timeout, peer did not respond",  /* SID:158 */
     [LA_F159] = "%s: timeout, retry %d/%d",  /* SID:159 */
-    [LA_F160] = "%s: track upsert remote cand<%s:%d> failed(OOM), dropping",  /* SID:160 */
     [LA_F161] = "%s: trickled %d cand(s), seq=%u (ses_id=%llu)\n",  /* SID:161 */
     [LA_F162] = "%s: triggered via COMPACT msg echo",  /* SID:162 */
     [LA_F163] = "%s: triggered via RELAY TUNE echo",  /* SID:163 */
@@ -209,6 +212,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F199] = "Detect local network interfaces failed(%d)",  /* SID:199 */
     [LA_F200] = "Detection completed %s",  /* SID:200 */
     [LA_F201] = "Discarded %d bytes payload of message type %d",  /* SID:201 */
+    [LA_F165] = "Duplicate remote cand<%s:%d> from signaling, skipped",  /* SID:165 */
+    [LA_F332] = "Duplicate remote candidate<%s:%d> from signaling, skipped",  /* SID:332 */
     [LA_F202] = "Failed to allocate %u bytes",  /* SID:202 */
     [LA_F203] = "% Failed to allocate ACK payload buffer",  /* SID:203 */
     [LA_F204] = "% Failed to allocate DTLS context",  /* SID:204 */
@@ -273,6 +278,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F263] = "Peer online, forwarded %d candidates",  /* SID:263 */
     [LA_F264] = "Processing (role=%s)",  /* SID:264 */
     [LA_F265] = "% PseudoTCP enabled as transport layer",  /* SID:265 */
+    [LA_F332] = "Push prflx candidate<%s:%d> failed(OOM)",  /* SID:332 */
+    [LA_F332] = "Push remote candidate<%s:%d> (type=%d) failed(OOM)",  /* SID:332 */
     [LA_F266] = "REGISTERED: peer=%s\n",  /* SID:266 */
     [LA_F267] = "% RELAY/COMPACT mode requires server_host",  /* SID:267 */
     [LA_F268] = "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d",  /* SID:268 */
@@ -339,7 +346,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F329] = "Unknown ACK status %d",  /* SID:329 */
     [LA_F330] = "Unknown signaling mode: %d",  /* SID:330 */
     [LA_F331] = "Updating Gist field '%s'...",  /* SID:331 */
-    [LA_F332] = "Upsert remote candidate<%s:%d> (type=%d) failed(OOM)",  /* SID:332 */
     [LA_F333] = "% Using path: RELAY",  /* SID:333 */
     [LA_F334] = "Waiting for peer '%s' timed out (%dms), giving up",  /* SID:334 */
     [LA_F335] = "[MbedTLS] DTLS role: %s (mode=%s)",  /* SID:335 */

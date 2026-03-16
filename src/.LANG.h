@@ -72,7 +72,7 @@ enum {
     LA_S30,  /* "%s: peer is online, waiting echo"  [p2p_probe.c] */
     LA_S31,  /* "%s: triggered on CONNECTED state (unnecessary)"  [p2p_probe.c] */
     LA_S32,  /* "%s: TURN allocated, starting address exchange"  [p2p_probe.c] */
-    LA_S33,  /* "%s: unpack upsert remote cand<%s:%d> failed(OOM)\n"  [p2p_signal_pubsub.c, p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_S33,  /* "Push remote cand<%s:%d> failed(OOM)\n"  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
     LA_S34,  /* "[SCTP] association established"  [p2p_trans_sctp.c] */
     LA_S35,  /* "[SCTP] usrsctp initialized, connecting..."  [p2p_trans_sctp.c] */
     LA_S36,  /* "[SCTP] usrsctp_socket failed"  [p2p_trans_sctp.c] */
@@ -139,7 +139,7 @@ enum {
     LA_F95,  /* "%s: bad payload(len=%d)\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F96,  /* "%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)" (%s,%s,%d)  [p2p_nat.c] */
     LA_F97,  /* "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n" (%s,%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
-    LA_F98,  /* "%s: discovered unsynced prflx cand<%s:%d>[%d]" (%s,%s,%d,%d)  [p2p_nat.c] */
+    LA_F98,  /* "%s: discovered prflx cand<%s:%d>[%d]" (%s,%s,%d,%d)  [p2p_nat.c] */
     LA_F99,  /* "%s: duplicate request ignored (sid=%u, already processing)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F100,  /* "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n" (%s,%u,%u,%d)  [p2p_signal_compact.c] */
     LA_F101,  /* "%s: entered, %s arrived after REGISTERED\n" (%s,%s)  [p2p_signal_compact.c] */
@@ -201,12 +201,12 @@ enum {
     LA_F157,  /* "%s: timeout, max(%d) attempts reached, reset to INIT\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F158,  /* "%s: timeout, peer did not respond" (%s)  [p2p_probe.c] */
     LA_F159,  /* "%s: timeout, retry %d/%d" (%s,%d,%d)  [p2p_probe.c] */
-    LA_F160,  /* "%s: track upsert remote cand<%s:%d> failed(OOM), dropping" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F160,  /* "%s: push remote cand<%s:%d> failed(OOM), dropping" (%s,%s,%d)  [p2p_nat.c] */
     LA_F161,  /* "%s: trickled %d cand(s), seq=%u (ses_id=%llu)\n" (%s,%d,%u,%l)  [p2p_signal_compact.c] */
     LA_F162,  /* "%s: triggered via COMPACT msg echo" (%s)  [p2p_probe.c] */
     LA_F163,  /* "%s: triggered via RELAY TUNE echo" (%s)  [p2p_probe.c] */
     LA_F164,  /* "%s: tx confirmed: me->peer path is UP (echoed seq=%u)" (%s,%u)  [p2p_nat.c] */
-    LA_F165,  /* "%s: unexpected Srflx candidate at idx %d, expected idx 0\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F165,  /* "Duplicate remote cand<%s:%d> from signaling, skipped" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
     LA_F166,  /* "%s: unexpected ack_seq=%u mask=0x%04x\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F167,  /* "%s: unexpected non-Srflx candidate at idx 0\n" (%s)  [p2p_signal_compact.c] */
     LA_F168,  /* "%s:%04d: %s" (%s,%s)  [p2p_dtls_mbedtls.c] */
@@ -373,7 +373,7 @@ enum {
     LA_F329,  /* "Unknown ACK status %d" (%d)  [p2p_signal_relay.c] */
     LA_F330,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
     LA_F331,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
-    LA_F332,  /* "Upsert remote candidate<%s:%d> (type=%d) failed(OOM)" (%s,%d,%d)  [p2p_ice.c] */
+    LA_F332,  /* "Push remote candidate<%s:%d> (type=%d) failed(OOM)" (%s,%d,%d)  [p2p_ice.c] */
     LA_F333,  /* "% Using path: RELAY"  [p2p.c] */
     LA_F334,  /* "Waiting for peer '%s' timed out (%dms), giving up" (%s,%d)  [p2p_signal_relay.c] */
     LA_F335,  /* "[MbedTLS] DTLS role: %s (mode=%s)" (%s,%s)  [p2p_dtls_mbedtls.c] */

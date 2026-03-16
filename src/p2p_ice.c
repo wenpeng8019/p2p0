@@ -619,14 +619,28 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
         memcpy(&caddr.sin_port, payload + offset + 4, 2);
         offset += 6;
 
-        int idx = p2p_upsert_remote_candidate(s, &caddr, (int)ctype, false);
+        // 信令候选不应重复，检查并警告
+        if (p2p_find_remote_candidate_by_addr(s, &caddr) >= 0) {
+            print("W:", LA_F("Duplicate remote candidate<%s:%d> from signaling, skipped", LA_F332, 332),
+                   inet_ntoa(caddr.sin_addr), ntohs(caddr.sin_port));
+            continue;
+        }
+
+        int idx = p2p_cand_push_remote(s);
         if (idx < 0) {
-            print("E:", LA_F("Upsert remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F332, 332),
+            print("E:", LA_F("Push remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F332, 332),
                    inet_ntoa(caddr.sin_addr), ntohs(caddr.sin_port), ctype);
             return;
         }
 
         p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
+        c->addr = caddr;
+        c->type = ctype;
+        c->priority = 0;
+        c->last_punch_send_ms = 0;
+        c->reachable = false;
+        path_stats_init(&c->stats, 0);
+
         print("I:", LA_F("Recv New Remote Candidate<%s:%d> (type=%d)", LA_F282, 282),
               inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->type);
     }
@@ -664,12 +678,20 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
      * 标准 ICE 行为：将其作为 prflx 候选加入列表，仍然视为成功。
      * 只要 IP 与某个已知候选匹配（或任意来源），均接受。 */
     if (matched_idx < 0) {
-        int idx = p2p_upsert_remote_candidate(s, from, P2P_CAND_PRFLX, true);
+        int idx = p2p_cand_push_remote(s);
         if (idx < 0) {
-            print("E:", LA_F("Upsert remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F332, 332),
-                   inet_ntoa(from->sin_addr), ntohs(from->sin_port), P2P_CAND_PRFLX);
+            print("E:", LA_F("Push prflx candidate<%s:%d> failed(OOM)", LA_F332, 332),
+                   inet_ntoa(from->sin_addr), ntohs(from->sin_port));
             return;
         }
+        p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
+        c->addr = *from;
+        c->type = P2P_CAND_PRFLX;
+        c->priority = 0;
+        c->last_punch_send_ms = 0;
+        c->reachable = false;
+        path_stats_init(&c->stats, 0);
+
         matched_idx = idx;
         print("I:", LA_F("Recv New Remote Candidate<%s:%d> (Peer Reflexive - symmetric NAT)", LA_F281, 281),
                         inet_ntoa(from->sin_addr), ntohs(from->sin_port));

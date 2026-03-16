@@ -9,7 +9,6 @@ void p2p_instrument(uint16_t rid, uint8_t chn, const char* tag, char *txt, int l
     if (!rid || chn != 'X') return;
 
     if (strcmp(tag, "host_ice") == 0) {
-        if (strcmp(txt, "off") == 0) {
-        }
+        
     }
 }

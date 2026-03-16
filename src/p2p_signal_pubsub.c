@@ -204,17 +204,30 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         
         /* 添加远端 ICE 候选 */
         for (int i = 0; i < payload.candidate_count; i++) {
-              p2p_local_candidate_entry_t parsed;
-              unpack_candidate(&parsed, dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t));
+            const uint8_t *cand_buf = dec_buf + sizeof(p2p_signaling_payload_hdr_t) + i * sizeof(p2p_candidate_t);
 
-            int idx = p2p_upsert_remote_candidate(s, &parsed.addr, parsed.type, false);
-            if (idx < 0) {
-                 print("E:", LA_S("%s: unpack upsert remote cand<%s:%d> failed(OOM)\n", LA_S33, 33),
-                       inet_ntoa(parsed.addr.sin_addr), ntohs(parsed.addr.sin_port));
-                break;
+            // 提取地址检查重复
+            struct sockaddr_in peek_addr;
+            memset(&peek_addr, 0, sizeof(peek_addr));
+            peek_addr.sin_family = AF_INET;
+            memcpy(&peek_addr.sin_port, cand_buf + 1, 2);
+            memcpy(&peek_addr.sin_addr.s_addr, cand_buf + 15, 4);
+
+            if (p2p_find_remote_candidate_by_addr(s, &peek_addr) >= 0) {
+                print("W:", LA_F("Duplicate remote cand<%s:%d> from signaling, skipped", LA_F165, 165),
+                      inet_ntoa(peek_addr.sin_addr), ntohs(peek_addr.sin_port));
+                continue;
             }
 
+            int idx = p2p_cand_push_remote(s);
+            if (idx < 0) {
+                 print("E:", LA_S("Push remote cand<%s:%d> failed(OOM)\n", LA_S33, 33),
+                       inet_ntoa(peek_addr.sin_addr), ntohs(peek_addr.sin_port));
+                break;
+            }
+            unpack_candidate(&s->remote_cands[idx], cand_buf);
             p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
+
             print("I:", LA_F("Received remote candidate: type=%d, address=%s:%d", LA_F276, 276),
                  c->type, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             
