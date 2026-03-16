@@ -25,18 +25,22 @@ ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable DTLS (MbedTLS)", 
 ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S16, 16));
 ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S17, 17));
 ARGS_B(false, compact,      0,   "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S28, 28));
-ARGS_B(false, cn,           0,   "cn",           LA_CS("Use Chinese language", LA_S27, 27));
 ARGS_B(false, echo,         0,   "echo",         LA_CS("Auto-echo received messages back to sender", LA_S13, 13));
 ARGS_S(false, server,       's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S21, 21));
 ARGS_S(false, github,       0,   "github",       LA_CS("GitHub Token for Public Signaling", LA_S19, 19));
 ARGS_S(false, gist,         0,   "gist",         LA_CS("GitHub Gist ID for Public Signaling", LA_S18, 18));
 ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", LA_S29, 29));
 ARGS_S(false, to,           't', "to",           LA_CS("Target Peer Name (if specified: active role)", LA_S23, 23));
+ARGS_S(false, stun,         0,   "stun",         LA_CS("STUN server address", LA_S44, 44));
 ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S25, 25));
 ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S26, 26));
 ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S24, 24));
 ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", LA_S20, 20));
 ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S40, 40));
+
+static p2p_language_t s_lang = P2P_LANG_EN;
+static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }
+ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", LA_S27, 27));
 
 /*
  * TUI 专有头文件（不适合移植到 p2p_platform.h，原因见下）：
@@ -387,21 +391,13 @@ int main(int argc, char *argv[]) {
     // 设置语言钩子
     P_lang = lang_cstr;
 
-    /* 预扫描 --cn 参数（在 ARGS_parse 之前加载中文，使 --help 也能显示中文） */
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--cn") == 0) {
-            lang_cn();
-            break;
-        }
-    }
-
     /* 解析命令行参数 */
     ARGS_parse(argc, argv,
+        &ARGS_DEF_cn,
         &ARGS_DEF_dtls,
         &ARGS_DEF_openssl,
         &ARGS_DEF_pseudo,
         &ARGS_DEF_compact,
-        &ARGS_DEF_cn,
         &ARGS_DEF_echo,
         &ARGS_DEF_server,
         &ARGS_DEF_github,
@@ -447,23 +443,26 @@ int main(int argc, char *argv[]) {
     int dtls_backend = ARGS_dtls.i64 ? 1 : (ARGS_openssl.i64 ? 2 : 0);
 
     p2p_config_t cfg = {0};
-    cfg.dtls_backend   = dtls_backend;
-    cfg.use_pseudotcp  = ARGS_pseudo.i64 ? 1 : 0;
-    cfg.use_ice        = !ARGS_compact.i64;
-    cfg.stun_server    = "stun.l.google.com";
-    cfg.stun_port      = 3478;
-    cfg.turn_server    = ARGS_turn.str;
-    cfg.turn_port      = ARGS_turn.str ? 3478 : 0;
-    cfg.turn_user      = ARGS_turn_user.str;
-    cfg.turn_pass      = ARGS_turn_pass.str;
-    cfg.server_host    = server_host;
-    cfg.server_port    = server_port;
-    cfg.gh_token       = ARGS_github.str;
-    cfg.gist_id        = ARGS_gist.str;
-    cfg.bind_port      = 0;
-    cfg.language       = ARGS_cn.i64 ? P2P_LANG_ZH : P2P_LANG_EN;
-    cfg.on_disconnected      = on_disconnected;
-    cfg.userdata             = NULL;
+    cfg.language        = s_lang;
+    cfg.dtls_backend    = dtls_backend;
+    cfg.use_pseudotcp   = ARGS_pseudo.i64 ? 1 : 0;
+    cfg.use_ice         = !ARGS_compact.i64;
+    //cfg.stun_server     = "stun.cloudflare.com";
+    cfg.stun_server     = ARGS_stun.str ? ARGS_stun.str : "stun.miwifi.com"; // 国内 STUN 服务器（小米）
+    //cfg.stun_server     = "stun.qq.com"; // 国内 STUN 服务器（腾讯）
+    //cfg.stun_server     = "stun.l.google.com";
+    cfg.stun_port       = 3478;
+    cfg.turn_server     = ARGS_turn.str;
+    cfg.turn_port       = ARGS_turn.str ? 3478 : 0;
+    cfg.turn_user       = ARGS_turn_user.str;
+    cfg.turn_pass       = ARGS_turn_pass.str;
+    cfg.server_host     = server_host;
+    cfg.server_port     = server_port;
+    cfg.gh_token        = ARGS_github.str;
+    cfg.gist_id         = ARGS_gist.str;
+    cfg.bind_port       = 0;
+    cfg.on_disconnected = on_disconnected;
+    cfg.userdata        = NULL;
     cfg.instrument_base = 10;
 
     if (ARGS_server.str)

@@ -698,7 +698,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                         memcpy(&peek_addr.sin_addr.s_addr, cand_buf + 15, 4);
 
                         if (p2p_find_remote_candidate_by_addr(s, &peek_addr) >= 0) {
-                            print("W:", LA_F("Duplicate remote cand<%s:%d> from signaling, skipped", LA_F165, 165),
+                            print("W:", LA_F("Duplicate remote cand<%s:%d> from signaling, skipped", LA_F386, 386),
                                   inet_ntoa(peek_addr.sin_addr), ntohs(peek_addr.sin_port));
                             continue;
                         }

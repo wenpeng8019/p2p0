@@ -144,9 +144,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F131] = "%s: punching remote cand<%s:%d>[%d]",  /* SID:131 */
     [LA_F160] = "%s: push remote cand<%s:%d> failed(OOM)",  /* SID:160 */
     [LA_F132] = "%s: received FIN from peer, marking NAT as CLOSED",  /* SID:132 */
-    [LA_F133] = "%s: remote host cand[%d]<%s:%d>%s\n",  /* SID:133 */
-    [LA_F133] = "%s: remote relay cand[%d]<%s:%d>%s\n",  /* SID:133 */
-    [LA_F133] = "%s: remote srflx cand[%d]<%s:%d>%s\n",  /* SID:133 */
+    [LA_F381] = "%s: remote host cand[%d]<%s:%d>%s\n",  /* SID:381 */
+    [LA_F382] = "%s: remote relay cand[%d]<%s:%d>%s\n",  /* SID:382 */
+    [LA_F383] = "%s: remote srflx cand[%d]<%s:%d>%s\n",  /* SID:383 */
     [LA_F134] = "%s: restarting periodic check",  /* SID:134 */
     [LA_F135] = "%s: retry(%d/%d) probe\n",  /* SID:135 */
     [LA_F136] = "%s: retry(%d/%d) req (sid=%u)\n",  /* SID:136 */
@@ -172,14 +172,14 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F156] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:156 */
     [LA_F157] = "%s: timeout, max(%d) attempts reached, reset to INIT\n",  /* SID:157 */
     [LA_F158] = "%s: timeout, peer did not respond",  /* SID:158 */
-    [LA_F159] = "%s: timeout, retry %d/%d",  /* SID:159 */
+    [LA_F22] = "%s: timeout, retry %d/%d",  /* SID:22 */
     [LA_F161] = "%s: trickled %d cand(s), seq=%u (ses_id=%llu)\n",  /* SID:161 */
     [LA_F162] = "%s: triggered via COMPACT msg echo",  /* SID:162 */
     [LA_F163] = "%s: triggered via RELAY TUNE echo",  /* SID:163 */
     [LA_F164] = "%s: tx confirmed: me->peer path is UP (echoed seq=%u)",  /* SID:164 */
     [LA_F166] = "%s: unexpected ack_seq=%u mask=0x%04x\n",  /* SID:166 */
-    [LA_F165] = "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n",  /* SID:165 */
-    [LA_F132] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:132 */
+    [LA_F384] = "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n",  /* SID:384 */
+    [LA_F385] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:385 */
     [LA_F168] = "%s:%04d: %s",  /* SID:168 */
     [LA_F169] = "%s_ACK sent, seq=%u (ses_id=%llu)\n",  /* SID:169 */
     [LA_F170] = "%s_ACK sent, sid=%u\n",  /* SID:170 */
@@ -187,7 +187,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F172] = "Added Remote Candidate: %d -> %s:%d",  /* SID:172 */
     [LA_F173] = "% Added SIGNALING path to path manager",  /* SID:173 */
     [LA_F174] = "% Answer already present, skipping offer re-publish",  /* SID:174 */
-    [LA_F210] = "Append Host candidate: %s:%d",  /* SID:210 */
+    [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 */
     [LA_F176] = "Attempting Simultaneous Open to %s:%d",  /* SID:176 */
     [LA_F177] = "Auto-send answer (with %d candidates) total sent %s",  /* SID:177 */
     [LA_F178] = "% BIO_new failed",  /* SID:178 */
@@ -214,7 +214,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F199] = "Detect local network interfaces failed(%d)",  /* SID:199 */
     [LA_F200] = "Detection completed %s",  /* SID:200 */
     [LA_F201] = "Discarded %d bytes payload of message type %d",  /* SID:201 */
-    [LA_F165] = "Duplicate remote cand<%s:%d> from signaling, skipped",  /* SID:165 */
+    [LA_F386] = "Duplicate remote cand<%s:%d> from signaling, skipped",  /* SID:386 */
     [LA_F332] = "Duplicate remote candidate<%s:%d> from signaling, skipped",  /* SID:332 */
     [LA_F202] = "Failed to allocate %u bytes",  /* SID:202 */
     [LA_F203] = "% Failed to allocate ACK payload buffer",  /* SID:203 */
@@ -280,8 +280,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F263] = "Peer online, forwarded %d candidates",  /* SID:263 */
     [LA_F264] = "Processing (role=%s)",  /* SID:264 */
     [LA_F265] = "% PseudoTCP enabled as transport layer",  /* SID:265 */
-    [LA_F332] = "Push prflx candidate<%s:%d> failed(OOM)",  /* SID:332 */
-    [LA_F332] = "Push remote candidate<%s:%d> (type=%d) failed(OOM)",  /* SID:332 */
+    [LA_F388] = "Push prflx candidate<%s:%d> failed(OOM)",  /* SID:388 */
+    [LA_F389] = "Push remote candidate<%s:%d> (type=%d) failed(OOM)",  /* SID:389 */
     [LA_F266] = "REGISTERED: peer=%s\n",  /* SID:266 */
     [LA_F267] = "% RELAY/COMPACT mode requires server_host",  /* SID:267 */
     [LA_F268] = "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d",  /* SID:268 */
@@ -292,7 +292,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F273] = "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d",  /* SID:273 */
     [LA_F274] = "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d",  /* SID:274 */
     [LA_F275] = "Received UNKNOWN pkt type: 0x%02X",  /* SID:275 */
-    [LA_F276] = "Received remote candidate: type=%d, address=%s:%d",  /* SID:276 */
+    [LA_F20] = "Received remote candidate: type=%d, address=%s:%d",  /* SID:20 */
     [LA_F277] = "Received valid signal from '%s'",  /* SID:277 */
     [LA_F278] = "Recv %s pkt from %s:%d",  /* SID:278 */
     [LA_F279] = "Recv %s pkt from %s:%d echo_seq=%u",  /* SID:279 */
@@ -362,7 +362,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F343] = "[SIGNALING] Sent candidates (cached, peer offline) %d to %s",  /* SID:343 */
     [LA_F344] = "[SIGNALING] Sent candidates, forwarded [%d-%d] to %s (forwarded=%d)",  /* SID:344 */
     [LA_F345] = "% [SIGNALING] Server storage full, waiting for peer to come online",  /* SID:345 */
-    [LA_F346] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:346 */
+    [LA_F19] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:19 */
     [LA_F347] = "[Trickle] Sent 1 candidate to %s (online=%s)",  /* SID:347 */
     [LA_F348] = "% [Trickle] TCP not connected, skipping single candidate send",  /* SID:348 */
     [LA_F349] = "[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()",  /* SID:349 */

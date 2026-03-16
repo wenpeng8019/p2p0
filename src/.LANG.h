@@ -173,8 +173,8 @@ enum {
     LA_F129,  /* "%s: punching %d/%d candidates (elapsed: %llu ms)" (%s,%d,%d,%l)  [p2p_nat.c] */
     LA_F130,  /* "%s: punching additional cand<%s:%d>[%d] while connected" (%s,%s,%d,%d)  [p2p_nat.c] */
     LA_F131,  /* "%s: punching remote cand<%s:%d>[%d]" (%s,%s,%d,%d)  [p2p_nat.c] */
-    LA_F132,  /* "%s: unexpected remote cand type %d, skipped\n" (%s,%d)  [p2p_signal_compact.c] */
-    LA_F133,  /* "%s: remote srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
+    LA_F132,  /* "%s: received FIN from peer, marking NAT as CLOSED" (%s)  [p2p_nat.c] */
+    LA_F133,  /* "%s: peer_info0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
     LA_F134,  /* "%s: restarting periodic check" (%s)  [p2p_probe.c] */
     LA_F135,  /* "%s: retry(%d/%d) probe\n" (%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F136,  /* "%s: retry(%d/%d) req (sid=%u)\n" (%s,%d,%d,%u)  [p2p_signal_compact.c] */
@@ -206,9 +206,9 @@ enum {
     LA_F162,  /* "%s: triggered via COMPACT msg echo" (%s)  [p2p_probe.c] */
     LA_F163,  /* "%s: triggered via RELAY TUNE echo" (%s)  [p2p_probe.c] */
     LA_F164,  /* "%s: tx confirmed: me->peer path is UP (echoed seq=%u)" (%s,%u)  [p2p_nat.c] */
-    LA_F165,  /* "Duplicate remote cand<%s:%d> from signaling, skipped" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
+    LA_F165,  /* "%s: duplicate remote cand<%s:%d> from signaling, skipped\n" (%s,%s,%d)  [p2p_signal_compact.c] */
     LA_F166,  /* "%s: unexpected ack_seq=%u mask=0x%04x\n" (%s,%u)  [p2p_signal_compact.c] */
-    _LA_167,
+    LA_F167,  /* "%s: unexpected non-Srflx candidate at idx 0\n" (%s)  [p2p_signal_compact.c] */
     LA_F168,  /* "%s:%04d: %s" (%s,%s)  [p2p_dtls_mbedtls.c] */
     LA_F169,  /* "%s_ACK sent, seq=%u (ses_id=%llu)\n" (%s,%u,%l)  [p2p_signal_compact.c] */
     LA_F170,  /* "%s_ACK sent, sid=%u\n" (%s,%u)  [p2p_signal_compact.c] */
@@ -216,7 +216,7 @@ enum {
     LA_F172,  /* "Added Remote Candidate: %d -> %s:%d" (%d,%s,%d)  [p2p_signal_relay.c] */
     LA_F173,  /* "% Added SIGNALING path to path manager"  [p2p.c] */
     LA_F174,  /* "% Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
-    _LA_175,
+    LA_F175,  /* "Append Host candidate: %s:%d" (%s,%d)  [p2p.c] */
     LA_F176,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
     LA_F177,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
     LA_F178,  /* "% BIO_new failed"  [p2p_dtls_openssl.c] */
@@ -251,7 +251,7 @@ enum {
     LA_F207,  /* "% Failed to allocate memory for candidate lists"  [p2p.c] */
     LA_F208,  /* "% Failed to allocate memory for session"  [p2p.c] */
     LA_F209,  /* "% Failed to build STUN request"  [p2p_stun.c] */
-    LA_F210,  /* "Failed to realloc memory for remote candidates (capacity: %d)" (%d)  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
+    LA_F210,  /* "Append Host candidate: %s:%d" (%s,%d)  [p2p.c] */
     LA_F211,  /* "Failed to reserve remote candidates (base=%u cnt=%d)\n" (%u,%d)  [p2p_signal_compact.c] */
     LA_F212,  /* "Failed to reserve remote candidates (cnt=%d)\n" (%d)  [p2p_signal_compact.c] */
     LA_F213,  /* "% Failed to reserve remote candidates (cnt=1)\n"  [p2p_signal_compact.c] */
@@ -373,7 +373,7 @@ enum {
     LA_F329,  /* "Unknown ACK status %d" (%d)  [p2p_signal_relay.c] */
     LA_F330,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
     LA_F331,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
-    LA_F332,  /* "Push remote candidate<%s:%d> (type=%d) failed(OOM)" (%s,%d,%d)  [p2p_ice.c] */
+    LA_F332,  /* "Duplicate remote candidate<%s:%d> from signaling, skipped" (%s,%d)  [p2p_ice.c] */
     LA_F333,  /* "% Using path: RELAY"  [p2p.c] */
     LA_F334,  /* "Waiting for peer '%s' timed out (%dms), giving up" (%s,%d)  [p2p_signal_relay.c] */
     LA_F335,  /* "[MbedTLS] DTLS role: %s (mode=%s)" (%s,%s)  [p2p_dtls_mbedtls.c] */
@@ -422,6 +422,15 @@ enum {
     LA_F378,  /* "% ✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
     LA_F379,  /* "%s NOTIFY: ignored srflx addr update due to instument\n" (%s)  [p2p_signal_compact.c] */
     LA_F380,  /* "% Skipping Host Candidate gathering due to instrumentation"  [p2p_ice.c] */
+    LA_F381,  /* "%s: remote host cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
+    LA_F382,  /* "%s: remote relay cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
+    LA_F383,  /* "%s: remote srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
+    LA_F384,  /* "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n" (%s)  [p2p_signal_compact.c] */
+    LA_F385,  /* "%s: unexpected remote cand type %d, skipped\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F386,  /* "Duplicate remote cand<%s:%d> from signaling, skipped" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
+    LA_F387,  /* "Failed to realloc memory for remote candidates (capacity: %d)" (%d)  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
+    LA_F388,  /* "Push prflx candidate<%s:%d> failed(OOM)" (%s,%d)  [p2p_ice.c] */
+    LA_F389,  /* "Push remote candidate<%s:%d> (type=%d) failed(OOM)" (%s,%d,%d)  [p2p_ice.c] */
 
     LA_NUM
 };

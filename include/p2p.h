@@ -21,7 +21,7 @@ extern "C" {
  * 新代码请使用 lang_load_fp() / lang_load_tx() 设置语言 */
 typedef enum {
     P2P_LANG_EN = 0,                            // English (默认)
-    P2P_LANG_ZH = 1                             // 简体中文
+    P2P_LANG_CN = 1                             // 简体中文
 } p2p_language_t;
 
 /* 日志等级 */

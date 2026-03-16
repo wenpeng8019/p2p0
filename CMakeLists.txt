@@ -7,7 +7,7 @@ option(WITH_OPENSSL "启用 OpenSSL DTLS 支持" OFF)
 option(WITH_SCTP    "启用 usrsctp 支持" OFF)
 option(THREADED     "启用内部线程" ON)
 option(I18N_ENABLED "启用 i18n 多语言支持" ON)
-option(I18N_CN      "生成中文翻译头文件 (LANG.cn.h)" OFF)
+option(I18N_CN      "生成中文翻译头文件 (LANG.cn.h)" ON)
 
 # --- 平台检测 ---
 if(WIN32)

@@ -628,7 +628,7 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
 
         int idx = p2p_cand_push_remote(s);
         if (idx < 0) {
-            print("E:", LA_F("Push remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F332, 332),
+            print("E:", LA_F("Push remote candidate<%s:%d> (type=%d) failed(OOM)", LA_F389, 389),
                    inet_ntoa(caddr.sin_addr), ntohs(caddr.sin_port), ctype);
             return;
         }
@@ -680,7 +680,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     if (matched_idx < 0) {
         int idx = p2p_cand_push_remote(s);
         if (idx < 0) {
-            print("E:", LA_F("Push prflx candidate<%s:%d> failed(OOM)", LA_F332, 332),
+            print("E:", LA_F("Push prflx candidate<%s:%d> failed(OOM)", LA_F388, 388),
                    inet_ntoa(from->sin_addr), ntohs(from->sin_port));
             return;
         }

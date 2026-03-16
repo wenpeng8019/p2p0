@@ -90,6 +90,9 @@ enum {
     LA_F42,  /* "% Timeout waiting for debugger. Continuing without debugger.\n"  [p2p_ping.c] */
     LA_F43,  /* "Waiting Debugger(%s) connecting...\n" (%s)  [p2p_ping.c] */
 
+    /* Strings (LA_S) */
+    LA_S44,  /* "STUN server address"  [p2p_ping.c] */
+
     LA_NUM
 };
 

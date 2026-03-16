@@ -66,7 +66,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         // 其首个地址候选（idx=0）肯定有效，即肯定是（服务器观察到的）对方公网地址
         if ((p2p_cand_type_t)c->type != P2P_CAND_SRFLX) {
 
-            print("W:", LA_F("%s: unexpected non-srflx cand in peer_info0, treating as srflx\n", LA_F165, 165),
+            print("W:", LA_F("%s: unexpected non-srflx cand in peer_info0, treating as srflx\n", LA_F384, 384),
                   TASK_ICE_REMOTE);
 
             c->type = P2P_CAND_SRFLX;
@@ -111,7 +111,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
             if ((p2p_cand_type_t)c->type != P2P_CAND_SRFLX) {
 
-                print("W:", LA_F("%s: unexpected non-srflx cand in peer_info0, treating as srflx\n", LA_F165, 165),
+                print("W:", LA_F("%s: unexpected non-srflx cand in peer_info0, treating as srflx\n", LA_F384, 384),
                       TASK_ICE_REMOTE);
 
                 c->type = P2P_CAND_SRFLX;
@@ -119,7 +119,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         }
         else if (c->type == P2P_CAND_RELAY) {
 
-            print("I:", LA_F("%s: remote relay cand[%d]<%s:%d>%s\n", LA_F133, 133),
+            print("I:", LA_F("%s: remote relay cand[%d]<%s:%d>%s\n", LA_F382, 382),
                   TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                   instrument_enabled(P2P_INST_OPT_RELAY_OFF) ? ", ignored due to instrument" : "");
 
@@ -129,7 +129,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         }
         else if (c->type == P2P_CAND_SRFLX) {
 
-            print("I:", LA_F("%s: remote srflx cand[%d]<%s:%d>%s\n", LA_F133, 133),
+            print("I:", LA_F("%s: remote srflx cand[%d]<%s:%d>%s\n", LA_F383, 383),
                         TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                         instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
                         instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
@@ -143,7 +143,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         }
         else if (c->type == P2P_CAND_HOST) {
 
-            print("I:", LA_F("%s: remote host cand[%d]<%s:%d>%s\n", LA_F133, 133),
+            print("I:", LA_F("%s: remote host cand[%d]<%s:%d>%s\n", LA_F381, 381),
                   TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                      instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF) ? ", ignored due to instrument" : 
                      instrument_enabled(P2P_INST_OPT_HOST_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
@@ -157,7 +157,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         }
         else {
 
-            print("E:", LA_F("%s: unexpected remote cand type %d, skipped\n", LA_F132, 132),
+            print("E:", LA_F("%s: unexpected remote cand type %d, skipped\n", LA_F385, 385),
                   TASK_ICE_REMOTE, c->type);
             --s->remote_cand_cnt;
             continue;
