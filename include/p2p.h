@@ -236,11 +236,6 @@ typedef struct {
     bool                    nagle;                      // 是否启用 Nagle 批处理 (默认 0)
     const char*             auth_key;                   // 安全握手密钥 (可选)
     
-    /* 测试选项 */
-    bool                    skip_host_candidates;       // 调试：跳过本地Host候选收集，只使用公网候选（Srflx/Relay）
-                                                        // 用途：COMPACT模式快速测试UDP打洞，避免发送大量本地地址，加快配对速度
-                                                        // 配合STUN使用，直接在服务器完成公网地址交换后立即开始打洞测试
-
     /* 语言选项（已废弃，保留字段以兼容旧 API） */
     p2p_language_t          language;                   // 旧系统语言选项，已无效；请用 lang_load_fp() 控制语言
     
@@ -254,6 +249,10 @@ typedef struct {
     p2p_on_request_fn       on_request;                 // MSG RPC 请求到达（B 端，服务器可选）
     p2p_on_response_fn      on_response;                // MSG RPC 应答到达（A 端，服务器可选）
     void*                   userdata;                   // 用户自定义数据，传递给回调函数
+
+    /* 测试选项 */
+    uint16_t                instrument_base;            // instrument 选项基址（0-65535），用于设定该模块的选项索引的起始值，避免与其他模块冲突
+
 } p2p_config_t;
 
 ///////////////////////////////////////////////////////////////////////////////

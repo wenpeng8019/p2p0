@@ -158,7 +158,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
             return NULL;
         }
 
-        instrument_listen(p2p_instrument);
+        instrument_listen(p2p_instrument, cfg->instrument_base);
     }
 
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
@@ -454,8 +454,8 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             struct sockaddr_in loc; socklen_t len = sizeof(loc);
             getsockname(s->sock, (struct sockaddr *)&loc, &len);
 
-            // 将 route 中的本地地址转换为候选列表（skip_host_candidates 时跳过）
-            if (!s->cfg.skip_host_candidates) {
+            // 将 route 中的本地地址转换为候选列表
+            if (!instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF)) {
                 for (int i = 0; i < s->route.addr_count; i++) {
                     int idx = p2p_cand_push_local(s);
                     if (idx < 0) {
@@ -469,10 +469,10 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                     c->addr = s->route.local_addrs[i];
                     c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
                     print("I:", LA_F("Append Host candidate: %s:%d", LA_F210, 210),
-                                 inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                          inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
                 }
             }
-            else print("I:", LA_F("Skipping local Host candidates on --public-only", LA_F304, 304));
+            else print("I:", LA_F("Skipping local Host candidates due to instrument", LA_F304, 304));
 
             // 注册（连接）到 COMPACT 信令服务器
             print("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F283, 283),

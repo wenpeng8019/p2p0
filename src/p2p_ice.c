@@ -454,10 +454,9 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
     /*
      * Host Candidate 是本地网卡的 IP 地址。
      * 在同一局域网内的对端可以直接使用此地址通信。
-     * skip_host_candidates 模式下跳过（用于快速公网打洞测试）。
      */
-    if (!s->cfg.skip_host_candidates)
-    {
+    if (!instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF)) {
+
         /* 获取本地端口 */
         struct sockaddr_in loc;
         socklen_t loclen = sizeof(loc);
@@ -538,6 +537,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
         }
 #endif
     }
+    else print("I:", LA_F("Skipping Host Candidate gathering due to instrumentation", 0, 0));
 
     /* ======================== 2. 收集 Srflx 候选 ======================== */
     /*

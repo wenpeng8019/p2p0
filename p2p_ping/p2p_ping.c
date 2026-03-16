@@ -437,7 +437,6 @@ int main(int argc, char *argv[]) {
     cfg.gist_id        = ARGS_gist.str;
     cfg.bind_port      = 0;
     cfg.language       = ARGS_cn.i64 ? P2P_LANG_ZH : P2P_LANG_EN;
-    cfg.skip_host_candidates = ARGS_public_only.i64 ? 1 : 0;
     cfg.on_disconnected      = on_disconnected;
     cfg.userdata             = NULL;
 

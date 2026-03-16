@@ -1173,7 +1173,7 @@ int main(int argc, char *argv[]) {
     
     // 初始化 instrument 监听
     instrument_local(0);
-    if (instrument_listen(on_instrument_log) != E_NONE) {
+    if (instrument_listen(on_instrument_log, 0) != E_NONE) {
         fprintf(stderr, "Failed to start instrument listener\n");
         return 1;
     }

@@ -38,7 +38,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S28] = "%s: already running, cannot trigger again",  /* SID:28 */
     [LA_S29] = "%s: peer is OFFLINE",  /* SID:29 */
     [LA_S30] = "%s: peer is online, waiting echo",  /* SID:30 */
-    [LA_S33] = "%s: push remote cand<%s:%d> failed(OOM)\n",  /* SID:33 */
     [LA_S31] = "%s: triggered on CONNECTED state (unnecessary)",  /* SID:31 */
     [LA_S32] = "%s: TURN allocated, starting address exchange",  /* SID:32 */
     [LA_S34] = "[SCTP] association established",  /* SID:34 */
@@ -59,6 +58,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F48] = "%s '%s' (%u %s)",  /* SID:48 */
     [LA_F49] = "%s NOTIFY: accepted\n",  /* SID:49 */
     [LA_F50] = "%s NOTIFY: ignored old notify base=%u (current=%u)\n",  /* SID:50 */
+    [LA_F379] = "%s NOTIFY: ignored srflx addr update due to instument\n",  /* SID:379 */
     [LA_F51] = "%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n",  /* SID:51 */
     [LA_F52] = "%s msg=0: accepted, echo reply (sid=%u, len=%d)\n",  /* SID:52 */
     [LA_F53] = "%s received (ice_ctx.state=%d), resetting ICE and clearing %d stale candidates",  /* SID:53 */
@@ -137,14 +137,16 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F125] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:125 */
     [LA_F126] = "%s: peer online, proceeding to ICE\n",  /* SID:126 */
     [LA_F127] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:127 */
+    [LA_F133] = "%s: peer_info0 srflx cand[%d]<%s:%d>%s\n",  /* SID:133 */
     [LA_F128] = "%s: punch remote cand[%d]<%s:%d> failed\n",  /* SID:128 */
     [LA_F129] = "%s: punching %d/%d candidates (elapsed: %llu ms)",  /* SID:129 */
     [LA_F130] = "%s: punching additional cand<%s:%d>[%d] while connected",  /* SID:130 */
     [LA_F131] = "%s: punching remote cand<%s:%d>[%d]",  /* SID:131 */
     [LA_F160] = "%s: push remote cand<%s:%d> failed(OOM)",  /* SID:160 */
-    [LA_F160] = "%s: push remote cand<%s:%d> failed(OOM), dropping",  /* SID:160 */
     [LA_F132] = "%s: received FIN from peer, marking NAT as CLOSED",  /* SID:132 */
-    [LA_F133] = "%s: remote cand[%d]<%s:%d>, starting punch\n",  /* SID:133 */
+    [LA_F133] = "%s: remote host cand[%d]<%s:%d>%s\n",  /* SID:133 */
+    [LA_F133] = "%s: remote relay cand[%d]<%s:%d>%s\n",  /* SID:133 */
+    [LA_F133] = "%s: remote srflx cand[%d]<%s:%d>%s\n",  /* SID:133 */
     [LA_F134] = "%s: restarting periodic check",  /* SID:134 */
     [LA_F135] = "%s: retry(%d/%d) probe\n",  /* SID:135 */
     [LA_F136] = "%s: retry(%d/%d) req (sid=%u)\n",  /* SID:136 */
@@ -175,9 +177,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F162] = "%s: triggered via COMPACT msg echo",  /* SID:162 */
     [LA_F163] = "%s: triggered via RELAY TUNE echo",  /* SID:163 */
     [LA_F164] = "%s: tx confirmed: me->peer path is UP (echoed seq=%u)",  /* SID:164 */
-    [LA_F165] = "%s: unexpected Srflx candidate at idx %d, expected idx 0\n",  /* SID:165 */
     [LA_F166] = "%s: unexpected ack_seq=%u mask=0x%04x\n",  /* SID:166 */
-    [LA_F167] = "%s: unexpected non-Srflx candidate at idx 0\n",  /* SID:167 */
+    [LA_F165] = "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n",  /* SID:165 */
+    [LA_F132] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:132 */
     [LA_F168] = "%s:%04d: %s",  /* SID:168 */
     [LA_F169] = "%s_ACK sent, seq=%u (ses_id=%llu)\n",  /* SID:169 */
     [LA_F170] = "%s_ACK sent, sid=%u\n",  /* SID:170 */
@@ -392,6 +394,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F167] = "%s: unexpected non-Srflx candidate at idx 0\n",  /* SID:167 disabled */
     [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 disabled */
 };
 

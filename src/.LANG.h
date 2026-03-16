@@ -173,8 +173,8 @@ enum {
     LA_F129,  /* "%s: punching %d/%d candidates (elapsed: %llu ms)" (%s,%d,%d,%l)  [p2p_nat.c] */
     LA_F130,  /* "%s: punching additional cand<%s:%d>[%d] while connected" (%s,%s,%d,%d)  [p2p_nat.c] */
     LA_F131,  /* "%s: punching remote cand<%s:%d>[%d]" (%s,%s,%d,%d)  [p2p_nat.c] */
-    LA_F132,  /* "%s: received FIN from peer, marking NAT as CLOSED" (%s)  [p2p_nat.c] */
-    LA_F133,  /* "%s: remote cand[%d]<%s:%d>, starting punch\n" (%s,%d,%s,%d)  [p2p_signal_compact.c] */
+    LA_F132,  /* "%s: unexpected remote cand type %d, skipped\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F133,  /* "%s: remote srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
     LA_F134,  /* "%s: restarting periodic check" (%s)  [p2p_probe.c] */
     LA_F135,  /* "%s: retry(%d/%d) probe\n" (%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F136,  /* "%s: retry(%d/%d) req (sid=%u)\n" (%s,%d,%d,%u)  [p2p_signal_compact.c] */
@@ -201,14 +201,14 @@ enum {
     LA_F157,  /* "%s: timeout, max(%d) attempts reached, reset to INIT\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F158,  /* "%s: timeout, peer did not respond" (%s)  [p2p_probe.c] */
     LA_F159,  /* "%s: timeout, retry %d/%d" (%s,%d,%d)  [p2p_probe.c] */
-    LA_F160,  /* "%s: push remote cand<%s:%d> failed(OOM), dropping" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F160,  /* "%s: push remote cand<%s:%d> failed(OOM)" (%s,%s,%d)  [p2p_nat.c] */
     LA_F161,  /* "%s: trickled %d cand(s), seq=%u (ses_id=%llu)\n" (%s,%d,%u,%l)  [p2p_signal_compact.c] */
     LA_F162,  /* "%s: triggered via COMPACT msg echo" (%s)  [p2p_probe.c] */
     LA_F163,  /* "%s: triggered via RELAY TUNE echo" (%s)  [p2p_probe.c] */
     LA_F164,  /* "%s: tx confirmed: me->peer path is UP (echoed seq=%u)" (%s,%u)  [p2p_nat.c] */
     LA_F165,  /* "Duplicate remote cand<%s:%d> from signaling, skipped" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
     LA_F166,  /* "%s: unexpected ack_seq=%u mask=0x%04x\n" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F167,  /* "%s: unexpected non-Srflx candidate at idx 0\n" (%s)  [p2p_signal_compact.c] */
+    LA_F167,  /* disabled "%s: unexpected non-Srflx candidate at idx 0\n" */
     LA_F168,  /* "%s:%04d: %s" (%s,%s)  [p2p_dtls_mbedtls.c] */
     LA_F169,  /* "%s_ACK sent, seq=%u (ses_id=%llu)\n" (%s,%u,%l)  [p2p_signal_compact.c] */
     LA_F170,  /* "%s_ACK sent, sid=%u\n" (%s,%u)  [p2p_signal_compact.c] */
@@ -420,6 +420,7 @@ enum {
     LA_F376,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
     LA_F377,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
     LA_F378,  /* "% ✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
+    LA_F379,  /* "%s NOTIFY: ignored srflx addr update due to instument\n" (%s)  [p2p_signal_compact.c] */
 
     LA_NUM
 };
