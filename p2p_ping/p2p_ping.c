@@ -91,6 +91,14 @@ static const char*      g_my_name = "me";           /* 本端显示名 */
 
 /* 注：终端尺寸获取已移植到 p2p_platform.h，使用 p2p_get_terminal_rows() */
 
+/* TUI 专用 printf：绕过 stdc.h 的 printf 重定义，直接输出 ANSI 序列 */
+static void tui_printf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stdout, fmt, ap);
+    va_end(ap);
+}
+
 /*
  * 在滚动区域打印一行（不破坏输入行）
  *
@@ -105,15 +113,15 @@ static const char*      g_my_name = "me";           /* 本端显示名 */
 static void tui_println(const char *line) {
     if (!g_tui_active) {
         /* 非交互模式：普通换行输出，不发 ANSI 控制序列 */
-        printf("%s\n", line);
+        tui_printf("%s\n", line);
         fflush(stdout);
         return;
     }
-    printf("\0337");                               /* save cursor */
-    printf("\033[%d;1H", g_rows - 1);             /* 移到滚动区末行 */
-    printf("\n\r\033[K%s", line);                  /* 滚动 + 清行 + 写内容 */
-    printf("\0338");                               /* restore cursor */
-    printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in); /* 重绘输入行 */
+    tui_printf("\0337");                               /* save cursor */
+    tui_printf("\033[%d;1H", g_rows - 1);             /* 移到滚动区末行 */
+    tui_printf("\n\r\033[K%s", line);                  /* 滚动 + 清行 + 写内容 */
+    tui_printf("\0338");                               /* restore cursor */
+    tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in); /* 重绘输入行 */
     fflush(stdout);
 }
 
@@ -133,6 +141,22 @@ static void tui_log_callback(p2p_log_level_t level, const char *module, const ch
         snprintf(line, sizeof(line), "[%s] [%s] %s", lvl, module, message);
     else
         snprintf(line, sizeof(line), "[%s] %s", lvl, message);
+    tui_println(line);
+}
+
+/* stdc 日志回调：重定向 print() 输出到 TUI */
+static void stdc_log_callback(log_level_e level, const char* tag, char *txt, int len) {
+    (void)level;
+    /* 移除末尾换行符，避免多余滚动 */
+    while (len > 0 && (txt[len - 1] == '\n' || txt[len - 1] == '\r')) {
+        txt[--len] = '\0';
+    }
+    if (len == 0) return;  /* 空行不输出 */
+    char line[1024 + 64];
+    if (tag && tag[0])
+        snprintf(line, sizeof(line), "%s %s", tag, txt);
+    else
+        snprintf(line, sizeof(line), "%s", txt);
     tui_println(line);
 }
 
@@ -160,13 +184,10 @@ static void tui_init(void) {
     }
 #endif
 
-    /* 将 p2p_log 输出重定向到 TUI 回调 */
-    p2p_set_log_output(tui_log_callback);
-
     /* 设置 ANSI 滚动区域：行 1 ~ rows-1（VT 已启用后再发送）*/
-    printf("\033[1;%dr", g_rows - 1);
+    tui_printf("\033[1;%dr", g_rows - 1);
     /* 清空输入行并显示提示符 */
-    printf("\033[%d;1H\033[K> ", g_rows);
+    tui_printf("\033[%d;1H\033[K> ", g_rows);
     fflush(stdout);
 
 #if !P_WIN
@@ -181,7 +202,13 @@ static void tui_init(void) {
     fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
 #endif
 
+    /* 先标记 TUI 已激活，再设置日志回调
+     * 避免回调在 g_tui_active=0 时被调用导致 tui_println 走错分支 */
     g_tui_active = 1;
+
+    /* 将日志输出重定向到 TUI 回调 */
+    p2p_set_log_output(tui_log_callback);
+    log_output(stdc_log_callback, true);
 }
 
 /* 退出 TUI，恢复终端状态 */
@@ -190,12 +217,13 @@ static void tui_cleanup(void) {
     if (!g_tui_active) return;
     g_tui_active = 0;
 
-    // 清除日志回调，恢复 p2p_log 默认输出（stdout）
+    // 清除日志回调，恢复默认输出（stdout）
     p2p_set_log_output(NULL);
+    log_output((log_cb)-1, false);  /* 恢复 stdc 默认 stdout 输出 */
 
     // 重置滚动区域，光标移到最后一行
-    printf("\033[r");
-    printf("\033[%d;1H\n", g_rows);
+    tui_printf("\033[r");
+    tui_printf("\033[%d;1H\n", g_rows);
     fflush(stdout);
 
 #if P_WIN
@@ -250,14 +278,14 @@ static void tui_process_input(p2p_handle_t hdl) {
                 /* 清空输入行 */
                 g_len_in = 0;
                 g_buf_in[0] = '\0';
-                printf("\033[%d;1H\033[K> ", g_rows);
+                tui_printf("\033[%d;1H\033[K> ", g_rows);
                 fflush(stdout);
             }
         } else if (c == 0x7f || c == '\b') {   /* Backspace / DEL */
             if (g_len_in > 0) {
                 g_len_in--;
                 g_buf_in[g_len_in] = '\0';
-                printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
+                tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
                 fflush(stdout);
             }
         } else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7f
@@ -266,7 +294,7 @@ static void tui_process_input(p2p_handle_t hdl) {
              * 不用 putchar(c)，避免 ConPTY 双重回显 */
             g_buf_in[g_len_in++] = c;
             g_buf_in[g_len_in]   = '\0';
-            printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
+            tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
             fflush(stdout);
         }
         /* 忽略方向键等控制序列 */
@@ -288,8 +316,8 @@ static void on_sigwinch(int sig) {
     int new_rows = P_term_rows();
     if (new_rows != g_rows) {
         g_rows = new_rows;
-        printf("\033[1;%dr", g_rows - 1);
-        printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
+        tui_printf("\033[1;%dr", g_rows - 1);
+        tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
         fflush(stdout);
     }
 }
