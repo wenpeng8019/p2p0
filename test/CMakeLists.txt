@@ -139,6 +139,16 @@ target_include_directories(test_ping_template PRIVATE
 )
 target_link_libraries(test_ping_template stdc ${TEST_PLATFORM_LIBS})
 
+# P2P Ping 对客户端连接测试（Alice <-> Bob）
+add_executable(test_ping_pair
+    test_ping_pair.c
+)
+target_include_directories(test_ping_pair PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_pair stdc ${TEST_PLATFORM_LIBS})
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)

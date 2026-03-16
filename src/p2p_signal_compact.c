@@ -1984,7 +1984,10 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
     }
     // 不支持探测
     if (!ctx->probe_port) {
-        assert(s->nat_type == P2P_NAT_UNDETECTABLE);
+        // 服务器不支持 NAT probe，设置为 UNDETECTABLE
+        if (s->nat_type != P2P_NAT_UNDETECTABLE) {
+            s->nat_type = P2P_NAT_UNDETECTABLE;
+        }
         return;
     }
     // 已经探测完成、或超时
