@@ -71,3 +71,4 @@ config.local.*
 
 # Gist temporary files
 .gist*.json
+test/udp_punch_test
