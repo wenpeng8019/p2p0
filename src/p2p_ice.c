@@ -537,7 +537,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
         }
 #endif
     }
-    else print("I:", LA_F("Skipping Host Candidate gathering due to instrumentation", 0, 0));
+    else print("I:", LA_F("Skipping Host Candidate gathering due to instrumentation", LA_F380, 380));
 
     /* ======================== 2. 收集 Srflx 候选 ======================== */
     /*

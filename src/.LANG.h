@@ -208,7 +208,7 @@ enum {
     LA_F164,  /* "%s: tx confirmed: me->peer path is UP (echoed seq=%u)" (%s,%u)  [p2p_nat.c] */
     LA_F165,  /* "Duplicate remote cand<%s:%d> from signaling, skipped" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
     LA_F166,  /* "%s: unexpected ack_seq=%u mask=0x%04x\n" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F167,  /* disabled "%s: unexpected non-Srflx candidate at idx 0\n" */
+    _LA_167,
     LA_F168,  /* "%s:%04d: %s" (%s,%s)  [p2p_dtls_mbedtls.c] */
     LA_F169,  /* "%s_ACK sent, seq=%u (ses_id=%llu)\n" (%s,%u,%l)  [p2p_signal_compact.c] */
     LA_F170,  /* "%s_ACK sent, sid=%u\n" (%s,%u)  [p2p_signal_compact.c] */
@@ -216,7 +216,7 @@ enum {
     LA_F172,  /* "Added Remote Candidate: %d -> %s:%d" (%d,%s,%d)  [p2p_signal_relay.c] */
     LA_F173,  /* "% Added SIGNALING path to path manager"  [p2p.c] */
     LA_F174,  /* "% Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
-    LA_F175,  /* disabled "Append Host candidate: %s:%d" */
+    _LA_175,
     LA_F176,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
     LA_F177,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
     LA_F178,  /* "% BIO_new failed"  [p2p_dtls_openssl.c] */
@@ -345,7 +345,7 @@ enum {
     LA_F301,  /* "Sent connect request to '%s' (%d bytes)" (%s,%d)  [p2p_signal_relay.c] */
     LA_F302,  /* "Sent initial offer(%d) to %s)" (%d,%s)  [p2p.c] */
     LA_F303,  /* "% Signal payload deserialization failed"  [p2p_signal_pubsub.c] */
-    LA_F304,  /* "% Skipping local Host candidates on --public-only"  [p2p.c] */
+    LA_F304,  /* "% Skipping local Host candidates due to instrument"  [p2p.c] */
     LA_F305,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
     LA_F306,  /* "% Starting internal thread"  [p2p.c] */
     LA_F307,  /* "% Stopping internal thread"  [p2p.c] */
@@ -421,6 +421,7 @@ enum {
     LA_F377,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
     LA_F378,  /* "% ✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
     LA_F379,  /* "%s NOTIFY: ignored srflx addr update due to instument\n" (%s)  [p2p_signal_compact.c] */
+    LA_F380,  /* "% Skipping Host Candidate gathering due to instrumentation"  [p2p_ice.c] */
 
     LA_NUM
 };

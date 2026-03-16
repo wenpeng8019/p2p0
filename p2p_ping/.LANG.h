@@ -53,7 +53,7 @@ enum {
     LA_S11,  /* "--- Peer disconnected ---"  [p2p_ping.c] */
     LA_S12,  /* "[EVENT] Connection closed"  [p2p_ping.c] */
     LA_S13,  /* "Auto-echo received messages back to sender"  [p2p_ping.c] */
-    LA_S14,  /* "Disable LAN shortcut (force NAT punch test)"  [p2p_ping.c] */
+    _LA_14,
     LA_S15,  /* "Enable DTLS (MbedTLS)"  [p2p_ping.c] */
     LA_S16,  /* "Enable DTLS (OpenSSL)"  [p2p_ping.c] */
     LA_S17,  /* "Enable PseudoTCP"  [p2p_ping.c] */
@@ -61,7 +61,7 @@ enum {
     LA_S19,  /* "GitHub Token for Public Signaling"  [p2p_ping.c] */
     LA_S20,  /* "Log level (0-5)"  [p2p_ping.c] */
     LA_S21,  /* "Signaling server IP[:PORT]"  [p2p_ping.c] */
-    LA_S22,  /* "Skip host candidates"  [p2p_ping.c] */
+    _LA_22,
     LA_S23,  /* "Target Peer Name (if specified: active role)"  [p2p_ping.c] */
     LA_S24,  /* "TURN password"  [p2p_ping.c] */
     LA_S25,  /* "TURN server address"  [p2p_ping.c] */
@@ -80,7 +80,15 @@ enum {
     LA_F36,  /* "% [Chat] Echo mode enabled: received messages will be echoed back.\n"  [p2p_ping.c] */
     LA_F37,  /* "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n"  [p2p_ping.c] */
     LA_F38,  /* "[STATE] %s (%d) -> %s (%d)" (%s,%d,%s,%d)  [p2p_ping.c] */
-    LA_F39,  /* "% [TEST] LAN shortcut disabled - forcing NAT punch\n"  [p2p_ping.c] */
+    _LA_39,
+
+    /* Strings (LA_S) */
+    LA_S40,  /* "Debugger Name"  [p2p_ping.c] */
+
+    /* Formats (LA_F) */
+    LA_F41,  /* "% Debugger connected, resuming execution.\n"  [p2p_ping.c] */
+    LA_F42,  /* "% Timeout waiting for debugger. Continuing without debugger.\n"  [p2p_ping.c] */
+    LA_F43,  /* "Waiting Debugger(%s) connecting...\n" (%s)  [p2p_ping.c] */
 
     LA_NUM
 };

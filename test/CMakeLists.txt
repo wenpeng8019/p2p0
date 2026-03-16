@@ -129,6 +129,16 @@ target_include_directories(test_compact_relay PRIVATE
 )
 target_link_libraries(test_compact_relay stdc ${TEST_PLATFORM_LIBS})
 
+# P2P Ping 客户端单元测试模版
+add_executable(test_ping_template
+    test_ping_template.c
+)
+target_include_directories(test_ping_template PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_template stdc ${TEST_PLATFORM_LIBS})
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)

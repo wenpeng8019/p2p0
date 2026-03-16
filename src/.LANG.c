@@ -320,7 +320,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F301] = "Sent connect request to '%s' (%d bytes)",  /* SID:301 */
     [LA_F302] = "Sent initial offer(%d) to %s)",  /* SID:302 */
     [LA_F303] = "% Signal payload deserialization failed",  /* SID:303 */
-    [LA_F304] = "% Skipping local Host candidates on --public-only",  /* SID:304 */
+    [LA_F380] = "% Skipping Host Candidate gathering due to instrumentation",  /* SID:380 */
+    [LA_F304] = "% Skipping local Host candidates due to instrument",  /* SID:304 */
     [LA_F305] = "Start internal thread failed(%d)",  /* SID:305 */
     [LA_F306] = "% Starting internal thread",  /* SID:306 */
     [LA_F307] = "% Stopping internal thread",  /* SID:307 */
@@ -394,8 +395,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
-    [LA_F167] = "%s: unexpected non-Srflx candidate at idx 0\n",  /* SID:167 disabled */
-    [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/
