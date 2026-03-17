@@ -38,7 +38,7 @@
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
-#include <stdc.h>
+#include "predefine.h"
 #include <p2p.h>
 
 /* 前向声明 */

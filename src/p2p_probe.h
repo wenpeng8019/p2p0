@@ -39,7 +39,7 @@
 #ifndef P2P_PROBE_H
 #define P2P_PROBE_H
 
-#include <stdc.h>
+#include "predefine.h"
 
 struct p2p_session;
 

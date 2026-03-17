@@ -13,20 +13,12 @@
 // 日志系统
 ///////////////////////////////////////////////////////////////////////////////
 
-static p2p_log_level_t g_log_level = P2P_LOG_LEVEL_INFO;
-static p2p_log_callback_t g_log_callback = NULL;
-
-void p2p_set_log_level(p2p_log_level_t level) {
-    g_log_level = level;
-}
-
-p2p_log_level_t p2p_get_log_level(void) {
-    return g_log_level;
-}
-
-void p2p_set_log_output(p2p_log_callback_t cb) {
-    g_log_callback = cb;
-}
+p2p_log_callback_t   p2p_log_callback = (p2p_log_callback_t)-1;
+#ifndef NDEBUG
+p2p_log_level_t      p2p_log_level = P2P_LOG_LEVEL_DEBUG;
+#else
+p2p_log_level_t      p2p_log_level = P2P_LOG_LEVEL_INFO;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 

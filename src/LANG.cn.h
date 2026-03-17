@@ -56,7 +56,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F48] = "%s '%s' (%u %s)",  /* SID:48 */
     [LA_F49] = "%s NOTIFY: accepted\n",  /* SID:49 */
     [LA_F50] = "%s NOTIFY: ignored old notify base=%u (current=%u)\n",  /* SID:50 */
-    [LA_F379] = "%s NOTIFY: ignored srflx addr update due to instument\n",  /* SID:379 new */
+    [LA_F379] = "%s NOTIFY: ignored srflx addr update due to instument\n",  /* SID:379 */
     [LA_F51] = "%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n",  /* SID:51 */
     [LA_F52] = "%s msg=0: accepted, echo reply (sid=%u, len=%d)\n",  /* SID:52 */
     [LA_F53] = "%s received (ice_ctx.state=%d), resetting ICE and clearing %d stale candidates",  /* SID:53 */
@@ -142,9 +142,9 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F131] = "%s: punching remote cand<%s:%d>[%d]",  /* SID:131 */
     [LA_F160] = "%s: track upsert remote cand<%s:%d> failed(OOM), dropping",  /* SID:160 */
     [LA_F132] = "%s: received FIN from peer, marking NAT as CLOSED",  /* SID:132 */
-    [LA_F133] = "%s: remote cand[%d]<%s:%d>, starting punch\n",  /* [SID:133] UPDATED new: "%s: remote host cand[%d]<%s:%d>%s\n" */
-    [LA_F133] = "%s: remote cand[%d]<%s:%d>, starting punch\n",  /* [SID:133] UPDATED new: "%s: remote relay cand[%d]<%s:%d>%s\n" */
-    [LA_F133] = "%s: remote cand[%d]<%s:%d>, starting punch\n",  /* [SID:133] UPDATED new: "%s: remote srflx cand[%d]<%s:%d>%s\n" */
+    [LA_F381] = "%s: remote host cand[%d]<%s:%d>%s\n",  /* SID:381 */
+    [LA_F382] = "%s: remote relay cand[%d]<%s:%d>%s\n",  /* SID:382 */
+    [LA_F383] = "%s: remote srflx cand[%d]<%s:%d>%s\n",  /* SID:383 */
     [LA_F134] = "%s: restarting periodic check",  /* SID:134 */
     [LA_F135] = "%s: retry(%d/%d) probe\n",  /* SID:135 */
     [LA_F136] = "%s: retry(%d/%d) req (sid=%u)\n",  /* SID:136 */
@@ -176,8 +176,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F163] = "%s: triggered via RELAY TUNE echo",  /* SID:163 */
     [LA_F164] = "%s: tx confirmed: me->peer path is UP (echoed seq=%u)",  /* SID:164 */
     [LA_F166] = "%s: unexpected ack_seq=%u mask=0x%04x\n",  /* SID:166 */
-    [LA_F165] = "%s: unexpected Srflx candidate at idx %d, expected idx 0\n",  /* [SID:165] UPDATED new: "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n" */
-    [LA_F132] = "%s: received FIN from peer, marking NAT as CLOSED",  /* [SID:132] UPDATED new: "%s: unexpected remote cand type %d, skipped\n" */
+    [LA_F384] = "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n",  /* SID:384 */
+    [LA_F385] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:385 */
     [LA_F168] = "%s:%04d: %s",  /* SID:168 */
     [LA_F169] = "%s_ACK sent, seq=%u (ses_id=%llu)\n",  /* SID:169 */
     [LA_F170] = "%s_ACK sent, sid=%u\n",  /* SID:170 */
@@ -212,7 +212,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F199] = "Detect local network interfaces failed(%d)",  /* SID:199 */
     [LA_F200] = "Detection completed %s",  /* SID:200 */
     [LA_F201] = "Discarded %d bytes payload of message type %d",  /* SID:201 */
-    [LA_F165] = "%s: unexpected Srflx candidate at idx %d, expected idx 0\n",  /* [SID:165] UPDATED new: "Duplicate remote cand<%s:%d> from signaling, skipped" */
+    [LA_F386] = "Duplicate remote cand<%s:%d> from signaling, skipped",  /* SID:386 */
     [LA_F332] = "Upsert remote candidate<%s:%d> (type=%d) failed(OOM)",  /* SID:332 */
     [LA_F202] = "Failed to allocate %u bytes",  /* SID:202 */
     [LA_F203] = "% Failed to allocate ACK payload buffer",  /* SID:203 */
@@ -222,7 +222,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F207] = "% Failed to allocate memory for candidate lists",  /* SID:207 */
     [LA_F208] = "% Failed to allocate memory for session",  /* SID:208 */
     [LA_F209] = "% Failed to build STUN request",  /* SID:209 */
-    [LA_F210] = "Failed to realloc memory for remote candidates (capacity: %d)",  /* [SID:210] UPDATED new: "Failed to realloc memory for remote candidates (capacity: %d)" */
+    [LA_F387] = "Failed to realloc memory for remote candidates (capacity: %d)",  /* SID:387 */
     [LA_F211] = "Failed to reserve remote candidates (base=%u cnt=%d)\n",  /* SID:211 */
     [LA_F212] = "Failed to reserve remote candidates (cnt=%d)\n",  /* SID:212 */
     [LA_F213] = "% Failed to reserve remote candidates (cnt=1)\n",  /* SID:213 */
@@ -278,8 +278,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F263] = "Peer online, forwarded %d candidates",  /* SID:263 */
     [LA_F264] = "Processing (role=%s)",  /* SID:264 */
     [LA_F265] = "% PseudoTCP enabled as transport layer",  /* SID:265 */
-    [LA_F332] = "Upsert remote candidate<%s:%d> (type=%d) failed(OOM)",  /* [SID:332] UPDATED new: "Push prflx candidate<%s:%d> failed(OOM)" */
-    [LA_F332] = "Upsert remote candidate<%s:%d> (type=%d) failed(OOM)",  /* [SID:332] UPDATED new: "Push remote candidate<%s:%d> (type=%d) failed(OOM)" */
+    [LA_F388] = "Push prflx candidate<%s:%d> failed(OOM)",  /* SID:388 */
+    [LA_F389] = "Push remote candidate<%s:%d> (type=%d) failed(OOM)",  /* SID:389 */
     [LA_F266] = "REGISTERED: peer=%s\n",  /* SID:266 */
     [LA_F267] = "% RELAY/COMPACT mode requires server_host",  /* SID:267 */
     [LA_F268] = "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d",  /* SID:268 */
@@ -318,7 +318,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F301] = "Sent connect request to '%s' (%d bytes)",  /* SID:301 */
     [LA_F302] = "Sent initial offer(%d) to %s)",  /* SID:302 */
     [LA_F303] = "% Signal payload deserialization failed",  /* SID:303 */
-    [LA_F380] = "% Skipping Host Candidate gathering due to instrumentation",  /* SID:380 new */
+    [LA_F380] = "% Skipping Host Candidate gathering due to instrumentation",  /* SID:380 */
     [LA_F304] = "% Skipping local Host candidates on --public-only",  /* SID:304 */
     [LA_F305] = "Start internal thread failed(%d)",  /* SID:305 */
     [LA_F306] = "% Starting internal thread",  /* SID:306 */
@@ -393,6 +393,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 */
 };
 
 static inline int lang_cn(void) {

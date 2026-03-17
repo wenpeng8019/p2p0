@@ -5,10 +5,10 @@
 #ifndef P2P_PATH_MANAGER_H
 #define P2P_PATH_MANAGER_H
 
-#include <stdc.h>
+#include "predefine.h"
 
 /* 前向声明 */
-typedef struct p2p_session p2p_session_t;
+struct p2p_session;
 
 /* 路径选择策略 */
 typedef enum {
@@ -228,7 +228,7 @@ typedef struct {
  * @param strategy  路径选择策略
  * @return          0=成功，-1=失败
  */
-int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy);
+int path_manager_init(struct p2p_session *s, p2p_path_strategy_t strategy);
 
 /*
  * 重置路径管理器运行时状态
@@ -238,7 +238,7 @@ int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy);
  *
  * @param s  会话指针
  */
-void path_manager_reset(p2p_session_t *s);
+void path_manager_reset(struct p2p_session *s);
 
 /*
  * 初始化路径统计（候选路径使用）
@@ -262,7 +262,7 @@ void path_stats_init(path_stats_t *st, int cost_score);
  * @param addr      信令服务器地址
  * @return          0=成功，-1=失败
  */
-int path_manager_enable_signaling(p2p_session_t *s, struct sockaddr_in *addr);
+int path_manager_enable_signaling(struct p2p_session *s, struct sockaddr_in *addr);
 
 /*
  * 配置 TURN 支持
@@ -274,7 +274,7 @@ int path_manager_enable_signaling(p2p_session_t *s, struct sockaddr_in *addr);
  * @param last_resort_only  是否仅作为最终备份
  * @return                  0=成功，-1=失败
  */
-int path_manager_configure_turn(p2p_session_t *s,
+int path_manager_configure_turn(struct p2p_session *s,
                                  bool enabled,
                                  int cost_multiplier,
                                  uint32_t max_bandwidth_bps,
@@ -287,7 +287,7 @@ int path_manager_configure_turn(p2p_session_t *s,
  * @param addr      TURN 服务器地址（已分配的中继地址）
  * @return          路径索引（>=0），或 -1（失败）
  */
-int path_manager_add_turn_path(p2p_session_t *s, struct sockaddr_in *addr);
+int path_manager_add_turn_path(struct p2p_session *s, struct sockaddr_in *addr);
 
 /* ============================================================================
  * 状态驱动（外部事件 → 驱动内部状态机）
@@ -314,7 +314,7 @@ int path_manager_add_turn_path(p2p_session_t *s, struct sockaddr_in *addr);
  * @param size      包大小（字节），0表示不计入流量统计
  * @return          0=成功，-1=失败
  */
-int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms, uint32_t size);
+int path_manager_on_packet_recv(struct p2p_session *s, int path_idx, uint64_t now_ms, uint32_t size);
 
 /* ---- Group 1: 探测层统计（全路径 punch/alive 包） ---- */
 
@@ -328,7 +328,7 @@ int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms,
  * @param size      包大小（字节），0表示不计入流量统计（仅用于RTT测量）
  * @return          0=成功，-1=失败
  */
-int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size);
+int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size);
 
 /*
  * 记录探测包确认（完成 per-path RTT 测量）
@@ -338,7 +338,7 @@ int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, ui
  * @param now_ms    当前时间（毫秒）
  * @return          测量的 RTT（毫秒），或 -1（未找到对应发送记录）
  */
-int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms);
+int path_manager_on_packet_ack(struct p2p_session *s, uint32_t seq, uint64_t now_ms);
 
 /* ---- Group 2: 数据层统计（活跃路径 DATA 包） ---- */
 
@@ -352,7 +352,7 @@ int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms);
  *
  * @note 质量评估会自动触发（有节流保护），无需单独调用刷新函数
  */
-int path_manager_on_data_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms);
+int path_manager_on_data_rtt(struct p2p_session *s, int path_idx, uint32_t rtt_ms);
 
 /*
  * 上报数据层丢包率（来自高级传输层 get_stats）
@@ -366,7 +366,7 @@ int path_manager_on_data_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms);
  * @param loss_rate 数据层丢包率（0.0-1.0）
  * @return          0=成功，-1=失败
  */
-int path_manager_on_data_loss_rate(p2p_session_t *s, int path_idx, float loss_rate);
+int path_manager_on_data_loss_rate(struct p2p_session *s, int path_idx, float loss_rate);
 
 //-----------------------------------------------------------------------------
 
@@ -380,7 +380,7 @@ int path_manager_on_data_loss_rate(p2p_session_t *s, int path_idx, float loss_ra
  * @param s         会话指针
  * @param now_ms    当前时间（毫秒）
  */
-void path_manager_tick(p2p_session_t *s, uint64_t now_ms);
+void path_manager_tick(struct p2p_session *s, uint64_t now_ms);
 
 /* ============================================================================
  * 操作执行
@@ -393,7 +393,7 @@ void path_manager_tick(p2p_session_t *s, uint64_t now_ms);
  * @param s         会话指针
  * @return          最佳路径索引（-1=SIGNALING, >=0=候选索引），或 -2（无可用路径）
  */
-int path_manager_select_best_path(p2p_session_t *s);
+int path_manager_select_best_path(struct p2p_session *s);
 
 /*
  * 切换到指定目标路径
@@ -405,7 +405,7 @@ int path_manager_select_best_path(p2p_session_t *s);
  * @param now_ms        当前时间（毫秒）
  * @return              0=成功切换，1=防抖延迟，-1=失败
  */
-int path_manager_switch_path(p2p_session_t *s, int target_path,
+int path_manager_switch_path(struct p2p_session *s, int target_path,
                               const char *reason, uint64_t now_ms);
 
 /* ============================================================================
@@ -419,7 +419,7 @@ int path_manager_switch_path(p2p_session_t *s, int target_path,
  * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
  * @return          P2P_PATH_LAN / P2P_PATH_PUNCH / P2P_PATH_RELAY / P2P_PATH_SIGNALING / P2P_PATH_NONE
  */
-p2p_path_t path_manager_get_path_type(p2p_session_t *s, int path_idx);
+p2p_path_t path_manager_get_path_type(struct p2p_session *s, int path_idx);
 
 /*
  * 检查是否有可用路径
@@ -427,7 +427,7 @@ p2p_path_t path_manager_get_path_type(p2p_session_t *s, int path_idx);
  * @param s         会话指针
  * @return          true=有可用路径，false=无
  */
-bool path_manager_has_active_path(p2p_session_t *s);
+bool path_manager_has_active_path(struct p2p_session *s);
 
 /*
  * 设置指定路径的状态
@@ -437,7 +437,7 @@ bool path_manager_has_active_path(p2p_session_t *s);
  * @param state     新状态
  * @return          0=成功，-1=失败
  */
-int path_manager_set_path_state(p2p_session_t *s, int path_idx, path_state_t state);
+int path_manager_set_path_state(struct p2p_session *s, int path_idx, path_state_t state);
 
 /*
  * 设置不同类型路径的切换阈值
@@ -450,7 +450,7 @@ int path_manager_set_path_state(p2p_session_t *s, int path_idx, path_state_t sta
  * @param stability_ms  稳定窗口（毫秒）
  * @return              0=成功，-1=失败
  */
-int path_manager_set_threshold(p2p_session_t *s, int path_type,
+int path_manager_set_threshold(struct p2p_session *s, int path_type,
                                uint32_t rtt_ms, float loss_rate,
                                uint64_t cooldown_ms, uint32_t stability_ms);
 
@@ -461,7 +461,7 @@ int path_manager_set_threshold(p2p_session_t *s, int path_type,
  * @param path_idx  路径索引
  * @return          质量等级，或 -1（失败）
  */
-path_quality_t path_manager_get_quality(p2p_session_t *s, int path_idx);
+path_quality_t path_manager_get_quality(struct p2p_session *s, int path_idx);
 
 /*
  * 获取路径质量评分（0.0-1.0）
@@ -470,7 +470,7 @@ path_quality_t path_manager_get_quality(p2p_session_t *s, int path_idx);
  * @param path_idx  路径索引
  * @return          质量评分，或 -1.0（失败）
  */
-float path_manager_get_quality_score(p2p_session_t *s, int path_idx);
+float path_manager_get_quality_score(struct p2p_session *s, int path_idx);
 
 /*
  * 获取路径质量趋势
@@ -479,7 +479,7 @@ float path_manager_get_quality_score(p2p_session_t *s, int path_idx);
  * @param path_idx  路径索引
  * @return          趋势值（-1.0=恶化, 0=稳定, 1.0=改善），或 NaN（失败）
  */
-float path_manager_get_quality_trend(p2p_session_t *s, int path_idx);
+float path_manager_get_quality_trend(struct p2p_session *s, int path_idx);
 
 /*
  * 获取切换历史记录
@@ -489,7 +489,7 @@ float path_manager_get_quality_trend(p2p_session_t *s, int path_idx);
  * @param max_count     最大记录数
  * @return              实际返回的记录数
  */
-int path_manager_get_switch_history(p2p_session_t *s, path_switch_record_t *records, int max_count);
+int path_manager_get_switch_history(struct p2p_session *s, path_switch_record_t *records, int max_count);
 
 /*
  * 获取路径切换频率
@@ -498,7 +498,7 @@ int path_manager_get_switch_history(p2p_session_t *s, path_switch_record_t *reco
  * @param window_ms     统计时间窗口（毫秒）
  * @return              窗口内的切换次数
  */
-int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms);
+int path_manager_get_switch_frequency(struct p2p_session *s, uint64_t window_ms);
 
 /*
  * 获取 TURN 路径统计
@@ -509,7 +509,7 @@ int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms);
  * @param avg_rtt_ms        输出：平均 RTT（毫秒）
  * @return                  0=成功，-1=失败（无 TURN 路径）
  */
-int path_manager_get_turn_stats(p2p_session_t *s,
+int path_manager_get_turn_stats(struct p2p_session *s,
                                  uint64_t *total_bytes_sent,
                                  uint64_t *total_bytes_recv,
                                  uint32_t *avg_rtt_ms);

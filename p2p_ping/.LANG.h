@@ -93,6 +93,9 @@ enum {
     /* Strings (LA_S) */
     LA_S44,  /* "STUN server address"  [p2p_ping.c] */
 
+    /* Formats (LA_F) */
+    LA_F45,  /* "[STATE] %s (%d) -> %s (%d)\n" (%s,%d,%s,%d)  [p2p_ping.c] */
+
     LA_NUM
 };
 

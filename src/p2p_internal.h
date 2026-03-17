@@ -65,6 +65,7 @@
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 #pragma ide diagnostic ignored "UnreachableCallsOfFunction"
 
+#include "predefine.h"
 #include <p2p.h>
 
 #include "p2p_common.h"         /* pack/unpack_signaling_payload_hdr（服务端也可包含此头） */

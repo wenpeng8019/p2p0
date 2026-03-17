@@ -208,7 +208,7 @@ enum {
     LA_F164,  /* "%s: tx confirmed: me->peer path is UP (echoed seq=%u)" (%s,%u)  [p2p_nat.c] */
     LA_F165,  /* "%s: duplicate remote cand<%s:%d> from signaling, skipped\n" (%s,%s,%d)  [p2p_signal_compact.c] */
     LA_F166,  /* "%s: unexpected ack_seq=%u mask=0x%04x\n" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F167,  /* "%s: unexpected non-Srflx candidate at idx 0\n" (%s)  [p2p_signal_compact.c] */
+    _LA_167,
     LA_F168,  /* "%s:%04d: %s" (%s,%s)  [p2p_dtls_mbedtls.c] */
     LA_F169,  /* "%s_ACK sent, seq=%u (ses_id=%llu)\n" (%s,%u,%l)  [p2p_signal_compact.c] */
     LA_F170,  /* "%s_ACK sent, sid=%u\n" (%s,%u)  [p2p_signal_compact.c] */
@@ -216,7 +216,7 @@ enum {
     LA_F172,  /* "Added Remote Candidate: %d -> %s:%d" (%d,%s,%d)  [p2p_signal_relay.c] */
     LA_F173,  /* "% Added SIGNALING path to path manager"  [p2p.c] */
     LA_F174,  /* "% Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
-    LA_F175,  /* "Append Host candidate: %s:%d" (%s,%d)  [p2p.c] */
+    LA_F175,  /* disabled "Append Host candidate: %s:%d" */
     LA_F176,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
     LA_F177,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
     LA_F178,  /* "% BIO_new failed"  [p2p_dtls_openssl.c] */

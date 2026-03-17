@@ -11,7 +11,7 @@
 #ifndef P2P_NAT_H
 #define P2P_NAT_H
 
-#include <stdc.h>
+#include "predefine.h"
 #include <p2pp.h>
 
 ///////////////////////////////////////////////////////////////////////////////

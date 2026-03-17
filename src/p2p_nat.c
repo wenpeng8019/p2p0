@@ -142,7 +142,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         print("I:", LA_F("%s: start punching all(%d) remote candidates", LA_F148, 148), TASK_NAT, s->remote_cand_cnt);
 
         // 打印详细日志
-        if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
+        if (p2p_log_level == P2P_LOG_LEVEL_VERBOSE) {
 
             for (int i = 0; i < s->remote_cand_cnt; i++) {
                 const char *type_str = "Unknown";

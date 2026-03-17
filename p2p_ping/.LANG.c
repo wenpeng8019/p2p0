@@ -49,6 +49,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F36] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:36 */
     [LA_F37] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:37 */
     [LA_F38] = "[STATE] %s (%d) -> %s (%d)",  /* SID:38 */
+    [LA_F45] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:45 */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

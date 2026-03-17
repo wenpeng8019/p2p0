@@ -693,11 +693,12 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
     P_check(len == 0 || data, return E_INVALID;)
-    P_check(ctx->msg_support, return E_NO_SUPPORT;)                             // 服务器不支持 MSG
+    P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
     P_check(ctx->state >= SIGNAL_COMPACT_REGISTERED, return E_NONE_CONTEXT;)    // 未注册
-    P_check(ctx->req_state == 0, return E_BUSY;)                                // 已有挂起请求
+    P_check(ctx->msg_support, return E_NO_SUPPORT;)                             // 服务器不支持 MSG
+    
+    if (ctx->req_state != 0) return E_BUSY;                                     // 已有挂起请求
 
     // 生成非零（循环）序列号
     static uint16_t _sid_bse = 0;

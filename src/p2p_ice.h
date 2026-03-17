@@ -131,7 +131,7 @@
 #ifndef P2P_ICE_H
 #define P2P_ICE_H
 
-#include <stdc.h>
+#include "predefine.h"
 #include "p2pp.h"
 
 struct p2p_session;

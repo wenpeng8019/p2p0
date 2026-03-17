@@ -119,7 +119,7 @@ ret_t route_detect_local(route_ctx_t *rt) {
 #endif
 
     print("I:", LA_F("Local address detection done: %d address(es)", LA_F234, 234), rt->addr_count);
-    if (p2p_get_log_level() == P2P_LOG_LEVEL_VERBOSE) {
+    if (p2p_log_level == P2P_LOG_LEVEL_VERBOSE) {
         for (i = 0; i < rt->addr_count; i++) {
             print("V:", LA_F("  [%d] %s/%d", LA_F45, 45), i,
                   inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));

@@ -26,24 +26,22 @@ typedef enum {
 
 /* 日志等级 */
 typedef enum {
-    P2P_LOG_LEVEL_FATAL  = 0,                   // 致命
-    P2P_LOG_LEVEL_ERROR = 1,                    // 错误：不可恢复的异常
-    P2P_LOG_LEVEL_WARN  = 2,                    // 警告：可恢复的异常或降级
-    P2P_LOG_LEVEL_INFO  = 3,                    // 信息：关键流程节点（默认）
-    P2P_LOG_LEVEL_DEBUG = 4,                    // 调试：内部状态变化
-    P2P_LOG_LEVEL_VERBOSE = 5,                  // 详细：极其详细的调试信息（性能敏感）
-    P2P_LOG_LEVEL_NONE = 6                      // 无日志输出
+    P2P_LOG_LEVEL_NONE = 0,                     // 不输出
+    P2P_LOG_LEVEL_FATAL,                        // 致命
+    P2P_LOG_LEVEL_ERROR,                        // 错误：不可恢复的异常
+    P2P_LOG_LEVEL_WARN,                         // 警告：可恢复的异常或降级
+    P2P_LOG_LEVEL_INFO,                         // 信息：关键流程节点（默认）
+    P2P_LOG_LEVEL_DEBUG,                        // 调试：内部状态变化
+    P2P_LOG_LEVEL_VERBOSE,                      // 详细：极其详细的调试信息（性能敏感）
 } p2p_log_level_t;
 
 /*
  * 日志回调接口
- * level   — 日志等级
- * module  — 模块名（可为 NULL/空）
- * message — 已格式化的日志正文（不含时间戳，不含 ANSI 颜色）
+ * level 日志等级
+ * tag   模块名（可为 NULL/空）
+ * txt   已格式化的日志正文
  */
-typedef void (*p2p_log_callback_t)(p2p_log_level_t level,
-                                   const char *module,
-                                   const char *message);
+typedef void (*p2p_log_callback_t)(p2p_log_level_t level, const char *tag, const char *txt, int len);
 
 /*
  * 信令模式
@@ -255,6 +253,9 @@ typedef struct {
 
 } p2p_config_t;
 
+extern p2p_log_callback_t   p2p_log_callback;
+extern p2p_log_level_t      p2p_log_level;
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -272,29 +273,6 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg);
  */
 void
 p2p_destroy(p2p_handle_t hdl);
-
-/**
- * 设置全局日志等级（线程安全）。
- * 低于此等级的日志将被忽略，不产生任何输出。
- * 默认等级为 P2P_LOG_LEVEL_INFO。
- */
-void
-p2p_set_log_level(p2p_log_level_t level);
-
-/**
- * 获取当前全局日志等级。
- */
-p2p_log_level_t
-p2p_get_log_level(void);
-
-/**
- * 设置日志输出回调。
- * 设置后，每条通过等级过滤的日志将调用 cb(level, module, message)。
- * message 不含时间戳与 ANSI 颜色转义序列。
- * 传 NULL 可清除回调，恢复默认 FILE 输出行为。
- */
-void
-p2p_set_log_output(p2p_log_callback_t cb);
 
 //-----------------------------------------------------------------------------
 

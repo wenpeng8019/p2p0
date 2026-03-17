@@ -5,7 +5,7 @@
 #ifndef P2P_INSTRUMENT_H
 #define P2P_INSTRUMENT_H
 
-#include <stdc.h>
+#include "predefine.h"
 
 enum {
     P2P_INST_OPT_SRFLX_PUNCH_OFF,           // 关闭公网后续地址打洞，只进行内网地址打洞（仅测试内网直连）

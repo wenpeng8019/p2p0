@@ -2,7 +2,7 @@
 #ifndef P2P_STREAM_H
 #define P2P_STREAM_H
 
-#include <stdc.h>
+#include "predefine.h"
 #include "p2pp.h"               /* P2P_MAX_PAYLOAD */
 
 /* ============================================================================

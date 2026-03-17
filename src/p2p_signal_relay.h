@@ -314,7 +314,7 @@
 #ifndef P2P_SIGNAL_RELAY_H
 #define P2P_SIGNAL_RELAY_H
 
-#include <stdc.h>
+#include "predefine.h"
 #include <p2p.h>
 #include <p2pp.h>           /* RELAY 模式协议定义 */
 

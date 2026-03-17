@@ -22,7 +22,7 @@
 #ifndef P2P_HTTP_H
 #define P2P_HTTP_H
 
-#include <stdc.h>
+#include "predefine.h"
 
 #ifdef __cplusplus
 extern "C" {

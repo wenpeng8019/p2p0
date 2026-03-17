@@ -172,7 +172,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F156] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:156 */
     [LA_F157] = "%s: timeout, max(%d) attempts reached, reset to INIT\n",  /* SID:157 */
     [LA_F158] = "%s: timeout, peer did not respond",  /* SID:158 */
-    [LA_F22] = "%s: timeout, retry %d/%d",  /* SID:22 */
+    [LA_F159] = "%s: timeout, retry %d/%d",  /* SID:159 */
     [LA_F161] = "%s: trickled %d cand(s), seq=%u (ses_id=%llu)\n",  /* SID:161 */
     [LA_F162] = "%s: triggered via COMPACT msg echo",  /* SID:162 */
     [LA_F163] = "%s: triggered via RELAY TUNE echo",  /* SID:163 */
@@ -187,7 +187,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F172] = "Added Remote Candidate: %d -> %s:%d",  /* SID:172 */
     [LA_F173] = "% Added SIGNALING path to path manager",  /* SID:173 */
     [LA_F174] = "% Answer already present, skipping offer re-publish",  /* SID:174 */
-    [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 */
+    [LA_F210] = "Append Host candidate: %s:%d",  /* SID:210 */
     [LA_F176] = "Attempting Simultaneous Open to %s:%d",  /* SID:176 */
     [LA_F177] = "Auto-send answer (with %d candidates) total sent %s",  /* SID:177 */
     [LA_F178] = "% BIO_new failed",  /* SID:178 */
@@ -224,7 +224,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F207] = "% Failed to allocate memory for candidate lists",  /* SID:207 */
     [LA_F208] = "% Failed to allocate memory for session",  /* SID:208 */
     [LA_F209] = "% Failed to build STUN request",  /* SID:209 */
-    [LA_F210] = "Failed to realloc memory for remote candidates (capacity: %d)",  /* SID:210 */
+    [LA_F387] = "Failed to realloc memory for remote candidates (capacity: %d)",  /* SID:387 */
     [LA_F211] = "Failed to reserve remote candidates (base=%u cnt=%d)\n",  /* SID:211 */
     [LA_F212] = "Failed to reserve remote candidates (cnt=%d)\n",  /* SID:212 */
     [LA_F213] = "% Failed to reserve remote candidates (cnt=1)\n",  /* SID:213 */
@@ -292,7 +292,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F273] = "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d",  /* SID:273 */
     [LA_F274] = "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d",  /* SID:274 */
     [LA_F275] = "Received UNKNOWN pkt type: 0x%02X",  /* SID:275 */
-    [LA_F20] = "Received remote candidate: type=%d, address=%s:%d",  /* SID:20 */
+    [LA_F276] = "Received remote candidate: type=%d, address=%s:%d",  /* SID:276 */
     [LA_F277] = "Received valid signal from '%s'",  /* SID:277 */
     [LA_F278] = "Recv %s pkt from %s:%d",  /* SID:278 */
     [LA_F279] = "Recv %s pkt from %s:%d echo_seq=%u",  /* SID:279 */
@@ -362,7 +362,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F343] = "[SIGNALING] Sent candidates (cached, peer offline) %d to %s",  /* SID:343 */
     [LA_F344] = "[SIGNALING] Sent candidates, forwarded [%d-%d] to %s (forwarded=%d)",  /* SID:344 */
     [LA_F345] = "% [SIGNALING] Server storage full, waiting for peer to come online",  /* SID:345 */
-    [LA_F19] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:19 */
+    [LA_F346] = "[Trickle] Immediately probing new candidate %s:%d",  /* SID:346 */
     [LA_F347] = "[Trickle] Sent 1 candidate to %s (online=%s)",  /* SID:347 */
     [LA_F348] = "% [Trickle] TCP not connected, skipping single candidate send",  /* SID:348 */
     [LA_F349] = "[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()",  /* SID:349 */
@@ -395,6 +395,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

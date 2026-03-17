@@ -5,7 +5,7 @@
 #ifndef P2P_UDP_H
 #define P2P_UDP_H
 
-#include <stdc.h>
+#include "predefine.h"
 #include <p2pp.h>               /* p2p_packet_hdr_t 定义 */
 
 sock_t udp_open_socket(uint16_t port);

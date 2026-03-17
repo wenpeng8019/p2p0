@@ -24,7 +24,7 @@
 ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable DTLS (MbedTLS)", LA_S15, 15));
 ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S16, 16));
 ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S17, 17));
-ARGS_B(false, compact,      0,   "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S28, 28));
+ARGS_B(false, compact,      'c', "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S28, 28));
 ARGS_B(false, echo,         0,   "echo",         LA_CS("Auto-echo received messages back to sender", LA_S13, 13));
 ARGS_S(false, server,       's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S21, 21));
 ARGS_S(false, github,       0,   "github",       LA_CS("GitHub Token for Public Signaling", LA_S19, 19));
@@ -41,6 +41,13 @@ ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S40, 
 static p2p_language_t s_lang = P2P_LANG_EN;
 static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }
 ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", LA_S27, 27));
+
+log_cb log_callback             = (log_cb)-1;
+static log_level_e log_level    = LOG_DEF;
+#undef LOG_CALLBACK
+#define LOG_CALLBACK log_callback
+#undef LOG_LEVEL
+#define LOG_LEVEL log_level
 
 /*
  * TUI 专有头文件（不适合移植到 p2p_platform.h，原因见下）：
@@ -121,46 +128,31 @@ static void tui_println(const char *line) {
         fflush(stdout);
         return;
     }
-    tui_printf("\0337");                               /* save cursor */
-    tui_printf("\033[%d;1H", g_rows - 1);             /* 移到滚动区末行 */
-    tui_printf("\n\r\033[K%s", line);                  /* 滚动 + 清行 + 写内容 */
-    tui_printf("\0338");                               /* restore cursor */
+    tui_printf("\0337");                                /* save cursor */
+    tui_printf("\033[%d;1H", g_rows - 1);               /* 移到滚动区末行 */
+    tui_printf("\n\r\033[K%s", line);                   /* 滚动 + 清行 + 写内容 */
+    tui_printf("\0338");                                /* restore cursor */
     tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in); /* 重绘输入行 */
     fflush(stdout);
 }
 
-/* 日志回调：在滚动区域打印一行（含等级与模块前缀） */
-static void tui_log_callback(p2p_log_level_t level, const char *module, const char *message) {
-    const char *lvl = "?????";
-    switch (level) {
-        case P2P_LOG_LEVEL_ERROR: lvl = "ERROR"; break;
-        case P2P_LOG_LEVEL_WARN:  lvl = "WARN"; break;
-        case P2P_LOG_LEVEL_INFO:  lvl = "INFO"; break;
-        case P2P_LOG_LEVEL_DEBUG: lvl = "DEBUG"; break;
-        case P2P_LOG_LEVEL_VERBOSE: lvl = "VERBOSE"; break;
-        default: break;
-    }
-    char line[1024 + 64];
-    if (module && module[0])
-        snprintf(line, sizeof(line), "[%s] [%s] %s", lvl, module, message);
-    else
-        snprintf(line, sizeof(line), "[%s] %s", lvl, message);
-    tui_println(line);
-}
-
 /* stdc 日志回调：重定向 print() 输出到 TUI */
-static void stdc_log_callback(log_level_e level, const char* tag, char *txt, int len) {
+static void tui_log_callbak(p2p_log_level_t level, const char* tag, const char *txt, int len) {
     (void)level;
     /* 移除末尾换行符，避免多余滚动 */
-    while (len > 0 && (txt[len - 1] == '\n' || txt[len - 1] == '\r')) {
-        txt[--len] = '\0';
+    char buf[2048];
+    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+    memcpy(buf, txt, (size_t)len);
+    buf[len] = '\0';
+    while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
+        buf[--len] = '\0';
     }
     if (len == 0) return;  /* 空行不输出 */
     char line[1024 + 64];
     if (tag && tag[0])
-        snprintf(line, sizeof(line), "%s %s", tag, txt);
+        snprintf(line, sizeof(line), "%s %s", tag, buf);
     else
-        snprintf(line, sizeof(line), "%s", txt);
+        snprintf(line, sizeof(line), "%s", buf);
     tui_println(line);
 }
 
@@ -211,8 +203,8 @@ static void tui_init(void) {
     g_tui_active = 1;
 
     /* 将日志输出重定向到 TUI 回调 */
-    p2p_set_log_output(tui_log_callback);
-    log_output(stdc_log_callback, true);
+    log_callback = (log_cb)tui_log_callbak;
+    p2p_log_callback = tui_log_callbak;
 }
 
 /* 退出 TUI，恢复终端状态 */
@@ -222,8 +214,8 @@ static void tui_cleanup(void) {
     g_tui_active = 0;
 
     // 清除日志回调，恢复默认输出（stdout）
-    p2p_set_log_output(NULL);
-    log_output((log_cb)-1, false);  /* 恢复 stdc 默认 stdout 输出 */
+    log_callback = (log_cb)-1;
+    p2p_log_callback = (p2p_log_callback_t)-1;
 
     // 重置滚动区域，光标移到最后一行
     tui_printf("\033[r");
@@ -356,11 +348,9 @@ static void log_state_change(p2p_handle_t s) {
                      state_name(state), state);
             tui_println(line);
         } else {
-            printf(LA_F("[STATE] %s (%d) -> %s (%d)", LA_F38, 38),
+            print("I:", LA_F("[STATE] %s (%d) -> %s (%d)\n", LA_F45, 45),
                    state_name(last_state), last_state,
                    state_name(state), state);
-            printf("\n");
-            fflush(stdout);
         }
         last_state = state;
     }
@@ -372,8 +362,7 @@ static void on_disconnected(p2p_handle_t s, void *userdata) {
     if (g_tui_active) {
         tui_println(LA_S("--- Peer disconnected ---", LA_S11, 11));
     } else {
-        printf("%s\n", LA_S("[EVENT] Connection closed", LA_S12, 12));
-        fflush(stdout);
+        print("I:", LA_S("[EVENT] Connection closed", LA_S12, 12));
     }
 }
 
@@ -404,6 +393,7 @@ int main(int argc, char *argv[]) {
         &ARGS_DEF_gist,
         &ARGS_DEF_name,
         &ARGS_DEF_to,
+        &ARGS_DEF_stun,
         &ARGS_DEF_turn,
         &ARGS_DEF_turn_user,
         &ARGS_DEF_turn_pass,
@@ -412,7 +402,9 @@ int main(int argc, char *argv[]) {
         NULL);
 
     /* 设置日志级别 */
-    if (ARGS_log.i64) p2p_set_log_level((int)ARGS_log.i64);
+    if (ARGS_log.i64) {
+        log_level = (log_level_e)ARGS_log.i64;
+    }
 
     /* Echo 模式 */
     g_echo_mode = ARGS_echo.i64 ? 1 : 0;

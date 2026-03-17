@@ -84,7 +84,6 @@ set(LIB_SRCS
     src/p2p_path_manager.c
     src/p2p_channel.c
     src/p2p_instrument.c
-    src/p2p_instrument.h
 )
 
 # --- i18n --ndebug 自动检测 ---
