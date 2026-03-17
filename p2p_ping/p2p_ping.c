@@ -97,7 +97,14 @@ static void tui_println(const char* line) {
 static void tui_log_callbak(p2p_log_level_t level, const char* tag, char *txt, int len) {
     (void)level;
     while (len > 0 && (txt[len - 1] == '\n' || txt[len - 1] == '\r')) txt[--len] = '\0';
-    tui_println(txt);
+    switch (level) {
+        case P2P_LOG_LEVEL_FATAL: tui_println(P_PURPLE("%s\n")); break;
+        case P2P_LOG_LEVEL_ERROR: tui_println(P_RED("%s\n")); break;
+        case P2P_LOG_LEVEL_WARN:  tui_println(P_YELLOW("%s\n")); break;
+        case P2P_LOG_LEVEL_VERBOSE: tui_println(P_GRAY("%s\n")); break;
+        case P2P_LOG_LEVEL_DEBUG: tui_println(P_CYAN("%s\n")); break;
+        default: tui_println("%s\n"); break;
+    }
 }
 
 static void tui_on_resize(void) {
