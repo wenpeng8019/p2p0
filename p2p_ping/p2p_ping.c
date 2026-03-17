@@ -49,27 +49,6 @@ static log_level_e log_level    = LOG_DEF;
 #undef LOG_LEVEL
 #define LOG_LEVEL log_level
 
-/*
- * TUI 专有头文件（不适合移植到 p2p_platform.h，原因见下）：
- *
- * 【Windows】<conio.h>
- *   - _kbhit():  非阻塞键盘输入检测（仅真实控制台有效，ConPTY 需用 PeekNamedPipe）
- *   - _getch():  逐字符读取（无回显）
- *   用途：TUI 输入循环中检测和读取按键
- *
- * 【POSIX】<termios.h>
- *   - tcgetattr() / tcsetattr():  终端模式控制（设置 raw 模式，禁用 ICANON 和 ECHO）
- *   - termios 结构体:  包含 c_lflag, c_cc 等多字段配置
- *   用途：TUI 初始化时将 stdin 切换为逐字符输入模式
- *
- * 【结论】这些 API 高度应用相关，平台间语义差异大，不适合通用封装
- *         （终端尺寸获取已统一封装为 p2p_get_terminal_rows/cols）
- */
-#ifdef _WIN32
-#include <conio.h>     /* _kbhit, _getch */
-#else
-#include <termios.h>    /* termios, tcgetattr, tcsetattr */
-#endif
 
 /* ============================================================================
  * TUI：固定输入行 + 滚动日志区
@@ -91,16 +70,8 @@ static int              g_echo_mode   = 0;          /* --echo 模式 */
 static char             g_buf_in[512] = {0};        /* 当前输入缓冲 */
 static int              g_len_in      = 0;          /* 输入缓冲长度 */
 static int              g_rows        = 24;         /* 终端行数 */
-#ifdef _WIN32
-static DWORD            g_orig_in_mode  = 0;        /* 原始控制台输入模式 */
-static DWORD            g_orig_out_mode = 0;        /* 原始控制台输出模式 */
-static int              g_win_pty_mode  = 0;        /* 1=ConPTY管道(VS Code)，0=真实控制台 */
-#else
-static struct termios   g_orig_term;                /* 原始终端配置 */
-#endif
+static P_term_ctx_t     g_term_ctx;                 /* 终端原始状态（P_term_init 保存） */
 static const char*      g_my_name = "me";           /* 本端显示名 */
-
-/* 注：终端尺寸获取已移植到 p2p_platform.h，使用 p2p_get_terminal_rows() */
 
 /* TUI 专用 printf：绕过 stdc.h 的 printf 重定义，直接输出 ANSI 序列 */
 static void tui_printf(const char *fmt, ...) {
@@ -122,17 +93,18 @@ static void tui_printf(const char *fmt, ...) {
  *   6. 重绘输入行（防止偶发脏屏）
  */
 static void tui_println(const char *line) {
+
     if (!g_tui_active) {
         /* 非交互模式：普通换行输出，不发 ANSI 控制序列 */
         tui_printf("%s\n", line);
         fflush(stdout);
         return;
     }
-    tui_printf("\0337");                                /* save cursor */
-    tui_printf("\033[%d;1H", g_rows - 1);               /* 移到滚动区末行 */
-    tui_printf("\n\r\033[K%s", line);                   /* 滚动 + 清行 + 写内容 */
-    tui_printf("\0338");                                /* restore cursor */
-    tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in); /* 重绘输入行 */
+    tui_printf(P_CURSOR_SAVE);                                      /* save cursor */
+    tui_printf(P_CURSOR_ROW, g_rows - 1);                           /* 移到滚动区末行 */
+    tui_printf("\n\r" P_CLEAR_EOL "%s", line);                      /* 滚动 + 清行 + 写内容 */
+    tui_printf(P_CURSOR_RESTORE);                                   /* restore cursor */
+    tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_rows, g_buf_in);  /* 重绘输入行 */
     fflush(stdout);
 }
 
@@ -158,45 +130,15 @@ static void tui_log_callbak(p2p_log_level_t level, const char* tag, const char *
 
 /* 初始化 TUI（连接建立后调用一次） */
 static void tui_init(void) {
-    /* 非交互终端（stdout 被重定向）时跳过 TUI，避免后台进程触发 SIGTTOU */
-    if (!P_isatty(stdout)) return;
-    g_rows = P_term_rows();
 
-#if P_WIN
-    /* Windows：先启用 ANSI VT 输出，再发送 ANSI 序列，否则第一屏乱码 */
-    HANDLE hin  = GetStdHandle(STD_INPUT_HANDLE);
-    HANDLE hout = GetStdHandle(STD_OUTPUT_HANDLE);
-    GetConsoleMode(hout, &g_orig_out_mode);
-    SetConsoleMode(hout, (g_orig_out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING
-                                          | DISABLE_NEWLINE_AUTO_RETURN));
-    /* 检测是否是管道模式（VS Code ConPTY / 重定向）
-     * ConPTY 的 stdin 是 FILE_TYPE_PIPE，_kbhit() 对管道无效 */
-    g_win_pty_mode = (GetFileType(hin) != FILE_TYPE_CHAR);
-    if (!g_win_pty_mode) {
-        /* 真实控制台：保留 ENABLE_PROCESSED_INPUT 使 Ctrl+C 能产生 SIGINT
-         * 去掉 ENABLE_LINE_INPUT + ENABLE_ECHO_INPUT 实现逐字符读取 */
-        GetConsoleMode(hin, &g_orig_in_mode);
-        SetConsoleMode(hin, (g_orig_in_mode | ENABLE_VIRTUAL_TERMINAL_INPUT) & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
-    }
-#endif
+    if (!P_term_init(&g_term_ctx)) return;  /* 非终端（管道/重定向）→ 跳过 */
+    g_rows = P_term_rows(&g_term_ctx);
 
-    /* 设置 ANSI 滚动区域：行 1 ~ rows-1（VT 已启用后再发送）*/
-    tui_printf("\033[1;%dr", g_rows - 1);
+    /* 设置 ANSI 滚动区域：行 1 ~ rows-1 */
+    tui_printf(P_SCROLL_SET, 1, g_rows - 1);
     /* 清空输入行并显示提示符 */
-    tui_printf("\033[%d;1H\033[K> ", g_rows);
+    tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> ", g_rows);
     fflush(stdout);
-
-#if !P_WIN
-    /* stdin：raw 模式（禁用行缓冲 + 回显） + 非阻塞 */
-    struct termios t;
-    tcgetattr(STDIN_FILENO, &g_orig_term);
-    t = g_orig_term;
-    t.c_lflag &= ~(unsigned)(ICANON | ECHO);
-    t.c_cc[VMIN]  = 0;
-    t.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSANOW, &t);
-    fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
-#endif
 
     /* 先标记 TUI 已激活，再设置日志回调
      * 避免回调在 g_tui_active=0 时被调用导致 tui_println 走错分支 */
@@ -218,19 +160,11 @@ static void tui_cleanup(void) {
     p2p_log_callback = (p2p_log_callback_t)-1;
 
     // 重置滚动区域，光标移到最后一行
-    tui_printf("\033[r");
-    tui_printf("\033[%d;1H\n", g_rows);
+    tui_printf(P_SCROLL_RESET);
+    tui_printf(P_CURSOR_ROW "\n", g_rows);
     fflush(stdout);
 
-#if P_WIN
-    if (!g_win_pty_mode)
-        SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), g_orig_in_mode);
-    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), g_orig_out_mode);
-#else
-    // 恢复终端模式
-    tcsetattr(STDIN_FILENO, TCSANOW, &g_orig_term);
-    fcntl(STDIN_FILENO, F_SETFL, 0);
-#endif
+    P_term_final(&g_term_ctx);
 }
 
 /* 处理 stdin 按键，维护输入缓冲，回车时发送 */
@@ -238,29 +172,8 @@ static void tui_process_input(p2p_handle_t hdl) {
 
     if (!g_tui_active) return;  /* 非交互模式（重定向/后台）跳过 stdin 读取 */
     for (;;) {
-        int ch;
-#if P_WIN
-        if (g_win_pty_mode) {
-            /* ConPTY / 管道模式：_kbhit() 对管道无效，改用 PeekNamedPipe */
-            HANDLE hin = GetStdHandle(STD_INPUT_HANDLE);
-            DWORD avail = 0;
-            if (!PeekNamedPipe(hin, NULL, 0, NULL, &avail, NULL) || avail == 0) break;
-            DWORD nr = 0; CHAR raw = 0;
-            if (!ReadFile(hin, &raw, 1, &nr, NULL) || nr == 0) break;
-            ch = (unsigned char)raw;
-        } else {
-            /* 真实控制台：使用 _kbhit / _getch */
-            if (!_kbhit()) break;
-            ch = _getch();
-            if (ch == 0 || ch == 0xE0) { _getch(); continue; } /* 跳过扩展键 */
-        }
-#else
-        {
-            char tmp;
-            if (read(STDIN_FILENO, &tmp, 1) != 1) break;
-            ch = (unsigned char)tmp;
-        }
-#endif
+        int ch = P_term_input(&g_term_ctx);
+        if (ch < 0) break;
         char c = (char)ch;
         if (c == '\r' || c == '\n') {
             if (g_len_in > 0) {
@@ -274,14 +187,14 @@ static void tui_process_input(p2p_handle_t hdl) {
                 /* 清空输入行 */
                 g_len_in = 0;
                 g_buf_in[0] = '\0';
-                tui_printf("\033[%d;1H\033[K> ", g_rows);
+                tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> ", g_rows);
                 fflush(stdout);
             }
         } else if (c == 0x7f || c == '\b') {   /* Backspace / DEL */
             if (g_len_in > 0) {
                 g_len_in--;
                 g_buf_in[g_len_in] = '\0';
-                tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
+                tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_rows, g_buf_in);
                 fflush(stdout);
             }
         } else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7f
@@ -290,7 +203,7 @@ static void tui_process_input(p2p_handle_t hdl) {
              * 不用 putchar(c)，避免 ConPTY 双重回显 */
             g_buf_in[g_len_in++] = c;
             g_buf_in[g_len_in]   = '\0';
-            tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
+            tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_rows, g_buf_in);
             fflush(stdout);
         }
         /* 忽略方向键等控制序列 */
@@ -309,11 +222,11 @@ static void on_signal(int sig) {
 static void on_sigwinch(int sig) {
     (void)sig;
     if (!g_tui_active) return;
-    int new_rows = P_term_rows();
+    int new_rows = P_term_rows(&g_term_ctx);
     if (new_rows != g_rows) {
         g_rows = new_rows;
-        tui_printf("\033[1;%dr", g_rows - 1);
-        tui_printf("\033[%d;1H\033[K> %s", g_rows, g_buf_in);
+        tui_printf(P_SCROLL_SET, 1, g_rows - 1);
+        tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_rows, g_buf_in);
         fflush(stdout);
     }
 }
@@ -367,12 +280,6 @@ static void on_disconnected(p2p_handle_t s, void *userdata) {
 }
 
 int main(int argc, char *argv[]) {
-
-#ifdef _WIN32
-    /* UTF-8 输出，支持中文显示 */
-    SetConsoleOutputCP(65001);
-    SetConsoleCP(65001);
-#endif
 
     /* 初始化语言系统 */
     LA_init();

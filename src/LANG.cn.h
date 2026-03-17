@@ -393,7 +393,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
-    [LA_F175] = "Append Host candidate: %s:%d",  /* SID:175 */
+    [_LA_175] = "Append Host candidate: %s:%d",  /* SID:175 (disabled) */
 };
 
 static inline int lang_cn(void) {
