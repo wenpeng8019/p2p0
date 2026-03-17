@@ -9,6 +9,7 @@
 
 #define LOG_CALLBACK ((void*)p2p_log_callback)
 #define LOG_LEVEL ((unsigned)p2p_log_level)
+#define LOG_TAG_P p2p_log_pre_tag
 
 #include <stdc.h>
 

@@ -40,8 +40,9 @@ typedef enum {
  * level 日志等级
  * tag   模块名（可为 NULL/空）
  * txt   已格式化的日志正文
+ *       这里的 txt 是可以写入变更的，但需要确保编辑的区域 <= len+1，例如增加一个 \n，或移除末尾的 \n（如果存在）
  */
-typedef void (*p2p_log_callback_t)(p2p_log_level_t level, const char *tag, const char *txt, int len);
+typedef void (*p2p_log_callback_t)(p2p_log_level_t level, const char *tag, char *txt, int len);
 
 /*
  * 信令模式
@@ -255,6 +256,7 @@ typedef struct {
 
 extern p2p_log_callback_t   p2p_log_callback;
 extern p2p_log_level_t      p2p_log_level;
+extern bool                 p2p_log_pre_tag;
 
 ///////////////////////////////////////////////////////////////////////////////
 

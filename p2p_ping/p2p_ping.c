@@ -42,12 +42,12 @@ static p2p_language_t s_lang = P2P_LANG_EN;
 static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }
 ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", LA_S27, 27));
 
-log_cb log_callback             = (log_cb)-1;
-static log_level_e log_level    = LOG_DEF;
 #undef LOG_CALLBACK
-#define LOG_CALLBACK log_callback
+#define LOG_CALLBACK    p2p_log_callback
 #undef LOG_LEVEL
-#define LOG_LEVEL log_level
+#define LOG_LEVEL       p2p_log_level
+#undef LOG_TAG_P
+#define LOG_TAG_P       p2p_log_pre_tag
 
 #undef printf
 
@@ -94,25 +94,10 @@ static void tui_println(const char* line) {
 }
 
 /* stdc日志回调：重定向 print() 输出到 TUI */
-static void tui_log_callbak(p2p_log_level_t level, const char* tag, const char *txt, int len) {
-
+static void tui_log_callbak(p2p_log_level_t level, const char* tag, char *txt, int len) {
     (void)level;
-    /* 移除末尾换行符，避免多余滚动 */
-    char buf[2048];
-    if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
-    memcpy(buf, txt, (size_t)len);
-    buf[len] = '\0';
-    while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
-        buf[--len] = '\0';
-    }
-    if (len == 0) return;  /* 空行不输出 */
-    char line[1024 + 64];
-    if (tag && tag[0])
-        snprintf(line, sizeof(line), "%s %s", tag, buf);
-    else
-        snprintf(line, sizeof(line), "%s", buf);
-
-    tui_println(line);
+    while (len > 0 && (txt[len - 1] == '\n' || txt[len - 1] == '\r')) txt[--len] = '\0';
+    tui_println(txt);
 }
 
 static void tui_on_resize(void) {
@@ -149,7 +134,6 @@ static void tui_init(void) {
     fflush(stdout);
 
     // 将日志输出重定向到 TUI 回调
-    log_callback = (log_cb)tui_log_callbak;
     p2p_log_callback = tui_log_callbak;
 }
 
@@ -161,7 +145,6 @@ static void tui_cleanup(void) {
     g_term_height = 0;
 
     // 清除日志回调，恢复默认输出（stdout）
-    log_callback = (log_cb)-1;
     p2p_log_callback = (p2p_log_callback_t)-1;
 
 #if !P_WIN
@@ -302,8 +285,10 @@ int main(int argc, char *argv[]) {
 
     /* 设置日志级别 */
     if (ARGS_log.i64) {
-        log_level = (log_level_e)ARGS_log.i64;
+        p2p_log_level = (p2p_log_level_t)ARGS_log.i64;
     }
+
+    p2p_log_pre_tag = true;  /* 日志前置标签，显示在日志内容前面（而非行首） */
 
     /* Echo 模式 */
     g_echo_mode = ARGS_echo.i64 ? 1 : 0;

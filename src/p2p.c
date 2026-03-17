@@ -19,6 +19,7 @@ p2p_log_level_t      p2p_log_level = P2P_LOG_LEVEL_DEBUG;
 #else
 p2p_log_level_t      p2p_log_level = P2P_LOG_LEVEL_INFO;
 #endif
+bool                 p2p_log_pre_tag = false;
 
 ///////////////////////////////////////////////////////////////////////////////
 
