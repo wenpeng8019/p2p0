@@ -8,6 +8,7 @@
 #ifndef P2PP_H
 #define P2PP_H
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 

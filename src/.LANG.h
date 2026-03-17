@@ -40,27 +40,27 @@ enum {
     /* Words (LA_W) */
     LA_W1,  /* "alive"  [p2p_nat.c] */
     LA_W2,  /* "bytes"  [p2p_signal_relay.c] */
-    LA_W3,  /* "Detecting..."  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
-    LA_W4,  /* "Full Cone NAT"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
+    LA_W3,  /* "Detecting..."  [p2p_internal.h] */
+    LA_W4,  /* "Full Cone NAT"  [p2p_internal.h] */
     LA_W5,  /* "NAT punch failed, no TURN server configured"  [p2p.c] */
     LA_W6,  /* "NAT punch failed, server has no relay support"  [p2p.c] */
     LA_W7,  /* "NAT punch failed, using COMPACT server relay"  [p2p.c] */
     LA_W8,  /* "no (cached)"  [p2p_ice.c] */
-    LA_W9,  /* "Open Internet (No NAT)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
-    LA_W10,  /* "Port Restricted Cone NAT"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
+    LA_W9,  /* "Open Internet (No NAT)"  [p2p_internal.h] */
+    LA_W10,  /* "Port Restricted Cone NAT"  [p2p_internal.h] */
     LA_W11,  /* "PUB"  [p2p_signal_pubsub.c] */
     LA_W12,  /* "Published"  [p2p_signal_pubsub.c] */
     LA_W13,  /* "punch"  [p2p_nat.c] */
     LA_W14,  /* "Received signal from"  [p2p_signal_relay.c] */
     LA_W15,  /* "Resent"  [p2p_signal_pubsub.c] */
-    LA_W16,  /* "Restricted Cone NAT"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
+    LA_W16,  /* "Restricted Cone NAT"  [p2p_internal.h] */
     LA_W17,  /* "retry"  [p2p_nat.c] */
     LA_W18,  /* "SUB"  [p2p_signal_pubsub.c] */
-    LA_W19,  /* "Symmetric NAT (port-random)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
-    LA_W20,  /* "Timeout (no response)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
-    LA_W21,  /* "UDP Blocked (STUN unreachable)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
-    LA_W22,  /* "Undetectable (no STUN/probe configured)"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
-    LA_W23,  /* "Unknown"  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
+    LA_W19,  /* "Symmetric NAT (port-random)"  [p2p_internal.h] */
+    LA_W20,  /* "Timeout (no response)"  [p2p_internal.h] */
+    LA_W21,  /* "UDP Blocked (STUN unreachable)"  [p2p_internal.h] */
+    LA_W22,  /* "Undetectable (no STUN/probe configured)"  [p2p_internal.h] */
+    LA_W23,  /* "Unknown"  [p2p_internal.h] */
     LA_W24,  /* "Waiting for incoming offer from any peer"  [p2p.c] */
     LA_W25,  /* "yes"  [p2p_ice.c] */
 
@@ -216,7 +216,7 @@ enum {
     LA_F172,  /* "Added Remote Candidate: %d -> %s:%d" (%d,%s,%d)  [p2p_signal_relay.c] */
     LA_F173,  /* "% Added SIGNALING path to path manager"  [p2p.c] */
     LA_F174,  /* "% Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
-    _LA_175,
+    LA_F175,  /* disabled "Append Host candidate: %s:%d" */
     LA_F176,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
     LA_F177,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
     LA_F178,  /* "% BIO_new failed"  [p2p_dtls_openssl.c] */
@@ -428,7 +428,7 @@ enum {
     LA_F384,  /* "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n" (%s)  [p2p_signal_compact.c] */
     LA_F385,  /* "%s: unexpected remote cand type %d, skipped\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F386,  /* "Duplicate remote cand<%s:%d> from signaling, skipped" (%s,%d)  [p2p_signal_pubsub.c, p2p_signal_relay.c] */
-    LA_F387,  /* "Failed to realloc memory for remote candidates (capacity: %d)" (%d)  [p2p_udp.c, p2p_signal_pubsub.c, p2p_trans_pseudotcp.c, p2p_tcp_punch.c, p2p_thread.c, p2p_turn.c, p2p_ice.c, p2p_signal_compact.c, p2p_signal_relay.c, p2p.c, p2p_dtls_mbedtls.c, p2p_trans_sctp.c, p2p_path_manager.c, p2p_probe.c, p2p_dtls_openssl.c, p2p_crypto.c, p2p_route.c, p2p_stream.c, p2p_nat.c, p2p_trans_reliable.c, p2p_stun.c, p2p_internal.h, p2p_channel.c] */
+    LA_F387,  /* "Failed to realloc memory for remote candidates (capacity: %d)" (%d)  [p2p_internal.h] */
     LA_F388,  /* "Push prflx candidate<%s:%d> failed(OOM)" (%s,%d)  [p2p_ice.c] */
     LA_F389,  /* "Push remote candidate<%s:%d> (type=%d) failed(OOM)" (%s,%d,%d)  [p2p_ice.c] */
 

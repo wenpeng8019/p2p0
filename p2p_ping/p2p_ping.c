@@ -403,7 +403,8 @@ int main(int argc, char *argv[]) {
             if (!g_connected_once) { g_connected_once = true;
                 print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F37, 37));
                 tui_init();
-                tui_println(LA_S("--- Connected ---", LA_S10, 10));
+                if (g_term_height)
+                    tui_println(LA_S("--- Connected ---", LA_S10, 10));
             }
 
             /* 接收对端消息 */

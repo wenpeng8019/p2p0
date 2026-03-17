@@ -5,6 +5,7 @@
 #ifndef P2P_H
 #define P2P_H
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 

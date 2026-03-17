@@ -61,6 +61,7 @@
 #ifndef P2P_INTERNAL_H
 #define P2P_INTERNAL_H
 #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 #pragma ide diagnostic ignored "UnreachableCallsOfFunction"
@@ -512,5 +513,6 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#pragma ide diagnostic pop
 #pragma clang diagnostic pop
 #endif /* P2P_INTERNAL_H */
