@@ -16,7 +16,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_W8] = "中继",  /* SID:8 */
     [LA_W9] = "未知",  /* SID:9 */
     [LA_S10] = "--- 已连接 ---",  /* SID:10 */
-    [LA_S11] = "--- 对端已断开 ---",  /* SID:11 */
+    [_LA_11] = "--- 对端已断开 ---",  /* SID:11 (disabled) */
     [LA_S12] = "[事件] 连接已关闭",  /* SID:12 */
     [LA_S13] = "自动回显收到的消息给发送方",  /* SID:13 */
     [LA_S40] = "调试器名称",  /* SID:40 */
@@ -46,7 +46,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F43] = "等待调试器(%s)连接中...\n",  /* SID:43 */
     [LA_F36] = "% [聊天] 回显模式已启用：收到的消息将自动回复。\n",  /* SID:36 */
     [LA_F37] = "% [聊天] 进入消息模式。输入文字后按回车发送，Ctrl+C 退出。\n",  /* SID:37 */
-    [LA_F38] = "[状态] %s (%d) -> %s (%d)",  /* SID:38 */
+    [_LA_38] = "[状态] %s (%d) -> %s (%d)",  /* SID:38 (disabled) */
 };
 
 static inline int lang_cn(void) {

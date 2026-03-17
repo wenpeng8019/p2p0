@@ -49,6 +49,10 @@ static log_level_e log_level    = LOG_DEF;
 #undef LOG_LEVEL
 #define LOG_LEVEL log_level
 
+#undef printf
+
+static int              g_echo_mode   = 0;          /* --echo 模式 */
+static bool             g_connected_once = false;   /* 首次连接已处理（非交互模式防重复打印）*/
 
 /* ============================================================================
  * TUI：固定输入行 + 滚动日志区
@@ -64,52 +68,34 @@ static log_level_e log_level    = LOG_DEF;
  *   - p2p_log 输出重定向到管道，主循环轮询读取并通过 tui_println 打印
  * ============================================================================ */
 
-static int              g_tui_active  = 0;          /* TUI 是否已初始化 */
-static int              g_first_connect_done = 0;   /* 首次连接已处理（非交互模式防重复打印）*/
-static int              g_echo_mode   = 0;          /* --echo 模式 */
+static int              g_term_height  = 0;         /* 终端行数， 0 表示未初始化 */
+static P_term_ctx_t     g_term_ctx;                 /* 终端原始状态（P_term_init 保存） */
 static char             g_buf_in[512] = {0};        /* 当前输入缓冲 */
 static int              g_len_in      = 0;          /* 输入缓冲长度 */
-static int              g_rows        = 24;         /* 终端行数 */
-static P_term_ctx_t     g_term_ctx;                 /* 终端原始状态（P_term_init 保存） */
 static const char*      g_my_name = "me";           /* 本端显示名 */
 
-/* TUI 专用 printf：绕过 stdc.h 的 printf 重定义，直接输出 ANSI 序列 */
-static void tui_printf(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stdout, fmt, ap);
-    va_end(ap);
-}
+static void tui_println(const char* line) {
 
-/*
- * 在滚动区域打印一行（不破坏输入行）
- *
- * 流程：
- *   1. 保存光标（DEC \0337）
- *   2. 移到滚动区底部行 (rows-1)
- *   3. \n → 触发滚动区向上滚动一行，光标停在 rows-1
- *   4. 清行并写内容
- *   5. 恢复光标（DEC \0338），光标回到输入行末尾
- *   6. 重绘输入行（防止偶发脏屏）
- */
-static void tui_println(const char *line) {
+    assert(g_term_height);
 
-    if (!g_tui_active) {
-        /* 非交互模式：普通换行输出，不发 ANSI 控制序列 */
-        tui_printf("%s\n", line);
-        fflush(stdout);
-        return;
-    }
-    tui_printf(P_CURSOR_SAVE);                                      /* save cursor */
-    tui_printf(P_CURSOR_ROW, g_rows - 1);                           /* 移到滚动区末行 */
-    tui_printf("\n\r" P_CLEAR_EOL "%s", line);                      /* 滚动 + 清行 + 写内容 */
-    tui_printf(P_CURSOR_RESTORE);                                   /* restore cursor */
-    tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_rows, g_buf_in);  /* 重绘输入行 */
+    // 将日志（滚动）区域向上滚动一行
+    // > 先将光标移动到滚动区（即除了输入行的区域）的最后一行
+    // > 发送 \n 触发滚动区整体向上滚动一行，光标仍停在最后一行（即输入行上方）
+    // > 发送 \r 将光标移到行首
+    // > P_CLEAR_EOL 清除当前行（行首光标后面的）内容
+    printf(P_CURSOR_SAVE);                                      /* save cursor */
+    printf(P_CURSOR_ROW "\n\r" P_CLEAR_EOL, g_term_height - 1);                           
+    printf("%s", line);
+    printf(P_CURSOR_RESTORE);
+
+    // 将输入行内容重新绘制一遍，避免偶发的脏屏（如 ConPTY 双重回显）
+    printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_term_height, g_buf_in);
     fflush(stdout);
 }
 
-/* stdc 日志回调：重定向 print() 输出到 TUI */
+/* stdc日志回调：重定向 print() 输出到 TUI */
 static void tui_log_callbak(p2p_log_level_t level, const char* tag, const char *txt, int len) {
+
     (void)level;
     /* 移除末尾换行符，避免多余滚动 */
     char buf[2048];
@@ -125,26 +111,44 @@ static void tui_log_callbak(p2p_log_level_t level, const char* tag, const char *
         snprintf(line, sizeof(line), "%s %s", tag, buf);
     else
         snprintf(line, sizeof(line), "%s", buf);
+
     tui_println(line);
 }
+
+static void tui_on_resize(void) {
+    int h = P_term_rows(&g_term_ctx);
+    if (h == g_term_height) return;
+    g_term_height = h;
+    printf(P_SCROLL_SET, 1, g_term_height - 1);
+    printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_term_height, g_buf_in);
+    fflush(stdout);
+}
+
+/* SIGWINCH：终端窗口大小变化，更新滚动区域（仅 Unix） */
+#if !P_WIN
+static void on_sigwinch(int sig) { (void)sig;
+    if (g_term_height) tui_on_resize();
+}
+#endif
 
 /* 初始化 TUI（连接建立后调用一次） */
 static void tui_init(void) {
 
+    if (g_term_height) return;
     if (!P_term_init(&g_term_ctx)) return;  /* 非终端（管道/重定向）→ 跳过 */
-    g_rows = P_term_rows(&g_term_ctx);
+    g_term_height = P_term_rows(&g_term_ctx);
+    if (!g_term_height) return;
 
-    /* 设置 ANSI 滚动区域：行 1 ~ rows-1 */
-    tui_printf(P_SCROLL_SET, 1, g_rows - 1);
-    /* 清空输入行并显示提示符 */
-    tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> ", g_rows);
+#if !P_WIN
+    signal(SIGWINCH, on_sigwinch);
+#endif
+
+    // 设置终端    
+    printf(P_SCROLL_SET, 1, g_term_height - 1);            // 设置日志滚动区域：行 1 ~ rows-1
+    printf(P_CURSOR_ROW P_CLEAR_EOL "> ", g_term_height);  // 清空输入行并显示提示符
     fflush(stdout);
 
-    /* 先标记 TUI 已激活，再设置日志回调
-     * 避免回调在 g_tui_active=0 时被调用导致 tui_println 走错分支 */
-    g_tui_active = 1;
-
-    /* 将日志输出重定向到 TUI 回调 */
+    // 将日志输出重定向到 TUI 回调
     log_callback = (log_cb)tui_log_callbak;
     p2p_log_callback = tui_log_callbak;
 }
@@ -152,16 +156,21 @@ static void tui_init(void) {
 /* 退出 TUI，恢复终端状态 */
 static void tui_cleanup(void) {
 
-    if (!g_tui_active) return;
-    g_tui_active = 0;
+    if (!g_term_height) return;
+    int rows = g_term_height;
+    g_term_height = 0;
 
     // 清除日志回调，恢复默认输出（stdout）
     log_callback = (log_cb)-1;
     p2p_log_callback = (p2p_log_callback_t)-1;
 
+#if !P_WIN
+    signal(SIGWINCH, SIG_DFL);
+#endif
+
     // 重置滚动区域，光标移到最后一行
-    tui_printf(P_SCROLL_RESET);
-    tui_printf(P_CURSOR_ROW "\n", g_rows);
+    printf(P_SCROLL_RESET);
+    printf(P_CURSOR_ROW "\n", rows);
     fflush(stdout);
 
     P_term_final(&g_term_ctx);
@@ -170,7 +179,12 @@ static void tui_cleanup(void) {
 /* 处理 stdin 按键，维护输入缓冲，回车时发送 */
 static void tui_process_input(p2p_handle_t hdl) {
 
-    if (!g_tui_active) return;  /* 非交互模式（重定向/后台）跳过 stdin 读取 */
+    if (!g_term_height) return;  /* 非交互模式（重定向/后台）跳过 stdin 读取 */
+
+#if P_WIN
+    tui_on_resize
+#endif
+
     for (;;) {
         int ch = P_term_input(&g_term_ctx);
         if (ch < 0) break;
@@ -178,59 +192,42 @@ static void tui_process_input(p2p_handle_t hdl) {
         if (c == '\r' || c == '\n') {
             if (g_len_in > 0) {
                 g_buf_in[g_len_in] = '\0';
+                
                 /* 在滚动区显示自己发出的消息 */
                 char line[576];
                 snprintf(line, sizeof(line), "%s: %s", g_my_name, g_buf_in);
                 tui_println(line);
+
                 /* 发送 */
                 p2p_send(hdl, g_buf_in, g_len_in);
+
                 /* 清空输入行 */
-                g_len_in = 0;
-                g_buf_in[0] = '\0';
-                tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> ", g_rows);
+                g_buf_in[g_len_in = 0] = '\0';
+                printf(P_CURSOR_ROW P_CLEAR_EOL "> ", g_term_height);
                 fflush(stdout);
             }
-        } else if (c == 0x7f || c == '\b') {   /* Backspace / DEL */
-            if (g_len_in > 0) {
-                g_len_in--;
-                g_buf_in[g_len_in] = '\0';
-                tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_rows, g_buf_in);
+        } 
+        else if (c == 0x7f || c == '\b') {   /* Backspace / DEL */
+            
+            if (g_len_in > 0) { g_buf_in[--g_len_in] = '\0';
+                printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_term_height, g_buf_in);
                 fflush(stdout);
             }
-        } else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7f
+        }
+         else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7f
                    && g_len_in < (int)sizeof(g_buf_in) - 1) {
+
             /* 可打印 ASCII：追加并完整重绘输入行
              * 不用 putchar(c)，避免 ConPTY 双重回显 */
             g_buf_in[g_len_in++] = c;
             g_buf_in[g_len_in]   = '\0';
-            tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_rows, g_buf_in);
+            printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_term_height, g_buf_in);
             fflush(stdout);
         }
+
         /* 忽略方向键等控制序列 */
     }
 }
-
-/* SIGINT / SIGTERM：优雅退出（跨平台） */
-static void on_signal(int sig) {
-    (void)sig;
-    tui_cleanup();
-    exit(0);
-}
-
-/* SIGWINCH：终端窗口大小变化，更新滚动区域（仅 Unix） */
-#if !P_WIN
-static void on_sigwinch(int sig) {
-    (void)sig;
-    if (!g_tui_active) return;
-    int new_rows = P_term_rows(&g_term_ctx);
-    if (new_rows != g_rows) {
-        g_rows = new_rows;
-        tui_printf(P_SCROLL_SET, 1, g_rows - 1);
-        tui_printf(P_CURSOR_ROW P_CLEAR_EOL "> %s", g_rows, g_buf_in);
-        fflush(stdout);
-    }
-}
-#endif
 
 /* ============================================================================
  * 主程序
@@ -254,17 +251,9 @@ static void log_state_change(p2p_handle_t s) {
     static int last_state = -1;
     int state = p2p_state(s);
     if (state != last_state) {
-        if (g_tui_active) {
-            char line[128];
-            snprintf(line, sizeof(line), LA_F("[STATE] %s (%d) -> %s (%d)", LA_F38, 38),
-                     state_name(last_state), last_state,
-                     state_name(state), state);
-            tui_println(line);
-        } else {
-            print("I:", LA_F("[STATE] %s (%d) -> %s (%d)\n", LA_F45, 45),
-                   state_name(last_state), last_state,
-                   state_name(state), state);
-        }
+        print("I:", LA_F("[STATE] %s (%d) -> %s (%d)\n", LA_F45, 45),
+              state_name(last_state), last_state,
+              state_name(state), state);
         last_state = state;
     }
 }
@@ -272,11 +261,14 @@ static void log_state_change(p2p_handle_t s) {
 /* 连接断开回调 */
 static void on_disconnected(p2p_handle_t s, void *userdata) {
     (void)s; (void)userdata;
-    if (g_tui_active) {
-        tui_println(LA_S("--- Peer disconnected ---", LA_S11, 11));
-    } else {
-        print("I:", LA_S("[EVENT] Connection closed", LA_S12, 12));
-    }
+    print("I:", LA_S("[EVENT] Connection closed", LA_S12, 12));
+}
+
+/* SIGINT / SIGTERM：优雅退出（跨平台） */
+static void on_signal(int sig) {
+    (void)sig;
+    tui_cleanup();
+    exit(0);
 }
 
 int main(int argc, char *argv[]) {
@@ -346,8 +338,8 @@ int main(int argc, char *argv[]) {
     cfg.dtls_backend    = dtls_backend;
     cfg.use_pseudotcp   = ARGS_pseudo.i64 ? 1 : 0;
     cfg.use_ice         = !ARGS_compact.i64;
-    //cfg.stun_server     = "stun.cloudflare.com";
     cfg.stun_server     = ARGS_stun.str ? ARGS_stun.str : "stun.miwifi.com"; // 国内 STUN 服务器（小米）
+    //cfg.stun_server     = "stun.cloudflare.com";
     //cfg.stun_server     = "stun.qq.com"; // 国内 STUN 服务器（腾讯）
     //cfg.stun_server     = "stun.l.google.com";
     cfg.stun_port       = 3478;
@@ -413,9 +405,6 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
-#if !P_WIN
-    signal(SIGWINCH, on_sigwinch);
-#endif
 
     /* ---- 主循环 ---- */
     for(;;) {
@@ -424,9 +413,9 @@ int main(int argc, char *argv[]) {
         log_state_change(hdl);
 
         if (p2p_is_ready(hdl)) {
+
             /* 首次连接成功：初始化 TUI，降低日志等级 */
-            if (!g_first_connect_done) {
-                g_first_connect_done = 1;
+            if (!g_connected_once) { g_connected_once = true;
                 print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F37, 37));
                 tui_init();
                 tui_println(LA_S("--- Connected ---", LA_S10, 10));
@@ -436,6 +425,7 @@ int main(int argc, char *argv[]) {
             char data[512] = {0};
             int r = p2p_recv(hdl, data, (int)sizeof(data) - 1);
             if (r > 0) {
+
                 data[r] = '\0';
                 char line[576];
                 const char *peer = target_name ? target_name : "peer";
@@ -455,11 +445,7 @@ int main(int argc, char *argv[]) {
         }
 
         // 间隔 ms
-#ifdef _WIN32
-        Sleep((DWORD)10);
-#else
-        usleep((unsigned int)10 * 1000);
-#endif
+        P_usleep(10 * 1000);
     }
 
     tui_cleanup();
