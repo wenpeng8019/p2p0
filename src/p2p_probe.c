@@ -113,13 +113,11 @@ void probe_compact_on_response(struct p2p_session *s, uint16_t sid) {
     if (ctx->mode.compact.phase != PROBE_COMPACT_PHASE_WAIT_ECHO) return;
     if (ctx->mode.compact.sid != sid) return;
 
-    uint64_t now_ms = P_tick_ms();
-    uint64_t rtt    = now_ms - ctx->start_ms;
-
     ctx->state = P2P_PROBE_STATE_SUCCESS;
-    ctx->complete_ms = now_ms;
+    ctx->complete_ms = P_tick_ms();
 
-    print("I:", LA_F("%s: peer reachable via signaling (RTT: %" PRIu64 " ms)", LA_F127, 127), TASK_RELAY_PROBE, rtt);
+    print("I:", LA_F("%s: peer reachable via signaling (RTT: %" PRIu64 " ms)", LA_F127, 127), TASK_RELAY_PROBE, 
+          tick_diff(ctx->complete_ms, ctx->start_ms));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
