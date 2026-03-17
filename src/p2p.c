@@ -1209,7 +1209,7 @@ p2p_update(p2p_handle_t hdl) {
         }
         
         // 周期性路径重选（每5秒检查一次是否有更优路径）
-        if (now_ms - s->path_mgr.last_reselect_ms > 5000) {
+        if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > 5000) {
             s->path_mgr.last_reselect_ms = now_ms;
             
             int current_path = s->active_path;

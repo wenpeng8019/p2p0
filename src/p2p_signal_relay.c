@@ -398,7 +398,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
     {
         uint64_t now_ms = P_tick_ms();
         if (ctx->last_heartbeat_ms == 0 ||
-            now_ms - ctx->last_heartbeat_ms >= P2P_RELAY_HEARTBEAT_INTERVAL_MS) {
+            tick_diff(now_ms, ctx->last_heartbeat_ms) >= P2P_RELAY_HEARTBEAT_INTERVAL_MS) {
             p2p_relay_hdr_t hb;
             hb.magic  = P2P_RLY_MAGIC;
             hb.type   = P2P_RLY_HEARTBEAT;
@@ -410,7 +410,7 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
 
     /* 检查等待超时 */
     if (ctx->waiting_for_peer) {
-        uint64_t elapsed = P_tick_ms() - ctx->waiting_start_time;
+        uint64_t elapsed = tick_diff(P_tick_ms(), ctx->waiting_start_time);
         if (elapsed > P2P_RELAY_PEER_WAIT_TIMEOUT_MS) {
             print("W:", LA_F("Waiting for peer '%s' timed out (%dms), giving up", LA_F334, 334),
                    ctx->waiting_target, P2P_RELAY_PEER_WAIT_TIMEOUT_MS);

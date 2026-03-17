@@ -810,7 +810,7 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
         return;
     }
 
-    if (now_ms - s->ice_ctx.check_last_ms < P2P_ICE_CHECK_INTERVAL_MS) return;
+    if (tick_diff(now_ms, s->ice_ctx.check_last_ms) < P2P_ICE_CHECK_INTERVAL_MS) return;
 
     s->ice_ctx.check_last_ms = now_ms;
     s->ice_ctx.check_count++;

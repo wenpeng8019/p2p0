@@ -766,14 +766,14 @@ void p2p_turn_tick(p2p_session_t *s, uint64_t now_ms) {
     if (t->state != TURN_ALLOCATED) return;
 
     /* ---- Refresh 续期 ---- */
-    uint64_t elapsed_s = (now_ms - t->last_refresh_ms) / 1000;
+    uint64_t elapsed_s = tick_diff(now_ms, t->last_refresh_ms) / 1000;
     uint32_t margin = t->lifetime > TURN_REFRESH_MARGIN_S ? TURN_REFRESH_MARGIN_S : t->lifetime / 2;
     if (elapsed_s + margin >= t->lifetime) {
         turn_refresh(s);
     }
 
     /* ---- 权限刷新：权限 5 分钟过期，每 4 分钟重新创建全部权限 ---- */
-    if (t->perm_count > 0 && (now_ms - t->last_perm_ms) / 1000 >= TURN_PERM_REFRESH_S) {
+    if (t->perm_count > 0 && tick_diff(now_ms, t->last_perm_ms) / 1000 >= TURN_PERM_REFRESH_S) {
         t->perm_count = 0;
         t->perm_cand_synced = 0;
         t->last_perm_ms = now_ms;

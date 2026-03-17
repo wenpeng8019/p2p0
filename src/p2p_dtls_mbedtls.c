@@ -165,7 +165,7 @@ static void p2p_dtls_set_timer(void *ctx, uint32_t int_ms, uint32_t fin_ms) {
 static int p2p_dtls_get_timer(void *ctx) {
     p2p_dtls_timer_t *timer = (p2p_dtls_timer_t *)ctx;
     if (timer->fin_ms == 0) return -1;  /* 定时器已取消 */
-    uint64_t elapsed = P_tick_ms() - timer->snapshot;
+    uint64_t elapsed = tick_diff(P_tick_ms(), timer->snapshot);
     if (elapsed >= timer->fin_ms) return 2;  /* 最终超时 → 需重传 */
     if (elapsed >= timer->int_ms) return 1;  /* 中间超时 */
     return 0;  /* 未超时 */

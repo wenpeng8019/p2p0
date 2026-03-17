@@ -558,9 +558,7 @@ int path_manager_select_best_path(p2p_session_t *s) {
  * 检查是否应该防抖（避免频繁切换）
  *   三级检查：冷却期 → 频率检测 → 稳定窗口
  */
-static bool should_debounce_switch(p2p_session_t *s,
-                                   int target_path,
-                                   uint64_t now_ms) {
+static bool should_debounce_switch(p2p_session_t *s, int target_path, uint64_t now_ms) {
 
     path_manager_t *pm = &s->path_mgr;
     
@@ -568,7 +566,7 @@ static bool should_debounce_switch(p2p_session_t *s,
     p2p_path_t target_type = path_manager_get_path_type(s, target_path);
     uint64_t cooldown = pm->thresholds[target_type].cooldown_ms;
     if (cooldown == 0) cooldown = DEFAULT_COOLDOWN_MS;
-    if (now_ms - pm->last_switch_time < cooldown) {
+    if (tick_diff(now_ms, pm->last_switch_time) < cooldown) {
         return true;
     }
     
@@ -592,7 +590,7 @@ static bool should_debounce_switch(p2p_session_t *s,
             return true;
         }
         // 已在等待同一目标稳定
-        if (now_ms - pm->debounce_timer_ms >= stability_ms) {
+        if (tick_diff(now_ms, pm->debounce_timer_ms) >= stability_ms) {
             return false; /* 稳定期已过，可以切换 */
         }
         return true; /* 仍在稳定期 */
@@ -946,7 +944,7 @@ int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms) 
         if (!p) return -1;
         
         // 计算 RTT（round trip time）
-        uint32_t rtt = (uint32_t)(now_ms - sent_ms);
+        uint32_t rtt = (uint32_t)tick_diff(now_ms, sent_ms);
         
         // 更新 RTT 样本（环形）缓冲区
         p->rtt_samples[p->rtt_sample_idx] = rtt;
@@ -1053,7 +1051,7 @@ static void update_quality(path_stats_t *p) {
 
     // 节流保护，避免过度计算（每秒最多更新一次） 
     uint64_t now_ms = P_tick_ms();
-    if (now_ms - p->last_quality_check_ms < QUALITY_UPDATE_INTERVAL_MS) return;
+    if (tick_diff(now_ms, p->last_quality_check_ms) < QUALITY_UPDATE_INTERVAL_MS) return;
     p->last_quality_check_ms = now_ms;
     
     // 计算质量评分（0.0-1.0）
@@ -1142,8 +1140,8 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
     if (p->state == PATH_STATE_ACTIVE || p->state == PATH_STATE_DEGRADED) {
         uint64_t timeout = p->is_lan ? LAN_TIMEOUT_MS : WAN_TIMEOUT_MS;
 
-        if (p->last_recv_ms > 0 && now_ms - p->last_recv_ms > timeout) {
-            int silent_timeouts = (int)((now_ms - p->last_recv_ms) / timeout);
+        if (p->last_recv_ms > 0 && tick_diff(now_ms, p->last_recv_ms) > timeout) {
+            int silent_timeouts = (int)(tick_diff(now_ms, p->last_recv_ms) / timeout);
             if (silent_timeouts >= FAILED_TIMEOUT_COUNT) {
                 p->state = PATH_STATE_FAILED;
 
@@ -1186,7 +1184,7 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
 
     /* ---- 3. FAILED → RECOVERING：30 秒后探测恢复 ---- */
     if (p->state == PATH_STATE_FAILED) {
-        if (p->probe_seq > 0 && now_ms - p->probe_seq > FAILED_TO_RECOVERING_MS) {
+        if (p->probe_seq > 0 && tick_diff(now_ms, p->probe_seq) > FAILED_TO_RECOVERING_MS) {
             p->state = PATH_STATE_RECOVERING;
 
             p->consecutive_timeouts = 0;                        // 重置连续超时计数
@@ -1201,7 +1199,7 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
     /* ---- 4. RECOVERING 超时或恢复成功 ---- */
     if (p->state == PATH_STATE_RECOVERING) {
         uint64_t recovering_start = p->probe_seq;
-        uint64_t elapsed = now_ms - recovering_start;
+        uint64_t elapsed = tick_diff(now_ms, recovering_start);
 
         // RECOVERING_TIMEOUT_MS 内未恢复 → 回到 FAILED，重新等待
         if (elapsed > RECOVERING_TIMEOUT_MS) {
@@ -1213,7 +1211,7 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
         } 
         // 收到数据且最近 2 秒内有活动 → 恢复成功
         else if (p->last_recv_ms > recovering_start &&
-                   now_ms - p->last_recv_ms < RECOVERING_ACTIVITY_MS) {
+                   tick_diff(now_ms, p->last_recv_ms) < RECOVERING_ACTIVITY_MS) {
             
             p->state = PATH_STATE_ACTIVE;
         }
@@ -1224,7 +1222,7 @@ void path_manager_tick(p2p_session_t *s, uint64_t now_ms) {
     path_manager_t *pm = &s->path_mgr;
     
     // 周期 health check
-    if (now_ms - pm->last_health_check_ms < pm->health_check_interval_ms) return;
+    if (tick_diff(now_ms, pm->last_health_check_ms) < pm->health_check_interval_ms) return;
     pm->last_health_check_ms = now_ms;
 
     // 扫描未 ACK 的探测包，如果超时视为丢包
@@ -1233,7 +1231,7 @@ void path_manager_tick(p2p_session_t *s, uint64_t now_ms) {
         packet_track_t *track = &pm->pending_packets[idx];
         if (track->sent_time_ms == 0) continue;     // 跳过已消费（应答）的槽位
 
-        if (now_ms - track->sent_time_ms > PROBE_LOSS_TIMEOUT_MS) {
+        if (tick_diff(now_ms, track->sent_time_ms) > PROBE_LOSS_TIMEOUT_MS) {
             path_stats_t *p = p2p_get_path_stats(s, track->path_idx);
             if (p) {
                 p->total_packets_lost++;            // 增加路径丢包计数

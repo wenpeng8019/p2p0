@@ -1647,7 +1647,9 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             if (pair && pair->valid && PEER_ONLINE(pair)) {
                 check_addr_change(udp_fd, pair, from);
 
-                // 转发给对方
+                // 转发给对方：将 payload 中的 session_id 改写为对端的 session_id
+                nwrite_ll((uint8_t *)payload, pair->peer->session_id);
+
                 sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
                        (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
                 
@@ -1705,7 +1707,9 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         print("V:", LA_F("%s accepted, '%s' -> '%s', ses_id=%" PRIu64 "\n", LA_F6, 6),
               PROTO, pair->local_peer_id, pair->remote_peer_id, session_id);
 
-        // 转发给对方
+        // 转发给对方：将 payload 中的 session_id 改写为对端的 session_id
+        nwrite_ll((uint8_t *)payload, pair->peer->session_id);
+
         sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
                (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
 

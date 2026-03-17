@@ -429,14 +429,14 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         case NAT_PUNCHING:
 
             // 超时判断
-            if (now_ms - n->punch_start >= PUNCH_TIMEOUT_MS) {
+            if (tick_diff(now_ms, n->punch_start) >= PUNCH_TIMEOUT_MS) {
                 
                 // ICE 候选交换完成后
                 // + 只有在 ICE 候选交换完成后才判定打洞超时，否则可能还有新候选在路上，该状态值由信令层负责设置维护
                 if (s->remote_ice_done) {
 
                     print("W:", LA_F("%s: timeout after %" PRIu64 " ms (ICE done), switching to RELAY", LA_F155, 155),
-                          TASK_NAT, now_ms - n->punch_start);
+                          TASK_NAT, tick_diff(now_ms, n->punch_start));
 
                     n->state = NAT_RELAY;           // 标记进入中继模式，
                     n->rx_confirmed = false;        // 重置双向确认标志（在中继期间继续尝试打洞）
@@ -446,14 +446,14 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                     probe_trigger(s);
                 }
                 else print("V:", LA_F("%s: timeout but ICE exchange not done yet (%" PRIu64 " ms elapsed, mode=%d), waiting for more candidates", LA_F156, 156),
-                           TASK_NAT, now_ms - n->punch_start, s->signaling_mode);
+                           TASK_NAT, tick_diff(now_ms, n->punch_start), s->signaling_mode);
             }
 
             // 如果存在未完成的 nat 打洞
             int sent_cnt = 0;
             for (int i = 0; i < s->remote_cand_cnt; i++) {
                 if (s->remote_cands[i].last_punch_send_ms == 0 ||
-                    now_ms - s->remote_cands[i].last_punch_send_ms >= PUNCH_INTERVAL_MS) {
+                    tick_diff(now_ms, s->remote_cands[i].last_punch_send_ms) >= PUNCH_INTERVAL_MS) {
 
                     nat_punch(s, i);
                     sent_cnt++;
@@ -461,24 +461,24 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             }
             if (sent_cnt) {
                 print("V:", LA_F("%s: punching %d/%d candidates (elapsed: %" PRIu64 " ms)", LA_F129, 129),
-                      TASK_NAT, sent_cnt, s->remote_cand_cnt, now_ms - n->punch_start);
+                      TASK_NAT, sent_cnt, s->remote_cand_cnt, tick_diff(now_ms, n->punch_start));
             }
             break;
 
         case NAT_CONNECTED:
 
-            // 超时检查
-            if (n->last_recv_time > 0 && now_ms - n->last_recv_time >= PONG_TIMEOUT_MS) {
+            // 超时检查（last_recv_time 来自回调中的 P_tick_ms()，可能略大于 tick 的 now_ms，需防止 uint64 下溢）
+            if (n->last_recv_time > 0 && tick_diff(now_ms, n->last_recv_time) >= PONG_TIMEOUT_MS) {
 
                 print("W:", LA_F("%s: no response for %" PRIu64 " ms, connection lost", LA_F123, 123),
-                      TASK_NAT, now_ms - n->last_recv_time);
+                      TASK_NAT, tick_diff(now_ms, n->last_recv_time));
 
                 n->state = NAT_LOST;
                 break;
             }
 
             // 向所有可达候选发送保活包（复用 PUNCH 包）-
-            if (now_ms - n->last_send_time >= PING_INTERVAL_MS) {
+            if (tick_diff(now_ms, n->last_send_time) >= PING_INTERVAL_MS) {
 
                 int alive_cnt = 0;
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
@@ -562,7 +562,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             probe_tick(s, now_ms);
 
             // 中继模式下周期性尝试直连
-            if (now_ms - n->last_send_time >= PUNCH_INTERVAL_MS * 4) {
+            if (tick_diff(now_ms, n->last_send_time) >= PUNCH_INTERVAL_MS * 4) {
 
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
                     nat_send_punch(s, LA_W("retry", LA_W17, 17), &s->remote_cands[i], now_ms);

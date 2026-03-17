@@ -161,7 +161,7 @@ void probe_relay_on_udp_response(struct p2p_session *s) {
     if (ctx->mode.relay.step != PROBE_RELAY_STEP_UDP_PROBE) return;
 
     uint64_t now_ms = P_tick_ms();
-    uint64_t rtt    = now_ms - ctx->start_ms;
+    uint64_t rtt    = tick_diff(now_ms, ctx->start_ms);
 
     ctx->state = P2P_PROBE_STATE_SUCCESS;
     ctx->complete_ms = now_ms;
@@ -182,10 +182,9 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
             ctx->state == P2P_PROBE_STATE_PEER_TIMEOUT ||
             ctx->state == P2P_PROBE_STATE_OFFLINE) {
             
-            if (ctx->complete_ms == 0)
-                ctx->complete_ms = now_ms;
+            if (ctx->complete_ms == 0) ctx->complete_ms = now_ms;
 
-            if (now_ms - ctx->complete_ms >= PROBE_COMPACT_REPEAT_INTERVAL) {
+            if (tick_diff(now_ms, ctx->complete_ms) >= PROBE_COMPACT_REPEAT_INTERVAL) {
                 print("V:", LA_F("%s: restarting periodic check", LA_F134, 134), TASK_RELAY_PROBE);
                 ctx->state = P2P_PROBE_STATE_READY;
                 ctx->mode.compact.phase = PROBE_COMPACT_PHASE_INIT;
@@ -219,7 +218,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
         // 等待 echo 回复，超时检测
         case PROBE_COMPACT_PHASE_WAIT_ECHO:
 
-            if (now_ms - ctx->start_ms >= PROBE_COMPACT_TIMEOUT_MS) {
+            if (tick_diff(now_ms, ctx->start_ms) >= PROBE_COMPACT_TIMEOUT_MS) {
                 if (ctx->retries < PROBE_COMPACT_MAX_RETRIES) {
                     ctx->retries++;
                     ctx->mode.compact.phase = PROBE_COMPACT_PHASE_SENDING;
@@ -248,10 +247,9 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
             ctx->state == P2P_PROBE_STATE_PEER_TIMEOUT ||
             ctx->state == P2P_PROBE_STATE_OFFLINE) {
             
-            if (ctx->complete_ms == 0)
-                ctx->complete_ms = now_ms;
+            if (ctx->complete_ms == 0) ctx->complete_ms = now_ms;
 
-            if (now_ms - ctx->complete_ms >= PROBE_RELAY_REPEAT_INTERVAL) {
+            if (tick_diff(now_ms, ctx->complete_ms) >= PROBE_RELAY_REPEAT_INTERVAL) {
                 print("V:", LA_F("%s: restarting periodic check", LA_F134, 134), TASK_RELAY_PROBE);
                 ctx->state = P2P_PROBE_STATE_READY;
                 ctx->mode.relay.step = PROBE_RELAY_STEP_INIT;
@@ -285,7 +283,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
         case PROBE_RELAY_STEP_ADDR_EXCHANGE:
             // 步骤2：通过信令服务器交换新地址
             // （实际发送在 probe_relay_on_turn_success 进入此步骤时触发）
-            if (now_ms - ctx->start_ms >= PROBE_RELAY_EXCHANGE_TIMEOUT_MS) {
+            if (tick_diff(now_ms, ctx->start_ms) >= PROBE_RELAY_EXCHANGE_TIMEOUT_MS) {
                 if (ctx->retries < PROBE_RELAY_MAX_RETRIES) {
                     ctx->retries++;
                     print("W:", LA_F("%s: exchange timeout, retry %d/%d", LA_F102, 102), TASK_RELAY_PROBE,
@@ -301,7 +299,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
 
         case PROBE_RELAY_STEP_UDP_PROBE:
             // 步骤3：发送 UDP 探测包（通过 TURN 中继）
-            if (now_ms - ctx->start_ms >= PROBE_RELAY_UDP_TIMEOUT_MS) {
+            if (tick_diff(now_ms, ctx->start_ms) >= PROBE_RELAY_UDP_TIMEOUT_MS) {
                 if (ctx->retries < PROBE_RELAY_MAX_RETRIES) {
                     ctx->retries++;
                     print("W:", LA_F("%s: UDP timeout, retry %d/%d", LA_F79, 79), TASK_RELAY_PROBE,
