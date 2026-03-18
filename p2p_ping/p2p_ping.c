@@ -74,7 +74,7 @@ static char             g_buf_in[512] = {0};        /* 当前输入缓冲 */
 static int              g_len_in      = 0;          /* 输入缓冲长度 */
 static const char*      g_my_name = "me";           /* 本端显示名 */
 
-static void tui_println(const char* line) {
+static void tui_println(p2p_log_level_t level, const char* line) {
 
     assert(g_term_height);
 
@@ -85,7 +85,14 @@ static void tui_println(const char* line) {
     // > P_CLEAR_EOL 清除当前行（行首光标后面的）内容
     printf(P_CURSOR_SAVE);                                      /* save cursor */
     printf(P_CURSOR_ROW "\n\r" P_CLEAR_EOL, g_term_height - 1);                           
-    printf("%s", line);
+    switch (level) {
+        case P2P_LOG_LEVEL_FATAL: printf(P_PURPLE("%s"), line); break;
+        case P2P_LOG_LEVEL_ERROR: printf(P_RED("%s"), line); break;
+        case P2P_LOG_LEVEL_WARN:  printf(P_YELLOW("%s"), line); break;
+        case P2P_LOG_LEVEL_VERBOSE: printf(P_GRAY("%s"), line); break;
+        case P2P_LOG_LEVEL_DEBUG: printf(P_CYAN("%s"), line); break;
+        default: printf("%s", line); break;
+    }
     printf(P_CURSOR_RESTORE);
 
     // 将输入行内容重新绘制一遍，避免偶发的脏屏（如 ConPTY 双重回显）
@@ -97,14 +104,7 @@ static void tui_println(const char* line) {
 static void tui_log_callbak(p2p_log_level_t level, const char* tag, char *txt, int len) {
     (void)level;
     while (len > 0 && (txt[len - 1] == '\n' || txt[len - 1] == '\r')) txt[--len] = '\0';
-    switch (level) {
-        case P2P_LOG_LEVEL_FATAL: tui_println(P_PURPLE("%s\n")); break;
-        case P2P_LOG_LEVEL_ERROR: tui_println(P_RED("%s\n")); break;
-        case P2P_LOG_LEVEL_WARN:  tui_println(P_YELLOW("%s\n")); break;
-        case P2P_LOG_LEVEL_VERBOSE: tui_println(P_GRAY("%s\n")); break;
-        case P2P_LOG_LEVEL_DEBUG: tui_println(P_CYAN("%s\n")); break;
-        default: tui_println("%s\n"); break;
-    }
+    tui_println(level, txt);
 }
 
 static void tui_on_resize(void) {
@@ -172,7 +172,7 @@ static void tui_process_input(p2p_handle_t hdl) {
     if (!g_term_height) return;  /* 非交互模式（重定向/后台）跳过 stdin 读取 */
 
 #if P_WIN
-    tui_on_resize
+    tui_on_resize();
 #endif
 
     for (;;) {
@@ -186,7 +186,7 @@ static void tui_process_input(p2p_handle_t hdl) {
                 /* 在滚动区显示自己发出的消息 */
                 char line[576];
                 snprintf(line, sizeof(line), "%s: %s", g_my_name, g_buf_in);
-                tui_println(line);
+                tui_println(P2P_LOG_LEVEL_INFO, line);
 
                 /* 发送 */
                 p2p_send(hdl, g_buf_in, g_len_in);
@@ -411,7 +411,7 @@ int main(int argc, char *argv[]) {
                 print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F37, 37));
                 tui_init();
                 if (g_term_height)
-                    tui_println(LA_S("--- Connected ---", LA_S10, 10));
+                    tui_println(P2P_LOG_LEVEL_INFO, LA_S("--- Connected ---", LA_S10, 10));
             }
 
             /* 接收对端消息 */
@@ -423,7 +423,7 @@ int main(int argc, char *argv[]) {
                 char line[576];
                 const char *peer = target_name ? target_name : "peer";
                 snprintf(line, sizeof(line), "%s: %s", peer, data);
-                tui_println(line);
+                tui_println(P2P_LOG_LEVEL_INFO, line);
 
                 /* echo 模式：不对已是 echo 的消息再次回复（防循环）*/
                 if (g_echo_mode && strncmp(data, "[echo] ", 7) != 0) {
