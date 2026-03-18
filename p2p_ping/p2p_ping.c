@@ -362,14 +362,9 @@ int main(int argc, char *argv[]) {
 
         print("I:", LA_F("Waiting Debugger(%s) connecting...\n", LA_F43, 43), ARGS_debugger.str);
 
-        int timeout = 60 * 1000 * 1000; /* 等待 60 秒，期间每 250ms 检测一次 */
-        while (!instrument_option(0) && timeout > 0) {
-            print("X: waiting:%s", ARGS_debugger.str);
-            P_usleep(250 * 1000); timeout -= 250 * 1000;
-        }
-        if (instrument_option(0)) {
+        ret_t r = instrument_wait(my_name, ARGS_debugger.str, 60 * 1000);
+        if (r == E_NONE) {
             print("I:", LA_F("Debugger connected, resuming execution.\n", LA_F41, 41));
-            instrument_enable(0, false); /* 反向通知 debugger 已连接 */
         } else {
             print("W:", LA_F("Timeout waiting for debugger. Continuing without debugger.\n", LA_F42, 42));
         }

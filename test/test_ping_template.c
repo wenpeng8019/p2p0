@@ -6,31 +6,25 @@
  * ============================================================================
  * 
  * 1. 测试程序作为 debugger 客户端
- * 2. 通过 instrument 机制与 ping 子进程协同
- * 3. 使用 X 通道进行同步信令：
- *    - ping 输出 "X: waiting:xxx" 表示等待 debugger
- *    - debugger 设置 option[0]=true 表示已连接
- *    - ping 设置 option[0]=false 表示已恢复执行
+ * 2. 通过 instrument 内置 wait/continue 机制与 ping 子进程协同
  *
  * ============================================================================
  * 同步协议
  * ============================================================================
  *
- *   [Test Client]                    [p2p_ping --debugger test1]
+ *   [Test Client]                    [p2p_ping --debugger test_dbg]
  *        |                                    |
  *        |  instrument_listen(cb)             |
  *        |  fork/exec ping                    |
  *        |                                    |
- *        |                          print("X: waiting:test1")
- *        |  <--- X channel ---                |
- *        |  detect "waiting"                  |
+ *        |                          instrument_wait(name, "test_dbg", 60s)
+ *        |  <--- WAIT packet ---              |
+ *        |  cb(rid, CTRL, NULL, name)         |
  *        |                                    |
- *        |  instrument_enable(0, true)        |
- *        |  --- option[0]=true --->           |
- *        |                          instrument_option(0) == true
+ *        |  instrument_continue(name, "test_dbg")
+ *        |  --- CONTINUE packet --->          |
+ *        |                          instrument_wait returns E_NONE
  *        |                          print("Debugger connected")
- *        |                          instrument_enable(0, false)
- *        |  <--- option[0]=false ---          |
  *        |                                    |
  *        |  continue execution...             |
  *
@@ -72,6 +66,7 @@ static pid_t g_server_pid = 0;
 static volatile int g_ping_waiting = 0;     // ping 是否在等待
 static volatile int g_ping_resumed = 0;     // ping 是否已恢复
 static char g_debugger_name[64] = {0};      // 期望的 debugger 名字
+static char g_ping_name[64] = {0};          // ping 的 peer 名字（WAIT port）
 
 // 测试结果
 static int g_tests_passed = 0;
@@ -106,14 +101,11 @@ static void on_instrument_log(uint16_t rid, uint8_t chn, const char* tag, char *
         g_logs[idx].txt[sizeof(g_logs[idx].txt) - 1] = '\0';
     }
     
-    // X 通道：检测 "waiting:xxx" 消息
-    // print("X: waiting:%s", name) 会被解析为：
-    //   chn = 'X', tag = MOD_TAG, txt = "waiting:xxx"
-    if (chn == 'X' && txt && strncmp(txt, "waiting:", 8) == 0) {
-        const char *dbg_name = txt + 8;  // 跳过 "waiting:"
-        if (g_debugger_name[0] && strcmp(dbg_name, g_debugger_name) == 0) {
+    // WAIT 包检测：instrument_wait 广播的 WAIT 包通过 cb(rid, CTRL, NULL, port_name) 通知
+    if (tag == NULL && chn == INSTRUMENT_CTRL && txt) {
+        if (g_ping_name[0] && strcmp(txt, g_ping_name) == 0) {
             g_ping_waiting = 1;
-            printf("    [SYNC] Detected ping waiting for debugger '%s'\n", dbg_name);
+            printf("    [SYNC] Detected ping WAIT: '%s' (rid=%u)\n", txt, rid);
         }
     }
     
@@ -182,9 +174,11 @@ static int start_server(const char *server_path) {
 // 启动 ping 子进程（带 debugger 参数）
 static int start_ping(const char *name, const char *target, const char *debugger_name) {
     
-    // 记录期望的 debugger 名字
+    // 记录 debugger 名字和 ping 的 peer 名字
     strncpy(g_debugger_name, debugger_name, sizeof(g_debugger_name) - 1);
     g_debugger_name[sizeof(g_debugger_name) - 1] = '\0';
+    strncpy(g_ping_name, name, sizeof(g_ping_name) - 1);
+    g_ping_name[sizeof(g_ping_name) - 1] = '\0';
     g_ping_waiting = 0;
     g_ping_resumed = 0;
     
@@ -231,25 +225,14 @@ static int sync_with_ping(int timeout_ms) {
         return -1;
     }
     
-    // 发送同步信号：设置 option[0] = true
-    printf("    [SYNC] Sending sync signal (option[0]=true)...\n");
-    instrument_enable(0, true);
+    // 发送 CONTINUE 释放 ping 的 instrument_wait
+    printf("    [SYNC] Sending continue to '%s' from '%s'...\n", g_ping_name, g_debugger_name);
+    instrument_continue(g_ping_name, g_debugger_name);
     
-    // 等待 ping 确认（它会设置 option[0] = false）
-    elapsed = 0;
-    while (instrument_option(0) && elapsed < 2000) {
-        P_usleep(poll_interval * 1000);
-        elapsed += poll_interval;
-    }
-    
-    if (!instrument_option(0)) {
-        printf("    [SYNC] Ping resumed execution (option[0]=false)\n");
-        g_ping_resumed = 1;
-        return 0;
-    } else {
-        fprintf(stderr, "    [SYNC] Ping did not acknowledge sync\n");
-        return -1;
-    }
+    P_usleep(200 * 1000);  // 等待 ping 处理 CONTINUE 并恢复
+    printf("    [SYNC] Ping resumed execution\n");
+    g_ping_resumed = 1;
+    return 0;
 }
 
 // 停止 ping 子进程
