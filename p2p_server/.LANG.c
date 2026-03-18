@@ -11,8 +11,14 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_W1] = "disabled",  /* SID:1 */
     [LA_W2] = "enabled",  /* SID:2 */
     [LA_S3] = "[TCP] User list truncated (too many users)\n",  /* SID:3 */
+    [LA_S119] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:119 */
+    [LA_S120] = "Enable data relay support (COMPACT mode fallback)",  /* SID:120 */
+    [LA_S121] = "Enable MSG RPC support",  /* SID:121 */
+    [LA_S122] = "NAT type detection port (0=disabled)",  /* SID:122 */
     [LA_S4] = "Received shutdown signal, exiting gracefully...",  /* SID:4 */
     [LA_S5] = "Shutting down...\n",  /* SID:5 */
+    [LA_S123] = "Signaling server listen port (TCP+UDP)",  /* SID:123 */
+    [LA_S124] = "Use Chinese language",  /* SID:124 */
     [LA_F6] = "%s accepted, '%s' -> '%s', ses_id=%llu\n",  /* SID:6 */
     [LA_F7] = "%s accepted, peer='%s', ses_id=%llu\n",  /* SID:7 */
     [LA_F8] = "%s accepted, seq=%u, ses_id=%llu\n",  /* SID:8 */

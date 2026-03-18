@@ -20,7 +20,7 @@
 #include "LANG.h"
 #include "LANG.cn.h"
 
-// 命令行参数定义（使用 stdc ARGS 宏）
+// 命令行参数定义
 ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable DTLS (MbedTLS)", LA_S15, 15));
 ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S16, 16));
 ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S17, 17));
@@ -50,9 +50,6 @@ ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", L
 #define LOG_TAG_P       p2p_log_pre_tag
 
 #undef printf
-
-static int              g_echo_mode   = 0;          /* --echo 模式 */
-static bool             g_connected_once = false;   /* 首次连接已处理（非交互模式防重复打印）*/
 
 /* ============================================================================
  * TUI：固定输入行 + 滚动日志区
@@ -101,8 +98,8 @@ static void tui_println(p2p_log_level_t level, const char* line) {
 }
 
 /* stdc日志回调：重定向 print() 输出到 TUI */
-static void tui_log_callbak(p2p_log_level_t level, const char* tag, char *txt, int len) {
-    (void)level;
+static void tui_log_callback(p2p_log_level_t level, const char* tag, char *txt, int len) {
+    (void)tag;
     while (len > 0 && (txt[len - 1] == '\n' || txt[len - 1] == '\r')) txt[--len] = '\0';
     tui_println(level, txt);
 }
@@ -141,7 +138,8 @@ static void tui_init(void) {
     fflush(stdout);
 
     // 将日志输出重定向到 TUI 回调
-    p2p_log_callback = tui_log_callbak;
+    p2p_log_callback = tui_log_callback;
+    instrument_loggable((log_cb) tui_log_callback);
 }
 
 /* 退出 TUI，恢复终端状态 */
@@ -153,6 +151,7 @@ static void tui_cleanup(void) {
 
     // 清除日志回调，恢复默认输出（stdout）
     p2p_log_callback = (p2p_log_callback_t)-1;
+    instrument_loggable((log_cb)-1);
 
 #if !P_WIN
     signal(SIGWINCH, SIG_DFL);
@@ -204,8 +203,8 @@ static void tui_process_input(p2p_handle_t hdl) {
                 fflush(stdout);
             }
         }
-         else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7f
-                   && g_len_in < (int)sizeof(g_buf_in) - 1) {
+        else if ((unsigned char)c >= 0x20 && (unsigned char)c < 0x7f
+                 && g_len_in < (int)sizeof(g_buf_in) - 1) {
 
             /* 可打印 ASCII：追加并完整重绘输入行
              * 不用 putchar(c)，避免 ConPTY 双重回显 */
@@ -254,11 +253,12 @@ static void on_disconnected(p2p_handle_t s, void *userdata) {
     print("I:", LA_S("[EVENT] Connection closed", LA_S12, 12));
 }
 
+static bool             g_running;
+static bool             g_connected_once = false;
+
 /* SIGINT / SIGTERM：优雅退出（跨平台） */
-static void on_signal(int sig) {
-    (void)sig;
-    tui_cleanup();
-    exit(0);
+static void on_signal(int sig) { (void)sig;
+    g_running = false;
 }
 
 int main(int argc, char *argv[]) {
@@ -266,7 +266,7 @@ int main(int argc, char *argv[]) {
     /* 初始化语言系统 */
     LA_init();
 
-    // 设置语言钩子
+    /* 设置语言钩子 */
     P_lang = lang_cstr;
 
     /* 解析命令行参数 */
@@ -296,9 +296,6 @@ int main(int argc, char *argv[]) {
     }
 
     p2p_log_pre_tag = true;  /* 日志前置标签，显示在日志内容前面（而非行首） */
-
-    /* Echo 模式 */
-    g_echo_mode = ARGS_echo.i64 ? 1 : 0;
 
     /* 名称 */
     const char *my_name = ARGS_name.str ? ARGS_name.str : "unnamed";
@@ -349,6 +346,7 @@ int main(int argc, char *argv[]) {
 
     #ifndef NDEBUG
     p2p_instrument_base = 10;
+    instrument_loggable((log_cb)-1);
     #endif
 
     if (ARGS_server.str)
@@ -383,7 +381,7 @@ int main(int argc, char *argv[]) {
     }
 
     // if (ARGS_disable_lan.i64) print("I:", LA_F("[TEST] LAN shortcut disabled - forcing NAT punch\n", LA_F39, 39));
-    if (g_echo_mode)          print("I:", LA_F("[Chat] Echo mode enabled: received messages will be echoed back.\n", LA_F36, 36));
+    if (ARGS_echo.i64) print("I:", LA_F("[Chat] Echo mode enabled: received messages will be echoed back.\n", LA_F36, 36));
 
     if (p2p_connect(hdl, target_name) < 0) {
         print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
@@ -397,7 +395,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, on_signal);
 
     /* ---- 主循环 ---- */
-    for(;;) {
+    while(g_running) {
 
         p2p_update(hdl);
         log_state_change(hdl);
@@ -424,7 +422,7 @@ int main(int argc, char *argv[]) {
                 tui_println(P2P_LOG_LEVEL_INFO, line);
 
                 /* echo 模式：不对已是 echo 的消息再次回复（防循环）*/
-                if (g_echo_mode && strncmp(data, "[echo] ", 7) != 0) {
+                if (ARGS_echo.i64 && strncmp(data, "[echo] ", 7) != 0) {
                     char echo_msg[520];
                     snprintf(echo_msg, sizeof(echo_msg), "[echo] %s", data);
                     p2p_send(hdl, echo_msg, (int)strlen(echo_msg));

@@ -161,6 +161,14 @@ enum {
     LA_F117,  /* "probe UDP bind failed(%d)\n" (%d)  [server.c] */
     LA_F118,  /* "select failed(%d)\n" (%d)  [server.c] */
 
+    /* Strings (LA_S) */
+    LA_S119,  /* "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)"  [server.c] */
+    LA_S120,  /* "Enable data relay support (COMPACT mode fallback)"  [server.c] */
+    LA_S121,  /* "Enable MSG RPC support"  [server.c] */
+    LA_S122,  /* "NAT type detection port (0=disabled)"  [server.c] */
+    LA_S123,  /* "Signaling server listen port (TCP+UDP)"  [server.c] */
+    LA_S124,  /* "Use Chinese language"  [server.c] */
+
     LA_NUM
 };
 

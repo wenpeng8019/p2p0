@@ -33,25 +33,24 @@
  */
 
 #define MOD_TAG "P2P0_SERVER"
-#include <stdc.h>
-#include <signal.h>    /* signal() */
 
 #include <p2p.h>
-#include <p2pp.h>
 #include "../src/p2p_common.h"
+
 #include "LANG.h"
+#include "LANG.cn.h"
+
+#include <signal.h>    /* signal() */
 #include "uthash.h"
 
 // 命令行参数定义
-ARGS_I(false, port,       'p', "port",       "Signaling server listen port (TCP+UDP)");
-ARGS_I(false, probe_port, 'P', "probe-port", "NAT type detection port (0=disabled)");
-ARGS_B(false, relay,      'r', "relay",      "Enable data relay support (COMPACT mode fallback)");
-ARGS_B(false, msg,        'm', "msg",        "Enable MSG RPC support");
-ARGS_B(false, cn,         0,   "cn",         "Use Chinese language");
+ARGS_I(false, port,       'p', "port",       LA_CS("Signaling server listen port (TCP+UDP)", LA_S123, 123));
+ARGS_I(false, probe_port, 'P', "probe-port", LA_CS("NAT type detection port (0=disabled)", LA_S122, 122));
+ARGS_B(false, relay,      'r', "relay",      LA_CS("Enable data relay support (COMPACT mode fallback)", LA_S120, 120));
+ARGS_B(false, msg,        'm', "msg",        LA_CS("Enable MSG RPC support", LA_S121, 121));
 
-// static p2p_language_t s_lang = P2P_LANG_EN;
-// static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }
-// ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", LA_S27, 27));
+static void cb_cn(const char* argv) { (void)argv;  lang_cn(); }
+ARGS_PRE(cb_cn, cn,         0,   "cn",       LA_CS("Use Chinese language", LA_S124, 124));
 
 #define DEFAULT_PORT                    9333
 
@@ -1023,8 +1022,8 @@ static void retry_info0_pending(sock_t udp_fd, uint64_t now) {
 // MSG RPC 链表管理和处理函数
 
 // 缓存响应数据到 pair->resp_* 并从 REQ 链表移到 RESP 链表
-static void transition_to_resp_pending(sock_t udp_fd, compact_pair_t *pair, uint64_t now,
-                                       uint8_t flags, uint8_t msg, const uint8_t *data, int len);
+static void transition_to_resp_pending(sock_t udp_fd, compact_pair_t *requester, uint64_t now,
+                                       uint8_t flags, uint8_t code, const uint8_t *data, int len);
 
 // 从 RPC 待确认链表移除
 static void remove_rpc_pending(compact_pair_t *pair) {
@@ -1440,7 +1439,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         if (remote_idx >= 0) {
 
-            compact_pair_t *remote = &g_compact_pairs[remote_idx];
+            remote = &g_compact_pairs[remote_idx];
 
             // 首次匹配成功
             if (local->peer == NULL || remote->peer == NULL) {
@@ -1717,10 +1716,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
                (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
 
-        if (hdr->type == SIG_PKT_PEER_INFO) {
-            print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", LA_F75, 75),
-                   PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
-        } else if (hdr->type == P2P_PKT_RELAY_DATA || hdr->type == P2P_PKT_RELAY_CRYPTO) {
+        if (hdr->type == SIG_PKT_PEER_INFO || hdr->type == P2P_PKT_RELAY_DATA || hdr->type == P2P_PKT_RELAY_CRYPTO) {
             print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", LA_F75, 75),
                    PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
         } else {
@@ -1994,7 +1990,7 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
 
         print("W:", LA_F("Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n", LA_F71, 71), 
                g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id,
-               (now - g_compact_pairs[i].last_active) / 1000.0);
+               tick_diff(now, g_compact_pairs[i].last_active) / 1000.0);
         
         // 向对端发送 PEER_OFF 通知（如果对端在线且有 session_id）
         if (PEER_ONLINE(&g_compact_pairs[i]) && 
@@ -2076,7 +2072,7 @@ static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct socka
 #define MOD_TAG "p2p0d"
 
 // 信号处理函数
-#ifdef _WIN32
+#if P_WIN
 BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
     switch (ctrl_type) {
         case CTRL_C_EVENT:
@@ -2100,23 +2096,27 @@ void signal_handler(int signum) {
 
 int main(int argc, char *argv[]) {
 
-    LA_init();  /* 注册默认英文字符串表 */
+    // 初始化语言系统
+    LA_init();
+
+    // 设置语言钩子
+    P_lang = lang_cstr;
 
     // 设置命令行帮助信息
     ARGS_usage(NULL,
-        "Description:\n"
-        "  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n"
-        "  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n"
-        "  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n"
-        "\n"
-        "Examples:\n"
-        "  $0                              # Default: port 9333, no probe, no relay\n"
-        "  $0 -p 8888                      # Listen on port 8888\n"
-        "  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n"
-        "  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n"
-        "  $0 --cn -p 8888                 # Chinese language\n"
-        "\n"
-        "Note: Run without arguments to use default configuration (port 9333)");
+               LA_S("Description:\n"
+                    "  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n"
+                    "  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n"
+                    "  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n"
+                    "\n"
+                    "Examples:\n"
+                    "  $0                              # Default: port 9333, no probe, no relay\n"
+                    "  $0 -p 8888                      # Listen on port 8888\n"
+                    "  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n"
+                    "  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n"
+                    "  $0 --cn -p 8888                 # Chinese language\n"
+                    "\n"
+                    "Note: Run without arguments to use default configuration (port 9333)", 0, 0));
 
     // 解析命令行参数（如果无参数，使用默认配置不显示帮助）
     if (argc > 1) {
@@ -2127,12 +2127,6 @@ int main(int argc, char *argv[]) {
             &ARGS_DEF_msg,
             &ARGS_DEF_cn,
             NULL);
-
-        // 处理中文语言
-        if (ARGS_cn.i64) {
-            FILE *fp = fopen("lang.zh", "r");
-            if (fp) { lang_load_fp(LA_RID, fp); fclose(fp); }
-        }
     }
 
     // 获取参数值（设置默认值）
@@ -2167,7 +2161,7 @@ int main(int argc, char *argv[]) {
           ARGS_relay.i64 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
 
     // 注册信号处理
-#ifdef _WIN32
+#if P_WIN
     if (!SetConsoleCtrlHandler(console_ctrl_handler, TRUE)) {
         print("W:", "%s", LA_S("Failed to set console ctrl handler\n", 0));
     }
@@ -2271,7 +2265,7 @@ int main(int argc, char *argv[]) {
         FD_SET(listen_fd, &read_fds);
         FD_SET(udp_fd, &read_fds);
         if (probe_fd != P_INVALID_SOCKET) FD_SET(probe_fd, &read_fds);
-#ifndef _WIN32
+#if !P_WIN
         max_fd = (int)((listen_fd > udp_fd) ? listen_fd : udp_fd);
         if (probe_fd != P_INVALID_SOCKET && (int)probe_fd > max_fd) max_fd = (int)probe_fd;
 #endif
@@ -2279,7 +2273,7 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < MAX_PEERS; i++) {
             if (g_relay_clients[i].valid && g_relay_clients[i].fd != P_INVALID_SOCKET) {
                 FD_SET(g_relay_clients[i].fd, &read_fds);
-#ifndef _WIN32
+#if !P_WIN
                 if ((int)g_relay_clients[i].fd > max_fd) max_fd = (int)g_relay_clients[i].fd;
 #endif
             }
