@@ -311,12 +311,12 @@ static int sync_client(ping_client_t *client) {
     // 等待客户端确认（设置 option[0] = false）
     int elapsed = 0;
     const int poll_interval = 50;
-    while (instrument_enabled(0) && elapsed < 2000) {
+    while (instrument_option(0) && elapsed < 2000) {
         P_usleep(poll_interval * 1000);
         elapsed += poll_interval;
     }
     
-    if (!instrument_enabled(0)) {
+    if (!instrument_option(0)) {
         printf("    [SYNC] %s resumed\n", client->name);
         client->resumed = 1;
         return 0;
@@ -537,7 +537,7 @@ int main(int argc, char *argv[]) {
     
     // 初始化 instrument 监听
     instrument_local(0);
-    if (instrument_listen(on_instrument_log, 0) != E_NONE) {
+    if (instrument_listen(on_instrument_log) != E_NONE) {
         fprintf(stderr, "Failed to start instrument listener\n");
         return 1;
     }

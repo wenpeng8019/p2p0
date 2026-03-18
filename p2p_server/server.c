@@ -49,6 +49,10 @@ ARGS_B(false, relay,      'r', "relay",      "Enable data relay support (COMPACT
 ARGS_B(false, msg,        'm', "msg",        "Enable MSG RPC support");
 ARGS_B(false, cn,         0,   "cn",         "Use Chinese language");
 
+// static p2p_language_t s_lang = P2P_LANG_EN;
+// static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }
+// ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", LA_S27, 27));
+
 #define DEFAULT_PORT                    9333
 
 // cleanup 过期配对/客户端的时间间隔（秒）

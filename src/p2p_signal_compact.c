@@ -74,11 +74,11 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
         print("I:", LA_F("%s: peer_info0 srflx cand[%d]<%s:%d>%s\n", LA_F133, 133),
                         TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                        instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
-                        instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
+                        instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
+                        instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
 
-        if (instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF)) --s->remote_cand_cnt;
-        else if (!instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
+        if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) --s->remote_cand_cnt;
+        else if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
 
             if (nat_punch(s, 0) != E_NONE) {
                 print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
@@ -89,7 +89,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         --cand_cnt; offset += (int)sizeof(p2p_candidate_t);
     }
     // 如果 peer_info0 以外的其他 info 包先到达，则需要保留 cand[0] 给对方（在 info0 中的）的公网地址
-    else if (s->remote_cand_cnt == 0 && !instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF)) {
+    else if (s->remote_cand_cnt == 0 && !instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) {
         memset(&s->remote_cands[0], 0, sizeof(p2p_remote_candidate_entry_t));
         s->remote_cand_cnt = 1;
     }
@@ -121,9 +121,9 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
             print("I:", LA_F("%s: remote relay cand[%d]<%s:%d>%s\n", LA_F382, 382),
                   TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                  instrument_enabled(P2P_INST_OPT_RELAY_OFF) ? ", ignored due to instrument" : "");
+                  instrument_option(P2P_INST_OPT_RELAY_OFF) ? ", ignored due to instrument" : "");
 
-            if (instrument_enabled(P2P_INST_OPT_RELAY_OFF)) --s->remote_cand_cnt;
+            if (instrument_option(P2P_INST_OPT_RELAY_OFF)) --s->remote_cand_cnt;
 
             continue;
         }
@@ -131,29 +131,29 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
             print("I:", LA_F("%s: remote srflx cand[%d]<%s:%d>%s\n", LA_F383, 383),
                         TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                        instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
-                        instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
+                        instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
+                        instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
 
-            if (instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF)) {
+            if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) {
                 --s->remote_cand_cnt;
                 continue;
             }
 
-            if (instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF)) continue;
+            if (instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) continue;
         }
         else if (c->type == P2P_CAND_HOST) {
 
             print("I:", LA_F("%s: remote host cand[%d]<%s:%d>%s\n", LA_F381, 381),
                   TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                     instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF) ? ", ignored due to instrument" : 
-                     instrument_enabled(P2P_INST_OPT_HOST_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
+                     instrument_option(P2P_INST_OPT_ICE_HOST_OFF) ? ", ignored due to instrument" : 
+                     instrument_option(P2P_INST_OPT_HOST_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
 
-            if (instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF)) {
+            if (instrument_option(P2P_INST_OPT_ICE_HOST_OFF)) {
                 --s->remote_cand_cnt;
                 continue;
             }
 
-            if (instrument_enabled(P2P_INST_OPT_HOST_PUNCH_OFF)) continue;
+            if (instrument_option(P2P_INST_OPT_HOST_PUNCH_OFF)) continue;
         }
         else {
 
@@ -1022,7 +1022,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                 return;
             }
 
-            if (instrument_enabled(P2P_INST_OPT_ICE_SRFLX_OFF)) {
+            if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) {
                 print("I:", LA_F("%s NOTIFY: ignored srflx addr update due to instument\n", LA_F379, 379), PROTO);
                 return;
             }
@@ -1049,7 +1049,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                 }
 
                 // 立即打洞新地址（nat_on_punch 收到回复后会自动注册新路径）
-                if (!instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
+                if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
                     if (nat_punch(s, 0) != E_NONE) {
                         print("E:", LA_F("Failed to send punch packet for new peer addr\n", LA_F218, 218));
                     }
@@ -1940,7 +1940,7 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
 
             // 重新发起 TURN Allocate（上一轮分配已随 ICE 重置失效）
             // todo 为啥 ICE 重置会失效，另外 turn 的生命周期管理设计？
-            if (!instrument_enabled(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
+            if (!instrument_option(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
                 if (p2p_turn_allocate(s) == 0) {
                     print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F286, 286), s->cfg.turn_server);
                 }

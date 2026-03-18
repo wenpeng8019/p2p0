@@ -455,7 +455,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      * Host Candidate 是本地网卡的 IP 地址。
      * 在同一局域网内的对端可以直接使用此地址通信。
      */
-    if (!instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF)) {
+    if (!instrument_option(P2P_INST_OPT_ICE_HOST_OFF)) {
 
         /* 获取本地端口 */
         struct sockaddr_in loc;
@@ -544,7 +544,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      * Server Reflexive Candidate 是通过 STUN 服务器发现的公网地址。
      * 用于穿透 NAT，让位于不同 NAT 后的对端能够通信。
      */
-    if (!instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF) && s->cfg.stun_server) {
+    if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF) && s->cfg.stun_server) {
 
         uint8_t stun_buf[256];
         int slen = p2p_stun_build_binding_request(stun_buf, sizeof(stun_buf), NULL, NULL, NULL);
@@ -569,7 +569,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      * Relay Candidate 是通过 TURN 服务器分配的中继地址。
      * 当直连和 STUN 穿透都失败时，使用中继作为最后的备选。
      */
-    if (!instrument_enabled(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
+    if (!instrument_option(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
         if (p2p_turn_allocate(s) == 0) {
             print("I:", LA_F("Requested Relay Candidate from %s", LA_F285, 285), s->cfg.turn_server);
         }
@@ -786,7 +786,7 @@ void p2p_ice_tick(p2p_session_t *s, uint64_t now_ms) {
     /* 等待有远端候选再开始 */
     if (s->remote_cand_cnt <= 0) return;
 
-    if (!instrument_enabled(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
+    if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
         if (s->nat.state == NAT_INIT) {
             print("I:", LA_F("starting NAT punch(Host candidate %d)", LA_F375, 375), s->remote_cand_cnt);
             nat_punch(s, -1);

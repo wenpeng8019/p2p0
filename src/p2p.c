@@ -21,6 +21,10 @@ p2p_log_level_t      p2p_log_level = P2P_LOG_LEVEL_INFO;
 #endif
 bool                 p2p_log_pre_tag = false;
 
+#ifndef NDEBUG
+uint16_t             p2p_instrument_base = 0;
+#endif
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /* ---- 信令重发配置 ---- */
@@ -151,7 +155,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
             return NULL;
         }
 
-        instrument_listen(p2p_instrument, cfg->instrument_base);
+        instrument_listen(p2p_instrument);
     }
 
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
@@ -448,7 +452,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             getsockname(s->sock, (struct sockaddr *)&loc, &len);
 
             // 将 route 中的本地地址转换为候选列表
-            if (!instrument_enabled(P2P_INST_OPT_ICE_HOST_OFF)) {
+            if (!instrument_option(P2P_INST_OPT_ICE_HOST_OFF)) {
                 for (int i = 0; i < s->route.addr_count; i++) {
                     int idx = p2p_cand_push_local(s);
                     if (idx < 0) {
@@ -479,7 +483,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             }
 
             // TURN：异步收集 Relay 候选（响应到达后 trickle 发送给对端）
-            if (!instrument_enabled(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
+            if (!instrument_option(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
                 if (p2p_turn_allocate(s) == 0) {
                     print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F286, 286), s->cfg.turn_server);
                 }

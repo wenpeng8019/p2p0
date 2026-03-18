@@ -346,7 +346,10 @@ int main(int argc, char *argv[]) {
     cfg.bind_port       = 0;
     cfg.on_disconnected = on_disconnected;
     cfg.userdata        = NULL;
-    cfg.instrument_base = 10;
+
+    #ifndef NDEBUG
+    p2p_instrument_base = 10;
+    #endif
 
     if (ARGS_server.str)
         cfg.signaling_mode = cfg.use_ice ? P2P_SIGNALING_MODE_RELAY : P2P_SIGNALING_MODE_COMPACT;
@@ -360,11 +363,11 @@ int main(int argc, char *argv[]) {
         print("I:", LA_F("Waiting Debugger(%s) connecting...\n", LA_F43, 43), ARGS_debugger.str);
 
         int timeout = 60 * 1000 * 1000; /* 等待 60 秒，期间每 250ms 检测一次 */
-        while (!instrument_enabled(0) && timeout > 0) {
+        while (!instrument_option(0) && timeout > 0) {
             print("X: waiting:%s", ARGS_debugger.str);
             P_usleep(250 * 1000); timeout -= 250 * 1000;
         }
-        if (instrument_enabled(0)) {
+        if (instrument_option(0)) {
             print("I:", LA_F("Debugger connected, resuming execution.\n", LA_F41, 41));
             instrument_enable(0, false); /* 反向通知 debugger 已连接 */
         } else {

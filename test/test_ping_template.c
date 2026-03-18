@@ -18,7 +18,7 @@
  *
  *   [Test Client]                    [p2p_ping --debugger test1]
  *        |                                    |
- *        |  instrument_listen(cb, 0)          |
+ *        |  instrument_listen(cb)             |
  *        |  fork/exec ping                    |
  *        |                                    |
  *        |                          print("X: waiting:test1")
@@ -27,7 +27,7 @@
  *        |                                    |
  *        |  instrument_enable(0, true)        |
  *        |  --- option[0]=true --->           |
- *        |                          instrument_enabled(0) == true
+ *        |                          instrument_option(0) == true
  *        |                          print("Debugger connected")
  *        |                          instrument_enable(0, false)
  *        |  <--- option[0]=false ---          |
@@ -237,12 +237,12 @@ static int sync_with_ping(int timeout_ms) {
     
     // 等待 ping 确认（它会设置 option[0] = false）
     elapsed = 0;
-    while (instrument_enabled(0) && elapsed < 2000) {
+    while (instrument_option(0) && elapsed < 2000) {
         P_usleep(poll_interval * 1000);
         elapsed += poll_interval;
     }
     
-    if (!instrument_enabled(0)) {
+    if (!instrument_option(0)) {
         printf("    [SYNC] Ping resumed execution (option[0]=false)\n");
         g_ping_resumed = 1;
         return 0;
@@ -373,7 +373,7 @@ int main(int argc, char *argv[]) {
     
     // 初始化 instrument 监听
     instrument_local(0);
-    if (instrument_listen(on_instrument_log, 0) != E_NONE) {
+    if (instrument_listen(on_instrument_log) != E_NONE) {
         fprintf(stderr, "Failed to start instrument listener\n");
         return 1;
     }

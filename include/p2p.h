@@ -250,14 +250,14 @@ typedef struct {
     p2p_on_response_fn      on_response;                // MSG RPC 应答到达（A 端，服务器可选）
     void*                   userdata;                   // 用户自定义数据，传递给回调函数
 
-    /* 测试选项 */
-    uint16_t                instrument_base;            // instrument 选项基址（0-65535），用于设定该模块的选项索引的起始值，避免与其他模块冲突
-
 } p2p_config_t;
 
 extern p2p_log_callback_t   p2p_log_callback;
 extern p2p_log_level_t      p2p_log_level;
 extern bool                 p2p_log_pre_tag;
+#ifndef NDEBUG
+extern uint16_t             p2p_instrument_base;        // instrument 选项基址（0-65535），用于设定该模块的选项索引的起始值，避免与其他模块冲突
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
