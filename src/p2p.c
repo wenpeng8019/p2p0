@@ -155,7 +155,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
             return NULL;
         }
 
-        instrument_listen(p2p_instrument);
+        instrument_listen(p2p_instrument, NULL);
     }
 
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
