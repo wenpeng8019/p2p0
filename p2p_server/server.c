@@ -1322,29 +1322,17 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 if (!g_compact_pairs[i].valid) { 
                     g_compact_pairs[i].valid = true;
                     
-                    // 在首次注册时分配 session_id（后续 MSG_REQ 直接使用）
-                    g_compact_pairs[i].instance_id = instance_id;
-                    g_compact_pairs[i].session_id = generate_session_id();
-                    
                     memcpy(g_compact_pairs[i].local_peer_id, local_peer_id, P2P_PEER_ID_MAX);
                     memcpy(g_compact_pairs[i].remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX);
+                    g_compact_pairs[i].instance_id = instance_id;
                     g_compact_pairs[i].peer = NULL;
-                    g_compact_pairs[i].info0_acked = 0;
-                    g_compact_pairs[i].addr_notify_seq = 0;
-                    g_compact_pairs[i].info0_base_index = 0;
-                    g_compact_pairs[i].info0_sent_time = 0;
-                    g_compact_pairs[i].info0_retry = 0;
-                    g_compact_pairs[i].info0_pending_next = NULL;
-                    
-                    // MSG RPC 初始化
-                    g_compact_pairs[i].rpc_responding = false;
-                    g_compact_pairs[i].rpc_last_sid = 0;
-                    g_compact_pairs[i].rpc_data_len = 0;
-                    g_compact_pairs[i].rpc_pending_next = NULL;
-                    
+
                     // 添加到 peer_key/session 索引
                     HASH_ADD(hh_peer, g_pairs_by_peer, local_peer_id, P2P_PEER_ID_MAX * 2, &g_compact_pairs[i]);
-                    HASH_ADD(hh, g_pairs_by_session, session_id, sizeof(uint64_t), &g_compact_pairs[i]);
+
+                    g_compact_pairs[i].info0_pending_next = NULL;
+                    g_compact_pairs[i].rpc_pending_next = NULL;
+
                     break;
                 }
             }
@@ -1357,47 +1345,37 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         compact_pair_t *local = &g_compact_pairs[i];
 
         // 如果是 instance_id 变更（客户端重启），必须重置旧会话
-        if (existing) {
+        if (existing) { assert(local->instance_id != instance_id);
 
             print("I:", LA_F("%s from '%.*s': new instance(old=%u new=%u), resetting session\n", LA_F12, 12),
                    PROTO, P2P_PEER_ID_MAX, local_peer_id, local->instance_id, instance_id);
 
             // 通知对端下线（如果对端在线且有 session_id）
-            if (PEER_ONLINE(local)
-                && local->peer->session_id != 0) {
-
+            if (PEER_ONLINE(local)) {
                 send_peer_off(udp_fd, local->peer, "reregister");
             }
 
             // 从待确认链表移除
             if (local->info0_pending_next) remove_info0_pending(local);
 
-            // 从 session_id 索引移除
-            if (local->session_id != 0) {
-                HASH_DELETE(hh, g_pairs_by_session, local);
-            }
-
-            // 重置状态（保留 valid=true 和 hh_peer 不变）
-            local->instance_id = instance_id;
-            local->session_id = generate_session_id();
-            HASH_ADD(hh, g_pairs_by_session, session_id, sizeof(uint64_t), local);
-            local->peer = NULL;
-            local->info0_acked = 0;
-            local->addr_notify_seq = 0;
-            local->info0_base_index = 0;
-            local->info0_retry = 0;
-            local->info0_sent_time = 0;
-            
             // 清理 RPC pending 状态（可能有旧会话的 RPC 正在重传）
-            if (local->rpc_pending_next) {
-                remove_rpc_pending(local);
-            }
-            local->rpc_responding = false;
-            local->rpc_last_sid = 0;
-            local->rpc_data_len = 0;
+            if (local->rpc_pending_next) remove_rpc_pending(local);
+
+            // 从 session_id 索引移除
+            if (local->session_id != 0) HASH_DELETE(hh, g_pairs_by_session, local);
         }
-        local->instance_id = instance_id;
         local->addr = *from;
+        local->instance_id = instance_id;
+        local->peer = NULL;
+
+        // 分配 session id
+        local->session_id = generate_session_id();
+        HASH_ADD(hh, g_pairs_by_session, session_id, sizeof(uint64_t), local);
+
+        // 重置 session 数据
+        local->addr_notify_seq = 0;
+        local->info0_acked = 0;
+        local->rpc_last_sid = 0;
 
         // 记录本端的候选列表
         local->candidate_count = candidate_count;
@@ -1438,14 +1416,15 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 if (remote->info0_pending_next) remove_info0_pending(remote);
                 if (remote->rpc_pending_next) remove_rpc_pending(remote);
 
-                // 重置 remote 的 session（生成新 session_id，客户端收到后会自动重置）
+                // 重置 remote 的 session id
                 HASH_DELETE(hh, g_pairs_by_session, remote);
                 remote->session_id = generate_session_id();
                 HASH_ADD(hh, g_pairs_by_session, session_id, sizeof(uint64_t), remote);
 
+                // 重置 session 数据
+                remote->addr_notify_seq = 0;
+                remote->info0_acked = 0;
                 remote->rpc_last_sid = 0;
-                remote->rpc_responding = false;
-                remote->rpc_data_len = 0;
 
                 remote->peer = NULL;
             }
@@ -1458,17 +1437,6 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
                 // session_id 已在 REGISTER 阶段分配
                 assert(local->session_id != 0 && remote->session_id != 0);
-
-                local->info0_acked = 0;
-                local->addr_notify_seq = 0;
-                local->info0_base_index = 0;
-                local->info0_retry = 0;
-                local->info0_sent_time = 0;
-                remote->info0_acked = 0;
-                remote->addr_notify_seq = 0;
-                remote->info0_base_index = 0;
-                remote->info0_retry = 0;
-                remote->info0_sent_time = 0;
 
                 // 向双方发送服务器维护的首个 PEER_INFO(seq=0, base_index=0)
                 send_peer_info_seq0(udp_fd, local, 0);
@@ -1505,6 +1473,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         HASH_FIND(hh_peer, g_pairs_by_peer, payload, P2P_PEER_ID_MAX * 2, pair);
         
         if (pair && pair->valid) {
+
             char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
             char remote_peer_id[P2P_PEER_ID_MAX + 1] = {0};
             memcpy(local_peer_id, pair->local_peer_id, P2P_PEER_ID_MAX);
@@ -1513,38 +1482,22 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             print("V:", LA_F("%s: accepted, releasing slot for '%s' -> '%s'\n", LA_F18, 18),
                    PROTO, local_peer_id, remote_peer_id);
 
-            // 向对端发送 PEER_OFF 通知（如果对端在线且有 session_id）
-            if (PEER_ONLINE(pair) && pair->peer->session_id != 0) {
+            // 向对端发送 PEER_OFF 通知
+            if (PEER_ONLINE(pair)) {
                 send_peer_off(udp_fd, pair->peer, "unregister");
             }
             
             // 从待确认链表移除
-            if (pair->info0_pending_next) {
-                remove_info0_pending(pair);
-            }
+            if (pair->info0_pending_next) remove_info0_pending(pair);
 
             // 从 MSG RPC 链表移除
-            if (pair->rpc_pending_next) {
-                remove_rpc_pending(pair);
-            }
+            if (pair->rpc_pending_next) remove_rpc_pending(pair);
 
             // 从哈希表删除
-            if (pair->session_id != 0) {
-                HASH_DELETE(hh, g_pairs_by_session, pair);
-            }
+            HASH_DELETE(hh, g_pairs_by_session, pair);
             HASH_DELETE(hh_peer, g_pairs_by_peer, pair);
 
             pair->valid = false;
-            pair->session_id = 0;
-            pair->peer = NULL;
-            pair->addr_notify_seq = 0;
-            pair->info0_base_index = 0;
-            pair->info0_retry = 0;
-            pair->info0_sent_time = 0;
-            pair->rpc_responding = false;
-            pair->rpc_last_sid = 0;
-            pair->rpc_data_len = 0;  // 添加数据长度清零
-            pair->rpc_pending_next = NULL;
         }
     } break;
 
