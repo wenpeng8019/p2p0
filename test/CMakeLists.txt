@@ -110,6 +110,26 @@ target_include_directories(test_ping2_template PRIVATE
 )
 target_link_libraries(test_ping2_template stdc ${TEST_PLATFORM_LIBS})
 
+# P2P Ping 消息互发测试（基于 instrument req/resp）
+add_executable(test_ping_msg
+    test_ping_msg.c
+)
+target_include_directories(test_ping_msg PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_msg stdc ${TEST_PLATFORM_LIBS})
+
+# P2P 重连测试集合（双端崩溃重连 + 单端崩溃重连）
+add_executable(test_ping_reconnect
+    test_ping_reconnect.c
+)
+target_include_directories(test_ping_reconnect PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_reconnect stdc ${TEST_PLATFORM_LIBS})
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)

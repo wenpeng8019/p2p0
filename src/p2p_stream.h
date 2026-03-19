@@ -57,13 +57,13 @@ typedef struct stream {
 } stream_t;
 
 /* Forward declarations */
-struct reliable;
+struct p2p_session;
 
 void stream_init(struct stream *st, int nagle);
 int  stream_write(struct stream *st, const void *buf, int len);
 int  stream_read(struct stream *st, void *buf, int len);
-int  stream_flush_to_reliable(struct stream *st, struct reliable *r);
-int  stream_feed_from_reliable(struct stream *st, struct reliable *r);
+int  stream_flush_to_reliable(struct p2p_session *s);
+int  stream_feed_from_reliable(struct p2p_session *s);
 
 ///////////////////////////////////////////////////////////////////////////////
 

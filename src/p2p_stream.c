@@ -244,11 +244,11 @@ int stream_read(stream_t *st, void *buf, int len) {
  *      c. 发送到可靠层
  *   4. 更新流偏移量
  *
- * @param st  流上下文
- * @param r   可靠传输层上下文
+ * @param s   会话对象
  * @return    实际发送的字节数
  */
-int stream_flush_to_reliable(stream_t *st, reliable_t *r) {
+int stream_flush_to_reliable(struct p2p_session *s) {
+    stream_t *st = &s->stream;
 
     int total_queued = ring_used(&st->send_ring);
     if (total_queued == 0) return 0;
@@ -261,7 +261,7 @@ int stream_flush_to_reliable(stream_t *st, reliable_t *r) {
     int flushed = 0;    /* 已发送字节数 */
 
     /* 循环发送，直到缓冲区空或窗口满 */
-    while (ring_used(&st->send_ring) > 0 && reliable_window_avail(r) > 0) {
+    while (ring_used(&st->send_ring) > 0 && reliable_window_avail(s) > 0) {
         int remaining = ring_used(&st->send_ring);
         int chunk = remaining;
         if (chunk > P2P_STREAM_PAYLOAD)
@@ -285,7 +285,7 @@ int stream_flush_to_reliable(stream_t *st, reliable_t *r) {
         ring_read(&st->send_ring, pkt + P2P_DATA_HDR_SIZE, chunk);
 
         /* 发送到可靠层 */
-        if (reliable_send_pkt(r, pkt, P2P_DATA_HDR_SIZE + chunk) < 0)
+        if (reliable_send_pkt(s, pkt, P2P_DATA_HDR_SIZE + chunk) < 0)
             break;  /* 发送窗口已满，停止发送 */
 
         st->send_offset += chunk;
@@ -309,18 +309,18 @@ int stream_flush_to_reliable(stream_t *st, reliable_t *r) {
  *   3. 剥离子头，写入接收缓冲区
  *   4. 更新接收偏移量
  *
- * @param st  流上下文
- * @param r   可靠传输层上下文
+ * @param s   会话对象
  * @return    接收的总字节数
  */
-int stream_feed_from_reliable(stream_t *st, reliable_t *r) {
+int stream_feed_from_reliable(struct p2p_session *s) {
+    stream_t *st = &s->stream;
     
     int total = 0;
     uint8_t pkt[P2P_MAX_PAYLOAD];
     int pkt_len;
 
     /* 循环处理所有可用的有序数据包 */
-    while (reliable_recv_pkt(r, pkt, &pkt_len) == 0) {
+    while (reliable_recv_pkt(s, pkt, &pkt_len) == 0) {
         /* 验证最小包长度 */
         if (pkt_len < P2P_DATA_HDR_SIZE) continue;  /* 格式错误，跳过 */
 

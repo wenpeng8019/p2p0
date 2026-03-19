@@ -72,8 +72,15 @@ static int              g_len_in      = 0;          /* 输入缓冲长度 */
 static const char*      g_my_name = "me";           /* 本端显示名 */
 
 static void tui_println(p2p_log_level_t level, const char* line) {
+    (void)level;
 
-    assert(g_term_height);
+    /* 非交互模式：输出到 stdout 并通过 instrument 广播（供测试验证） */
+    if (!g_term_height) {
+        printf("%s\n", line);
+        fflush(stdout);
+        print("I:", "%s", line);  /* 通过 instrument 广播，供测试程序验证 */
+        return;
+    }
 
     // 将日志（滚动）区域向上滚动一行
     // > 先将光标移动到滚动区（即除了输入行的区域）的最后一行
@@ -229,7 +236,6 @@ static const char* state_name(p2p_state_t state) {
         case P2P_STATE_PUNCHING:    return LA_W("PUNCHING", LA_W6, 6);
         case P2P_STATE_CONNECTED:   return LA_W("CONNECTED", LA_W3, 3);
         case P2P_STATE_RELAY:       return LA_W("RELAY", LA_W8, 8);
-        case P2P_STATE_CLOSING:     return LA_W("CLOSING", LA_W2, 2);
         case P2P_STATE_CLOSED:      return LA_W("CLOSED", LA_W1, 1);
         case P2P_STATE_ERROR:       return LA_W("ERROR", LA_W4, 4);
         default:                    return LA_W("UNKNOWN", LA_W9, 9);
@@ -255,10 +261,63 @@ static void on_disconnected(p2p_handle_t s, void *userdata) {
 
 static bool             g_running;
 static bool             g_connected_once = false;
+static p2p_handle_t     g_hdl = NULL;           /* 全局句柄，供 instrument 回调使用 */
 
 /* SIGINT / SIGTERM：优雅退出（跨平台） */
 static void on_signal(int sig) { (void)sig;
     g_running = false;
+}
+
+/* ============================================================================
+ * Instrument 被控接口
+ *
+ * 支持远程调用（通过 instrument_req）：
+ *   - msg="send", content="<text>" : 发送消息给对端
+ *   - msg="state"                   : 返回当前连接状态
+ *   - msg="quit"                    : 退出程序
+ * ============================================================================ */
+static void on_instrument(uint16_t rid, uint8_t chn, const char* msg, char *content, int len) {
+    (void)len;
+
+    /* msg==NULL 表示普通日志/WAIT，不是 REQ 请求 */
+    if (msg == NULL || chn != INSTRUMENT_CTRL) return;
+
+    print("D:", "[CTRL] rid=%u msg=%s content=%.*s", rid, msg, len, content ? content : "");
+
+    /* send:<message> - 发送消息给对端 */
+    if (strcmp(msg, "send") == 0) {
+        if (g_hdl && p2p_is_ready(g_hdl) && content && len > 0) {
+            p2p_send(g_hdl, content, len);
+            char line[576];
+            snprintf(line, sizeof(line), "%s: %s", g_my_name, content);
+            tui_println(P2P_LOG_LEVEL_INFO, line);
+            instrument_resp(rid, "ok");
+        } else {
+            print("W:", "[CTRL] send failed: hdl=%p ready=%d content=%p len=%d",
+                  (void*)g_hdl, g_hdl ? p2p_is_ready(g_hdl) : -1, (void*)content, len);
+            instrument_resp(rid, "not_ready");
+        }
+        return;
+    }
+
+    /* state - 返回连接状态 */
+    if (strcmp(msg, "state") == 0) {
+        int st = g_hdl ? p2p_state(g_hdl) : -1;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", st);
+        instrument_resp(rid, buf);
+        return;
+    }
+
+    /* quit - 退出程序 */
+    if (strcmp(msg, "quit") == 0) {
+        instrument_resp(rid, "bye");
+        g_running = false;
+        return;
+    }
+
+    /* 未知命令 */
+    instrument_resp(rid, "unknown");
 }
 
 int main(int argc, char *argv[]) {
@@ -346,7 +405,7 @@ int main(int argc, char *argv[]) {
 
     #ifndef NDEBUG
     p2p_instrument_base = 10;
-    instrument_loggable((log_cb)-1);
+    //instrument_loggable((log_cb)-1);
     #endif
 
     if (ARGS_server.str)
@@ -357,6 +416,14 @@ int main(int argc, char *argv[]) {
     print("I:", LA_F("=== P2P Ping Diagnostic Tool ===\n", LA_F30, 30));
 
     if (ARGS_debugger.str) {
+        /* 
+         * 启用 instrument 被控模式：
+         * 1. 先注册回调 + id 以接收 REQ 和发送 WAIT
+         * 2. 等待 debugger 连接（WAIT/CONTINUE 交互）
+         * 注：p2p_create 会调用 instrument_listen(cb, NULL) 覆盖回调，
+         *     所以需要在 p2p_create 后再次注册
+         */
+        instrument_listen(on_instrument, ARGS_debugger.str);
 
         print("I:", LA_F("Waiting Debugger(%s) connecting...\n", LA_F43, 43), ARGS_debugger.str);
 
@@ -370,6 +437,12 @@ int main(int argc, char *argv[]) {
 
     p2p_handle_t hdl = p2p_create(my_name, &cfg);
     if (!hdl) { print("E:", LA_F("Failed to create sessions\n", LA_F31, 31)); return 1; }
+    g_hdl = hdl;  /* 供 instrument 回调使用 */
+
+    /* 重新注册 instrument 回调（p2p_create 会覆盖之前的设置） */
+    if (ARGS_debugger.str) {
+        instrument_listen(on_instrument, ARGS_debugger.str);
+    }
 
     const char *mode_name = NULL;
     if (ARGS_server.str) mode_name = cfg.use_ice ? "RELAY" : "COMPACT";
@@ -393,6 +466,8 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
+
+    g_running = true;
 
     /* ---- 主循环 ---- */
     while(g_running) {

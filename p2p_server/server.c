@@ -1351,9 +1351,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                    PROTO, P2P_PEER_ID_MAX, local_peer_id, local->instance_id, instance_id);
 
             // 通知对端下线（如果对端在线且有 session_id）
-            if (PEER_ONLINE(local)) {
-                send_peer_off(udp_fd, local->peer, "reregister");
-            }
+            if (PEER_ONLINE(local)) send_peer_off(udp_fd, local->peer, "reregister");
 
             // 从待确认链表移除
             if (local->info0_pending_next) remove_info0_pending(local);
@@ -1626,15 +1624,21 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
     } break;
 
-    // SIG_PKT_PEER_INFO/P2P_PKT_RELAY_DATA/P2P_PKT_RELAY_ACK/P2P_PKT_RELAY_CRYPTO: relay 转发给对方
-    // 格式：所有包都包含 session_id(4) 在 payload 开头
+    // SIG_PKT_PEER_INFO/P2P_PKT_DATA/P2P_PKT_ACK/P2P_PKT_CRYPTO (+SESSION): relay 转发给对方
+    // 格式：所有包都包含 session_id(8) 在 payload 开头
     case SIG_PKT_PEER_INFO:
-    case P2P_PKT_RELAY_DATA:
-    case P2P_PKT_RELAY_ACK:
-    case P2P_PKT_RELAY_CRYPTO: {
+    case P2P_PKT_DATA:
+    case P2P_PKT_ACK:
+    case P2P_PKT_CRYPTO: {
+        // DATA/ACK/CRYPTO 必须携带 P2P_DATA_FLAG_SESSION 标志才进行中继
+        if (hdr->type != SIG_PKT_PEER_INFO && !(hdr->flags & P2P_DATA_FLAG_SESSION)) {
+            // 非中继包，忽略
+            return;
+        }
+
         const char* PROTO = (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
-                           (hdr->type == P2P_PKT_RELAY_DATA) ? "RELAY_DATA" :
-                           (hdr->type == P2P_PKT_RELAY_ACK) ? "RELAY_ACK" : "RELAY_CRYPTO";
+                           (hdr->type == P2P_PKT_DATA) ? "DATA+SESSION" :
+                           (hdr->type == P2P_PKT_ACK) ? "ACK+SESSION" : "CRYPTO+SESSION";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F108, 108),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
@@ -1678,7 +1682,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
                (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
 
-        if (hdr->type == SIG_PKT_PEER_INFO || hdr->type == P2P_PKT_RELAY_DATA || hdr->type == P2P_PKT_RELAY_CRYPTO) {
+        if (hdr->type == SIG_PKT_PEER_INFO || hdr->type == P2P_PKT_DATA || hdr->type == P2P_PKT_CRYPTO) {
             print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", LA_F75, 75),
                    PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
         } else {

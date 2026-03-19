@@ -132,12 +132,12 @@ static int pseudotcp_init(struct p2p_session *s) {
 }
 
 static int pseudotcp_send(struct p2p_session *s, const void *buf, int len) {
-    return reliable_send_pkt(&s->reliable, buf, len);
+    return reliable_send_pkt(s, buf, len);
 }
 
 static void pseudotcp_tick(struct p2p_session *s) {
     p2p_pseudotcp_tick(s);
-    reliable_tick_ack(&s->reliable);
+    reliable_tick_ack(s);
 }
 
 static int pseudotcp_is_ready(struct p2p_session *s) {

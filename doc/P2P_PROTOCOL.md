@@ -371,20 +371,23 @@ on_peer_info(new_pub_addr, new_priv_addr) {
 
 当 NAT 打洞 5 秒仍失败时，客户端通过服务器中转。
 
-#### RELAY_DATA (0x40)
+#### DATA + P2P_DATA_FLAG_SESSION (0x20, flags=0x01)
+
+新协议统一使用 `P2P_PKT_DATA/ACK/CRYPTO` + `P2P_DATA_FLAG_SESSION` 标志，
+取代废弃的 `RELAY_DATA/ACK/CRYPTO` (0xA0-0xA2)。
 
 - **方向**: 客户端 → 服务器 → 客户端
-- **Payload**: `[ target_peer_id: 32 | original_data: N ]`
+- **Payload**: `[ session_id: 8 | original_data: N ]`
 - **说明**:
-  - 服务器收到后，剥离 `target_peer_id`，将 `original_data` 转发给目标 peer
-  - 转发时保持包头 type=0x40，seq 保持不变
+  - 服务器通过 `session_id` 快速查找目标对端（O(1)哈希查找）
+  - `session_id` 还用于会话隔离，过滤旧会话重传的包（解决重连污染问题）
 
 ```
 Alice                  Server                    Bob
   |                      |                        |
-  |-- RELAY_DATA(bob) -->|-- RELAY_DATA(data) --->|
-  |                      |                        |
-  |<- RELAY_DATA(data) --|<- RELAY_DATA(alice) ---|
+  |-- DATA+SESSION ----->|-- DATA+SESSION ------->|
+  |    (session_id)      |    (转发)              |
+  |<- DATA+SESSION ------|<- DATA+SESSION --------|
 ```
 
 ### 4. 超时与断开处理
@@ -1125,6 +1128,10 @@ p2p_signaling_payload_t (76B header + N×32B candidates)
 
 | 范围 | 包类型 | 说明 |
 |------|--------|------|
+| **0x20-0x2F** | **数据传输** | |
+| 0x20 | P2P_PKT_DATA | 数据包（flags & 0x01 = 携带 session_id） |
+| 0x21 | P2P_PKT_ACK | 确认包（flags & 0x01 = 携带 session_id） |
+| 0x22 | P2P_PKT_CRYPTO | DTLS 加密包（flags & 0x01 = 携带 session_id） |
 | **0x80-0x8F** | **核心信令** | |
 | 0x80 | SIG_PKT_REGISTER | 注册到信令服务器 |
 | 0x81 | SIG_PKT_REGISTER_ACK | 注册确认 |
@@ -1132,9 +1139,6 @@ p2p_signaling_payload_t (76B header + N×32B candidates)
 | 0x83 | SIG_PKT_PEER_INFO_ACK | 候选列表确认 |
 | 0x84 | SIG_PKT_NAT_PROBE | NAT 类型探测请求 |
 | 0x85 | SIG_PKT_NAT_PROBE_ACK | NAT 类型探测响应 |
-| **0xA0-0xAF** | **中继扩展** | |
-| 0xA0 | P2P_PKT_RELAY_DATA | 中继服务器转发的数据 |
-| 0xA1 | P2P_PKT_RELAY_ACK | 中继服务器转发的 ACK |
 
 PEER_INFO_ACK（0x83）格式：
 - 包头：`seq=确认的 PEER_INFO 序列号`（`seq=0` 表示确认服务器下发的 `PEER_INFO(seq=0)`）

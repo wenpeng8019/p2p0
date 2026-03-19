@@ -12,8 +12,7 @@
  *   - PEER_INFO_ACK: 候选接收确认，用于可靠传输控制
  *   - NAT_PROBE:     NAT 类型探测请求（可选，发往服务器探测端口）
  *   - NAT_PROBE_ACK: NAT 探测响应，返回第二次映射地址
- *   - RELAY_DATA:    中继数据转发（P2P 打洞失败时的降级方案）
- *   - RELAY_ACK:     中继数据确认
+ *   - DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION: 会话隔离和中继转发
  *
  * 候选列表序列化同步机制详见 p2pp.h（COMPACT 模式信令服务协议节）。
  *
@@ -216,8 +215,7 @@ struct p2p_session;
  * 3. 使用场景：
  *    - PEER_INFO(seq>0)：客户端继续同步候选时，携带 session_id
  *    - PEER_INFO_ACK：客户端确认收到 PEER_INFO，携带 session_id
- *    - RELAY_DATA：P2P 打洞失败后，通过服务器中继转发，用 session_id 查找目标
- *    - RELAY_ACK：中继数据确认，携带 session_id
+ *    - DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION：会话隔离和中继转发
  *
  * 4. 服务器索引：
  *    - 双索引机制：session_id（O(1)查找）+ peer_key（local_id+remote_id）
@@ -236,19 +234,14 @@ struct p2p_session;
  *     - base_index 作为 8 位循环通知序号（1..255 循环）
  *     - 接收端按循环序比较，仅应用更新的通知；旧通知可忽略但仍需 ACK
  *
- * RELAY_DATA（P2P 打洞失败后的中继转发）:
- *   [session_id(8)][data_len(2)][data(N)]
- *   包头: type=0xA0, flags=0, seq=数据序列号
- *   - session_id: 会话 ID（网络字节序，64位，用于服务器查找目标对端）
- *   - data_len: 数据长度（网络字节序）
- *   - data: 实际数据内容
- *   用于在 P2P 打洞失败后，通过服务器中继转发数据
- *
- * RELAY_ACK:
- *   [session_id(8)][ack_seq(2)]
- *   包头: type=0xA1, flags=0, seq=0
+ * DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION（会话隔离和中继转发）:
+ *   [session_id(8)][payload(N)]
+ *   包头: type=0x20/0x21/0x22, flags=0x01, seq=数据序列号
  *   - session_id: 会话 ID（网络字节序，64位）
- *   - ack_seq: 确认的 RELAY_DATA 序列号（网络字节序）
+ *   - payload: 原始数据/ACK/DTLS 内容
+ *   用于：
+ *     1. 会话隔离：过滤旧会话重传的包（解决重连污染问题）
+ *     2. 中继转发：服务器通过 session_id 查找目标对端
  */
 
 /* PEER_INFO flags */
@@ -466,11 +459,6 @@ void compact_on_peer_info_ack(struct p2p_session *s, uint16_t seq,
 /* 处理 PEER_OFF（对端离线通知） */
 void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
                          const struct sockaddr_in *from);
-
-/* 处理 RELAY_DATA / RELAY_ACK（中继数据）*/
-bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
-                             const uint8_t **payload, int *len,
-                             const struct sockaddr_in *from);
 
 /* 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）*/
 void compact_on_request(struct p2p_session *s, uint8_t flags,

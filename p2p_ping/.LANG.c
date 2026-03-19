@@ -9,7 +9,6 @@ int LA_ping;
 /* 字符串表 */
 static const char* s_lang_en[LA_NUM] = {
     [LA_W1] = "CLOSED",  /* SID:1 */
-    [LA_W2] = "CLOSING",  /* SID:2 */
     [LA_W3] = "CONNECTED",  /* SID:3 */
     [LA_W4] = "ERROR",  /* SID:4 */
     [LA_W5] = "INIT",  /* SID:5 */
@@ -48,6 +47,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F36] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:36 */
     [LA_F37] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:37 */
     [LA_F45] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:45 */
+    [LA_W2] = "CLOSING",  /* SID:2 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

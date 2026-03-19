@@ -59,13 +59,14 @@ typedef enum {
  */
 typedef enum {
     P2P_STATE_INIT = 0,                         // 初始状态
-    P2P_STATE_REGISTERING,                      // 注册到信令服务器
-    P2P_STATE_PUNCHING,                         // NAT 打洞中
-    P2P_STATE_CONNECTED,                        // 已连接
-    P2P_STATE_RELAY,                            // 中继模式
-    P2P_STATE_CLOSING,                          // 关闭中
     P2P_STATE_CLOSED,                           // 已关闭
-    P2P_STATE_ERROR                             // 错误状态
+    P2P_STATE_ERROR,                            // 错误状态（不可恢复，等价于自动关闭）
+    P2P_STATE_REGISTERING,                      // 注册（登录）到信令服务器
+    P2P_STATE_REGISTERED,                       // 已在信令服务器注册（登录），如果对方不在线，则会挂起在该状态
+    P2P_STATE_PUNCHING,                         // NAT 打洞中
+    P2P_STATE_LOST,                             // 信号丢失（可能恢复，也可能不会，需要由应用层来决定断开或重连；NAT 和 中继都丢失了）
+    P2P_STATE_CONNECTED,                        // 已连接（NAT 肯定处于 CONNECTED 状态）
+    P2P_STATE_RELAY                             // 中继模式（NAT 未处于 CONNECTED 状态，且可中继）
 } p2p_state_t;
 
 /*

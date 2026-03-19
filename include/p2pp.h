@@ -206,10 +206,32 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define P2P_PKT_PUNCH           0x01        // 连接探测包（打洞/保活）
 #define P2P_PKT_PUNCH_ACK       0x02        // PUNCH 即时确认包（seq=回传对方的 PUNCH seq）
 
-/* 数据传输 (peer-to-peer) */
+/*
+ * 数据传输 (peer-to-peer)
+ *
+ * DATA/ACK/CRYPTO flags 字段:
+ *   P2P_DATA_FLAG_SESSION (0x01): 携带 session_id（8字节）
+ *
+ * 格式 (flags & 0x01 == 0，上层协议自带会话隔离如 SCTP/DTLS):
+ *   DATA:   [hdr(4)][data(N)]
+ *   ACK:    [hdr(4)][ack_seq(2)][sack(4)]
+ *   CRYPTO: [hdr(4)][crypto_data(N)]
+ *
+ * 格式 (flags & 0x01 == 1，裸可靠层或中继路径):
+ *   DATA:   [hdr(4)][session_id(8)][data(N)]
+ *   ACK:    [hdr(4)][session_id(8)][ack_seq(2)][sack(4)]
+ *   CRYPTO: [hdr(4)][session_id(8)][crypto_data(N)]
+ *
+ * session_id 用于:
+ *   1. 会话隔离: 过滤旧会话重传的包（解决重连污染问题）
+ *   2. 服务器路由: 中继路径时服务器通过 session_id 查找目标对端
+ */
 #define P2P_PKT_DATA            0x20        // 数据包
 #define P2P_PKT_ACK             0x21        // 确认包
 #define P2P_PKT_CRYPTO          0x22        // DTLS 加密包（握手/密文数据）
+
+/* P2P_PKT_DATA/ACK/CRYPTO flags 标志位 */
+#define P2P_DATA_FLAG_SESSION   0x01        // 携带 session_id（8字节），用于会话隔离/中继路由
 
 /* 会话控制 */
 #define P2P_PKT_FIN             0x30        // 结束包（无需应答）
@@ -332,11 +354,6 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_NAT_PROBE_ACK   0x8D        // NAT 类型探测响应（返回第二次映射地址）
 
 
-/* COMPACT 服务器中继扩展协议 - 0xA0-0xBF */
-#define P2P_PKT_RELAY_DATA      0xA0        // 中继服务器转发的数据（P2P 打洞失败后的降级方案）
-#define P2P_PKT_RELAY_ACK       0xA1        // 中继服务器转发的 ACK 确认包
-#define P2P_PKT_RELAY_CRYPTO    0xA2        // 中继服务器转发的 DTLS 加密包
-
 /* REGISTER_ACK status 码 */
 #define SIG_REGACK_PEER_OFFLINE 0           // 成功，对端离线
 #define SIG_REGACK_PEER_ONLINE  1           // 成功，对端在线
@@ -442,26 +459,26 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - probe_ip/port: 服务器在探测端口观察到的客户端源地址（第二次映射）
  *   - seq: 复制请求包的 seq，用于客户端匹配响应
  *
- * RELAY_DATA:
+ * P2P_PKT_DATA (flags & P2P_DATA_FLAG_SESSION):
  *   payload: [session_id(8)][data(N)]
- *   包头: type=0xA0, flags=0, seq=数据序列号
- *   - session_id: 会话 ID（网络字节序，64位，用于服务器查找目标对端）
- *   - data: 实际数据内容（UDP 保留消息边界，无需 data_len 字段）
- *   用于在 P2P 打洞失败后，通过服务器中继转发数据
+ *   包头: type=0x20, flags=0x01, seq=数据序列号
+ *   - session_id: 会话 ID（网络字节序，64位）
+ *   - data: 实际数据内容
+ *   用于裸可靠层的会话隔离，或通过服务器中继转发数据
  *
- * RELAY_ACK:
+ * P2P_PKT_ACK (flags & P2P_DATA_FLAG_SESSION):
  *   payload: [session_id(8)][ack_seq(2)][sack(4)]
- *   包头: type=0xA1, flags=0, seq=0
+ *   包头: type=0x21, flags=0x01, seq=0
  *   - session_id: 会话 ID（网络字节序，64位）
  *   - ack_seq: 累积确认序列号（网络字节序）
  *   - sack: 选择性确认位图（网络字节序）
- * 
- * RELAY_CRYPTO:
+ *
+ * P2P_PKT_CRYPTO (flags & P2P_DATA_FLAG_SESSION):
  *   payload: [session_id(8)][crypto_data(N)]
- *   包头: type=0xA2, flags=0, seq=0
+ *   包头: type=0x22, flags=0x01, seq=0
  *   - session_id: 会话 ID（网络字节序，64位）
- *   - crypto_data: DTLS 握手或加密数据（UDP 保留消息边界，无需 data_len 字段）
- *     用于在 P2P 打洞失败后，通过服务器中继转发 DTLS 握手和加密数据
+ *   - crypto_data: DTLS 握手或加密数据
+ *   用于中继路径的 DTLS 握手和加密数据转发
  * 
  * MSG_REQ (A → Server):
  *   payload: [session_id(8)][sid(2)][msg(1)][data(N)]

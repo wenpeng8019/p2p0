@@ -676,16 +676,16 @@ void p2p_signal_compact_trickle_turn(p2p_session_t *s) {
 }
 
 /*
- * 通过服务器中转发送数据包（RELAY 机制）
+ * 通过服务器中转发送数据包（新协议）
  *
- * 协议：P2P_PKT_RELAY_DATA (0x10)
- * 包头: [type=0x10 | flags=0 | seq=0]
+ * 协议：P2P_PKT_DATA (0x20) + P2P_DATA_FLAG_SESSION
+ * 包头: [type=0x20 | flags=0x01 | seq=0]
  * 负载: [session_id(8)][data(N)]
  *   - session_id: 会话 ID（8字节，网络字节序）
  *   - data: 用户数据
  */
 ret_t p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t* size) {
-    const char* PROTO = "RELAY_DATA";
+    const char* PROTO = "DATA+SESSION";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     P_check(data && size && *size, return E_INVALID;)
@@ -702,12 +702,13 @@ ret_t p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t*
 
     print("V:", LA_F("%s sent, size=%d (ses_id=%" PRIu64 ")\n", LA_F62, 62), PROTO, *size, ctx->session_id);
 
-    ret_t ret = udp_send_packet(s->sock, &ctx->server_addr, P2P_PKT_RELAY_DATA, 0, 0, payload, (int)(sizeof(uint64_t) + *size));
+    /* 使用新协议: P2P_PKT_DATA + P2P_DATA_FLAG_SESSION */
+    ret_t ret = udp_send_packet(s->sock, &ctx->server_addr, P2P_PKT_DATA, P2P_DATA_FLAG_SESSION, 0, payload, (int)(sizeof(uint64_t) + *size));
     if (ret < 0)
         print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F355, 355), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
     else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F358, 358),
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0x01, len=%d\n", LA_F393, 393),
                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
                (int)(sizeof(uint64_t) + *size));
 
@@ -999,7 +1000,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         if (seq == 0 && base_index == 0) {
 
             // 此时本端只能被迫强制重连
-            print("W:", LA_F("%s: renew session due to session_id changed by info0 (local=%" PRIu64 " pkt=%" PRIu64 ")\n", 0, 0),
+            print("W:", LA_F("%s: renew session due to session_id changed by info0 (local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F391, 391),
                   PROTO, ctx->session_id, session_id);
 
             // 如果 p2p 之前已经连接成功过，即业务层可能已经完成部分通讯
@@ -1297,74 +1298,6 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     // + 这里将信令层的 peer close 转换为 NAT 层的 closed 状态，主循环会统一以 NAT 层的 NAT_CLOSED 状态机变更为准
     //   并统一调用 p2p_session_reset
     s->nat.state = NAT_CLOSED;
-}
-
-/*
- * 处理 RELAY_DATA / RELAY_ACK，中继数据（用于支持 P2P 打洞失败后，通过服务器中继转发数据）
- * 该操作会验证 COMPACT 层的 session_id，并调整 payload/len 跳过该头部
- * 使其返回的 payload/len 和 TURN 中继数据的格式一致，供后续直接交给 TURN 层处理
- * @return true=验证成功（payload/len 已调整），false=验证失败
- *
- * 协议：P2P_PKT_RELAY_DATA (0xA0) / P2P_PKT_RELAY_ACK (0xA1)
- * 包头: [type=0xA0/0xA1 | flags=0 | seq=数据序列号]
- * 负载: [session_id(8)][data(N)]  (对于 RELAY_DATA)
- *       [session_id(8)][ack_seq(2)][sack(4)]  (对于 RELAY_ACK)
- *   - session_id: 会话 ID（网络字节序，64位）
- *   - data: 中继数据（对于 RELAY_DATA）
- *   - ack_seq: 确认序列号（对于 RELAY_ACK）
- *   - sack: 选择性确认（对于 RELAY_ACK）
- */
-bool compact_on_relay_packet(struct p2p_session *s, uint8_t type,
-                             const uint8_t **payload, int *len,
-                             const struct sockaddr_in *from) {
-    assert(type == P2P_PKT_RELAY_DATA || type == P2P_PKT_RELAY_ACK || type == P2P_PKT_RELAY_CRYPTO);
-    const char* PROTO = type == P2P_PKT_RELAY_DATA ? "RELAY_DATA" :
-                         type == P2P_PKT_RELAY_ACK ? "RELAY_ACK" : "RELAY_CRYPTO";
-
-    printf(LA_F("[UDP] %s recv from %s:%d, len=%d\n", LA_F351, 351),
-           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), *len);
-
-    // RELAY 包只能在 COMPACT 模式下使用
-    if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
-        print("E:", LA_F("%s: invalid in non-COMPACT mode\n", LA_F117, 117), PROTO);
-        return false;
-    }
-
-    // 验证负载长度
-    if (type == P2P_PKT_RELAY_ACK) {
-        // RELAY_ACK 固定长度：session_id(8) + ack_seq(2) + sack(4) = 14 字节
-        if (*len != 14) {
-            print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F95, 95), PROTO, *len);
-            return false;
-        }
-    } else {
-        // RELAY_DATA 至少需要 session_id(8)
-        if (*len < (int)sizeof(uint64_t)) {
-            print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F95, 95), PROTO, *len);
-            return false;
-        }
-    }
-
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
-
-    if (!ctx->relay_support) {
-        print("E:", LA_F("%s: ignored (relay not supported)\n", LA_F106, 106), PROTO);
-        return false;
-    }
-
-    uint64_t session_id = nget_ll(*payload);
-    if (session_id != ctx->session_id) {
-        print("W:", LA_F("%s: session mismatch(local=%" PRIu64 ", pkt=%" PRIu64 ")\n", LA_F145, 145),
-              PROTO, ctx->session_id, session_id);
-        return false;
-    }
-
-    print("V:", LA_F("%s: accepted, len=%d (ses_id=%" PRIu64 ")\n", LA_F88, 88), PROTO, *len, session_id);
-
-    // 跳过 COMPACT 层的 session_id 头部
-    *payload += sizeof(uint64_t);
-    *len -= (int)sizeof(uint64_t);
-    return true;
 }
 
 /*

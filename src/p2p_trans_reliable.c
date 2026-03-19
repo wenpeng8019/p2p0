@@ -15,7 +15,8 @@ static inline int seq_in_window(uint16_t seq, uint16_t base, int window) {
     return d >= 0 && d < window;
 }
 
-void reliable_init(reliable_t *r) {
+void reliable_init(struct p2p_session *s) {
+    reliable_t *r = &s->reliable;
     memset(r, 0, sizeof(*r));
     r->rto = RELIABLE_RTO_INIT;
     r->srtt = 0;
@@ -24,7 +25,8 @@ void reliable_init(reliable_t *r) {
                 RELIABLE_RTO_INIT, RELIABLE_WINDOW);
 }
 
-int reliable_window_avail(const reliable_t *r) {
+int reliable_window_avail(const struct p2p_session *s) {
+    const reliable_t *r = &s->reliable;
     return RELIABLE_WINDOW - r->send_count;
 }
 
@@ -34,7 +36,8 @@ int reliable_window_avail(const reliable_t *r) {
  * Queue a packet for reliable delivery.
  * Returns 0 on success, -1 if window is full.
  */
-int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
+int reliable_send_pkt(struct p2p_session *s, const uint8_t *data, int len) {
+    reliable_t *r = &s->reliable;
     if (r->send_count >= RELIABLE_WINDOW) {
         print("W:", LA_F("Send window full, dropping packet send_count=%d", LA_F294, 294), r->send_count);
         return -1;
@@ -64,7 +67,8 @@ int reliable_send_pkt(reliable_t *r, const uint8_t *data, int len) {
  * 出队下一个按序接收的数据包
  * 成功返回 0，无可用数据返回 -1
  */
-int reliable_recv_pkt(reliable_t *r, uint8_t *buf, int *out_len) {
+int reliable_recv_pkt(struct p2p_session *s, uint8_t *buf, int *out_len) {
+    reliable_t *r = &s->reliable;
     int idx = r->recv_base % RELIABLE_WINDOW;
     if (!r->recv_bitmap[idx]) return -1;
 
@@ -78,7 +82,8 @@ int reliable_recv_pkt(reliable_t *r, uint8_t *buf, int *out_len) {
 /*
  * 处理传入的 DATA 数据包
  */
-int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int len) {
+int reliable_on_data(struct p2p_session *s, uint16_t seq, const uint8_t *payload, int len) {
+    reliable_t *r = &s->reliable;
     if (!seq_in_window(seq, r->recv_base, RELIABLE_WINDOW)) {
         printf(LA_F("Out-of-window packet discarded seq=%u base=%u", LA_F244, 244),
                       seq, r->recv_base);
@@ -104,7 +109,8 @@ int reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int le
  * ack_seq = 累积确认（所有 < ack_seq 的都已确认）
  * sack_bits = ack_seq 之后的选择性确认位图
  */
-int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
+int reliable_on_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack_bits) {
+    reliable_t *r = &s->reliable;
     uint64_t now = P_tick_ms();
 
     // 根据累积 ACK 推进 send_base
@@ -116,7 +122,6 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
             r->send_count--;
 
             // PseudoTCP：在 ACK 时更新窗口（仅当启用拥塞控制时，避免 cwnd=0 除零崩溃）
-            struct p2p_session *s = r->session;
             if (s->cfg.use_pseudotcp)
                 p2p_pseudotcp_on_ack(s, ack_seq);
 
@@ -145,9 +150,9 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
     // SACK 位图：第 i 位 = ack_seq + 1 + i
     for (int i = 0; i < 32; i++) {
         if (sack_bits & (1u << i)) {
-            uint16_t s = ack_seq + 1 + i;
-            if (seq_in_window(s, r->send_base, RELIABLE_WINDOW)) {
-                int idx = s % RELIABLE_WINDOW;
+            uint16_t sack_seq = ack_seq + 1 + i;
+            if (seq_in_window(sack_seq, r->send_base, RELIABLE_WINDOW)) {
+                int idx = sack_seq % RELIABLE_WINDOW;
                 if (!r->send_buf[idx].acked) {
                     r->send_buf[idx].acked = 1;
                     r->send_count--;
@@ -184,11 +189,10 @@ static int build_ack_payload(const reliable_t *r, uint8_t *buf) {
  * 周期性 tick：重传 + 发送 ACK + 刷新待处理数据
  * 仅在需要时发送 ACK
  */
-void reliable_tick_ack(reliable_t *r) {
+void reliable_tick_ack(struct p2p_session *s) {
+    reliable_t *r = &s->reliable;
     if (!r->need_ack) return;  // 没有新数据时不发 ACK，避免空闲时 100 ACK/s 洪泛
     r->need_ack = false;
-
-    struct p2p_session *s = r->session;
     uint8_t ack_payload[6];
     build_ack_payload(r, ack_payload);
     uint16_t ack_seq = nget_s(ack_payload);
@@ -208,9 +212,8 @@ void reliable_tick_ack(reliable_t *r) {
  *   2. 对超过 RTO 未确认的包进行指数退避重传
  *   3. 和 reliable_tick_ack 一起发送 ACK
  */
-void reliable_tick(reliable_t *r) {
-    struct p2p_session *s = r->session;
-    if (!s) return;
+void reliable_tick(struct p2p_session *s) {
+    reliable_t *r = &s->reliable;
     uint64_t now = P_tick_ms();
 
     /* 遍历所有未确认的发送条目 */
@@ -238,7 +241,7 @@ void reliable_tick(reliable_t *r) {
     }
 
     /* 发送 ACK */
-    reliable_tick_ack(r);
+    reliable_tick_ack(s);
 }
 
 /*

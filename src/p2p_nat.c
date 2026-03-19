@@ -575,3 +575,35 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             break;
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// 会话隔离验证（防止旧会话重传包污染新会话）
+///////////////////////////////////////////////////////////////////////////////
+
+bool nat_validate_session(struct p2p_session *s,
+                          const uint8_t **payload, int *len,
+                          const char *proto_name) {
+    // 至少需要 session_id(8)
+    if (*len < (int)sizeof(uint64_t)) {
+        print("E:", LA_F("%s: bad payload(len=%d, need >=8)\n", LA_F392, 392), proto_name, *len);
+        return false;
+    }
+
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    uint64_t session_id = nget_ll(*payload);
+
+    // 验证 session_id 匹配
+    if (session_id != ctx->session_id) {
+        print("W:", LA_F("%s: session mismatch(local=%" PRIu64 ", pkt=%" PRIu64 ")\n", LA_F145, 145),
+              proto_name, ctx->session_id, session_id);
+        return false;
+    }
+
+    print("V:", LA_F("%s: session validated, len=%d (ses_id=%" PRIu64 ")\n", LA_F88, 88),
+          proto_name, *len, session_id);
+
+    // 跳过 session_id 头部
+    *payload += sizeof(uint64_t);
+    *len -= (int)sizeof(uint64_t);
+    return true;
+}

@@ -242,8 +242,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     nat_init(&s->nat);
 
     // 初始化基础传输层（reliable ARQ）
-    reliable_init(&s->reliable);
-    s->reliable.session = s;  // 设置回溯指针
+    reliable_init(s);
 
     // 初始化路径管理器（多路径并行支持）
     p2p_path_strategy_t strategy = (p2p_path_strategy_t)(cfg->path_strategy);
@@ -744,10 +743,11 @@ p2p_update(p2p_handle_t hdl) {
             // 加密层（DTLS 密文解包 → 解密 → 重新派发）
             // --------------------
 
-            case P2P_PKT_RELAY_CRYPTO:
-                if (!compact_on_relay_packet(s, hdr.type, &payload, &payload_len, &from)) break;
-                /* fall through — payload 现在是 DTLS 记录 */
             case P2P_PKT_CRYPTO: {
+                /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
+                if (hdr.flags & P2P_DATA_FLAG_SESSION) {
+                    if (!nat_validate_session(s, &payload, &payload_len, "CRYPTO")) break;
+                }
                 if (!s->dtls) break;
                 int dec_len = s->dtls->decrypt_recv(s, payload, payload_len,
                                                       crypto_dec_buf, sizeof(crypto_dec_buf));
@@ -768,19 +768,18 @@ p2p_update(p2p_handle_t hdl) {
             // 数据传输（P2P 直连 或 服务器中继）
             // --------------------
 
-            case P2P_PKT_RELAY_DATA:
-            case P2P_PKT_RELAY_ACK:
-                if (!compact_on_relay_packet(s, hdr.type, &payload, &payload_len, &from)) break;
-                if (hdr.type == P2P_PKT_RELAY_DATA) goto handle_data;
-                else goto handle_ack;
-
             /*
              * 协议：P2P_PKT_DATA (0x20)
-             * 包头: [type=0x20 | flags=0 | seq=序列号(2B)]
-             * 负载: [data(N)]
+             * 包头: [type=0x20 | flags=见下 | seq=序列号(2B)]
+             * 负载 (flags & 0x01 == 0): [data(N)]
+             * 负载 (flags & 0x01 == 1): [session_id(8)][data(N)]
              * 说明：P2P 数据包，由 reliable 层或高级传输层处理
              */
             case P2P_PKT_DATA:
+                /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
+                if (hdr.flags & P2P_DATA_FLAG_SESSION) {
+                    if (!nat_validate_session(s, &payload, &payload_len, "DATA")) break;
+                }
                 printf(LA_F("Received DATA pkt from %s:%d, seq=%u, len=%d", LA_F271, 271),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
             handle_data:
@@ -797,17 +796,22 @@ p2p_update(p2p_handle_t hdl) {
                     s->trans->on_packet(s, hdr.type, payload, payload_len, &from);
                 // 基础 reliable 层处理
                 else if (payload_len > 0)
-                    reliable_on_data(&s->reliable, hdr.seq, payload, payload_len);
+                    reliable_on_data(s, hdr.seq, payload, payload_len);
                 
                 break;
 
             /*
              * 协议：P2P_PKT_ACK (0x21)
-             * 包头: [type=0x21 | flags=0 | seq=序列号(2B)]
-             * 负载: [ack_seq(2B) | sack(4B)]
+             * 包头: [type=0x21 | flags=见下 | seq=序列号(2B)]
+             * 负载 (flags & 0x01 == 0): [ack_seq(2B) | sack(4B)]
+             * 负载 (flags & 0x01 == 1): [session_id(8)][ack_seq(2B) | sack(4B)]
              * 说明：ACK 仅基础 reliable 层使用，DTLS/SCTP 有自己的确认机制
              */
             case P2P_PKT_ACK:
+                /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
+                if (hdr.flags & P2P_DATA_FLAG_SESSION) {
+                    if (!nat_validate_session(s, &payload, &payload_len, "ACK")) break;
+                }
             handle_ack: {
                 uint16_t ack_seq = nget_s(payload);
                 uint32_t sack; nread_l(&sack, payload + 2);
@@ -823,7 +827,7 @@ p2p_update(p2p_handle_t hdl) {
                     int old_srtt = s->reliable.srtt;
                     
                     // 处理 ACK（reliable 层会更新 RTT）
-                    reliable_on_ack(&s->reliable, ack_seq, sack);
+                    reliable_on_ack(s, ack_seq, sack);
                     
                     // 如果 RTT 更新了，同步到路径管理器（Group 2: 数据层 RTT）
                     if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0) {
@@ -945,14 +949,15 @@ p2p_update(p2p_handle_t hdl) {
         s->state = P2P_STATE_PUNCHING;
     }
 
-    // 转换：PUNCHING/REGISTERING → CONNECTED（NAT 穿透成功）
+    // 转换：PUNCHING/REGISTERING/REGISTERED → CONNECTED（NAT 穿透成功）
     // + 注意，NAT 变为 CONNECTED 状态时，P2P 可能还未进入 PUNCHING 状态
     //   因为，NAT 的 CONNECTED，是收到对方发过来的包，说明自己的端口对对方是开放的了
     //   但 PUNCHING 状态是向对方端口发送打洞包，也就是检测对方端口是否可写入。
     //   所以，对方可能先于自己获得对方（也就是自己）的候选地址，并先完成 NAT 穿透（对方发包过来），此时自己还未开始打洞（PUNCHING）
-    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING) &&
+    // + REGISTERED 状态也需要处理，因为当对端重连时（收到新 session_id 的 PEER_INFO），
+    //   本端会进入 REGISTERED 状态等待打洞，NAT 成功后应该转换到 CONNECTED
+    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED) &&
         s->nat.state == NAT_CONNECTED) {
-
 
         print("I:", LA_F("P2P connection established", LA_F246, 246));
         s->state = P2P_STATE_CONNECTED;
@@ -1107,14 +1112,14 @@ p2p_update(p2p_handle_t hdl) {
             }
         }
         // 使用基础 reliable 层
-        else stream_flush_to_reliable(&s->stream, &s->reliable);
+        else stream_flush_to_reliable(s);
     }
 
     // reliable 周期 tick：发送/重传数据包 + 发 ACK
     // 注：仅在无高级传输层时调用。PseudoTCP 虽然 on_packet==NULL（复用 reliable 收包），
     //     但它有自己的 tick（cwnd 控制），不能再调 reliable_tick，否则双重发送且绕过拥塞控制。
     if (!s->trans) {
-        reliable_tick(&s->reliable);
+        reliable_tick(s);
     }
 
     // 传输模块周期 tick（重传，拥塞控制等）
@@ -1149,7 +1154,7 @@ p2p_update(p2p_handle_t hdl) {
     // 注：DTLS/SCTP 直接写入 stream.recv_ring，不需要此步骤
     //     只有基础 reliable 层需要从 reliable 缓冲区读取
     if (!s->trans || !s->trans->on_packet) {
-        stream_feed_from_reliable(&s->stream, &s->reliable);
+        stream_feed_from_reliable(s);
     }
 
     /* ========================================================================

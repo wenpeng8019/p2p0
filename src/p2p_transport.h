@@ -72,9 +72,6 @@ typedef struct reliable {
     int          srtt;                                  /* 平滑 RTT (毫秒) */
     int          rttvar;                                /* RTT 方差 */
     int          rto;                                   /* 当前重传超时 (毫秒) */
-
-    /* ======================== 回溯指针 ======================== */
-    struct p2p_session *session;                         /* 所属会话（消除 offsetof hack） */
 } reliable_t;
 
 /* ------------------------------ p2p_trans_reliable.c ------------------------------ */
@@ -83,28 +80,28 @@ typedef struct reliable {
  */
 
 /* 初始化 reliable 模块 */
-void reliable_init(reliable_t *r);
+void reliable_init(struct p2p_session *s);
 
 /* 发送数据包（加入发送缓冲区等待确认） */
-int  reliable_send_pkt(reliable_t *r, const uint8_t *data, int len);
+int  reliable_send_pkt(struct p2p_session *s, const uint8_t *data, int len);
 
 /* 接收已确认的顺序数据包 */
-int  reliable_recv_pkt(reliable_t *r, uint8_t *buf, int *out_len);
+int  reliable_recv_pkt(struct p2p_session *s, uint8_t *buf, int *out_len);
 
 /* 处理收到的数据包（乱序缓存） */
-int  reliable_on_data(reliable_t *r, uint16_t seq, const uint8_t *payload, int len);
+int  reliable_on_data(struct p2p_session *s, uint16_t seq, const uint8_t *payload, int len);
 
 /* 处理收到的 ACK（释放已确认数据包） */
-int  reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits);
+int  reliable_on_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack_bits);
 
 /* 定时 ACK 处理 */
-void reliable_tick_ack(reliable_t *r);
+void reliable_tick_ack(struct p2p_session *s);
 
 /* 周期 tick：发送队列中尚未发出的包、重传超时包、发送 ACK */
-void reliable_tick(reliable_t *r);
+void reliable_tick(struct p2p_session *s);
 
 /* 查询发送窗口剩余空间 */
-int  reliable_window_avail(const reliable_t *r);
+int  reliable_window_avail(const struct p2p_session *s);
 
 /* ------------------------------ p2p_trans_pseudotcp.c ------------------------------ */
 /*

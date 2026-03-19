@@ -1,13 +1,13 @@
 /*
- * test_compact_relay.c - COMPACT RELAY 和 NAT_PROBE 协议单元测试
+ * test_compact_relay.c - COMPACT 会话隔离和中继转发协议单元测试
  *
  * ============================================================================
  * 测试目标
  * ============================================================================
  * 验证 p2p_server 对 COMPACT 协议中继和 NAT 探测功能的处理逻辑：
- * - RELAY_DATA: 数据中继转发（P2P 打洞失败后的降级方案）
- * - RELAY_ACK: 中继 ACK 包转发
- * - RELAY_CRYPTO: DTLS 加密包转发
+ * - DATA + P2P_DATA_FLAG_SESSION: 数据中继转发（P2P 打洞失败后的降级方案）
+ * - ACK + P2P_DATA_FLAG_SESSION: 中继 ACK 包转发
+ * - CRYPTO + P2P_DATA_FLAG_SESSION: DTLS 加密包转发
  * - NAT_PROBE: NAT 类型探测（返回映射地址）
  *
  * ============================================================================
@@ -25,23 +25,23 @@
  * ---------------------------------------------------------------------------
  *
  * 测试 1: relay_data_forwarded
- *   目标：验证 RELAY_DATA 包被正确转发给对端
- *   方法：Alice 配对 Bob → Alice 发送 RELAY_DATA → Bob 接收
+ *   目标：验证 DATA+SESSION 包被正确转发给对端
+ *   方法：Alice 配对 Bob → Alice 发送 DATA+SESSION → Bob 接收
  *   预期：
- *     - Bob 收到 RELAY_DATA 包
+ *     - Bob 收到 DATA+SESSION 包
  *     - 包含正确的 session_id 和 data
  *
  * 测试 2: relay_ack_forwarded
- *   目标：验证 RELAY_ACK 包被正确转发
- *   方法：Alice 发送 RELAY_ACK → Bob 接收
+ *   目标：验证 ACK+SESSION 包被正确转发
+ *   方法：Alice 发送 ACK+SESSION → Bob 接收
  *   预期：
- *     - Bob 收到 RELAY_ACK 包
+ *     - Bob 收到 ACK+SESSION 包
  *
  * 测试 3: relay_crypto_forwarded
- *   目标：验证 RELAY_CRYPTO 包被正确转发
- *   方法：Alice 发送 RELAY_CRYPTO → Bob 接收
+ *   目标：验证 CRYPTO+SESSION 包被正确转发
+ *   方法：Alice 发送 CRYPTO+SESSION → Bob 接收
  *   预期：
- *     - Bob 收到 RELAY_CRYPTO 包
+ *     - Bob 收到 CRYPTO+SESSION 包
  *
  * 测试 4: nat_probe_returns_mapping
  *   目标：验证 NAT_PROBE 返回正确的映射地址
@@ -54,8 +54,8 @@
  * ---------------------------------------------------------------------------
  *
  * 测试 5: relay_data_bad_session
- *   目标：验证无效 session_id 的 RELAY_DATA 被丢弃
- *   方法：发送包含不存在 session_id 的 RELAY_DATA
+ *   目标：验证无效 session_id 的 DATA+SESSION 被丢弃
+ *   方法：发送包含不存在 session_id 的 DATA+SESSION
  *   预期：
  *     - 不触发异常
  *     - 对端不收到数据
@@ -218,15 +218,15 @@ static int build_register(uint8_t *buf, int buf_size,
     return n;
 }
 
-// 构造 RELAY_DATA 包
+// 构造 DATA+SESSION 包
 // 协议: [hdr(4)][session_id(8)][data(N)]
 static int build_relay_data(uint8_t *buf, int buf_size, 
                             uint64_t session_id, uint16_t seq,
                             const uint8_t *data, int data_len) {
     if (buf_size < 4 + 8 + data_len) return -1;
     
-    buf[0] = P2P_PKT_RELAY_DATA;
-    buf[1] = 0;  // flags
+    buf[0] = P2P_PKT_DATA;
+    buf[1] = P2P_DATA_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -243,14 +243,14 @@ static int build_relay_data(uint8_t *buf, int buf_size,
     return 12 + data_len;
 }
 
-// 构造 RELAY_ACK 包
+// 构造 ACK+SESSION 包
 // 协议: [hdr(4)][session_id(8)]
 static int build_relay_ack(uint8_t *buf, int buf_size, 
                            uint64_t session_id, uint16_t seq) {
     if (buf_size < 4 + 8) return -1;
     
-    buf[0] = P2P_PKT_RELAY_ACK;
-    buf[1] = 0;  // flags
+    buf[0] = P2P_PKT_ACK;
+    buf[1] = P2P_DATA_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -262,15 +262,15 @@ static int build_relay_ack(uint8_t *buf, int buf_size,
     return 12;
 }
 
-// 构造 RELAY_CRYPTO 包
+// 构造 CRYPTO+SESSION 包
 // 协议: [hdr(4)][session_id(8)][crypto_data(N)]
 static int build_relay_crypto(uint8_t *buf, int buf_size, 
                               uint64_t session_id, uint16_t seq,
                               const uint8_t *data, int data_len) {
     if (buf_size < 4 + 8 + data_len) return -1;
     
-    buf[0] = P2P_PKT_RELAY_CRYPTO;
-    buf[1] = 0;  // flags
+    buf[0] = P2P_PKT_CRYPTO;
+    buf[1] = P2P_DATA_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -331,17 +331,20 @@ typedef struct {
     int data_len;
 } relay_packet_t;
 
-// 解析 RELAY 包
+// 解析中继包 (DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION)
 static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt) {
     memset(pkt, 0, sizeof(*pkt));
     
     if (len < 12) return;  // header + session_id
-    if (buf[0] != P2P_PKT_RELAY_DATA && 
-        buf[0] != P2P_PKT_RELAY_ACK && 
-        buf[0] != P2P_PKT_RELAY_CRYPTO) return;
+    
+    // 检查是否是 DATA/ACK/CRYPTO 且携带 SESSION 标志
+    uint8_t type = buf[0];
+    uint8_t flags = buf[1];
+    if ((type != P2P_PKT_DATA && type != P2P_PKT_ACK && type != P2P_PKT_CRYPTO) ||
+        !(flags & P2P_DATA_FLAG_SESSION)) return;
     
     pkt->received = 1;
-    pkt->type = buf[0];
+    pkt->type = type;
     pkt->seq = ((uint16_t)buf[2] << 8) | buf[3];
     
     // session_id (8 bytes)
@@ -432,9 +435,10 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt_out) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         
-        if (n >= 12 && (recv_buf[0] == P2P_PKT_RELAY_DATA ||
-                        recv_buf[0] == P2P_PKT_RELAY_ACK ||
-                        recv_buf[0] == P2P_PKT_RELAY_CRYPTO)) {
+        if (n >= 12 && (
+                (recv_buf[0] == P2P_PKT_DATA && (recv_buf[1] & P2P_DATA_FLAG_SESSION)) ||
+                (recv_buf[0] == P2P_PKT_ACK && (recv_buf[1] & P2P_DATA_FLAG_SESSION)) ||
+                (recv_buf[0] == P2P_PKT_CRYPTO && (recv_buf[1] & P2P_DATA_FLAG_SESSION)))) {
             if (pkt_out) {
                 parse_relay_packet(recv_buf, (int)n, pkt_out);
             }
@@ -564,7 +568,7 @@ static void test_relay_data_forwarded(void) {
         return;
     }
     
-    if (relay_pkt.type != P2P_PKT_RELAY_DATA) {
+    if (relay_pkt.type != P2P_PKT_DATA) {
         TEST_FAIL(TEST_NAME, "wrong packet type");
         return;
     }
@@ -637,7 +641,7 @@ static void test_relay_ack_forwarded(void) {
         return;
     }
     
-    if (relay_pkt.type != P2P_PKT_RELAY_ACK) {
+    if (relay_pkt.type != P2P_PKT_ACK) {
         TEST_FAIL(TEST_NAME, "wrong packet type");
         return;
     }
@@ -703,7 +707,7 @@ static void test_relay_crypto_forwarded(void) {
         return;
     }
     
-    if (relay_pkt.type != P2P_PKT_RELAY_CRYPTO) {
+    if (relay_pkt.type != P2P_PKT_CRYPTO) {
         TEST_FAIL(TEST_NAME, "wrong packet type");
         return;
     }
@@ -841,10 +845,10 @@ static void test_relay_data_bad_payload(void) {
         return;
     }
     
-    // 发送 payload 过短的 RELAY_DATA 包
+    // 发送 payload 过短的 DATA+SESSION 包
     uint8_t bad_pkt[16];
-    bad_pkt[0] = P2P_PKT_RELAY_DATA;
-    bad_pkt[1] = 0;
+    bad_pkt[0] = P2P_PKT_DATA;
+    bad_pkt[1] = P2P_DATA_FLAG_SESSION;
     bad_pkt[2] = 0;
     bad_pkt[3] = 0;
     // 只放 4 字节头 + 几字节（不够 session_id 的 8 字节）

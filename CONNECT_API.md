@@ -228,7 +228,6 @@ enum {
     P2P_STATE_PUNCHING,         // NAT 打洞中
     P2P_STATE_CONNECTED,        // 已连接
     P2P_STATE_RELAY,            // 中继模式
-    P2P_STATE_CLOSING,          // 关闭中
     P2P_STATE_CLOSED,           // 已关闭
     P2P_STATE_ERROR             // 错误状态
 };

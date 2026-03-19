@@ -290,6 +290,10 @@ static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
     // + 所以 session 关闭或重置，之前的探测也就无效了
     probe_reset(s);
 
+    // 重置可靠传输层（序列号、窗口、重试计数等）
+    // + 对端重连时使用新的序列号起点，旧的状态会导致消息被误判为重复或乱序
+    reliable_init(s);
+
     // 如果是关闭连接（而非重置）
     if (closing) {
 

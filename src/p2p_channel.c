@@ -36,13 +36,13 @@ int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
         return p2p_turn_send_indication(s, addr, pkt, P2P_HDR_SIZE + payload_len);
     }
 
-    /* Compact 信令转发路径: 封装 session_id */
+    /* Compact 信令转发路径: 封装 session_id + P2P_DATA_FLAG_SESSION */
     if (s->path == P2P_PATH_SIGNALING) {
         uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
         nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
         memcpy(relay_pkt + sizeof(uint64_t), payload, payload_len);
-        uint8_t relay_type = (type == P2P_PKT_ACK) ? P2P_PKT_RELAY_ACK : P2P_PKT_RELAY_DATA;
-        return udp_send_packet(s->sock, addr, relay_type, flags, seq,
+        /* 使用原始 type (DATA/ACK) + P2P_DATA_FLAG_SESSION 标志 */
+        return udp_send_packet(s->sock, addr, type, flags | P2P_DATA_FLAG_SESSION, seq,
                                relay_pkt, (int)(sizeof(uint64_t) + payload_len));
     }
 
@@ -56,7 +56,7 @@ int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
  * 自动处理中继模式 session_id 封装。
  *
  * 直连: [P2P_HDR: CRYPTO, 0, 0] [dtls_record]
- * 中继: [P2P_HDR: RELAY_CRYPTO, 0, 0] [session_id(8B) | dtls_record]
+ * 中继: [P2P_HDR: CRYPTO, P2P_DATA_FLAG_SESSION, 0] [session_id(8B) | dtls_record]
  */
 void p2p_send_dtls_record(p2p_session_t *s, const struct sockaddr_in *addr,
                        const void *dtls_record, int record_len) {
@@ -71,9 +71,9 @@ void p2p_send_dtls_record(p2p_session_t *s, const struct sockaddr_in *addr,
         return;
     }
 
-    /* Compact 信令转发: RELAY_CRYPTO + session_id */
+    /* Compact 信令转发: CRYPTO + P2P_DATA_FLAG_SESSION + session_id */
     if (s->path == P2P_PATH_SIGNALING) {
-        p2p_pkt_hdr_encode(pkt, P2P_PKT_RELAY_CRYPTO, 0, 0);
+        p2p_pkt_hdr_encode(pkt, P2P_PKT_CRYPTO, P2P_DATA_FLAG_SESSION, 0);
         nwrite_ll(pkt + P2P_HDR_SIZE, s->sig_compact_ctx.session_id);
         memcpy(pkt + P2P_HDR_SIZE + sizeof(uint64_t), dtls_record, record_len);
         udp_send_to(s->sock, addr, pkt,

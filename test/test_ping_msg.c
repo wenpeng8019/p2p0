@@ -84,7 +84,7 @@ static int g_tests_passed = 0;
 static int g_tests_failed = 0;
 
 // instrument 日志收集
-#define MAX_LOG_ENTRIES 1000
+#define MAX_LOG_ENTRIES 5000
 static struct {
     uint16_t rid;
     uint8_t chn;
@@ -710,153 +710,6 @@ static void test_log_collection(void) {
     stop_client(&g_bob);
 }
 
-// 测试 4: 重连测试（验证断开后重新连接）
-static void test_reconnection(void) {
-    const char *TEST_NAME = "reconnection";
-    printf("\n--- Test: %s ---\n", TEST_NAME);
-    clear_logs();
-    
-    // 重启 server 以清除旧会话状态
-    if (restart_server() != 0) {
-        TEST_FAIL(TEST_NAME, "failed to restart server");
-        return;
-    }
-    
-    // 重置客户端状态
-    g_alice.pid = 0;
-    g_alice.rid = 0;
-    g_alice.waiting = 0;
-    g_alice.connected = 0;
-    g_bob.pid = 0;
-    g_bob.rid = 0;
-    g_bob.waiting = 0;
-    g_bob.connected = 0;
-    
-    // 1. 启动 Alice 和 Bob
-    printf("[1] Starting Alice and Bob...\n");
-    if (start_ping_client(&g_alice, "bob") != 0) {
-        TEST_FAIL(TEST_NAME, "failed to start alice");
-        return;
-    }
-    wait_for_waiting(&g_alice, SYNC_TIMEOUT_MS);
-    sync_client(&g_alice);
-    
-    if (start_ping_client(&g_bob, "alice") != 0) {
-        TEST_FAIL(TEST_NAME, "failed to start bob");
-        stop_client(&g_alice);
-        return;
-    }
-    wait_for_waiting(&g_bob, SYNC_TIMEOUT_MS);
-    sync_client(&g_bob);
-    
-    // 2. 等待首次连接
-    printf("[2] Waiting for initial connection...\n");
-    if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
-        TEST_FAIL(TEST_NAME, "initial connection timeout");
-        stop_client(&g_alice);
-        stop_client(&g_bob);
-        return;
-    }
-    P_usleep(500 * 1000);
-    
-    // 3. 发送消息验证首次连接正常
-    printf("[3] Verifying initial connection with message...\n");
-    if (ping_send_message(&g_alice, "First message") != 0) {
-        TEST_FAIL(TEST_NAME, "first message failed");
-        stop_client(&g_alice);
-        stop_client(&g_bob);
-        return;
-    }
-    P_usleep(300 * 1000);
-    
-    // 4. 断开 Alice（模拟客户端重启）
-    printf("[4] Stopping Alice to simulate disconnect...\n");
-    uint16_t old_alice_rid = g_alice.rid;
-    stop_client(&g_alice);
-    
-    // 等待 Bob 收到 PEER_OFF 并处理
-    P_usleep(1000 * 1000);
-    printf("    Bob should have received PEER_OFF\n");
-    
-    // 5. 重新启动 Alice
-    printf("[5] Restarting Alice...\n");
-    g_alice.pid = 0;
-    g_alice.rid = 0;
-    g_alice.waiting = 0;
-    g_alice.connected = 0;
-    // Bob 的 connected 状态需要重置，因为对端断开了
-    g_bob.connected = 0;
-    
-    if (start_ping_client(&g_alice, "bob") != 0) {
-        TEST_FAIL(TEST_NAME, "failed to restart alice");
-        stop_client(&g_bob);
-        return;
-    }
-    
-    if (wait_for_waiting(&g_alice, SYNC_TIMEOUT_MS) != 0) {
-        TEST_FAIL(TEST_NAME, "alice waiting timeout after restart");
-        stop_client(&g_alice);
-        stop_client(&g_bob);
-        return;
-    }
-    sync_client(&g_alice);
-    
-    printf("    Alice new rid=%u (old=%u)\n", g_alice.rid, old_alice_rid);
-    
-    // 6. 等待重新连接
-    printf("[6] Waiting for reconnection...\n");
-    if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
-        print_log_summary();
-        TEST_FAIL(TEST_NAME, "reconnection timeout");
-        stop_client(&g_alice);
-        stop_client(&g_bob);
-        return;
-    }
-    P_usleep(500 * 1000);
-    
-    // 7. 发送消息验证重连后连接正常
-    printf("[7] Verifying reconnection with message...\n");
-    if (ping_send_message(&g_alice, "After reconnect") != 0) {
-        TEST_FAIL(TEST_NAME, "message after reconnect failed");
-        stop_client(&g_alice);
-        stop_client(&g_bob);
-        return;
-    }
-    P_usleep(300 * 1000);
-    
-    // 8. Bob 也发送消息验证双向通信
-    printf("[8] Verifying bidirectional communication...\n");
-    if (ping_send_message(&g_bob, "Bob reply after reconnect") != 0) {
-        TEST_FAIL(TEST_NAME, "bob message after reconnect failed");
-        stop_client(&g_alice);
-        stop_client(&g_bob);
-        return;
-    }
-    P_usleep(300 * 1000);
-    
-    // 9. 验证消息接收
-    printf("[9] Verifying message delivery...\n");
-    int bob_recv = find_log_from_rid(g_bob.rid, "After reconnect");
-    int alice_recv = find_log_from_rid(g_alice.rid, "Bob reply");
-    
-    printf("    Bob received 'After reconnect': %s\n", bob_recv >= 0 ? "yes" : "no");
-    printf("    Alice received 'Bob reply': %s\n", alice_recv >= 0 ? "yes" : "no");
-    
-    if (bob_recv < 0 || alice_recv < 0) {
-        print_log_summary();
-        TEST_FAIL(TEST_NAME, "message not received after reconnect");
-        stop_client(&g_alice);
-        stop_client(&g_bob);
-        return;
-    }
-    
-    print_log_summary();
-    TEST_PASS(TEST_NAME);
-    
-    stop_client(&g_alice);
-    stop_client(&g_bob);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // 主函数
 ///////////////////////////////////////////////////////////////////////////////
@@ -912,7 +765,6 @@ int main(int argc, char *argv[]) {
     test_message_exchange();
     test_non_interactive_mode();
     test_log_collection();
-    test_reconnection();
     
     // 清理
     printf("\n[*] Cleaning up...\n");

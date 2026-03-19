@@ -95,8 +95,7 @@ p2p_session_t *create_mock_session(void) {
     stream_init(&s->stream, 0);
     
     // 初始化 reliable
-    memset(&s->reliable, 0, sizeof(reliable_t));
-    s->reliable.rto = RELIABLE_RTO_INIT;
+    reliable_init(s);
     
     return s;
 }
@@ -121,7 +120,7 @@ TEST(reliable_send_recv) {
     stream_write(&s->stream, test_data, len);
     
     // Flush 到 reliable 层
-    int flushed = stream_flush_to_reliable(&s->stream, &s->reliable);
+    int flushed = stream_flush_to_reliable(s);
     
     // 验证数据被发送到 reliable 层
     ASSERT(flushed > 0);
@@ -132,7 +131,7 @@ TEST(reliable_send_recv) {
     // 测试接收方向：模拟收到数据包
     uint8_t pkt[100];
     memcpy(pkt + 5, test_data, len);  // 跳过 DATA 头（5字节）
-    reliable_on_data(&s->reliable, 0, pkt, len + 5);
+    reliable_on_data(s, 0, pkt, len + 5);
     
     // 验证数据进入接收缓冲区
     ASSERT_EQ(s->reliable.recv_bitmap[0], 1);
@@ -140,7 +139,7 @@ TEST(reliable_send_recv) {
     // 从 reliable 读取数据
     uint8_t recv_buf[100];
     int recv_len;
-    int ret = reliable_recv_pkt(&s->reliable, recv_buf, &recv_len);
+    int ret = reliable_recv_pkt(s, recv_buf, &recv_len);
     ASSERT_EQ(ret, 0);
     ASSERT_EQ(recv_len, len + 5);
     
@@ -154,17 +153,17 @@ TEST(reliable_window_full) {
     // 填满发送窗口
     uint8_t data[100];
     for (int i = 0; i < RELIABLE_WINDOW; i++) {
-        int ret = reliable_send_pkt(&s->reliable, data, sizeof(data));
+        int ret = reliable_send_pkt(s, data, sizeof(data));
         ASSERT_EQ(ret, 0);
     }
     
     // 窗口已满，再发送应该失败
-    int ret = reliable_send_pkt(&s->reliable, data, sizeof(data));
+    int ret = reliable_send_pkt(s, data, sizeof(data));
     ASSERT_EQ(ret, -1);
     
     // 验证窗口计数
     ASSERT_EQ(s->reliable.send_count, RELIABLE_WINDOW);
-    ASSERT_EQ(reliable_window_avail(&s->reliable), 0);
+    ASSERT_EQ(reliable_window_avail(s), 0);
     
     destroy_mock_session(s);
 }
@@ -180,28 +179,28 @@ TEST(reliable_recv_order) {
     memcpy(pkt3, "Packet 3", 9);
     
     // 先收到 seq=1 和 seq=2，seq=0 丢失
-    reliable_on_data(&s->reliable, 1, pkt2, 9);
-    reliable_on_data(&s->reliable, 2, pkt3, 9);
+    reliable_on_data(s, 1, pkt2, 9);
+    reliable_on_data(s, 2, pkt3, 9);
     
     // 尝试读取，应该读不到（等待 seq=0）
     uint8_t buf[100];
     int len;
-    int ret = reliable_recv_pkt(&s->reliable, buf, &len);
+    int ret = reliable_recv_pkt(s, buf, &len);
     ASSERT_EQ(ret, -1);  // 没有按序的包
     
     // 收到 seq=0
-    reliable_on_data(&s->reliable, 0, pkt1, 9);
+    reliable_on_data(s, 0, pkt1, 9);
     
     // 现在应该能按序读出 3 个包
-    ret = reliable_recv_pkt(&s->reliable, buf, &len);
+    ret = reliable_recv_pkt(s, buf, &len);
     ASSERT_EQ(ret, 0);
     ASSERT_EQ(memcmp(buf, "Packet 1", 8), 0);
     
-    ret = reliable_recv_pkt(&s->reliable, buf, &len);
+    ret = reliable_recv_pkt(s, buf, &len);
     ASSERT_EQ(ret, 0);
     ASSERT_EQ(memcmp(buf, "Packet 2", 8), 0);
     
-    ret = reliable_recv_pkt(&s->reliable, buf, &len);
+    ret = reliable_recv_pkt(s, buf, &len);
     ASSERT_EQ(ret, 0);
     ASSERT_EQ(memcmp(buf, "Packet 3", 8), 0);
     
@@ -267,7 +266,7 @@ TEST(stream_flush_fragmentation) {
     stream_write(&s->stream, large_data, sizeof(large_data));
     
     // Flush 到 reliable
-    int flushed = stream_flush_to_reliable(&s->stream, &s->reliable);
+    int flushed = stream_flush_to_reliable(s);
     
     ASSERT(flushed > 0);
     
@@ -318,7 +317,7 @@ TEST(stream_exact_packet_size) {
     memset(data, 'B', sizeof(data));
     
     stream_write(&s->stream, data, sizeof(data));
-    int flushed = stream_flush_to_reliable(&s->stream, &s->reliable);
+    int flushed = stream_flush_to_reliable(s);
     
     // 应该生成 1 个包
     ASSERT(flushed == P2P_STREAM_PAYLOAD);
@@ -367,7 +366,7 @@ TEST(reliable_large_data) {
     stream_write(&s->stream, large_data, total_size);
     
     // Flush，应该只发送窗口大小的数据
-    int flushed = stream_flush_to_reliable(&s->stream, &s->reliable);
+    int flushed = stream_flush_to_reliable(s);
     
     // 窗口满了，无法全部发送
     ASSERT(flushed > 0);
@@ -387,12 +386,12 @@ TEST(reliable_max_payload) {
     uint8_t data[P2P_MAX_PAYLOAD];
     memset(data, 'E', sizeof(data));
     
-    int ret = reliable_send_pkt(&s->reliable, data, sizeof(data));
+    int ret = reliable_send_pkt(s, data, sizeof(data));
     ASSERT_EQ(ret, 0);
     
     // 超过最大大小应该失败
     uint8_t oversized[P2P_MAX_PAYLOAD + 1];
-    ret = reliable_send_pkt(&s->reliable, oversized, sizeof(oversized));
+    ret = reliable_send_pkt(s, oversized, sizeof(oversized));
     ASSERT_EQ(ret, -1);
     
     destroy_mock_session(s);

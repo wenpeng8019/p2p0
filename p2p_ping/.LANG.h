@@ -39,7 +39,7 @@ enum {
 
     /* Words (LA_W) */
     LA_W1,  /* "CLOSED"  [p2p_ping.c] */
-    LA_W2,  /* "CLOSING"  [p2p_ping.c] */
+    LA_W2,  /* disabled "CLOSING" */
     LA_W3,  /* "CONNECTED"  [p2p_ping.c] */
     LA_W4,  /* "ERROR"  [p2p_ping.c] */
     LA_W5,  /* "INIT"  [p2p_ping.c] */

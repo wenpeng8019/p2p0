@@ -96,7 +96,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F85] = "%s: accepted from cand[%d]",  /* SID:85 */
     [LA_F86] = "%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n",  /* SID:86 */
     [LA_F87] = "%s: accepted sid=%u, msg=%u\n",  /* SID:87 */
-    [LA_F88] = "%s: accepted, len=%d (ses_id=%llu)\n",  /* SID:88 */
     [LA_F89] = "%s: accepted, probe_mapped=%s:%d\n",  /* SID:89 */
     [LA_F90] = "%s: accepted, public=%s:%d ses_id=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n",  /* SID:90 */
     [LA_F91] = "%s: accepted, waiting for response (sid=%u)\n",  /* SID:91 */
@@ -104,6 +103,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F93] = "%s: already connected, ignoring batch punch request",  /* SID:93 */
     [LA_F94] = "%s: bad payload(len=%d cand_cnt=%d)\n",  /* SID:94 */
     [LA_F95] = "%s: bad payload(len=%d)\n",  /* SID:95 */
+    [LA_F392] = "%s: bad payload(len=%d, need >=8)\n",  /* SID:392 */
     [LA_F96] = "%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)",  /* SID:96 */
     [LA_F97] = "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n",  /* SID:97 */
     [LA_F98] = "%s: discovered prflx cand<%s:%d>[%d]",  /* SID:98 */
@@ -113,9 +113,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F101] = "%s: entered, %s arrived after REGISTERED\n",  /* SID:101 */
     [LA_F102] = "%s: exchange timeout, retry %d/%d",  /* SID:102 */
     [LA_F103] = "%s: exchange timeout: peer not responding",  /* SID:103 */
-    [LA_F104] = "%s: failed to RE-REGISTER after timeout\n",  /* SID:104 */
-    [LA_F105] = "%s: failed to send UNREGISTER before restart\n",  /* SID:105 */
-    [LA_F106] = "%s: ignored (relay not supported)\n",  /* SID:106 */
     [LA_F107] = "%s: ignored for duplicated seq=%u, already acked\n",  /* SID:107 */
     [LA_F108] = "%s: ignored for seq=%u (expect=%d)\n",  /* SID:108 */
     [LA_F109] = "%s: ignored for ses_id=%llu (local ses_id=%llu)\n",  /* SID:109 */
@@ -126,7 +123,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F114] = "%s: invalid ack_seq=%u\n",  /* SID:114 */
     [LA_F115] = "%s: invalid cand idx: %d (count: %d)",  /* SID:115 */
     [LA_F116] = "%s: invalid for non-relay req\n",  /* SID:116 */
-    [LA_F117] = "%s: invalid in non-COMPACT mode\n",  /* SID:117 */
     [LA_F118] = "%s: invalid seq=%u\n",  /* SID:118 */
     [LA_F119] = "%s: invalid session_id=0\n",  /* SID:119 */
     [LA_F120] = "%s: keep alive to %d reachable cand(s)",  /* SID:120 */
@@ -147,6 +143,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F381] = "%s: remote host cand[%d]<%s:%d>%s\n",  /* SID:381 */
     [LA_F382] = "%s: remote relay cand[%d]<%s:%d>%s\n",  /* SID:382 */
     [LA_F383] = "%s: remote srflx cand[%d]<%s:%d>%s\n",  /* SID:383 */
+    [LA_F391] = "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n",  /* SID:391 */
     [LA_F134] = "%s: restarting periodic check",  /* SID:134 */
     [LA_F135] = "%s: retry(%d/%d) probe\n",  /* SID:135 */
     [LA_F136] = "%s: retry(%d/%d) req (sid=%u)\n",  /* SID:136 */
@@ -159,6 +156,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F143] = "%s: session mismatch(local=%llu ack=%llu)\n",  /* SID:143 */
     [LA_F144] = "%s: session mismatch(local=%llu pkt=%llu)\n",  /* SID:144 */
     [LA_F145] = "%s: session mismatch(local=%llu, pkt=%llu)\n",  /* SID:145 */
+    [LA_F88] = "%s: session validated, len=%d (ses_id=%llu)\n",  /* SID:88 */
     [LA_F146] = "%s: session_id mismatch (recv=%llu, expect=%llu)\n",  /* SID:146 */
     [LA_F147] = "%s: stale ACK(ack_inst=%u local_inst=%u), ignored\n",  /* SID:147 */
     [LA_F148] = "%s: start punching all(%d) remote candidates",  /* SID:148 */
@@ -288,7 +286,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F269] = "Received ACK (status=%d, candidates_acked=%d)",  /* SID:269 */
     [LA_F270] = "Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x",  /* SID:270 */
     [LA_F271] = "Received DATA pkt from %s:%d, seq=%u, len=%d",  /* SID:271 */
-    [LA_F272] = "% Received FIN packet, connection closed",  /* SID:272 */
     [LA_F273] = "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d",  /* SID:273 */
     [LA_F274] = "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d",  /* SID:274 */
     [LA_F275] = "Received UNKNOWN pkt type: 0x%02X",  /* SID:275 */
@@ -375,11 +372,13 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F356] = "[UDP] %s send to %s:%d, seq=%u, flags=0, len=0\n",  /* SID:356 */
     [LA_F357] = "[UDP] %s send to %s:%d, seq=%u, flags=0x%02x, len=%d\n",  /* SID:357 */
     [LA_F358] = "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n",  /* SID:358 */
+    [LA_F393] = "[UDP] %s send to %s:%d, seq=0, flags=0x01, len=%d\n",  /* SID:393 */
     [LA_F359] = "[UDP] %s_ACK send to %s:%d failed(%d)\n",  /* SID:359 */
     [LA_F360] = "[UDP] %s_ACK send to %s:%d, seq=%u, flags=0, len=%d\n",  /* SID:360 */
     [LA_F361] = "[UDP] %s_ACK send to %s:%d, seq=0, flags=0, len=%d\n",  /* SID:361 */
     [LA_F362] = "[UDP] Resend %s to %s:%d, seq=%u, flags=0x%02x, len=%d\n",  /* SID:362 */
     [LA_F363] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:363 */
+    [LA_F272] = "% connection closed by peer",  /* SID:272 */
     [LA_F364] = "ctr_drbg_seed failed: -0x%x",  /* SID:364 */
     [LA_F365] = "% p2p_ice_send_local_candidate called in non-RELAY mode",  /* SID:365 */
     [LA_F366] = "recv error %d",  /* SID:366 */
@@ -395,6 +394,10 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F106] = "%s: ignored (relay not supported)\n",  /* SID:106 disabled */
+    [LA_F117] = "%s: invalid in non-COMPACT mode\n",  /* SID:117 disabled */
+    [LA_F104] = "%s: failed to RE-REGISTER after timeout\n",  /* SID:104 disabled */
+    [LA_F105] = "%s: failed to send UNREGISTER before restart\n",  /* SID:105 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

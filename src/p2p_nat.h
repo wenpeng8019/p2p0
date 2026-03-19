@@ -117,6 +117,26 @@ void nat_on_punch_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
  */
 void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from);
 
+/*
+ * 验证 session_id 并调整 payload/len（用于会话隔离）
+ *
+ * 当 DATA/ACK/CRYPTO 携带 P2P_DATA_FLAG_SESSION 标志时，
+ * 调用此函数验证 session_id 是否匹配当前会话。
+ *
+ * 工作原理：
+ *   1. 会话隔离: 防止旧会话的重传包污染新会话的 reliable 层
+ *   2. 中继路由: 服务器通过 session_id 查找目标对端
+ *
+ * @param s          会话对象
+ * @param payload    输入/输出参数：payload 指针（验证成功后跳过 session_id）
+ * @param len        输入/输出参数：payload 长度（验证成功后减去 session_id 大小）
+ * @param proto_name 协议名称（用于日志）
+ * @return true=验证成功（payload/len 已调整），false=验证失败
+ */
+bool nat_validate_session(struct p2p_session *s,
+                          const uint8_t **payload, int *len,
+                          const char *proto_name);
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #endif /* P2P_NAT_H */
