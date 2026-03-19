@@ -545,6 +545,34 @@ void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx) {
     ctx->state = SIGNAL_COMPACT_INIT;
 }
 
+static void reset_peer(p2p_signal_compact_ctx_t *ctx) {
+
+    ctx->peer_online = false;
+
+    // 清理发给对端的候选及其确认状态
+    ctx->candidates_mask = 0;
+    ctx->candidates_acked = 0;
+    ctx->trickle_seq_base = 1;
+    ctx->trickle_seq_next = 1;
+    ctx->trickle_idx_base = 0;
+    memset(ctx->trickle_queue, 0, sizeof(ctx->trickle_queue));
+    ctx->trickle_last_pack_time = 0;
+
+    // 清理从对端收到的候选状态
+    ctx->remote_candidates_0 = false;
+    ctx->remote_candidates_mask = 0;
+    ctx->remote_candidates_done = 0;
+    ctx->remote_addr_notify_seq = 0;
+
+    // 清理 MSG RPC 状态
+    ctx->rpc_last_sid = 0;
+    ctx->req_sid = 0;
+    ctx->req_state = 0;
+    ctx->resp_sid = 0;
+    ctx->resp_state = 0;
+    ctx->resp_session_id = 0;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -571,6 +599,7 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
     strncpy(ctx->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
     ctx->local_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
     ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+
     ctx->peer_online = false;
 
     // 初始化清空对端候选列表
@@ -578,9 +607,9 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
 
     // 构造并发送带候选列表的注册包
     send_register(s);
-
-    ctx->last_send_time = P_tick_ms();
     ctx->register_attempts = 1;
+    ctx->last_send_time = P_tick_ms();
+
     return E_NONE;
 }
 
@@ -637,7 +666,7 @@ void p2p_signal_compact_trickle_turn(p2p_session_t *s) {
 
     // 攒批间隔控制（固定窗口策略）
     uint64_t now = P_tick_ms();
-    if (ctx->trickle_last_pack_time && (now - ctx->trickle_last_pack_time) < TRICKLE_BATCH_MS) {
+    if (ctx->trickle_last_pack_time && tick_diff(now, ctx->trickle_last_pack_time) < TRICKLE_BATCH_MS) {
         print("V:", LA_F("PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n", LA_F249, 249),
               ctx->trickle_queue[seq], seq);
         return;
@@ -957,16 +986,52 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    // 如果之前已经收到过 REGISTER_ACK，则启动 ICE 阶段，向对方发送后续候选队列和 FIN 包
-    // + ICE 阶段同时依赖 SIG_PKT_REGISTER_ACK 和 SIG_PKT_PEER_INFO 包：
-    //   SIG_PKT_REGISTER_ACK 提供后续候选队列基准; SIG_PKT_PEER_INFO 提供 session_id 作为双方连接的唯一标识
-    if (ctx->state == SIGNAL_COMPACT_REGISTERED) {
+    uint8_t base_index = payload[sizeof(uint64_t)];
 
-        assert(ctx->session_id);
-        if (session_id != ctx->session_id) {
+    // 并行网络中，PEER_INFO 可能先于 REGISTER_ACK 到达，所以此时 session_id 可能还未设置
+    if (!ctx->session_id) ctx->session_id = session_id;
+
+    // 如果 session_id 不一致
+    else if (ctx->session_id != session_id) {
+
+        // 对于 info0 包，意味着对方可能重新发起连接了（例如对端崩溃重启）
+        // ! 根据协议，对方将自己的 session 重置，并不会影响自己和信令服务之间的连接和数据状态
+        if (seq == 0 && base_index == 0) {
+
+            // 此时本端只能被迫强制重连
+            print("W:", LA_F("%s: renew session due to session_id changed by info0 (local=%" PRIu64 " pkt=%" PRIu64 ")\n", 0, 0),
+                  PROTO, ctx->session_id, session_id);
+
+            // 如果 p2p 之前已经连接成功过，即业务层可能已经完成部分通讯
+            // + 此时需要通知业务层，确保业务层的数据一致性
+            // ! 另外，触发 on_disconnected 前，并不会将 state 设置为 disconnected
+            //   接口可以以此来区分是断开连接，还是被迫重连
+            if (s->state >= P2P_STATE_LOST) {
+                if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
+            }
+
+            // 清除双方协商信息
+            reset_peer(ctx);
+
+            // 重置 p2p 会话
+            p2p_session_reset(s, false);
+
+            ctx->session_id = session_id;
+
+            if (ctx->state == SIGNAL_COMPACT_REGISTERING) s->state = P2P_STATE_REGISTERING;
+            else { ctx->state = SIGNAL_COMPACT_REGISTERED;
+                s->state = P2P_STATE_REGISTERED;
+            }
+        }
+        else {
             print("E:", LA_F("%s: session mismatch(local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F144, 144), PROTO, ctx->session_id, session_id);
             return;
         }
+    }
+
+    // 如果之前已经收到过 REGISTER_ACK，则启动 ICE 阶段，向对方发送后续候选队列和 FIN 包
+    // + ICE 阶段依赖 SIG_PKT_REGISTER_ACK，它提供后续候选队列基准
+    if (ctx->state == SIGNAL_COMPACT_REGISTERED) {
 
         ctx->state = SIGNAL_COMPACT_ICE;
         print("I:", LA_F("%s: entered, %s arrived after REGISTERED\n", LA_F101, 101), TASK_ICE, PROTO);
@@ -974,102 +1039,15 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         send_rest_candidates_and_fin(s);
         ctx->last_send_time = P_tick_ms();
     }
-    else if (!ctx->session_id) ctx->session_id = session_id;
-    else if (ctx->session_id != session_id) {
-
-        print("E:", LA_F("%s: session mismatch(local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F144, 144), PROTO, ctx->session_id, session_id);
-        return;
-    }
 
     bool new_seq = false;
 
-    // seq=0: 服务器维护的首个 PEER_INFO 包，或地址变更通知
-    if (seq == 0) {
-
-        uint8_t base_index = payload[sizeof(uint64_t)];
-        if (base_index == 0) {
-
-            print("V:", LA_F("%s seq=0: accepted cand_cnt=%d\n", LA_F64, 64), PROTO, cand_cnt);
-
-            if (!ctx->remote_candidates_0) {
-
-                // 维护分配远端候选列表的空间（作为首个 PEER_INFO 包，候选队列基准 base_index 肯定是 0）
-                // + 注意，seq=0 的 PEER_INFO 包的 base_index 字段值可以不为 0（协议上 base_index !=0 说明是对方公网地址发生变更的通知）
-                if (p2p_remote_cands_reserve(s, cand_cnt) != E_NONE) {
-                    print("E:", LA_F("Failed to reserve remote candidates (cnt=%d)\n", LA_F212, 212), cand_cnt);
-                    return;
-                }
-
-                unpack_remote_candidates(s, payload, cand_cnt);
-
-                ctx->remote_candidates_0 = new_seq = true;
-            }
-        }
-        // base_index!=0 表示地址变更通知，此时 pkt 必须只携带一个候选地址（即变更后的公网地址），且不带 FIN 标识
-        else if (cand_cnt != 1 || (flags & SIG_PEER_INFO_FIN)) {
-
-            print("E:", LA_F("%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n", LA_F51, 51),
-                  PROTO, base_index, cand_cnt, flags);
-            return;
-        }
-        // 确保地址变更通知是最新的
-        else if (ctx->remote_addr_notify_seq == 0 || uint8_circle_newer(base_index, ctx->remote_addr_notify_seq)) {
-
-            print("V:", LA_F("%s NOTIFY: accepted\n", LA_F49, 49), PROTO);
-
-            if (p2p_remote_cands_reserve(s, 1) != E_NONE) {
-                print("E:", LA_F("Failed to reserve remote candidates (cnt=1)\n", LA_F213, 213));
-                return;
-            }
-
-            if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) {
-                print("I:", LA_F("%s NOTIFY: ignored srflx addr update due to instument\n", LA_F379, 379), PROTO);
-                return;
-            }
-
-            p2p_remote_candidate_entry_t *c = &s->remote_cands[0];
-            c->type = (p2p_cand_type_t)payload[sizeof(uint64_t)+2];
-            c->priority = 0;
-            sockaddr_init_with_net(&c->addr, (uint32_t *) (payload + sizeof(uint64_t) + 3),
-                                   (uint16_t *) (payload + sizeof(uint64_t) + 7));
-            c->last_punch_send_ms = 0;
-            if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
-
-            // Trickle ICE：NAT 打洞已启动时，立即探测最新地址
-            if (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_RELAY) {
-
-                print("I:", LA_F("%s: Peer addr changed -> %s:%d, retrying punch\n", LA_F71, 71),
-                      TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
-
-                // 标记旧的活跃路径为失效（地址已变更）
-                if (s->active_path >= 0 && s->active_path < s->remote_cand_cnt) {
-                    path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
-                    print("V:", LA_F("Marked old path (idx=%d) as FAILED due to addr change\n", LA_F235, 235),
-                           s->active_path);
-                }
-
-                // 立即打洞新地址（nat_on_punch 收到回复后会自动注册新路径）
-                if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
-                    if (nat_punch(s, 0) != E_NONE) {
-                        print("E:", LA_F("Failed to send punch packet for new peer addr\n", LA_F218, 218));
-                    }
-                }
-            }
-            else {
-                print("I:", LA_F("%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n", LA_F70, 70),
-                      TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), (int)s->nat.state);
-            }
-
-            ctx->remote_addr_notify_seq = base_index;
-        }
-        else print("V:", LA_F("%s NOTIFY: ignored old notify base=%u (current=%u)\n", LA_F50, 50),
-                   PROTO, base_index, ctx->remote_addr_notify_seq);
-    }
-    // seq!=0 说明是对方发来的 PEER_INFO 包
-    else {
+    // seq!=0 说明是对端发来的后续 PEER_INFO 包
+    if (seq != 0) {
 
         print("V:", LA_F("%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n", LA_F86, 86), PROTO, seq, cand_cnt, flags);
 
+        // 排重
         if ((new_seq = (ctx->remote_candidates_done & (1u << (seq - 1))) == 0)) {
 
             // 对于 FIN 包，计算对方候选地址集合序列掩码（即计算全集区间）
@@ -1089,6 +1067,86 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             ctx->remote_candidates_done |= 1u << (seq - 1);
         }
     }
+    // seq=0 则是服务器维护的 PEER_INFO 包（可能是首个 info0，也可能是对端的公网地址变更通知）
+    // base_index = 0 意味着首个 info0
+    else if (base_index == 0) {
+
+        print("V:", LA_F("%s seq=0: accepted cand_cnt=%d\n", LA_F64, 64), PROTO, cand_cnt);
+
+        // 排重
+        if (!ctx->remote_candidates_0) {
+
+            // 维护分配远端候选列表的空间（作为首个 PEER_INFO 包，候选队列基准 base_index 肯定是 0）
+            // + 注意，seq=0 的 PEER_INFO 包的 base_index 字段值可以不为 0（协议上 base_index !=0 说明是对方公网地址发生变更的通知）
+            if (p2p_remote_cands_reserve(s, cand_cnt) != E_NONE) {
+                print("E:", LA_F("Failed to reserve remote candidates (cnt=%d)\n", LA_F212, 212), cand_cnt);
+                return;
+            }
+
+            unpack_remote_candidates(s, payload, cand_cnt);
+
+            ctx->remote_candidates_0 = new_seq = true;
+        }
+    }
+    // base_index!=0 说明是对方公网地址变更通知。此时 pkt 必须只携带一个候选地址（即变更后的公网地址），且不带 FIN 标识
+    else if (cand_cnt != 1 || (flags & SIG_PEER_INFO_FIN)) {
+
+        print("E:", LA_F("%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n", LA_F51, 51),
+              PROTO, base_index, cand_cnt, flags);
+        return;
+    }
+    // 确保地址变更通知是最新的
+    else if (ctx->remote_addr_notify_seq == 0 || uint8_circle_newer(base_index, ctx->remote_addr_notify_seq)) {
+
+        print("V:", LA_F("%s NOTIFY: accepted\n", LA_F49, 49), PROTO);
+
+        if (p2p_remote_cands_reserve(s, 1) != E_NONE) {
+            print("E:", LA_F("Failed to reserve remote candidates (cnt=1)\n", LA_F213, 213));
+            return;
+        }
+
+        if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) {
+            print("I:", LA_F("%s NOTIFY: ignored srflx addr update due to instument\n", LA_F379, 379), PROTO);
+            return;
+        }
+
+        p2p_remote_candidate_entry_t *c = &s->remote_cands[0];
+        c->type = (p2p_cand_type_t)payload[sizeof(uint64_t)+2];
+        c->priority = 0;
+        sockaddr_init_with_net(&c->addr, (uint32_t *) (payload + sizeof(uint64_t) + 3),
+                               (uint16_t *) (payload + sizeof(uint64_t) + 7));
+        c->last_punch_send_ms = 0;
+        if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
+
+        // Trickle ICE：NAT 打洞已启动时，立即探测最新地址
+        if (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_RELAY) {
+
+            print("I:", LA_F("%s: Peer addr changed -> %s:%d, retrying punch\n", LA_F71, 71),
+                  TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+
+            // 标记旧的活跃路径为失效（地址已变更）
+            if (s->active_path >= 0 && s->active_path < s->remote_cand_cnt) {
+                path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
+                print("V:", LA_F("Marked old path (idx=%d) as FAILED due to addr change\n", LA_F235, 235),
+                       s->active_path);
+            }
+
+            // 立即打洞新地址（nat_on_punch 收到回复后会自动注册新路径）
+            if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
+                if (nat_punch(s, 0) != E_NONE) {
+                    print("E:", LA_F("Failed to send punch packet for new peer addr\n", LA_F218, 218));
+                }
+            }
+        }
+        else {
+            print("I:", LA_F("%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n", LA_F70, 70),
+                  TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), (int)s->nat.state);
+        }
+
+        ctx->remote_addr_notify_seq = base_index;
+    }
+    else print("V:", LA_F("%s NOTIFY: ignored old notify base=%u (current=%u)\n", LA_F50, 50),
+               PROTO, base_index, ctx->remote_addr_notify_seq);
 
     if (new_seq) {
 
@@ -1218,7 +1276,7 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     }
 
     uint64_t session_id = nget_ll(payload);
-    if (ctx->session_id != session_id || !session_id) {
+    if (!session_id || ctx->session_id != session_id) {
         print("W:", LA_F("%s: session mismatch(local=%" PRIu64 ", pkt=%" PRIu64 ")\n", LA_F145, 145), PROTO, ctx->session_id, session_id);
         return;
     }
@@ -1226,45 +1284,19 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     print("V:", LA_F("%s: accepted (ses_id=%" PRIu64 ")\n", LA_F82, 82), PROTO, session_id);
 
     // 重置到 REGISTERED 状态，等待对端重新注册
+    // ! 这里可以明确知道是对方断开了连接，所以自己和信令服务器之间的连接和数据状态都是正常的，不需要重置
+    //   同样，session_id 也不需要重置，因为它是本端的唯一标识，是信令服务器在 REGISTER 请求时分配的
     ctx->state = SIGNAL_COMPACT_REGISTERED;
-    ctx->peer_online = false;
-    ctx->session_id = 0;
 
-    ctx->candidates_mask = 0;
-    ctx->candidates_acked = 0;
-    ctx->trickle_idx_base = 0;
-    ctx->trickle_seq_base = 0;
-    ctx->trickle_seq_next = 0;
-    memset(ctx->trickle_queue, 0, sizeof(ctx->trickle_queue));
-    ctx->trickle_last_pack_time = 0;
-
-    ctx->remote_candidates_mask = 0;
-    ctx->remote_candidates_done = 0;
-    ctx->remote_candidates_0 = false;
-
-    ctx->remote_addr_notify_seq = 0;
-
-    // 清理 MSG RPC 状态（A 端：发送请求，B 端：接收请求）
-    ctx->rpc_last_sid = 0;  // 重置最后完成的 sid
-    ctx->req_sid = 0;
-    ctx->req_state = 0;
-    ctx->resp_sid = 0;
-    ctx->resp_state = 0;
-    ctx->resp_session_id = 0;
-
-    // 重置探测状态（对端已断开）
-    probe_reset(s);
-    // 设置为 OFFLINE（信令未就绪，等待重新配对）
-    s->probe_ctx.state = P2P_PROBE_STATE_OFFLINE;
-
-    // 标记 NAT 为已关闭（主循环的 do_disconnected 统一处理 P2P 状态转换和回调）
-    if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY || 
-        s->state == P2P_STATE_CLOSING) {
-
-        s->nat.state = NAT_CLOSED;
-    }
+    // 清除双方协商信息
+    reset_peer(ctx);
 
     print("I:", LA_F("%s: peer disconnected (ses_id=%" PRIu64 "), reset to REGISTERED\n", LA_F125, 125), PROTO, session_id);
+
+    // 标记 NAT 为已关闭
+    // + 这里将信令层的 peer close 转换为 NAT 层的 closed 状态，主循环会统一以 NAT 层的 NAT_CLOSED 状态机变更为准
+    //   并统一调用 p2p_session_reset
+    s->nat.state = NAT_CLOSED;
 }
 
 /*
@@ -1757,7 +1789,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
     // REGISTERING 状态：定期重发 REGISTER
     if (ctx->state == SIGNAL_COMPACT_REGISTERING) {
 
-        if (now - ctx->last_send_time >= REGISTER_INTERVAL_MS) {
+        if (tick_diff(now, ctx->last_send_time) >= REGISTER_INTERVAL_MS) {
 
             // 超时检查
             if (ctx->register_attempts++ < MAX_REGISTER_ATTEMPTS) {
@@ -1780,7 +1812,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
     // REGISTERED/READY 状态：定期向服务器发送保活包
     else if (ctx->state == SIGNAL_COMPACT_REGISTERED || ctx->state == SIGNAL_COMPACT_READY) {
 
-        if (now - ctx->last_send_time >= REGISTER_KEEPALIVE_INTERVAL_MS) {
+        if (tick_diff(now, ctx->last_send_time) >= REGISTER_KEEPALIVE_INTERVAL_MS) {
 
             /*
              * 发送 ALIVE 保活包
@@ -1819,7 +1851,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
     // 当前（请求端）处于等待（服务器返回的）REQ_ACK 的阶段
     if (ctx->req_state == 1/* waiting REQ_ACK */) {
 
-        if ((now - ctx->req_send_time) >= MSG_REQ_INTERVAL_MS) {
+        if (tick_diff(now, ctx->req_send_time) >= MSG_REQ_INTERVAL_MS) {
 
             /* 超时失败 */
             if (ctx->req_retries++ < MSG_REQ_MAX_RETRIES) {
@@ -1853,7 +1885,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
     // 当前（响应端）处于等待（服务器返回的）RESP_ACK 的阶段
     if (ctx->resp_state == 1/* waiting RESP_ACK */) {
 
-        if ((now - ctx->resp_send_time) >= MSG_REQ_INTERVAL_MS) {
+        if (tick_diff(now, ctx->resp_send_time) >= MSG_REQ_INTERVAL_MS) {
 
             /* 超时失败（与 A 端对称，使用相同的超时配置） */
             if (ctx->resp_retries++ < MSG_REQ_MAX_RETRIES) {
@@ -1894,12 +1926,17 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     uint64_t now = P_tick_ms();
 
-    // ICE 状态：定期向对方重发剩余候选、以及 FIN
+    // ICE 交换阶段：定期重发剩余候选和 FIN，直到收到对端确认（进入 READY）
     if (ctx->state == SIGNAL_COMPACT_ICE) {
 
-        // ICE 超时检查：直接执行 UNREGISTER + RE-REGISTER 重新协商
-        // + 这里不能 回退到 REGISTERED，避免“服务端不重启 ICE 协调”导致永久卡住
-        if (now - ctx->last_send_time >= ICE_TIMEOUT_MS) {
+        // ICE 交换超时：直接执行 UNREGISTER + RE-REGISTER 即重新初始连接
+        // + 由于 ICE 交换是服务器中转实现，所以此时有可能是信令服务器的问题、也可能是对端网络问题，当然也可能是自己网络问题
+        //   由于无法确认问题来自哪里，所以不能回退到 REGISTERED，因为三方如果都误认为是别人的问题，那就会一直卡在 ICE 交换阶段无法恢复了
+        // ! 注意：如果 p2p 已经是连接过的状态
+        //   由于候选支持 trickle 模式，所以 p2p 可能在 ICE 阶段变为已连接状态，即可能已经部分打洞连接成功
+        //   此时如果 p2p 是可连接状态，那么问题应该出现在信令服务器或和服务器之间的网络，如果问题出现在之间的网络，那么是可能恢复的
+        //   即使信号已经 lost，连接过的网络，也应该由应用来决定是否断开或重连
+        if (s->state < P2P_STATE_LOST && tick_diff(now, ctx->last_send_time) >= ICE_TIMEOUT_MS) {
 
             char local_peer_id[P2P_PEER_ID_MAX];
             char remote_peer_id[P2P_PEER_ID_MAX];
@@ -1911,51 +1948,48 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
             print("W:", LA_F("%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)\n", LA_F153, 153),
                   TASK_ICE, ICE_TIMEOUT_MS);
 
-            // 清理本地 ICE 相关状态，避免旧会话状态污染后续协商
+            // 重置双方协商信息
+            reset_peer(ctx);
+
+            // 重置 p2p 会话
+            p2p_session_reset(s, false);
+
+            // session id 会在服务器重新注册时重新分配
             ctx->session_id = 0;
 
-            ctx->candidates_mask = 0;
-            ctx->candidates_acked = 0;
-            ctx->trickle_idx_base = 0;
-            ctx->trickle_seq_base = 0;
-            ctx->trickle_seq_next = 0;
-            memset(ctx->trickle_queue, 0, sizeof(ctx->trickle_queue));
-            ctx->trickle_last_pack_time = 0;
+            // 重新 REGISTER
+            // + 这里无需向服务器发送 UNREGISTER 包，因为协议上要求新的 rid 会确保服务器上的旧注册失效
+            ctx->state = SIGNAL_COMPACT_REGISTERING;
 
-            ctx->remote_candidates_mask = 0;
-            ctx->remote_candidates_done = 0;
-            ctx->remote_candidates_0 = false;
+            // 生成新的注册 rid
+            uint32_t rid = ctx->instance_id;
+            while (rid == ctx->instance_id) rid = P_rand32();
+            ctx->instance_id = rid;
 
-            ctx->remote_addr_notify_seq = 0;
-
-            // 先 UNREGISTER，再立即发起新一轮 REGISTER（新 instance_id）
-            if (p2p_signal_compact_disconnect(s) != E_NONE) {
-                print("E:", LA_F("%s: failed to send UNREGISTER before restart\n", LA_F105, 105), TASK_ICE);
-                return;
-            }
-            if (p2p_signal_compact_connect(s, local_peer_id, remote_peer_id, &ctx->server_addr) != E_NONE) {
-                print("E:", LA_F("%s: failed to RE-REGISTER after timeout\n", LA_F104, 104), TASK_ICE);
-                return;
-            }
+            // 发送注册协议包
+            send_register(s);
+            ctx->register_attempts = 1;
+            ctx->last_send_time = P_tick_ms();
 
             // 重新发起 TURN Allocate（上一轮分配已随 ICE 重置失效）
-            // todo 为啥 ICE 重置会失效，另外 turn 的生命周期管理设计？
-            if (!instrument_option(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
-                if (p2p_turn_allocate(s) == 0) {
-                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F286, 286), s->cfg.turn_server);
-                }
-            }
+            // todo ? turn 为啥 ICE 重置会失效，另外 turn 的生命周期管理设计？
+            // turn 的公网地址应该会添加到本地候选队列，不应该失效呀
+//            if (!instrument_option(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
+//                if (p2p_turn_allocate(s) == 0) {
+//                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F286, 286), s->cfg.turn_server);
+//                }
+//            }
 
             return;
         }
 
         // 如果有待发送的 trickle 候选，且超过了攒批间隔时间窗口
-        if (ctx->trickle_last_pack_time && now - ctx->trickle_last_pack_time >= TRICKLE_BATCH_MS
+        if (ctx->trickle_last_pack_time && tick_diff(now, ctx->trickle_last_pack_time) >= TRICKLE_BATCH_MS
             && ctx->trickle_seq_next <= 16 && ctx->trickle_queue[ctx->trickle_seq_next] > 0) {
             send_trickle_candidates(s);
         }
 
-        if (now - ctx->last_send_time < PEER_INFO_INTERVAL_MS) return;
+        if (tick_diff(now, ctx->last_send_time) < PEER_INFO_INTERVAL_MS) return;
 
         print("V:", LA_F("%s, retry remaining candidates and FIN to peer\n", LA_F67, 67), TASK_ICE);
 
@@ -1998,7 +2032,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
 
     // 间隔等待
     uint64_t now = P_tick_ms();
-    if ((now - ctx->nat_probe_send_time) < NAT_PROBE_INTERVAL_MS) return;
+    if (tick_diff(now, ctx->nat_probe_send_time) < NAT_PROBE_INTERVAL_MS) return;
 
     if (ctx->nat_probe_retries++ < NAT_PROBE_MAX_RETRIES) {
 

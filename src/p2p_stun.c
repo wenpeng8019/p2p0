@@ -554,8 +554,8 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
     s->nat_type = P2P_NAT_DETECTING;
     
     /* 检查超时 */
-    if (ctx->state != NAT_TEST_IDLE && 
-        now - ctx->last_send_time > STUN_TEST_TIMEOUT_MS) {
+    if (ctx->state != NAT_TEST_IDLE &&
+        tick_diff(now, ctx->last_send_time) > STUN_TEST_TIMEOUT_MS) {
         
         if (ctx->retry_count >= STUN_MAX_RETRIES) {
             /* 超时失败，进入下一个测试 */

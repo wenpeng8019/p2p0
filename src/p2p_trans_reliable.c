@@ -122,7 +122,7 @@ int reliable_on_ack(reliable_t *r, uint16_t ack_seq, uint32_t sack_bits) {
 
             // 更新 RTT 估算（仅针对非重传数据包）
             if (e->retx_count == 0 && e->send_time > 0) {
-                int rtt = (int)(now - e->send_time);
+                int rtt = (int)tick_diff(now, e->send_time);
                 if (r->srtt == 0) {
                     r->srtt = rtt;
                     r->rttvar = rtt / 2;
@@ -225,7 +225,7 @@ void reliable_tick(reliable_t *r) {
             p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
             e->send_time = now;
             e->retx_count = 0;
-        } else if ((int)(now - e->send_time) >= r->rto) {
+        } else if ((int)tick_diff(now, e->send_time) >= r->rto) {
             /* 超时重传 + 指数退避 */
             p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
             e->send_time = now;

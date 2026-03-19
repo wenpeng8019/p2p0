@@ -76,7 +76,7 @@ static void disconnect(p2p_session_t *s) {
     p2p_session_reset(s, true);
 
     // NAT 层 FIN（仅在已连接状态，重复发送提高 UDP 可靠性）
-    if (prev_state == P2P_STATE_CONNECTED || prev_state == P2P_STATE_RELAY) {
+    if (prev_state >= P2P_STATE_LOST) {
 
         print("V:", LA_F("Sending FIN packet to peer before closing", LA_F296, 296));
         for (int i = 0; i < 3; i++) {
@@ -112,20 +112,19 @@ static void peer_disconnect(p2p_session_t *s) {
     // 信令信令层的 FIN 信号会统一转换为 NAT 层的 FIN 信号
     assert(s->nat.state == NAT_CLOSED);
 
-    assert(s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY ||
-           s->state == P2P_STATE_CLOSING);
+    assert(s->state >= P2P_STATE_LOST);
 
-    print("I:", LA_F("Received FIN packet, connection closed", LA_F272, 272));
+    print("I:", LA_F("connection closed by peer", LA_F272, 272));
+
+    p2p_probe_state_t prev_probe_state = s->probe_ctx.state;
 
     p2p_session_reset(s, true);
 
-    // 停止信道外 NAT 探测（回到 READY 状态）
-    // + 注意，disconnect 并不会直接执行该操作，而是在 p2p_close 中执行，
-    //   因为 disconnect 也可能被 p2p_destroy 调用，此时需要执行 probe_reset，而非变为 READY 状态
-    //   另外，单纯的 p2p_session_reset(s, false)，即数据会话重置时，无需改变 probe_ctx 的状态（即它是信道外探测）
-    if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT
-        && s->probe_ctx.state != P2P_PROBE_STATE_OFFLINE) {
-        s->probe_ctx.state = P2P_PROBE_STATE_READY;
+    // 信道外探测基于信令服务器 RPC 转发，而对方断开连接，不影响自己和服务器的注册状态
+    if (prev_probe_state != P2P_PROBE_STATE_OFFLINE) {
+        s->probe_ctx.state = prev_probe_state == P2P_PROBE_STATE_NO_SUPPORT
+                ? P2P_PROBE_STATE_NO_SUPPORT
+                : P2P_PROBE_STATE_READY;
     }
 
     if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
@@ -604,12 +603,6 @@ p2p_close(p2p_handle_t hdl) {
         return;
     }
 
-    // 停止信道外 NAT 探测（回到 READY 状态）
-    if (s->probe_ctx.state != P2P_PROBE_STATE_NO_SUPPORT
-        && s->probe_ctx.state != P2P_PROBE_STATE_OFFLINE) {
-        s->probe_ctx.state = P2P_PROBE_STATE_READY;
-    }
-    
     // 主动断开（NAT FIN + 信令层 disconnect）
     disconnect(s);
     
@@ -1057,9 +1050,7 @@ p2p_update(p2p_handle_t hdl) {
 
     // 转换：CONNECTED/RELAY/CLOSING → CLOSED
     // + NAT FIN 和信令 PEER_OFF 都归一化为 NAT_CLOSED，统一在此处理
-    if (s->nat.state == NAT_CLOSED
-        && (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY|| 
-            s->state == P2P_STATE_CLOSING)) {
+    if (s->nat.state == NAT_CLOSED && s->state >= P2P_STATE_LOST) {
         peer_disconnect(s);
     }
 

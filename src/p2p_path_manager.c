@@ -804,7 +804,7 @@ int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms) {
     if (pm->switch_history_count == 0) return 0;
     
     uint64_t now = P_tick_ms();
-    uint64_t cutoff_time = (now > window_ms) ? (now - window_ms) : 0;
+    uint64_t cutoff_time = (now > window_ms) ? tick_diff(now, window_ms) : 0;
     
     int count = 0;
     for (int i = 0; i < pm->switch_history_count; i++) {

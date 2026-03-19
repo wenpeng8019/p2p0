@@ -97,7 +97,7 @@ static void p2p_pseudotcp_tick(struct p2p_session *s) {
         /* 窗口检查：超过 cwnd 则停止发送 */
         if (in_flight >= (int)s->tcp.cwnd) break;
 
-        if (e->send_time == 0 || now - e->send_time >= (uint64_t)r->rto) {
+        if (e->send_time == 0 || tick_diff(now, e->send_time) >= (uint64_t)r->rto) {
             /* 发送/重传数据包 */
             p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
             

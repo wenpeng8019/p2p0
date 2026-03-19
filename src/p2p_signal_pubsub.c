@@ -542,7 +542,7 @@ void p2p_signal_pubsub_tick_recv(p2p_signal_pubsub_ctx_t *ctx, struct p2p_sessio
     else return;
 
     uint64_t now = P_tick_ms();
-    uint64_t diff = now - ctx->last_poll;
+    uint64_t diff = tick_diff(now, ctx->last_poll);
     if (diff < (uint64_t)poll_interval) return;
     ctx->last_poll = now;
 
@@ -710,7 +710,7 @@ void p2p_signal_pubsub_tick_send(p2p_signal_pubsub_ctx_t *ctx, struct p2p_sessio
     
     /* 检查是否需要（重）发送 */
     if (!s->ice_ctx.signal_sent ||
-        (now - s->ice_ctx.last_signal_time >= resend_interval) ||
+        (tick_diff(now, s->ice_ctx.last_signal_time) >= resend_interval) ||
         (s->local_cand_cnt > s->ice_ctx.last_cand_cnt_sent)) {
         
         uint8_t pkt[2048];

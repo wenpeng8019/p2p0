@@ -286,12 +286,21 @@ static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
     // 重置路径管理器
     path_manager_reset(s);
 
+    // 重置探测状态（它依赖信令服务器的 rpc，即基于 session 的数据状态）
+    // + 所以 session 关闭或重置，之前的探测也就无效了
+    probe_reset(s);
+
+    // 如果是关闭连接（而非重置）
     if (closing) {
-        s->turn_pending = 0;
+
+        s->turn_pending = 0;            // 关闭 TURN 服务
         p2p_turn_reset(s);
-        s->nat.state = NAT_CLOSED;
-        s->state = P2P_STATE_CLOSED;
+
+        s->nat.state = NAT_CLOSED;      // 标记 NAT 已关闭
+
+        s->state = P2P_STATE_CLOSED;    // 更新状态为已关闭
     }
+    // 重置 NAT
     else nat_reset(&s->nat);
 }
 

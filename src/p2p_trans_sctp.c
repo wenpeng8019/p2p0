@@ -407,7 +407,7 @@ static void sctp_tick(p2p_session_t *s) {
 #ifndef P2P_THREADED
     /* 单线程模式：手动驱动 usrsctp 定时器 */
     uint64_t now = P_tick_ms();
-    uint32_t elapsed = (uint32_t)(now - ctx->last_tick);
+    uint32_t elapsed = (uint32_t)tick_diff(now, ctx->last_tick);
     if (elapsed > 0) {
         usrsctp_handle_timers(elapsed);
         ctx->last_tick = now;

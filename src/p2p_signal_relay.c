@@ -828,7 +828,7 @@ void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
         if (unsent_count > 0 &&
             !ctx->waiting_for_peer &&                        // 不在等待对端上线状态
             (!s->ice_ctx.signal_sent ||                              // 从未发送过
-             (now - s->ice_ctx.last_signal_time >= SIGNAL_RESEND_INTERVAL_MS) || // 超过重发间隔（Trickle ICE）
+             tick_diff(now, s->ice_ctx.last_signal_time) >= SIGNAL_RESEND_INTERVAL_MS || // 超过重发间隔（Trickle ICE）
              (s->local_cand_cnt > s->ice_ctx.last_cand_cnt_sent) ||  // 有新候选收集到（如 STUN 响应）
              s->ice_ctx.cands_pending_send                           // 有待发送的候选（之前 TCP 发送失败）
             )) {

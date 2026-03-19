@@ -187,7 +187,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
               inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port), idx);
 
         // 首次或重新启动时初始化状态（INIT/CLOSED）
-        if (n->state == NAT_INIT || n->state == NAT_CLOSED) {
+        if (n->state == NAT_INIT) {
             n->state = NAT_PUNCHING;
             n->punch_start = now;
             n->rx_confirmed = false;
@@ -409,8 +409,8 @@ void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
     print("V:", LA_F("%s: accepted", LA_F81, 81), PROTO);
 
     // 收到对端主动断开通知，标记 NAT 层为已关闭
-    if (s->nat.state != NAT_CLOSED) {
-        s->nat.state = NAT_CLOSED;
+    if (s->nat.state != NAT_CLOSED) { s->nat.state = NAT_CLOSED;
+
         print("I:", LA_F("%s: received FIN from peer, marking NAT as CLOSED", LA_F132, 132), TASK_NAT);
     }
 }
