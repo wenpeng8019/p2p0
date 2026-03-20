@@ -54,8 +54,8 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
     assert(s->remote_cand_cnt + cand_cnt <= s->remote_cand_cap);
 
-    p2p_remote_candidate_entry_t*c;
     int offset = sizeof(uint64_t) + 2;  // 第一个 candidates 列表的起始位置
+    p2p_remote_candidate_entry_t*c;
 
     // 对于 peer_info0, 即由 server 维护的双方握手包
     if (payload[sizeof(uint64_t)]/* base_index */ == 0) {
@@ -80,7 +80,8 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) --s->remote_cand_cnt;
         else if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
 
-            if (nat_punch(s, 0) != E_NONE) {
+            if (nat_punch(s, 0) == E_NONE) s->remote_srflx_cnt++;
+            else {
                 print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
                     TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             }
@@ -94,12 +95,9 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         s->remote_cand_cnt = 1;
     }
 
-    if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
-
     for (int i = 0, idx; i < cand_cnt; i++, offset += (int)sizeof(p2p_candidate_t)) {
 
         unpack_candidate(c = &s->remote_cands[idx = s->remote_cand_cnt], payload + offset);
-
         if (p2p_find_remote_candidate_by_addr(s, &c->addr) >= 0) {
             print("W:", LA_F("%s: duplicate remote cand<%s:%d> from signaling, skipped\n", LA_F165, 165),
                   TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
@@ -107,27 +105,17 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         }
         ++s->remote_cand_cnt;
 
-        if (i == 0 && payload[sizeof(uint64_t)]/* base_index */ == 0) {
-
-            if ((p2p_cand_type_t)c->type != P2P_CAND_SRFLX) {
-
-                print("W:", LA_F("%s: unexpected non-srflx cand in peer_info0, treating as srflx\n", LA_F384, 384),
-                      TASK_ICE_REMOTE);
-
-                c->type = P2P_CAND_SRFLX;
-            }
-        }
-        else if (c->type == P2P_CAND_RELAY) {
+        if (c->type == P2P_CAND_RELAY) {
 
             print("I:", LA_F("%s: remote relay cand[%d]<%s:%d>%s\n", LA_F382, 382),
                   TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                  instrument_option(P2P_INST_OPT_RELAY_OFF) ? ", ignored due to instrument" : "");
+                  instrument_option(P2P_INST_OPT_ICE_RELAY_OFF) ? ", ignored due to instrument" : "");
 
-            if (instrument_option(P2P_INST_OPT_RELAY_OFF)) --s->remote_cand_cnt;
-
+            if (instrument_option(P2P_INST_OPT_ICE_RELAY_OFF)) --s->remote_cand_cnt;
+            s->remote_relay_cnt++;
             continue;
         }
-        else if (c->type == P2P_CAND_SRFLX) {
+        if (c->type == P2P_CAND_SRFLX) {
 
             print("I:", LA_F("%s: remote srflx cand[%d]<%s:%d>%s\n", LA_F383, 383),
                         TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
@@ -140,6 +128,8 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
             }
 
             if (instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) continue;
+
+            if (nat_punch(s, idx) == E_NONE) { s->remote_srflx_cnt++; continue; }
         }
         else if (c->type == P2P_CAND_HOST) {
 
@@ -154,6 +144,8 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
             }
 
             if (instrument_option(P2P_INST_OPT_HOST_PUNCH_OFF)) continue;
+
+            if (nat_punch(s, idx) == E_NONE) { s->remote_host_cnt++; continue; }
         }
         else {
 
@@ -163,10 +155,8 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
             continue;
         }
 
-        if (nat_punch(s, idx) != E_NONE) {
-            print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
-                  TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
-        }
+        print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
+              TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
     }
 }
 
@@ -600,11 +590,6 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
     ctx->local_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
     ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
-    ctx->peer_online = false;
-
-    // 初始化清空对端候选列表
-    s->remote_cand_cnt = 0;
-
     // 构造并发送带候选列表的注册包
     send_register(s);
     ctx->register_attempts = 1;
@@ -644,8 +629,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
                (int)sizeof(payload));
 
-    ctx->state = SIGNAL_COMPACT_INIT;
-    ctx->session_id = 0;            // 清除会话 ID（防止处理延迟到达的 PEER_OFF）
+    p2p_signal_compact_init(ctx);
     return E_NONE;
 }
 
@@ -831,10 +815,10 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         ctx->candidates_cached = max_candidates;
 
     // 根据服务器能力设置探测状态
-    if (!ctx->msg_support) {
-        s->probe_ctx.state = P2P_PROBE_STATE_NO_SUPPORT;
-    } else {
+    if (ctx->msg_support) {
         s->probe_ctx.state = P2P_PROBE_STATE_READY;
+    } else {
+        s->probe_ctx.state = P2P_PROBE_STATE_NO_SUPPORT;
     }
 
     // 解析自己的公网地址（服务器主端口探测到的 UDP 源地址）
@@ -1087,6 +1071,17 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             unpack_remote_candidates(s, payload, cand_cnt);
 
             ctx->remote_candidates_0 = new_seq = true;
+        }
+
+        // 如果禁止打洞
+        if ((instrument_option(P2P_INST_OPT_HOST_PUNCH_OFF) || instrument_option(P2P_INST_OPT_ICE_HOST_OFF)) &&
+            (instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF) || instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF))) {
+
+            if ((instrument_option(P2P_INST_OPT_ICE_RELAY_OFF))) {
+                print("W:", LA_F("%s: all candidates disabled by instrument, only use signaling relay\n", 0, 0), PROTO);
+            }
+
+
         }
     }
     // base_index!=0 说明是对方公网地址变更通知。此时 pkt 必须只携带一个候选地址（即变更后的公网地址），且不带 FIN 标识

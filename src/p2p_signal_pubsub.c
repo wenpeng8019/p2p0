@@ -195,7 +195,13 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
             if (s->remote_cand_cnt > 0 || s->ice_ctx.state != P2P_ICE_STATE_INIT) {
                 printf(LA_F("First offer, resetting ICE and clearing %d stale candidates", LA_F221, 221), s->remote_cand_cnt);
+
+                // todo 需要这里初始化？
                 s->remote_cand_cnt = 0;
+                s->remote_host_cnt = 0;
+                s->remote_srflx_cnt = 0;
+                s->remote_relay_cnt = 0;
+
                 s->ice_ctx.state = P2P_ICE_STATE_GATHERING_DONE;
                 s->ice_ctx.check_count = 0;
                 s->ice_ctx.check_last_ms = 0;

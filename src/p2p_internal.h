@@ -159,6 +159,9 @@ typedef struct p2p_session {
     p2p_remote_candidate_entry_t*   remote_cands;       // 远端候选地址（动态分配，含运行时状态）
     int                             remote_cand_cnt;    // 远端候选数量
     int                             remote_cand_cap;    // 远端候选容量
+    uint16_t                        remote_host_cnt;    // 对端 host 类型候选数量
+    uint16_t                        remote_srflx_cnt;   // 对端 srflx 类型候选数量
+    uint16_t                        remote_relay_cnt;   // 对端 relay 类型候选数量
     bool                            remote_ice_done;    // 远端候选是否同步完成（由信令层设置，NAT 层判断超时用）
     int                             turn_pending;       // TURN Allocate 待响应计数（>0 表示还有异步收集未完成）
 
@@ -272,6 +275,9 @@ static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
     
     // 清除远端候选
     s->remote_cand_cnt = 0;
+    s->remote_host_cnt = 0;
+    s->remote_srflx_cnt = 0;
+    s->remote_relay_cnt = 0;
     s->remote_ice_done = false;
     p2p_ice_reset(&s->ice_ctx);
     

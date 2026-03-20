@@ -22,13 +22,13 @@ struct p2p_session;
 /* 打洞状态 */
 enum {
     NAT_INIT = 0,                           // 初始化状态（从未连接过）
+    NAT_CLOSED,                             // 收到 FIN 包主动断开（连接彻底终止）
     NAT_PUNCHING,                           // 打洞中（已回取候选列表，正在尝试建立双向路径）
+    NAT_LOST,                               // 连接丢失：曾经连通，现超时无响应（可能恢复）
     NAT_CONNECTED,                          // 双向连通：rx + tx 同时已确认
                                             //   rx: 收到对方的 PUNCH/PUNCH_ACK（peer→me 方向通）
                                             //   tx: 收到 PUNCH_ACK（对方收到了我们的 PUNCH，me→peer 方向通）
-    NAT_RELAY,                              // 中继模式：打洞超时失败。此时仍周期发送 PUNCH 尝试重连
-    NAT_LOST,                               // 连接丢失：曾经连通，现超时无响应（可能恢复）
-    NAT_CLOSED                              // 收到 FIN 包主动断开（连接彻底终止）
+    NAT_RELAY                               // 中继模式：打洞超时失败。此时仍周期发送 PUNCH 尝试重连
 };
 
 /* 打洞上下文 */

@@ -544,7 +544,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
      * Server Reflexive Candidate 是通过 STUN 服务器发现的公网地址。
      * 用于穿透 NAT，让位于不同 NAT 后的对端能够通信。
      */
-    if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF) && s->cfg.stun_server) {
+    if (!instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF) && s->cfg.stun_server) {
 
         uint8_t stun_buf[256];
         int slen = p2p_stun_build_binding_request(stun_buf, sizeof(stun_buf), NULL, NULL, NULL);

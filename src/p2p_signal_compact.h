@@ -294,10 +294,10 @@ typedef struct {
     uint8_t             trickle_seq_next;                   /* 下一个 trickle 包的 seq（累加目标，flush 后自增） */
     uint8_t             trickle_queue[17];                  /* trickle 候选队列包队列，记录每个包所携带的候选队列数量（1-based，索引 1-16） */
     uint64_t            trickle_last_pack_time;             /* 上次打包发送 trickle 包的时间，用于累积批发送 trickle 候选队列 */
-    bool                remote_candidates_0;
-    uint16_t            remote_candidates_mask;
-    uint16_t            remote_candidates_done;
-    uint8_t             remote_addr_notify_seq;              /* 最近一次已应用的地址变更通知序号（base_index，1..255） */
+    bool                remote_candidates_0;                /* 是否已收到 PEER_INFO seq=0（首批候选），该包由信令服务器维护 */
+    uint16_t            remote_candidates_mask;             /* 对端候选队列 seq 窗口 mask，用于判断是否收到过某个 seq 的 PEER_INFO 包 */
+    uint16_t            remote_candidates_done;             /* 对端候选队列 seq 窗口完成 mask，表示已收到过且确认过的 seq（即对端已应用） */
+    uint8_t             remote_addr_notify_seq;             /* 最近一次已应用的地址变更通知序号（base_index，1..255） */
 
     /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
     struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */

@@ -130,6 +130,16 @@ target_include_directories(test_ping_reconnect PRIVATE
 )
 target_link_libraries(test_ping_reconnect stdc ${TEST_PLATFORM_LIBS})
 
+# P2P ICE 候选测试集合（候选过滤验证）
+add_executable(test_ping_ice
+    test_ping_ice.c
+)
+target_include_directories(test_ping_ice PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_ice stdc ${TEST_PLATFORM_LIBS})
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)

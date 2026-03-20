@@ -671,7 +671,13 @@ void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session 
                     if (should_reset && (s->remote_cand_cnt > 0 || s->ice_ctx.state != P2P_ICE_STATE_INIT)) {
                         printf(LA_F("%s received (ice_ctx.state=%d), resetting ICE and clearing %d stale candidates", LA_F53, 53),
                                ctx->read_hdr.type == P2P_RLY_OFFER ? "OFFER" : "FORWARD", s->ice_ctx.state, s->remote_cand_cnt);
+
+                        // todo 需要这里初始化？
                         s->remote_cand_cnt = 0;
+                        s->remote_host_cnt = 0;
+                        s->remote_srflx_cnt = 0;
+                        s->remote_relay_cnt = 0;
+
                         s->ice_ctx.state = P2P_ICE_STATE_GATHERING_DONE;
                         s->ice_ctx.check_count = 0;
                         s->ice_ctx.check_last_ms = 0;

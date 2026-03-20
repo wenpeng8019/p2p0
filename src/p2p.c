@@ -197,7 +197,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         free(s); P_sock_close(sock);
         return NULL;
     } else if (cfg->auth_key) {
-        strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1); // todo 用 strdup
+        strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1);
     }
 
     // 如果没有配置 STUN 服务器，并且未使用 COMPACT 模式，则无法进行 NAT 类型检测
@@ -449,7 +449,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             struct sockaddr_in loc; socklen_t len = sizeof(loc);
             getsockname(s->sock, (struct sockaddr *)&loc, &len);
 
-            // 将 route 中的本地地址转换为候选列表
+            // 将 route 中的本地地址（和本地绑定端口成对）转换为候选列表
             if (!instrument_option(P2P_INST_OPT_ICE_HOST_OFF)) {
                 for (int i = 0; i < s->route.addr_count; i++) {
                     int idx = p2p_cand_push_local(s);
@@ -481,7 +481,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             }
 
             // TURN：异步收集 Relay 候选（响应到达后 trickle 发送给对端）
-            if (!instrument_option(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
+            if (!instrument_option(P2P_INST_OPT_ICE_RELAY_OFF) && s->cfg.turn_server) {
                 if (p2p_turn_allocate(s) == 0) {
                     print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F286, 286), s->cfg.turn_server);
                 }
@@ -986,7 +986,7 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     // NAT 重新连接后恢复路径（NAT_RELAY → NAT_CONNECTED）
-    if (s->nat.state == NAT_CONNECTED && s->state == P2P_STATE_RELAY) {
+    if (s->state == P2P_STATE_RELAY && s->nat.state == NAT_CONNECTED) {
         print("I:", LA_F("NAT connection recovered, upgrading from RELAY to CONNECTED", LA_F236, 236));
         
         // 标记中继路径为降级（但不移除，保留作为备份）
@@ -1007,14 +1007,17 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     // 转换：PUNCHING → RELAY（NAT 打洞失败，添加中继路径）
-    if (s->state == P2P_STATE_PUNCHING && s->nat.state == NAT_RELAY) {
+    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
+        && (s->nat.state == NAT_RELAY || (s->remote_ice_done && s->remote_srflx_cnt == 0 && s->remote_host_cnt == 0))) {
 
         // 添加中继路径
         print("I:", LA_F("P2P punch failed, adding relay path", LA_F247, 247));
         
         struct sockaddr_in relay_addr;
         bool relay_available = false;
-        
+
+        // todo 这里的 signaling relay 并不在这里作为降级后的备选，应该全局就添加
+
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
             if (s->sig_compact_ctx.relay_support) {
                 relay_addr = s->sig_compact_ctx.server_addr;
