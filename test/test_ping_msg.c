@@ -398,12 +398,58 @@ static void stop_server(void) {
 // server 路径（需要在 main 前保存）
 static const char *g_server_path = NULL;
 
+// 启动 server 子进程（带可选参数）
+static int start_server_ex(const char *server_path, int relay_mode) {
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", g_server_port);
+    
+    g_server_pid = fork();
+    if (g_server_pid < 0) {
+        fprintf(stderr, "Failed to fork server: %s\n", strerror(errno));
+        return -1;
+    } else if (g_server_pid == 0) {
+        if (relay_mode) {
+            execl(server_path, server_path, "-p", port_str, "-r", "-m", NULL);
+        } else {
+            execl(server_path, server_path, "-p", port_str, NULL);
+        }
+        fprintf(stderr, "Failed to exec server: %s\n", strerror(errno));
+        _exit(127);
+    }
+    
+    printf("    Server PID: %d (relay=%s)\n", g_server_pid, relay_mode ? "yes" : "no");
+    P_usleep(500 * 1000);  // 等待 server 启动
+    return 0;
+}
+
 // 重启 server（用于测试间隔离）
 static int restart_server(void) {
     printf("    [*] Restarting server...\n");
     stop_server();
     P_usleep(100 * 1000);
-    return start_server(g_server_path);
+    return start_server_ex(g_server_path, 0);
+}
+
+// 重启 server（带 relay 模式）
+static int restart_server_with_relay(void) {
+    printf("    [*] Restarting server with relay mode...\n");
+    stop_server();
+    P_usleep(100 * 1000);
+    return start_server_ex(g_server_path, 1);
+}
+
+// 设置 instrument 选项（广播方式，影响所有监听进程）
+static void set_opt(int idx, int enable) {
+    instrument_enable(idx, enable != 0);
+    printf("    [OPT] opt[%d] = %d (broadcast)\n", idx, enable);
+}
+
+// 重置所有 ICE 选项
+static void reset_opts(void) {
+    for (int i = 0; i <= 5; i++) {
+        instrument_enable(i, false);
+    }
+    printf("    [OPT] All options reset\n");
 }
 
 // 清理所有进程
@@ -710,6 +756,181 @@ static void test_log_collection(void) {
     stop_client(&g_bob);
 }
 
+// 测试 4: 信令服务器中转消息
+// 关闭 HOST 和 SRFLX 候选，强制通过信令服务器中转
+static void test_relay_message(void) {
+    const char *TEST_NAME = "relay_message";
+    printf("\n--- Test: %s ---\n", TEST_NAME);
+    printf("    Testing message relay through signaling server\n");
+    clear_logs();
+    
+    // 重置客户端状态
+    g_alice.rid = 0;
+    g_alice.waiting = 0;
+    g_alice.connected = 0;
+    g_bob.rid = 0;
+    g_bob.waiting = 0;
+    g_bob.connected = 0;
+    
+    // 1. 重启 server（带 relay 模式）
+    printf("[1] Starting server with relay mode (-r -m)...\n");
+    if (restart_server_with_relay() != 0) {
+        TEST_FAIL(TEST_NAME, "failed to restart server with relay");
+        return;
+    }
+    
+    // 2. 启动 Alice（不设置 opt，先让它进入 waiting 状态）
+    printf("[2] Starting Alice (target=bob)...\n");
+    if (start_ping_client(&g_alice, "bob") != 0) {
+        TEST_FAIL(TEST_NAME, "failed to start alice");
+        return;
+    }
+    
+    if (wait_for_waiting(&g_alice, SYNC_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "alice waiting timeout");
+        stop_client(&g_alice);
+        return;
+    }
+    
+    // 3. 启动 Bob
+    printf("[3] Starting Bob (target=alice)...\n");
+    if (start_ping_client(&g_bob, "alice") != 0) {
+        TEST_FAIL(TEST_NAME, "failed to start bob");
+        stop_client(&g_alice);
+        return;
+    }
+    
+    if (wait_for_waiting(&g_bob, SYNC_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "bob waiting timeout");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    // 4. 设置选项：关闭 HOST 和 SRFLX 候选收集
+    // 在两个客户端都进入 waiting 状态后设置，确保它们恢复时能收到广播
+    printf("[4] Setting instrument options (disable HOST and SRFLX)...\n");
+    set_opt(3, 1);  // P2P_INST_OPT_ICE_HOST_OFF - 关闭 HOST 候选收集
+    set_opt(4, 1);  // P2P_INST_OPT_ICE_SRFLX_OFF - 关闭 SRFLX 候选收集
+    P_usleep(100 * 1000);  // 等待广播被处理
+    
+    // 5. 同步 Alice 和 Bob，让它们开始连接
+    printf("[5] Syncing Alice and Bob...\n");
+    sync_client(&g_alice);
+    sync_client(&g_bob);
+    
+    // 6. 等待连接（应该通过 relay 连接，因为直连候选被禁用）
+    printf("[6] Waiting for relay connection...\n");
+    if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
+        // 检查是否有 relay 相关日志
+        int relay_log = find_log("relay");
+        int msg_relay_log = find_log("MSG_REQ") + find_log("MSG_RESP");
+        printf("    Relay logs: %d, MSG relay logs: %d\n", relay_log >= 0 ? 1 : 0, msg_relay_log);
+        
+        print_log_summary();
+        TEST_FAIL(TEST_NAME, "relay connection timeout");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        reset_opts();
+        return;
+    }
+    
+    P_usleep(500 * 1000);
+    
+    // 7. Alice 发送消息给 Bob
+    printf("[7] Alice sends message to Bob (via relay)...\n");
+    if (ping_send_message(&g_alice, "Hello via relay!") != 0) {
+        TEST_FAIL(TEST_NAME, "alice failed to send message");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        reset_opts();
+        return;
+    }
+    
+    P_usleep(1000 * 1000);  // 给 relay 更多时间
+    
+    // 8. Bob 发送消息给 Alice
+    printf("[8] Bob sends message to Alice (via relay)...\n");
+    if (ping_send_message(&g_bob, "Reply via relay!") != 0) {
+        TEST_FAIL(TEST_NAME, "bob failed to send message");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        reset_opts();
+        return;
+    }
+    
+    P_usleep(1000 * 1000);  // 给 relay 更多时间
+    
+    // 9. 验证 ICE 候选被正确禁用
+    printf("[9] Verifying ICE candidate filtering...\n");
+    
+    // 验证 HOST 候选被禁用
+    int host_skipped = find_log("Skipping Host Candidate") >= 0 || 
+                       find_log("Skipping local Host") >= 0;
+    printf("    HOST candidates skipped: %s\n", host_skipped ? "yes" : "no");
+    
+    // 验证没有 SRFLX 候选被收集（不应该有 "Gathered Srflx" 或 "Requested Srflx"）
+    int srflx_gathered = find_log("Gathered Srflx") >= 0;
+    int srflx_requested = find_log("Requested Srflx") >= 0;
+    printf("    SRFLX requested: %s, gathered: %s\n", 
+           srflx_requested ? "yes" : "no", srflx_gathered ? "yes" : "no");
+    
+    // 验证使用了 relay 路径（客户端日志）
+    int relay_path = find_log("relay path") >= 0 || find_log("RELAY") >= 0;
+    printf("    Relay path used: %s\n", relay_path ? "yes" : "maybe");
+    
+    // 验证服务器中转日志（服务器的 printf 也会广播到 instrument）
+    int server_relay = find_log("[Relay]") >= 0;
+    printf("    Server relay log: %s\n", server_relay ? "yes" : "no");
+    
+    // 10. 验证消息接收
+    printf("[10] Verifying message delivery...\n");
+    
+    int bob_recv = find_log_from_rid(g_bob.rid, "Hello via relay");
+    int alice_recv = find_log_from_rid(g_alice.rid, "Reply via relay");
+    
+    printf("    Bob received 'Hello via relay': %s\n", bob_recv >= 0 ? "yes" : "no");
+    printf("    Alice received 'Reply via relay': %s\n", alice_recv >= 0 ? "yes" : "no");
+    
+    // 失败条件：消息未收到，或 HOST 未被禁用，或没有服务器中转日志
+    if (bob_recv < 0 || alice_recv < 0) {
+        print_log_summary();
+        TEST_FAIL(TEST_NAME, "message not received via relay");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        reset_opts();
+        return;
+    }
+    
+    if (!host_skipped) {
+        print_log_summary();
+        TEST_FAIL(TEST_NAME, "HOST candidates were not skipped");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        reset_opts();
+        return;
+    }
+    
+    if (!server_relay) {
+        print_log_summary();
+        TEST_FAIL(TEST_NAME, "no server relay log found (message not relayed through server)");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        reset_opts();
+        return;
+    }
+    
+    print_log_summary();
+    TEST_PASS(TEST_NAME);
+    
+    stop_client(&g_alice);
+    stop_client(&g_bob);
+    reset_opts();
+    
+    // 重启普通 server 以便后续测试
+    restart_server();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // 主函数
 ///////////////////////////////////////////////////////////////////////////////
@@ -754,7 +975,7 @@ int main(int argc, char *argv[]) {
     
     // 启动 server
     printf("[*] Starting server...\n");
-    if (start_server(g_server_path) != 0) {
+    if (start_server_ex(g_server_path, 0) != 0) {
         fprintf(stderr, "Failed to start server\n");
         return 1;
     }
@@ -765,6 +986,7 @@ int main(int argc, char *argv[]) {
     test_message_exchange();
     test_non_interactive_mode();
     test_log_collection();
+    test_relay_message();
     
     // 清理
     printf("\n[*] Cleaning up...\n");
