@@ -861,6 +861,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     // 标记进入 REGISTERED 状态（该状态将停止周期发送 REGISTER）
     ctx->state = SIGNAL_COMPACT_REGISTERED;
     print("I:", LA_F("REGISTERED: peer=%s\n", LA_F266, 266), ctx->peer_online ? "online" : "offline");
+    if (s->state == P2P_STATE_REGISTERING) s->state = P2P_STATE_REGISTERED;
 
     // 如果对方在线，直接进入 ICE 阶段，发送后续候选队列和 FIN 包
     // + 这里可能存在两种情况：

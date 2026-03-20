@@ -1,7 +1,7 @@
 //
 // Created by 温朋 on 2026/3/14.
 //
-#include "p2p_instrument.h"
+#include "p2p_internal.h"
 
 void p2p_instrument(uint16_t rid, uint8_t chn, const char* tag, char *txt, int len) {
 

@@ -71,7 +71,6 @@
 
 #include "p2p_common.h"         /* pack/unpack_signaling_payload_hdr（服务端也可包含此头） */
 #include "LANG.h"               /* 多语言支持 */
-#include "p2p_instrument.h"     /* 内部调试协同 */
 
 #include "p2p_nat.h"            /* NAT 穿透与类型检测 */
 #include "p2p_route.h"          /* 路由表管理 */

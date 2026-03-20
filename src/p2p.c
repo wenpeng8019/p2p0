@@ -969,7 +969,9 @@ p2p_update(p2p_handle_t hdl) {
      * ======================================================================== */
 
     // 转换：REGISTERING → PUNCHING（开始打洞）
-    if (s->state == P2P_STATE_REGISTERING && s->nat.state == NAT_PUNCHING) {
+    if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
+        && s->nat.state == NAT_PUNCHING) {
+
         print("I:", LA_F("State: → PUNCHING", LA_F248, 248));
         p2p_set_state(s, P2P_STATE_PUNCHING);
     }
@@ -981,8 +983,8 @@ p2p_update(p2p_handle_t hdl) {
     //   所以，对方可能先于自己获得对方（也就是自己）的候选地址，并先完成 NAT 穿透（对方发包过来），此时自己还未开始打洞（PUNCHING）
     // + REGISTERED 状态也需要处理，因为当对端重连时（收到新 session_id 的 PEER_INFO），
     //   本端会进入 REGISTERED 状态等待打洞，NAT 成功后应该转换到 CONNECTED
-    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED) &&
-        s->nat.state == NAT_CONNECTED) {
+    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
+        && s->nat.state == NAT_CONNECTED) {
 
         // 选择最佳路径
         int best_path = path_manager_select_best_path(s);
@@ -1004,7 +1006,8 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     // NAT 重新连接后恢复路径（NAT_RELAY → NAT_CONNECTED）
-    if (s->state == P2P_STATE_RELAY && s->nat.state == NAT_CONNECTED) {
+    if (s->state == P2P_STATE_RELAY
+        && s->nat.state == NAT_CONNECTED) {
         
         // 标记中继路径为降级（但不移除，保留作为备份）
         path_manager_set_path_state(s, PATH_IDX_SIGNALING, PATH_STATE_DEGRADED);
@@ -1048,7 +1051,8 @@ p2p_update(p2p_handle_t hdl) {
 
     // 转换：CONNECTED → LOST/RELAY（NAT 连接丢失，可能恢复）
     // LOST 是可恢复的数据链丢失状态，与旧版本的 timeout 错误处理不同
-    if (s->nat.state == NAT_LOST && s->state == P2P_STATE_CONNECTED) {
+    if (s->state == P2P_STATE_CONNECTED
+        && s->nat.state == NAT_LOST) {
         
         // 标记当前活跃路径为失效
         path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
@@ -1074,7 +1078,8 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     // 转换：LOST → CONNECTED（NAT 连接恢复）
-    if (s->state == P2P_STATE_LOST && s->nat.state == NAT_CONNECTED) {
+    if (s->state == P2P_STATE_LOST
+        && s->nat.state == NAT_CONNECTED) {
         
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {
@@ -1094,7 +1099,8 @@ p2p_update(p2p_handle_t hdl) {
 
     // 转换：CONNECTED/RELAY/LOST/CLOSING → CLOSED
     // + NAT FIN 和信令 PEER_OFF 都归一化为 NAT_CLOSED，统一在此处理
-    if (s->nat.state == NAT_CLOSED && s->state >= P2P_STATE_LOST) {
+    if (s->state >= P2P_STATE_LOST
+        && s->nat.state == NAT_CLOSED) {
         peer_disconnect(s);
     }
 

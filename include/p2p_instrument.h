@@ -5,7 +5,7 @@
 #ifndef P2P_INSTRUMENT_H
 #define P2P_INSTRUMENT_H
 
-#include "predefine.h"
+#include <stdint.h>
 
 enum {
     P2P_INST_OPT_HOST_PUNCH_OFF,            // 关闭本地 Host 候选打洞（防止内网直连，仅通过公网地址打洞）

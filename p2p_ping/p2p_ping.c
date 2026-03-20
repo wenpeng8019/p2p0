@@ -16,6 +16,7 @@
 
 #include <stdc.h>
 #include <p2p.h>
+#include <p2p_instrument.h>
 
 #include "LANG.h"
 #include "LANG.cn.h"
@@ -50,6 +51,8 @@ ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", L
 #define LOG_TAG_P       p2p_log_pre_tag
 
 #undef printf
+
+#define SHOW_INSTRUMENT_LOGS  0
 
 /* ============================================================================
  * TUI：固定输入行 + 滚动日志区
@@ -146,7 +149,9 @@ static void tui_init(void) {
 
     // 将日志输出重定向到 TUI 回调
     p2p_log_callback = tui_log_callback;
+#if SHOW_INSTRUMENT_LOGS
     instrument_loggable((log_cb) tui_log_callback);
+#endif
 }
 
 /* 退出 TUI，恢复终端状态 */
@@ -158,7 +163,9 @@ static void tui_cleanup(void) {
 
     // 清除日志回调，恢复默认输出（stdout）
     p2p_log_callback = (p2p_log_callback_t)-1;
+#if SHOW_INSTRUMENT_LOGS
     instrument_loggable((log_cb)-1);
+#endif
 
 #if !P_WIN
     signal(SIGWINCH, SIG_DFL);
@@ -405,7 +412,9 @@ int main(int argc, char *argv[]) {
 
     #ifndef NDEBUG
     p2p_instrument_base = 10;
-    //instrument_loggable((log_cb)-1);
+#if SHOW_INSTRUMENT_LOGS
+    instrument_loggable((log_cb)-1);
+#endif
     #endif
 
     if (ARGS_server.str)

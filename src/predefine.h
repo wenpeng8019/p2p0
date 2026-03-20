@@ -6,6 +6,7 @@
 #define P2P_PREDEFINE_H
 
 #include <p2p.h>
+#include <p2p_instrument.h>
 
 #define LOG_CALLBACK ((void*)p2p_log_callback)
 #define LOG_LEVEL ((unsigned)p2p_log_level)
