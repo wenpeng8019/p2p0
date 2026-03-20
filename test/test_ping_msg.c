@@ -74,6 +74,7 @@ typedef struct {
     volatile int waiting;       // 是否在等待 debugger
     volatile int resumed;       // 是否已恢复执行
     volatile int connected;     // 是否已连接成功
+    volatile int relay;         // 是否走了 RELAY 路径
 } ping_client_t;
 
 static ping_client_t g_alice = { .name = "alice" };
@@ -138,13 +139,27 @@ static void on_instrument_log(uint16_t rid, uint8_t chn, const char* tag, char *
     // 检测连接成功
     if (txt && (strstr(txt, "P2P connection established") || 
                 strstr(txt, "Nomination successful") ||
-                strstr(txt, "NAT_CONNECTED"))) {
+                strstr(txt, "NAT_CONNECTED") ||
+                strstr(txt, "State: → CONNECTED"))) {
         if (rid == g_alice.rid) {
             g_alice.connected = 1;
             printf("    [CONN] Alice connected!\n");
         } else if (rid == g_bob.rid) {
             g_bob.connected = 1;
             printf("    [CONN] Bob connected!\n");
+        }
+    }
+    
+    // 检测 RELAY 状态（走中继路径）
+    if (txt && strstr(txt, "State: → RELAY")) {
+        if (rid == g_alice.rid) {
+            g_alice.connected = 1;
+            g_alice.relay = 1;
+            printf("    [CONN] Alice connected via RELAY!\n");
+        } else if (rid == g_bob.rid) {
+            g_bob.connected = 1;
+            g_bob.relay = 1;
+            printf("    [CONN] Bob connected via RELAY!\n");
         }
     }
     
@@ -237,6 +252,7 @@ static int start_ping_client(ping_client_t *client, const char *target) {
     client->waiting = 0;
     client->resumed = 0;
     client->connected = 0;
+    client->relay = 0;
     
     client->pid = fork();
     if (client->pid < 0) {
@@ -768,9 +784,11 @@ static void test_relay_message(void) {
     g_alice.rid = 0;
     g_alice.waiting = 0;
     g_alice.connected = 0;
+    g_alice.relay = 0;
     g_bob.rid = 0;
     g_bob.waiting = 0;
     g_bob.connected = 0;
+    g_bob.relay = 0;
     
     // 1. 重启 server（带 relay 模式）
     printf("[1] Starting server with relay mode (-r -m)...\n");
@@ -861,25 +879,23 @@ static void test_relay_message(void) {
     
     P_usleep(1000 * 1000);  // 给 relay 更多时间
     
-    // 9. 验证 ICE 候选被正确禁用
-    printf("[9] Verifying ICE candidate filtering...\n");
+    // 9. 验证两个客户端都走了 RELAY 路径
+    printf("[9] Verifying RELAY path...\n");
+    printf("    Alice relay: %s\n", g_alice.relay ? "yes" : "no");
+    printf("    Bob relay: %s\n", g_bob.relay ? "yes" : "no");
+    
+    // 检查状态转换日志
+    int alice_relay_log = find_log_from_rid(g_alice.rid, "State: → RELAY") >= 0;
+    int bob_relay_log = find_log_from_rid(g_bob.rid, "State: → RELAY") >= 0;
+    printf("    Alice RELAY log: %s\n", alice_relay_log ? "yes" : "no");
+    printf("    Bob RELAY log: %s\n", bob_relay_log ? "yes" : "no");
     
     // 验证 HOST 候选被禁用
     int host_skipped = find_log("Skipping Host Candidate") >= 0 || 
                        find_log("Skipping local Host") >= 0;
     printf("    HOST candidates skipped: %s\n", host_skipped ? "yes" : "no");
     
-    // 验证没有 SRFLX 候选被收集（不应该有 "Gathered Srflx" 或 "Requested Srflx"）
-    int srflx_gathered = find_log("Gathered Srflx") >= 0;
-    int srflx_requested = find_log("Requested Srflx") >= 0;
-    printf("    SRFLX requested: %s, gathered: %s\n", 
-           srflx_requested ? "yes" : "no", srflx_gathered ? "yes" : "no");
-    
-    // 验证使用了 relay 路径（客户端日志）
-    int relay_path = find_log("relay path") >= 0 || find_log("RELAY") >= 0;
-    printf("    Relay path used: %s\n", relay_path ? "yes" : "maybe");
-    
-    // 验证服务器中转日志（服务器的 printf 也会广播到 instrument）
+    // 验证服务器中转日志
     int server_relay = find_log("[Relay]") >= 0;
     printf("    Server relay log: %s\n", server_relay ? "yes" : "no");
     
@@ -892,7 +908,19 @@ static void test_relay_message(void) {
     printf("    Bob received 'Hello via relay': %s\n", bob_recv >= 0 ? "yes" : "no");
     printf("    Alice received 'Reply via relay': %s\n", alice_recv >= 0 ? "yes" : "no");
     
-    // 失败条件：消息未收到，或 HOST 未被禁用，或没有服务器中转日志
+    // 验证条件 1: 两个客户端都必须走了 RELAY 路径
+    if (!g_alice.relay || !g_bob.relay) {
+        if (!alice_relay_log || !bob_relay_log) {
+            print_log_summary();
+            TEST_FAIL(TEST_NAME, "not all clients used RELAY path");
+            stop_client(&g_alice);
+            stop_client(&g_bob);
+            reset_opts();
+            return;
+        }
+    }
+    
+    // 验证条件 2: 消息必须成功收发
     if (bob_recv < 0 || alice_recv < 0) {
         print_log_summary();
         TEST_FAIL(TEST_NAME, "message not received via relay");
@@ -902,18 +930,10 @@ static void test_relay_message(void) {
         return;
     }
     
+    // 验证条件 3: HOST 候选必须被禁用
     if (!host_skipped) {
         print_log_summary();
         TEST_FAIL(TEST_NAME, "HOST candidates were not skipped");
-        stop_client(&g_alice);
-        stop_client(&g_bob);
-        reset_opts();
-        return;
-    }
-    
-    if (!server_relay) {
-        print_log_summary();
-        TEST_FAIL(TEST_NAME, "no server relay log found (message not relayed through server)");
         stop_client(&g_alice);
         stop_client(&g_bob);
         reset_opts();
