@@ -886,6 +886,13 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         ctx->nat_probe_send_time = P_tick_ms();
     }
     else s->nat_type = P2P_NAT_UNDETECTABLE;
+
+    // 如果服务器支持数据中继，提前将 SIGNALING 路径添加到路径管理器（作为 fallback）
+    // 这样当 P2P 打洞失败或连接断开时，可以自动降级到信令服务器中转
+    if (ctx->relay_support && !s->signaling.active) {
+        path_manager_enable_signaling(s, &ctx->server_addr);
+        print("I:", LA_F("SIGNALING path enabled (server supports relay)\n", LA_F398, 398));
+    }
 }
 
 /*
@@ -1071,17 +1078,6 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             unpack_remote_candidates(s, payload, cand_cnt);
 
             ctx->remote_candidates_0 = new_seq = true;
-        }
-
-        // 如果禁止打洞
-        if ((instrument_option(P2P_INST_OPT_HOST_PUNCH_OFF) || instrument_option(P2P_INST_OPT_ICE_HOST_OFF)) &&
-            (instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF) || instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF))) {
-
-            if ((instrument_option(P2P_INST_OPT_ICE_RELAY_OFF))) {
-                print("W:", LA_F("%s: all candidates disabled by instrument, only use signaling relay\n", 0, 0), PROTO);
-            }
-
-
         }
     }
     // base_index!=0 说明是对方公网地址变更通知。此时 pkt 必须只携带一个候选地址（即变更后的公网地址），且不带 FIN 标识

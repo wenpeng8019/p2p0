@@ -12,9 +12,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_W2] = "bytes",  /* SID:2 */
     [LA_W3] = "Detecting...",  /* SID:3 */
     [LA_W4] = "Full Cone NAT",  /* SID:4 */
-    [LA_W5] = "NAT punch failed, no TURN server configured",  /* SID:5 */
-    [LA_W6] = "NAT punch failed, server has no relay support",  /* SID:6 */
-    [LA_W7] = "NAT punch failed, using COMPACT server relay",  /* SID:7 */
     [LA_W8] = "no (cached)",  /* SID:8 */
     [LA_W9] = "Open Internet (No NAT)",  /* SID:9 */
     [LA_W10] = "Port Restricted Cone NAT",  /* SID:10 */
@@ -183,7 +180,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F170] = "%s_ACK sent, sid=%u\n",  /* SID:170 */
     [LA_F171] = "ACK processed ack_seq=%u send_base=%u inflight=%d",  /* SID:171 */
     [LA_F172] = "Added Remote Candidate: %d -> %s:%d",  /* SID:172 */
-    [LA_F173] = "% Added SIGNALING path to path manager",  /* SID:173 */
     [LA_F174] = "% Answer already present, skipping offer re-publish",  /* SID:174 */
     [LA_F210] = "Append Host candidate: %s:%d",  /* SID:210 */
     [LA_F176] = "Attempting Simultaneous Open to %s:%d",  /* SID:176 */
@@ -252,6 +248,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F237] = "% NAT connection timeout, downgrading to relay mode",  /* SID:237 */
     [LA_F238] = "% No advanced transport layer enabled, using simple reliable layer",  /* SID:238 */
     [LA_F239] = "% No auth_key provided, using default key (insecure)",  /* SID:239 */
+    [LA_F395] = "% No available path, entering RELAY mode without active path",  /* SID:395 */
+    [LA_F396] = "% No remote candidates received, falling back to relay",  /* SID:396 */
     [LA_F240] = "Nomination successful! Using! Using %s path %s:%d%s",  /* SID:240 */
     [LA_F241] = "Open P2P UDP socket on port %d",  /* SID:241 */
     [LA_F242] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:242 */
@@ -259,7 +257,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F244] = "Out-of-window packet discarded seq=%u base=%u",  /* SID:244 */
     [LA_F245] = "% P2P connected, closing signaling TCP connection",  /* SID:245 */
     [LA_F246] = "% P2P connection established",  /* SID:246 */
-    [LA_F247] = "% P2P punch failed, adding relay path",  /* SID:247 */
+    [LA_F397] = "% P2P punch failed, switching to relay path",  /* SID:397 */
     [LA_F248] = "% P2P punching in progress ...",  /* SID:248 */
     [LA_F249] = "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n",  /* SID:249 */
     [LA_F250] = "% PEER_INFO(trickle): seq overflow, cannot trickle more\n",  /* SID:250 */
@@ -303,6 +301,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F287] = "Requested Srflx Candidate from %s",  /* SID:287 */
     [LA_F288] = "Resolve COMPACT signaling server address: %s:%d failed(%d)",  /* SID:288 */
     [LA_F289] = "% SCTP (usrsctp) requested but library not linked",  /* SID:289 */
+    [LA_F398] = "% SIGNALING path enabled (server supports relay)\n",  /* SID:398 */
     [LA_F290] = "% SSL_CTX_new failed",  /* SID:290 */
     [LA_F291] = "% SSL_new failed",  /* SID:291 */
     [LA_F292] = "Selected path: PUNCH (idx=%d)",  /* SID:292 */
@@ -346,7 +345,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F329] = "Unknown ACK status %d",  /* SID:329 */
     [LA_F330] = "Unknown signaling mode: %d",  /* SID:330 */
     [LA_F331] = "Updating Gist field '%s'...",  /* SID:331 */
-    [LA_F333] = "% Using path: RELAY",  /* SID:333 */
     [LA_F334] = "Waiting for peer '%s' timed out (%dms), giving up",  /* SID:334 */
     [LA_F335] = "[MbedTLS] DTLS role: %s (mode=%s)",  /* SID:335 */
     [LA_F336] = "% [OpenSSL] DTLS handshake completed",  /* SID:336 */
@@ -394,6 +392,13 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F394] = "%s: all candidates disabled by instrument, only use signaling relay\n",  /* SID:394 disabled */
+    [LA_F333] = "% Using path: RELAY",  /* SID:333 disabled */
+    [LA_W5] = "NAT punch failed, no TURN server configured",  /* SID:5 disabled */
+    [LA_W6] = "NAT punch failed, server has no relay support",  /* SID:6 disabled */
+    [LA_W7] = "NAT punch failed, using COMPACT server relay",  /* SID:7 disabled */
+    [LA_F173] = "% Added SIGNALING path to path manager",  /* SID:173 disabled */
+    [LA_F247] = "% P2P punch failed, adding relay path",  /* SID:247 disabled */
     [LA_F106] = "%s: ignored (relay not supported)\n",  /* SID:106 disabled */
     [LA_F117] = "%s: invalid in non-COMPACT mode\n",  /* SID:117 disabled */
     [LA_F104] = "%s: failed to RE-REGISTER after timeout\n",  /* SID:104 disabled */

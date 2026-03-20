@@ -42,9 +42,9 @@ enum {
     LA_W2,  /* "bytes"  [p2p_signal_relay.c] */
     LA_W3,  /* "Detecting..."  [p2p_internal.h] */
     LA_W4,  /* "Full Cone NAT"  [p2p_internal.h] */
-    LA_W5,  /* "NAT punch failed, no TURN server configured"  [p2p.c] */
-    LA_W6,  /* "NAT punch failed, server has no relay support"  [p2p.c] */
-    LA_W7,  /* "NAT punch failed, using COMPACT server relay"  [p2p.c] */
+    LA_W5,  /* disabled "NAT punch failed, no TURN server configured" */
+    LA_W6,  /* disabled "NAT punch failed, server has no relay support" */
+    LA_W7,  /* disabled "NAT punch failed, using COMPACT server relay" */
     LA_W8,  /* "no (cached)"  [p2p_ice.c] */
     LA_W9,  /* "Open Internet (No NAT)"  [p2p_internal.h] */
     LA_W10,  /* "Port Restricted Cone NAT"  [p2p_internal.h] */
@@ -214,7 +214,7 @@ enum {
     LA_F170,  /* "%s_ACK sent, sid=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F171,  /* "ACK processed ack_seq=%u send_base=%u inflight=%d" (%u,%u,%d)  [p2p_trans_reliable.c] */
     LA_F172,  /* "Added Remote Candidate: %d -> %s:%d" (%d,%s,%d)  [p2p_signal_relay.c] */
-    LA_F173,  /* "% Added SIGNALING path to path manager"  [p2p.c] */
+    LA_F173,  /* disabled "% Added SIGNALING path to path manager" */
     LA_F174,  /* "% Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
     _LA_175,
     LA_F176,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
@@ -288,7 +288,7 @@ enum {
     LA_F244,  /* "Out-of-window packet discarded seq=%u base=%u" (%u,%u)  [p2p_trans_reliable.c] */
     LA_F245,  /* "% P2P connected, closing signaling TCP connection"  [p2p_signal_relay.c] */
     LA_F246,  /* "% P2P connection established"  [p2p.c] */
-    LA_F247,  /* "% P2P punch failed, adding relay path"  [p2p.c] */
+    LA_F247,  /* disabled "% P2P punch failed, adding relay path" */
     LA_F248,  /* "% P2P punching in progress ..."  [p2p.c] */
     LA_F249,  /* "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n" (%d,%u)  [p2p_signal_compact.c] */
     LA_F250,  /* "% PEER_INFO(trickle): seq overflow, cannot trickle more\n"  [p2p_signal_compact.c] */
@@ -374,7 +374,7 @@ enum {
     LA_F330,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
     LA_F331,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
     LA_F332,  /* "Duplicate remote candidate<%s:%d> from signaling, skipped" (%s,%d)  [p2p_ice.c] */
-    LA_F333,  /* "% Using path: RELAY"  [p2p.c] */
+    LA_F333,  /* disabled "% Using path: RELAY" */
     LA_F334,  /* "Waiting for peer '%s' timed out (%dms), giving up" (%s,%d)  [p2p_signal_relay.c] */
     LA_F335,  /* "[MbedTLS] DTLS role: %s (mode=%s)" (%s,%s)  [p2p_dtls_mbedtls.c] */
     LA_F336,  /* "% [OpenSSL] DTLS handshake completed"  [p2p_dtls_openssl.c] */
@@ -435,6 +435,11 @@ enum {
     LA_F391,  /* "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
     LA_F392,  /* "%s: bad payload(len=%d, need >=8)\n" (%s,%d)  [p2p_nat.c] */
     LA_F393,  /* "[UDP] %s send to %s:%d, seq=0, flags=0x01, len=%d\n" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
+    LA_F394,  /* disabled "%s: all candidates disabled by instrument, only use signaling relay\n" */
+    LA_F395,  /* "% No available path, entering RELAY mode without active path"  [p2p.c] */
+    LA_F396,  /* "% No remote candidates received, falling back to relay"  [p2p.c] */
+    LA_F397,  /* "% P2P punch failed, switching to relay path"  [p2p.c] */
+    LA_F398,  /* "% SIGNALING path enabled (server supports relay)\n"  [p2p_signal_compact.c] */
 
     LA_NUM
 };

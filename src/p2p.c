@@ -966,12 +966,10 @@ p2p_update(p2p_handle_t hdl) {
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
-            if (addr) {
-                s->path = P2P_PATH_PUNCH;  // 目前只有 PUNCH
-                s->active_addr = *addr;
-                path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
-                print("I:", LA_F("Selected path: PUNCH (idx=%d)", LA_F292, 292), best_path);
-            }
+            s->path = P2P_PATH_PUNCH;  // 目前只有 PUNCH
+            s->active_addr = addr ? *addr : s->nat.peer_addr;
+            path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
+            print("I:", LA_F("Selected path: PUNCH (idx=%d)", LA_F292, 292), best_path);
         } else {
             // 降级：路径管理器无可用路径，使用传统方式
             s->path = P2P_PATH_PUNCH;
@@ -996,70 +994,43 @@ p2p_update(p2p_handle_t hdl) {
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
-            if (addr) {
-                s->path = P2P_PATH_PUNCH;
-                s->active_addr = *addr;
-                path_manager_switch_path(s, best_path, "nat_recovery", now_ms);
-                s->state = P2P_STATE_CONNECTED; // 恢复为 CONNECTED 状态
-                print("I:", LA_F("Path recovered: switched to PUNCH", LA_F258, 258));
-            }
+            s->path = P2P_PATH_PUNCH;
+            s->active_addr = addr ? *addr : s->nat.peer_addr;
+            path_manager_switch_path(s, best_path, "nat_recovery", now_ms);
+            s->state = P2P_STATE_CONNECTED;
+            print("I:", LA_F("Path recovered: switched to PUNCH", LA_F258, 258));
         }
+        // else: 无可用路径，保持 RELAY 状态等待
     }
 
-    // 转换：PUNCHING → RELAY（NAT 打洞失败，添加中继路径）
+    // 转换：PUNCHING → RELAY（NAT 打洞失败，切换到中继路径）
     if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
-        && (s->nat.state == NAT_RELAY || (s->remote_ice_done && s->remote_srflx_cnt == 0 && s->remote_host_cnt == 0))) {
+        && (s->nat.state == NAT_RELAY || (s->remote_ice_done && s->remote_cand_cnt == s->remote_relay_cnt))) {
 
-        // 添加中继路径
-        print("I:", LA_F("P2P punch failed, adding relay path", LA_F247, 247));
-        
-        struct sockaddr_in relay_addr;
-        bool relay_available = false;
-
-        // todo 这里的 signaling relay 并不在这里作为降级后的备选，应该全局就添加
-
-        if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-            if (s->sig_compact_ctx.relay_support) {
-                relay_addr = s->sig_compact_ctx.server_addr;
-                relay_available = true;
-                print("I: %s", LA_W("NAT punch failed, using COMPACT server relay", LA_W7, 7));
-            } else {
-                print("W: %s", LA_W("NAT punch failed, server has no relay support", LA_W6, 6));
-            }
+        // 打印状态信息
+        if (s->remote_ice_done && s->remote_cand_cnt == 0) {
+            print("W:", LA_F("No remote candidates received, falling back to relay", 0, 0));
         } else {
-            print("W: %s", LA_W("NAT punch failed, no TURN server configured", LA_W5, 5));
+            print("I:", LA_F("P2P punch failed, switching to relay path", 0, 0));
         }
         
-        // 设置 SIGNALING 路径
-        if (relay_available) {
-            path_manager_enable_signaling(s, &relay_addr);
-            print("I:", LA_F("Added SIGNALING path to path manager", LA_F173, 173));
-        }
-        
-        // 选择最佳可用路径
+        // SIGNALING 路径已在 REGISTER_ACK 时添加（如果服务器支持）
+        // 这里只需选择最佳可用路径
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
-            if (addr) {
-                s->path = path_manager_get_path_type(s, best_path);
-                s->active_addr = *addr;
-                path_manager_switch_path(s, best_path, "nat_punch_failed", now_ms);
-                s->state = P2P_STATE_RELAY;
-                print("I:", LA_F("Using path: RELAY", LA_F333, 333));
-            }
-        } else {
-            // 无可用路径：降级到传统方式
-            s->state = P2P_STATE_RELAY;
-            s->path = P2P_PATH_SIGNALING;
-            s->active_addr = relay_available ? relay_addr : s->nat.peer_addr;
+            s->path = path_manager_get_path_type(s, best_path);
+            s->active_addr = addr ? *addr : (s->signaling.active ? s->signaling.addr : s->nat.peer_addr);
+            path_manager_switch_path(s, best_path, "nat_punch_failed", now_ms);
+        }
+        // 无可用路径：等待后续路径恢复
+        else {
+            print("W:", LA_F("No available path, entering RELAY mode without active path", 0, 0));
+            s->path = P2P_PATH_NONE;
             s->active_path = -2;  // -2=无路径管理器管理的路径
         }
-    }
 
-    // 转换：CONNECTED/RELAY/CLOSING → CLOSED
-    // + NAT FIN 和信令 PEER_OFF 都归一化为 NAT_CLOSED，统一在此处理
-    if (s->nat.state == NAT_CLOSED && s->state >= P2P_STATE_LOST) {
-        peer_disconnect(s);
+        s->state = P2P_STATE_RELAY;  // 无论哪个分支都转换状态
     }
 
     // 转换：CONNECTED → RELAY（NAT 连接超时断开，降级到中继模式）
@@ -1073,19 +1044,23 @@ p2p_update(p2p_handle_t hdl) {
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
-            if (addr) {
-                s->path = path_manager_get_path_type(s, best_path);
-                s->active_addr = *addr;
-                path_manager_switch_path(s, best_path, "nat_timeout", now_ms);
-                s->state = P2P_STATE_RELAY;
-                print("I:", LA_F("Switched to backup path: RELAY", LA_F309, 309));
-            }
-        } else {
-            // 无备用路径：NAT 层会继续尝试恢复
-            s->state = P2P_STATE_RELAY;
+            s->path = path_manager_get_path_type(s, best_path);
+            s->active_addr = addr ? *addr : (s->signaling.active ? s->signaling.addr : s->nat.peer_addr);
+            path_manager_switch_path(s, best_path, "nat_timeout", now_ms);
+            print("I:", LA_F("Switched to backup path: RELAY", LA_F309, 309));
+        } 
+        // 无备用路径：NAT 层会继续尝试恢复
+        else {
             s->nat.state = NAT_RELAY;
             s->active_path = -2;  // -2=无路径管理器管理的路径
         }
+        s->state = P2P_STATE_RELAY;  // 无论哪个分支都转换状态
+    }
+
+    // 转换：CONNECTED/RELAY/CLOSING → CLOSED
+    // + NAT FIN 和信令 PEER_OFF 都归一化为 NAT_CLOSED，统一在此处理
+    if (s->nat.state == NAT_CLOSED && s->state >= P2P_STATE_LOST) {
+        peer_disconnect(s);
     }
 
     /* ========================================================================
