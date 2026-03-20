@@ -734,12 +734,13 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 
     /* 更新状态 */
     s->ice_ctx.state = P2P_ICE_STATE_COMPLETED;
+    p2p_state_t old_state = s->state;
     s->state = P2P_STATE_CONNECTED;
     s->path = P2P_PATH_PUNCH; 
 
-    /* 触发连接建立回调 */
-    if (s->cfg.on_connected) {
-        s->cfg.on_connected(s, s->cfg.userdata);
+    /* 触发状态回调 */
+    if (s->cfg.on_state) {
+        s->cfg.on_state(s, old_state, P2P_STATE_CONNECTED, s->cfg.userdata);
     }
 
     /* 被动方：发送 answer 给主动方 */

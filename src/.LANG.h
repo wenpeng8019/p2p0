@@ -277,8 +277,8 @@ enum {
     LA_F233,  /* "% Invalid signaling mode in configuration"  [p2p.c] */
     LA_F234,  /* "Local address detection done: %d address(es)" (%d)  [p2p_route.c] */
     LA_F235,  /* "Marked old path (idx=%d) as FAILED due to addr change\n" (%d)  [p2p_signal_compact.c] */
-    LA_F236,  /* "% NAT connection recovered, upgrading from RELAY to CONNECTED"  [p2p.c] */
-    LA_F237,  /* "% NAT connection timeout, downgrading to relay mode"  [p2p.c] */
+    LA_F236,  /* "State: RELAY → CONNECTED, path=PUNCH[%d]" (%d)  [p2p.c] */
+    LA_F237,  /* "% State: CONNECTED → RELAY (path lost)"  [p2p.c] */
     LA_F238,  /* "% No advanced transport layer enabled, using simple reliable layer"  [p2p.c] */
     LA_F239,  /* "% No auth_key provided, using default key (insecure)"  [p2p_signal_pubsub.c] */
     LA_F240,  /* "Nomination successful! Using! Using %s path %s:%d%s" (%s,%s,%d,%s)  [p2p_ice.c] */
@@ -287,9 +287,9 @@ enum {
     LA_F243,  /* "% OpenSSL requested but library not linked"  [p2p.c] */
     LA_F244,  /* "Out-of-window packet discarded seq=%u base=%u" (%u,%u)  [p2p_trans_reliable.c] */
     LA_F245,  /* "% P2P connected, closing signaling TCP connection"  [p2p_signal_relay.c] */
-    LA_F246,  /* "% P2P connection established"  [p2p.c] */
+    LA_F246,  /* "State: → CONNECTED, path=PUNCH[%d]" (%d)  [p2p.c] */
     LA_F247,  /* disabled "% P2P punch failed, adding relay path" */
-    LA_F248,  /* "% P2P punching in progress ..."  [p2p.c] */
+    LA_F248,  /* "% State: → PUNCHING"  [p2p.c] */
     LA_F249,  /* "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n" (%d,%u)  [p2p_signal_compact.c] */
     LA_F250,  /* "% PEER_INFO(trickle): seq overflow, cannot trickle more\n"  [p2p_signal_compact.c] */
     LA_F251,  /* "% PUBSUB (PUB): gathering candidates, waiting for STUN before publishing"  [p2p.c] */
@@ -299,7 +299,7 @@ enum {
     LA_F255,  /* "Packet too large len=%d max=%d" (%d,%d)  [p2p_trans_reliable.c] */
     LA_F256,  /* "Passive peer learned remote ID '%s' from OFFER" (%s)  [p2p_signal_relay.c] */
     LA_F257,  /* "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)" (%d)  [p2p.c] */
-    LA_F258,  /* "% Path recovered: switched to PUNCH"  [p2p.c] */
+    LA_F258,  /* disabled "% Path recovered: switched to PUNCH" */
     LA_F259,  /* "% Path switch debounced, waiting for stability"  [p2p.c] */
     LA_F260,  /* "Path switched to better route (idx=%d)" (%d)  [p2p.c] */
     LA_F261,  /* "Peer '%s' is now online (FORWARD received), resuming" (%s)  [p2p_signal_relay.c] */
@@ -333,7 +333,7 @@ enum {
     LA_F289,  /* "% SCTP (usrsctp) requested but library not linked"  [p2p.c] */
     LA_F290,  /* "% SSL_CTX_new failed"  [p2p_dtls_openssl.c] */
     LA_F291,  /* "% SSL_new failed"  [p2p_dtls_openssl.c] */
-    LA_F292,  /* "Selected path: PUNCH (idx=%d)" (%d)  [p2p.c] */
+    LA_F292,  /* disabled "Selected path: PUNCH (idx=%d)" */
     LA_F293,  /* "Send offer to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
     LA_F294,  /* "Send window full, dropping packet send_count=%d" (%d)  [p2p_trans_reliable.c] */
     LA_F295,  /* "Sending Allocate Request to %s:%d" (%s,%d)  [p2p_turn.c] */
@@ -350,7 +350,7 @@ enum {
     LA_F306,  /* "% Starting internal thread"  [p2p.c] */
     LA_F307,  /* "% Stopping internal thread"  [p2p.c] */
     LA_F308,  /* "% Storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
-    LA_F309,  /* "% Switched to backup path: RELAY"  [p2p.c] */
+    LA_F309,  /* disabled "% Switched to backup path: RELAY" */
     LA_F310,  /* "% Synced path after failover"  [p2p.c] */
     LA_F311,  /* "TURN 401 Unauthorized (realm=%s), authenticating..." (%s)  [p2p_turn.c] */
     LA_F312,  /* "TURN Allocate failed with error %d" (%d)  [p2p_turn.c] */
@@ -436,10 +436,16 @@ enum {
     LA_F392,  /* "%s: bad payload(len=%d, need >=8)\n" (%s,%d)  [p2p_nat.c] */
     LA_F393,  /* "[UDP] %s send to %s:%d, seq=0, flags=0x01, len=%d\n" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F394,  /* disabled "%s: all candidates disabled by instrument, only use signaling relay\n" */
-    LA_F395,  /* "% No available path, entering RELAY mode without active path"  [p2p.c] */
-    LA_F396,  /* "% No remote candidates received, falling back to relay"  [p2p.c] */
-    LA_F397,  /* "% P2P punch failed, switching to relay path"  [p2p.c] */
+    LA_F395,  /* disabled "% No available path, entering RELAY mode without active path" */
+    LA_F396,  /* disabled "% No remote candidates received, falling back to relay" */
+    LA_F397,  /* disabled "% P2P punch failed, switching to relay path" */
     LA_F398,  /* "% SIGNALING path enabled (server supports relay)\n"  [p2p_signal_compact.c] */
+    LA_F399,  /* "% State: CONNECTED → LOST (no relay)"  [p2p.c] */
+    LA_F400,  /* "% State: LOST → CONNECTED (legacy path)"  [p2p.c] */
+    LA_F401,  /* "% State: → RELAY (no path available)"  [p2p.c] */
+    LA_F402,  /* "State: → RELAY (punch failed), path[%d]" (%d)  [p2p.c] */
+    LA_F403,  /* disabled "% P2P punch failed, switching to relay path" */
+    LA_F404,  /* "State: LOST → CONNECTED, path=PUNCH[%d]" (%d)  [p2p.c] */
 
     LA_NUM
 };

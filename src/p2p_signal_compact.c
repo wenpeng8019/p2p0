@@ -996,10 +996,10 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
             // 如果 p2p 之前已经连接成功过，即业务层可能已经完成部分通讯
             // + 此时需要通知业务层，确保业务层的数据一致性
-            // ! 另外，触发 on_disconnected 前，并不会将 state 设置为 disconnected
-            //   接口可以以此来区分是断开连接，还是被迫重连
+            // ! 对于业务层来说，session 被强制重置 = 连接断开，需要重新开始
             if (s->state >= P2P_STATE_LOST) {
-                if (s->cfg.on_disconnected) s->cfg.on_disconnected(s, s->cfg.userdata);
+                // 通知业务层连接断开（session 被对方重置）
+                if (s->cfg.on_state) s->cfg.on_state(s, s->state, P2P_STATE_CLOSED, s->cfg.userdata);
             }
 
             // 清除双方协商信息

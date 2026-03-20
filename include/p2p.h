@@ -140,20 +140,21 @@ typedef const void* p2p_handle_t;
 /* ---------- 事件回调类型 ---------- */
 
 /*
- * 连接建立回调
+ * 连接状态变化回调
+ *
+ * 当连接状态发生变化时触发，覆盖所有关键状态转换：
+ *   - CONNECTED: 连接建立
+ *   - RELAY: 切换到中继模式
+ *   - LOST: 连接丢失但可能恢复（NAT 超时且无 relay 可用）
+ *   - CLOSED: 连接关闭
+ *
  * 参数：
  *   hdl: 会话对象
+ *   old_state: 前一状态
+ *   new_state: 当前状态
  *   userdata: 用户自定义数据
  */
-typedef void (*p2p_on_connected_fn)(p2p_handle_t hdl, void *userdata);
-
-/*
- * 连接断开回调
- * 参数：
- *   hdl: 会话对象
- *   userdata: 用户自定义数据
- */
-typedef void (*p2p_on_disconnected_fn)(p2p_handle_t hdl, void *userdata);
+typedef void (*p2p_on_state_fn)(p2p_handle_t hdl, p2p_state_t old_state, p2p_state_t new_state, void *userdata);
 
 /*
  * 数据到达回调（可选，如果未设置则需要主动调用 p2p_recv）
@@ -244,8 +245,7 @@ typedef struct {
     int                     path_strategy;              // 路径选择策略：0=直连优先，1=性能优先，2=混合模式（默认0）
     
     /* 事件回调 */
-    p2p_on_connected_fn     on_connected;               // 连接建立回调 (可选)
-    p2p_on_disconnected_fn  on_disconnected;            // 连接断开回调 (可选)
+    p2p_on_state_fn         on_state;                   // 状态变化回调 (可选)
     p2p_on_data_fn          on_data;                    // 数据到达回调 (可选)
     p2p_on_request_fn       on_request;                 // MSG RPC 请求到达（B 端，服务器可选）
     p2p_on_response_fn      on_response;                // MSG RPC 应答到达（A 端，服务器可选）

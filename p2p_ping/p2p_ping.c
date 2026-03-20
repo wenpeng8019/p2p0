@@ -253,10 +253,10 @@ static void log_state_change(p2p_handle_t s) {
     }
 }
 
-/* 连接断开回调 */
-static void on_disconnected(p2p_handle_t s, void *userdata) {
+/* 状态变化回调 */
+static void on_state(p2p_handle_t s, p2p_state_t old_state, p2p_state_t new_state, void *userdata) {
     (void)s; (void)userdata;
-    print("I:", LA_S("[EVENT] Connection closed", LA_S12, 12));
+    print("I:", LA_F("[EVENT] State: %s -> %s\n", LA_F46, 46), state_name(old_state), state_name(new_state));
 }
 
 static bool             g_running;
@@ -400,7 +400,7 @@ int main(int argc, char *argv[]) {
     cfg.gh_token        = ARGS_github.str;
     cfg.gist_id         = ARGS_gist.str;
     cfg.bind_port       = 0;
-    cfg.on_disconnected = on_disconnected;
+    cfg.on_state        = on_state;
     cfg.userdata        = NULL;
 
     #ifndef NDEBUG

@@ -17,7 +17,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_W8] = "RELAY",  /* SID:8 */
     [LA_W9] = "UNKNOWN",  /* SID:9 */
     [LA_S10] = "--- Connected ---",  /* SID:10 */
-    [LA_S12] = "[EVENT] Connection closed",  /* SID:12 */
     [LA_S13] = "Auto-echo received messages back to sender",  /* SID:13 */
     [LA_S40] = "Debugger Name",  /* SID:40 */
     [LA_S15] = "Enable DTLS (MbedTLS)",  /* SID:15 */
@@ -46,7 +45,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F43] = "Waiting Debugger(%s) connecting...\n",  /* SID:43 */
     [LA_F36] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:36 */
     [LA_F37] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:37 */
+    [LA_F46] = "[EVENT] State: %s -> %s\n",  /* SID:46 */
     [LA_F45] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:45 */
+    [LA_S12] = "[EVENT] Connection closed",  /* SID:12 disabled */
     [LA_W2] = "CLOSING",  /* SID:2 disabled */
 };
 

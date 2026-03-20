@@ -244,21 +244,14 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F233] = "% Invalid signaling mode in configuration",  /* SID:233 */
     [LA_F234] = "Local address detection done: %d address(es)",  /* SID:234 */
     [LA_F235] = "Marked old path (idx=%d) as FAILED due to addr change\n",  /* SID:235 */
-    [LA_F236] = "% NAT connection recovered, upgrading from RELAY to CONNECTED",  /* SID:236 */
-    [LA_F237] = "% NAT connection timeout, downgrading to relay mode",  /* SID:237 */
     [LA_F238] = "% No advanced transport layer enabled, using simple reliable layer",  /* SID:238 */
     [LA_F239] = "% No auth_key provided, using default key (insecure)",  /* SID:239 */
-    [LA_F395] = "% No available path, entering RELAY mode without active path",  /* SID:395 */
-    [LA_F396] = "% No remote candidates received, falling back to relay",  /* SID:396 */
     [LA_F240] = "Nomination successful! Using! Using %s path %s:%d%s",  /* SID:240 */
     [LA_F241] = "Open P2P UDP socket on port %d",  /* SID:241 */
     [LA_F242] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:242 */
     [LA_F243] = "% OpenSSL requested but library not linked",  /* SID:243 */
     [LA_F244] = "Out-of-window packet discarded seq=%u base=%u",  /* SID:244 */
     [LA_F245] = "% P2P connected, closing signaling TCP connection",  /* SID:245 */
-    [LA_F246] = "% P2P connection established",  /* SID:246 */
-    [LA_F397] = "% P2P punch failed, switching to relay path",  /* SID:397 */
-    [LA_F248] = "% P2P punching in progress ...",  /* SID:248 */
     [LA_F249] = "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n",  /* SID:249 */
     [LA_F250] = "% PEER_INFO(trickle): seq overflow, cannot trickle more\n",  /* SID:250 */
     [LA_F251] = "% PUBSUB (PUB): gathering candidates, waiting for STUN before publishing",  /* SID:251 */
@@ -268,7 +261,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F255] = "Packet too large len=%d max=%d",  /* SID:255 */
     [LA_F256] = "Passive peer learned remote ID '%s' from OFFER",  /* SID:256 */
     [LA_F257] = "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)",  /* SID:257 */
-    [LA_F258] = "% Path recovered: switched to PUNCH",  /* SID:258 */
     [LA_F259] = "% Path switch debounced, waiting for stability",  /* SID:259 */
     [LA_F260] = "Path switched to better route (idx=%d)",  /* SID:260 */
     [LA_F261] = "Peer '%s' is now online (FORWARD received), resuming",  /* SID:261 */
@@ -304,7 +296,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F398] = "% SIGNALING path enabled (server supports relay)\n",  /* SID:398 */
     [LA_F290] = "% SSL_CTX_new failed",  /* SID:290 */
     [LA_F291] = "% SSL_new failed",  /* SID:291 */
-    [LA_F292] = "Selected path: PUNCH (idx=%d)",  /* SID:292 */
     [LA_F293] = "Send offer to RELAY signaling server failed(%d)",  /* SID:293 */
     [LA_F294] = "Send window full, dropping packet send_count=%d",  /* SID:294 */
     [LA_F295] = "Sending Allocate Request to %s:%d",  /* SID:295 */
@@ -320,9 +311,17 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F304] = "% Skipping local Host candidates due to instrument",  /* SID:304 */
     [LA_F305] = "Start internal thread failed(%d)",  /* SID:305 */
     [LA_F306] = "% Starting internal thread",  /* SID:306 */
+    [LA_F399] = "% State: CONNECTED → LOST (no relay)",  /* SID:399 */
+    [LA_F237] = "% State: CONNECTED → RELAY (path lost)",  /* SID:237 */
+    [LA_F400] = "% State: LOST → CONNECTED (legacy path)",  /* SID:400 */
+    [LA_F404] = "State: LOST → CONNECTED, path=PUNCH[%d]",  /* SID:404 */
+    [LA_F236] = "State: RELAY → CONNECTED, path=PUNCH[%d]",  /* SID:236 */
+    [LA_F246] = "State: → CONNECTED, path=PUNCH[%d]",  /* SID:246 */
+    [LA_F248] = "% State: → PUNCHING",  /* SID:248 */
+    [LA_F401] = "% State: → RELAY (no path available)",  /* SID:401 */
+    [LA_F402] = "State: → RELAY (punch failed), path[%d]",  /* SID:402 */
     [LA_F307] = "% Stopping internal thread",  /* SID:307 */
     [LA_F308] = "% Storage full, waiting for peer to come online",  /* SID:308 */
-    [LA_F309] = "% Switched to backup path: RELAY",  /* SID:309 */
     [LA_F310] = "% Synced path after failover",  /* SID:310 */
     [LA_F311] = "TURN 401 Unauthorized (realm=%s), authenticating...",  /* SID:311 */
     [LA_F312] = "TURN Allocate failed with error %d",  /* SID:312 */
@@ -392,6 +391,13 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F403] = "% P2P punch failed, switching to relay path",  /* SID:403 disabled */
+    [LA_F258] = "% Path recovered: switched to PUNCH",  /* SID:258 disabled */
+    [LA_F292] = "Selected path: PUNCH (idx=%d)",  /* SID:292 disabled */
+    [LA_F309] = "% Switched to backup path: RELAY",  /* SID:309 disabled */
+    [LA_F395] = "% No available path, entering RELAY mode without active path",  /* SID:395 disabled */
+    [LA_F396] = "% No remote candidates received, falling back to relay",  /* SID:396 disabled */
+    [LA_F397] = "% P2P punch failed, switching to relay path",  /* SID:397 disabled */
     [LA_F394] = "%s: all candidates disabled by instrument, only use signaling relay\n",  /* SID:394 disabled */
     [LA_F333] = "% Using path: RELAY",  /* SID:333 disabled */
     [LA_W5] = "NAT punch failed, no TURN server configured",  /* SID:5 disabled */
