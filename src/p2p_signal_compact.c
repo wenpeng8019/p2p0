@@ -74,14 +74,14 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
         print("I:", LA_F("%s: peer_info0 srflx cand[%d]<%s:%d>%s\n", LA_F133, 133),
                         TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                        instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
-                        instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
+                        instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : "");
 
         if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) --s->remote_cand_cnt;
-        else if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
+        else { s->remote_srflx_cnt++;
 
-            if (nat_punch(s, 0) == E_NONE) s->remote_srflx_cnt++;
-            else {
+            // 这里启动打洞需要依赖于信令服务器的 REGISTER_ACK 包中携带的 relay_support 标志
+            // + 该标志用于决定所使用的冷打洞机制，如果冷打洞不依赖服务器中转，则打洞可以不依赖 REGISTER_ACK 包
+            if (s->sig_compact_ctx.state >= SIGNAL_COMPACT_REGISTERED && nat_punch(s, 0) != E_NONE) {
                 print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
                     TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             }
@@ -105,6 +105,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         }
         ++s->remote_cand_cnt;
 
+        // 对于 relay 候选类型，无需打洞
         if (c->type == P2P_CAND_RELAY) {
 
             print("I:", LA_F("%s: remote relay cand[%d]<%s:%d>%s\n", LA_F382, 382),
@@ -115,48 +116,33 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
             s->remote_relay_cnt++;
             continue;
         }
-        if (c->type == P2P_CAND_SRFLX) {
 
-            print("I:", LA_F("%s: remote srflx cand[%d]<%s:%d>%s\n", LA_F383, 383),
-                        TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                        instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : 
-                        instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
-
-            if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) {
-                --s->remote_cand_cnt;
-                continue;
-            }
-
-            if (instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) continue;
-
-            if (nat_punch(s, idx) == E_NONE) { s->remote_srflx_cnt++; continue; }
-        }
-        else if (c->type == P2P_CAND_HOST) {
-
-            print("I:", LA_F("%s: remote host cand[%d]<%s:%d>%s\n", LA_F381, 381),
-                  TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                     instrument_option(P2P_INST_OPT_ICE_HOST_OFF) ? ", ignored due to instrument" : 
-                     instrument_option(P2P_INST_OPT_HOST_PUNCH_OFF) ? ", punch skipped due to instrument" : "");
-
-            if (instrument_option(P2P_INST_OPT_ICE_HOST_OFF)) {
-                --s->remote_cand_cnt;
-                continue;
-            }
-
-            if (instrument_option(P2P_INST_OPT_HOST_PUNCH_OFF)) continue;
-
-            if (nat_punch(s, idx) == E_NONE) { s->remote_host_cnt++; continue; }
-        }
-        else {
-
+        const char* type_str;
+        if (c->type == P2P_CAND_HOST) type_str = "host";
+        else if (c->type == P2P_CAND_SRFLX) type_str = "srflx";
+        else { --s->remote_cand_cnt;
             print("E:", LA_F("%s: unexpected remote cand type %d, skipped\n", LA_F385, 385),
                   TASK_ICE_REMOTE, c->type);
-            --s->remote_cand_cnt;
             continue;
         }
 
-        print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
-              TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+        if (instrument_option(c->type == P2P_CAND_SRFLX ? P2P_INST_OPT_ICE_SRFLX_OFF : P2P_INST_OPT_ICE_HOST_OFF)) {
+            --s->remote_cand_cnt;
+            print("I:", LA_F("%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n", LA_F381, 381),
+                  TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            continue;
+        }
+
+        print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F383, 383),
+              TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+
+        s->remote_srflx_cnt++;
+
+        if (s->sig_compact_ctx.state < SIGNAL_COMPACT_REGISTERED) continue;
+
+        if (nat_punch(s, idx) != E_NONE)
+            print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F128, 128),
+                  TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
     }
 }
 
@@ -930,6 +916,15 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         path_manager_enable_signaling(s, &ctx->server_addr);
         print("I:", LA_F("SIGNALING path enabled (server supports relay)\n", LA_F398, 398));
     }
+
+    // 启动数据中继功能（如果服务器支持）
+    assert(!s->signaling_relay_fn);
+    if (ctx->relay_support)
+        s->signaling_relay_fn = p2p_signal_compact_relay;
+
+    // 启动 NAT 打洞
+    assert(s->nat.state < NAT_PUNCHING);
+    nat_punch(s, -1/* all candidates */);
 }
 
 /*
@@ -1160,8 +1155,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                        s->active_path);
             }
 
-            // 立即打洞新地址（nat_on_punch 收到回复后会自动注册新路径）
-            if (!instrument_option(P2P_INST_OPT_SRFLX_PUNCH_OFF)) {
+            if (ctx->state >= SIGNAL_COMPACT_REGISTERED) {
                 if (nat_punch(s, 0) != E_NONE) {
                     print("E:", LA_F("Failed to send punch packet for new peer addr\n", LA_F218, 218));
                 }

@@ -350,6 +350,16 @@ typedef enum {
     P2P_CAND_PRFLX                              // 对端反射地址（Peer Reflexive Candidate）
 } p2p_cand_type_t;
 
+static inline const char* p2p_candidate_type_str(p2p_cand_type_t type) {
+    switch (type) {
+        case P2P_CAND_HOST:             return "Host";
+        case P2P_CAND_SRFLX:            return "Srflx";
+        case P2P_CAND_PRFLX:            return "Prflx";
+        case P2P_CAND_RELAY:            return "Relay";
+        default:                        return "Unknown";
+    }
+}
+
 /*
  * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
  *

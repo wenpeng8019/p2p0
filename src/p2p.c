@@ -266,13 +266,6 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 初始化虚拟链路层（基于 NAT 穿透的 P2P）
     nat_init(&s->nat);
 
-    // 设置信令中转回调（根据信令模式）
-    if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-        s->signaling_relay_fn = p2p_signal_compact_relay;
-    } else {
-        s->signaling_relay_fn = NULL;
-    }
-
     // 初始化基础传输层（reliable ARQ）
     reliable_init(s);
 

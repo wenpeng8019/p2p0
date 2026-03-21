@@ -166,11 +166,15 @@ void nat_reset(nat_ctx_t *n) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * NAT 打洞（统一接口，支持批量启动和单候选追加）
+ * NAT 打洞
+ * + 这是针对模块外部的打洞接口，受到 NAT 状态机的约束
+ *   并会根据不同状态执行不同的业务逻辑
+ *
+ * 此外，对于模块内部的打洞调用，例如 keep-alive
+ * 则直接调用 nat_send_punch，不受 NAT 状态机约束
  *
  * @param s        会话对象
  * @param idx      目标候选索引（-1=批量启动所有候选，>=0=单个候选打洞）
- * @return         0=成功，!0=失败
  *
  * 用法：
  *   - nat_punch(s, -1)      批量启动所有 remote_cands 的打洞
@@ -181,54 +185,38 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
     P_check(s != NULL, return E_INVALID;)
     
     nat_ctx_t *n = &s->nat;
-    uint64_t now = P_tick_ms();
-    
+
     /* ========== 首次批量或重新启动模式：idx == -1 ========== */
 
     if (idx == -1) {
 
-        if (s->remote_cand_cnt == 0) {
-            print("E:", LA_F("%s: no remote candidates to punch", LA_F122, 122), TASK_NAT);
-            return E_NONE_EXISTS;
-        }
-
         // 已连接时忽略（避免破坏已建立的连接）
-        if (n->state == NAT_CONNECTED) {
-            print("V:", LA_F("%s: already connected, ignoring batch punch request", LA_F93, 93), TASK_NAT);
-            return E_NONE;
+        if (n->state >= NAT_PUNCHING) {
+            print("V:", LA_F("%s: already punching, ignored", LA_F93, 93), TASK_NAT);
+            return E_NONE_CONTEXT;
         }
         
         // 启动/重启 PUNCHING 状态（适用于 INIT/CLOSED/DISCONNECTED/RELAY）
         n->state = NAT_PUNCHING;
-        n->punch_start = now;
+        n->punch_start = P_tick_ms();
         n->rx_confirmed = false;
         n->tx_confirmed = false;
         n->peer_addr = s->remote_cands[0].addr;  /* 默认值，收到 ACK 时会更新 */
 
         print("I:", LA_F("%s: start punching all(%d) remote candidates", LA_F148, 148), TASK_NAT, s->remote_cand_cnt);
 
-        // 打印详细日志
-        if (p2p_log_level == P2P_LOG_LEVEL_VERBOSE) {
+        if (s->remote_cand_cnt == 0) return E_NONE;
 
-            for (int i = 0; i < s->remote_cand_cnt; i++) {
-                const char *type_str = "Unknown";
-                switch ((p2p_cand_type_t)s->remote_cands[i].type) {
-                    case P2P_CAND_HOST:  type_str = "Host";  break;
-                    case P2P_CAND_SRFLX: type_str = "Srflx"; break;
-                    case P2P_CAND_PRFLX: type_str = "Prflx"; break;
-                    case P2P_CAND_RELAY: type_str = "Relay"; break;
-                }
-
-                print("V:", LA_F("  [%d]<%s:%d> (type: %s)", LA_F47, 47), i,
-                      inet_ntoa(s->remote_cands[i].addr.sin_addr), ntohs(s->remote_cands[i].addr.sin_port),
-                      type_str);
-            }
+        for (int i = 0; i < s->remote_cand_cnt; i++) {
+            print("V:", LA_F("s: punching remote [%d]<%s:%d> (type: %s)", LA_F47, 47), TASK_NAT, i,
+                  inet_ntoa(s->remote_cands[i].addr.sin_addr), ntohs(s->remote_cands[i].addr.sin_port),
+                  p2p_candidate_type_str((p2p_cand_type_t)s->remote_cands[i].type));
         }
 
         // 立即向所有候选并行发送打洞包
         for (int i = 0; i < s->remote_cand_cnt; i++)
-            nat_send_punch(s, LA_W("punch", LA_W13, 13), &s->remote_cands[i], now);
-        n->last_send_time = now;
+            nat_send_punch(s, LA_W("punch", LA_W13, 13), &s->remote_cands[i], n->punch_start);
+        n->last_send_time = n->punch_start;
         
         return E_NONE;
     }
@@ -240,27 +228,24 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         return E_OUT_OF_RANGE;
     }
 
+    uint64_t now = P_tick_ms();
+
+    // 首次或重新启动时初始化状态（INIT/CLOSED）
+    if (n->state < NAT_PUNCHING) {
+        n->state = NAT_PUNCHING;
+        n->punch_start = now;
+        n->rx_confirmed = false;
+        n->tx_confirmed = false;
+        n->peer_addr = s->remote_cands[0].addr;
+
+        print("I:", LA_F("%s: start punching trickle", 0, 0), TASK_NAT);
+    }
+
     p2p_remote_candidate_entry_t *entry = &s->remote_cands[idx];
 
-    // 已连接状态：直接发送打洞包建立新路径，不改变连接状态
-    if (n->state == NAT_CONNECTED) {
-
-        print("I:", LA_F("%s: punching additional cand<%s:%d>[%d] while connected", LA_F130, 130), TASK_NAT,
-              inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port), idx);
-    }
-    else {
-        print("I:", LA_F("%s: punching remote cand<%s:%d>[%d]", LA_F131, 131), TASK_NAT,
-              inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port), idx);
-
-        // 首次或重新启动时初始化状态（INIT/CLOSED）
-        if (n->state == NAT_INIT) {
-            n->state = NAT_PUNCHING;
-            n->punch_start = now;
-            n->rx_confirmed = false;
-            n->tx_confirmed = false;
-            n->peer_addr = s->remote_cands[0].addr;
-        }
-    }
+    print("I:", LA_F("%s: punching remote [%d]cand<%s:%d> (type: %s)", LA_F47, 47), TASK_NAT, idx,
+          inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port),
+          p2p_candidate_type_str((p2p_cand_type_t)entry->type));
 
     // 发送打洞包
     nat_send_punch(s, LA_W("punch", LA_W13, 13), entry, now);
@@ -278,6 +263,11 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
  */
 void nat_send_fin(p2p_session_t *s) {
     const char* PROTO = "FIN";
+
+    if (s->nat.state < NAT_LOST) {
+        print("E:", LA_F("%s: not connected, cannot send FIN", 0, 0), PROTO);
+        return;
+    }
 
     udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
 
