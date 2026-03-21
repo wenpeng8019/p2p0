@@ -109,9 +109,8 @@ int reliable_on_data(struct p2p_session *s, uint16_t seq, const uint8_t *payload
  * ack_seq = 累积确认（所有 < ack_seq 的都已确认）
  * sack_bits = ack_seq 之后的选择性确认位图
  */
-int reliable_on_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack_bits) {
+int reliable_on_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack_bits, uint64_t now) {
     reliable_t *r = &s->reliable;
-    uint64_t now = P_tick_ms();
 
     // 根据累积 ACK 推进 send_base
     while (seq_diff(ack_seq, r->send_base) > 0) {

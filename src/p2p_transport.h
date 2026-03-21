@@ -92,7 +92,7 @@ int  reliable_recv_pkt(struct p2p_session *s, uint8_t *buf, int *out_len);
 int  reliable_on_data(struct p2p_session *s, uint16_t seq, const uint8_t *payload, int len);
 
 /* 处理收到的 ACK（释放已确认数据包） */
-int  reliable_on_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack_bits);
+int  reliable_on_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack_bits, uint64_t now);
 
 /* 定时 ACK 处理 */
 void reliable_tick_ack(struct p2p_session *s);
@@ -138,8 +138,8 @@ typedef struct p2p_transport_ops {
     /* 周期性驱动逻辑 */
     void (*tick)(struct p2p_session *s);
 
-    /* 处理来自底层的 UDP 包 */
-    void (*on_packet)(struct p2p_session *s, uint8_t type, const uint8_t *payload, int len, const struct sockaddr_in *from);
+    /* 将 P2P 链路层的数据包解包为传输层内部协议包或数据 */
+    void (*on_packet)(struct p2p_session *s, const uint8_t *payload, int len);
     int  (*is_ready)(struct p2p_session *s);
     
     /* 获取传输层统计（用于路径管理器）

@@ -674,7 +674,7 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
     // 构造完整负载：[session_id(8)][原始 payload]
     uint8_t relay_payload[P2P_MAX_PAYLOAD];
     if (payload_len + 8 > P2P_MAX_PAYLOAD) {
-        print("E:", LA_F("COMPACT relay payload too large: %d", LA_F160, 160), payload_len);
+        print("E:", LA_F("COMPACT relay payload too large: %d", LA_F433, 433), payload_len);
         return E_OUT_OF_CAPACITY;
     }
     
@@ -688,10 +688,10 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
                                 relay_payload, 8 + payload_len);
     
     if (ret >= 0) {
-        print("V:", LA_F("COMPACT relay: type=0x%02x, seq=%u (session_id=%" PRIu64 ")", LA_F410, 410),
+        print("V:", LA_F("COMPACT relay: type=0x%02x, seq=%u (session_id=%" PRIu64 ")", LA_F422, 422),
               type, seq, ctx->session_id);
     } else {
-        print("E:", LA_F("COMPACT relay send failed: type=0x%02x, ret=%d", LA_F160, 160),
+        print("E:", LA_F("COMPACT relay send failed: type=0x%02x, ret=%d", LA_F434, 434),
               type, E_EXT_CODE(ret));
     }
     

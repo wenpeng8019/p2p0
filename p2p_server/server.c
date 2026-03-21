@@ -1631,7 +1631,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     case P2P_PKT_CRYPTO:
     case P2P_PKT_REACH:
         if (!(hdr->flags & P2P_DATA_FLAG_SESSION)) {
-            print("E:", LA_F("[Relay] %s: missing SESSION flag, dropped\n", 0, 0),
+            print("E:", LA_F("[Relay] %s: missing SESSION flag, dropped\n", LA_F163, 163),
                   (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
                   (hdr->type == P2P_PKT_REACH) ? "REACH+SESSION" :
                   (hdr->type == P2P_PKT_DATA) ? "DATA+SESSION" :

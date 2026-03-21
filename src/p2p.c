@@ -765,19 +765,22 @@ p2p_update(p2p_handle_t hdl) {
         switch (hdr.type) {
 
             // --------------------
-            // 加密层（DTLS 密文解包 → 解密 → 重新派发）
+            // 加密层
             // --------------------
 
             case P2P_PKT_CRYPTO: {
-                /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
+
+                // flags & P2P_DATA_FLAG_SESSION 表示携带 session_id
                 if (hdr.flags & P2P_DATA_FLAG_SESSION) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "CRYPTO")) break;
                 }
                 if (!s->dtls) break;
-                int dec_len = s->dtls->decrypt_recv(s, payload, payload_len,
-                                                      crypto_dec_buf, sizeof(crypto_dec_buf));
+
+                // 解密密文包
+                int dec_len = s->dtls->decrypt_recv(s, payload, payload_len, crypto_dec_buf, sizeof(crypto_dec_buf));
                 if (dec_len >= P2P_HDR_SIZE) {
-                    /* 解析内层 P2P 包头 */
+
+                    // unpack 解密后的内层 P2P 包头和负载
                     hdr.type = crypto_dec_buf[0];
                     hdr.flags = crypto_dec_buf[1];
                     hdr.seq = (uint16_t)((crypto_dec_buf[2] << 8) | crypto_dec_buf[3]);
@@ -801,24 +804,17 @@ p2p_update(p2p_handle_t hdl) {
              * 说明：P2P 数据包，由 reliable 层或高级传输层处理
              */
             case P2P_PKT_DATA:
-                /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
+                // flags & P2P_DATA_FLAG_SESSION 表示携带 session_id
                 if (hdr.flags & P2P_DATA_FLAG_SESSION) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "DATA")) break;
                 }
-                printf(LA_F("Received DATA pkt from %s:%d, seq=%u, len=%d", LA_F271, 271),
-                    inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
             handle_data:
 
-                // 记录数据包接收（根据来源地址查找实际接收路径）
-                {
-                    int recv_path = p2p_find_path_by_addr(s, &from);
-                    if (recv_path >= -1)
-                        path_manager_on_packet_recv(s, recv_path, now_ms, P2P_HDR_SIZE + payload_len);
-                }
+                nat_on_data(s, &from, now_ms, hdr.seq, P2P_HDR_SIZE + payload_len);
 
                 // 高级传输层（DTLS/SCTP/PseudoTCP）有自己的解包逻辑
                 if (s->trans && s->trans->on_packet)
-                    s->trans->on_packet(s, hdr.type, payload, payload_len, &from);
+                    s->trans->on_packet(s, payload, payload_len);
                 // 基础 reliable 层处理
                 else if (payload_len > 0)
                     reliable_on_data(s, hdr.seq, payload, payload_len);
@@ -838,52 +834,64 @@ p2p_update(p2p_handle_t hdl) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "ACK")) break;
                 }
             handle_ack: {
-                uint16_t ack_seq = nget_s(payload);
-                uint32_t sack; nread_l(&sack, payload + 2);
-                if (hdr.type == P2P_PKT_ACK) {
-                    printf(LA_F("Received ACK pkt from %s:%d, ack_seq=%u, sack=0x%08x", LA_F270, 270),
-                        inet_ntoa(from.sin_addr), ntohs(from.sin_port), ack_seq, sack);
+
+                // 协议不匹配：有独立封装的传输层不应该收到 P2P_PKT_ACK
+                // + 注：有 on_packet 的传输层（如 SCTP）会将自己的所有协议数据（含内部 ACK）
+                //   都封装在 P2P_PKT_DATA payload 中，类似 P2P_PKT_CRYPTO 将内层包封装为
+                //   CRYPTO 包。这种独立协议封装的传输层不使用 P2P_PKT_ACK
+                if (s->trans && s->trans->on_packet) {
+                    print("E:", LA_F("ACK: protocol mismatch, trans=%s has on_packet but received P2P_PKT_ACK", LA_F432, 432),
+                          s->trans->name);
+                    break;
                 }
 
-                // 只有使用基础 reliable 层时才处理（无高级传输层或高级传输层无 on_packet）
-                if ((!s->trans || !s->trans->on_packet) && payload_len >= 6) {
-                    
-                    // 记录 ACK 前的 RTT 值
-                    int old_srtt = s->reliable.srtt;
-                    
-                    // 处理 ACK（reliable 层会更新 RTT）
-                    reliable_on_ack(s, ack_seq, sack);
-                    
-                    // 如果 RTT 更新了，同步到路径管理器（Group 2: 数据层 RTT）
-                    if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0) {
-                        if (s->active_path >= -1) {
-                            path_manager_on_data_rtt(s, s->active_path, (uint32_t)s->reliable.srtt);
-                        }
-                    }
+                // ACK 包至少要有 ack_seq(2B) + sack(4B) 
+                if (payload_len < 6) {
+                    print("E:", LA_F("ACK: invalid payload length %d, expected at least 6", LA_F431, 431), payload_len);
+                    break;
+                }
+
+                uint16_t ack_seq = nget_s(payload); 
+                uint32_t sack; nread_l(&sack, payload + 2);
+
+                nat_on_data_ack(s, &from, now_ms, ack_seq, sack);
+
+                // reliable 内部会更新 RTT
+                int old_srtt = s->reliable.srtt;
+                reliable_on_ack(s, ack_seq, sack, now_ms);
+                
+                // 这里检测变化后同步到路径管理器
+                if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0 && s->active_path >= -1) {
+                    path_manager_on_data_rtt(s, s->active_path, (uint32_t)s->reliable.srtt);
                 }
                 break;
             }
+            
             // --------------------
             // NAT 链路层（打洞、保活、断开）
             // --------------------
 
+            // NAT 打洞/保活包
+            case P2P_PKT_PUNCH:
+                nat_on_punch(s, &hdr, payload, payload_len, &from, now_ms);
+                break;
             case P2P_PKT_REACH:
                 // 中转版本（通过信令服务器）：验证 session_id 后传给 NAT 层
                 if (hdr.flags & P2P_DATA_FLAG_SESSION) {
                     if (p2p_signal_compact_relay_validation(s, &payload, &payload_len, "REACH_RELAYED")) {
                         // session_id 验证成功，清除 RELAYED 标志后传给 NAT 层
                         hdr.flags = 0;
-                        nat_on_reach(s, &hdr, payload, payload_len, &from);
+                        nat_on_reach(s, &hdr, payload, payload_len, &from, now_ms);
                     }
                 }
                 // 直连版本（P2P 路径）：直接传给 NAT 层
-                else {
-                    nat_on_reach(s, &hdr, payload, payload_len, &from);
-                }
+                else nat_on_reach(s, &hdr, payload, payload_len, &from, now_ms);
                 break;
-            // NAT 打洞/保活包
-            case P2P_PKT_PUNCH:
-                nat_on_punch(s, &hdr, payload, payload_len, &from);
+            case P2P_PKT_CONN:
+                nat_on_conn(s, &hdr, &from, now_ms);
+                break;
+            case P2P_PKT_CONN_ACK:
+                nat_on_conn_ack(s, &hdr, &from, now_ms);
                 break;
             case P2P_PKT_FIN:
                 nat_on_fin(s, &from);

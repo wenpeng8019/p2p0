@@ -418,10 +418,7 @@ static void sctp_tick(p2p_session_t *s) {
 /* ============================================================================
  * 处理入站 SCTP 数据包（UDP → usrsctp）
  * ============================================================================ */
-static void sctp_on_packet(struct p2p_session *s, uint8_t type, const uint8_t *payload,
-                           int len, const struct sockaddr_in *from) {
-    if (type != P2P_PKT_DATA && type != P2P_PKT_RELAY_DATA) return;
-    (void)from;
+static void sctp_on_packet(struct p2p_session *s, const uint8_t *payload, int len) {
 
     p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx) return;
