@@ -1624,19 +1624,23 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
     } break;
 
-    // SIG_PKT_PEER_INFO/P2P_PKT_DATA/P2P_PKT_ACK/P2P_PKT_CRYPTO (+SESSION): relay 转发给对方
+    // SIG_PKT_PEER_INFO/P2P_PKT_REACH/P2P_PKT_DATA/P2P_PKT_ACK/P2P_PKT_CRYPTO (+SESSION/RELAYED): relay 转发给对方
     // 格式：所有包都包含 session_id(8) 在 payload 开头
-    case SIG_PKT_PEER_INFO:
     case P2P_PKT_DATA:
     case P2P_PKT_ACK:
-    case P2P_PKT_CRYPTO: {
-        // DATA/ACK/CRYPTO 必须携带 P2P_DATA_FLAG_SESSION 标志才进行中继
-        if (hdr->type != SIG_PKT_PEER_INFO && !(hdr->flags & P2P_DATA_FLAG_SESSION)) {
-            // 非中继包，忽略
+    case P2P_PKT_CRYPTO:
+    case P2P_PKT_REACH:
+        if (!(hdr->flags & P2P_DATA_FLAG_SESSION)) {
+            print("E:", LA_F("[Relay] %s: missing SESSION flag, dropped\n", 0, 0),
+                  (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
+                  (hdr->type == P2P_PKT_REACH) ? "REACH+SESSION" :
+                  (hdr->type == P2P_PKT_DATA) ? "DATA+SESSION" :
+                  (hdr->type == P2P_PKT_ACK) ? "ACK+SESSION" : "CRYPTO+SESSION");
             return;
         }
-
+    case SIG_PKT_PEER_INFO: {
         const char* PROTO = (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
+                           (hdr->type == P2P_PKT_REACH) ? "REACH+SESSION" :
                            (hdr->type == P2P_PKT_DATA) ? "DATA+SESSION" :
                            (hdr->type == P2P_PKT_ACK) ? "ACK+SESSION" : "CRYPTO+SESSION";
 
@@ -1682,7 +1686,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
                (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
 
-        if (hdr->type == SIG_PKT_PEER_INFO || hdr->type == P2P_PKT_DATA || hdr->type == P2P_PKT_CRYPTO) {
+        if (hdr->type == SIG_PKT_PEER_INFO || hdr->type == P2P_PKT_REACH || 
+            hdr->type == P2P_PKT_DATA || hdr->type == P2P_PKT_CRYPTO) {
             print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", LA_F75, 75),
                    PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
         } else {

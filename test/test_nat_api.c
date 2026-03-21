@@ -90,7 +90,12 @@ TEST(nat_punch_batch_mode_success) {
         .seq = 100  // 对方的序列号
     };
     
-    nat_on_punch(s, &hdr, &peer_addr);
+    // 构造 PUNCH 负载: [target_addr(4B) | target_port(2B)]
+    uint8_t punch_payload[6];
+    memcpy(punch_payload, &peer_addr.sin_addr.s_addr, 4);
+    memcpy(punch_payload + 4, &peer_addr.sin_port, 2);
+    
+    nat_on_punch(s, &hdr, punch_payload, sizeof(punch_payload), &peer_addr);
     
     // PUNCH 只确认 rx 方向，尚未 NAT_CONNECTED
     ASSERT_EQ(s->nat.rx_confirmed, true);
@@ -99,12 +104,17 @@ TEST(nat_punch_batch_mode_success) {
     
     // 模拟收到 PUNCH_ACK（证明 me→peer 方向也通了 → NAT_CONNECTED）
     p2p_packet_hdr_t ack_hdr = {
-        .type = P2P_PKT_PUNCH_ACK,
+        .type = P2P_PKT_REACH,
         .flags = 0,
         .seq = 1  // 回传我们的 punch_seq
     };
     
-    nat_on_punch_ack(s, &ack_hdr, &peer_addr);
+    // 构造 REACH 负载: echo target_addr
+    uint8_t ack_payload[6];
+    memcpy(ack_payload, &peer_addr.sin_addr.s_addr, 4);
+    memcpy(ack_payload + 4, &peer_addr.sin_port, 2);
+    
+    nat_on_reach(s, &ack_hdr, ack_payload, sizeof(ack_payload), &peer_addr);
     
     // 双向确认 → NAT_CONNECTED
     ASSERT_EQ(s->nat.tx_confirmed, true);

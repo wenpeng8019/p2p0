@@ -637,8 +637,9 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
         c->addr = caddr;
         c->type = ctype;
         c->priority = 0;
+        c->readable = false;
+        c->writable = false;
         c->last_punch_send_ms = 0;
-        c->reachable = false;
         path_stats_init(&c->stats, 0);
 
         print("I:", LA_F("Recv New Remote Candidate<%s:%d> (type=%d)", LA_F282, 282),
@@ -688,8 +689,9 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
         c->addr = *from;
         c->type = P2P_CAND_PRFLX;
         c->priority = 0;
+        c->readable = false;
+        c->writable = false;
         c->last_punch_send_ms = 0;
-        c->reachable = false;
         path_stats_init(&c->stats, 0);
 
         matched_idx = idx;
@@ -726,7 +728,8 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
             cand_type_str, inet_ntoa(from->sin_addr), ntohs(from->sin_port), connection_desc);
 
     if (matched_idx >= 0) {
-        s->remote_cands[matched_idx].reachable = true;
+        s->remote_cands[matched_idx].readable = true;
+        s->remote_cands[matched_idx].writable = true;
     }
     
     /* 设置活动地址 */

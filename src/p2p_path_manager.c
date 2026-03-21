@@ -31,9 +31,9 @@
  *              → p2p_nat.c: nat_on_punch() / nat_on_punch_ack()
  *   DEGRADED: RTT>300ms 或 loss>10%；恢复到 RTT<250ms 且 loss<5% 回 ACTIVE。
  *              → p2p_path_manager.c: health_check_one_path()
- *   FAILED  : 连续 3 次超时（LAN 5s / 其他 10s）。清除 reachable 停止 keep-alive。
+ *   FAILED  : 连续 3 次超时（LAN 5s / 其他 10s）。清除 writable 停止 keep-alive。
  *              → p2p_path_manager.c: health_check_one_path()
- *   RECOVERING: FAILED 30 秒后进入恢复探测。恢复 reachable 触发 keep-alive。
+ *   RECOVERING: FAILED 30 秒后进入恢复探测。恢复 writable 触发 keep-alive。
  *             10 秒窗口内收到响应且 2 秒内有活动则回 ACTIVE；超时则回 FAILED。
  *              → p2p_path_manager.c: health_check_one_path()
  *
@@ -1148,9 +1148,9 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
                 // 记录进入 FAILED 的时间（用于 30s 后触发 RECOVERING）
                 p->probe_seq = now_ms;
 
-                // 清除 reachable 标记，停止 keep-alive 以使 probe_seq 时间戳生效
+                // 清除 writable 标记，停止 keep-alive 以使 probe_seq 时间戳生效
                 if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
-                    s->remote_cands[path_idx].reachable = false;
+                    s->remote_cands[path_idx].writable = false;
                 }
 
                 // 故障转移：当前活跃路径失效时，选择新路径
@@ -1189,8 +1189,8 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
 
             p->consecutive_timeouts = 0;                        // 重置连续超时计数
             p->probe_seq = now_ms;                              // 恢复开始时间（复用 probe_seq 存储）
-            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) // 恢复 reachable 让 keep-alive 发送探测包
-                s->remote_cands[path_idx].reachable = true;
+            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) // 恢复 writable 让 keep-alive 发送探测包
+                s->remote_cands[path_idx].writable = true;
             
             p->last_recv_ms = now_ms;                           // 初始化 last_recv_ms 为当前时刻
         }
@@ -1206,8 +1206,8 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
             p->state = PATH_STATE_FAILED;
 
             p->probe_seq = now_ms;
-            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) // 再次清除 reachable 停止探测
-                s->remote_cands[path_idx].reachable = false;
+            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) // 再次清除 writable 停止探测
+                s->remote_cands[path_idx].writable = false;
         } 
         // 收到数据且最近 2 秒内有活动 → 恢复成功
         else if (p->last_recv_ms > recovering_start &&

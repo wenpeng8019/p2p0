@@ -660,43 +660,79 @@ void p2p_signal_compact_trickle_turn(p2p_session_t *s) {
 }
 
 /*
- * 通过服务器中转发送数据包（新协议）
+ * 通过 COMPACT 信令中转发送数据包（通用接口）
  *
- * 协议：P2P_PKT_DATA (0x20) + P2P_DATA_FLAG_SESSION
- * 包头: [type=0x20 | flags=0x01 | seq=0]
- * 负载: [session_id(8)][data(N)]
- *   - session_id: 会话 ID（8字节，网络字节序）
- *   - data: 用户数据
+ * 协议：P2P_PKT_* + P2P_DATA_FLAG_SESSION (0x01)
+ * 包头：[type | flags|P2P_DATA_FLAG_SESSION | seq]
+ * 负载：[session_id(8)][原始 payload]
+ *
+ * 用于所有需要通过信令服务器转发的包类型（REACH/DATA/ACK/CRYPTO 等）。
  */
-ret_t p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t* size) {
-    const char* PROTO = "DATA+SESSION";
+ret_t p2p_signal_compact_relay(struct p2p_session *s,
+                               uint8_t type, uint8_t flags, uint16_t seq,
+                               const void *payload, uint16_t payload_len) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
-    P_check(data && size && *size, return E_INVALID;)
+    P_check(!payload_len || payload, return E_INVALID;)
     P_check(ctx->relay_support, return E_NO_SUPPORT;)
     P_check(ctx->session_id, return E_NONE_CONTEXT;)
 
-    if (*size > (uint32_t)(P2P_MAX_PAYLOAD - sizeof(uint64_t))) {
-        *size = (uint32_t)(P2P_MAX_PAYLOAD - sizeof(uint64_t));
+    // 构造完整负载：[session_id(8)][原始 payload]
+    uint8_t relay_payload[P2P_MAX_PAYLOAD];
+    if (payload_len + 8 > P2P_MAX_PAYLOAD) {
+        print("E:", LA_F("COMPACT relay payload too large: %d", LA_F160, 160), payload_len);
+        return E_OUT_OF_CAPACITY;
+    }
+    
+    nwrite_ll(relay_payload, ctx->session_id);
+    if (payload_len > 0 && payload)
+        memcpy(relay_payload + 8, payload, payload_len);
+
+    // 发送包，自动添加 P2P_DATA_FLAG_SESSION 标志
+    ret_t ret = udp_send_packet(s->sock, &ctx->server_addr, type,
+                                flags | P2P_DATA_FLAG_SESSION, seq,
+                                relay_payload, 8 + payload_len);
+    
+    if (ret >= 0) {
+        print("V:", LA_F("COMPACT relay: type=0x%02x, seq=%u (session_id=%" PRIu64 ")", LA_F410, 410),
+              type, seq, ctx->session_id);
+    } else {
+        print("E:", LA_F("COMPACT relay send failed: type=0x%02x, ret=%d", LA_F160, 160),
+              type, E_EXT_CODE(ret));
+    }
+    
+    return ret >= 0 ? E_NONE : ret;
+}
+
+/* 
+ * COMPACT 信令会话隔离验证（防止旧会话重传包污染新会话）
+ */
+bool p2p_signal_compact_relay_validation(struct p2p_session *s,
+                                         const uint8_t **payload, int *len,
+                                         const char *proto_name) {
+    // 至少需要 session_id(8)
+    if (*len < (int)sizeof(uint64_t)) {
+        print("E:", LA_F("%s: bad payload(len=%d, need >=8)\n", LA_F392, 392), proto_name, *len);
+        return false;
     }
 
-    uint8_t payload[P2P_MAX_PAYLOAD];
-    nwrite_ll(payload, ctx->session_id);
-    memcpy(payload + sizeof(uint64_t), data, *size);
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    uint64_t session_id = nget_ll(*payload);
 
-    print("V:", LA_F("%s sent, size=%d (ses_id=%" PRIu64 ")\n", LA_F62, 62), PROTO, *size, ctx->session_id);
+    // 验证 session_id 匹配
+    if (session_id != ctx->session_id) {
+        print("W:", LA_F("%s: session mismatch(local=%" PRIu64 ", pkt=%" PRIu64 ")\n", LA_F145, 145),
+              proto_name, ctx->session_id, session_id);
+        return false;
+    }
 
-    /* 使用新协议: P2P_PKT_DATA + P2P_DATA_FLAG_SESSION */
-    ret_t ret = udp_send_packet(s->sock, &ctx->server_addr, P2P_PKT_DATA, P2P_DATA_FLAG_SESSION, 0, payload, (int)(sizeof(uint64_t) + *size));
-    if (ret < 0)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F355, 355), 
-              PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
-    else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0x01, len=%d\n", LA_F393, 393),
-               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
-               (int)(sizeof(uint64_t) + *size));
+    print("V:", LA_F("%s: session validated, len=%d (ses_id=%" PRIu64 ")\n", LA_F88, 88),
+          proto_name, *len, session_id);
 
-    return E_NONE;
+    // 跳过 session_id 头部
+    *payload += sizeof(uint64_t);
+    *len -= (int)sizeof(uint64_t);
+    return true;
 }
 
 /*

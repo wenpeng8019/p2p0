@@ -202,25 +202,109 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *                    [匹配 pending: RTT = 20ms, path=0]
  *
  * 注：Bob 也会独立定时发送 PUNCH（未在上图中显示），Alice 同样会立即回复 PUNCH_ACK。
+ *
+ * ============================================================================
+ * 收发分离协议
+ * ============================================================================
+ *
+ * PUNCH/PUNCH_ACK 携带 target_addr 实现收发路径分离：
+ *
+ * PUNCH 格式:
+ *   包头: [type=0x01 | flags=0 | seq(2B)]
+ *   负载: [target_addr(4B) | target_port(2B)]  // 我发往哪个地址
+ *
+ * PUNCH_ACK 格式:
+ *   包头: [type=0x02 | flags=0 | seq=echo_seq(2B)]
+ *   负载: [target_addr(4B) | target_port(2B)]  // echo 回 PUNCH 中的目标地址
+ *
+ * 收发分离语义：
+ *   - PUNCH 携带 target: 告知对方"我是发往哪个地址的"
+ *   - REACH echo target: 告知发送方"你的包到达了这个地址"
+ *   - 发送方收到 REACH 后，标记该 target 对应的路径为 writable
+ *   - 解决单向防火墙：即使收到包的端口不能回复，也能通过其他可写路径回复 REACH
  */
-#define P2P_PKT_PUNCH           0x01        // 连接探测包（打洞/保活）
-#define P2P_PKT_PUNCH_ACK       0x02        // PUNCH 即时确认包（seq=回传对方的 PUNCH seq）
+#define P2P_PKT_PUNCH           0x01        // 连接探测包（打洞/保活），负载: target_addr(6B)
+#define P2P_PKT_REACH           0x02        // PUNCH 到达确认包，负载: echo target_addr(6B)
+
+/*
+ * P2P_PKT_CONN / CONN_ACK 协议（连接建立三次握手的最后一次）
+ *
+ * ============================================================================
+ * CONN (0x03) — 连接就绪包
+ * ============================================================================
+ *   包头: [type=0x03 | flags=0 | seq=发送方序列号(2B)]
+ *   负载: 无
+ *   发送: 收到第一个 REACH 后定期发送，直到收到 CONN_ACK 或数据包
+ *   接收: 立即回复 CONN_ACK，状态机转换为 CONNECTED，允许数据传输
+ *
+ * ============================================================================
+ * CONN_ACK (0x04) — 连接就绪确认包
+ * ============================================================================
+ *   包头: [type=0x04 | flags=0 | seq=回传对方的 CONN seq(2B)]
+ *   负载: 无
+ *   发送: 收到 CONN 后立即回复
+ *   接收: 停止发送 CONN，状态机转换为 CONNECTED
+ *
+ * ============================================================================
+ * 协议机制
+ * ============================================================================
+ *
+ * 三次握手确保双方同步进入 CONNECTED 状态：
+ *   1. PUNCH → REACH: NAT 打洞确认（双向连通）
+ *   2. CONN → CONN_ACK: 数据传输就绪确认（避免丢失首包）
+ *
+ * 状态转换：
+ *   - 发送方: 收到 REACH → 定期发送 CONN → 收到 CONN_ACK → CONNECTED
+ *   - 接收方: 收到 CONN → 回复 CONN_ACK → CONNECTED
+ *
+ * 超时处理：
+ *   - 收到任何数据包（DATA/CRYPTO）也可停止 CONN 重传
+ *   - 防止握手包丢失导致单方等待
+ *
+ * ============================================================================
+ * 交互示例
+ * ============================================================================
+ *
+ *   时间轴（ms）      Alice                                 Bob
+ *   ────────────────────────────────────────────────────────────────────
+ *   t=0              PUNCH(seq=1) ─────────────────────────→
+ *
+ *   t=10                                                    收到 PUNCH(seq=1)
+ *                                  ←───────────────────── REACH(seq=1)
+ *
+ *   t=20             收到 REACH(seq=1)
+ *                    [双向连通确认]
+ *                    CONN(seq=100) ────────────────────────→
+ *
+ *   t=30                                                    收到 CONN(seq=100)
+ *                                                           [状态 → CONNECTED]
+ *                                  ←───────────────────── CONN_ACK(seq=100)
+ *
+ *   t=40             收到 CONN_ACK(seq=100)
+ *                    [停止 CONN 重传]
+ *                    [状态 → CONNECTED]
+ *                    DATA(seq=1) ──────────────────────────→ (开始数据传输)
+ */
+#define P2P_PKT_CONN            0x03        // 连接就绪包（三次握手最后一次）
+#define P2P_PKT_CONN_ACK        0x04        // 连接就绪确认包
 
 /*
  * 数据传输 (peer-to-peer)
  *
- * DATA/ACK/CRYPTO flags 字段:
+ * DATA/ACK/CRYPTO/REACH flags 字段:
  *   P2P_DATA_FLAG_SESSION (0x01): 携带 session_id（8字节）
  *
  * 格式 (flags & 0x01 == 0，上层协议自带会话隔离如 SCTP/DTLS):
  *   DATA:   [hdr(4)][data(N)]
  *   ACK:    [hdr(4)][ack_seq(2)][sack(4)]
  *   CRYPTO: [hdr(4)][crypto_data(N)]
+ *   REACH:  [hdr(4)][target_addr(6)]  (直连 P2P 路径)
  *
  * 格式 (flags & 0x01 == 1，裸可靠层或中继路径):
  *   DATA:   [hdr(4)][session_id(8)][data(N)]
  *   ACK:    [hdr(4)][session_id(8)][ack_seq(2)][sack(4)]
  *   CRYPTO: [hdr(4)][session_id(8)][crypto_data(N)]
+ *   REACH:  [hdr(4)][session_id(8)][target_addr(6)]  (服务器中转)
  *
  * session_id 用于:
  *   1. 会话隔离: 过滤旧会话重传的包（解决重连污染问题）
@@ -230,7 +314,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define P2P_PKT_ACK             0x21        // 确认包
 #define P2P_PKT_CRYPTO          0x22        // DTLS 加密包（握手/密文数据）
 
-/* P2P_PKT_DATA/ACK/CRYPTO flags 标志位 */
+/* P2P_PKT_DATA/ACK/CRYPTO/REACH flags 标志位 */
 #define P2P_DATA_FLAG_SESSION   0x01        // 携带 session_id（8字节），用于会话隔离/中继路由
 
 /* 会话控制 */

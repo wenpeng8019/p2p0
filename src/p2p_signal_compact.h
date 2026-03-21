@@ -397,14 +397,29 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s);
 void p2p_signal_compact_trickle_turn(struct p2p_session *s);
 
 /*
- * 通过信令中继服务向对端发送数据（P2P 打洞失败时的降级方案）
+ * 通过 COMPACT 信令中转发送 REACH 包（NAT 打洞冷启动握手）
  *
- * @param s     会话对象
- * @param data  数据缓冲区
- * @param size  数据长度
- * @return      =0 成功，!=0 错误码
+ * @param s       会话对象
+ * @param type    P2P 包类型
+ * @param flags   flags 标志（接口内部会添加 P2P_DATA_FLAG_SESSION）
+ * @param seq     序列号
+ * @param payload 原始负载
+ * @param payload_len 负载长度
+ * @return        0=成功，!=0 错误码
  */
-ret_t p2p_signal_compact_relay_send(struct p2p_session *s, void* data, uint32_t* size);
+ret_t p2p_signal_compact_relay(struct p2p_session *s,
+                               uint8_t type, uint8_t flags, uint16_t seq,
+                               const void *payload, uint16_t payload_len);
+
+/*
+ * COMPACT 信令会话隔离验证（防止旧会话重传包污染新会话）
+ * 
+ * 验证 session_id 并跳过头部，返回 true 表示验证成功。
+ * 成功后 payload 指针和 len 会被更新，指向去掉 session_id 后的数据。
+ */
+bool p2p_signal_compact_relay_validation(struct p2p_session *s,
+                                         const uint8_t **payload, int *len,
+                                         const char *proto_name);
 
 /*
  * 通过信令代理服务向对端发送 MSG 请求（A 端）

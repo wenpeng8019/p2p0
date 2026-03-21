@@ -31,6 +31,14 @@ enum {
     NAT_RELAY                               // 中继模式：打洞超时失败。此时仍周期发送 PUNCH 尝试重连
 };
 
+/* reaching 队列节点（NAT 内部使用，单向链表） */
+typedef struct punch_reaching {
+    uint16_t                   seq;         // PUNCH seq（需要 echo）
+    struct sockaddr_in         target;      // PUNCH 携带的 target_addr（需要 echo）
+    int                        cand_idx;    // 来源候选索引
+    struct punch_reaching*     next;        // 下一个节点
+} punch_reaching_t;
+
 /* 打洞上下文 */
 typedef struct {
     int                 state;              // 打洞状态
@@ -41,6 +49,11 @@ typedef struct {
     uint16_t            punch_seq;          // 本地 PUNCH 包序列号（自增）
     bool                rx_confirmed;       // peer→me 已确认
     bool                tx_confirmed;       // me→peer 已确认
+    
+    /* reaching 队列（无 writable 路径时缓存 REACH） */
+    punch_reaching_t*   reaching_head;      // 队列头指针（最早的在前）
+    punch_reaching_t*   reaching_rear;      // 队列尾指针（最新的在后）
+    uint64_t            last_reaching_send_ms; // 上次通过信令发送的时间
 } nat_ctx_t;
 
 /*
@@ -91,22 +104,28 @@ void nat_send_fin(struct p2p_session *s);
 /*
  * 处理 PUNCH 包（NAT 打洞、保活）
  *
- * @param s        会话对象
- * @param hdr      包头（包含 type, flags, seq）
- * @param from     来源地址
+ * @param s           会话对象
+ * @param hdr         包头（包含 type, flags, seq）
+ * @param payload     负载数据（扩展协议时携带 target_addr）
+ * @param payload_len 负载长度
+ * @param from        来源地址
  */
 void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+                  const uint8_t *payload, int payload_len,
                   const struct sockaddr_in *from);
 
 /*
- * 处理 PUNCH_ACK 包（PUNCH 的即时确认）
+ * 处理 REACH 包（PUNCH 到达确认）
  *
- * @param s        会话对象
- * @param hdr      包头（seq = 回传的 PUNCH seq）
- * @param from     来源地址
+ * @param s           会话对象
+ * @param hdr         包头（seq = 回传的 PUNCH seq）
+ * @param payload     负载数据（携带 target_addr）
+ * @param payload_len 负载长度
+ * @param from        来源地址
  */
-void nat_on_punch_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                     const struct sockaddr_in *from);
+void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+                  const uint8_t *payload, int payload_len,
+                  const struct sockaddr_in *from);
 
 /*
  * 处理 FIN 包（对方主动断开连接）
@@ -116,26 +135,6 @@ void nat_on_punch_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
  * @return         0=成功，!0=失败
  */
 void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from);
-
-/*
- * 验证 session_id 并调整 payload/len（用于会话隔离）
- *
- * 当 DATA/ACK/CRYPTO 携带 P2P_DATA_FLAG_SESSION 标志时，
- * 调用此函数验证 session_id 是否匹配当前会话。
- *
- * 工作原理：
- *   1. 会话隔离: 防止旧会话的重传包污染新会话的 reliable 层
- *   2. 中继路由: 服务器通过 session_id 查找目标对端
- *
- * @param s          会话对象
- * @param payload    输入/输出参数：payload 指针（验证成功后跳过 session_id）
- * @param len        输入/输出参数：payload 长度（验证成功后减去 session_id 大小）
- * @param proto_name 协议名称（用于日志）
- * @return true=验证成功（payload/len 已调整），false=验证失败
- */
-bool nat_validate_session(struct p2p_session *s,
-                          const uint8_t **payload, int *len,
-                          const char *proto_name);
 
 ///////////////////////////////////////////////////////////////////////////////
 

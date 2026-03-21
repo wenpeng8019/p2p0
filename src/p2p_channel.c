@@ -36,14 +36,14 @@ int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
         return p2p_turn_send_indication(s, addr, pkt, P2P_HDR_SIZE + payload_len);
     }
 
-    /* Compact 信令转发路径: 封装 session_id + P2P_DATA_FLAG_SESSION */
+    /* 信令转发路径: 调用信令模式特定的中转接口 */
     if (s->path == P2P_PATH_SIGNALING) {
-        uint8_t relay_pkt[sizeof(uint64_t) + P2P_MAX_PAYLOAD];
-        nwrite_ll(relay_pkt, s->sig_compact_ctx.session_id);
-        memcpy(relay_pkt + sizeof(uint64_t), payload, payload_len);
-        /* 使用原始 type (DATA/ACK) + P2P_DATA_FLAG_SESSION 标志 */
-        return udp_send_packet(s->sock, addr, type, flags | P2P_DATA_FLAG_SESSION, seq,
-                               relay_pkt, (int)(sizeof(uint64_t) + payload_len));
+        if (s->signaling_relay_fn) {
+            return s->signaling_relay_fn(s, type, flags, seq, payload, payload_len);
+        } else {
+            print("E:", LA_F("SIGNALING path active but relay function not available", 0, 0));
+            return -1;
+        }
     }
 
     return udp_send_packet(s->sock, addr, type, flags, seq, payload, payload_len);
@@ -71,13 +71,13 @@ void p2p_send_dtls_record(p2p_session_t *s, const struct sockaddr_in *addr,
         return;
     }
 
-    /* Compact 信令转发: CRYPTO + P2P_DATA_FLAG_SESSION + session_id */
+    /* 信令转发: CRYPTO 包通过信令中转接口发送 */
     if (s->path == P2P_PATH_SIGNALING) {
-        p2p_pkt_hdr_encode(pkt, P2P_PKT_CRYPTO, P2P_DATA_FLAG_SESSION, 0);
-        nwrite_ll(pkt + P2P_HDR_SIZE, s->sig_compact_ctx.session_id);
-        memcpy(pkt + P2P_HDR_SIZE + sizeof(uint64_t), dtls_record, record_len);
-        udp_send_to(s->sock, addr, pkt,
-                    P2P_HDR_SIZE + (int)sizeof(uint64_t) + record_len);
+        if (s->signaling_relay_fn) {
+            s->signaling_relay_fn(s, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
+        } else {
+            print("E:", LA_F("SIGNALING path active but relay function not available", 0, 0));
+        }
     } else {
         /* 直连: CRYPTO */
         p2p_pkt_hdr_encode(pkt, P2P_PKT_CRYPTO, 0, 0);

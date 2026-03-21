@@ -266,6 +266,13 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 初始化虚拟链路层（基于 NAT 穿透的 P2P）
     nat_init(&s->nat);
 
+    // 设置信令中转回调（根据信令模式）
+    if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+        s->signaling_relay_fn = p2p_signal_compact_relay;
+    } else {
+        s->signaling_relay_fn = NULL;
+    }
+
     // 初始化基础传输层（reliable ARQ）
     reliable_init(s);
 
@@ -771,7 +778,7 @@ p2p_update(p2p_handle_t hdl) {
             case P2P_PKT_CRYPTO: {
                 /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
                 if (hdr.flags & P2P_DATA_FLAG_SESSION) {
-                    if (!nat_validate_session(s, &payload, &payload_len, "CRYPTO")) break;
+                    if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "CRYPTO")) break;
                 }
                 if (!s->dtls) break;
                 int dec_len = s->dtls->decrypt_recv(s, payload, payload_len,
@@ -803,7 +810,7 @@ p2p_update(p2p_handle_t hdl) {
             case P2P_PKT_DATA:
                 /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
                 if (hdr.flags & P2P_DATA_FLAG_SESSION) {
-                    if (!nat_validate_session(s, &payload, &payload_len, "DATA")) break;
+                    if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "DATA")) break;
                 }
                 printf(LA_F("Received DATA pkt from %s:%d, seq=%u, len=%d", LA_F271, 271),
                     inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.seq, payload_len);
@@ -835,7 +842,7 @@ p2p_update(p2p_handle_t hdl) {
             case P2P_PKT_ACK:
                 /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
                 if (hdr.flags & P2P_DATA_FLAG_SESSION) {
-                    if (!nat_validate_session(s, &payload, &payload_len, "ACK")) break;
+                    if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "ACK")) break;
                 }
             handle_ack: {
                 uint16_t ack_seq = nget_s(payload);
@@ -867,12 +874,23 @@ p2p_update(p2p_handle_t hdl) {
             // NAT 链路层（打洞、保活、断开）
             // --------------------
 
+            case P2P_PKT_REACH:
+                // 中转版本（通过信令服务器）：验证 session_id 后传给 NAT 层
+                if (hdr.flags & P2P_DATA_FLAG_SESSION) {
+                    if (p2p_signal_compact_relay_validation(s, &payload, &payload_len, "REACH_RELAYED")) {
+                        // session_id 验证成功，清除 RELAYED 标志后传给 NAT 层
+                        hdr.flags = 0;
+                        nat_on_reach(s, &hdr, payload, payload_len, &from);
+                    }
+                }
+                // 直连版本（P2P 路径）：直接传给 NAT 层
+                else {
+                    nat_on_reach(s, &hdr, payload, payload_len, &from);
+                }
+                break;
             // NAT 打洞/保活包
             case P2P_PKT_PUNCH:
-                nat_on_punch(s, &hdr, &from);
-                break;
-            case P2P_PKT_PUNCH_ACK:
-                nat_on_punch_ack(s, &hdr, &from);
+                nat_on_punch(s, &hdr, payload, payload_len, &from);
                 break;
             case P2P_PKT_FIN:
                 nat_on_fin(s, &from);

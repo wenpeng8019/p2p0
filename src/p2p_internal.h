@@ -183,6 +183,25 @@ typedef struct p2p_session {
     /* ======================== 中继服务 ======================== */
     turn_ctx_t                      turn;               // TURN 中继上下文
 
+    /*
+     * 通过信令服务器中转发送数据包（通用接口）
+     *
+     * 各信令模式（compact/relay/pubsub）在 p2p_create 时赋值具体实现。
+     * 自动处理 session_id 封装和服务器路由。
+     *
+     * 参数：
+     *   type: P2P 包类型（REACH/DATA/ACK/CRYPTO 等）
+     *   flags: 原始 flags（接口内部会自动添加 P2P_DATA_FLAG_SESSION）
+     *   seq: 序列号
+     *   payload: 原始负载（不含 session_id）
+     *   payload_len: 原始负载长度
+     *
+     * 返回：E_NONE=成功，负值=错误码
+     */
+    ret_t (*signaling_relay_fn)(struct p2p_session *s,
+                                uint8_t type, uint8_t flags, uint16_t seq,
+                                const void *payload, uint16_t payload_len);
+
     /* ======================== NAT 检测 ======================== */
     int                             nat_type;           // NAT 类型，即 p2p_nat_type() 返回值，也就是支持负值状态
     int                             det_step;           // 当前检测步骤 det_step_t
@@ -355,8 +374,11 @@ struct p2p_remote_candidate_entry {
     uint32_t           priority;                // 候选优先级
     struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
 
-    bool               reachable;               // 是否已观测到（对端到己端）可达（收到对端 PUNCH 探测包）
-    uint64_t           last_punch_send_ms;      // 最近一次发送 PUNCH 的时间（调度状态）
+    /* 收发分离状态 */
+    bool               readable;                // 可读：收到过来自该地址的包
+    bool               writable;                // 可写：收到 PUNCH_ACK 确认可达
+    
+    uint64_t           last_punch_send_ms;      // 最近一次发送 PUNCH 的时间
     path_stats_t       stats;                   // 路径统计信息
 };
 
@@ -386,8 +408,9 @@ static inline int unpack_candidate(p2p_remote_candidate_entry_t *c, const uint8_
     sockaddr_from_p2p_wire(&c->addr, &w->addr);
     c->priority = ntohl(w->priority);
 
+    c->readable = false;
+    c->writable = false;
     c->last_punch_send_ms = 0;
-    c->reachable = false;
     path_stats_init(&c->stats, 0);  /* 初始化路径统计默认值（rtt_min=9999 等） */
 
     return (int)sizeof(p2p_candidate_t);  /* 23 */
@@ -500,7 +523,8 @@ static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
         path_stats_init(&s->signaling.stats, 5);  /* cost_score=5 */
     } else if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
         p2p_remote_candidate_entry_t *c = &s->remote_cands[path_idx];
-        c->reachable = false;
+        c->readable = false;
+        c->writable = false;
         c->last_punch_send_ms = 0;
         path_stats_init(&c->stats, 0);
     } else return E_INVALID;
@@ -527,9 +551,7 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
 
 /* 发送原始 DTLS 记录（加密模块的握手/加密输出使用） */
 void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
-                  const void *dtls_record, int record_len);                  
-
-///////////////////////////////////////////////////////////////////////////////
+                  const void *dtls_record, int record_len);
 
 #pragma ide diagnostic pop
 #pragma clang diagnostic pop
