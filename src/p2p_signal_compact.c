@@ -112,8 +112,16 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
                   TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                   instrument_option(P2P_INST_OPT_ICE_RELAY_OFF) ? ", ignored due to instrument" : "");
 
-            if (instrument_option(P2P_INST_OPT_ICE_RELAY_OFF)) --s->remote_cand_cnt;
+            if (instrument_option(P2P_INST_OPT_ICE_RELAY_OFF)) {
+                --s->remote_cand_cnt;
+                continue;
+            }
+            
             s->remote_relay_cnt++;
+
+            // 注册到路径管理器（设置为 ACTIVE 状态）
+            path_manager_set_path_state(s, idx, PATH_STATE_ACTIVE);
+
             continue;
         }
 

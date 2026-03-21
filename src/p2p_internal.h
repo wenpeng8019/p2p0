@@ -133,12 +133,16 @@ typedef struct p2p_session {
     } signaling;
 
     /* ======================== p2p 链路 ======================== */
+
     nat_ctx_t                       nat;                // NAT 穿透上下文
     route_ctx_t                     route;              // 路由表上下文
     reliable_t                      reliable;           // 可靠传输层状态
     stream_t                        stream;             // 流传输层状态
     path_manager_t                  path_mgr;           // 路径管理器（多路径并行支持）
     p2p_probe_ctx_t                 probe_ctx;          // 探测上下文
+
+    bool                            rx_confirmed;       // peer→me 已确认（收到对端包）
+    bool                            tx_confirmed;       // me→peer 已确认（对端可收到我的包）
 
     /* ======================== 传输层实例 ======================== */
     /*

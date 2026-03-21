@@ -62,7 +62,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F54] = "%s resent, %d/%d\n",  /* SID:54 */
     [LA_F55] = "%s sent to %s:%d",  /* SID:55 */
     [LA_F56] = "%s sent to %s:%d for %s, seq=%d, path=%d",  /* SID:56 */
-    [LA_F57] = "%s sent to %s:%d, echo_seq=%u",  /* SID:57 */
+    [LA_F57] = "%s sent to %s:%d, echo_seq=%u, echo_target=%s:%d",  /* SID:57 */
     [LA_F58] = "%s sent, inst_id=%u, cands=%d\n",  /* SID:58 */
     [LA_F59] = "%s sent, inst_id=%u\n",  /* SID:59 */
     [LA_F60] = "%s sent, seq=%u\n",  /* SID:60 */
@@ -90,7 +90,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F82] = "%s: accepted (ses_id=%llu)\n",  /* SID:82 */
     [LA_F83] = "%s: accepted (sid=%u)\n",  /* SID:83 */
     [LA_F84] = "%s: accepted for ack_seq=%u\n",  /* SID:84 */
-    [LA_F85] = "%s: accepted from cand[%d]",  /* SID:85 */
+    [LA_F85] = "%s: accepted from cand[%d], marked readable",  /* SID:85 */
     [LA_F86] = "%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n",  /* SID:86 */
     [LA_F87] = "%s: accepted sid=%u, msg=%u\n",  /* SID:87 */
     [LA_F89] = "%s: accepted, probe_mapped=%s:%d\n",  /* SID:89 */
@@ -120,17 +120,21 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F114] = "%s: invalid ack_seq=%u\n",  /* SID:114 */
     [LA_F115] = "%s: invalid cand idx: %d (count: %d)",  /* SID:115 */
     [LA_F116] = "%s: invalid for non-relay req\n",  /* SID:116 */
+    [LA_F405] = "%s: invalid payload len=%d (need 6)",  /* SID:405 */
     [LA_F118] = "%s: invalid seq=%u\n",  /* SID:118 */
     [LA_F119] = "%s: invalid session_id=0\n",  /* SID:119 */
-    [LA_F120] = "%s: keep alive to %d reachable cand(s)",  /* SID:120 */
+    [LA_F120] = "%s: keep alive to %d writable cand(s)",  /* SID:120 */
     [LA_F121] = "%s: new request (sid=%u) overrides pending request (sid=%u)\n",  /* SID:121 */
     [LA_F122] = "%s: no remote candidates to punch",  /* SID:122 */
     [LA_F123] = "%s: no response for %llu ms, connection lost",  /* SID:123 */
     [LA_F124] = "%s: old request ignored (sid=%u <= last_sid=%u)\n",  /* SID:124 */
+    [LA_F406] = "%s: path[%d] %s:%d confirmed writable",  /* SID:406 */
+    [LA_F410] = "%s: path[%d] not writable, pending_ack queued",  /* SID:410 */
     [LA_F125] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:125 */
     [LA_F126] = "%s: peer online, proceeding to ICE\n",  /* SID:126 */
     [LA_F127] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:127 */
     [LA_F133] = "%s: peer_info0 srflx cand[%d]<%s:%d>%s\n",  /* SID:133 */
+    [LA_F408] = "%s: pending_ack sent via writable path[%d] to %s:%d, seq=%u",  /* SID:408 */
     [LA_F128] = "%s: punch remote cand[%d]<%s:%d> failed\n",  /* SID:128 */
     [LA_F129] = "%s: punching %d/%d candidates (elapsed: %llu ms)",  /* SID:129 */
     [LA_F130] = "%s: punching additional cand<%s:%d>[%d] while connected",  /* SID:130 */
@@ -161,6 +165,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F150] = "%s: status error(%d)\n",  /* SID:150 */
     [LA_F151] = "%s: sync complete (ses_id=%llu)\n",  /* SID:151 */
     [LA_F152] = "%s: sync complete (ses_id=%llu, mask=0x%04x)\n",  /* SID:152 */
+    [LA_F409] = "%s: target=%s:%d",  /* SID:409 */
     [LA_F153] = "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)\n",  /* SID:153 */
     [LA_F154] = "%s: timeout after %d retries , type unknown\n",  /* SID:154 */
     [LA_F155] = "%s: timeout after %llu ms (ICE done), switching to RELAY",  /* SID:155 */
@@ -391,6 +396,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F407] = "%s: path[%d] not writable, pending_ack queued",  /* SID:407 disabled */
     [LA_F403] = "% P2P punch failed, switching to relay path",  /* SID:403 disabled */
     [LA_F258] = "% Path recovered: switched to PUNCH",  /* SID:258 disabled */
     [LA_F292] = "Selected path: PUNCH (idx=%d)",  /* SID:292 disabled */

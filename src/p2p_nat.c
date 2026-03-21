@@ -199,8 +199,8 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         // 启动/重启 PUNCHING 状态（适用于 INIT/CLOSED/DISCONNECTED/RELAY）
         n->state = NAT_PUNCHING;
         n->punch_start = P_tick_ms();
-        n->rx_confirmed = false;
-        n->tx_confirmed = false;
+        s->rx_confirmed = false;
+        s->tx_confirmed = false;
         n->peer_addr = s->remote_cands[0].addr;  /* 默认值，收到 ACK 时会更新 */
 
         print("I:", LA_F("%s: start punching all(%d) remote candidates", LA_F148, 148), TASK_NAT, s->remote_cand_cnt);
@@ -234,8 +234,8 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
     if (n->state < NAT_PUNCHING) {
         n->state = NAT_PUNCHING;
         n->punch_start = now;
-        n->rx_confirmed = false;
-        n->tx_confirmed = false;
+        s->rx_confirmed = false;
+        s->tx_confirmed = false;
         n->peer_addr = s->remote_cands[0].addr;
 
         print("I:", LA_F("%s: start punching trickle", 0, 0), TASK_NAT);
@@ -397,8 +397,8 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     path_manager_on_packet_recv(s, cand_idx, now, 0);
 
     // peer→me 方向：收到 PUNCH 即证明入方向通了
-    if (n->rx_confirmed) return;
-    n->rx_confirmed = true;
+    if (s->rx_confirmed) return;
+    s->rx_confirmed = true;
     print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F139, 139),
             TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 }
@@ -487,15 +487,15 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // ---------- 双向确认逻辑 ----------
 
     // peer→me 方向：收到 PUNCH_ACK 也证明入方向通（对方能发包给我们）
-    if (!n->rx_confirmed) {
-        n->rx_confirmed = true;
+    if (!s->rx_confirmed) {
+        s->rx_confirmed = true;
         print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F139, 139),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 
     // me→peer 方向：收到 REACH 证明我们的 PUNCH 到达了对方
-    if (!n->tx_confirmed) {
-        n->tx_confirmed = true;
+    if (!s->tx_confirmed) {
+        s->tx_confirmed = true;
         print("I:", LA_F("%s: tx confirmed: me->peer path is UP (echoed seq=%u)", LA_F164, 164),
                 TASK_NAT, hdr->seq);
 
@@ -504,7 +504,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     }
 
     // 双向均确认 → NAT_CONNECTED
-    if (n->rx_confirmed && n->tx_confirmed) {
+    if (s->rx_confirmed && s->tx_confirmed) {
         n->state = NAT_CONNECTED;
         n->peer_addr = s->remote_cands[cand_idx].addr;
         print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F96, 96),
@@ -558,8 +558,8 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                           TASK_NAT, tick_diff(now_ms, n->punch_start));
 
                     n->state = NAT_RELAY;           // 标记进入中继模式，
-                    n->rx_confirmed = false;        // 重置双向确认标志（在中继期间继续尝试打洞）
-                    n->tx_confirmed = false;
+                    s->rx_confirmed = false;        // 重置双向确认标志（在中继期间继续尝试打洞）
+                    s->tx_confirmed = false;
 
                     // 启动信通外对端探测（如果支持）
                     probe_trigger(s);

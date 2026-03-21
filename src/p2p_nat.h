@@ -26,8 +26,7 @@ enum {
     NAT_PUNCHING,                           // 打洞中（已回取候选列表，正在尝试建立双向路径）
     NAT_LOST,                               // 连接丢失：曾经连通，现超时无响应（可能恢复）
     NAT_CONNECTED,                          // 双向连通：rx + tx 同时已确认
-                                            //   rx: 收到对方的 PUNCH/PUNCH_ACK（peer→me 方向通）
-                                            //   tx: 收到 PUNCH_ACK（对方收到了我们的 PUNCH，me→peer 方向通）
+                                            //   （rx/tx_confirmed 现已移至 p2p_session_t，所有传输路径共享）
     NAT_RELAY                               // 中继模式：打洞超时失败。此时仍周期发送 PUNCH 尝试重连
 };
 
@@ -47,8 +46,6 @@ typedef struct {
     uint64_t            last_recv_time;     // 上次接收时间
     uint64_t            punch_start;        // 打洞开始时间
     uint16_t            punch_seq;          // 本地 PUNCH 包序列号（自增）
-    bool                rx_confirmed;       // peer→me 已确认
-    bool                tx_confirmed;       // me→peer 已确认
     
     /* reaching 队列（无 writable 路径时缓存 REACH） */
     punch_reaching_t*   reaching_head;      // 队列头指针（最早的在前）
