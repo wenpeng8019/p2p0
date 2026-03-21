@@ -208,7 +208,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         if (s->remote_cand_cnt == 0) return E_NONE;
 
         for (int i = 0; i < s->remote_cand_cnt; i++) {
-            print("V:", LA_F("s: punching remote [%d]<%s:%d> (type: %s)", LA_F47, 47), TASK_NAT, i,
+            print("V:", LA_F("s: punching remote [%d]<%s:%d> (type: %s)", LA_F424, 424), TASK_NAT, i,
                   inet_ntoa(s->remote_cands[i].addr.sin_addr), ntohs(s->remote_cands[i].addr.sin_port),
                   p2p_candidate_type_str((p2p_cand_type_t)s->remote_cands[i].type));
         }
@@ -238,7 +238,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         s->tx_confirmed = false;
         n->peer_addr = s->remote_cands[0].addr;
 
-        print("I:", LA_F("%s: start punching trickle", 0, 0), TASK_NAT);
+        print("I:", LA_F("%s: start punching trickle", LA_F418, 418), TASK_NAT);
     }
 
     p2p_remote_candidate_entry_t *entry = &s->remote_cands[idx];
@@ -265,7 +265,7 @@ void nat_send_fin(p2p_session_t *s) {
     const char* PROTO = "FIN";
 
     if (s->nat.state < NAT_LOST) {
-        print("E:", LA_F("%s: not connected, cannot send FIN", 0, 0), PROTO);
+        print("E:", LA_F("%s: not connected, cannot send FIN", LA_F412, 412), PROTO);
         return;
     }
 
@@ -345,38 +345,84 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
             if (best_path >= 0 && best_path < s->remote_cand_cnt && s->remote_cands[best_path].writable) {
                 udp_send_packet(s->sock, &s->remote_cands[best_path].addr,
                                P2P_PKT_REACH, 0, hdr->seq, ack_payload, sizeof(ack_payload));
-                print("V:", LA_F("%s sent via best path[%d] to %s:%d, echo_seq=%u", LA_F57, 57),
+                print("V:", LA_F("%s sent via best path[%d] to %s:%d, echo_seq=%u", LA_F411, 411),
                       PROTO2, best_path,
                       inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
                       ntohs(s->remote_cands[best_path].addr.sin_port), hdr->seq);
             }
-            // 没有可用的 writable 候选路径，原路尝试并缓存（等待信令中转或路径激活）
+            // 没有可用的 writable 候选路径
             else {
+
+                // 尝试原路发送
                 udp_send_packet(s->sock, from, P2P_PKT_REACH, 0,
                                hdr->seq, ack_payload, sizeof(ack_payload));
-                print("V:", LA_F("%s_ACK sent to %s:%d (try), echo_seq=%u", LA_F57, 57),
+                print("V:", LA_F("%s_ACK sent to %s:%d (try), echo_seq=%u", LA_F419, 419),
                       PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
 
-                // 内联入队逻辑：缓存 reaching，等待通过信令中转或 writable 路径补发
-                punch_reaching_t *node = (punch_reaching_t *)malloc(sizeof(punch_reaching_t));
-                if (node) {
+                // 缓存 reaching，等待冷打洞策略处理
+                // 1. 去重：同一 target_addr 只保留最新 seq
+                // 2. 优先级排序：按候选优先级插入队列（高优先级在前）
+                
+                // 查找是否已存在相同 target_addr 的节点
+                punch_reaching_t *existing = NULL;
+                for (punch_reaching_t *p = n->reaching_head; p != NULL; p = p->next) {
+                    if (sockaddr_equal(&p->target, &target_addr)) {
+                        existing = p;
+                        break;
+                    }
+                }
+                
+                // 按优先级插入（高优先级在前）
+                if (!existing) {
+                    punch_reaching_t *node = (punch_reaching_t *)malloc(sizeof(punch_reaching_t));
+                    if (!node) {
+                        print("E:", LA_F("%s: reaching alloc failed(OOM)", LA_F413, 413), TASK_NAT);
+                        return;
+                    }
+                    
                     node->seq = hdr->seq;
                     node->target = target_addr;
                     node->cand_idx = cand_idx;
                     node->next = NULL;
-
-                    // O(1) 尾插
-                    if (!n->reaching_rear) {
-                        n->reaching_head = node;
-                        n->reaching_rear = node;
-                    } else {
-                        n->reaching_rear->next = node;
-                        n->reaching_rear = node;
+                    
+                    // 获取当前候选的优先级
+                    uint32_t priority = s->remote_cands[cand_idx].priority;
+                    
+                    // 按优先级插入（降序：高优先级在前）
+                    punch_reaching_t *prev_insert = NULL;
+                    punch_reaching_t *curr = n->reaching_head;
+                    while (curr != NULL && s->remote_cands[curr->cand_idx].priority >= priority) {
+                        prev_insert = curr;
+                        curr = curr->next;
                     }
-                    print("V:", LA_F("%s: reaching enqueued: cand[%d], seq=%u", LA_F410, 410),
-                          TASK_NAT, cand_idx, hdr->seq);
-                } else {
-                    print("E:", LA_F("%s: reaching alloc failed(OOM)", LA_F160, 160), TASK_NAT);
+                    
+                    // 插入节点
+                    if (prev_insert == NULL) {
+                        // 插入队头
+                        node->next = n->reaching_head;
+                        n->reaching_head = node;
+                        if (!n->reaching_rear) {
+                            n->reaching_rear = node;  // 队列之前为空
+                        }
+                    } else {
+                        // 插入中间或队尾
+                        node->next = prev_insert->next;
+                        prev_insert->next = node;
+                        if (node->next == NULL) {
+                            n->reaching_rear = node;  // 更新队尾
+                        }
+                    }
+                    
+                    print("V:", LA_F("%s: reaching enqueued: cand[%d], seq=%u, priority=%u", LA_F410, 410),
+                          TASK_NAT, cand_idx, hdr->seq, priority);
+                }
+                // 更新为最新的 seq
+                else if (uint16_circle_newer(hdr->seq, existing->seq)) {
+
+                    print("V:", LA_F("%s: reaching updated: cand[%d], seq=%u->%u", LA_F417, 417),
+                            TASK_NAT, cand_idx, existing->seq, hdr->seq);
+
+                    existing->seq = hdr->seq;
                 }
             }
         }
@@ -698,41 +744,70 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             break;
     }
 
-    // 检查 reaching 队列，通过信令中转发送最早的一个（兜底方案）
+    // 检查 reaching 队列，发送冷打洞 REACH 包（兜底方案）
     // 适用于 PUNCHING 和 LOST 状态
+    //
+    // 问题：冷打洞时，双方都是单向写的情况（对称NAT），PUNCH 包无法原路返回
+    //       导致双方永远收不到 REACH 应答，无法确认 tx_confirmed
+    //
+    // 解决方案：
+    //   策略1：信令中转（如果服务器支持 signaling_relay_fn）
+    //          通过信令服务器中转 REACH 包，效率高但依赖服务器
+    //   策略2：广播模式（不依赖信令服务器）
+    //          向所有候选路径广播 REACH 包（排列组合），总有一条路径能通
     if ((n->state == NAT_PUNCHING || n->state == NAT_LOST) &&
-        n->reaching_head &&
-        (n->last_reaching_send_ms == 0 ||
-         tick_diff(now_ms, n->last_reaching_send_ms) >= REACHING_RELAY_INTERVAL_MS)) {
+        n->reaching_head && tick_diff(now_ms, n->last_reaching_send_ms) >= REACHING_RELAY_INTERVAL_MS) {
         
-        // 只发送最早的一个（通过信令中转，避免频繁中转）
+        n->last_reaching_send_ms = now_ms;
+
+        // 构造 REACH 负载：[target_addr(6)]
+        uint8_t reach_payload[6];
+        memcpy(reach_payload, &n->reaching_head->target.sin_addr.s_addr, 4);
+        memcpy(reach_payload + 4, &n->reaching_head->target.sin_port, 2);
+        
+        // 策略 1：信令中转模式（如果服务器支持）
         if (s->signaling_relay_fn) {
-            // 构造 REACH 负载：[target_addr(6)]
-            uint8_t reach_payload[6];
-            memcpy(reach_payload, &n->reaching_head->target.sin_addr.s_addr, 4);
-            memcpy(reach_payload + 4, &n->reaching_head->target.sin_port, 2);
-            
-            ret_t ret = s->signaling_relay_fn(s, P2P_PKT_REACH, 0, n->reaching_head->seq,
-                                              reach_payload, 6);
-            n->last_reaching_send_ms = now_ms;
-            
+
+            ret_t ret = s->signaling_relay_fn(s, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, 6);            
             if (ret == E_NONE) {
-                
+
                 // 发送成功，将节点出队并释放
                 punch_reaching_t *node = n->reaching_head;
                 n->reaching_head = node->next;
-                if (!n->reaching_head) {
-                    n->reaching_rear = NULL;  // 队列变空，维护 tail
-                }
+                if (!n->reaching_head) n->reaching_rear = NULL;
                 
-                print("V:", LA_F("%s: reaching relay via signaling SUCCESS, seq=%u", LA_F410, 410),
+                print("V:", LA_F("%s: reaching relay via signaling SUCCESS, seq=%u", LA_F416, 416),
                       TASK_NAT, node->seq);
                 free(node);
-            } else {
-                // 发送失败（信令服务器未就绪），保留节点等待下次重试
-                print("V:", LA_F("%s: reaching relay via signaling FAILED (ret=%d), seq=%u", LA_F411, 411),
-                      TASK_NAT, ret, n->reaching_head->seq);
-            }
+            } 
+            // 发送失败（信令服务器未就绪），保留节点等待下次重试
+            else print("V:", LA_F("%s: reaching relay via signaling FAILED (ret=%d), seq=%u", LA_F415, 415),
+                      TASK_NAT, ret, n->reaching_head->seq);            
+        }
+        // 策略 2：广播模式（不依赖信令服务器）
+        else {
+
+            // 向所有候选路径广播 REACH 包（排列组合策略）
+            int broadcast_cnt = 0;
+            for (int i = 0; i < s->remote_cand_cnt; i++) {
+
+                // 跳过 target 地址（已原路发送）
+                if (sockaddr_equal(&s->remote_cands[i].addr, &n->reaching_head->target)) continue;
+
+                udp_send_packet(s->sock, &s->remote_cands[i].addr,
+                                P2P_PKT_REACH, 0, n->reaching_head->seq,
+                                reach_payload, sizeof(reach_payload));
+                broadcast_cnt++;
+            }            
+            
+            // 将节点出队并释放
+            punch_reaching_t *node = n->reaching_head;
+            n->reaching_head = node->next;
+            if (!n->reaching_head) n->reaching_rear = NULL;
+            
+            print("V:", LA_F("%s: reaching broadcast to %d cand(s), seq=%u", LA_F414, 414),
+                  TASK_NAT, broadcast_cnt, node->seq);
+            free(node);
         }
     }
 }
