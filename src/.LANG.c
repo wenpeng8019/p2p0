@@ -54,8 +54,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F44] = "%s '%s' (%u %s)",  /* SID:44 */
     [LA_F45] = "%s NOTIFY: accepted\n",  /* SID:45 */
     [LA_F46] = "%s NOTIFY: ignored old notify base=%u (current=%u)\n",  /* SID:46 */
-    [LA_F47] = "%s NOTIFY: ignored srflx addr update due to instument\n",  /* SID:47 */
     [LA_F48] = "%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n",  /* SID:48 */
+    [LA_F47] = "%s NOTIFY: srflx addr update (disabled)\n",  /* SID:47 */
     [LA_F49] = "%s msg=0: accepted, echo reply (sid=%u, len=%d)\n",  /* SID:49 */
     [LA_F50] = "%s received (ice_ctx.state=%d), resetting ICE and clearing %d stale candidates",  /* SID:50 */
     [LA_F51] = "%s resent, %d/%d\n",  /* SID:51 */
@@ -162,8 +162,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F148] = "%s: reaching updated: cand[%d], seq=%u->%u",  /* SID:148 */
     [LA_F151] = "%s: recorded peer conn_seq=%u for future CONN_ACK",  /* SID:151 */
     [LA_F91] = "%s: recv from cand[%d]",  /* SID:91 */
+    [LA_F154] = "%s: remote %s cand[%d]<%s:%d> (disabled)\n",  /* SID:154 */
     [LA_F153] = "%s: remote %s cand[%d]<%s:%d> accepted\n",  /* SID:153 */
-    [LA_F154] = "%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n",  /* SID:154 */
     [LA_F156] = "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n",  /* SID:156 */
     [LA_F157] = "%s: restarting periodic check",  /* SID:157 */
     [LA_F158] = "%s: retry(%d/%d) probe\n",  /* SID:158 */
@@ -339,8 +339,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F331] = "Sent connect request to '%s' (%d bytes)",  /* SID:331 */
     [LA_F332] = "Sent initial offer(%d) to %s)",  /* SID:332 */
     [LA_F333] = "% Signal payload deserialization failed",  /* SID:333 */
-    [LA_F334] = "% Skipping Host Candidate gathering due to instrumentation",  /* SID:334 */
-    [LA_F335] = "% Skipping local Host candidates due to instrument",  /* SID:335 */
+    [LA_F334] = "% Skipping Host Candidate gathering (disabled)",  /* SID:334 */
+    [LA_F335] = "% Skipping local Host candidates (disabled)",  /* SID:335 */
     [LA_F336] = "Start internal thread failed(%d)",  /* SID:336 */
     [LA_F337] = "% Starting internal thread",  /* SID:337 */
     [LA_F338] = "% State: CONNECTED → LOST (no relay)",  /* SID:338 */
