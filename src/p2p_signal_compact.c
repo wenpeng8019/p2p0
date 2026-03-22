@@ -103,48 +103,29 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
                   TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             continue;
         }
-        ++s->remote_cand_cnt;
 
-        // 对于 relay 候选类型，无需打洞
-        if (c->type == P2P_CAND_RELAY) {
-
-            print("I:", LA_F("%s: remote relay cand[%d]<%s:%d>%s\n", LA_F155, 155),
-                  TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                  instrument_option(P2P_INST_OPT_ICE_RELAY_OFF) ? ", ignored due to instrument" : "");
-
-            if (instrument_option(P2P_INST_OPT_ICE_RELAY_OFF)) {
-                --s->remote_cand_cnt;
-                continue;
-            }
-            
-            s->remote_relay_cnt++;
-
-            // 注册到路径管理器（设置为 ACTIVE 状态）
-            path_manager_set_path_state(s, idx, PATH_STATE_ACTIVE);
-
-            continue;
-        }
-
-        const char* type_str;
-        if (c->type == P2P_CAND_HOST) type_str = "host";
-        else if (c->type == P2P_CAND_SRFLX) type_str = "srflx";
+        const char* type_str; uint16_t* cand_cnt_ptr;
+        if (c->type == P2P_CAND_HOST) { type_str = "host"; cand_cnt_ptr = &s->remote_host_cnt; }
+        else if (c->type == P2P_CAND_SRFLX) { type_str = "srflx"; cand_cnt_ptr = &s->remote_srflx_cnt; }
+        else if (c->type == P2P_CAND_RELAY) { type_str = "relay"; cand_cnt_ptr = &s->remote_relay_cnt; }
         else { --s->remote_cand_cnt;
             print("E:", LA_F("%s: unexpected remote cand type %d, skipped\n", LA_F193, 193),
                   TASK_ICE_REMOTE, c->type);
             continue;
         }
 
-        if (instrument_option(c->type == P2P_CAND_SRFLX ? P2P_INST_OPT_ICE_SRFLX_OFF : P2P_INST_OPT_ICE_HOST_OFF)) {
-            --s->remote_cand_cnt;
+        if (instrument_option(c->type == P2P_CAND_SRFLX ? P2P_INST_OPT_ICE_SRFLX_OFF : 
+                               c->type == P2P_CAND_HOST ? P2P_INST_OPT_ICE_HOST_OFF : 
+                                                          P2P_INST_OPT_ICE_RELAY_OFF)) {
             print("I:", LA_F("%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n", LA_F154, 154),
                   TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             continue;
         }
 
+        ++s->remote_cand_cnt; ++*cand_cnt_ptr;
+
         print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F153, 153),
               TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
-
-        s->remote_srflx_cnt++;
 
         if (s->sig_compact_ctx.state < SIGNAL_COMPACT_REGISTERED) continue;
 
