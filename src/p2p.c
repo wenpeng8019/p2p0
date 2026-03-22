@@ -85,6 +85,46 @@ static bool p2p_set_state(p2p_session_t *s, p2p_state_t new_state) {
 }
 
 /*
+ * NAT_CONNECTED 同步转换为 P2P_STATE_CONNECTED
+ * 
+ * NAT 模块在进入 NAT_CONNECTED 状态时同步调用此函数，触发：
+ *   - 路径选择和切换
+ *   - P2P 状态转换
+ *   - on_connected 事件回调
+ * 
+ * 目的：确保应用层的 on_connected 总是在数据包处理之前触发（数据层会话一致性契约）。
+ * 
+ * 参数:
+ *   s       - P2P 会话
+ *   now_ms  - 当前时间戳（毫秒）
+ * 
+ * 使用场景：
+ *   - NAT 模块收到 CONN/CONN_ACK/DATA 后进入 NAT_CONNECTED 状态
+ *   - NAT 握手完成（双向 REACH 确认后收到 CONN_ACK）
+ */
+void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
+    
+    // 仅在 PUNCHING/REGISTERING/REGISTERED 状态下转换
+    // NAT 可能从 LOST → CONNECTED，但 p2p 状态可能是 RELAY，不在此处理
+    if (s->state < P2P_STATE_REGISTERING || s->state > P2P_STATE_PUNCHING) {
+        return;
+    }
+
+    // 选择最佳路径
+    int best_path = path_manager_select_best_path(s);
+    if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
+        s->path = path_manager_get_path_type(s, best_path);
+        path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
+        print("I:", LA_F("State: → CONNECTED, path[%d]", LA_F439, 439), best_path);
+        
+        // 状态转换（触发 on_state 回调）
+        p2p_set_state(s, P2P_STATE_CONNECTED);
+    } 
+    // 不应该发生：NAT_CONNECTED 但路径管理器无可用路径（逻辑错误）
+    else print("E:", LA_F("NAT connected but no available path in path manager", LA_F246, 246));
+}
+
+/*
  * 主动断开 — 通过 NAT 层和信令层双通道通知对端
  *
  * NAT FIN:  UDP 直连（不可靠，重复发送提高成功率）
@@ -987,42 +1027,18 @@ p2p_update(p2p_handle_t hdl) {
      * 阶段 5：统一状态机（集中处理所有 P2P 连接状态转换）
      * ======================================================================== */
 
-    // 转换：REGISTERING → PUNCHING（开始打洞）
+    // 转换：REGISTERING/REGISTERED → PUNCHING（开始打洞）
+    // NAT >= PUNCHING 包括：PUNCHING（打洞中）、CONNECTING（双向确认，握手中）
     if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
-        && s->nat.state == NAT_PUNCHING) {
+        && (s->nat.state >= NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
 
         print("I:", LA_F("State: → PUNCHING", LA_F248, 248));
         p2p_set_state(s, P2P_STATE_PUNCHING);
     }
 
-    // 转换：PUNCHING/REGISTERING/REGISTERED → CONNECTED（NAT 穿透成功）
-    // + 注意，NAT 变为 CONNECTED 状态时，P2P 可能还未进入 PUNCHING 状态
-    //   因为，NAT 的 CONNECTED，是收到对方发过来的包，说明自己的端口对对方是开放的了
-    //   但 PUNCHING 状态是向对方端口发送打洞包，也就是检测对方端口是否可写入。
-    //   所以，对方可能先于自己获得对方（也就是自己）的候选地址，并先完成 NAT 穿透（对方发包过来），此时自己还未开始打洞（PUNCHING）
-    // + REGISTERED 状态也需要处理，因为当对端重连时（收到新 session_id 的 PEER_INFO），
-    //   本端会进入 REGISTERED 状态等待打洞，NAT 成功后应该转换到 CONNECTED
-    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
-        && s->nat.state == NAT_CONNECTED) {
-
-        // 选择最佳路径
-        int best_path = path_manager_select_best_path(s);
-        if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
-            const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
-            s->path = P2P_PATH_PUNCH;  // 目前只有 PUNCH
-            s->active_addr = addr ? *addr : s->nat.peer_addr;
-            path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
-            print("I:", LA_F("State: → CONNECTED, path=PUNCH[%d]", LA_F246, 246), best_path);
-        } else {
-            // 降级：路径管理器无可用路径，使用传统方式
-            s->path = P2P_PATH_PUNCH;
-            s->active_addr = s->nat.peer_addr;
-            s->active_path = -2;  // -2=无路径管理器管理的路径
-        }
-
-        // 状态转换（触发 on_state 回调）
-        p2p_set_state(s, P2P_STATE_CONNECTED);
-    }
+    // NAT_CONNECTED 状态转换已由 nat 模块通过 p2p_connected() 同步触发
+    // + 同步转换保证了数据包处理总是在 on_connected 事件之后发生（数据层会话一致性契约）
+    // + 此处不再需要异步协同（NAT_CONNECTED → P2P_STATE_CONNECTED）
 
     // NAT 重新连接后恢复路径（NAT_RELAY → NAT_CONNECTED）
     if (s->state == P2P_STATE_RELAY
@@ -1128,10 +1144,11 @@ p2p_update(p2p_handle_t hdl) {
      * ======================================================================== */
 
     // 发送数据：数据流层 → 传输层 flush 写入
-    if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
+    if (s->state > P2P_STATE_LOST) {
         
         // 如果使用高级传输层（DTLS、SCTP、PseudoTCP）
         if (s->trans && s->trans->send_data) {
+
             // 传输层就绪检查：DTLS 握手完成前不 drain 数据，避免丢失
             int ready = !s->trans->is_ready || s->trans->is_ready(s);
             if (ready) {
@@ -1153,40 +1170,36 @@ p2p_update(p2p_handle_t hdl) {
         else stream_flush_to_reliable(s);
     }
 
+    // 如果使用了高级传输层（如 DTLS/SCTP/PseudoTCP）
+    if (s->trans) {
+
+        // 传输模块周期 tick（重传，拥塞控制等）
+        if (s->trans->tick) {
+            if (s->state > P2P_STATE_LOST) {
+                s->trans->tick(s);
+            }
+        }
+
+        // 将高级传输层统计同步到路径管理器（Group 2: 数据层 RTT + 丢包率）
+        if (s->trans->get_stats && s->active_path >= -1) {
+            uint32_t rtt_ms = 0;
+            float loss_rate = 0.0f;
+            
+            if (s->trans->get_stats(s, &rtt_ms, &loss_rate) == 0) {
+
+                if (rtt_ms > 0)
+                    path_manager_on_data_rtt(s, s->active_path, rtt_ms);
+
+                // 上报数据层丢包率（之前被忽略，导致路径质量评估缺少数据层信息）
+                if (loss_rate > 0.0f)
+                    path_manager_on_data_loss_rate(s, s->active_path, loss_rate);
+            }
+        }
+    }
     // reliable 周期 tick：发送/重传数据包 + 发 ACK
     // 注：仅在无高级传输层时调用。PseudoTCP 虽然 on_packet==NULL（复用 reliable 收包），
     //     但它有自己的 tick（cwnd 控制），不能再调 reliable_tick，否则双重发送且绕过拥塞控制。
-    if (!s->trans) {
-        reliable_tick(s);
-    }
-
-    // 传输模块周期 tick（重传，拥塞控制等）
-    if (s->trans && s->trans->tick) {
-        if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
-            s->trans->tick(s);
-        }
-    }
-
-    // 加密层周期 tick（DTLS 握手推进、重传定时器）
-    if (s->dtls && s->dtls->tick) {
-        s->dtls->tick(s);
-    }
-    
-    // [CRITICAL] 同步高级传输层统计到路径管理器（Group 2: 数据层 RTT + 丢包率）
-    if (s->trans && s->trans->get_stats && s->active_path >= -1) {
-        uint32_t rtt_ms = 0;
-        float loss_rate = 0.0f;
-        
-        if (s->trans->get_stats(s, &rtt_ms, &loss_rate) == 0) {
-
-            if (rtt_ms > 0)
-                path_manager_on_data_rtt(s, s->active_path, rtt_ms);
-
-            // 上报数据层丢包率（之前被忽略，导致路径质量评估缺少数据层信息）
-            if (loss_rate > 0.0f)
-                path_manager_on_data_loss_rate(s, s->active_path, loss_rate);
-        }
-    }
+    else reliable_tick(s);
 
     // 接收数据：传输层 → 数据流层
     // 注：DTLS/SCTP 直接写入 stream.recv_ring，不需要此步骤
@@ -1195,6 +1208,11 @@ p2p_update(p2p_handle_t hdl) {
         stream_feed_from_reliable(s);
     }
 
+    // 加密层周期 tick（DTLS 握手推进、重传定时器）
+    if (s->dtls && s->dtls->tick) {
+        s->dtls->tick(s);
+    }
+    
     /* ========================================================================
      * 阶段 7：信令输出（主动推送本地候选地址）
      * ======================================================================== */
@@ -1222,7 +1240,8 @@ p2p_update(p2p_handle_t hdl) {
      * 阶段 8：路径管理器维护（健康检查与路径选择）
      * ======================================================================== */
 
-    if (s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY) {
+    // LOST 状态下无活跃路径（active_path = -2），恢复由 NAT 层驱动，无需路径管理器维护
+    if (s->state > P2P_STATE_LOST) {
 
         // 路径健康检查（检测超时、失效路径）
         path_manager_tick(s, now_ms);

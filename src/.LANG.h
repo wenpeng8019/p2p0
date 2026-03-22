@@ -287,7 +287,7 @@ enum {
     LA_F243,  /* "% OpenSSL requested but library not linked"  [p2p.c] */
     LA_F244,  /* "Out-of-window packet discarded seq=%u base=%u" (%u,%u)  [p2p_trans_reliable.c] */
     LA_F245,  /* "% P2P connected, closing signaling TCP connection"  [p2p_signal_relay.c] */
-    LA_F246,  /* "State: → CONNECTED, path=PUNCH[%d]" (%d)  [p2p.c] */
+    LA_F246,  /* "% NAT connected but no available path in path manager"  [p2p.c] */
     LA_F247,  /* disabled "% P2P punch failed, adding relay path" */
     LA_F248,  /* "% State: → PUNCHING"  [p2p.c] */
     LA_F249,  /* "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n" (%d,%u)  [p2p_signal_compact.c] */
@@ -480,6 +480,7 @@ enum {
     LA_F436,  /* disabled "%s: accepted from cand[%d]" */
     LA_F437,  /* "%s: NAT_CONNECTED (received CONN)" (%s)  [p2p_nat.c] */
     LA_F438,  /* "%s: reaching broadcast to %d cand(s), seq=%u" (%s,%d,%u)  [p2p_nat.c] */
+    LA_F439,  /* "State: → CONNECTED, path[%d]" (%d)  [p2p.c] */
 
     LA_NUM
 };

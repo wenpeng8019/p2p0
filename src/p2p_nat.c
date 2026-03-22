@@ -613,6 +613,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
             n->peer_connecting = false;
             n->state = NAT_CONNECTED;
+            p2p_connected(s, now);
 
             print("I:", LA_F("%s: NAT_CONNECTED (received CONN before)", LA_F426, 426), TASK_NAT);
         }
@@ -671,6 +672,7 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     if (n->state == NAT_CONNECTING) {
         assert(!n->peer_connecting);
         n->state = NAT_CONNECTED;
+        p2p_connected(s, now);
         print("I:", LA_F("%s: NAT_CONNECTED (received CONN)", LA_F437, 437), TASK_NAT);
     }
 }
@@ -708,6 +710,7 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     if (n->state == NAT_CONNECTING) {
         assert(!n->peer_connecting);
         n->state = NAT_CONNECTED;
+        p2p_connected(s, now);
         print("I:", LA_F("%s: NAT_CONNECTED (received CONN_ACK)", LA_F428, 428), TASK_NAT);
     }
 }
@@ -733,6 +736,7 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
     if (n->state == NAT_CONNECTING) {
         assert(!n->peer_connecting);
         n->state = NAT_CONNECTED;
+        p2p_connected(s, now);
         print("I:", LA_F("%s: NAT_CONNECTED (received data)", LA_F427, 427), TASK_NAT);
     }
 }

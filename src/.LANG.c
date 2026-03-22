@@ -268,6 +268,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F233] = "% Invalid signaling mode in configuration",  /* SID:233 */
     [LA_F234] = "Local address detection done: %d address(es)",  /* SID:234 */
     [LA_F235] = "Marked old path (idx=%d) as FAILED due to addr change\n",  /* SID:235 */
+    [LA_F246] = "% NAT connected but no available path in path manager",  /* SID:246 */
     [LA_F238] = "% No advanced transport layer enabled, using simple reliable layer",  /* SID:238 */
     [LA_F239] = "% No auth_key provided, using default key (insecure)",  /* SID:239 */
     [LA_F240] = "Nomination successful! Using! Using %s path %s:%d%s",  /* SID:240 */
@@ -341,7 +342,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F400] = "% State: LOST → CONNECTED (legacy path)",  /* SID:400 */
     [LA_F404] = "State: LOST → CONNECTED, path=PUNCH[%d]",  /* SID:404 */
     [LA_F236] = "State: RELAY → CONNECTED, path=PUNCH[%d]",  /* SID:236 */
-    [LA_F246] = "State: → CONNECTED, path=PUNCH[%d]",  /* SID:246 */
+    [LA_F439] = "State: → CONNECTED, path[%d]",  /* SID:439 */
     [LA_F248] = "% State: → PUNCHING",  /* SID:248 */
     [LA_F401] = "% State: → RELAY (no path available)",  /* SID:401 */
     [LA_F402] = "State: → RELAY (punch failed), path[%d]",  /* SID:402 */

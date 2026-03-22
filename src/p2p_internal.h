@@ -558,6 +558,14 @@ static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
 }
 
 /* ============================================================================
+ * NAT 状态同步 (p2p.c)
+ * 
+ * NAT 模块在进入 NAT_CONNECTED 状态时同步调用，触发 P2P 层状态转换和 on_connected 事件。
+ * 确保数据包处理总是在 on_connected 之后发生（数据层会话一致性契约）。
+ * ============================================================================ */
+void p2p_connected(struct p2p_session *s, uint64_t now_ms);
+
+/* ============================================================================
  * 通道发送接口 (p2p_channel.c)
 
  * 所有传输模块（reliable / pseudotcp / sctp）通过 p2p_send_packet 发送:
