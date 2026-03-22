@@ -62,8 +62,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F55] = "%s sent to %s:%d",  /* SID:55 */
     [LA_F57] = "%s sent to %s:%d (writable), echo_seq=%u",  /* SID:57 */
     [LA_F56] = "%s sent to %s:%d for %s, seq=%d, path=%d",  /* SID:56 */
-    [LA_F424] = "%s sent to %s:%d, echo_seq=%u, path=%d",  /* SID:424 */
-    [LA_F421] = "%s sent to %s:%d, seq=%u, path=%d",  /* SID:421 */
+    [LA_F424] = "%s sent to %s:%d, echo_seq=0, path=%d",  /* SID:424 */
+    [LA_F421] = "%s sent to %s:%d, seq=0, path=%d",  /* SID:421 */
     [LA_F411] = "%s sent via best path[%d] to %s:%d, echo_seq=%u",  /* SID:411 */
     [LA_F58] = "%s sent, inst_id=%u, cands=%d\n",  /* SID:58 */
     [LA_F59] = "%s sent, inst_id=%u\n",  /* SID:59 */
@@ -77,8 +77,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F68] = "%s, sent on %s\n",  /* SID:68 */
     [LA_F69] = "%s: %s timeout after %d retries (sid=%u)\n",  /* SID:69 */
     [LA_F429] = "%s: CONN handshake timeout after %llu ms, P2P failed",  /* SID:429 */
-    [LA_F425] = "%s: NAT_CONNECTED (received ACK)",  /* SID:425 */
     [LA_F426] = "%s: NAT_CONNECTED (received CONN before)",  /* SID:426 */
+    [LA_F437] = "%s: NAT_CONNECTED (received CONN)",  /* SID:437 */
     [LA_F428] = "%s: NAT_CONNECTED (received CONN_ACK)",  /* SID:428 */
     [LA_F427] = "%s: NAT_CONNECTED (received data)",  /* SID:427 */
     [LA_F70] = "%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n",  /* SID:70 */
@@ -134,6 +134,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F123] = "%s: no response for %llu ms, connection lost",  /* SID:123 */
     [LA_F420] = "%s: no writable path available",  /* SID:420 */
     [LA_F412] = "%s: not connected, cannot send FIN",  /* SID:412 */
+    [LA_F414] = "%s: not connected, unexpected ACK",  /* SID:414 */
     [LA_F124] = "%s: old request ignored (sid=%u <= last_sid=%u)\n",  /* SID:124 */
     [LA_F406] = "%s: path[%d] %s:%d confirmed writable",  /* SID:406 */
     [LA_F125] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:125 */
@@ -145,7 +146,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F47] = "%s: punching remote [%d]cand<%s:%d> (type: %s)",  /* SID:47 */
     [LA_F160] = "%s: push remote cand<%s:%d> failed(OOM)",  /* SID:160 */
     [LA_F413] = "%s: reaching alloc failed(OOM)",  /* SID:413 */
-    [LA_F414] = "%s: reaching broadcast to %d cand(s), seq=%u",  /* SID:414 */
+    [LA_F438] = "%s: reaching broadcast to %d cand(s), seq=%u",  /* SID:438 */
     [LA_F410] = "%s: reaching enqueued: cand[%d], seq=%u, priority=%u",  /* SID:410 */
     [LA_F415] = "%s: reaching relay via signaling FAILED (ret=%d), seq=%u",  /* SID:415 */
     [LA_F416] = "%s: reaching relay via signaling SUCCESS, seq=%u",  /* SID:416 */
@@ -416,6 +417,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F425] = "%s: NAT_CONNECTED (received ACK)",  /* SID:425 disabled */
     [LA_F62] = "%s sent, size=%d (ses_id=%llu)\n",  /* SID:62 disabled */
     [LA_F112] = "%s: ignored in state(%d)",  /* SID:112 disabled */
     [LA_F122] = "%s: no remote candidates to punch",  /* SID:122 disabled */

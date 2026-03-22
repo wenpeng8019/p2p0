@@ -12,6 +12,8 @@
 
 #define PUNCH_INTERVAL_MS       500         /* 打洞间隔 */
 #define PUNCH_TIMEOUT_MS        5000        /* 打洞超时 */
+#define CONN_INTERVAL_MS        500         /* CONN 握手间隔 */
+#define CONN_TIMEOUT_MS         3000        /* CONN 握手超时 */
 #define PING_INTERVAL_MS        5000        /* 心跳间隔（调整为5秒，适配path_manager 10秒超时）*/
 #define PONG_TIMEOUT_MS         30000       /* 心跳超时 */
 #define REACHING_RELAY_INTERVAL_MS  300     /* reaching 信令中转间隔（0.3秒，避免频繁中转） */
@@ -137,6 +139,56 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
     path_manager_on_packet_send(s, send_path, n->punch_seq, now, 0);
 }
 
+/*
+ * 向对端发送 CONN 包（数据层连接握手）
+ *
+ * 协议：P2P_PKT_CONN (0x03)
+ * 包头: [type=0x03 | flags=0 | seq=conn_seq(2B)]
+ * 负载: 无
+ *
+ * 在双向连通确认后（rx_confirmed && tx_confirmed）发送，
+ * 通知对端可以开始数据传输。
+ */
+static void nat_send_conn(p2p_session_t *s, uint64_t now) {
+    const char* PROTO = "CONN";
+    nat_ctx_t *n = &s->nat;
+
+    // 选择最佳路径发送
+    int best_path = path_manager_select_best_path(s);
+    if (best_path < 0) {
+        print("W:", LA_F("%s: no writable path available", LA_F420, 420), PROTO);
+        return;
+    }
+
+    udp_send_packet(s->sock, &s->remote_cands[best_path].addr,
+                    P2P_PKT_CONN, 0, 0, NULL, 0);
+
+    print("V:", LA_F("%s sent to %s:%d, seq=0, path=%d", LA_F421, 421),
+          PROTO, inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
+          ntohs(s->remote_cands[best_path].addr.sin_port), best_path);
+
+    n->last_conn_send_ms = now;
+}
+
+static void nat_send_conn_ack(p2p_session_t *s, uint64_t now) {
+    const char* PROTO = "CONN_ACK";
+    (void)now;  // 响应包不使用计时器
+
+    // 选择最佳路径发送
+    int best_path = path_manager_select_best_path(s);
+    if (best_path < 0) {
+        print("W:", LA_F("%s: no writable path available", LA_F420, 420), PROTO);
+        return;
+    }
+
+    udp_send_packet(s->sock, &s->remote_cands[best_path].addr,
+                        P2P_PKT_CONN_ACK, 0, 0, NULL, 0);
+
+    print("V:", LA_F("%s sent to %s:%d, echo_seq=0, path=%d", LA_F424, 424),
+          PROTO, inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
+          ntohs(s->remote_cands[best_path].addr.sin_port), best_path);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -208,7 +260,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         if (s->remote_cand_cnt == 0) return E_NONE;
 
         for (int i = 0; i < s->remote_cand_cnt; i++) {
-            print("V:", LA_F("s: punching remote [%d]<%s:%d> (type: %s)", LA_F424, 424), TASK_NAT, i,
+            print("V:", LA_F("s: punching remote [%d]<%s:%d> (type: %s)", LA_F435, 435), TASK_NAT, i,
                   inet_ntoa(s->remote_cands[i].addr.sin_addr), ntohs(s->remote_cands[i].addr.sin_port),
                   p2p_candidate_type_str((p2p_cand_type_t)s->remote_cands[i].type));
         }
@@ -216,7 +268,6 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         // 立即向所有候选并行发送打洞包
         for (int i = 0; i < s->remote_cand_cnt; i++)
             nat_send_punch(s, LA_W("punch", LA_W13, 13), &s->remote_cands[i], n->punch_start);
-        n->last_send_time = n->punch_start;
         
         return E_NONE;
     }
@@ -249,7 +300,6 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
 
     // 发送打洞包
     nat_send_punch(s, LA_W("punch", LA_W13, 13), entry, now);
-    n->last_send_time = now;
 
     return E_NONE;
 }
@@ -290,7 +340,7 @@ void nat_send_fin(p2p_session_t *s) {
  */
 void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                   const uint8_t *payload, int payload_len,
-                  const struct sockaddr_in *from) {
+                  const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "PUNCH";
 
     printf(LA_F("Recv %s pkt from %s:%d seq=%u", LA_F280, 280),
@@ -303,7 +353,9 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     }
 
     nat_ctx_t *n = &s->nat;
-    uint64_t now = P_tick_ms();
+
+    // 更新最后接收时间
+    n->last_recv_time = now;
 
     int cand_idx = nat_upsert_prflx(s, from);
     if (cand_idx < 0) return;
@@ -428,18 +480,17 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         }
     }
 
-    // 更新最后接收时间（保活/心跳超时检测）
-    n->last_recv_time = now;
-
     // 通知 ICE 层（如果启用）
     if (s->cfg.use_ice) {
         p2p_ice_on_check_success(s, from);
     }
 
     // RTT 测量：通过 seq 匹配 pending_packets 计算精确 per-path RTT
+    // fixme: 这里是 ack ?
     if (hdr->seq > 0)
         path_manager_on_packet_ack(s, hdr->seq, now);
     // PUNCH_ACK 包不计入流量统计（size=0）
+    // fixme: 那为啥要统计
     path_manager_on_packet_recv(s, cand_idx, now, 0);
 
     // peer→me 方向：收到 PUNCH 即证明入方向通了
@@ -461,7 +512,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
  */
 void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                   const uint8_t *payload, int payload_len,
-                  const struct sockaddr_in *from) {
+                  const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "REACH";
 
     // 校验负载长度：标准格式 6B (target_addr)
@@ -472,7 +523,6 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     }
 
     nat_ctx_t *n = &s->nat;
-    uint64_t now = P_tick_ms();
 
     printf(LA_F("Recv %s pkt from %s:%d echo_seq=%u", LA_F279, 279),
           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
@@ -507,9 +557,11 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     }
 
     // RTT 测量：通过 seq 匹配 pending_packets 计算精确 per-path RTT
+    // fixme: 如果不是原路返回 rtt 可能不准确
     if (hdr->seq > 0)
         path_manager_on_packet_ack(s, hdr->seq, now);
     // PUNCH_ACK 包不计入流量统计（size=0）
+    // fixme: 那为啥要统计
     path_manager_on_packet_recv(s, cand_idx, now, 0);
 
     // 如果该路径已经 writable，说明之前已处理过，后续逻辑无需执行
@@ -533,15 +585,15 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // ---------- 双向确认逻辑 ----------
 
     // peer→me 方向：收到 PUNCH_ACK 也证明入方向通（对方能发包给我们）
-    if (!s->rx_confirmed) {
-        s->rx_confirmed = true;
+    if (!s->rx_confirmed) { s->rx_confirmed = true;
+
         print("I:", LA_F("%s: rx confirmed: peer->me path is UP (%s:%d)", LA_F139, 139),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 
     // me→peer 方向：收到 REACH 证明我们的 PUNCH 到达了对方
-    if (!s->tx_confirmed) {
-        s->tx_confirmed = true;
+    if (!s->tx_confirmed) { s->tx_confirmed = true;
+
         print("I:", LA_F("%s: tx confirmed: me->peer path is UP (echoed seq=%u)", LA_F164, 164),
                 TASK_NAT, hdr->seq);
 
@@ -549,13 +601,158 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         nat_flush_reaching_queue(s, target_path);
     }
 
-    // 双向均确认 → NAT_CONNECTED
+    // 双向均确认 → NAT_CONNECTING（开始数据层握手）
     if (s->rx_confirmed && s->tx_confirmed) {
-        n->state = NAT_CONNECTED;
+
         n->peer_addr = s->remote_cands[cand_idx].addr;
-        print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTED (%s:%d)", LA_F96, 96),
+
+        print("I:", LA_F("%s: bidirectional confirmed: NAT_CONNECTING (%s:%d)", LA_F96, 96),
                 TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        
+        // 如果已经收到对方的 CONN 包，即对方已经进入 NAT_CONNECTING 状态
+        // + 此时无需再发送 CONN 包，直接回复 CONN_ACK 即可。同时本端也可以直接进入 NAT_CONNECTED 状态
+        //   此时，本端的后续数据包（以及这里返回的 ACK）都可让对方进入 NAT_CONNECTED 状态
+        if (n->peer_connecting) {
+
+            nat_send_conn_ack(s, now);
+
+            n->peer_connecting = false;
+            n->state = NAT_CONNECTED;
+
+            print("I:", LA_F("%s: NAT_CONNECTED (received CONN before)", LA_F426, 426), TASK_NAT);
+        }
+        // 否则周期向对方发送 CONN 包，等待对方回复 CONN_ACK（或任意数据包后）后进入 NAT_CONNECTED 状态
+        else {
+
+            n->state = NAT_CONNECTING;
+            n->conn_start_ms = now;
+            
+            nat_send_conn(s, now);
+        }
     }
+}
+
+/*
+ * 处理 CONN 包（数据层连接请求）
+ *
+ * 协议：P2P_PKT_CONN (0x03)
+ * 包头: [type=0x03 | flags=0 | seq=对方conn_seq(2B)]
+ * 负载: 无
+ * 
+ * 收到 CONN 后，立即回复 CONN_ACK 并进入 NAT_CONNECTED 状态。
+ */
+void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+                 const struct sockaddr_in *from, uint64_t now) {
+    const char* PROTO = "CONN";
+    nat_ctx_t *n = &s->nat;
+
+    printf(LA_F("Recv %s pkt from %s:%d seq=%u", LA_F280, 280),
+          PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
+
+    // 更新最后接收时间
+    n->last_recv_time = now;
+
+    // 查找来源路径
+    int cand_idx = nat_upsert_prflx(s, from);
+    if (cand_idx < 0) return;
+
+    // 如果本端还未进入 NAT_CONNECTING 状态，记录对方的 conn_seq 以便后续发送 CONN_ACK 时使用
+    if (n->state < NAT_CONNECTING) {
+        n->peer_connecting = true;
+        print("V:", LA_F("%s: recorded peer conn_seq=%u for future CONN_ACK", LA_F430, 430),
+            PROTO, hdr->seq);
+        return;
+    }
+
+    // 进入 NAT_CONNECTING 状态后收到 CONN，立即回复 CONN_ACK
+    // + 注意，本端此时可能已经是 NAT_CONNECTED 状态，因为如果本端是先发送的 CONN
+    //   那么对端对本地的 CONN_ACK 可能会先于对端自己的 CONN 到达，
+    //   而本端在收到自己的 CONN_ACK 后会直接进入 NAT_CONNECTED 状态
+    nat_send_conn_ack(s, now);
+
+    if (n->state == NAT_CONNECTING) {
+        assert(!n->peer_connecting);
+        n->state = NAT_CONNECTED;
+        print("I:", LA_F("%s: NAT_CONNECTED (received CONN)", LA_F437, 437), TASK_NAT);
+    }
+}
+
+/*
+ * 处理 CONN_ACK 包（数据层连接确认）
+ *
+ * 协议：P2P_PKT_CONN_ACK (0x04)
+ * 包头: [type=0x04 | flags=0 | seq=echo conn_seq(2B)]
+ * 负载: 无
+ * 
+ * 收到 CONN_ACK 后，停止发送 CONN，进入 NAT_CONNECTED 状态。
+ */
+void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+                     const struct sockaddr_in *from, uint64_t now) {
+    const char* PROTO = "CONN_ACK";
+    nat_ctx_t *n = &s->nat;
+
+    printf(LA_F("Recv %s pkt from %s:%d echo_seq=%u", LA_F279, 279),
+          PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
+
+    // 更新最后接收时间
+    n->last_recv_time = now;
+
+    // 查找来源路径
+    int cand_idx = nat_upsert_prflx(s, from);
+    if (cand_idx < 0) return;
+
+    print("V:", LA_F("%s: accepted from cand[%d]", LA_F436, 436), PROTO, cand_idx);
+
+    // 进入 NAT_CONNECTED 状态
+    if (n->state == NAT_CONNECTING) {
+        assert(!n->peer_connecting);
+        n->state = NAT_CONNECTED;
+        print("I:", LA_F("%s: NAT_CONNECTED (received CONN_ACK)", LA_F428, 428), TASK_NAT);
+    }
+}
+
+/*
+ * 处理 DATA 数据包（P2P_PKT_DATA）
+ */
+void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t now, uint16_t seq, int data_len) {
+    const char* PROTO = "DATA";
+    nat_ctx_t *n = &s->nat;
+
+    printf(LA_F("Recv %s pkt from %s:%d, seq=%u, len=%d", LA_F271, 271),
+           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, data_len - P2P_HDR_SIZE);
+    
+    n->last_recv_time = now;
+
+    // 记录数据包接收（根据来源地址查找实际接收路径）
+    int recv_path = p2p_find_path_by_addr(s, from);
+    if (recv_path >= -1)
+        path_manager_on_packet_recv(s, recv_path, now, data_len);
+
+    // NAT_CONNECTING → NAT_CONNECTED（首次收到数据包）
+    if (n->state == NAT_CONNECTING) {
+        assert(!n->peer_connecting);
+        n->state = NAT_CONNECTED;
+        print("I:", LA_F("%s: NAT_CONNECTED (received data)", LA_F427, 427), TASK_NAT);
+    }
+}
+
+/*
+ * 处理 ACK 包（P2P_PKT_ACK）
+ */
+void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
+                     uint64_t now, uint16_t ack_seq, uint32_t sack) {
+    const char* PROTO = "ACK";
+    nat_ctx_t *n = &s->nat;
+
+    if (n->state < NAT_LOST) {
+        print("E:", LA_F("%s: not connected, unexpected ACK", LA_F414, 414), PROTO);
+        return;
+    }
+
+    printf(LA_F("Recv %s pkt from %s:%d, ack_seq=%u, sack=0x%08x", LA_F270, 270),
+           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), ack_seq, sack);
+
+    n->last_recv_time = now;
 }
 
 /*
@@ -620,13 +817,37 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 if (s->remote_cands[i].last_punch_send_ms == 0 ||
                     tick_diff(now_ms, s->remote_cands[i].last_punch_send_ms) >= PUNCH_INTERVAL_MS) {
 
-                    nat_punch(s, i);
+                    nat_send_punch(s, LA_W("punch", LA_W13, 13), &s->remote_cands[i], now_ms);
                     sent_cnt++;
                 }
             }
             if (sent_cnt) {
                 print("V:", LA_F("%s: punching %d/%d candidates (elapsed: %" PRIu64 " ms)", LA_F129, 129),
                       TASK_NAT, sent_cnt, s->remote_cand_cnt, tick_diff(now_ms, n->punch_start));
+            }
+            break;
+
+        case NAT_CONNECTING:
+
+            // 超时检查
+            // todo 完善超时，应该报错
+            if (tick_diff(now_ms, n->conn_start_ms) >= CONN_TIMEOUT_MS) {
+                print("E:", LA_F("%s: CONN handshake timeout after %" PRIu64 " ms, P2P failed", LA_F429, 429),
+                      TASK_NAT, tick_diff(now_ms, n->conn_start_ms));
+                
+                // 连接建立超时，视为 P2P 失败，回退到 RELAY 模式
+                n->state = NAT_RELAY;
+                s->rx_confirmed = false;
+                s->tx_confirmed = false;
+                
+                // 启动信道外对端探测（如果支持）
+                probe_trigger(s);
+                break;
+            }
+
+            // 周期发送 CONN 包（使用独立的 CONN 计时器）
+            if (tick_diff(now_ms, n->last_conn_send_ms) >= CONN_INTERVAL_MS) {
+                nat_send_conn(s, now_ms);
             }
             break;
 
@@ -644,7 +865,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
             // 向所有可写候选发送保活包（复用 PUNCH 包）
             // + 跳过 Relay 类型：Relay 候选通过 TURN 服务器中转，其 allocation 保活由对端负责
-            if (tick_diff(now_ms, n->last_send_time) >= PING_INTERVAL_MS) {
+            if (tick_diff(now_ms, n->last_keepalive_send_ms) >= PING_INTERVAL_MS) {
 
                 int alive_cnt = 0;
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
@@ -655,7 +876,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                     }
                 }
                 if (alive_cnt) {
-                    n->last_send_time = now_ms;
+                    n->last_keepalive_send_ms = now_ms;
                     print("V:", LA_F("%s: keep alive to %d writable cand(s)", LA_F120, 120), TASK_NAT, alive_cnt);
                 }
             }
@@ -731,12 +952,12 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             probe_tick(s, now_ms);
 
             // 中继模式下周期性尝试直连
-            if (tick_diff(now_ms, n->last_send_time) >= PUNCH_INTERVAL_MS * 4) {
+            if (tick_diff(now_ms, n->last_retry_send_ms) >= PUNCH_INTERVAL_MS * 4) {
 
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
                     nat_send_punch(s, LA_W("retry", LA_W17, 17), &s->remote_cands[i], now_ms);
                 }
-                n->last_send_time = now_ms;
+                n->last_retry_send_ms = now_ms;
             }
             break;
 
@@ -805,7 +1026,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             n->reaching_head = node->next;
             if (!n->reaching_head) n->reaching_rear = NULL;
             
-            print("V:", LA_F("%s: reaching broadcast to %d cand(s), seq=%u", LA_F414, 414),
+            print("V:", LA_F("%s: reaching broadcast to %d cand(s), seq=%u", LA_F438, 438),
                   TASK_NAT, broadcast_cnt, node->seq);
             free(node);
         }

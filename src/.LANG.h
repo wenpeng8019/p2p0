@@ -455,18 +455,18 @@ enum {
     LA_F411,  /* "%s sent via best path[%d] to %s:%d, echo_seq=%u" (%s,%d,%s,%d,%u)  [p2p_nat.c] */
     LA_F412,  /* "%s: not connected, cannot send FIN" (%s)  [p2p_nat.c] */
     LA_F413,  /* "%s: reaching alloc failed(OOM)" (%s)  [p2p_nat.c] */
-    LA_F414,  /* "%s: reaching broadcast to %d cand(s), seq=%u" (%s,%d,%u)  [p2p_nat.c] */
+    LA_F414,  /* "%s: not connected, unexpected ACK" (%s)  [p2p_nat.c] */
     LA_F415,  /* "%s: reaching relay via signaling FAILED (ret=%d), seq=%u" (%s,%d,%u)  [p2p_nat.c] */
     LA_F416,  /* "%s: reaching relay via signaling SUCCESS, seq=%u" (%s,%u)  [p2p_nat.c] */
     LA_F417,  /* "%s: reaching updated: cand[%d], seq=%u->%u" (%s,%d,%u,%u)  [p2p_nat.c] */
     LA_F418,  /* "%s: start punching trickle" (%s)  [p2p_nat.c] */
     LA_F419,  /* "%s_ACK sent to %s:%d (try), echo_seq=%u" (%s,%s,%d,%u)  [p2p_nat.c] */
     LA_F420,  /* "%s: no writable path available" (%s)  [p2p_nat.c] */
-    LA_F421,  /* "%s sent to %s:%d, seq=%u, path=%d" (%s,%s,%d,%u,%d)  [p2p_nat.c] */
+    LA_F421,  /* "%s sent to %s:%d, seq=0, path=%d" (%s,%s,%d,%d)  [p2p_nat.c] */
     LA_F422,  /* "COMPACT relay: type=0x%02x, seq=%u (session_id=%llu)" (%u,%l)  [p2p_signal_compact.c] */
     LA_F423,  /* "% SIGNALING path active but relay function not available"  [p2p_channel.c] */
-    LA_F424,  /* "%s sent to %s:%d, echo_seq=%u, path=%d" (%s,%s,%d,%u,%d)  [p2p_nat.c] */
-    LA_F425,  /* "%s: NAT_CONNECTED (received ACK)" (%s)  [p2p_nat.c] */
+    LA_F424,  /* "%s sent to %s:%d, echo_seq=0, path=%d" (%s,%s,%d,%d)  [p2p_nat.c] */
+    LA_F425,  /* disabled "%s: NAT_CONNECTED (received ACK)" */
     LA_F426,  /* "%s: NAT_CONNECTED (received CONN before)" (%s)  [p2p_nat.c] */
     LA_F427,  /* "%s: NAT_CONNECTED (received data)" (%s)  [p2p_nat.c] */
     LA_F428,  /* "%s: NAT_CONNECTED (received CONN_ACK)" (%s)  [p2p_nat.c] */
@@ -478,6 +478,8 @@ enum {
     LA_F434,  /* "COMPACT relay send failed: type=0x%02x, ret=%d" (%d)  [p2p_signal_compact.c] */
     LA_F435,  /* "s: punching remote [%d]<%s:%d> (type: %s)" (%d,%s,%d,%s)  [p2p_nat.c] */
     LA_F436,  /* "%s: accepted from cand[%d]" (%s,%d)  [p2p_nat.c] */
+    LA_F437,  /* "%s: NAT_CONNECTED (received CONN)" (%s)  [p2p_nat.c] */
+    LA_F438,  /* "%s: reaching broadcast to %d cand(s), seq=%u" (%s,%d,%u)  [p2p_nat.c] */
 
     LA_NUM
 };
