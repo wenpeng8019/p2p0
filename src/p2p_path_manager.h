@@ -159,9 +159,7 @@ typedef struct {
 /* TURN 路径配置 */
 typedef struct {
     bool                enabled;                    // 是否启用 TURN
-    int                 cost_multiplier;            // 成本倍数（相对于 RELAY）
-    uint32_t            max_bandwidth_bps;          // 最大带宽限制
-    bool                use_as_last_resort;         // 仅作为最终备份
+    bool                use_as_last_resort;         // 仅作为最终备份（默认 true）
 } turn_config_t;
 
 /*
@@ -301,25 +299,12 @@ int path_manager_enable_signaling(struct p2p_session *s, struct sockaddr_in *add
  *
  * @param s                 会话指针
  * @param enabled           是否启用 TURN
- * @param cost_multiplier   成本倍数（相对于 RELAY，1-10）
- * @param max_bandwidth_bps 最大带宽限制（bps，0=无限制）
  * @param last_resort_only  是否仅作为最终备份
  * @return                  0=成功，-1=失败
  */
 int path_manager_configure_turn(struct p2p_session *s,
                                  bool enabled,
-                                 int cost_multiplier,
-                                 uint32_t max_bandwidth_bps,
                                  bool last_resort_only);
-
-/*
- * 添加 TURN 路径
- *
- * @param s         会话指针
- * @param addr      TURN 服务器地址（已分配的中继地址）
- * @return          路径索引（>=0），或 -1（失败）
- */
-int path_manager_add_turn_path(struct p2p_session *s, struct sockaddr_in *addr);
 
 /* ============================================================================
  * 状态驱动（外部事件 → 驱动内部状态机）

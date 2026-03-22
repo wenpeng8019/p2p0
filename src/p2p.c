@@ -115,10 +115,17 @@ void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
     if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
         s->path = path_manager_get_path_type(s, best_path);
         path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
-        print("I:", LA_F("State: → CONNECTED, path[%d]", LA_F439, 439), best_path);
         
-        // 状态转换（触发 on_state 回调）
-        p2p_set_state(s, P2P_STATE_CONNECTED);
+        // 根据路径类型决定 P2P 状态
+        if (best_path == PATH_IDX_SIGNALING) {
+            // 信令中转模式：NAT 未直连，通过信令服务器转发数据
+            print("I:", LA_F("State: → RELAY, path[%d] (signaling)", LA_F439, 439), best_path);
+            p2p_set_state(s, P2P_STATE_RELAY);
+        } else {
+            // 直连或 TURN 中继：NAT 已连接，P2P 数据直达
+            print("I:", LA_F("State: → CONNECTED, path[%d]", LA_F439, 439), best_path);
+            p2p_set_state(s, P2P_STATE_CONNECTED);
+        }
     } 
     // 不应该发生：NAT_CONNECTED 但路径管理器无可用路径（逻辑错误）
     else print("E:", LA_F("NAT connected but no available path in path manager", LA_F246, 246));
@@ -1039,6 +1046,15 @@ p2p_update(p2p_handle_t hdl) {
     // NAT_CONNECTED 状态转换已由 nat 模块通过 p2p_connected() 同步触发
     // + 同步转换保证了数据包处理总是在 on_connected 事件之后发生（数据层会话一致性契约）
     // + 此处不再需要异步协同（NAT_CONNECTED → P2P_STATE_CONNECTED）
+
+    // 转换：PUNCHING → ERROR（NAT 打洞超时且无中继服务）
+    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
+        && s->nat.state == NAT_CLOSED) {
+
+        print("E:", LA_F("State: → ERROR (punch timeout, no relay available)", LA_F441, 441));
+        p2p_set_state(s, P2P_STATE_ERROR);
+        // NAT_CLOSED 表示打洞失败且无信令中转服务，连接已不可恢复
+    }
 
     // NAT 重新连接后恢复路径（NAT_RELAY → NAT_CONNECTED）
     if (s->state == P2P_STATE_RELAY

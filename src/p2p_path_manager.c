@@ -7,11 +7,12 @@
  *
  *   路径信息不由本模块存储，而是绑定在 session 的候选地址上：
  *     - s->remote_cands[i].stats  — 候选路径（索引 >=0）
- *     - s->signaling.stats — 信令转发/SIGNALING（索引 -1，非TURN）
+ *     - s->signaling.stats — 信令转发/SIGNALING（索引 -1）
  *   path_manager 仅做决策与状态驱动，所有 API 第一个参数为 p2p_session_t *s。
  *
- *   路径用 cost_score 分类：0=直连(LAN/PUNCH)  5=信令转发(SIGNALING)  >=8=TURN。
- *   注意：SIGNALING 虽 cost_score=5，但优先级最低（最终兜底），低于 TURN。
+ *   路径类型识别：基于候选的 type 字段（P2P_CAND_HOST/SRFLX/RELAY/PRFLX）。
+ *   路径优先级：直连（LAN/PUNCH）> 中继候选 > TURN > 信令转发（SIGNALING，兜底）。
+ *   注意：SIGNALING 虽可用，但优先级最低（最终兜底），低于 TURN。
  *
  *
  * 【状态机】
@@ -176,8 +177,6 @@ int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy) {
     
     /* TURN 配置（注：TURN 是候选，此配置仅用于策略调整） */
     pm->turn_config.enabled = true;
-    pm->turn_config.cost_multiplier = 5;
-    pm->turn_config.max_bandwidth_bps = 0;
     pm->turn_config.use_as_last_resort = true;
 
     /* 按路径类型初始化独立阈值（rtt_ms, loss, cooldown_ms, stability_ms） */
@@ -275,45 +274,16 @@ int path_manager_enable_signaling(p2p_session_t *s, struct sockaddr_in *addr) {
  */
 int path_manager_configure_turn(p2p_session_t *s,
                                  bool enabled,
-                                 int cost_multiplier,
-                                 uint32_t max_bandwidth_bps,
                                  bool last_resort_only) {
     path_manager_t *pm = &s->path_mgr;
     pm->turn_config.enabled = enabled;
-    pm->turn_config.cost_multiplier = cost_multiplier;
-    pm->turn_config.max_bandwidth_bps = max_bandwidth_bps;
     pm->turn_config.use_as_last_resort = last_resort_only;
     return 0;
 }
 
-/*
- * 添加TURN路径 - 方案A：TURN是候选的一种类型，由外部添加到候选列表
- * 此函数仅返回提示信息
- */
-int path_manager_add_turn_path(p2p_session_t *s, struct sockaddr_in *addr) {
-    (void)s; (void)addr;
-    /* 方案A：TURN路径通过p2p_session_t的候选机制添加，不需要单独API */
-    return -1;
-}
-
-
 /* ==========================================================================
  *                                    操作执行
  * ========================================================================== */
-
-/*
- * 辅助：判断候选路径是否为直连（cost_score == 0 为 LAN/PUNCH）
- */
-static bool path_is_direct(const path_stats_t *stats) {
-    return stats->cost_score == 0;
-}
-
-/*
- * 辅助：判断候选路径是否为 TURN 类型（cost_score >= 8）
- */
-static bool path_is_turn(const path_stats_t *stats) {
-    return stats->cost_score >= 8;
-}
 
 /*
  * 判断是否应该使用TURN（last_resort 模式下的前置检查）
@@ -330,7 +300,8 @@ static bool should_use_turn(p2p_session_t *s) {
     /* 检查是否存在非 TURN 的可用直连/中继路径（不含 SIGNALING） */
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         path_stats_t *st = &s->remote_cands[i].stats;
-        if (path_is_turn(st)) continue;
+        p2p_path_t type = path_manager_get_path_type(s, i);
+        if (type == P2P_PATH_RELAY) continue;  // 跳过 TURN/RELAY
         if (path_is_selectable(st->state)) {
             return false; // 存在直连/中继备选
         }
@@ -357,20 +328,22 @@ static int select_path_connection_first(p2p_session_t *s) {
         path_stats_t *st = &s->remote_cands[i].stats;
         if (!path_is_selectable(st->state)) continue;
 
-        if (path_is_turn(st)) {
+        p2p_path_t type = path_manager_get_path_type(s, i);
+        
+        if (type == P2P_PATH_RELAY) {
             /* TURN 路径：仅在 use_as_last_resort 时跳过 */
             if (pm->turn_config.use_as_last_resort) continue;
             if (st->rtt_ms < best_turn_rtt) {
                 best_turn_rtt = st->rtt_ms;
                 best_turn = i;
             }
-        } else if (path_is_direct(st)) {
+        } else if (type == P2P_PATH_LAN || type == P2P_PATH_PUNCH) {
             if (st->rtt_ms < best_direct_rtt) {
                 best_direct_rtt = st->rtt_ms;
                 best_direct = i;
             }
         } else {
-            /* 中继类候选（cost > 0 且 < 8） */
+            /* 中继类候选（既非 TURN 也非直连） */
             if (st->rtt_ms < best_relay_rtt) {
                 best_relay_rtt = st->rtt_ms;
                 best_relay_cand = i;
@@ -393,7 +366,8 @@ static int select_path_connection_first(p2p_session_t *s) {
         uint32_t min_turn_rtt = UINT32_MAX;
         for (int i = 0; i < s->remote_cand_cnt; i++) {
             path_stats_t *st = &s->remote_cands[i].stats;
-            if (path_is_turn(st) && path_is_selectable(st->state)) {
+            p2p_path_t type = path_manager_get_path_type(s, i);
+            if (type == P2P_PATH_RELAY && path_is_selectable(st->state)) {
                 if (st->rtt_ms < min_turn_rtt) {
                     min_turn_rtt = st->rtt_ms;
                     turn_fallback = i;
@@ -423,8 +397,10 @@ static int select_path_performance_first(p2p_session_t *s) {
         path_stats_t *st = &s->remote_cands[i].stats;
         if (!path_is_selectable(st->state)) continue;
 
+        p2p_path_t type = path_manager_get_path_type(s, i);
+        
         /* TURN last_resort 检查 */
-        if (path_is_turn(st) && pm->turn_config.use_as_last_resort &&
+        if (type == P2P_PATH_RELAY && pm->turn_config.use_as_last_resort &&
             !should_use_turn(s)) continue;
 
         float rtt_score = 1.0f - fminf((float)st->rtt_ms / 500.0f, 1.0f);
@@ -433,7 +409,7 @@ static int select_path_performance_first(p2p_session_t *s) {
         float score = 0.5f * rtt_score + 0.3f * loss_score + 0.2f * jitter_score;
 
         /* 成本惩罚：中继/TURN 路径打八折 */
-        if (!path_is_direct(st)) score *= 0.8f;
+        if (type != P2P_PATH_LAN && type != P2P_PATH_PUNCH) score *= 0.8f;
 
         if (score > best_score) {
             best_score = score;
@@ -441,20 +417,14 @@ static int select_path_performance_first(p2p_session_t *s) {
         }
     }
 
-    /* 评估信令转发(SIGNALING)：最终兜底，惩罚系数大于 TURN（×0.5 vs ×0.8） */
-    if (s->signaling.active && path_is_selectable(s->signaling.stats.state)) {
-        path_stats_t *rst = &s->signaling.stats;
-        float rtt_score = 1.0f - fminf((float)rst->rtt_ms / 500.0f, 1.0f);
-        float loss_score = 1.0f - rst->loss_rate;
-        float jitter_score = 1.0f - fminf((float)rst->rtt_variance / 100.0f, 1.0f);
-        float score = (0.5f * rtt_score + 0.3f * loss_score + 0.2f * jitter_score) * 0.5f;
+    /* 如果找到可用候选路径，直接返回（SIGNALING 作为最终兜底，不参与评分竞争） */
+    if (best_path >= 0) return best_path;
 
-        if (score > best_score) {
-            best_path = PATH_IDX_SIGNALING;
-        }
-    }
+    /* 信令转发(SIGNALING)：最终兜底（只在无其他可用路径时使用） */
+    if (s->signaling.active && path_is_selectable(s->signaling.stats.state))
+        return PATH_IDX_SIGNALING;
 
-    return best_path;
+    return -2;
 }
 
 /*
@@ -477,12 +447,14 @@ static int select_path_hybrid(p2p_session_t *s) {
         path_stats_t *st = &s->remote_cands[i].stats;
         if (!path_is_selectable(st->state)) continue;
 
-        if (path_is_turn(st)) {
+        p2p_path_t type = path_manager_get_path_type(s, i);
+        
+        if (type == P2P_PATH_RELAY) {
             if (st->rtt_ms < turn_rtt) {
                 turn_rtt = st->rtt_ms;
                 best_turn = i;
             }
-        } else if (path_is_direct(st)) {
+        } else if (type == P2P_PATH_LAN || type == P2P_PATH_PUNCH) {
             if (st->rtt_ms < direct_rtt) {
                 direct_rtt = st->rtt_ms;
                 direct_loss = st->loss_rate;
@@ -820,7 +792,7 @@ int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms) {
 }
 
 /*
- * 获取TURN统计：遍历候选找到cost_score>=8的TURN路径，汇总统计
+ * 获取TURN统计：遍历候选找到 RELAY 类型路径，汇总统计
  */
 int path_manager_get_turn_stats(p2p_session_t *s,
                                  uint64_t *total_bytes_sent,
@@ -831,9 +803,10 @@ int path_manager_get_turn_stats(p2p_session_t *s,
     int turn_count = 0;
     
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        path_stats_t *st = &s->remote_cands[i].stats;
-        if (!path_is_turn(st)) continue;
+        p2p_path_t type = path_manager_get_path_type(s, i);
+        if (type != P2P_PATH_RELAY) continue;
         
+        path_stats_t *st = &s->remote_cands[i].stats;
         bytes_sent += st->total_bytes_sent;
         bytes_recv += st->total_bytes_recv;
         rtt_sum += st->rtt_ms;
