@@ -41,7 +41,7 @@ int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
         if (s->signaling_relay_fn) {
             return s->signaling_relay_fn(s, type, flags, seq, payload, payload_len);
         } else {
-            print("E:", LA_F("SIGNALING path active but relay function not available", LA_F423, 423));
+            print("E:", LA_F("SIGNALING path active but relay function not available", LA_F319, 319));
             return -1;
         }
     }
@@ -76,7 +76,7 @@ void p2p_send_dtls_record(p2p_session_t *s, const struct sockaddr_in *addr,
         if (s->signaling_relay_fn) {
             s->signaling_relay_fn(s, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
         } else {
-            print("E:", LA_F("SIGNALING path active but relay function not available", LA_F423, 423));
+            print("E:", LA_F("SIGNALING path active but relay function not available", LA_F319, 319));
         }
     } else {
         /* 直连: CRYPTO */

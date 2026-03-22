@@ -39,7 +39,7 @@ enum {
 
     /* Words (LA_W) */
     LA_W1,  /* "CLOSED"  [p2p_ping.c] */
-    LA_W2,  /* disabled "CLOSING" */
+    _LA_2,
     LA_W3,  /* "CONNECTED"  [p2p_ping.c] */
     LA_W4,  /* "ERROR"  [p2p_ping.c] */
     LA_W5,  /* "INIT"  [p2p_ping.c] */
@@ -51,7 +51,7 @@ enum {
     /* Strings (LA_S) */
     LA_S10,  /* "--- Connected ---"  [p2p_ping.c] */
     _LA_11,
-    LA_S12,  /* disabled "[EVENT] Connection closed" */
+    _LA_12,
     LA_S13,  /* "Auto-echo received messages back to sender"  [p2p_ping.c] */
     _LA_14,
     LA_S15,  /* "Enable DTLS (MbedTLS)"  [p2p_ping.c] */

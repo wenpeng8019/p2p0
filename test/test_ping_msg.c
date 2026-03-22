@@ -454,16 +454,21 @@ static int restart_server_with_relay(void) {
     return start_server_ex(g_server_path, 1);
 }
 
+// p2p_ping 在 Debug 模式下设置 p2p_instrument_base = 10
+// 测试程序需要使用相同的基址才能正确控制 p2p_ping 的 instrument 选项
+#define P2P_INST_BASE 10
+
 // 设置 instrument 选项（广播方式，影响所有监听进程）
 static void set_opt(int idx, int enable) {
-    instrument_enable(idx, enable != 0);
-    printf("    [OPT] opt[%d] = %d (broadcast)\n", idx, enable);
+    int actual_idx = P2P_INST_BASE + idx;
+    instrument_enable(actual_idx, enable != 0);
+    printf("    [OPT] opt[%d] (actual=%d) = %d (broadcast)\n", idx, actual_idx, enable);
 }
 
 // 重置所有 ICE 选项
 static void reset_opts(void) {
-    for (int i = 0; i <= 5; i++) {
-        instrument_enable(i, false);
+    for (int i = 0; i <= 2; i++) {
+        instrument_enable(P2P_INST_BASE + i, false);
     }
     printf("    [OPT] All options reset\n");
 }
@@ -828,9 +833,12 @@ static void test_relay_message(void) {
     // 4. 设置选项：关闭 HOST 和 SRFLX 候选收集
     // 在两个客户端都进入 waiting 状态后设置，确保它们恢复时能收到广播
     printf("[4] Setting instrument options (disable HOST and SRFLX)...\n");
-    set_opt(3, 1);  // P2P_INST_OPT_ICE_HOST_OFF - 关闭 HOST 候选收集
-    set_opt(4, 1);  // P2P_INST_OPT_ICE_SRFLX_OFF - 关闭 SRFLX 候选收集
-    P_usleep(100 * 1000);  // 等待广播被处理
+    set_opt(0, 1);  // P2P_INST_OPT_ICE_HOST_OFF - 关闭 HOST 候选收集
+    set_opt(1, 1);  // P2P_INST_OPT_ICE_SRFLX_OFF - 关闭 SRFLX 候选收集
+    
+    // 重要：需要足够的时间让 OPTIONS 广播被所有进程的后台线程接收并处理
+    // 否则 sync_client 后主线程会立即执行 p2p_connect，此时选项可能还没生效
+    P_usleep(500 * 1000);  // 等待广播被处理
     
     // 5. 同步 Alice 和 Bob，让它们开始连接
     printf("[5] Syncing Alice and Bob...\n");

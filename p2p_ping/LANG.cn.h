@@ -7,7 +7,6 @@
 /* Embedded cn language table */
 static const char* s_lang_cn[LA_NUM] = {
     [LA_W1] = "已关闭",  /* SID:1 */
-    [LA_W2] = "关闭中",  /* SID:2 */
     [LA_W3] = "已连接",  /* SID:3 */
     [LA_W4] = "错误",  /* SID:4 */
     [LA_W5] = "初始化",  /* SID:5 */
@@ -16,8 +15,6 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_W8] = "中继",  /* SID:8 */
     [LA_W9] = "未知",  /* SID:9 */
     [LA_S10] = "--- 已连接 ---",  /* SID:10 */
-    [_LA_11] = "--- 对端已断开 ---",  /* SID:11 (disabled) */
-    [LA_S12] = "[事件] 连接已关闭",  /* SID:12 */
     [LA_S13] = "自动回显收到的消息给发送方",  /* SID:13 */
     [LA_S40] = "调试器名称",  /* SID:40 */
     [LA_S15] = "启用 DTLS (MbedTLS)",  /* SID:15 */
@@ -27,7 +24,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_S19] = "GitHub Token（公网信令）",  /* SID:19 */
     [LA_S20] = "日志级别 (0-5)",  /* SID:20 */
     [LA_S21] = "信令服务器 IP[:端口]",  /* SID:21 */
-    [LA_S44] = "STUN 服务器地址",  /* SID:44 new */
+    [LA_S44] = "STUN 服务器地址",  /* SID:44 */
     [LA_S23] = "目标节点名称（指定则为主动连接方）",  /* SID:23 */
     [LA_S24] = "TURN 密码",  /* SID:24 */
     [LA_S25] = "TURN 服务器地址",  /* SID:25 */
@@ -46,7 +43,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F43] = "等待调试器(%s)连接中...\n",  /* SID:43 */
     [LA_F36] = "% [聊天] 回显模式已启用：收到的消息将自动回复。\n",  /* SID:36 */
     [LA_F37] = "% [聊天] 进入消息模式。输入文字后按回车发送，Ctrl+C 退出。\n",  /* SID:37 */
-    [_LA_38] = "[状态] %s (%d) -> %s (%d)",  /* SID:38 (disabled) */
+    [LA_F46] = "[EVENT] State: %s -> %s\n",  /* SID:46 new */
+    [LA_F45] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:45 new */
 };
 
 static inline int lang_cn(void) {

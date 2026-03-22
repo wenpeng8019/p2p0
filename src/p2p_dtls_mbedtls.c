@@ -121,7 +121,7 @@
  */
 static void p2p_dtls_debug(void *ctx, int level, const char *file, int line, const char *str) {
     (void)ctx; (void)level;
-    printf(LA_F("%s:%04d: %s", LA_F168, 168), file, line, str);
+    printf(LA_F("%s:%04d: %s", LA_F194, 194), file, line, str);
 }
 
 /*
@@ -263,7 +263,7 @@ static int p2p_dtls_recv(void *ctx, unsigned char *buf, size_t len) {
 static int dtls_init(p2p_session_t *s) {
     p2p_dtls_ctx_t *dtls = calloc(1, sizeof(p2p_dtls_ctx_t));
     if (!dtls) {
-        print("E:", LA_F("Failed to allocate DTLS context", LA_F204, 204));
+        print("E:", LA_F("Failed to allocate DTLS context", LA_F237, 237));
         return -1;
     }
     s->dtls_data = dtls;
@@ -288,7 +288,7 @@ static int dtls_init(p2p_session_t *s) {
         3
     );
     if (ret != 0) {
-        print("E:", LA_F("ctr_drbg_seed failed: -0x%x", LA_F364, 364), -ret);
+        print("E:", LA_F("ctr_drbg_seed failed: -0x%x", LA_F404, 404), -ret);
         goto fail_cleanup;
     }
     
@@ -305,7 +305,7 @@ static int dtls_init(p2p_session_t *s) {
     else if (s->cfg.dtls_role == 2) is_server = 0;
     else /* auto */                 is_server = (s->remote_peer_id[0] == '\0')
                                               || strcmp(s->local_peer_id, s->remote_peer_id) > 0;
-    print("I:", LA_F("[MbedTLS] DTLS role: %s (mode=%s)", LA_F335, 335),
+    print("I:", LA_F("[MbedTLS] DTLS role: %s (mode=%s)", LA_F374, 374),
           is_server ? "server" : "client",
           s->cfg.dtls_role == 0 ? "auto" : "forced");
 
@@ -314,7 +314,7 @@ static int dtls_init(p2p_session_t *s) {
                                 MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                 MBEDTLS_SSL_PRESET_DEFAULT);
     if (ret != 0) {
-        print("E:", LA_F("ssl_config_defaults failed: -0x%x", LA_F373, 373), -ret);
+        print("E:", LA_F("ssl_config_defaults failed: -0x%x", LA_F413, 413), -ret);
         goto fail_cleanup;
     }
                                 
@@ -364,7 +364,7 @@ static int dtls_init(p2p_session_t *s) {
 
     int ret2;
     if ((ret2 = mbedtls_ssl_setup(&dtls->ssl, &dtls->conf)) != 0) {
-        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F374, 374), -ret2);
+        print("E:", LA_F("ssl_setup failed: -0x%x", LA_F414, 414), -ret2);
         goto fail_cleanup;
     }
     
@@ -437,11 +437,11 @@ static void dtls_tick(p2p_session_t *s) {
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            print("I:", LA_F("Handshake complete", LA_F225, 225));
+            print("I:", LA_F("Handshake complete", LA_F258, 258));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));
-            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F226, 226), ebuf, -ret);
+            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F259, 259), ebuf, -ret);
             s->state = P2P_STATE_ERROR;
         }
     }
@@ -471,11 +471,11 @@ static int mbedtls_decrypt_recv(p2p_session_t *s, const uint8_t *in, int in_len,
         int ret = mbedtls_ssl_handshake(&dtls->ssl);
         if (ret == 0) {
             dtls->handshake_done = 1;
-            print("I:", LA_F("DTLS handshake complete (MbedTLS)", LA_F197, 197));
+            print("I:", LA_F("DTLS handshake complete (MbedTLS)", LA_F228, 228));
         } else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
             char ebuf[128];
             mbedtls_strerror(ret, ebuf, sizeof(ebuf));
-            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F226, 226), ebuf, -ret);
+            print("E:", LA_F("Handshake failed: %s (-0x%04x)", LA_F259, 259), ebuf, -ret);
         }
         return 0;  /* 握手包，无应用数据 */
     }

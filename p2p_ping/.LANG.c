@@ -47,8 +47,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F37] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:37 */
     [LA_F46] = "[EVENT] State: %s -> %s\n",  /* SID:46 */
     [LA_F45] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:45 */
-    [LA_S12] = "[EVENT] Connection closed",  /* SID:12 disabled */
-    [LA_W2] = "CLOSING",  /* SID:2 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

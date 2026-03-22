@@ -12,9 +12,7 @@
 #define LOG_LEVEL ((unsigned)p2p_log_level)
 #define LOG_TAG_P p2p_log_pre_tag
 
-#ifdef LOG_INSTRUMENT
 #define INSTRUMENT_OPT_BASE p2p_instrument_base
-#endif
 
 #include <stdc.h>
 
