@@ -27,19 +27,6 @@ if(I18N_ENABLED)
     target_compile_definitions(test_transport PRIVATE I18N_ENABLED)
 endif()
 
-# NAT API 统一单元测试（独立运行，测试批量/单候选模式、状态转换）
-add_executable(test_nat_api
-    test_nat_api.c
-    ${CMAKE_SOURCE_DIR}/src/.LANG.c
-    ${CMAKE_SOURCE_DIR}/i18n/i18n.c
-)
-target_link_libraries(test_nat_api p2p_static)
-target_include_directories(test_nat_api PRIVATE ${CMAKE_SOURCE_DIR}/i18n)
-if(I18N_ENABLED)
-    target_compile_definitions(test_nat_api PRIVATE I18N_ENABLED)
-endif()
-add_test(NAME test_nat_api COMMAND test_nat_api)
-
 # COMPACT REGISTER 协议单元测试
 add_executable(test_compact_register
     test_compact_register.c

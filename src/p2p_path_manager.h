@@ -51,11 +51,14 @@ typedef enum {
 typedef enum {
     PATH_STATE_INIT = 0,                            // 初始化（远端候选添加时的默认状态）
     PATH_STATE_PROBING,                             // 探测中（已发送 PUNCH，等待响应）
+    PATH_STATE_FAILED,                              // 失败（连续超时）
     PATH_STATE_ACTIVE,                              // 可用（双向可达）
     PATH_STATE_DEGRADED,                            // 降级（RTT>300ms 或 loss>10%）
-    PATH_STATE_FAILED,                              // 失败（连续超时）
     PATH_STATE_RECOVERING                           // 恢复中（FAILED 30s 后重新探测）
 } path_state_t;
+
+/* RTT 样本统计 */
+#define RTT_SAMPLE_COUNT    10                      // 样本缓冲区容量
 
 /*
  * 路径统计信息
@@ -77,8 +80,6 @@ typedef struct {
     uint32_t            rtt_srtt;                   // 平滑 RTT
     uint32_t            rtt_rttvar;                 // RTT 方差
     
-    /* RTT 样本统计 */
-#define RTT_SAMPLE_COUNT    10                      // 样本缓冲区容量
     uint32_t            rtt_samples[RTT_SAMPLE_COUNT]; // RTT 样本环形缓冲区
     int                 rtt_sample_idx;             // 当前样本索引
     int                 rtt_sample_count;           // 有效样本数
@@ -216,6 +217,14 @@ typedef struct {
     /* 按路径类型的切换阈值（下标为 p2p_path_t：0=NONE 1=LAN 2=PUNCH 3=RELAY 4=SIGNALING） */
     path_threshold_config_t thresholds[5];
 } path_manager_t;
+
+/*
+ * 辅助工具：检查路径是否可选（ACTIVE、DEGRADED 或 RECOVERING）
+ *   等价于 state >= PATH_STATE_ACTIVE
+ */
+static inline bool path_is_selectable(path_state_t state) {
+    return state >= PATH_STATE_ACTIVE;
+}
 
 /* ============================================================================
  * 初始化

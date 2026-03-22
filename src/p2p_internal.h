@@ -390,7 +390,6 @@ struct p2p_remote_candidate_entry {
 
     /* 收发分离状态 */
     bool               readable;                // 可读：收到过来自该地址的包
-    bool               writable;                // 可写：收到 PUNCH_ACK 确认可达
     
     uint64_t           last_punch_send_ms;      // 最近一次发送 PUNCH 的时间
     path_stats_t       stats;                   // 路径统计信息
@@ -423,7 +422,6 @@ static inline int unpack_candidate(p2p_remote_candidate_entry_t *c, const uint8_
     c->priority = ntohl(w->priority);
 
     c->readable = false;
-    c->writable = false;
     c->last_punch_send_ms = 0;
     path_stats_init(&c->stats, 0);  /* 初始化路径统计默认值（rtt_min=9999 等） */
 
@@ -538,7 +536,6 @@ static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
     } else if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
         p2p_remote_candidate_entry_t *c = &s->remote_cands[path_idx];
         c->readable = false;
-        c->writable = false;
         c->last_punch_send_ms = 0;
         path_stats_init(&c->stats, 0);
     } else return E_INVALID;

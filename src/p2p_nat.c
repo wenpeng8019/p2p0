@@ -44,7 +44,6 @@ static int nat_upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
 
     // 收发分离状态初始化
     c->readable = false;
-    c->writable = false;
     c->last_punch_send_ms = 0;
     path_stats_init(&c->stats, 0);
 
@@ -383,8 +382,8 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         memcpy(ack_payload, &target_addr.sin_addr.s_addr, 4);
         memcpy(ack_payload + 4, &target_addr.sin_port, 2);
 
-        // 来源路径已知 writable，直接原路回复
-        if (s->remote_cands[cand_idx].writable) {
+        // 来源路径已激活（state >= ACTIVE），直接原路回复
+        if (path_is_selectable(s->remote_cands[cand_idx].stats.state)) {
             udp_send_packet(s->sock, from, P2P_PKT_REACH, 0,
                            hdr->seq, ack_payload, sizeof(ack_payload));
             print("V:", LA_F("%s sent to %s:%d (writable), echo_seq=%u", LA_F57, 57),
@@ -394,7 +393,8 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
             // 来源路径不可写，尝试找其他可写候选路径（通过 path_manager 选择最佳路径）
             // 注意：这里不能使用信令路径（PATH_IDX_SIGNALING），只能使用候选数组中的物理路径
             int best_path = path_manager_select_best_path(s);
-            if (best_path >= 0 && best_path < s->remote_cand_cnt && s->remote_cands[best_path].writable) {
+            if (best_path >= 0 && best_path < s->remote_cand_cnt && 
+                path_is_selectable(s->remote_cands[best_path].stats.state)) {
                 udp_send_packet(s->sock, &s->remote_cands[best_path].addr,
                                P2P_PKT_REACH, 0, hdr->seq, ack_payload, sizeof(ack_payload));
                 print("V:", LA_F("%s sent via best path[%d] to %s:%d, echo_seq=%u", LA_F411, 411),
@@ -449,15 +449,13 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                     }
                     
                     // 插入节点
-                    if (prev_insert == NULL) {
-                        // 插入队头
+                    if (prev_insert == NULL) { // 插入队头
                         node->next = n->reaching_head;
                         n->reaching_head = node;
                         if (!n->reaching_rear) {
                             n->reaching_rear = node;  // 队列之前为空
                         }
-                    } else {
-                        // 插入中间或队尾
+                    } else { // 插入中间或队尾
                         node->next = prev_insert->next;
                         prev_insert->next = node;
                         if (node->next == NULL) {
@@ -486,11 +484,9 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     }
 
     // RTT 测量：通过 seq 匹配 pending_packets 计算精确 per-path RTT
-    // fixme: 这里是 ack ?
     if (hdr->seq > 0)
         path_manager_on_packet_ack(s, hdr->seq, now);
-    // PUNCH_ACK 包不计入流量统计（size=0）
-    // fixme: 那为啥要统计
+    // PUNCH 控制包不计入流量统计（size=0），但这里需要更新路径活跃时间、包计数和重置超时计数器
     path_manager_on_packet_recv(s, cand_idx, now, 0);
 
     // peer→me 方向：收到 PUNCH 即证明入方向通了
@@ -549,26 +545,21 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     int target_path = p2p_find_remote_candidate_by_addr(s, &target_addr);
     if (target_path < 0) return;
 
-    /* 仅在路径尚未被 health_check 管理时激活；ACTIVE/DEGRADED/RECOVERING 由 health_check 维护 */
-    if (s->remote_cands[target_path].stats.state != PATH_STATE_ACTIVE &&
-        s->remote_cands[target_path].stats.state != PATH_STATE_DEGRADED &&
-        s->remote_cands[target_path].stats.state != PATH_STATE_RECOVERING) {
-        path_manager_set_path_state(s, target_path, PATH_STATE_ACTIVE);
-    }
-
     // RTT 测量：通过 seq 匹配 pending_packets 计算精确 per-path RTT
-    // fixme: 如果不是原路返回 rtt 可能不准确
+    // 注意：如果 REACH 不是原路返回，RTT 测量可能不准确（反映的是跨路径延迟）
     if (hdr->seq > 0)
         path_manager_on_packet_ack(s, hdr->seq, now);
-    // PUNCH_ACK 包不计入流量统计（size=0）
-    // fixme: 那为啥要统计
+
+    // REACH 控制包不计入流量统计（size=0），但这里需要更新路径活跃时间、包计数和重置超时计数器
     path_manager_on_packet_recv(s, cand_idx, now, 0);
 
-    // 如果该路径已经 writable，说明之前已处理过，后续逻辑无需执行
-    if (s->remote_cands[target_path].writable) return;
+    // 如果路径已激活，只更新统计即可，直接返回
+    if (path_is_selectable(s->remote_cands[target_path].stats.state)) return;
 
-    // 首次设置 writable 标志并打印日志
-    s->remote_cands[target_path].writable = true;
+    // 收到 REACH 证明路径可写，首次激活路径（INIT/PROBING/FAILED → ACTIVE）
+    path_manager_set_path_state(s, target_path, PATH_STATE_ACTIVE);
+
+    // 首次设置 writable 标志的逻辑已由上面的 path_manager_set_path_state() 完成
     print("I:", LA_F("%s: path[%d] %s:%d confirmed writable", LA_F406, 406),
           PROTO, target_path, inet_ntoa(target_addr.sin_addr), ntohs(target_addr.sin_port));
 
@@ -869,7 +860,8 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
                 int alive_cnt = 0;
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
-                    if (s->remote_cands[i].writable && s->remote_cands[i].type != P2P_CAND_RELAY) {
+                    if (path_is_selectable(s->remote_cands[i].stats.state) && 
+                        s->remote_cands[i].type != P2P_CAND_RELAY) {
 
                         nat_send_punch(s, LA_W("alive", LA_W1, 1), &s->remote_cands[i], now_ms);
                         alive_cnt++;

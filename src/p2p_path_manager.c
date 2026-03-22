@@ -292,15 +292,6 @@ int path_manager_add_turn_path(p2p_session_t *s, struct sockaddr_in *addr) {
  * ========================================================================== */
 
 /*
- * 辅助：检查路径是否可选（ACTIVE、DEGRADED 或 RECOVERING）
- */
-static bool path_is_selectable(path_state_t state) {
-    return state == PATH_STATE_ACTIVE ||
-           state == PATH_STATE_DEGRADED ||
-           state == PATH_STATE_RECOVERING;
-}
-
-/*
  * 辅助：判断候选路径是否为直连（cost_score == 0 为 LAN/PUNCH）
  */
 static bool path_is_direct(const path_stats_t *stats) {
@@ -1148,11 +1139,6 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
                 // 记录进入 FAILED 的时间（用于 30s 后触发 RECOVERING）
                 p->probe_seq = now_ms;
 
-                // 清除 writable 标记，停止 keep-alive 以使 probe_seq 时间戳生效
-                if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
-                    s->remote_cands[path_idx].writable = false;
-                }
-
                 // 故障转移：当前活跃路径失效时，选择新路径
                 if (s->active_path == path_idx) {
                     int new_path = path_manager_select_best_path(s);
@@ -1189,9 +1175,6 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
 
             p->consecutive_timeouts = 0;                        // 重置连续超时计数
             p->probe_seq = now_ms;                              // 恢复开始时间（复用 probe_seq 存储）
-            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) // 恢复 writable 让 keep-alive 发送探测包
-                s->remote_cands[path_idx].writable = true;
-            
             p->last_recv_ms = now_ms;                           // 初始化 last_recv_ms 为当前时刻
         }
     }
@@ -1204,10 +1187,7 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
         // RECOVERING_TIMEOUT_MS 内未恢复 → 回到 FAILED，重新等待
         if (elapsed > RECOVERING_TIMEOUT_MS) {
             p->state = PATH_STATE_FAILED;
-
             p->probe_seq = now_ms;
-            if (path_idx >= 0 && path_idx < s->remote_cand_cnt) // 再次清除 writable 停止探测
-                s->remote_cands[path_idx].writable = false;
         } 
         // 收到数据且最近 2 秒内有活动 → 恢复成功
         else if (p->last_recv_ms > recovering_start &&

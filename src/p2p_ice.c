@@ -638,7 +638,6 @@ void p2p_ice_on_remote_candidates(p2p_session_t *s, const uint8_t *payload, int 
         c->type = ctype;
         c->priority = 0;
         c->readable = false;
-        c->writable = false;
         c->last_punch_send_ms = 0;
         path_stats_init(&c->stats, 0);
 
@@ -690,7 +689,6 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
         c->type = P2P_CAND_PRFLX;
         c->priority = 0;
         c->readable = false;
-        c->writable = false;
         c->last_punch_send_ms = 0;
         path_stats_init(&c->stats, 0);
 
@@ -729,7 +727,8 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
 
     if (matched_idx >= 0) {
         s->remote_cands[matched_idx].readable = true;
-        s->remote_cands[matched_idx].writable = true;
+        // 设置路径为 ACTIVE，替代 writable 标志
+        path_manager_set_path_state(s, matched_idx, PATH_STATE_ACTIVE);
     }
     
     /* 设置活动地址 */
