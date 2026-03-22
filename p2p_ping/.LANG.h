@@ -92,10 +92,18 @@ enum {
 
     /* Strings (LA_S) */
     LA_S44,  /* "STUN server address"  [p2p_ping.c] */
+    LA_S45,  /* disabled "Disable Host candidates (for testing)" */
+    LA_S46,  /* disabled "Disable Srflx candidates (for testing)" */
+    LA_S47,  /* disabled "Disable Relay candidates (for testing)" */
 
     /* Formats (LA_F) */
-    LA_F45,  /* "[STATE] %s (%d) -> %s (%d)\n" (%s,%d,%s,%d)  [p2p_ping.c] */
-    LA_F46,  /* "[EVENT] State: %s -> %s\n" (%s,%s)  [p2p_ping.c] */
+    LA_F48,  /* "[STATE] %s (%d) -> %s (%d)\n" (%s,%d,%s,%d)  [p2p_ping.c] */
+    LA_F49,  /* "[EVENT] State: %s -> %s\n" (%s,%s)  [p2p_ping.c] */
+
+    /* Strings (LA_S) */
+    LA_S50,  /* "Disable Host candidates (for testing)"  [p2p_ping.c] */
+    LA_S51,  /* "Disable Relay candidates (for testing)"  [p2p_ping.c] */
+    LA_S52,  /* "Disable Srflx candidates (for testing)"  [p2p_ping.c] */
 
     LA_NUM
 };

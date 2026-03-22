@@ -251,6 +251,11 @@ typedef struct {
     p2p_on_response_fn      on_response;                // MSG RPC 应答到达（A 端，服务器可选）
     void*                   userdata;                   // 用户自定义数据，传递给回调函数
 
+    /* 测试选项 */
+    bool                    test_ice_host_off;          // 禁用 Host 候选（不收集本地网卡地址）
+    bool                    test_ice_srflx_off;         // 禁用 Srflx 候选（不收集 NAT 反射地址）
+    bool                    test_ice_relay_off;         // 禁用 Relay 候选（不收集 TURN 中继地址）
+
 } p2p_config_t;
 
 extern p2p_log_callback_t   p2p_log_callback;

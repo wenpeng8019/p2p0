@@ -19,6 +19,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S10] = "--- Connected ---",  /* SID:10 */
     [LA_S13] = "Auto-echo received messages back to sender",  /* SID:13 */
     [LA_S40] = "Debugger Name",  /* SID:40 */
+    [LA_S50] = "Disable Host candidates (for testing)",  /* SID:50 */
+    [LA_S51] = "Disable Relay candidates (for testing)",  /* SID:51 */
+    [LA_S52] = "Disable Srflx candidates (for testing)",  /* SID:52 */
     [LA_S15] = "Enable DTLS (MbedTLS)",  /* SID:15 */
     [LA_S16] = "Enable DTLS (OpenSSL)",  /* SID:16 */
     [LA_S17] = "Enable PseudoTCP",  /* SID:17 */
@@ -45,8 +48,11 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F43] = "Waiting Debugger(%s) connecting...\n",  /* SID:43 */
     [LA_F36] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:36 */
     [LA_F37] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:37 */
-    [LA_F46] = "[EVENT] State: %s -> %s\n",  /* SID:46 */
-    [LA_F45] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:45 */
+    [LA_F49] = "[EVENT] State: %s -> %s\n",  /* SID:49 */
+    [LA_F48] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:48 */
+    [LA_S45] = "Disable Host candidates (for testing)",  /* SID:45 disabled */
+    [LA_S47] = "Disable Relay candidates (for testing)",  /* SID:47 disabled */
+    [LA_S46] = "Disable Srflx candidates (for testing)",  /* SID:46 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

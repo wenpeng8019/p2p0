@@ -38,6 +38,9 @@ ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S26, 
 ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S24, 24));
 ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", LA_S20, 20));
 ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S40, 40));
+ARGS_B(false, no_host,      0,   "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S50, 50));
+ARGS_B(false, no_srflx,     0,   "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S52, 52));
+ARGS_B(false, no_relay,     0,   "no-relay",     LA_CS("Disable Relay candidates (for testing)", LA_S51, 51));
 
 static p2p_language_t s_lang = P2P_LANG_EN;
 static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }
@@ -253,7 +256,7 @@ static void log_state_change(p2p_handle_t s) {
     static int last_state = -1;
     int state = p2p_state(s);
     if (state != last_state) {
-        print("I:", LA_F("[STATE] %s (%d) -> %s (%d)\n", LA_F45, 45),
+        print("I:", LA_F("[STATE] %s (%d) -> %s (%d)\n", LA_F48, 48),
               state_name(last_state), last_state,
               state_name(state), state);
         last_state = state;
@@ -263,7 +266,7 @@ static void log_state_change(p2p_handle_t s) {
 /* 状态变化回调 */
 static void on_state(p2p_handle_t s, p2p_state_t old_state, p2p_state_t new_state, void *userdata) {
     (void)s; (void)userdata;
-    print("I:", LA_F("[EVENT] State: %s -> %s\n", LA_F46, 46), state_name(old_state), state_name(new_state));
+    print("I:", LA_F("[EVENT] State: %s -> %s\n", LA_F49, 49), state_name(old_state), state_name(new_state));
 }
 
 static bool             g_running;
@@ -354,6 +357,9 @@ int main(int argc, char *argv[]) {
         &ARGS_DEF_turn_pass,
         &ARGS_DEF_log,
         &ARGS_DEF_debugger,
+        &ARGS_DEF_no_host,
+        &ARGS_DEF_no_srflx,
+        &ARGS_DEF_no_relay,
         NULL);
 
     /* 设置日志级别 */
@@ -409,6 +415,9 @@ int main(int argc, char *argv[]) {
     cfg.bind_port       = 0;
     cfg.on_state        = on_state;
     cfg.userdata        = NULL;
+    cfg.test_ice_host_off  = ARGS_no_host.i64 ? true : false;
+    cfg.test_ice_srflx_off = ARGS_no_srflx.i64 ? true : false;
+    cfg.test_ice_relay_off = ARGS_no_relay.i64 ? true : false;
 
     #ifndef NDEBUG
     p2p_instrument_base = 10;

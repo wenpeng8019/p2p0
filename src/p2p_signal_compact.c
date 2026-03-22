@@ -74,9 +74,9 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
         print("I:", LA_F("%s: peer_info0 srflx cand[%d]<%s:%d>%s\n", LA_F136, 136),
                         TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                        instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF) ? ", ignored due to instrument" : "");
+                        s->cfg.test_ice_srflx_off ? " (disabled)" : "");
 
-        if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) --s->remote_cand_cnt;
+        if (s->cfg.test_ice_srflx_off) --s->remote_cand_cnt;
         else { s->remote_srflx_cnt++;
 
             // 这里启动打洞需要依赖于信令服务器的 REGISTER_ACK 包中携带的 relay_support 标志
@@ -90,7 +90,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         --cand_cnt; offset += (int)sizeof(p2p_candidate_t);
     }
     // 如果 peer_info0 以外的其他 info 包先到达，则需要保留 cand[0] 给对方（在 info0 中的）的公网地址
-    else if (s->remote_cand_cnt == 0 && !instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) {
+    else if (s->remote_cand_cnt == 0 && !s->cfg.test_ice_srflx_off) {
         memset(&s->remote_cands[0], 0, sizeof(p2p_remote_candidate_entry_t));
         s->remote_cand_cnt = 1;
     }
@@ -104,20 +104,18 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
             continue;
         }
 
-        const char* type_str; uint16_t* cand_cnt_ptr;
-        if (c->type == P2P_CAND_HOST) { type_str = "host"; cand_cnt_ptr = &s->remote_host_cnt; }
-        else if (c->type == P2P_CAND_SRFLX) { type_str = "srflx"; cand_cnt_ptr = &s->remote_srflx_cnt; }
-        else if (c->type == P2P_CAND_RELAY) { type_str = "relay"; cand_cnt_ptr = &s->remote_relay_cnt; }
+        const char* type_str; uint16_t* cand_cnt_ptr; bool opt_off = false;
+        if (c->type == P2P_CAND_HOST) { type_str = "host"; cand_cnt_ptr = &s->remote_host_cnt; opt_off = s->cfg.test_ice_host_off; }
+        else if (c->type == P2P_CAND_SRFLX) { type_str = "srflx"; cand_cnt_ptr = &s->remote_srflx_cnt; opt_off = s->cfg.test_ice_srflx_off; }
+        else if (c->type == P2P_CAND_RELAY) { type_str = "relay"; cand_cnt_ptr = &s->remote_relay_cnt; opt_off = s->cfg.test_ice_relay_off; }
         else { --s->remote_cand_cnt;
             print("E:", LA_F("%s: unexpected remote cand type %d, skipped\n", LA_F193, 193),
                   TASK_ICE_REMOTE, c->type);
             continue;
         }
 
-        if (instrument_option(c->type == P2P_CAND_SRFLX ? P2P_INST_OPT_ICE_SRFLX_OFF : 
-                               c->type == P2P_CAND_HOST ? P2P_INST_OPT_ICE_HOST_OFF : 
-                                                          P2P_INST_OPT_ICE_RELAY_OFF)) {
-            print("I:", LA_F("%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n", LA_F154, 154),
+        if (opt_off) {
+            print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F154, 154),
                   TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             continue;
         }
@@ -1118,8 +1116,8 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             return;
         }
 
-        if (instrument_option(P2P_INST_OPT_ICE_SRFLX_OFF)) {
-            print("I:", LA_F("%s NOTIFY: ignored srflx addr update due to instument\n", LA_F47, 47), PROTO);
+        if (s->cfg.test_ice_srflx_off) {
+            print("I:", LA_F("%s NOTIFY: srflx addr update (disabled)\n", LA_F47, 47), PROTO);
             return;
         }
 

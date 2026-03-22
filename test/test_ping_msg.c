@@ -221,28 +221,8 @@ static void print_log_summary(void) {
 // 进程管理
 ///////////////////////////////////////////////////////////////////////////////
 
-// 启动 server 子进程
-static int start_server(const char *server_path) {
-    char port_str[16];
-    snprintf(port_str, sizeof(port_str), "%d", g_server_port);
-    
-    g_server_pid = fork();
-    if (g_server_pid < 0) {
-        fprintf(stderr, "Failed to fork server: %s\n", strerror(errno));
-        return -1;
-    } else if (g_server_pid == 0) {
-        execl(server_path, server_path, "-p", port_str, NULL);
-        fprintf(stderr, "Failed to exec server: %s\n", strerror(errno));
-        _exit(127);
-    }
-    
-    printf("    Server PID: %d\n", g_server_pid);
-    P_usleep(500 * 1000);  // 等待 server 启动
-    return 0;
-}
-
 // 启动 ping 客户端
-static int start_ping_client(ping_client_t *client, const char *target) {
+static int start_ping_client(ping_client_t *client, const char *target, const char *extra_args) {
     char server_arg[64];
     snprintf(server_arg, sizeof(server_arg), "%s:%d", g_server_host, g_server_port);
     
@@ -268,24 +248,41 @@ static int start_ping_client(ping_client_t *client, const char *target) {
             close(null_fd);
         }
         
+        // 构建参数列表，支持额外参数
+        const char *argv[32];
+        int argc = 0;
+        argv[argc++] = g_ping_path;
+        argv[argc++] = "--compact";
+        argv[argc++] = "-s";
+        argv[argc++] = server_arg;
+        argv[argc++] = "-n";
+        argv[argc++] = client->name;
         if (target) {
-            execl(g_ping_path, g_ping_path, 
-                  "--compact", "-s", server_arg, 
-                  "-n", client->name, "-t", target,
-                  "--debugger", client->name, 
-                  NULL);
-        } else {
-            execl(g_ping_path, g_ping_path, 
-                  "--compact", "-s", server_arg, 
-                  "-n", client->name,
-                  "--debugger", client->name, 
-                  NULL);
+            argv[argc++] = "-t";
+            argv[argc++] = target;
         }
+        argv[argc++] = "--debugger";
+        argv[argc++] = client->name;
+        
+        // 添加额外参数
+        if (extra_args && *extra_args) {
+            // 简单的空格分割（假设参数不包含空格）
+            char *args_copy = strdup(extra_args);
+            char *token = strtok(args_copy, " ");
+            while (token && argc < 30) {
+                argv[argc++] = token;
+                token = strtok(NULL, " ");
+            }
+        }
+        
+        argv[argc] = NULL;
+        execv(g_ping_path, (char *const *)argv);
         fprintf(stderr, "Failed to exec %s: %s\n", client->name, strerror(errno));
         _exit(127);
     }
     
-    printf("    %s PID: %d (target=%s, non-interactive)\n", client->name, client->pid, target ? target : "none");
+    printf("    %s PID: %d (target=%s, extra_args=%s, non-interactive)\n", 
+           client->name, client->pid, target ? target : "none", extra_args ? extra_args : "none");
     return 0;
 }
 
@@ -455,24 +452,6 @@ static int restart_server_with_relay(void) {
 }
 
 // p2p_ping 在 Debug 模式下设置 p2p_instrument_base = 10
-// 测试程序需要使用相同的基址才能正确控制 p2p_ping 的 instrument 选项
-#define P2P_INST_BASE 10
-
-// 设置 instrument 选项（广播方式，影响所有监听进程）
-static void set_opt(int idx, int enable) {
-    int actual_idx = P2P_INST_BASE + idx;
-    instrument_enable(actual_idx, enable != 0);
-    printf("    [OPT] opt[%d] (actual=%d) = %d (broadcast)\n", idx, actual_idx, enable);
-}
-
-// 重置所有 ICE 选项
-static void reset_opts(void) {
-    for (int i = 0; i <= 2; i++) {
-        instrument_enable(P2P_INST_BASE + i, false);
-    }
-    printf("    [OPT] All options reset\n");
-}
-
 // 清理所有进程
 static void cleanup(void) {
     stop_client(&g_alice);
@@ -511,9 +490,23 @@ static void test_message_exchange(void) {
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
+    // 重置客户端状态
+    g_alice.pid = 0;
+    g_alice.rid = 0;
+    g_alice.waiting = 0;
+    g_alice.resumed = 0;
+    g_alice.connected = 0;
+    g_alice.relay = 0;
+    g_bob.pid = 0;
+    g_bob.rid = 0;
+    g_bob.waiting = 0;
+    g_bob.resumed = 0;
+    g_bob.connected = 0;
+    g_bob.relay = 0;
+    
     // 1. 启动 Alice (target=bob)
     printf("[1] Starting Alice (target=bob, non-interactive)...\n");
-    if (start_ping_client(&g_alice, "bob") != 0) {
+    if (start_ping_client(&g_alice, "bob", NULL) != 0) {
         TEST_FAIL(TEST_NAME, "failed to start alice");
         return;
     }
@@ -537,7 +530,7 @@ static void test_message_exchange(void) {
     
     // 3. 启动 Bob (target=alice)
     printf("[3] Starting Bob (target=alice, non-interactive)...\n");
-    if (start_ping_client(&g_bob, "alice") != 0) {
+    if (start_ping_client(&g_bob, "alice", NULL) != 0) {
         TEST_FAIL(TEST_NAME, "failed to start bob");
         stop_client(&g_alice);
         return;
@@ -621,6 +614,7 @@ static void test_message_exchange(void) {
     
     stop_client(&g_alice);
     stop_client(&g_bob);
+    P_usleep(500 * 1000);  // 等待进程清理
 }
 
 // 测试 2: 非交互模式验证（stdin 重定向）
@@ -639,15 +633,19 @@ static void test_non_interactive_mode(void) {
     g_alice.pid = 0;
     g_alice.rid = 0;
     g_alice.waiting = 0;
+    g_alice.resumed = 0;
     g_alice.connected = 0;
+    g_alice.relay = 0;
     g_bob.pid = 0;
     g_bob.rid = 0;
     g_bob.waiting = 0;
+    g_bob.resumed = 0;
     g_bob.connected = 0;
+    g_bob.relay = 0;
     
     // 1. 启动 Alice（stdin 已重定向到 /dev/null）
     printf("[1] Starting Alice (non-interactive)...\n");
-    if (start_ping_client(&g_alice, "bob") != 0) {
+    if (start_ping_client(&g_alice, "bob", NULL) != 0) {
         TEST_FAIL(TEST_NAME, "failed to start alice");
         return;
     }
@@ -665,7 +663,7 @@ static void test_non_interactive_mode(void) {
     
     // 3. 启动 Bob
     printf("[3] Starting Bob (non-interactive)...\n");
-    if (start_ping_client(&g_bob, "alice") != 0) {
+    if (start_ping_client(&g_bob, "alice", NULL) != 0) {
         TEST_FAIL(TEST_NAME, "failed to start bob");
         stop_client(&g_alice);
         return;
@@ -711,6 +709,7 @@ static void test_non_interactive_mode(void) {
     
     stop_client(&g_alice);
     stop_client(&g_bob);
+    P_usleep(500 * 1000);  // 等待进程清理
 }
 
 // 测试 3: instrument 日志收集验证
@@ -720,18 +719,26 @@ static void test_log_collection(void) {
     clear_logs();
     
     // 重置客户端状态
+    g_alice.pid = 0;
     g_alice.rid = 0;
     g_alice.waiting = 0;
+    g_alice.resumed = 0;
+    g_alice.connected = 0;
+    g_alice.relay = 0;
+    g_bob.pid = 0;
     g_bob.rid = 0;
     g_bob.waiting = 0;
+    g_bob.resumed = 0;
+    g_bob.connected = 0;
+    g_bob.relay = 0;
     
     // 启动并同步客户端
     printf("[1] Starting clients...\n");
-    start_ping_client(&g_alice, "bob");
+    start_ping_client(&g_alice, "bob", NULL);
     wait_for_waiting(&g_alice, SYNC_TIMEOUT_MS);
     sync_client(&g_alice);
     
-    start_ping_client(&g_bob, "alice");
+    start_ping_client(&g_bob, "alice", NULL);
     wait_for_waiting(&g_bob, SYNC_TIMEOUT_MS);
     sync_client(&g_bob);
     
@@ -775,6 +782,7 @@ static void test_log_collection(void) {
     
     stop_client(&g_alice);
     stop_client(&g_bob);
+    P_usleep(500 * 1000);  // 等待进程清理
 }
 
 // 测试 4: 信令服务器中转消息
@@ -786,12 +794,16 @@ static void test_relay_message(void) {
     clear_logs();
     
     // 重置客户端状态
+    g_alice.pid = 0;
     g_alice.rid = 0;
     g_alice.waiting = 0;
+    g_alice.resumed = 0;
     g_alice.connected = 0;
     g_alice.relay = 0;
+    g_bob.pid = 0;
     g_bob.rid = 0;
     g_bob.waiting = 0;
+    g_bob.resumed = 0;
     g_bob.connected = 0;
     g_bob.relay = 0;
     
@@ -802,9 +814,9 @@ static void test_relay_message(void) {
         return;
     }
     
-    // 2. 启动 Alice（不设置 opt，先让它进入 waiting 状态）
-    printf("[2] Starting Alice (target=bob)...\n");
-    if (start_ping_client(&g_alice, "bob") != 0) {
+    // 2. 启动 Alice（使用 --no-host --no-srflx 禁用直连候选）
+    printf("[2] Starting Alice (target=bob, no-host, no-srflx)...\n");
+    if (start_ping_client(&g_alice, "bob", "--no-host --no-srflx") != 0) {
         TEST_FAIL(TEST_NAME, "failed to start alice");
         return;
     }
@@ -815,9 +827,9 @@ static void test_relay_message(void) {
         return;
     }
     
-    // 3. 启动 Bob
-    printf("[3] Starting Bob (target=alice)...\n");
-    if (start_ping_client(&g_bob, "alice") != 0) {
+    // 3. 启动 Bob（使用 --no-host --no-srflx 禁用直连候选）
+    printf("[3] Starting Bob (target=alice, no-host, no-srflx)...\n");
+    if (start_ping_client(&g_bob, "alice", "--no-host --no-srflx") != 0) {
         TEST_FAIL(TEST_NAME, "failed to start bob");
         stop_client(&g_alice);
         return;
@@ -830,23 +842,14 @@ static void test_relay_message(void) {
         return;
     }
     
-    // 4. 设置选项：关闭 HOST 和 SRFLX 候选收集
-    // 在两个客户端都进入 waiting 状态后设置，确保它们恢复时能收到广播
-    printf("[4] Setting instrument options (disable HOST and SRFLX)...\n");
-    set_opt(0, 1);  // P2P_INST_OPT_ICE_HOST_OFF - 关闭 HOST 候选收集
-    set_opt(1, 1);  // P2P_INST_OPT_ICE_SRFLX_OFF - 关闭 SRFLX 候选收集
-    
-    // 重要：需要足够的时间让 OPTIONS 广播被所有进程的后台线程接收并处理
-    // 否则 sync_client 后主线程会立即执行 p2p_connect，此时选项可能还没生效
-    P_usleep(500 * 1000);  // 等待广播被处理
-    
-    // 5. 同步 Alice 和 Bob，让它们开始连接
-    printf("[5] Syncing Alice and Bob...\n");
+    // 4. 同步 Alice 和 Bob，让它们开始连接
+    // 注意：客户端已通过命令行参数 --no-host --no-srflx 禁用了直连候选
+    printf("[4] Syncing Alice and Bob...\n");
     sync_client(&g_alice);
     sync_client(&g_bob);
     
-    // 6. 等待连接（应该通过 relay 连接，因为直连候选被禁用）
-    printf("[6] Waiting for relay connection...\n");
+    // 5. 等待连接（应该通过 relay 连接，因为直连候选被禁用）
+    printf("[5] Waiting for relay connection...\n");
     if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
         // 检查是否有 relay 相关日志
         int relay_log = find_log("relay");
@@ -857,38 +860,35 @@ static void test_relay_message(void) {
         TEST_FAIL(TEST_NAME, "relay connection timeout");
         stop_client(&g_alice);
         stop_client(&g_bob);
-        reset_opts();
         return;
     }
     
     P_usleep(500 * 1000);
     
-    // 7. Alice 发送消息给 Bob
-    printf("[7] Alice sends message to Bob (via relay)...\n");
+    // 6. Alice 发送消息给 Bob
+    printf("[6] Alice sends message to Bob (via relay)...\n");
     if (ping_send_message(&g_alice, "Hello via relay!") != 0) {
         TEST_FAIL(TEST_NAME, "alice failed to send message");
         stop_client(&g_alice);
         stop_client(&g_bob);
-        reset_opts();
         return;
     }
     
     P_usleep(1000 * 1000);  // 给 relay 更多时间
     
-    // 8. Bob 发送消息给 Alice
-    printf("[8] Bob sends message to Alice (via relay)...\n");
+    // 7. Bob 发送消息给 Alice
+    printf("[7] Bob sends message to Alice (via relay)...\n");
     if (ping_send_message(&g_bob, "Reply via relay!") != 0) {
         TEST_FAIL(TEST_NAME, "bob failed to send message");
         stop_client(&g_alice);
         stop_client(&g_bob);
-        reset_opts();
         return;
     }
     
     P_usleep(1000 * 1000);  // 给 relay 更多时间
     
-    // 9. 验证两个客户端都走了 RELAY 路径
-    printf("[9] Verifying RELAY path...\n");
+    // 8. 验证两个客户端都走了 RELAY 路径
+    printf("[8] Verifying RELAY path...\n");
     printf("    Alice relay: %s\n", g_alice.relay ? "yes" : "no");
     printf("    Bob relay: %s\n", g_bob.relay ? "yes" : "no");
     
@@ -907,8 +907,8 @@ static void test_relay_message(void) {
     int server_relay = find_log("[Relay]") >= 0;
     printf("    Server relay log: %s\n", server_relay ? "yes" : "no");
     
-    // 10. 验证消息接收
-    printf("[10] Verifying message delivery...\n");
+    // 9. 验证消息接收
+    printf("[9] Verifying message delivery...\n");
     
     int bob_recv = find_log_from_rid(g_bob.rid, "Hello via relay");
     int alice_recv = find_log_from_rid(g_alice.rid, "Reply via relay");
@@ -923,7 +923,6 @@ static void test_relay_message(void) {
             TEST_FAIL(TEST_NAME, "not all clients used RELAY path");
             stop_client(&g_alice);
             stop_client(&g_bob);
-            reset_opts();
             return;
         }
     }
@@ -934,7 +933,6 @@ static void test_relay_message(void) {
         TEST_FAIL(TEST_NAME, "message not received via relay");
         stop_client(&g_alice);
         stop_client(&g_bob);
-        reset_opts();
         return;
     }
     
@@ -944,7 +942,6 @@ static void test_relay_message(void) {
         TEST_FAIL(TEST_NAME, "HOST candidates were not skipped");
         stop_client(&g_alice);
         stop_client(&g_bob);
-        reset_opts();
         return;
     }
     
@@ -953,7 +950,7 @@ static void test_relay_message(void) {
     
     stop_client(&g_alice);
     stop_client(&g_bob);
-    reset_opts();
+    P_usleep(500 * 1000);  // 等待进程清理
     
     // 重启普通 server 以便后续测试
     restart_server();

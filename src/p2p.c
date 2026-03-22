@@ -524,7 +524,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             getsockname(s->sock, (struct sockaddr *)&loc, &len);
 
             // 将 route 中的本地地址（和本地绑定端口成对）转换为候选列表
-            if (!instrument_option(P2P_INST_OPT_ICE_HOST_OFF)) {
+            if (!s->cfg.test_ice_host_off) {
                 for (int i = 0; i < s->route.addr_count; i++) {
                     int idx = p2p_cand_push_local(s);
                     if (idx < 0) {
@@ -541,7 +541,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                           inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
                 }
             }
-            else print("I:", LA_F("Skipping local Host candidates due to instrument", LA_F335, 335));
+            else print("I:", LA_F("Skipping local Host candidates (disabled)", LA_F335, 335));
 
             // 注册（连接）到 COMPACT 信令服务器
             print("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F312, 312),
@@ -555,7 +555,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             }
 
             // TURN：异步收集 Relay 候选（响应到达后 trickle 发送给对端）
-            if (!instrument_option(P2P_INST_OPT_ICE_RELAY_OFF) && s->cfg.turn_server) {
+            if (!s->cfg.test_ice_relay_off && s->cfg.turn_server) {
                 if (p2p_turn_allocate(s) == 0) {
                     print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F315, 315), s->cfg.turn_server);
                 }
