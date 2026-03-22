@@ -162,7 +162,7 @@ enum {
     LA_F118,  /* "%s: invalid ack_seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F119,  /* "%s: invalid cand idx: %d (count: %d)" (%s,%d,%d)  [p2p_nat.c] */
     LA_F120,  /* "%s: invalid for non-relay req\n" (%s)  [p2p_signal_compact.c] */
-    LA_F121,  /* "%s: invalid payload len=%d (need 6)" (%s,%d)  [p2p_nat.c] */
+    LA_F121,  /* "%s: bad payload len=%d (need 6)" (%s,%d)  [p2p_nat.c] */
     LA_F122,  /* "%s: invalid seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F123,  /* "%s: invalid session_id=0\n" (%s)  [p2p_signal_compact.c] */
     LA_F124,  /* "%s: keep-alive sent (%d cands)" (%s,%d)  [p2p_nat.c] */
@@ -171,7 +171,7 @@ enum {
     LA_F127,  /* "%s: CONNECTED → LOST (no response %llums)\n" (%s,%l)  [p2p_nat.c] */
     LA_F128,  /* "%s: no writable path available" (%s)  [p2p_nat.c] */
     LA_F129,  /* "%s: not connected, cannot send FIN" (%s)  [p2p_nat.c] */
-    LA_F130,  /* "%s: not connected, unexpected ACK" (%s)  [p2p_nat.c] */
+    LA_F130,  /* disabled "%s: not connected, unexpected ACK" */
     LA_F131,  /* "%s: old request ignored (sid=%u <= last_sid=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F132,  /* "%s: path[%d] UP (%s:%d)" (%s,%d,%s,%d)  [p2p_nat.c] */
     LA_F133,  /* "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n" (%s,%l)  [p2p_signal_compact.c] */
@@ -460,6 +460,10 @@ enum {
     LA_F416,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
     LA_F417,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
     LA_F418,  /* "% ✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
+    LA_F419,  /* "%s: invalid payload len=%d (need 6)" (%s,%d)  [p2p_nat.c] */
+    LA_F420,  /* "Ignore %s pkt from %s:%d, not connected" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F421,  /* "Ignore %s pkt from %s:%d, not connecting" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F422,  /* "Ignore %s pkt from %s:%d, not connecting/connected" (%s,%s,%d)  [p2p_nat.c] */
 
     LA_NUM
 };

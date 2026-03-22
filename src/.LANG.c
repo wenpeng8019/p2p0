@@ -109,6 +109,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F95] = "%s: accepted, public=%s:%d ses_id=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n",  /* SID:95 */
     [LA_F96] = "%s: accepted, waiting for response (sid=%u)\n",  /* SID:96 */
     [LA_F97] = "%s: accepted\n",  /* SID:97 */
+    [LA_F121] = "%s: bad payload len=%d (need 6)",  /* SID:121 */
     [LA_F99] = "%s: bad payload(len=%d cand_cnt=%d)\n",  /* SID:99 */
     [LA_F100] = "%s: bad payload(len=%d)\n",  /* SID:100 */
     [LA_F101] = "%s: bad payload(len=%d, need >=8)\n",  /* SID:101 */
@@ -132,14 +133,13 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F118] = "%s: invalid ack_seq=%u\n",  /* SID:118 */
     [LA_F119] = "%s: invalid cand idx: %d (count: %d)",  /* SID:119 */
     [LA_F120] = "%s: invalid for non-relay req\n",  /* SID:120 */
-    [LA_F121] = "%s: invalid payload len=%d (need 6)",  /* SID:121 */
+    [LA_F419] = "%s: invalid payload len=%d (need 6)",  /* SID:419 */
     [LA_F122] = "%s: invalid seq=%u\n",  /* SID:122 */
     [LA_F123] = "%s: invalid session_id=0\n",  /* SID:123 */
     [LA_F124] = "%s: keep-alive sent (%d cands)",  /* SID:124 */
     [LA_F125] = "%s: new request (sid=%u) overrides pending request (sid=%u)\n",  /* SID:125 */
     [LA_F128] = "%s: no writable path available",  /* SID:128 */
     [LA_F129] = "%s: not connected, cannot send FIN",  /* SID:129 */
-    [LA_F130] = "%s: not connected, unexpected ACK",  /* SID:130 */
     [LA_F131] = "%s: old request ignored (sid=%u <= last_sid=%u)\n",  /* SID:131 */
     [LA_F162] = "%s: path rx UP (%s:%d)",  /* SID:162 */
     [LA_F190] = "%s: path tx UP (echo seq=%u)",  /* SID:190 */
@@ -265,6 +265,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F257] = "Gathered host cand<%s:%d> (priority=0x%08x)",  /* SID:257 */
     [LA_F258] = "% Handshake complete",  /* SID:258 */
     [LA_F259] = "Handshake failed: %s (-0x%04x)",  /* SID:259 */
+    [LA_F420] = "Ignore %s pkt from %s:%d, not connected",  /* SID:420 */
+    [LA_F421] = "Ignore %s pkt from %s:%d, not connecting",  /* SID:421 */
+    [LA_F422] = "Ignore %s pkt from %s:%d, not connecting/connected",  /* SID:422 */
     [LA_F260] = "Initialize PUBSUB signaling context failed(%d)",  /* SID:260 */
     [LA_F261] = "Initialize network subsystem failed(%d)",  /* SID:261 */
     [LA_F262] = "Initialize signaling mode: %d",  /* SID:262 */
@@ -422,6 +425,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
+    [LA_F130] = "%s: not connected, unexpected ACK",  /* SID:130 disabled */
     [LA_F141] = "%s: punching remote [%d]cand<%s:%d> (type: %s)",  /* SID:141 disabled */
 };
 

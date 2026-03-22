@@ -447,7 +447,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     // 校验负载长度
     if (payload_len < 6) {
-        print("W:", LA_F("%s: invalid payload len=%d (need 6)", LA_F121, 121), PROTO, payload_len);
+        print("W:", LA_F("%s: invalid payload len=%d (need 6)", LA_F419, 419), PROTO, payload_len);
         return;
     }
 
@@ -620,7 +620,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     // 校验负载长度：标准格式 6B (target_addr)
     if (payload_len < 6) {
-        print("W:", LA_F("%s: invalid payload len=%d (need 6)", LA_F121, 121), 
+        print("W:", LA_F("%s: bad payload len=%d (need 6)", LA_F121, 121), 
               PROTO, payload_len);
         return;
     }
@@ -802,6 +802,12 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     const char* PROTO = "CONN_ACK";
     nat_ctx_t *n = &s->nat;
 
+    if (n->state < NAT_CONNECTING) {
+        print("E:", LA_F("Ignore %s pkt from %s:%d, not connecting", LA_F421, 421), PROTO,
+              inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        return;
+    }
+
     printf(LA_F("Recv %s pkt from %s:%d echo_seq=%u", LA_F306, 306),
           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
 
@@ -833,12 +839,18 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
     const char* PROTO = "DATA";
     nat_ctx_t *n = &s->nat;
 
+    if (n->state < NAT_CONNECTING) {
+        print("E:", LA_F("Ignore %s pkt from %s:%d, not connecting/connected", LA_F422, 422), PROTO,
+              inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        return;
+    }
+
     printf(LA_F("Recv %s pkt from %s:%d, seq=%u, len=%d", LA_F309, 309),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, data_len - P2P_HDR_SIZE);
     
     n->last_recv_time = now;
 
-    // 记录数据包接收（根据来源地址查找实际接收路径）
+    // 记录统计数据包接收
     int recv_path = p2p_find_path_by_addr(s, from);
     if (recv_path >= -1)
         path_manager_on_packet_recv(s, recv_path, now, data_len);
@@ -861,7 +873,8 @@ void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
     nat_ctx_t *n = &s->nat;
 
     if (n->state < NAT_LOST) {
-        print("E:", LA_F("%s: not connected, unexpected ACK", LA_F130, 130), PROTO);
+        print("E:", LA_F("Ignore %s pkt from %s:%d, not connected", LA_F420, 420), PROTO,
+              inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return;
     }
 
@@ -870,10 +883,9 @@ void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
 
     n->last_recv_time = now;
 
-    // 查找来源路径
+    // ACK 控制包不计入流量统计（size=0），但需要更新路径活跃时间、包计数和重置超时计数器
     int cand_idx = p2p_find_remote_candidate_by_addr(s, from);
     if (cand_idx >= 0) {
-        // ACK 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
         path_manager_on_packet_recv(s, cand_idx, now, 0);
     }
 }
@@ -917,57 +929,60 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
         case NAT_PUNCHING:
 
-            // 超时判断
-            if (tick_diff(now_ms, n->punch_start) >= PUNCH_TIMEOUT_MS) {
-                
-                // ICE 候选交换完成后
-                // + 只有在 ICE 候选交换完成后才判定打洞超时，否则可能还有新候选在路上，该状态值由信令层负责设置维护
-                if (s->remote_ice_done) {
+            // ICE 候选交换完成后
+            if (s->remote_ice_done) {
 
-                    // 检查是否有信令中转服务可用（通过 path_manager 选路判断）
-                    int best_path = path_manager_select_best_path(s);
-                    
-                    // 如果最佳路径是信令中转（PATH_IDX_SIGNALING），说明打洞失败但可通过信令转发数据
-                    if (best_path == PATH_IDX_SIGNALING) {
+                // 如果没有候选队列，或者打洞超时
+                if (!s->remote_cand_cnt || tick_diff(now_ms, n->punch_start) >= PUNCH_TIMEOUT_MS) {
+
+                    // 如果有信令中转服务可用
+                    // + 最佳路径只有在没有任何其他可用路径后，且存在信令中转服务时，才会返回 PATH_IDX_SIGNALING
+                    if (path_manager_select_best_path(s) == PATH_IDX_SIGNALING) {
                         
                         print("W:", LA_F("%s: PUNCHING → RELAY (timeout %" PRIu64 "ms, signaling)", LA_F182, 182),
                               TASK_NAT, tick_diff(now_ms, n->punch_start));
 
                         n->state = NAT_RELAY;           // 标记进入中继模式
-                        s->rx_confirmed = true;         // 信令路径视为双向已确认（通过服务器转发）
+                        s->rx_confirmed = true;         // 信令路径视为双向已确认
                         s->tx_confirmed = true;
 
                         // 触发 p2p_connected 事件（信令中转模式）
                         p2p_connected(s, now_ms);
                         
-                        // 启动信道外对端探测（继续尝试打洞）
+                        // 启动信道外对端探测（确认对端确实在线，只是网络不通）
                         probe_trigger(s);
                     }
                     // 打洞失败且无信令中转服务：超时错误
                     else {
+
                         print("E:", LA_F("%s: PUNCHING → CLOSED (timeout %" PRIu64 "ms, no relay)", LA_F138, 138),
                               TASK_NAT, tick_diff(now_ms, n->punch_start));
                         
-                        n->state = NAT_CLOSED;  // 标记为已关闭（打洞失败）
-                        nat_clear_reaching_queue(n);  // 清理 reaching queue
+                        n->state = NAT_CLOSED;          // 标记为已关闭（打洞失败）
+                        nat_clear_reaching_queue(n);    // 清理 reaching queue
                     }
+
+                    break;
                 }
-                else print("V:", LA_F("%s: timeout but ICE exchange not done yet (%" PRIu64 " ms elapsed, mode=%d), waiting for more candidates", LA_F183, 183),
-                           TASK_NAT, tick_diff(now_ms, n->punch_start), s->signaling_mode);
+            }
+            else if (tick_diff(now_ms, n->punch_start) >= PUNCH_TIMEOUT_MS) {
+
+                print("V:", LA_F("%s: timeout but ICE exchange not done yet (%" PRIu64 " ms elapsed, mode=%d), waiting for more candidates", LA_F183, 183),
+                        TASK_NAT, tick_diff(now_ms, n->punch_start), s->signaling_mode);
             }
 
             // 周期性向所有候选发送打洞包（包括 relay）
             int sent_cnt = 0;
             for (int i = 0; i < s->remote_cand_cnt; i++) {
 
-                if (s->remote_cands[i].last_punch_send_ms == 0 ||
-                    tick_diff(now_ms, s->remote_cands[i].last_punch_send_ms) >= PUNCH_INTERVAL_MS) {
+                if (tick_diff(now_ms, s->remote_cands[i].last_punch_send_ms) >= PUNCH_INTERVAL_MS) {
 
                     nat_send_punch(s, LA_W("punch", LA_W10, 10), &s->remote_cands[i], now_ms);
                     sent_cnt++;
                 }
             }
             if (sent_cnt) {
+
                 print("V:", LA_F("%s: punching %d/%d candidates (elapsed: %" PRIu64 " ms)", LA_F139, 139),
                       TASK_NAT, sent_cnt, s->remote_cand_cnt, tick_diff(now_ms, n->punch_start));
             }
@@ -977,34 +992,33 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
             // 超时检查
             if (tick_diff(now_ms, n->conn_start_ms) >= CONN_TIMEOUT_MS) {
+                
                 print("E:", LA_F("%s: CONN timeout after %" PRIu64 "ms", LA_F69, 69),
                       TASK_NAT, tick_diff(now_ms, n->conn_start_ms));
                 
-                // 检查是否有信令中转服务可用
-                int best_path = path_manager_select_best_path(s);
-                
-                // 有信令中转：回退到 RELAY 模式
-                if (best_path == PATH_IDX_SIGNALING) {
+                // 如果有信令中转服务可用，fallback 到 RELAY 模式
+                if (path_manager_select_best_path(s) == PATH_IDX_SIGNALING) {
+
+                    print("W:", LA_F("%s: CONNECTING → RELAY (timeout, signaling)", LA_F70, 70), TASK_NAT);
 
                     n->state = NAT_RELAY;
                     s->rx_confirmed = true;         // 信令路径视为双向已确认
                     s->tx_confirmed = true;
                     
-                    // 触发 p2p_connected 事件（信令中转模式）
+                    // 触发 p2p_connected 事件
                     p2p_connected(s, now_ms);
                     
-                    // 启动信道外对端探测（继续尝试打洞）
+                    // 启动信道外对端探测（确认对端确实在线，只是网络不通）
                     probe_trigger(s);
                     
-                    print("W:", LA_F("%s: CONNECTING → RELAY (timeout, signaling)", LA_F70, 70), TASK_NAT);
                 } 
                 // 无信令中转：连接失败
                 else {
 
-                    n->state = NAT_CLOSED;
-                    nat_clear_reaching_queue(n);  // 清理 reaching queue
-                    
                     print("E:", LA_F("%s: CONNECTING → CLOSED (timeout, no relay)", LA_F71, 71), TASK_NAT);
+
+                    n->state = NAT_CLOSED;
+                    nat_clear_reaching_queue(n);  // 清理 reaching queue                    
                 }
 
                 break;
@@ -1051,8 +1065,8 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             // 推进探测状态机
             probe_tick(s, now_ms);
 
-            // 中继模式下周期性尝试直连
-            if (tick_diff(now_ms, n->last_retry_send_ms) >= PUNCH_INTERVAL_MS * 4) {
+            // 中继模式下周期性尝试直连（打洞）
+            if (s->remote_cand_cnt && tick_diff(now_ms, n->last_retry_send_ms) >= PUNCH_INTERVAL_MS * 4) {
 
                 for (int i = 0; i < s->remote_cand_cnt; i++) {
                     nat_send_punch(s, LA_W("retry", LA_W14, 14), &s->remote_cands[i], now_ms);
@@ -1167,7 +1181,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             } 
             // 发送失败（信令服务器未就绪），保留节点等待下次重试
             else print("V:", LA_F("%s: reaching relay via signaling FAILED (ret=%d), seq=%u", LA_F146, 146),
-                      TASK_NAT, ret, n->reaching_head->seq);            
+                       TASK_NAT, ret, n->reaching_head->seq);            
         }
         // 策略 2：广播模式（不依赖信令服务器）
         else {
