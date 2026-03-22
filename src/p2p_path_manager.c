@@ -95,7 +95,7 @@
 #include "p2p_internal.h"
 
 /* 前向声明 */
-static void update_metrics(path_stats_t *p, uint32_t rtt_ms, bool success);
+static void update_metrics(path_stats_t *p);
 static void update_quality(path_stats_t *p);
 
 /*
@@ -236,11 +236,22 @@ void path_stats_init(path_stats_t *st, int cost_score) {
     st->state = PATH_STATE_INIT;
     st->cost_score = cost_score;
     
-    /* RTT：使用合理初始值避免新路径被忽略 */
-    st->rtt_ms = 100;       /* 初始估计 100ms */
+    /* RTT：使用合理初始值避免新路径被忽略
+     * 
+     * 混合模式 RTT 初始化：
+     *   - 所有测量源初始为 0 表示未测量
+     *   - rtt_ms 初始估计 100ms（用于路径选择排序，避免新路径被完全忽略）
+     *   - 一旦有任何测量值，get_effective_rtt() 会自动选择最优源
+     */
+    st->probe_rtt_direct = 0;           /* 未测量：等待原路返回测量 */
+    st->probe_rtt_direct_srtt = 0;      /* 未平滑：等待首次测量后初始化 */
+    st->probe_rtt_direct_rttvar = 0;    /* 未测量：等待首次测量后初始化 */
+    st->probe_rtt_cross = 0;            /* 未测量：等待跨路径测量 */
+    st->data_rtt = 0;                   /* 未测量：等待数据层 SRTT */
+    
+    st->rtt_ms = 100;       /* 初始估计 100ms（避免新路径被忽略） */
     st->rtt_min = 9999;     /* 等待首次测量 */
-    st->rtt_srtt = 100;     /* EWMA 初始 100ms */
-    st->rtt_rttvar = 50;    /* 方差 50ms */
+    st->rtt_variance = 0;   /* 等待方差测量 */
     
     /* 质量：初始假设为一般 */
     st->quality = PATH_QUALITY_FAIR;
@@ -251,7 +262,6 @@ void path_stats_init(path_stats_t *st, int cost_score) {
  * 设置信令转发(SIGNALING)路径
  */
 int path_manager_enable_signaling(p2p_session_t *s, struct sockaddr_in *addr) {
-    path_manager_t *pm = &s->path_mgr;
     s->signaling.active = true;
     s->signaling.addr = *addr;
     path_stats_init(&s->signaling.stats, 5);       /* SIGNALING cost=5 */
@@ -651,7 +661,6 @@ int path_manager_switch_path(p2p_session_t *s,
                               int target_path,
                               const char *reason,
                               uint64_t now_ms) {
-    path_manager_t *pm = &s->path_mgr;
     if (target_path < -1) return -1; /* -1=SIGNALING, >=0=候选 */
     if (target_path == s->active_path) return 0; /* 已是目标路径 */
     
@@ -892,7 +901,7 @@ int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, ui
             if (p) {
                 p->total_packets_lost++;                    // 增加路径丢包计数
                 p->consecutive_timeouts++;                  // 增加路径连续超时次数
-                update_metrics(p, 0, false);                // 实时更新路径统计信息
+                update_metrics(p);                          // 更新综合指标（丢包率）
             }
         }
         pm->pending_head = (pm->pending_head + 1) % MAX_PENDING_PACKETS;
@@ -910,7 +919,18 @@ int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, ui
     return 0;
 }
 
-int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms) {
+/*
+ * 记录探测包确认（完成 per-path RTT 测量）
+ *
+ * 混合模式 RTT 测量策略：
+ *   - 原路返回（send_path == recv_path）：记录到 probe_rtt_direct（精确）
+ *   - 跨路径返回（send_path != recv_path）：记录到 probe_rtt_cross（估算，降权）
+ * 
+ * 适用场景：
+ *   - PUNCHING 阶段：冷打洞时可能出现单向网络，接受跨路径测量
+ *   - CONNECTED 阶段：应该都是原路返回（对称路径已建立）
+ */
+int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, int recv_path, uint64_t now_ms) {
     path_manager_t *pm = &s->path_mgr;
     
     // 在环形队列中查找对应的发送记录（seq=0 为特殊值，也允许测量）
@@ -920,7 +940,7 @@ int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms) 
         if (track->sent_time_ms == 0) continue;             // 跳过已消费（应答）的槽位
         if (track->seq != seq) continue;
         
-        int path_idx = track->path_idx;
+        int send_path = track->path_idx;                    // PUNCH 发送路径
         uint64_t sent_ms = track->sent_time_ms;
         track->sent_time_ms = 0;                            // 标记为已消费（应答）
 
@@ -931,24 +951,76 @@ int path_manager_on_packet_ack(p2p_session_t *s, uint32_t seq, uint64_t now_ms) 
             pm->pending_count--;
         }
         
-        path_stats_t *p = p2p_get_path_stats(s, path_idx);
-        if (!p) return -1;
-        
         // 计算 RTT（round trip time）
         uint32_t rtt = (uint32_t)tick_diff(now_ms, sent_ms);
         
-        // 更新 RTT 样本（环形）缓冲区
-        p->rtt_samples[p->rtt_sample_idx] = rtt;
-        p->rtt_sample_idx = (p->rtt_sample_idx + 1) % RTT_SAMPLE_COUNT;
-        if (p->rtt_sample_count < RTT_SAMPLE_COUNT) {
-            p->rtt_sample_count++;
-        }
-        // 更新 RTT 统计
-        if (rtt < p->rtt_min) p->rtt_min = rtt;
-        if (rtt > p->rtt_max) p->rtt_max = rtt;
+        // ========== 关键：判断是否原路返回 ==========
+        bool is_roundtrip = (send_path == recv_path);
         
-        // 实时更新路径统计信息
-        update_metrics(p, rtt, true);
+        // 更新发送路径的 RTT 统计（按原路/跨路径分别记录）
+        path_stats_t *send_stats = p2p_get_path_stats(s, send_path);
+        if (send_stats) {
+            if (is_roundtrip) {
+                // ========== 原路返回：精确测量，进行 EWMA 平滑 ==========
+                
+                // 记录原始测量值
+                send_stats->probe_rtt_direct = rtt;
+                
+                // EWMA 平滑算法（TCP-style smoothed RTT）
+                if (send_stats->probe_rtt_direct_srtt == 0) {
+                    // 首次测量：初始化
+                    send_stats->probe_rtt_direct_srtt = rtt;
+                    send_stats->probe_rtt_direct_rttvar = rtt / 2;
+                } else {
+                    // 后续测量：应用 EWMA
+                    // SRTT = (1-α) * SRTT + α * RTT
+                    // RTTVAR = (1-β) * RTTVAR + β * |SRTT - RTT|
+                    int32_t err = (int32_t)rtt - (int32_t)send_stats->probe_rtt_direct_srtt;
+                    int32_t new_srtt = (int32_t)send_stats->probe_rtt_direct_srtt + (int32_t)(ALPHA * (float)err);
+                    send_stats->probe_rtt_direct_srtt = new_srtt > 0 ? (uint32_t)new_srtt : send_stats->probe_rtt_direct_srtt;
+                    
+                    int32_t var_err = abs(err) - (int32_t)send_stats->probe_rtt_direct_rttvar;
+                    int32_t new_rttvar = (int32_t)send_stats->probe_rtt_direct_rttvar + (int32_t)(BETA * (float)var_err);
+                    send_stats->probe_rtt_direct_rttvar = new_rttvar > 0 ? (uint32_t)new_rttvar : 1;  // 最小值1
+                }
+                
+                // 更新 RTT 样本缓冲区（用于统计分析）
+                send_stats->rtt_samples[send_stats->rtt_sample_idx] = rtt;
+                send_stats->rtt_sample_idx = (send_stats->rtt_sample_idx + 1) % RTT_SAMPLE_COUNT;
+                if (send_stats->rtt_sample_count < RTT_SAMPLE_COUNT) {
+                    send_stats->rtt_sample_count++;
+                }
+                
+                // 更新 min/max RTT
+                if (rtt < send_stats->rtt_min) send_stats->rtt_min = rtt;
+                if (rtt > send_stats->rtt_max) send_stats->rtt_max = rtt;
+                
+                // 重置连续超时计数
+                send_stats->consecutive_timeouts = 0;
+                
+                // 更新综合指标（rtt_ms, rtt_variance, loss_rate）
+                update_metrics(send_stats);
+                
+                // 调试日志
+                print("V:", "path_manager: RTT path[%d] = %u ms (direct, srtt=%u, var=%u, seq=%u)",
+                      send_path, rtt, send_stats->probe_rtt_direct_srtt, 
+                      send_stats->probe_rtt_direct_rttvar, seq);
+            } else {
+                // ========== 跨路径返回：估算值（仅参考），不平滑 ==========
+                // 注意：这个 RTT 不是单条路径的真实延迟，而是 send_path + recv_path 的组合延迟
+                send_stats->probe_rtt_cross = rtt;
+                
+                // 更新综合指标（可能会用跨路径值作为初步参考）
+                update_metrics(send_stats);
+                
+                // 调试日志：标记为跨路径测量
+                print("V:", "path_manager: RTT path[%d] = %u ms (cross-path from recv_path=%d, seq=%u)",
+                      send_path, rtt, recv_path, seq);
+                
+                // 提示：跨路径测量仅作为冷打洞阶段的初步参考
+                // 在路径选择时，get_effective_rtt() 会对其降权处理（+30% 惩罚）
+            }
+        }
         
         return (int)rtt;
     }
@@ -975,8 +1047,11 @@ int path_manager_on_data_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms) {
     path_stats_t *p = p2p_get_path_stats(s, path_idx);
     if (!p) return -1;
 
-    // 实时更新 RTT 统计（基于 EWMA 平滑算法）
-    update_metrics(p, rtt_ms, true);
+    // 记录数据层 RTT（最可靠的测量值，来自 reliable 层 SRTT，已平滑）
+    p->data_rtt = rtt_ms;
+
+    // 更新综合指标
+    update_metrics(p);
     
     // 定期更新路径质量评估，有节流保护（1秒最多更新一次）
     update_quality(p);
@@ -1000,35 +1075,26 @@ int path_manager_on_data_loss_rate(p2p_session_t *s, int path_idx, float loss_ra
     return 0;
 }
 
-/* 内部函数：实时更新路径统计信息 metrics（RTT/丢包率, 采用 EWMA 平滑算法） */
-static void update_metrics(path_stats_t *p, uint32_t rtt_ms, bool success) {
-    // 基于 EWMA 平滑算法更新 RTT 
-    if (success) {
-
-        // 对于首帧的测量统计
-        // + 目前 path_stats_init 会对 srtt/rttvar 进行初始化，所以这里仅作为完备性兜底
-        if (p->rtt_srtt == 0) {
-            p->rtt_srtt = rtt_ms;
-            p->rtt_rttvar = rtt_ms / 2;
-        } else {
-            // 注意，这里需要转换为有符号整数进行计算，避免 UB 溢出问题
-            int32_t err = (int32_t)rtt_ms - (int32_t)p->rtt_srtt;
-            int32_t new_srtt = (int32_t)p->rtt_srtt + (int32_t)(ALPHA * (float)err);
-            p->rtt_srtt = new_srtt > 0 ? (uint32_t)new_srtt : p->rtt_srtt;
-            
-            int32_t var_err = abs(err) - (int32_t)p->rtt_rttvar;
-            int32_t new_rttvar = (int32_t)p->rtt_rttvar + (int32_t)(BETA * (float)var_err);
-            p->rtt_rttvar = new_rttvar > 0 ? (uint32_t)new_rttvar : 1;  // 最小值1，避免为0
-        }
-        
-        p->rtt_ms = p->rtt_srtt;                        // 平滑后的 RTT 作为当前 RTT
-        p->rtt_variance = p->rtt_rttvar;                // 平滑后的 RTT 方差作为当前抖动指标
-        if (rtt_ms < p->rtt_min) p->rtt_min = rtt_ms;   // 统计最小 RTT
-        
-        p->consecutive_timeouts = 0;
+/* 内部函数：实时更新路径综合指标（RTT/丢包率）
+ * 
+ * 此函数负责更新路径的综合 RTT 和丢包率，用于路径选择和质量评估。
+ * 注意：各测量源的 EWMA 平滑在各自的记录函数中完成。
+ */
+static void update_metrics(path_stats_t *p) {
+    // ========== 选择最优 RTT 作为综合 RTT ==========
+    // 优先级：data_rtt > probe_rtt_direct_srtt > probe_rtt_cross * 1.3
+    uint32_t effective_rtt = get_effective_rtt(p);
+    if (effective_rtt != UINT32_MAX) {
+        p->rtt_ms = effective_rtt;
     }
+    // 否则保持 rtt_ms 初始值（100ms），避免新路径被完全忽略
     
-    // 重新计算丢包率：综合 = max(探测层, 数据层)
+    // ========== 使用 direct 的方差作为综合抖动 ==========
+    // 只有原路返回测量才有可靠的抖动指标
+    p->rtt_variance = p->probe_rtt_direct_rttvar;
+    
+    // ========== 重新计算综合丢包率 ==========
+    // 综合丢包率 = max(探测层, 数据层)
     if (p->total_packets_sent > 0) {
         float probe_loss = (float)p->total_packets_lost / (float)p->total_packets_sent;
         p->loss_rate = fmaxf(probe_loss, p->data_loss_rate);
@@ -1216,7 +1282,7 @@ void path_manager_tick(p2p_session_t *s, uint64_t now_ms) {
             if (p) {
                 p->total_packets_lost++;            // 增加路径丢包计数
                 p->consecutive_timeouts++;          // 增加路径连续超时次数
-                update_metrics(p, 0, false);        // 实时更新路径统计信息
+                update_metrics(p);                  // 更新综合指标（丢包率）
             }
             track->sent_time_ms = 0;
         }

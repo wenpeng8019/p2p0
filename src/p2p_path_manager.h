@@ -67,18 +67,40 @@ typedef struct {
     /* 路径状态 */
     path_state_t        state;                      // 路径状态
     
-    /* 性能指标（用于路径选择） */
-    uint32_t            rtt_ms;                     // Round-Trip Time（毫秒）
+    /* 性能指标（用于路径选择）
+     * 
+     * RTT 测量分层策略（混合模式）：
+     *   1. 探测层原路返回测量：
+     *      - probe_rtt_direct:      最新测量值（原始 RTT）
+     *      - probe_rtt_direct_srtt: EWMA 平滑值（用于路径选择，抗抖动）
+     *      - probe_rtt_direct_rttvar: RTT 方差（用于抖动评估）
+     * 
+     *   2. 探测层跨路径测量：
+     *      - probe_rtt_cross: 跨路径测量值（不平滑，仅参考）
+     *      - 场景：PUNCH(A) → peer → REACH(B)，测量的是 A出+B入 的组合延迟
+     *      - 用途：冷打洞单向网络时的初步排序，选择时降权 +30%
+     * 
+     *   3. 数据层 SRTT：
+     *      - data_rtt: 来自 reliable 层的 SRTT（已平滑，最可靠）
+     * 
+     *   4. 综合 RTT：
+     *      - rtt_ms: 从三个源中自动选择最优值
+     *      - 优先级：data_rtt > probe_rtt_direct_srtt > probe_rtt_cross*1.3
+     *      - rtt_variance: 综合抖动指标
+     */
+    uint32_t            probe_rtt_direct;           // 探测层原路最新测量（0=未测量）
+    uint32_t            probe_rtt_direct_srtt;      // 探测层原路 EWMA 平滑值（路径选择用）
+    uint32_t            probe_rtt_direct_rttvar;    // 探测层原路 RTT 方差（抖动评估用）
+    uint32_t            probe_rtt_cross;            // 探测层跨路径测量（0=未测量，仅参考）
+    uint32_t            data_rtt;                   // 数据层 SRTT（0=未测量，最可靠）
+    
+    uint32_t            rtt_ms;                     // 当前综合 RTT（毫秒，自动选择最优）
     uint32_t            rtt_min;                    // 最小 RTT（基线）
     uint32_t            rtt_max;                    // 最大 RTT
-    uint32_t            rtt_variance;               // 延迟抖动
+    uint32_t            rtt_variance;               // 综合延迟抖动
     float               loss_rate;                  // 综合丢包率（0.0-1.0），取 probe 和 data 两层的最大值
     float               data_loss_rate;             // 数据层丢包率（来自 reliable/SCTP/DTLS 传输层）
     uint64_t            bandwidth_bps;              // 估计带宽（bps）
-    
-    /* RTT 平滑（EWMA: Exponentially Weighted Moving Average） */
-    uint32_t            rtt_srtt;                   // 平滑 RTT
-    uint32_t            rtt_rttvar;                 // RTT 方差
     
     uint32_t            rtt_samples[RTT_SAMPLE_COUNT]; // RTT 样本环形缓冲区
     int                 rtt_sample_idx;             // 当前样本索引
@@ -253,8 +275,9 @@ void path_manager_reset(struct p2p_session *s);
  * 初始化路径统计（候选路径使用）
  *
  * 设置合理默认值避免 memset(0) 导致的问题：
- *   rtt_ms=100, rtt_min=9999, rtt_srtt=100, rtt_rttvar=50,
- *   quality=FAIR, quality_score=0.5, state=INIT
+ *   - rtt_ms=100（初始估计），rtt_min=9999（等待首次测量）
+ *   - 所有测量源（probe_rtt_direct/cross, data_rtt）初始为 0（未测量）
+ *   - quality=FAIR, quality_score=0.5, state=INIT
  *
  * @param st         统计结构指针
  * @param cost_score 成本分数（0=LAN/PUNCH, 5=RELAY, 8+=TURN）
@@ -304,7 +327,7 @@ int path_manager_add_turn_path(struct p2p_session *s, struct sockaddr_in *addr);
  * 两组统计接口：
  *   Group 1 — 探测层（probe, 面向所有路径）：
  *     path_manager_on_packet_recv / path_manager_on_packet_send / path_manager_on_packet_ack
- *     用于 NAT punch/alive 包在各路径上的 RTT 测量和丢包检测。
+ *     用于控制包（PUNCH/REACH/ALIVE）在各路径上的 RTT 测量和丢包检测。
  *     丢包由 path_manager_tick 扫描 pending 队列超时判定。
  *
  *   Group 2 — 数据层（data, 面向当前活跃路径）：
@@ -325,7 +348,7 @@ int path_manager_add_turn_path(struct p2p_session *s, struct sockaddr_in *addr);
  */
 int path_manager_on_packet_recv(struct p2p_session *s, int path_idx, uint64_t now_ms, uint32_t size);
 
-/* ---- Group 1: 探测层统计（全路径 punch/alive 包） ---- */
+/* ---- Group 1: 探测层统计（控制包 PUNCH/REACH/ALIVE 的 per-path RTT 测量） ---- */
 
 /*
  * 记录探测包发送（开始 per-path RTT 测量）
@@ -342,12 +365,32 @@ int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t se
 /*
  * 记录探测包确认（完成 per-path RTT 测量）
  *
- * @param s         会话指针
- * @param seq       确认的序列号
- * @param now_ms    当前时间（毫秒）
- * @return          测量的 RTT（毫秒），或 -1（未找到对应发送记录）
+ * 混合模式 RTT 测量策略：
+ *   1. 原路返回（send_path == recv_path）：
+ *      - 记录到 probe_rtt_direct（精确测量）
+ *      - 用于 PUNCHING/CONNECTED 阶段的路径选择
+ *      - 这是最准确的单路径 RTT
+ * 
+ *   2. 跨路径返回（send_path != recv_path）：
+ *      - 记录到 probe_rtt_cross（估算值，仅参考）
+ *      - 仅用于 PUNCHING 阶段冷打洞的初步排序
+ *      - RTT = 发送路径延迟 + 接收路径延迟（非单路径真实延迟）
+ *      - 路径选择时会降权处理（+30% 惩罚）
+ * 
+ *   3. 使用场景：
+ *      - PUNCHING 阶段：接受跨路径测量（单向网络场景，无其他数据）
+ *      - CONNECTED 阶段：应该都是原路返回（对称路径已建立）
+ * 
+ * @param s            会话指针
+ * @param seq          确认的序列号
+ * @param recv_path    接收路径索引（REACH 包来源路径）
+ * @param now_ms       当前时间（毫秒）
+ * @return             测量的 RTT（毫秒），或 -1（未找到对应发送记录）
+ * 
+ * @note 调用方需通过 target_addr 判断 send_path，然后比较 send_path == recv_path
+ *       来确定是否原路返回，这样才能正确更新对应的 RTT 字段
  */
-int path_manager_on_packet_ack(struct p2p_session *s, uint32_t seq, uint64_t now_ms);
+int path_manager_on_packet_ack(struct p2p_session *s, uint32_t seq, int recv_path, uint64_t now_ms);
 
 /* ---- Group 2: 数据层统计（活跃路径 DATA 包） ---- */
 
@@ -376,6 +419,38 @@ int path_manager_on_data_rtt(struct p2p_session *s, int path_idx, uint32_t rtt_m
  * @return          0=成功，-1=失败
  */
 int path_manager_on_data_loss_rate(struct p2p_session *s, int path_idx, float loss_rate);
+
+/* ---- 辅助函数 ---- */
+
+/*
+ * 获取路径的有效 RTT（按优先级选择最优测量值）
+ *
+ * 优先级策略（混合模式）：
+ *   1. data_rtt > 0                    → 使用数据层 SRTT（最可靠，CONNECTED 阶段）
+ *   2. probe_rtt_direct_srtt > 0       → 使用探测层原路 EWMA 平滑值（精确且抗抖动）
+ *   3. probe_rtt_cross > 0             → 使用跨路径测量 * 1.3（降权，冷打洞阶段）
+ *   4. 否则                            → 返回 UINT32_MAX（未测量，不可选）
+ *
+ * 跨路径测量降权原因：
+ *   - 跨路径 RTT = 发送路径延迟 + 接收路径延迟（非单路径真实延迟）
+ *   - 仅用于冷打洞阶段的初步排序，不应作为最终路径选择依据
+ *   - 增加 30% 惩罚，确保有原路测量的路径被优先选择
+ *
+ * @param p  路径统计指针
+ * @return   有效 RTT（毫秒），或 UINT32_MAX（未测量）
+ *
+ * @note 此函数用于路径选择和质量评估，确保使用最准确的 RTT 值
+ */
+static inline uint32_t get_effective_rtt(const path_stats_t *p) {
+    if (p->data_rtt > 0) return p->data_rtt;                          // 最优：数据层 SRTT
+    if (p->probe_rtt_direct_srtt > 0) return p->probe_rtt_direct_srtt; // 次优：原路 EWMA 平滑
+    if (p->probe_rtt_cross > 0) {
+        // 跨路径测量降权：增加 30% 惩罚（避免混淆单路径真实延迟）
+        uint64_t penalized = (uint64_t)p->probe_rtt_cross * 13 / 10;
+        return penalized > UINT32_MAX ? UINT32_MAX : (uint32_t)penalized;
+    }
+    return UINT32_MAX;  // 未测量
+}
 
 //-----------------------------------------------------------------------------
 

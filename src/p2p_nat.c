@@ -479,10 +479,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         p2p_ice_on_check_success(s, from);
     }
 
-    // RTT 测量：通过 seq 匹配 pending_packets 计算精确 per-path RTT
-    if (hdr->seq > 0)
-        path_manager_on_packet_ack(s, hdr->seq, now);
-    // PUNCH 控制包不计入流量统计（size=0），但这里需要更新路径活跃时间、包计数和重置超时计数器
+    // PUNCH 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
     path_manager_on_packet_recv(s, cand_idx, now, 0);
 
     // peer→me 方向：收到 PUNCH 即证明入方向通了
@@ -538,10 +535,24 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     int target_path = p2p_find_remote_candidate_by_addr(s, &target_addr);
     if (target_path < 0) return;
 
-    // RTT 测量：通过 seq 匹配 pending_packets 计算精确 per-path RTT
-    // 注意：如果 REACH 不是原路返回，RTT 测量可能不准确（反映的是跨路径延迟）
+    // ========== RTT 测量（混合模式，区分原路/跨路径） ==========
+    // 
+    // 关键逻辑：
+    //   - target_path：我方发送 PUNCH 的路径（从 target_addr 解析）
+    //   - cand_idx：   对端返回 REACH 的路径（from 地址）
+    // 
+    // 原路返回（target_path == cand_idx）：
+    //   PUNCH(A) → [NAT] → peer → [NAT] → REACH(A)
+    //   测量的是单条路径 A 的真实 RTT，记录到 probe_rtt_direct
+    // 
+    // 跨路径返回（target_path != cand_idx）：
+    //   PUNCH(A) → [NAT] → peer → [NAT] → REACH(B)
+    //   测量的是路径 A 出 + 路径 B 入的组合延迟（冷打洞单向网络场景）
+    //   这不是路径 A 的真实 RTT，仅作为初步参考，记录到 probe_rtt_cross
+    //   路径选择时会降权处理（+30% 惩罚）
+    // 
     if (hdr->seq > 0)
-        path_manager_on_packet_ack(s, hdr->seq, now);
+        path_manager_on_packet_ack(s, hdr->seq, cand_idx, now);
 
     // REACH 控制包不计入流量统计（size=0），但这里需要更新路径活跃时间、包计数和重置超时计数器
     path_manager_on_packet_recv(s, cand_idx, now, 0);
@@ -640,6 +651,9 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     int cand_idx = nat_upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
+    // CONN 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
+    path_manager_on_packet_recv(s, cand_idx, now, 0);
+
     // 如果本端还未进入 NAT_CONNECTING 状态，记录对方的 conn_seq 以便后续发送 CONN_ACK 时使用
     if (n->state < NAT_CONNECTING) {
         n->peer_connecting = true;
@@ -686,6 +700,9 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     if (cand_idx < 0) return;
 
     print("V:", LA_F("%s: accepted from cand[%d]", LA_F85, 85), PROTO, cand_idx);
+
+    // CONN_ACK 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
+    path_manager_on_packet_recv(s, cand_idx, now, 0);
 
     // 进入 NAT_CONNECTED 状态
     if (n->state == NAT_CONNECTING) {
@@ -737,6 +754,13 @@ void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), ack_seq, sack);
 
     n->last_recv_time = now;
+
+    // 查找来源路径
+    int cand_idx = p2p_find_remote_candidate_by_addr(s, from);
+    if (cand_idx >= 0) {
+        // ACK 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
+        path_manager_on_packet_recv(s, cand_idx, now, 0);
+    }
 }
 
 /*
