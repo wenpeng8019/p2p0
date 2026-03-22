@@ -1049,6 +1049,9 @@ p2p_update(p2p_handle_t hdl) {
     // + 同步转换保证了数据包处理总是在 on_connected 事件之后发生（数据层会话一致性契约）
     // + 此处不再需要异步协同（NAT_CONNECTED → P2P_STATE_CONNECTED）
 
+    // NAT_RELAY 状态转换已由 nat 模块通过 p2p_connected() 同步触发
+    // relay 候选也需要通过 NAT 层 connect 握手，已统一处理
+
     // 转换：PUNCHING → ERROR（NAT 打洞超时且无中继服务）
     if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
         && s->nat.state == NAT_CLOSED) {
@@ -1078,33 +1081,9 @@ p2p_update(p2p_handle_t hdl) {
         // else: 无可用路径，保持 RELAY 状态等待
     }
 
-    // 转换：PUNCHING → RELAY（NAT 打洞失败，切换到中继路径）
-    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
-        && (s->nat.state == NAT_RELAY || (s->remote_ice_done && s->remote_cand_cnt == s->remote_relay_cnt))) {
-
-        // SIGNALING 路径已在 REGISTER_ACK 时添加（如果服务器支持）
-        // 这里只需选择最佳可用路径
-        int best_path = path_manager_select_best_path(s);
-        if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
-            const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
-            s->path = path_manager_get_path_type(s, best_path);
-            s->active_addr = addr ? *addr : (s->signaling.active ? s->signaling.addr : s->nat.peer_addr);
-            path_manager_switch_path(s, best_path, "nat_punch_failed", now_ms);
-            print("I:", LA_F("State: → RELAY (punch failed), path[%d]", LA_F347, 347), best_path);
-        }
-        // 无可用路径：等待后续路径恢复
-        else {
-            print("W:", LA_F("State: → RELAY (no path available)", LA_F346, 346));
-            s->path = P2P_PATH_NONE;
-            s->active_path = -2;  // -2=无路径管理器管理的路径
-        }
-
-        p2p_set_state(s, P2P_STATE_RELAY);  // 无论哪个分支都转换状态
-    }
-
     // 转换：CONNECTED → LOST/RELAY（NAT 连接丢失，可能恢复）
     // LOST 是可恢复的数据链丢失状态，与旧版本的 timeout 错误处理不同
-    if (s->state == P2P_STATE_CONNECTED
+    if ((s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)
         && s->nat.state == NAT_LOST) {
         
         // 标记当前活跃路径为失效
@@ -1132,7 +1111,7 @@ p2p_update(p2p_handle_t hdl) {
 
     // 转换：LOST → CONNECTED（NAT 连接恢复）
     if (s->state == P2P_STATE_LOST
-        && s->nat.state == NAT_CONNECTED) {
+        && (s->nat.state == NAT_CONNECTED || s->nat.state == NAT_RELAY)) {
         
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {
@@ -1150,7 +1129,7 @@ p2p_update(p2p_handle_t hdl) {
         p2p_set_state(s, P2P_STATE_CONNECTED);
     }
 
-    // 转换：CONNECTED/RELAY/LOST/CLOSING → CLOSED
+    // 转换：CONNECTED/RELAY/LOST → CLOSED
     // + NAT FIN 和信令 PEER_OFF 都归一化为 NAT_CLOSED，统一在此处理
     if (s->state >= P2P_STATE_LOST
         && s->nat.state == NAT_CLOSED) {

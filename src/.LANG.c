@@ -162,7 +162,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F152] = "%s: relay candidate [%d] activated, tx_confirmed=true",  /* SID:152 */
     [LA_F153] = "%s: remote %s cand[%d]<%s:%d> accepted\n",  /* SID:153 */
     [LA_F154] = "%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n",  /* SID:154 */
-    [LA_F155] = "%s: remote relay cand[%d]<%s:%d>%s\n",  /* SID:155 */
     [LA_F156] = "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n",  /* SID:156 */
     [LA_F157] = "%s: restarting periodic check",  /* SID:157 */
     [LA_F158] = "%s: retry(%d/%d) probe\n",  /* SID:158 */
@@ -353,8 +352,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F343] = "State: → CONNECTED, path[%d]",  /* SID:343 */
     [LA_F344] = "% State: → ERROR (punch timeout, no relay available)",  /* SID:344 */
     [LA_F345] = "% State: → PUNCHING",  /* SID:345 */
-    [LA_F346] = "% State: → RELAY (no path available)",  /* SID:346 */
-    [LA_F347] = "State: → RELAY (punch failed), path[%d]",  /* SID:347 */
     [LA_F348] = "State: → RELAY, path[%d] (signaling)",  /* SID:348 */
     [LA_F349] = "% Stopping internal thread",  /* SID:349 */
     [LA_F350] = "% Storage full, waiting for peer to come online",  /* SID:350 */

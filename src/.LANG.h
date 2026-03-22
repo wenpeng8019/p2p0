@@ -196,7 +196,7 @@ enum {
     LA_F152,  /* "%s: relay candidate [%d] activated, tx_confirmed=true" (%s,%d)  [p2p_nat.c] */
     LA_F153,  /* "%s: remote %s cand[%d]<%s:%d> accepted\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c] */
     LA_F154,  /* "%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c] */
-    LA_F155,  /* "%s: remote relay cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
+    _LA_155,
     LA_F156,  /* "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
     LA_F157,  /* "%s: restarting periodic check" (%s)  [p2p_probe.c] */
     LA_F158,  /* "%s: retry(%d/%d) probe\n" (%s,%d,%d)  [p2p_signal_compact.c] */
@@ -387,8 +387,8 @@ enum {
     LA_F343,  /* "State: → CONNECTED, path[%d]" (%d)  [p2p.c] */
     LA_F344,  /* "% State: → ERROR (punch timeout, no relay available)"  [p2p.c] */
     LA_F345,  /* "% State: → PUNCHING"  [p2p.c] */
-    LA_F346,  /* "% State: → RELAY (no path available)"  [p2p.c] */
-    LA_F347,  /* "State: → RELAY (punch failed), path[%d]" (%d)  [p2p.c] */
+    _LA_346,
+    _LA_347,
     LA_F348,  /* "State: → RELAY, path[%d] (signaling)" (%d)  [p2p.c] */
     LA_F349,  /* "% Stopping internal thread"  [p2p.c] */
     LA_F350,  /* "% Storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
