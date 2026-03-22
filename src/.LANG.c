@@ -96,8 +96,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F82] = "%s: accepted (ses_id=%llu)\n",  /* SID:82 */
     [LA_F83] = "%s: accepted (sid=%u)\n",  /* SID:83 */
     [LA_F84] = "%s: accepted for ack_seq=%u\n",  /* SID:84 */
-    [LA_F436] = "%s: accepted from cand[%d]",  /* SID:436 */
-    [LA_F85] = "%s: accepted from cand[%d], marked readable",  /* SID:85 */
+    [LA_F85] = "%s: accepted from cand[%d]",  /* SID:85 */
     [LA_F86] = "%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n",  /* SID:86 */
     [LA_F87] = "%s: accepted sid=%u, msg=%u\n",  /* SID:87 */
     [LA_F89] = "%s: accepted, probe_mapped=%s:%d\n",  /* SID:89 */
@@ -417,6 +416,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F376] = "transport send_data failed, %d bytes dropped",  /* SID:376 */
     [LA_F377] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:377 */
     [LA_F378] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:378 */
+    [LA_F436] = "%s: accepted from cand[%d]",  /* SID:436 disabled */
     [LA_F425] = "%s: NAT_CONNECTED (received ACK)",  /* SID:425 disabled */
     [LA_F62] = "%s sent, size=%d (ses_id=%llu)\n",  /* SID:62 disabled */
     [LA_F112] = "%s: ignored in state(%d)",  /* SID:112 disabled */

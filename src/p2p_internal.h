@@ -389,11 +389,23 @@ struct p2p_remote_candidate_entry {
     struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
 
     /* 收发分离状态 */
-    bool               readable;                // 可读：收到过来自该地址的包
-    
     uint64_t           last_punch_send_ms;      // 最近一次发送 PUNCH 的时间
     path_stats_t       stats;                   // 路径统计信息
 };
+
+/*
+ * 收发分离状态工具函数
+ *
+ * readable: 路径可读（收到过来自该地址的包）
+ * writable: 路径可写（双向连通，可发送数据）
+ */
+static inline bool p2p_remote_candidate_readable(const p2p_remote_candidate_entry_t *c) {
+    return c->stats.last_recv_ms != 0;
+}
+
+static inline bool p2p_remote_candidate_writable(const p2p_remote_candidate_entry_t *c) {
+    return path_is_selectable(c->stats.state);
+}
 
 /* ============================================================================
  * 候选地址序列化 / 反序列化
@@ -421,7 +433,6 @@ static inline int unpack_candidate(p2p_remote_candidate_entry_t *c, const uint8_
     sockaddr_from_p2p_wire(&c->addr, &w->addr);
     c->priority = ntohl(w->priority);
 
-    c->readable = false;
     c->last_punch_send_ms = 0;
     path_stats_init(&c->stats, 0);  /* 初始化路径统计默认值（rtt_min=9999 等） */
 
@@ -535,7 +546,6 @@ static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
         path_stats_init(&s->signaling.stats, 5);  /* cost_score=5 */
     } else if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
         p2p_remote_candidate_entry_t *c = &s->remote_cands[path_idx];
-        c->readable = false;
         c->last_punch_send_ms = 0;
         path_stats_init(&c->stats, 0);
     } else return E_INVALID;

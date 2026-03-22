@@ -126,7 +126,7 @@ enum {
     LA_F82,  /* "%s: accepted (ses_id=%llu)\n" (%s,%l)  [p2p_signal_compact.c] */
     LA_F83,  /* "%s: accepted (sid=%u)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F84,  /* "%s: accepted for ack_seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F85,  /* "%s: accepted from cand[%d], marked readable" (%s,%d)  [p2p_nat.c] */
+    LA_F85,  /* "%s: accepted from cand[%d]" (%s,%d)  [p2p_nat.c] */
     LA_F86,  /* "%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n" (%s,%u,%d)  [p2p_signal_compact.c] */
     LA_F87,  /* "%s: accepted sid=%u, msg=%u\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F88,  /* "%s: session validated, len=%d (ses_id=%llu)\n" (%s,%d,%l)  [p2p_signal_compact.c] */
@@ -477,7 +477,7 @@ enum {
     LA_F433,  /* "COMPACT relay payload too large: %d" (%d)  [p2p_signal_compact.c] */
     LA_F434,  /* "COMPACT relay send failed: type=0x%02x, ret=%d" (%d)  [p2p_signal_compact.c] */
     LA_F435,  /* "s: punching remote [%d]<%s:%d> (type: %s)" (%d,%s,%d,%s)  [p2p_nat.c] */
-    LA_F436,  /* "%s: accepted from cand[%d]" (%s,%d)  [p2p_nat.c] */
+    LA_F436,  /* disabled "%s: accepted from cand[%d]" */
     LA_F437,  /* "%s: NAT_CONNECTED (received CONN)" (%s)  [p2p_nat.c] */
     LA_F438,  /* "%s: reaching broadcast to %d cand(s), seq=%u" (%s,%d,%u)  [p2p_nat.c] */
 

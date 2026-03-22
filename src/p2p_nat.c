@@ -43,7 +43,6 @@ static int nat_upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
     c->priority = 0;
 
     // 收发分离状态初始化
-    c->readable = false;
     c->last_punch_send_ms = 0;
     path_stats_init(&c->stats, 0);
 
@@ -359,10 +358,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     int cand_idx = nat_upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
-    // 标记来源路径为 readable（能收到包说明入方向通）
-    s->remote_cands[cand_idx].readable = true;
-
-    print("V:", LA_F("%s: accepted from cand[%d], marked readable", LA_F85, 85), PROTO, cand_idx);
+    print("V:", LA_F("%s: accepted from cand[%d]", LA_F85, 85), PROTO, cand_idx);
 
     // ---------- 解析负载中的 target_addr ----------
     struct sockaddr_in target_addr;
@@ -529,9 +525,6 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     int cand_idx = nat_upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
-    // 标记来源路径为 readable（能收到回复说明入方向通）
-    s->remote_cands[cand_idx].readable = true;
-
     // ---------- 解析负载中的 target_addr ----------
     // target_addr 是我方发送 PUNCH 时的目标地址，现在被回显
     // 找到对应的 candidate 并标记为 writable
@@ -692,7 +685,7 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     int cand_idx = nat_upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
-    print("V:", LA_F("%s: accepted from cand[%d]", LA_F436, 436), PROTO, cand_idx);
+    print("V:", LA_F("%s: accepted from cand[%d]", LA_F85, 85), PROTO, cand_idx);
 
     // 进入 NAT_CONNECTED 状态
     if (n->state == NAT_CONNECTING) {

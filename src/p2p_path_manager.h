@@ -85,8 +85,8 @@ typedef struct {
     int                 rtt_sample_count;           // 有效样本数
     
     /* 健康检查 */
-    uint64_t            last_send_ms;               // 最后发送时间
     uint64_t            last_recv_ms;               // 最后接收时间
+    uint64_t            last_send_ms;               // 最后发送时间
     uint64_t            probe_seq;                  // 探测序列号
     int                 consecutive_timeouts;       // 连续超时次数
     
