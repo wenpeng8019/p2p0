@@ -19,15 +19,12 @@
  *    - 验证连接超时失败
  *
  * ============================================================================
- * 调试选项（定义在 p2p_instrument.h）
+ * 命令行选项（p2p_ping）
  * ============================================================================
  *
- * P2P_INST_OPT_SRFLX_PUNCH_OFF (0) - 关闭公网打洞
- * P2P_INST_OPT_HOST_PUNCH_OFF  (1) - 关闭内网打洞
- * P2P_INST_OPT_RELAY_OFF       (2) - 关闭中继
- * P2P_INST_OPT_ICE_HOST_OFF    (3) - 关闭 HOST 候选收集
- * P2P_INST_OPT_ICE_SRFLX_OFF   (4) - 关闭 SRFLX 候选收集
- * P2P_INST_OPT_ICE_RELAY_OFF   (5) - 关闭 RELAY 候选收集
+ * --no-host   - 禁用 HOST 候选收集（不收集本地网卡地址）
+ * --no-srflx  - 禁用 SRFLX 候选收集（不收集 NAT 反射地址）
+ * --no-relay  - 禁用 RELAY 候选收集（不收集 TURN 中继地址）
  */
 
 #define MOD_TAG "TEST_ICE"
@@ -119,7 +116,7 @@ static void on_instrument(uint16_t rid, uint8_t chn, const char* tag, char *txt,
     }
 
     // 连接成功检测
-    if (txt && (strstr(txt, "NAT_CONNECTED") || strstr(txt, "bidirectional confirmed"))) {
+    if (txt && (strstr(txt, "State: → CONNECTED") || strstr(txt, "CONNECTING → CONNECTED"))) {
         if (rid == g_alice.rid && !g_alice.connected) {
             g_alice.connected = 1;
             printf("    [CONN] Alice connected!\n");
@@ -223,7 +220,7 @@ static int restart_server(void) {
     return start_server();
 }
 
-static int start_client(client_t *c, const char *target) {
+static int start_client(client_t *c, const char *target, const char *extra_args) {
     char server_arg[64];
     snprintf(server_arg, sizeof(server_arg), "%s:%d", g_server_host, g_server_port);
 
@@ -242,16 +239,38 @@ static int start_client(client_t *c, const char *target) {
             dup2(null_fd, STDIN_FILENO);
             close(null_fd);
         }
-        execl(g_ping_path, g_ping_path,
-              "--compact", "-s", server_arg,
-              "-n", c->name, "-t", target,
-              "--debugger", c->name,
-              NULL);
+        
+        // 构建参数列表
+        const char *argv[32];
+        int argc = 0;
+        argv[argc++] = g_ping_path;
+        argv[argc++] = "--compact";
+        argv[argc++] = "-s";
+        argv[argc++] = server_arg;
+        argv[argc++] = "-n";
+        argv[argc++] = c->name;
+        argv[argc++] = "-t";
+        argv[argc++] = target;
+        argv[argc++] = "--debugger";
+        argv[argc++] = c->name;
+        
+        // 添加额外参数
+        if (extra_args && *extra_args) {
+            char *args_copy = strdup(extra_args);
+            char *token = strtok(args_copy, " ");
+            while (token && argc < 30) {
+                argv[argc++] = token;
+                token = strtok(NULL, " ");
+            }
+        }
+        
+        argv[argc] = NULL;
+        execv(g_ping_path, (char *const *)argv);
         perror("exec client");
         _exit(127);
     }
 
-    printf("    %s PID: %d\n", c->name, c->pid);
+    printf("    %s PID: %d (extra_args=%s)\n", c->name, c->pid, extra_args ? extra_args : "none");
     return 0;
 }
 
@@ -302,14 +321,6 @@ static void set_opt(int idx, int enable) {
     printf("    [OPT] opt[%d] = %d (broadcast)\n", idx, enable);
 }
 
-// 重置所有 ICE 选项
-static void reset_opts(void) {
-    for (int i = 0; i <= 5; i++) {
-        instrument_enable(i, false);
-    }
-    printf("    [OPT] All options reset\n");
-}
-
 static void cleanup(void) {
     stop_client(&g_alice);
     stop_client(&g_bob);
@@ -351,8 +362,8 @@ static void test_host_only(void) {
         return;
     }
 
-    // 启动 Alice
-    if (start_client(&g_alice, "bob") != 0) {
+    // 启动 Alice（使用 --no-srflx --no-relay 禁用 SRFLX 和 RELAY）
+    if (start_client(&g_alice, "bob", "--no-srflx --no-relay") != 0) {
         TEST_FAIL(TEST_NAME, "failed to start alice");
         return;
     }
@@ -361,14 +372,10 @@ static void test_host_only(void) {
         stop_client(&g_alice);
         return;
     }
-
-    // 设置选项：关闭 SRFLX 和 RELAY
-    set_opt(4, 1);  // P2P_INST_OPT_ICE_SRFLX_OFF
-    set_opt(5, 1);  // P2P_INST_OPT_ICE_RELAY_OFF
     sync_client(&g_alice);
 
-    // 启动 Bob
-    if (start_client(&g_bob, "alice") != 0) {
+    // 启动 Bob（同样使用 --no-srflx --no-relay）
+    if (start_client(&g_bob, "alice", "--no-srflx --no-relay") != 0) {
         TEST_FAIL(TEST_NAME, "failed to start bob");
         stop_client(&g_alice);
         return;
@@ -379,10 +386,6 @@ static void test_host_only(void) {
         stop_client(&g_bob);
         return;
     }
-
-    // Bob 也设置相同选项
-    set_opt(4, 1);  // P2P_INST_OPT_ICE_SRFLX_OFF
-    set_opt(5, 1);  // P2P_INST_OPT_ICE_RELAY_OFF
     sync_client(&g_bob);
 
     // 等待连接
@@ -436,8 +439,8 @@ static void test_no_host_punch(void) {
         return;
     }
 
-    // 启动 Alice
-    if (start_client(&g_alice, "bob") != 0) {
+    // 启动 Alice（使用 --no-srflx --no-relay 禁用 SRFLX 和 RELAY）
+    if (start_client(&g_alice, "bob", "--no-srflx --no-relay") != 0) {
         TEST_FAIL(TEST_NAME, "failed to start alice");
         return;
     }
@@ -447,14 +450,12 @@ static void test_no_host_punch(void) {
         return;
     }
 
-    // 设置选项：关闭 HOST 打洞（但仍收集），关闭 SRFLX 和 RELAY
+    // 设置选项：关闭 HOST 打洞（但仍收集）
     set_opt(1, 1);  // P2P_INST_OPT_HOST_PUNCH_OFF
-    set_opt(4, 1);  // P2P_INST_OPT_ICE_SRFLX_OFF
-    set_opt(5, 1);  // P2P_INST_OPT_ICE_RELAY_OFF
     sync_client(&g_alice);
 
-    // 启动 Bob
-    if (start_client(&g_bob, "alice") != 0) {
+    // 启动 Bob（同样使用 --no-srflx --no-relay）
+    if (start_client(&g_bob, "alice", "--no-srflx --no-relay") != 0) {
         TEST_FAIL(TEST_NAME, "failed to start bob");
         stop_client(&g_alice);
         return;
@@ -468,8 +469,6 @@ static void test_no_host_punch(void) {
 
     // Bob 也设置相同选项
     set_opt(1, 1);  // P2P_INST_OPT_HOST_PUNCH_OFF
-    set_opt(4, 1);  // P2P_INST_OPT_ICE_SRFLX_OFF
-    set_opt(5, 1);  // P2P_INST_OPT_ICE_RELAY_OFF
     sync_client(&g_bob);
 
     // 等待连接（应该失败，因为 HOST 打洞被关闭，SRFLX 和 RELAY 也关闭）
@@ -528,7 +527,7 @@ static void test_log_format(void) {
     }
 
     // 启动 Alice（不设置任何选项，正常模式）
-    if (start_client(&g_alice, "bob") != 0) {
+    if (start_client(&g_alice, "bob", NULL) != 0) {
         TEST_FAIL(TEST_NAME, "failed to start alice");
         return;
     }
@@ -536,7 +535,7 @@ static void test_log_format(void) {
     sync_client(&g_alice);
 
     // 启动 Bob
-    if (start_client(&g_bob, "alice") != 0) {
+    if (start_client(&g_bob, "alice", NULL) != 0) {
         TEST_FAIL(TEST_NAME, "failed to start bob");
         stop_client(&g_alice);
         return;
