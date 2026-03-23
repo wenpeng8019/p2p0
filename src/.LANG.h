@@ -465,6 +465,7 @@ enum {
     LA_F421,  /* "Ignore %s pkt from %s:%d, not connecting" (%s,%s,%d)  [p2p_nat.c] */
     LA_F422,  /* "Ignore %s pkt from %s:%d, not connecting/connected" (%s,%s,%d)  [p2p_nat.c] */
     LA_F423,  /* "%s: remote %s cand[%d]<%s:%d> (disabled)\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c] */
+    LA_F424,  /* "%s: peer online, starting NAT punch\n" (%s)  [p2p_signal_compact.c] */
 
     LA_NUM
 };

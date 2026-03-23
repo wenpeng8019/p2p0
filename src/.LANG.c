@@ -146,6 +146,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F152] = "%s: path[%d] relay UP",  /* SID:152 */
     [LA_F133] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:133 */
     [LA_F134] = "%s: peer online, proceeding to ICE\n",  /* SID:134 */
+    [LA_F424] = "%s: peer online, starting NAT punch\n",  /* SID:424 */
     [LA_F135] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:135 */
     [LA_F136] = "%s: peer_info0 srflx cand[%d]<%s:%d>%s\n",  /* SID:136 */
     [LA_F140] = "%s: punch cand[%d] %s:%d (%s)",  /* SID:140 */

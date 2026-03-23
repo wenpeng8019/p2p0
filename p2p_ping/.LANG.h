@@ -50,7 +50,7 @@ enum {
 
     /* Strings (LA_S) */
     LA_S10,  /* "--- Connected ---"  [p2p_ping.c] */
-    _LA_11,
+    LA_S11,  /* "--- Disconnected ---"  [p2p_ping.c] */
     _LA_12,
     LA_S13,  /* "Auto-echo received messages back to sender"  [p2p_ping.c] */
     _LA_14,

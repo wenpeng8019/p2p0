@@ -17,6 +17,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_W8] = "RELAY",  /* SID:8 */
     [LA_W9] = "UNKNOWN",  /* SID:9 */
     [LA_S10] = "--- Connected ---",  /* SID:10 */
+    [LA_S11] = "--- Disconnected ---",  /* SID:11 */
     [LA_S13] = "Auto-echo received messages back to sender",  /* SID:13 */
     [LA_S40] = "Debugger Name",  /* SID:40 */
     [LA_S50] = "Disable Host candidates (for testing)",  /* SID:50 */

@@ -1165,10 +1165,16 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
     else print("V:", LA_F("%s NOTIFY: ignored old notify base=%u (current=%u)\n", LA_F46, 46),
                PROTO, base_index, ctx->remote_addr_notify_seq);
 
-    if (new_seq) {
+    // 收到该消息说明对方肯定已上线
+    if (!ctx->peer_online) { ctx->peer_online = true;
 
-        // 收到该消息说明对方肯定已上线
-        ctx->peer_online = true;
+        if (s->nat.state < NAT_PUNCHING) {
+            print("I:", LA_F("%s: peer online, starting NAT punch\n", LA_F424, 424), PROTO);
+            nat_punch(s, -1/* all candidates */);
+        }
+    }
+
+    if (new_seq) {
 
         // 如果对方所有的候选队列都已经接收完成
         // 注：此状态用于 NAT 打洞超时判断，只有 ICE 交换完成后才会触发打洞超时

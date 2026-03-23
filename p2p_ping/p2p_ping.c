@@ -528,6 +528,10 @@ int main(int argc, char *argv[]) {
             /* 处理键盘输入 */
             tui_process_input(hdl);
         }
+        else if (g_connected_once) { g_connected_once = false;
+            tui_println(P2P_LOG_LEVEL_WARN, LA_S("--- Disconnected ---", LA_S11, 11));
+            tui_cleanup();
+        }
 
         // 间隔 ms
         P_usleep(10 * 1000);
