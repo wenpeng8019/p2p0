@@ -43,6 +43,7 @@ void probe_reset(struct p2p_session *s) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+// fixme: 这里不考虑 ready ？
 void probe_trigger(struct p2p_session *s) {
     p2p_probe_ctx_t *ctx = &s->probe_ctx;
 
