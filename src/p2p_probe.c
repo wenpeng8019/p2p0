@@ -43,7 +43,6 @@ void probe_reset(struct p2p_session *s) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// fixme: 这里不考虑 ready ？
 void probe_trigger(struct p2p_session *s) {
     p2p_probe_ctx_t *ctx = &s->probe_ctx;
 
@@ -65,9 +64,11 @@ void probe_trigger(struct p2p_session *s) {
         return;
     }
 
+    assert(ctx->state >= P2P_PROBE_STATE_READY);
     ctx->state = P2P_PROBE_STATE_RUNNING;
 
     switch (s->signaling_mode) {
+
         // 启动 COMPACT 探测
         case P2P_SIGNALING_MODE_COMPACT:
             ctx->mode.compact.phase = PROBE_COMPACT_PHASE_SENDING;
@@ -174,16 +175,15 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
     p2p_probe_ctx_t *ctx = &s->probe_ctx;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) {
+
         // 完成状态：等待间隔后自动重启
-        if (ctx->state == P2P_PROBE_STATE_SUCCESS ||
-            ctx->state == P2P_PROBE_STATE_PEER_OFFLINE ||
-            ctx->state == P2P_PROBE_STATE_TIMEOUT ||
-            ctx->state == P2P_PROBE_STATE_PEER_TIMEOUT ||
-            ctx->state == P2P_PROBE_STATE_OFFLINE) {
+        if (ctx->state > P2P_PROBE_STATE_RUNNING) {
             
             if (ctx->complete_ms == 0) ctx->complete_ms = now_ms;
 
-            if (tick_diff(now_ms, ctx->complete_ms) >= PROBE_COMPACT_REPEAT_INTERVAL) {
+            // 有效性超时重置
+            else if (tick_diff(now_ms, ctx->complete_ms) >= PROBE_COMPACT_REPEAT_INTERVAL * 1000) {
+
                 print("V:", LA_F("%s: restarting periodic check", LA_F157, 157), TASK_RELAY_PROBE);
                 ctx->state = P2P_PROBE_STATE_READY;
                 ctx->mode.compact.phase = PROBE_COMPACT_PHASE_INIT;

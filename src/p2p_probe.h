@@ -49,7 +49,7 @@ struct p2p_session;
 #define PROBE_COMPACT_TIMEOUT_MS       5000    /* 单次探测超时（毫秒）*/
 #define PROBE_COMPACT_MAX_RETRIES      3       /* 最大重试次数 */
 #define PROBE_COMPACT_RETRY_INTERVAL   1000    /* 重试间隔（毫秒）*/
-#define PROBE_COMPACT_REPEAT_INTERVAL  10000   /* 重复探测间隔（毫秒）*/
+#define PROBE_COMPACT_REPEAT_INTERVAL  10      /* 有效性超时间隔（秒）*/
 
 /* ============================================================================
  * RELAY 模式探测配置
