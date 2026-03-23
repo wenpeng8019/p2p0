@@ -42,10 +42,14 @@ typedef struct punch_reaching {
 /* 打洞上下文 */
 typedef struct {
     int                 state;                  // 打洞状态
-    struct sockaddr_in  peer_addr;              // 成功连接的对端地址
     uint64_t            last_recv_time;         // 最后接收时间（用于连接超时检测）
 
     /* 打洞相关状态 */
+    int                 punching;               // 打洞阶段。
+                                                //   0: remote_ice_done == false
+                                                //   1: remote_ice_done == true
+                                                //  -1: remote_ice_done == true 且超时后，如果存在信令中转服务，
+                                                //      则允许继续打洞一个超时周期。也就是在 relay 模式下进行握手
     uint64_t            punch_start;            // 打洞开始时间（计算打洞超时）
     uint16_t            punch_seq;              // 本地 PUNCH 包序列号（自增）
     

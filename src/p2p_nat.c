@@ -85,6 +85,43 @@ static void clear_reaching_queue(nat_ctx_t *n) {
 }
 
 /*
+ * 通过候选路径发送数据包
+ *
+ * 自动处理 TURN relay 和直连的区别。
+ *
+ * @param s           会话对象
+ * @param cand_idx    候选索引（必须 >= 0）
+ * @param type        包类型
+ * @param flags       包标志
+ * @param seq         包序列号
+ * @param payload     负载数据
+ * @param payload_len 负载长度
+ */
+static void cand_send_packet(p2p_session_t *s, int cand_idx,
+                             uint8_t type, uint8_t flags, uint16_t seq,
+                             const uint8_t *payload, int payload_len) {
+    assert(cand_idx >= 0 && cand_idx < s->remote_cand_cnt);
+    const struct sockaddr_in *addr = &s->remote_cands[cand_idx].addr;
+
+    if (s->remote_cands[cand_idx].type == P2P_CAND_RELAY) {
+    
+        if (s->turn.state != TURN_ALLOCATED) {
+            print("W:", LA_F("%s: relay cand[%d] but TURN not allocated", LA_F426, 426),
+                  TASK_NAT, cand_idx);
+            return;
+        }
+        // TURN 中继：通过 Send Indication 发送
+        uint8_t pkt[P2P_HDR_SIZE + 32];
+        assert(payload_len <= 32);
+        p2p_pkt_hdr_encode(pkt, type, flags, seq);
+        if (payload && payload_len > 0)
+            memcpy(pkt + P2P_HDR_SIZE, payload, payload_len);
+        p2p_turn_send_indication(s, addr, pkt, P2P_HDR_SIZE + payload_len);
+    }
+    else udp_send_packet(s->sock, addr, type, flags, seq, payload, payload_len);
+}
+
+/*
  * 处理所有 reaching 队列（从 writable 路径发送）
  *
  * 收发分离：当某路径收到 PUNCH 但该路径不可写时，需要从其他 writable 路径发送 REACH。
@@ -95,7 +132,6 @@ static void clear_reaching_queue(nat_ctx_t *n) {
  */
 static void flush_reaching_queue(p2p_session_t *s, int writable_path) {
     nat_ctx_t *n = &s->nat;
-    if (writable_path < 0) return;
 
     punch_reaching_t *node;
     while (n->reaching_head) {
@@ -104,21 +140,26 @@ static void flush_reaching_queue(p2p_session_t *s, int writable_path) {
         n->reaching_head = node->next;
         if (!n->reaching_head) n->reaching_rear = NULL;
 
-        // 构造 ACK 负载：回显 target_addr
+        // 构造 REACH 负载：回显 target_addr
         uint8_t ack_payload[6];
         memcpy(ack_payload, &node->target.sin_addr.s_addr, 4);
         memcpy(ack_payload + 4, &node->target.sin_port, 2);
 
-        udp_send_packet(s->sock, &s->remote_cands[writable_path].addr,
-                       P2P_PKT_REACH, 0,
-                       node->seq,
-                       ack_payload, sizeof(ack_payload));
+        if (writable_path == PATH_IDX_SIGNALING) { assert(s->signaling_relay_fn);
 
-        print("V:", LA_F("%s: reaching cand[%d] via path[%d] to %s:%d, seq=%u", LA_F149, 149),
-              TASK_NAT, node->cand_idx, writable_path,
-              inet_ntoa(s->remote_cands[writable_path].addr.sin_addr),
-              ntohs(s->remote_cands[writable_path].addr.sin_port),
-              node->seq);
+            s->signaling_relay_fn(s, P2P_PKT_REACH, 0, node->seq, ack_payload, sizeof(ack_payload));
+
+            print("V:", LA_F("%s: reaching cand[%d] via signaling relay, seq=%u", LA_F428, 428),
+                  TASK_NAT, node->cand_idx, node->seq);
+        } 
+        else {
+            cand_send_packet(s, writable_path, P2P_PKT_REACH, 0, node->seq, ack_payload, 6);
+
+            const struct sockaddr_in *addr = &s->remote_cands[writable_path].addr;
+            print("V:", LA_F("%s: reaching cand[%d] via path[%d] to %s:%d, seq=%u", LA_F149, 149),
+                  TASK_NAT, node->cand_idx, writable_path,
+                  inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), node->seq);
+        }
 
         free(node);
     }
@@ -159,8 +200,8 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
     memcpy(payload, &entry->addr.sin_addr.s_addr, 4);  // network order
     memcpy(payload + 4, &entry->addr.sin_port, 2);     // network order
 
-    udp_send_packet(s->sock, &entry->addr, P2P_PKT_PUNCH, 0,
-                    n->punch_seq, payload, sizeof(payload));
+    cand_send_packet(s, send_path, P2P_PKT_PUNCH, 0,
+                     n->punch_seq, payload, sizeof(payload));
 
     print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, path=%d", LA_F54, 54),
           PROTO, inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port),
@@ -187,20 +228,15 @@ static void nat_send_conn(p2p_session_t *s, uint64_t now) {
     const char* PROTO = "CONN";
     nat_ctx_t *n = &s->nat;
 
-    // 选择最佳路径发送
-    int best_path = path_manager_select_best_path(s);
-    if (best_path < 0) {
-        print("W:", LA_F("%s: no writable path available", LA_F128, 128), PROTO);
-        n->last_conn_send_ms = now;  // 更新时间戳，避免 nat_tick() 重复调用
-        return;
+    // 使用统一发送接口（自动处理 TURN/信令中转/直连）
+    p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, 0, 0, NULL, 0);
+
+    if (s->path == P2P_PATH_SIGNALING) {
+        print("V:", LA_F("%s sent via signaling relay", LA_F427, 427), PROTO);
+    } else {
+        print("V:", LA_F("%s sent to %s:%d", LA_F56, 56),
+              PROTO, inet_ntoa(s->active_addr.sin_addr), ntohs(s->active_addr.sin_port));
     }
-
-    udp_send_packet(s->sock, &s->remote_cands[best_path].addr,
-                    P2P_PKT_CONN, 0, 0, NULL, 0);
-
-    print("V:", LA_F("%s sent to %s:%d, seq=0, path=%d", LA_F56, 56),
-          PROTO, inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
-          ntohs(s->remote_cands[best_path].addr.sin_port), best_path);
 
     n->last_conn_send_ms = now;
 }
@@ -210,19 +246,15 @@ static void nat_send_conn_ack(p2p_session_t *s) {
     
     if (instrument_option(P2P_INST_OPT_NAT_CONN_ACK_OFF)) return;
 
-    // 选择最佳路径发送
-    int best_path = path_manager_select_best_path(s);
-    if (best_path < 0) {
-        print("W:", LA_F("%s: no writable path available", LA_F128, 128), PROTO);
-        return;
+    // 使用统一发送接口（自动处理 TURN/信令中转/直连）
+    p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, 0, 0, NULL, 0);
+
+    if (s->path == P2P_PATH_SIGNALING) {
+        print("V:", LA_F("%s sent via signaling relay", LA_F427, 427), PROTO);
+    } else {
+        print("V:", LA_F("%s sent to %s:%d", LA_F56, 56),
+              PROTO, inet_ntoa(s->active_addr.sin_addr), ntohs(s->active_addr.sin_port));
     }
-
-    udp_send_packet(s->sock, &s->remote_cands[best_path].addr,
-                        P2P_PKT_CONN_ACK, 0, 0, NULL, 0);
-
-    print("V:", LA_F("%s sent to %s:%d, echo_seq=0, path=%d", LA_F55, 55),
-          PROTO, inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
-          ntohs(s->remote_cands[best_path].addr.sin_port), best_path);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -255,25 +287,27 @@ void nat_reset(nat_ctx_t *n) {
  *   - s->rx_confirmed && s->tx_confirmed
  *
  * @param s          会话对象
- * @param peer_addr  对端地址（用于设置 n->peer_addr）
+ * @param path_idx   路径索引（-1=SIGNALING, >=0=候选）
  * @param now        当前时间戳
  * @param reason     日志原因（如 "batch relay", "trickle relay", "relay+punch"）
  */
-static void bidirectional_confirmed(p2p_session_t *s, 
-                                           const struct sockaddr_in *peer_addr,
-                                           uint64_t now,
-                                           const char *reason) {
+static void bidirectional_confirmed(p2p_session_t *s, int path_idx, uint64_t now, const char *reason) {
     nat_ctx_t *n = &s->nat;
     
+    // 设置活跃路径（用于 nat_send_conn）
+    const struct sockaddr_in *addr = p2p_get_path_addr(s, path_idx);
+    s->path = path_manager_get_path_type(s, path_idx);
+    s->active_path = path_idx;
+    s->active_addr = addr ? *addr : (struct sockaddr_in){0};
+    
     // 双向确认完成，进入 CONNECTING 状态
-    n->peer_addr = *peer_addr;
     n->state = NAT_CONNECTING;
     n->conn_start_ms = now;
     
     nat_send_conn(s, now);
     
-    print("I:", LA_F("%s: PUNCHING → CONNECTING (%s)", LA_F102, 102),
-          TASK_NAT, reason);
+    print("I:", LA_F("%s: PUNCHING → CONNECTING (%s%s)", LA_F102, 102),
+          TASK_NAT, reason, path_idx == PATH_IDX_SIGNALING ? ", signaling" : "");
 }
 
 /*
@@ -309,7 +343,7 @@ static void punch_relay(p2p_session_t *s, int cand_idx, uint64_t now, const char
         // 注意：即使触发了双向确认进入 CONNECTING，也不跳出循环，继续向剩余候选发送 PUNCH
         // 目的：发现所有可能路径、测量所有 RTT、提供路径冗余
         if (s->rx_confirmed && n->state == NAT_PUNCHING) {
-            bidirectional_confirmed(s, &s->remote_cands[cand_idx].addr, now, reason);
+            bidirectional_confirmed(s, cand_idx, now, reason);
         }
     }
 }
@@ -351,11 +385,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         // 这里只重置 tx_confirmed，保留 rx_confirmed 原值（需要考虑对端先启动打洞的场景）
         s->tx_confirmed = false;
         
-        // 有候选时设置 peer_addr，无候选时清零等待 Trickle
-        if (s->remote_cand_cnt > 0) {
-            n->peer_addr = s->remote_cands[0].addr;  /* 默认值，收到 ACK 时会更新 */
-        } else {
-            memset(&n->peer_addr, 0, sizeof(n->peer_addr));
+        if (s->remote_cand_cnt == 0) {
             print("W:", LA_F("%s: batch punch: no cand, wait trickle", LA_F126, 126), TASK_NAT);
         }
 
@@ -397,14 +427,8 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
         n->punch_start = now;
         // 只重置 tx_confirmed，保留 rx_confirmed 原值（需要考虑对端先启动打洞的场景）
         s->tx_confirmed = false;
-        n->peer_addr = entry->addr;  // Trickle 首次候选作为默认 peer_addr
 
         print("I:", LA_F("%s: trickle punch start", LA_F174, 174), TASK_NAT);
-    }
-    // Trickle 模式：如果 peer_addr 为 0（批量模式 0 候选启动），设置为首个候选
-    else if (n->peer_addr.sin_addr.s_addr == 0) {
-        n->peer_addr = entry->addr;
-        print("I:", LA_F("%s: trickle punch: set peer_addr", LA_F171, 171), TASK_NAT);
     }
 
     print("I:", LA_F("%s: punch cand[%d] %s:%d (%s)", LA_F140, 140), TASK_NAT, idx,
@@ -439,7 +463,7 @@ void nat_send_fin(p2p_session_t *s) {
 
     udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
 
-    print("V:", LA_F("%s sent to %s:%d", LA_F52, 52),
+    print("V:", LA_F("%s sent to %s:%d", LA_F56, 56),
           PROTO, inet_ntoa(s->active_addr.sin_addr), ntohs(s->active_addr.sin_port));
 
     for (int i = 2; i--;) {
@@ -480,6 +504,8 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 更新最后接收时间
     n->last_recv_time = now;
 
+    // punch 包肯定不会来自信令服务器
+    assert(!sockaddr_equal(from, &s->signaling.addr));
     int cand_idx = upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
@@ -507,8 +533,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)
             && path_is_selectable(s->remote_cands[cand_idx].stats.state)) {
 
-            udp_send_packet(s->sock, from, P2P_PKT_REACH, 0,
-                           hdr->seq, ack_payload, sizeof(ack_payload));
+            cand_send_packet(s, cand_idx, P2P_PKT_REACH, 0, hdr->seq, ack_payload, 6);
             print("V:", LA_F("%s sent to %s:%d (writable), echo_seq=%u", LA_F53, 53),
                   PROTO2, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
         }
@@ -520,8 +545,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                 && (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF) || best_path != cand_idx)
                 && best_path >= 0 && path_is_selectable(s->remote_cands[best_path].stats.state)) {
 
-                udp_send_packet(s->sock, &s->remote_cands[best_path].addr,
-                               P2P_PKT_REACH, 0, hdr->seq, ack_payload, sizeof(ack_payload));
+                cand_send_packet(s, best_path, P2P_PKT_REACH, 0, hdr->seq, ack_payload, 6);
                 print("V:", LA_F("%s sent via best path[%d] to %s:%d, echo_seq=%u", LA_F57, 57),
                       PROTO2, best_path,
                       inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
@@ -532,8 +556,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
                 // 尝试原路发送
                 if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)) {
-                    udp_send_packet(s->sock, from, P2P_PKT_REACH, 0, 
-                                    hdr->seq, ack_payload, sizeof(ack_payload));
+                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, 0, hdr->seq, ack_payload, 6);
                     print("V:", LA_F("%s_ACK sent to %s:%d (try), echo_seq=%u", LA_F195, 195),
                           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
                 }
@@ -635,7 +658,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     //   场景 2：本端 Trickle 模式收到 relay 候选，激活时设置了 tx_confirmed=true
     //   场景 3：本端批量模式已启动，对端的 REACH 到达设置了 tx_confirmed=true
     if (s->tx_confirmed && n->state == NAT_PUNCHING) {
-        bidirectional_confirmed(s, from, now, "relay+punch");
+        bidirectional_confirmed(s, cand_idx, now, "relay+punch");
     }
 }
 
@@ -656,7 +679,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
     // 校验负载长度：标准格式 6B (target_addr)
     if (payload_len < 6) {
-        print("W:", LA_F("%s: bad payload len=%d (need 6)", LA_F121, 121), 
+        print("W:", LA_F("%s: bad payload(%d)", LA_F121, 121), 
               PROTO, payload_len);
         return;
     }
@@ -669,8 +692,17 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 更新最后接收时间
     n->last_recv_time = now;
 
-    int cand_idx = upsert_prflx(s, from);
-    if (cand_idx < 0) return;
+    // 检查是否是信令服务器转发的 REACH（from 是信令服务器地址）
+    // 信令服务器不应作为 PRFLX 候选添加
+    int path_idx = -1;
+    if (!sockaddr_equal(from, &s->signaling.addr)) {
+        path_idx = upsert_prflx(s, from);
+        if (path_idx < 0) {
+            print("W:", LA_F("%s: REACH ignored, upsert %s:%d failed", LA_F437, 437), 
+                  PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+            return;
+        }
+    }
 
     // ---------- 解析负载中的 target_addr ----------
     // target_addr 是我方发送 PUNCH 时的目标地址，现在被回显
@@ -701,11 +733,15 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     //   这不是路径 A 的真实 RTT，仅作为初步参考，记录到 probe_rtt_cross
     //   路径选择时会降权处理（+30% 惩罚）
     // 
-    if (hdr->seq > 0)
-        path_manager_on_packet_ack(s, hdr->seq, cand_idx, now);
+    // 只有直连路径才需要 RTT 测量和统计更新（信令转发的 REACH 不更新 cand_idx 统计）
+    if (path_idx >= 0) {
 
-    // REACH 控制包不计入流量统计（size=0），但这里需要更新路径活跃时间、包计数和重置超时计数器
-    path_manager_on_packet_recv(s, cand_idx, now, 0);
+        if (hdr->seq > 0)
+            path_manager_on_packet_ack(s, hdr->seq, path_idx, now);
+
+        // REACH 控制包不计入流量统计（size=0），但这里需要更新路径活跃时间、包计数和重置超时计数器
+        path_manager_on_packet_recv(s, path_idx, now, 0);
+    }
 
     // 如果路径已激活，只更新统计即可，直接返回
     if (path_is_selectable(s->remote_cands[target_path].stats.state)) return;
@@ -723,7 +759,6 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // + 直接升级到 CONNECTED，由 p2p_connected() 切换路径
     if (n->state == NAT_RELAY) {
         print("I:", LA_F("%s: RELAY → CONNECTED (direct path recovered)", LA_F77, 77), TASK_NAT);
-        n->peer_addr = s->remote_cands[cand_idx].addr;
 
         n->state = NAT_CONNECTED;
         n->last_keepalive_send_ms = now;
@@ -741,14 +776,14 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     if (!s->rx_confirmed) { s->rx_confirmed = true;
 
         print("I:", LA_F("%s: path rx UP (%s:%d)", LA_F162, 162),
-                TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+              TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
     }
 
     // me→peer 方向：收到 REACH 证明我们的 PUNCH 到达了对方
     if (!s->tx_confirmed) { s->tx_confirmed = true;
 
         print("I:", LA_F("%s: path tx UP (echo seq=%u)", LA_F190, 190),
-                TASK_NAT, hdr->seq);
+              TASK_NAT, hdr->seq);
 
         // 首次确认 tx_confirmed，处理所有 reaching 队列（此后不会再有新的 pending）
         flush_reaching_queue(s, target_path);
@@ -763,18 +798,25 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         // 对方已进入 CONNECTING，直接回复 CONN_ACK 并进入 CONNECTED
         if (n->peer_connecting) {
 
-            n->peer_addr = s->remote_cands[cand_idx].addr;
+            // 设置活跃路径（用于 nat_send_conn_ack）
+            // 注意：使用 target_path 而不是 cand_idx，因为 target_path 才是被确认可写的路径
+            const struct sockaddr_in *addr = p2p_get_path_addr(s, target_path);
+            s->path = path_manager_get_path_type(s, target_path);
+            s->active_path = target_path;
+            s->active_addr = addr ? *addr : (struct sockaddr_in){0};
+
             n->peer_connecting = false;
             nat_send_conn_ack(s);
 
-            n->state = NAT_CONNECTED;
+            n->state = target_path < 0 ? NAT_RELAY : NAT_CONNECTED;
             n->last_keepalive_send_ms = now;
             p2p_connected(s, now);
             
-            print("I:", LA_F("%s: PUNCHING → CONNECTED (earlier CONN)", LA_F103, 103), TASK_NAT);
+            print("I:", LA_F("%s: PUNCHING → %s (earlier CONN)", LA_F103, 103), TASK_NAT, n->state == NAT_RELAY ? "RELAY" : "CONNECTED");
         } 
         // 正常流程：进入 CONNECTING，发送 CONN
-        else bidirectional_confirmed(s, &s->remote_cands[cand_idx].addr, now, "punch+reach");
+        // 注意：使用 target_path 而不是 cand_idx，因为 target_path 才是被确认可写的路径
+        else bidirectional_confirmed(s, target_path, now, "punch+reach");
     }
 }
 
@@ -799,11 +841,18 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     n->last_recv_time = now;
 
     // 查找来源路径
-    int cand_idx = upsert_prflx(s, from);
-    if (cand_idx < 0) return;
+    int path_idx = -1;
+    if (!sockaddr_equal(from, &s->signaling.addr)) {
+        path_idx = upsert_prflx(s, from);
+        if (path_idx < 0) {
+            print("W:", LA_F("%s: CONN ignored, upsert %s:%d failed", LA_F435, 435), 
+                  PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+            return;
+        }
+    }
 
     // CONN 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
-    path_manager_on_packet_recv(s, cand_idx, now, 0);
+    path_manager_on_packet_recv(s, path_idx, now, 0);
 
     // 如果本端还未进入 NAT_CONNECTING 状态，记录对方的 conn_seq 以便后续发送 CONN_ACK 时使用
     if (n->state < NAT_CONNECTING) {
@@ -821,10 +870,10 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
 
     if (n->state == NAT_CONNECTING) {
         assert(!n->peer_connecting);
-        n->state = NAT_CONNECTED;
+        n->state = s->active_path < 0 ? NAT_RELAY : NAT_CONNECTED;
         n->last_keepalive_send_ms = now;
         p2p_connected(s, now);
-        print("I:", LA_F("%s: CONNECTING → CONNECTED (recv CONN)", LA_F72, 72), TASK_NAT);
+        print("I:", LA_F("%s: CONNECTING → %s (recv CONN)", LA_F72, 72), TASK_NAT, n->state == NAT_RELAY ? "RELAY" : "CONNECTED");
     }
 }
 
@@ -855,21 +904,27 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     n->last_recv_time = now;
 
     // 查找来源路径
-    int cand_idx = upsert_prflx(s, from);
-    if (cand_idx < 0) return;
+    int path_idx = -1;
+    if (!sockaddr_equal(from, &s->signaling.addr)) {
+        path_idx = upsert_prflx(s, from);
+        if (path_idx < 0) {
+            print("W:", LA_F("%s: CONN_ACK ignored, upsert %s:%d failed", LA_F436, 436), 
+                  PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+            return;
+        }
+    }
 
-    print("V:", LA_F("%s: recv from cand[%d]", LA_F91, 91), PROTO, cand_idx);
+    print("V:", LA_F("%s: recv from cand[%d]", LA_F91, 91), PROTO, path_idx);
 
     // CONN_ACK 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
-    path_manager_on_packet_recv(s, cand_idx, now, 0);
+    path_manager_on_packet_recv(s, path_idx, now, 0);
 
     // 进入 NAT_CONNECTED 状态
-    if (n->state == NAT_CONNECTING) {
-        assert(!n->peer_connecting);
-        n->state = NAT_CONNECTED;
+    if (n->state == NAT_CONNECTING) { assert(!n->peer_connecting);
+        n->state = s->active_path < 0 ? NAT_RELAY : NAT_CONNECTED;
         n->last_keepalive_send_ms = now;
         p2p_connected(s, now);
-        print("I:", LA_F("%s: CONNECTING → CONNECTED (recv CONN_ACK)", LA_F73, 73), TASK_NAT);
+        print("I:", LA_F("%s: CONNECTING → %s (recv CONN_ACK)", LA_F73, 73), TASK_NAT, n->state == NAT_RELAY ? "RELAY" : "CONNECTED");
     }
 }
 
@@ -899,10 +954,10 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
     // NAT_CONNECTING → NAT_CONNECTED（首次收到数据包）
     if (n->state == NAT_CONNECTING) {
         assert(!n->peer_connecting);
-        n->state = NAT_CONNECTED;
+        n->state = s->active_path < 0 ? NAT_RELAY : NAT_CONNECTED;
         n->last_keepalive_send_ms = now;
         p2p_connected(s, now);
-        print("I:", LA_F("%s: CONNECTING → CONNECTED (recv DATA)", LA_F74, 74), TASK_NAT);
+        print("I:", LA_F("%s: CONNECTING → %s (recv DATA)", LA_F74, 74), TASK_NAT, n->state == NAT_RELAY ? "RELAY" : "CONNECTED");
     }
 }
 
@@ -974,40 +1029,63 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             // ICE 候选交换完成后
             if (s->remote_ice_done) {
 
-                // 如果没有候选队列，或者打洞超时
-                if (!s->remote_cand_cnt || 
-                    (!instrument_option(P2P_INST_OPT_TIMEOUT_OFF)
-                     && tick_diff(now_ms, n->punch_start) >= PUNCH_TIMEOUT_MS)) {
+                // 首次 ICE 候选交换完成后，重置 punch 超时计时，以便准确计算打洞超时
+                if (!n->punching) { n->punching = 1; n->punch_start = now_ms; }
 
-                    // 如果有信令中转服务可用
+                // 如果打洞超时
+                // + 注意，即使此时 remote_cand_cnt == 0（没有任何候选），也得等到超时后再 fallback
+                //   因为这个过程可能会出现 prflx candidate 地址
+                else if (!instrument_option(P2P_INST_OPT_TIMEOUT_OFF)
+                         && tick_diff(now_ms, n->punch_start) >= PUNCH_TIMEOUT_MS) {
+
+                    // 如果没有信令中转服务可用
                     // + 最佳路径只有在没有任何其他可用路径后，且存在信令中转服务时，才会返回 PATH_IDX_SIGNALING
-                    if (path_manager_select_best_path(s) == PATH_IDX_SIGNALING) {
+                    if (n->punching < 0 || path_manager_select_best_path(s) < PATH_IDX_SIGNALING) {
+
+                        print("E:", LA_F("%s: PUNCHING → CLOSED (timeout %" PRIu64 "ms, %s signaling relay)", LA_F138, 138),
+                              TASK_NAT, tick_diff(now_ms, n->punch_start), n->punching < 0 ? "using" : "no");
+
+                        n->state = NAT_CLOSED;          // 标记为已关闭（打洞失败）
+                        clear_reaching_queue(n);        // 清理 reaching queue
+                        break;
+                    }
+
+                    // 信令服务中转支持读写
+                    assert(path_manager_select_best_path(s) == PATH_IDX_SIGNALING);
+                    n->punching = -1;                   // 标记为正在进行 relay punching
+                    n->punch_start = now_ms;            // 重置打洞开始时间，进入 relay punching 阶段
+
+                    print("W:", LA_F("%s: punch timeout, fallback punching using signaling relay", LA_F425, 425), TASK_NAT);
+
+                    // 如果之前没有写路径
+                    if (!s->tx_confirmed) { s->tx_confirmed = true;
+
+                        // 如果已经收到对方数据包
+                        // 首次确认 tx_confirmed，处理所有 reaching 队列（此后不会再有新的 pending）
+                        if (s->rx_confirmed) flush_reaching_queue(s, PATH_IDX_SIGNALING);
+                        else s->rx_confirmed = true;
+                    }
+                    else s->rx_confirmed = true;
+
+                    // 对方已进入 CONNECTING，直接回复 CONN_ACK 并进入 CONNECTED
+                    if (n->peer_connecting) {
+
+                        // 设置活跃路径（用于 nat_send_conn_ack）
+                        s->active_path = PATH_IDX_SIGNALING;
+                        s->path = P2P_PATH_SIGNALING;
+                        s->active_addr = s->signaling.addr;
                         
-                        print("W:", LA_F("%s: PUNCHING → RELAY (timeout %" PRIu64 "ms, signaling)", LA_F182, 182),
-                              TASK_NAT, tick_diff(now_ms, n->punch_start));
+                        n->peer_connecting = false;
+                        nat_send_conn_ack(s);
 
-                        n->state = NAT_RELAY;           // 标记进入中继模式
-                        s->rx_confirmed = true;         // 信令路径视为双向已确认
-                        s->tx_confirmed = true;
-
-                        // 触发 p2p_connected 事件（信令中转模式）
+                        n->state = NAT_RELAY;
+                        n->last_keepalive_send_ms = now_ms;
                         p2p_connected(s, now_ms);
                         
-                        // 启动信道外对端探测（确认对端确实在线，只是网络不通）
-                        if (!instrument_option(P2P_INST_OPT_AUTO_PROBE_OFF))
-                            probe_trigger(s);
-                    }
-                    // 打洞失败且无信令中转服务：超时错误
-                    else {
-
-                        print("E:", LA_F("%s: PUNCHING → CLOSED (timeout %" PRIu64 "ms, no relay)", LA_F138, 138),
-                              TASK_NAT, tick_diff(now_ms, n->punch_start));
-                        
-                        n->state = NAT_CLOSED;          // 标记为已关闭（打洞失败）
-                        clear_reaching_queue(n);    // 清理 reaching queue
-                    }
-
-                    break;
+                        print("I:", LA_F("%s: PUNCHING → RELAY (earlier CONN)", LA_F438, 438), TASK_NAT);
+                    } 
+                    // 正常流程：进入 CONNECTING，发送 CONN
+                    else bidirectional_confirmed(s, PATH_IDX_SIGNALING, now_ms, "signaling relay");
                 }
             }
             else if (!instrument_option(P2P_INST_OPT_TIMEOUT_OFF) 
@@ -1046,31 +1124,11 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 print("E:", LA_F("%s: CONN timeout after %" PRIu64 "ms", LA_F69, 69),
                       TASK_NAT, tick_diff(now_ms, n->conn_start_ms));
                 
-                // 如果有信令中转服务可用，fallback 到 RELAY 模式
-                if (path_manager_select_best_path(s) == PATH_IDX_SIGNALING) {
+                // 此时双工读写已经确认（肯定存在至少一个写路径），但发送的 conn 包一直无应答
+                print("E:", LA_F("%s: CONNECTING → CLOSED (timeout, no relay)", LA_F71, 71), TASK_NAT);
 
-                    print("W:", LA_F("%s: CONNECTING → RELAY (timeout, signaling)", LA_F70, 70), TASK_NAT);
-
-                    n->state = NAT_RELAY;
-                    s->rx_confirmed = true;         // 信令路径视为双向已确认
-                    s->tx_confirmed = true;
-                    
-                    // 触发 p2p_connected 事件
-                    p2p_connected(s, now_ms);
-                    
-                    // 启动信道外对端探测（确认对端确实在线，只是网络不通）
-                    if (!instrument_option(P2P_INST_OPT_AUTO_PROBE_OFF))
-                        probe_trigger(s);
-                    
-                } 
-                // 无信令中转：连接失败
-                else {
-
-                    print("E:", LA_F("%s: CONNECTING → CLOSED (timeout, no relay)", LA_F71, 71), TASK_NAT);
-
-                    n->state = NAT_CLOSED;
-                    clear_reaching_queue(n);  // 清理 reaching queue                    
-                }
+                n->state = NAT_CLOSED;
+                clear_reaching_queue(n);  // 清理 reaching queue                    
 
                 break;
             }
@@ -1252,11 +1310,9 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 // 跳过 target 地址（已原路发送）
                 if (sockaddr_equal(&s->remote_cands[i].addr, &n->reaching_head->target)) continue;
 
-                udp_send_packet(s->sock, &s->remote_cands[i].addr,
-                                P2P_PKT_REACH, 0, n->reaching_head->seq,
-                                reach_payload, sizeof(reach_payload));
+                cand_send_packet(s, i, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, 6);
                 broadcast_cnt++;
-            }            
+            }
             
             // 将节点出队并释放
             punch_reaching_t *node = n->reaching_head;

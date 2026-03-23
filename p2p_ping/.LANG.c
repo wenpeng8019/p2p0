@@ -52,9 +52,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F37] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:37 */
     [LA_F49] = "[EVENT] State: %s -> %s\n",  /* SID:49 */
     [LA_F48] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:48 */
-    [LA_S45] = "Disable Host candidates (for testing)",  /* SID:45 disabled */
-    [LA_S47] = "Disable Relay candidates (for testing)",  /* SID:47 disabled */
-    [LA_S46] = "Disable Srflx candidates (for testing)",  /* SID:46 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

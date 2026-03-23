@@ -53,16 +53,15 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F45] = "%s NOTIFY: accepted\n",  /* SID:45 */
     [LA_F46] = "%s NOTIFY: ignored old notify base=%u (current=%u)\n",  /* SID:46 */
     [LA_F48] = "%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n",  /* SID:48 */
-    [LA_F47] = "%s NOTIFY: ignored srflx addr update due to instument\n",  /* [SID:47] UPDATED new: "%s NOTIFY: srflx addr update (disabled)\n" */
+    [LA_F47] = "%s NOTIFY: ignored srflx addr update due to instument\n",  /* SID:47 */
     [LA_F49] = "%s msg=0: accepted, echo reply (sid=%u, len=%d)\n",  /* SID:49 */
     [LA_F50] = "%s received (ice_ctx.state=%d), resetting ICE and clearing %d stale candidates",  /* SID:50 */
     [LA_F51] = "%s resent, %d/%d\n",  /* SID:51 */
-    [LA_F52] = "%s sent to %s:%d",  /* SID:52 */
+    [LA_F56] = "%s sent to %s:%d, seq=0, path=%d",  /* SID:56 */
     [LA_F53] = "%s sent to %s:%d (writable), echo_seq=%u",  /* SID:53 */
     [LA_F54] = "%s sent to %s:%d for %s, seq=%d, path=%d",  /* SID:54 */
-    [LA_F55] = "%s sent to %s:%d, echo_seq=0, path=%d",  /* SID:55 */
-    [LA_F56] = "%s sent to %s:%d, seq=0, path=%d",  /* SID:56 */
     [LA_F57] = "%s sent via best path[%d] to %s:%d, echo_seq=%u",  /* SID:57 */
+    [LA_F427] = "%s sent via signaling relay",  /* SID:427 new */
     [LA_F58] = "%s sent, inst_id=%u, cands=%d\n",  /* SID:58 */
     [LA_F59] = "%s sent, inst_id=%u\n",  /* SID:59 */
     [LA_F60] = "%s sent, seq=%u\n",  /* SID:60 */
@@ -80,11 +79,9 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F72] = "%s: CONNECTING → CONNECTED (recv CONN)",  /* SID:72 */
     [LA_F73] = "%s: CONNECTING → CONNECTED (recv CONN_ACK)",  /* SID:73 */
     [LA_F74] = "%s: CONNECTING → CONNECTED (recv DATA)",  /* SID:74 */
-    [LA_F70] = "%s: CONNECTING → RELAY (timeout, signaling)",  /* SID:70 */
     [LA_F138] = "%s: PUNCHING → CLOSED (timeout %llums, no relay)",  /* SID:138 */
     [LA_F103] = "%s: PUNCHING → CONNECTED (earlier CONN)",  /* SID:103 */
     [LA_F102] = "%s: PUNCHING → CONNECTING (%s)",  /* SID:102 */
-    [LA_F182] = "%s: PUNCHING → RELAY (timeout %llums, signaling)",  /* SID:182 */
     [LA_F75] = "%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n",  /* SID:75 */
     [LA_F76] = "%s: Peer addr changed -> %s:%d, retrying punch\n",  /* SID:76 */
     [LA_F77] = "%s: RELAY → CONNECTED (direct path recovered)",  /* SID:77 */
@@ -107,6 +104,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F95] = "%s: accepted, public=%s:%d ses_id=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n",  /* SID:95 */
     [LA_F96] = "%s: accepted, waiting for response (sid=%u)\n",  /* SID:96 */
     [LA_F97] = "%s: accepted\n",  /* SID:97 */
+    [LA_F121] = "%s: invalid payload len=%d (need 6)",  /* SID:121 */
     [LA_F99] = "%s: bad payload(len=%d cand_cnt=%d)\n",  /* SID:99 */
     [LA_F100] = "%s: bad payload(len=%d)\n",  /* SID:100 */
     [LA_F101] = "%s: bad payload(len=%d, need >=8)\n",  /* SID:101 */
@@ -114,7 +112,6 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F173] = "%s: batch punch start (%d cands)",  /* SID:173 */
     [LA_F126] = "%s: batch punch: no cand, wait trickle",  /* SID:126 */
     [LA_F104] = "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n",  /* SID:104 */
-    [LA_F105] = "%s: discovered prflx cand<%s:%d>[%d]",  /* SID:105 */
     [LA_F106] = "%s: duplicate remote cand<%s:%d> from signaling, skipped\n",  /* SID:106 */
     [LA_F107] = "%s: duplicate request ignored (sid=%u, already processing)\n",  /* SID:107 */
     [LA_F108] = "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n",  /* SID:108 */
@@ -130,14 +127,12 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F118] = "%s: invalid ack_seq=%u\n",  /* SID:118 */
     [LA_F119] = "%s: invalid cand idx: %d (count: %d)",  /* SID:119 */
     [LA_F120] = "%s: invalid for non-relay req\n",  /* SID:120 */
-    [LA_F121] = "%s: invalid payload len=%d (need 6)",  /* SID:121 */
+    [LA_F419] = "%s: invalid payload len=%d (need 6)",  /* SID:419 new */
     [LA_F122] = "%s: invalid seq=%u\n",  /* SID:122 */
     [LA_F123] = "%s: invalid session_id=0\n",  /* SID:123 */
     [LA_F124] = "%s: keep-alive sent (%d cands)",  /* SID:124 */
     [LA_F125] = "%s: new request (sid=%u) overrides pending request (sid=%u)\n",  /* SID:125 */
-    [LA_F128] = "%s: no writable path available",  /* SID:128 */
     [LA_F129] = "%s: not connected, cannot send FIN",  /* SID:129 */
-    [LA_F130] = "%s: not connected, unexpected ACK",  /* SID:130 */
     [LA_F131] = "%s: old request ignored (sid=%u <= last_sid=%u)\n",  /* SID:131 */
     [LA_F162] = "%s: path rx UP (%s:%d)",  /* SID:162 */
     [LA_F190] = "%s: path tx UP (echo seq=%u)",  /* SID:190 */
@@ -145,22 +140,27 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F152] = "%s: path[%d] relay UP",  /* SID:152 */
     [LA_F133] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:133 */
     [LA_F134] = "%s: peer online, proceeding to ICE\n",  /* SID:134 */
+    [LA_F424] = "%s: peer online, starting NAT punch\n",  /* SID:424 new */
     [LA_F135] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:135 */
     [LA_F136] = "%s: peer_info0 srflx cand[%d]<%s:%d>%s\n",  /* SID:136 */
     [LA_F140] = "%s: punch cand[%d] %s:%d (%s)",  /* SID:140 */
     [LA_F137] = "%s: punch remote cand[%d]<%s:%d> failed\n",  /* SID:137 */
+    [LA_F425] = "%s: punch timeout, fallback punching using signaling relay",  /* SID:425 new */
     [LA_F139] = "%s: punching %d/%d candidates (elapsed: %llu ms)",  /* SID:139 */
     [LA_F142] = "%s: push remote cand<%s:%d> failed(OOM)",  /* SID:142 */
     [LA_F143] = "%s: reaching alloc OOM",  /* SID:143 */
     [LA_F144] = "%s: reaching broadcast to %d cand(s), seq=%u",  /* SID:144 */
     [LA_F149] = "%s: reaching cand[%d] via path[%d] to %s:%d, seq=%u",  /* SID:149 */
+    [LA_F428] = "%s: reaching cand[%d] via signaling relay, seq=%u",  /* SID:428 new */
     [LA_F145] = "%s: reaching enqueued: cand[%d], seq=%u, priority=%u",  /* SID:145 */
     [LA_F146] = "%s: reaching relay via signaling FAILED (ret=%d), seq=%u",  /* SID:146 */
     [LA_F147] = "%s: reaching relay via signaling SUCCESS, seq=%u",  /* SID:147 */
     [LA_F148] = "%s: reaching updated: cand[%d], seq=%u->%u",  /* SID:148 */
     [LA_F151] = "%s: recorded peer conn_seq=%u for future CONN_ACK",  /* SID:151 */
     [LA_F91] = "%s: recv from cand[%d]",  /* SID:91 */
-    [LA_F154] = "%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n",  /* [SID:154] UPDATED new: "%s: remote %s cand[%d]<%s:%d> (disabled)\n" */
+    [LA_F426] = "%s: relay cand[%d] but TURN not allocated",  /* SID:426 new */
+    [LA_F154] = "%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n",  /* SID:154 */
+    [LA_F423] = "%s: remote %s cand[%d]<%s:%d> (disabled)\n",  /* SID:423 new */
     [LA_F153] = "%s: remote %s cand[%d]<%s:%d> accepted\n",  /* SID:153 */
     [LA_F156] = "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n",  /* SID:156 */
     [LA_F157] = "%s: restarting periodic check",  /* SID:157 */
@@ -189,7 +189,6 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F185] = "%s: timeout, peer did not respond",  /* SID:185 */
     [LA_F186] = "%s: timeout, retry %d/%d",  /* SID:186 */
     [LA_F174] = "%s: trickle punch start",  /* SID:174 */
-    [LA_F171] = "%s: trickle punch: set peer_addr",  /* SID:171 */
     [LA_F187] = "%s: trickled %d cand(s), seq=%u (ses_id=%llu)\n",  /* SID:187 */
     [LA_F188] = "%s: triggered via COMPACT msg echo",  /* SID:188 */
     [LA_F189] = "%s: triggered via RELAY TUNE echo",  /* SID:189 */
@@ -263,6 +262,9 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F257] = "Gathered host cand<%s:%d> (priority=0x%08x)",  /* SID:257 */
     [LA_F258] = "% Handshake complete",  /* SID:258 */
     [LA_F259] = "Handshake failed: %s (-0x%04x)",  /* SID:259 */
+    [LA_F420] = "Ignore %s pkt from %s:%d, not connected",  /* SID:420 new */
+    [LA_F421] = "Ignore %s pkt from %s:%d, not connecting",  /* SID:421 new */
+    [LA_F422] = "Ignore %s pkt from %s:%d, not connecting/connected",  /* SID:422 new */
     [LA_F260] = "Initialize PUBSUB signaling context failed(%d)",  /* SID:260 */
     [LA_F261] = "Initialize network subsystem failed(%d)",  /* SID:261 */
     [LA_F262] = "Initialize signaling mode: %d",  /* SID:262 */
@@ -270,6 +272,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F264] = "Invalid magic 0x%x (expected 0x%x), resetting",  /* SID:264 */
     [LA_F265] = "Invalid read state %d, resetting",  /* SID:265 */
     [LA_F266] = "% Invalid signaling mode in configuration",  /* SID:266 */
+    [LA_F430] = "% LOST recovery: NAT connected but no path available",  /* SID:430 new */
     [LA_F267] = "Local address detection done: %d address(es)",  /* SID:267 */
     [LA_F268] = "Marked old path (idx=%d) as FAILED due to addr change\n",  /* SID:268 */
     [LA_F269] = "% NAT connected but no available path in path manager",  /* SID:269 */
@@ -300,6 +303,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F294] = "Push prflx candidate<%s:%d> failed(OOM)",  /* SID:294 */
     [LA_F295] = "Push remote candidate<%s:%d> (type=%d) failed(OOM)",  /* SID:295 */
     [LA_F296] = "REGISTERED: peer=%s\n",  /* SID:296 */
+    [LA_F429] = "% RELAY path but TURN not allocated",  /* SID:429 new */
+    [LA_F434] = "% RELAY path but TURN not allocated (dtls)",  /* SID:434 new */
     [LA_F297] = "% RELAY/COMPACT mode requires server_host",  /* SID:297 */
     [LA_F298] = "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d",  /* SID:298 */
     [LA_F299] = "Received ACK (status=%d, candidates_acked=%d)",  /* SID:299 */
@@ -337,13 +342,12 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F331] = "Sent connect request to '%s' (%d bytes)",  /* SID:331 */
     [LA_F332] = "Sent initial offer(%d) to %s)",  /* SID:332 */
     [LA_F333] = "% Signal payload deserialization failed",  /* SID:333 */
-    [LA_F334] = "% Skipping Host Candidate gathering due to instrumentation",  /* [SID:334] UPDATED new: "% Skipping Host Candidate gathering (disabled)" */
-    [LA_F335] = "% Skipping local Host candidates due to instrument",  /* [SID:335] UPDATED new: "% Skipping local Host candidates (disabled)" */
+    [LA_F334] = "% Skipping Host Candidate gathering due to instrumentation",  /* SID:334 */
+    [LA_F335] = "% Skipping local Host candidates due to instrument",  /* SID:335 */
     [LA_F336] = "Start internal thread failed(%d)",  /* SID:336 */
     [LA_F337] = "% Starting internal thread",  /* SID:337 */
     [LA_F338] = "% State: CONNECTED → LOST (no relay)",  /* SID:338 */
     [LA_F339] = "% State: CONNECTED → RELAY (path lost)",  /* SID:339 */
-    [LA_F340] = "% State: LOST → CONNECTED (legacy path)",  /* SID:340 */
     [LA_F341] = "State: LOST → CONNECTED, path=PUNCH[%d]",  /* SID:341 */
     [LA_F342] = "State: RELAY → CONNECTED, path=PUNCH[%d]",  /* SID:342 */
     [LA_F343] = "State: → CONNECTED, path[%d]",  /* SID:343 */
@@ -407,6 +411,9 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F403] = "% connection closed by peer",  /* SID:403 */
     [LA_F404] = "ctr_drbg_seed failed: -0x%x",  /* SID:404 */
     [LA_F405] = "% p2p_ice_send_local_candidate called in non-RELAY mode",  /* SID:405 */
+    [LA_F431] = "path[%d] addr is NULL",  /* SID:431 new */
+    [LA_F432] = "path[%d] addr is NULL (LOST recovery)",  /* SID:432 new */
+    [LA_F433] = "path[%d] addr is NULL (RELAY recovery)",  /* SID:433 new */
     [LA_F406] = "recv error %d",  /* SID:406 */
     [LA_F407] = "recv error %d while discarding",  /* SID:407 */
     [LA_F408] = "recv error %d while reading payload",  /* SID:408 */
@@ -420,7 +427,6 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
-    [LA_F141] = "%s: punching remote [%d]cand<%s:%d> (type: %s)",  /* SID:141 */
 };
 
 static inline int lang_cn(void) {

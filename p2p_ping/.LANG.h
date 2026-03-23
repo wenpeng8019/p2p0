@@ -92,9 +92,9 @@ enum {
 
     /* Strings (LA_S) */
     LA_S44,  /* "STUN server address"  [p2p_ping.c] */
-    LA_S45,  /* disabled "Disable Host candidates (for testing)" */
-    LA_S46,  /* disabled "Disable Srflx candidates (for testing)" */
-    LA_S47,  /* disabled "Disable Relay candidates (for testing)" */
+    _LA_45,
+    _LA_46,
+    _LA_47,
 
     /* Formats (LA_F) */
     LA_F48,  /* "[STATE] %s (%d) -> %s (%d)\n" (%s,%d,%s,%d)  [p2p_ping.c] */

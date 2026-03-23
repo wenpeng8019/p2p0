@@ -21,13 +21,17 @@ int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
                        uint8_t type, uint8_t flags, uint16_t seq,
                        const void *payload, int payload_len) {
 
-    /* 加密路径: encrypt_send 内部调用 p2p_send_dtls_record */
-    if (s->dtls && s->dtls->is_ready(s)) {
+    /* 加密路径: 有 payload 时加密，控制包（CONN/CONN_ACK）无 payload 不加密 */
+    if (payload && s->dtls && s->dtls->is_ready(s)) {
         return s->dtls->encrypt_send(s, addr, type, flags, seq, payload, payload_len);
     }
 
     /* TURN 中继路径: 将原始 P2P 包通过 Send Indication 发送 */
-    if (s->path == P2P_PATH_RELAY && s->turn.state == TURN_ALLOCATED) {
+    if (s->path == P2P_PATH_RELAY) {
+        if (s->turn.state != TURN_ALLOCATED) {
+            print("W:", LA_F("RELAY path but TURN not allocated", LA_F429, 429));
+            return -1;
+        }
         uint8_t pkt[P2P_MTU];
         if (P2P_HDR_SIZE + payload_len > P2P_MTU) return -1;
         p2p_pkt_hdr_encode(pkt, type, flags, seq);
@@ -64,7 +68,11 @@ void p2p_send_dtls_record(p2p_session_t *s, const struct sockaddr_in *addr,
     uint8_t pkt[P2P_HDR_SIZE + sizeof(uint64_t) + P2P_MTU + 64];
 
     /* TURN 中继: CRYPTO 包通过 Send Indication 发送 */
-    if (s->path == P2P_PATH_RELAY && s->turn.state == TURN_ALLOCATED) {
+    if (s->path == P2P_PATH_RELAY) {
+        if (s->turn.state != TURN_ALLOCATED) {
+            print("W:", LA_F("RELAY path but TURN not allocated (dtls)", LA_F434, 434));
+            return;
+        }
         p2p_pkt_hdr_encode(pkt, P2P_PKT_CRYPTO, 0, 0);
         memcpy(pkt + P2P_HDR_SIZE, dtls_record, record_len);
         p2p_turn_send_indication(s, addr, pkt, P2P_HDR_SIZE + record_len);

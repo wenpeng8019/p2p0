@@ -114,8 +114,12 @@ void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
     int best_path = path_manager_select_best_path(s);
     if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
         const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
+        if (!addr) {
+            print("E:", LA_F("path[%d] addr is NULL", LA_F431, 431), best_path);
+            return;
+        }
         s->path = path_manager_get_path_type(s, best_path);
-        s->active_addr = addr ? *addr : s->nat.peer_addr;
+        s->active_addr = *addr;
         path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
         
         // 根据路径类型决定 P2P 状态
@@ -152,7 +156,7 @@ static void disconnect(p2p_session_t *s) {
     if (old_state >= P2P_STATE_LOST) {
 
         print("V:", LA_F("Sending FIN packet to peer before closing", LA_F326, 326));
-        
+
         nat_send_fin(s);
 
         // 触发回调
@@ -1070,8 +1074,12 @@ p2p_update(p2p_handle_t hdl) {
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
             const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
+            if (!addr) {
+                print("E:", LA_F("path[%d] addr is NULL (RELAY recovery)", LA_F433, 433), best_path);
+                return -1;  // 异常状态
+            }
             s->path = P2P_PATH_PUNCH;
-            s->active_addr = addr ? *addr : s->nat.peer_addr;
+            s->active_addr = *addr;
             path_manager_switch_path(s, best_path, "nat_recovery", now_ms);
             p2p_set_state(s, P2P_STATE_CONNECTED);
             print("I:", LA_F("State: RELAY → CONNECTED, path=PUNCH[%d]", LA_F342, 342), best_path);
@@ -1093,7 +1101,7 @@ p2p_update(p2p_handle_t hdl) {
             // 有 relay 可用：切换到中继路径
             const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
             s->path = path_manager_get_path_type(s, best_path);
-            s->active_addr = addr ? *addr : s->signaling.addr;
+            s->active_addr = addr ? *addr : s->signaling.addr;  // signaling 作为 fallback
             path_manager_switch_path(s, best_path, "nat_lost_to_relay", now_ms);
             p2p_set_state(s, P2P_STATE_RELAY);
             print("W:", LA_F("State: CONNECTED → RELAY (path lost)", LA_F339, 339));
@@ -1114,15 +1122,17 @@ p2p_update(p2p_handle_t hdl) {
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {
             const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
+            if (!addr) {
+                print("E:", LA_F("path[%d] addr is NULL (LOST recovery)", LA_F432, 432), best_path);
+                return -1;  // 异常状态
+            }
             s->path = P2P_PATH_PUNCH;
-            s->active_addr = addr ? *addr : s->nat.peer_addr;
+            s->active_addr = *addr;
             path_manager_switch_path(s, best_path, "lost_recovery", now_ms);
             print("I:", LA_F("State: LOST → CONNECTED, path=PUNCH[%d]", LA_F341, 341), best_path);
         } else {
-            s->path = P2P_PATH_PUNCH;
-            s->active_addr = s->nat.peer_addr;
-            s->active_path = -2;
-            print("I:", LA_F("State: LOST → CONNECTED (legacy path)", LA_F340, 340));
+            // 无可用路径，但 NAT 状态显示已连接（异常状态，保持当前 active_addr）
+            print("W:", LA_F("LOST recovery: NAT connected but no path available", LA_F430, 430));
         }
         p2p_set_state(s, P2P_STATE_CONNECTED);
     }

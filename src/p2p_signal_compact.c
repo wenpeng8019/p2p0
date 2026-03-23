@@ -52,7 +52,7 @@
  */
 static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, int cand_cnt) {
 
-    assert(s->remote_cand_cnt + cand_cnt <= s->remote_cand_cap);
+    assert(cand_cnt && s->remote_cand_cnt + cand_cnt <= s->remote_cand_cap);
 
     int offset = sizeof(uint64_t) + 2;  // 第一个 candidates 列表的起始位置
     p2p_remote_candidate_entry_t*c;
@@ -1080,7 +1080,9 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                 return;
             }
 
-            unpack_remote_candidates(s, payload, cand_cnt);
+            if (cand_cnt) 
+                unpack_remote_candidates(s, payload, cand_cnt);
+
             ctx->remote_candidates_done |= 1u << (seq - 1);
         }
     }
@@ -1100,6 +1102,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                 return;
             }
 
+            assert(cand_cnt);
             unpack_remote_candidates(s, payload, cand_cnt);
 
             ctx->remote_candidates_0 = new_seq = true;

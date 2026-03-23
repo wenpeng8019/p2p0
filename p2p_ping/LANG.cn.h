@@ -15,9 +15,11 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_W8] = "RELAY",  /* SID:8 */
     [LA_W9] = "UNKNOWN",  /* SID:9 */
     [LA_S10] = "--- Connected ---",  /* SID:10 */
+    [LA_S11] = "--- Disconnected ---",  /* SID:11 new */
     [LA_S13] = "Auto-echo received messages back to sender",  /* SID:13 */
     [LA_S40] = "Debugger Name",  /* SID:40 */
     [LA_S50] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:50 */
+    [LA_S53] = "Disable Prflx candidates (for testing)",  /* SID:53 new */
     [LA_S51] = "Disable Relay candidates (for testing)",  /* SID:51 */
     [LA_S52] = "[EVENT] State: %s -> %s\n",  /* SID:52 */
     [LA_S15] = "Enable DTLS (MbedTLS)",  /* SID:15 */
@@ -46,11 +48,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F43] = "Waiting Debugger(%s) connecting...\n",  /* SID:43 */
     [LA_F36] = "% [Chat] Echo mode enabled: received messages will be echoed back.\n",  /* SID:36 */
     [LA_F37] = "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n",  /* SID:37 */
-    [LA_F49] = "[EVENT] State: %s -> %s\n",  /* SID:49 new */
+    [LA_F49] = "[EVENT] State: %s -> %s\n",  /* SID:49 */
     [LA_F48] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:48 */
-    [LA_S45] = "[STATE] %s (%d) -> %s (%d)\n",  /* SID:45 */
-    [LA_S47] = "Disable Relay candidates (for testing)",  /* SID:47 */
-    [LA_S46] = "[EVENT] State: %s -> %s\n",  /* SID:46 */
 };
 
 static inline int lang_cn(void) {
