@@ -872,19 +872,6 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     print("I:", LA_F("REGISTERED: peer=%s\n", LA_F296, 296), ctx->peer_online ? "online" : "offline");
     if (s->state == P2P_STATE_REGISTERING) s->state = P2P_STATE_REGISTERED;
 
-    // 如果对方在线，直接进入 ICE 阶段，发送后续候选队列和 FIN 包
-    // + 这里可能存在两种情况：
-    //   1. PEER_INFO 先于 REGISTER_ACK 到达，此时先到达的 PEER_INFO 会先将 peer_online 标记为 true
-    //      注意，并发场景下，此时 REGISTER_ACK 可能并未携带 SIG_REGACK_PEER_ONLINE 标识
-    //   2. REGISTER_ACK 先到达，且携带 SIG_REGACK_PEER_ONLINE 标识，此时直接标记 peer_online 为 true
-    if (ctx->peer_online) {
-
-        print("I:", LA_F("%s: peer online, proceeding to ICE\n", LA_F134, 134), PROTO);
-        ctx->state = SIGNAL_COMPACT_ICE;
-        send_rest_candidates_and_fin(s);
-        ctx->last_send_time = P_tick_ms();
-    }
-
     // 如果服务器支持 NAT 探测端口，则启动 NAT_PROBE 探测流程
     if (ctx->probe_port > 0) {
 
@@ -897,21 +884,34 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     }
     else s->nat_type = P2P_NAT_UNDETECTABLE;
 
-    // 如果服务器支持数据中继，提前将 SIGNALING 路径添加到路径管理器（作为 fallback）
-    // 这样当 P2P 打洞失败或连接断开时，可以自动降级到信令服务器中转
-    if (ctx->relay_support && !s->signaling.active) {
+    // 如果服务器支持数据中继
+    if (ctx->relay_support) {
+
+        // 启动数据中继功能
+        assert(!s->signaling_relay_fn);
+        s->signaling_relay_fn = p2p_signal_compact_relay;
+
+        // 将 SIGNALING 路径添加到路径管理器（作为 fallback）
         path_manager_enable_signaling(s, &ctx->server_addr);
         print("I:", LA_F("SIGNALING path enabled (server supports relay)\n", LA_F320, 320));
     }
 
-    // 启动数据中继功能（如果服务器支持）
-    assert(!s->signaling_relay_fn);
-    if (ctx->relay_support)
-        s->signaling_relay_fn = p2p_signal_compact_relay;
+    // 如果对方在线，直接进入 ICE 阶段，发送后续候选队列和 FIN 包
+    // + 这里可能存在两种情况：
+    //   1. PEER_INFO 先于 REGISTER_ACK 到达，此时先到达的 PEER_INFO 会先将 peer_online 标记为 true
+    //      注意，并发场景下，此时 REGISTER_ACK 可能并未携带 SIG_REGACK_PEER_ONLINE 标识
+    //   2. REGISTER_ACK 先到达，且携带 SIG_REGACK_PEER_ONLINE 标识，此时直接标记 peer_online 为 true
+    if (ctx->peer_online) {
 
-    // 启动 NAT 打洞
-    assert(s->nat.state < NAT_PUNCHING);
-    nat_punch(s, -1/* all candidates */);
+        print("I:", LA_F("%s: peer online, proceeding to ICE\n", LA_F134, 134), PROTO);
+        ctx->state = SIGNAL_COMPACT_ICE;
+        send_rest_candidates_and_fin(s);
+        ctx->last_send_time = P_tick_ms();
+
+        // 启动 NAT 打洞
+        assert(s->nat.state < NAT_PUNCHING);
+        nat_punch(s, -1/* all candidates */);
+    }
 }
 
 /*
@@ -1143,6 +1143,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             }
 
             if (ctx->state >= SIGNAL_COMPACT_REGISTERED) {
+
                 if (nat_punch(s, 0) != E_NONE) {
                     print("E:", LA_F("Failed to send punch packet for new peer addr\n", LA_F251, 251));
                 }
