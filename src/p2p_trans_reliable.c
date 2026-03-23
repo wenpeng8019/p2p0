@@ -87,6 +87,7 @@ int reliable_on_data(struct p2p_session *s, uint16_t seq, const uint8_t *payload
     if (!seq_in_window(seq, r->recv_base, RELIABLE_WINDOW)) {
         printf(LA_F("Out-of-window packet discarded seq=%u base=%u", LA_F276, 276),
                       seq, r->recv_base);
+        r->need_ack = true;  // 发送 ACK 告知发送方当前 recv_base，以防第一个 ACK 丢包
         return 0;  // 超出窗口，忽略
     }
 
@@ -167,15 +168,21 @@ int reliable_on_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack_bits,
  * 根据当前接收状态构建 ACK 载荷
  */
 static int build_ack_payload(const reliable_t *r, uint8_t *buf) {
-    // 累积 ACK：recv_base（它之前的所有内容都已接收）
+    // 累积 ACK：从 recv_base 向前扫描已缓冲（已接收但应用层可能尚未消费）的连续包
+    // 注：recv_base 只在应用层消费包时推进（reliable_recv_pkt），但发送 ACK 需要基于
+    //     已接收入缓冲区的包，不能等应用层消费后再 ACK，否则 ack_seq 会滞后一帧
     uint16_t ack_seq = r->recv_base;
+    while (r->recv_bitmap[ack_seq % RELIABLE_WINDOW] &&
+           (uint16_t)(ack_seq - r->recv_base) < RELIABLE_WINDOW) {
+        ack_seq++;
+    }
     nwrite_s(buf, ack_seq);
 
-    // SACK 位图：第 i 位 = recv_base + 1 + i（与接收方解读一致：ack_seq + 1 + i）
+    // SACK 位图：第 i 位 = ack_seq + 1 + i（与发送方解读一致）
     // 注：循环上限用 RELIABLE_WINDOW-1 而非 RELIABLE_WINDOW，避免环形缓冲区回绕导致漏报已确认包
     uint32_t sack = 0;
     for (int i = 0; i < 32 && i < RELIABLE_WINDOW - 1; i++) {
-        int idx = (r->recv_base + 1 + i) % RELIABLE_WINDOW;
+        int idx = (ack_seq + 1 + i) % RELIABLE_WINDOW;
         if (r->recv_bitmap[idx])
             sack |= (1u << i);
     }
