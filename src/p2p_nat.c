@@ -20,6 +20,7 @@
 
 #define TASK_NAT                "NAT"
 #define TASK_PATH               "PATH"
+#define TASK_ICE_REMOTE         "ICE REMOTE"
 
 /*
  * 查找或添加远端候选（PRFLX 发现）
@@ -28,8 +29,15 @@
  * 返回候选索引，或负值表示 OOM。
  */
 static int upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
+
     int idx = p2p_find_remote_candidate_by_addr(s, from);
     if (idx >= 0) return idx;
+
+    if (s->cfg.test_ice_prflx_off) {
+        print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F154, 154),
+              TASK_ICE_REMOTE, "prflx", idx, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        return -1;
+    }
 
     // 新候选（NAT 映射出的 PRFLX）
     idx = p2p_cand_push_remote(s);
@@ -38,6 +46,7 @@ static int upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
               TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return idx;
     }
+
     p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
     c->addr = *from;
     c->type = P2P_CAND_PRFLX;
@@ -47,8 +56,9 @@ static int upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
     c->last_punch_send_ms = 0;
     path_stats_init(&c->stats, 0);
 
-    print("I:", LA_F("%s: discovered prflx cand<%s:%d>[%d]", LA_F105, 105),
-          TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port), idx);
+    print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F153, 153),
+          TASK_ICE_REMOTE, "prflx", idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+
     return idx;
 }
 

@@ -20,6 +20,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S13] = "Auto-echo received messages back to sender",  /* SID:13 */
     [LA_S40] = "Debugger Name",  /* SID:40 */
     [LA_S50] = "Disable Host candidates (for testing)",  /* SID:50 */
+    [LA_S53] = "Disable Prflx candidates (for testing)",  /* SID:53 */
     [LA_S51] = "Disable Relay candidates (for testing)",  /* SID:51 */
     [LA_S52] = "Disable Srflx candidates (for testing)",  /* SID:52 */
     [LA_S15] = "Enable DTLS (MbedTLS)",  /* SID:15 */

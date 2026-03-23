@@ -146,7 +146,7 @@ enum {
     LA_F102,  /* "%s: PUNCHING → CONNECTING (%s)" (%s,%s)  [p2p_nat.c] */
     LA_F103,  /* "%s: PUNCHING → CONNECTED (earlier CONN)" (%s)  [p2p_nat.c] */
     LA_F104,  /* "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n" (%s,%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
-    LA_F105,  /* "%s: discovered prflx cand<%s:%d>[%d]" (%s,%s,%d,%d)  [p2p_nat.c] */
+    LA_F105,  /* disabled "%s: discovered prflx cand<%s:%d>[%d]" */
     LA_F106,  /* "%s: duplicate remote cand<%s:%d> from signaling, skipped\n" (%s,%s,%d)  [p2p_signal_compact.c] */
     LA_F107,  /* "%s: duplicate request ignored (sid=%u, already processing)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F108,  /* "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n" (%s,%u,%u,%d)  [p2p_signal_compact.c] */
@@ -194,8 +194,8 @@ enum {
     LA_F150,  /* "%s: → CLOSED (recv FIN)" (%s)  [p2p_nat.c] */
     LA_F151,  /* "%s: recorded peer conn_seq=%u for future CONN_ACK" (%s,%u)  [p2p_nat.c] */
     LA_F152,  /* "%s: path[%d] relay UP" (%s,%d)  [p2p_nat.c] */
-    LA_F153,  /* "%s: remote %s cand[%d]<%s:%d> accepted\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c] */
-    LA_F154,  /* "%s: remote %s cand[%d]<%s:%d> (disabled)\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c] */
+    LA_F153,  /* "%s: remote %s cand[%d]<%s:%d> accepted\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c, p2p_nat.c] */
+    LA_F154,  /* "%s: remote %s cand[%d]<%s:%d> (disabled)\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c, p2p_nat.c] */
     _LA_155,
     LA_F156,  /* "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
     LA_F157,  /* "%s: restarting periodic check" (%s)  [p2p_probe.c] */

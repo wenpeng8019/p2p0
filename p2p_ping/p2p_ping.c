@@ -41,6 +41,7 @@ ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S40, 
 ARGS_B(false, no_host,      0,   "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S50, 50));
 ARGS_B(false, no_srflx,     0,   "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S52, 52));
 ARGS_B(false, no_relay,     0,   "no-relay",     LA_CS("Disable Relay candidates (for testing)", LA_S51, 51));
+ARGS_B(false, no_prflx,     0,   "no-prflx",     LA_CS("Disable Prflx candidates (for testing)", LA_S53, 53));
 
 static p2p_language_t s_lang = P2P_LANG_EN;
 static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }
@@ -360,6 +361,7 @@ int main(int argc, char *argv[]) {
         &ARGS_DEF_no_host,
         &ARGS_DEF_no_srflx,
         &ARGS_DEF_no_relay,
+        &ARGS_DEF_no_prflx,
         NULL);
 
     /* 设置日志级别 */
@@ -418,6 +420,7 @@ int main(int argc, char *argv[]) {
     cfg.test_ice_host_off  = ARGS_no_host.i64 ? true : false;
     cfg.test_ice_srflx_off = ARGS_no_srflx.i64 ? true : false;
     cfg.test_ice_relay_off = ARGS_no_relay.i64 ? true : false;
+    cfg.test_ice_prflx_off = ARGS_no_prflx.i64 ? true : false;
 
     #ifndef NDEBUG
     p2p_instrument_base = 10;

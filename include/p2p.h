@@ -252,6 +252,7 @@ typedef struct {
     void*                   userdata;                   // 用户自定义数据，传递给回调函数
 
     /* 测试选项 */
+    bool                    test_ice_prflx_off;         // 禁用 Prflx 候选（不收集对等方地址）
     bool                    test_ice_host_off;          // 禁用 Host 候选（不收集本地网卡地址）
     bool                    test_ice_srflx_off;         // 禁用 Srflx 候选（不收集 NAT 反射地址）
     bool                    test_ice_relay_off;         // 禁用 Relay 候选（不收集 TURN 中继地址）

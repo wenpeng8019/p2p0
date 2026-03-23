@@ -104,6 +104,7 @@ enum {
     LA_S50,  /* "Disable Host candidates (for testing)"  [p2p_ping.c] */
     LA_S51,  /* "Disable Relay candidates (for testing)"  [p2p_ping.c] */
     LA_S52,  /* "Disable Srflx candidates (for testing)"  [p2p_ping.c] */
+    LA_S53,  /* "Disable Prflx candidates (for testing)"  [p2p_ping.c] */
 
     LA_NUM
 };

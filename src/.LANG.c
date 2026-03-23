@@ -117,7 +117,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F173] = "%s: batch punch start (%d cands)",  /* SID:173 */
     [LA_F126] = "%s: batch punch: no cand, wait trickle",  /* SID:126 */
     [LA_F104] = "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n",  /* SID:104 */
-    [LA_F105] = "%s: discovered prflx cand<%s:%d>[%d]",  /* SID:105 */
     [LA_F106] = "%s: duplicate remote cand<%s:%d> from signaling, skipped\n",  /* SID:106 */
     [LA_F107] = "%s: duplicate request ignored (sid=%u, already processing)\n",  /* SID:107 */
     [LA_F108] = "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n",  /* SID:108 */
@@ -425,6 +424,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
+    [LA_F105] = "%s: discovered prflx cand<%s:%d>[%d]",  /* SID:105 disabled */
     [LA_F130] = "%s: not connected, unexpected ACK",  /* SID:130 disabled */
     [LA_F141] = "%s: punching remote [%d]cand<%s:%d> (type: %s)",  /* SID:141 disabled */
 };
