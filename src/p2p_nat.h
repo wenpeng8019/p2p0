@@ -50,6 +50,7 @@ typedef struct {
     uint16_t            punch_seq;          // 本地 PUNCH 包序列号（自增）
     
     /* reaching 队列（原路径处于非 writable 状态时缓存 REACH） */
+    punch_reaching_t*   reaching_recycle;   
     punch_reaching_t*   reaching_head;      // 队列头指针（最早的在前）
     punch_reaching_t*   reaching_rear;      // 队列尾指针（最新的在后）
     uint64_t            last_reaching_send_ms; // 上次通过信令发送的时间

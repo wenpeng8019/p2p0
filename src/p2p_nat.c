@@ -27,7 +27,7 @@
  * 从已知 PUNCH/PUNCH_ACK 来源地址查找候选，若不存在则作为 PRFLX 添加。
  * 返回候选索引，或负值表示 OOM。
  */
-static int nat_upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
+static int upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
     int idx = p2p_find_remote_candidate_by_addr(s, from);
     if (idx >= 0) return idx;
 
@@ -52,8 +52,6 @@ static int nat_upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
     return idx;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-
 /*
  * 清理 reaching 队列
  *
@@ -62,13 +60,18 @@ static int nat_upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
  *
  * @param n  NAT 上下文
  */
-static void nat_clear_reaching_queue(nat_ctx_t *n) {
+static void clear_reaching_queue(nat_ctx_t *n) {
+    punch_reaching_t *node;
     while (n->reaching_head) {
-        punch_reaching_t *node = n->reaching_head;
+        node = n->reaching_head;
         n->reaching_head = node->next;
         free(node);
     }
     n->reaching_rear = NULL;
+    while(n->reaching_recycle) {
+        node = n->reaching_recycle; n->reaching_recycle = node->next;
+        free(node);
+    }
 }
 
 /*
@@ -80,17 +83,16 @@ static void nat_clear_reaching_queue(nat_ctx_t *n) {
  * @param s              会话对象
  * @param writable_path  可写路径索引（必须 >= 0）
  */
-static void nat_flush_reaching_queue(p2p_session_t *s, int writable_path) {
+static void flush_reaching_queue(p2p_session_t *s, int writable_path) {
     nat_ctx_t *n = &s->nat;
     if (writable_path < 0) return;
 
+    punch_reaching_t *node;
     while (n->reaching_head) {
-        // 内联出队逻辑（O(1) 头删）
-        punch_reaching_t *node = n->reaching_head;
+
+        node = n->reaching_head;
         n->reaching_head = node->next;
-        if (!n->reaching_head) {
-            n->reaching_rear = NULL;  // 队列变空，维护 tail
-        }
+        if (!n->reaching_head) n->reaching_rear = NULL;
 
         // 构造 ACK 负载：回显 target_addr
         uint8_t ack_payload[6];
@@ -110,7 +112,13 @@ static void nat_flush_reaching_queue(p2p_session_t *s, int writable_path) {
 
         free(node);
     }
+    while(n->reaching_recycle) {
+        node = n->reaching_recycle; n->reaching_recycle = node->next;
+        free(node);
+    }
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 /*
  * 向指定候选发送打洞包
@@ -206,6 +214,25 @@ static void nat_send_conn_ack(p2p_session_t *s, uint64_t now) {
           ntohs(s->remote_cands[best_path].addr.sin_port), best_path);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * 初始化打洞上下文
+ */
+void nat_init(nat_ctx_t *n) {
+    memset(n, 0, sizeof(*n));
+    n->state = NAT_INIT;
+}
+
+void nat_reset(nat_ctx_t *n) {
+
+    // 清空 reaching 队列
+    clear_reaching_queue(n);
+    nat_init(n);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 /*
  * 执行双向确认后的状态转换
  *
@@ -221,7 +248,7 @@ static void nat_send_conn_ack(p2p_session_t *s, uint64_t now) {
  * @param now        当前时间戳
  * @param reason     日志原因（如 "batch relay", "trickle relay", "relay+punch"）
  */
-static void nat_do_bidirectional_confirmed(p2p_session_t *s, 
+static void bidirectional_confirmed(p2p_session_t *s, 
                                            const struct sockaddr_in *peer_addr,
                                            uint64_t now,
                                            const char *reason) {
@@ -237,25 +264,6 @@ static void nat_do_bidirectional_confirmed(p2p_session_t *s,
     print("I:", LA_F("%s: PUNCHING → CONNECTING (%s)", LA_F102, 102),
           TASK_NAT, reason);
 }
-
-///////////////////////////////////////////////////////////////////////////////
-
-/*
- * 初始化打洞上下文
- */
-void nat_init(nat_ctx_t *n) {
-    memset(n, 0, sizeof(*n));
-    n->state = NAT_INIT;
-}
-
-void nat_reset(nat_ctx_t *n) {
-
-    // 清空 reaching 队列
-    nat_clear_reaching_queue(n);
-    nat_init(n);
-}
-
-///////////////////////////////////////////////////////////////////////////////
 
 /*
  * 处理 relay 候选
@@ -281,7 +289,7 @@ static void punch_relay(p2p_session_t *s, int cand_idx, uint64_t now, const char
               TASK_PATH, cand_idx);
         
         // 首次确认 tx，flush reaching queue
-        nat_flush_reaching_queue(s, cand_idx);
+        flush_reaching_queue(s, cand_idx);
         
         // 检查双向确认：
         //   正常场景：批量模式首次启动，rx_confirmed 为 false，不会触发
@@ -290,7 +298,7 @@ static void punch_relay(p2p_session_t *s, int cand_idx, uint64_t now, const char
         // 注意：即使触发了双向确认进入 CONNECTING，也不跳出循环，继续向剩余候选发送 PUNCH
         // 目的：发现所有可能路径、测量所有 RTT、提供路径冗余
         if (s->rx_confirmed && n->state == NAT_PUNCHING) {
-            nat_do_bidirectional_confirmed(s, &s->remote_cands[cand_idx].addr, now, reason);
+            bidirectional_confirmed(s, &s->remote_cands[cand_idx].addr, now, reason);
         }
     }
 }
@@ -456,7 +464,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 更新最后接收时间
     n->last_recv_time = now;
 
-    int cand_idx = nat_upsert_prflx(s, from);
+    int cand_idx = upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
     print("V:", LA_F("%s: recv from cand[%d]", LA_F91, 91), PROTO, cand_idx);
@@ -523,10 +531,13 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                 
                 // 按优先级插入（高优先级在前）
                 if (!existing) {
-                    punch_reaching_t *node = (punch_reaching_t *)malloc(sizeof(punch_reaching_t));
-                    if (!node) {
-                        print("E:", LA_F("%s: reaching alloc OOM", LA_F143, 143), TASK_NAT);
-                        return;
+                    punch_reaching_t *node = n->reaching_recycle;
+                    if (node) n->reaching_recycle = node->next;
+                    else { node = (punch_reaching_t *)malloc(sizeof(punch_reaching_t));
+                        if (!node) {
+                            print("E:", LA_F("%s: reaching alloc OOM", LA_F143, 143), TASK_NAT);
+                            return;
+                        }
                     }
                     
                     node->seq = hdr->seq;
@@ -599,7 +610,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     //   场景 2：本端 Trickle 模式收到 relay 候选，激活时设置了 tx_confirmed=true
     //   场景 3：本端批量模式已启动，对端的 REACH 到达设置了 tx_confirmed=true
     if (s->tx_confirmed && n->state == NAT_PUNCHING) {
-        nat_do_bidirectional_confirmed(s, from, now, "relay+punch");
+        bidirectional_confirmed(s, from, now, "relay+punch");
     }
 }
 
@@ -633,7 +644,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 更新最后接收时间
     n->last_recv_time = now;
 
-    int cand_idx = nat_upsert_prflx(s, from);
+    int cand_idx = upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
     // ---------- 解析负载中的 target_addr ----------
@@ -713,7 +724,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                 TASK_NAT, hdr->seq);
 
         // 首次确认 tx_confirmed，处理所有 reaching 队列（此后不会再有新的 pending）
-        nat_flush_reaching_queue(s, target_path);
+        flush_reaching_queue(s, target_path);
     }
 
     // 双向均确认 → NAT_CONNECTING（开始数据层握手）
@@ -735,7 +746,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
             print("I:", LA_F("%s: PUNCHING → CONNECTED (earlier CONN)", LA_F103, 103), TASK_NAT);
         } 
         // 正常流程：进入 CONNECTING，发送 CONN
-        else nat_do_bidirectional_confirmed(s, &s->remote_cands[cand_idx].addr, now, "punch+reach");
+        else bidirectional_confirmed(s, &s->remote_cands[cand_idx].addr, now, "punch+reach");
     }
 }
 
@@ -760,7 +771,7 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     n->last_recv_time = now;
 
     // 查找来源路径
-    int cand_idx = nat_upsert_prflx(s, from);
+    int cand_idx = upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
     // CONN 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
@@ -815,7 +826,7 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     n->last_recv_time = now;
 
     // 查找来源路径
-    int cand_idx = nat_upsert_prflx(s, from);
+    int cand_idx = upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
     print("V:", LA_F("%s: recv from cand[%d]", LA_F91, 91), PROTO, cand_idx);
@@ -910,7 +921,7 @@ void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
         s->nat.state = NAT_CLOSED;
         
         // 清理 reaching queue
-        nat_clear_reaching_queue(&s->nat);
+        clear_reaching_queue(&s->nat);
 
         print("I:", LA_F("%s: → CLOSED (recv FIN)", LA_F150, 150), TASK_NAT);
     }
@@ -959,7 +970,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                               TASK_NAT, tick_diff(now_ms, n->punch_start));
                         
                         n->state = NAT_CLOSED;          // 标记为已关闭（打洞失败）
-                        nat_clear_reaching_queue(n);    // 清理 reaching queue
+                        clear_reaching_queue(n);    // 清理 reaching queue
                     }
 
                     break;
@@ -1018,7 +1029,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                     print("E:", LA_F("%s: CONNECTING → CLOSED (timeout, no relay)", LA_F71, 71), TASK_NAT);
 
                     n->state = NAT_CLOSED;
-                    nat_clear_reaching_queue(n);  // 清理 reaching queue                    
+                    clear_reaching_queue(n);  // 清理 reaching queue                    
                 }
 
                 break;
@@ -1177,7 +1188,9 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 
                 print("V:", LA_F("%s: reaching relay via signaling SUCCESS, seq=%u", LA_F147, 147),
                       TASK_NAT, node->seq);
-                free(node);
+
+                node->next = n->reaching_recycle;
+                n->reaching_recycle = node;
             } 
             // 发送失败（信令服务器未就绪），保留节点等待下次重试
             else print("V:", LA_F("%s: reaching relay via signaling FAILED (ret=%d), seq=%u", LA_F146, 146),
@@ -1206,7 +1219,9 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
             
             print("V:", LA_F("%s: reaching broadcast to %d cand(s), seq=%u", LA_F144, 144),
                   TASK_NAT, broadcast_cnt, node->seq);
-            free(node);
+
+            node->next = n->reaching_recycle;
+            n->reaching_recycle = node;
         }
     }
 }
