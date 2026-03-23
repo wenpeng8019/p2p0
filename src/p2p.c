@@ -152,10 +152,8 @@ static void disconnect(p2p_session_t *s) {
     if (old_state >= P2P_STATE_LOST) {
 
         print("V:", LA_F("Sending FIN packet to peer before closing", LA_F326, 326));
-        for (int i = 0; i < 3; i++) {
-            if (i) P_usleep(5 * 1000); // 5ms 间隔重发
-            nat_send_fin(s);
-        }
+        
+        nat_send_fin(s);
 
         // 触发回调
         if (s->cfg.on_state) s->cfg.on_state(s, old_state, P2P_STATE_CLOSED, s->cfg.userdata);
@@ -1355,7 +1353,7 @@ p2p_is_ready(p2p_handle_t hdl) {
     if (!hdl) return false;
 
     p2p_session_t *s = (p2p_session_t*)hdl;
-    if (s->state != P2P_STATE_CONNECTED && s->state != P2P_STATE_RELAY) return false;
+    if (s->state < P2P_STATE_LOST) return false;
     if (s->trans && s->trans->is_ready) {
         return s->trans->is_ready(s);
     }

@@ -485,10 +485,10 @@ int main(int argc, char *argv[]) {
     if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F34, 34), mode_name, target_name); }
     else             { print("I:", LA_F("Running in %s mode (waiting for connection)...", LA_F35, 35), mode_name); }
 
+    g_running = true;
+
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
-
-    g_running = true;
 
     /* ---- 主循环 ---- */
     while(g_running) {
@@ -533,6 +533,7 @@ int main(int argc, char *argv[]) {
         P_usleep(10 * 1000);
     }
 
+    p2p_destroy(hdl);
     tui_cleanup();
     return 0;
 }

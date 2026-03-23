@@ -34,8 +34,8 @@ static int upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
     if (idx >= 0) return idx;
 
     if (s->cfg.test_ice_prflx_off) {
-        print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F154, 154),
-              TASK_ICE_REMOTE, "prflx", idx, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        print("I:", LA_F("%s: remote %s cand<%s:%d> (disabled)\n", LA_F154, 154),
+              TASK_ICE_REMOTE, "prflx", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return -1;
     }
 
@@ -441,6 +441,11 @@ void nat_send_fin(p2p_session_t *s) {
 
     print("V:", LA_F("%s sent to %s:%d", LA_F52, 52),
           PROTO, inet_ntoa(s->active_addr.sin_addr), ntohs(s->active_addr.sin_port));
+
+    for (int i = 2; i--;) {
+        P_usleep(50 * 1000); // 50ms 间隔重发
+        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

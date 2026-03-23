@@ -115,7 +115,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         }
 
         if (opt_off) {
-            print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F154, 154),
+            print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F423, 423),
                   TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             continue;
         }
@@ -592,15 +592,21 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     memcpy(payload + P2P_PEER_ID_MAX, ctx->remote_peer_id, strnlen(ctx->remote_peer_id, P2P_PEER_ID_MAX));
 
     print("V:", LA_F("%s sent, inst_id=%u\n", LA_F59, 59), PROTO, ctx->instance_id);
-
+    
     ret_t ret = udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_UNREGISTER, 0, 0, payload, (int)sizeof(payload));
     if (ret < 0)
         print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
-    else
+    else {
         printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F397, 397),
                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
                (int)sizeof(payload));
+
+        for(int n=2; n--;) { // 最多重试 2 次，确保服务器收到注销请求
+            P_usleep(50 * 1000);
+            udp_send_packet(s->sock, &ctx->server_addr, SIG_PKT_UNREGISTER, 0, 0, payload, (int)sizeof(payload));
+        }
+    }
 
     p2p_signal_compact_init(ctx);
     return E_NONE;

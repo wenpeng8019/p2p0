@@ -161,7 +161,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F148] = "%s: reaching updated: cand[%d], seq=%u->%u",  /* SID:148 */
     [LA_F151] = "%s: recorded peer conn_seq=%u for future CONN_ACK",  /* SID:151 */
     [LA_F91] = "%s: recv from cand[%d]",  /* SID:91 */
-    [LA_F154] = "%s: remote %s cand[%d]<%s:%d> (disabled)\n",  /* SID:154 */
+    [LA_F154] = "%s: remote %s cand<%s:%d> (disabled)\n",  /* SID:154 */
+    [LA_F423] = "%s: remote %s cand[%d]<%s:%d> (disabled)\n",  /* SID:423 */
     [LA_F153] = "%s: remote %s cand[%d]<%s:%d> accepted\n",  /* SID:153 */
     [LA_F156] = "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n",  /* SID:156 */
     [LA_F157] = "%s: restarting periodic check",  /* SID:157 */
