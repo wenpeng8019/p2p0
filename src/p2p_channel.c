@@ -58,7 +58,13 @@ int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
 
     /* 加密路径: 有 payload 时加密，控制包（CONN/CONN_ACK）无 payload 不加密 */
     if (payload && s->dtls && s->dtls->is_ready(s)) {
-        return s->dtls->encrypt_send(s, addr, type, flags, seq, payload, payload_len);
+
+        uint8_t plain[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];
+        p2p_pkt_hdr_encode(plain, type, flags, seq);
+        if (payload_len > 0)
+            memcpy(plain + P2P_HDR_SIZE, payload, payload_len);
+
+        return s->dtls->encrypt_send(s, addr, plain, P2P_HDR_SIZE + payload_len);
     }
 
     /* TURN 中继路径: 将原始 P2P 包通过 Send Indication 发送 */
@@ -86,14 +92,14 @@ int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
  * p2p_send_dtls_record — 发送原始 DTLS 记录
  *
  * 加密模块（MbedTLS / OpenSSL）的 BIO 输出最终调用此函数。
- * 自动处理中继模式 session_id 封装。
  *
- * 直连: [P2P_HDR: CRYPTO, 0, 0] [dtls_record]
+ * 这里 P2P_PKT_CRYPTO 包自身的 flags 和 seq 字段不使用
+ * 密文所负载的明文的 flags 和 seq 被封装在加密数据中，由加密模块处理
+ * 对于 signaling relay 中转添加 session_id 的情况，
+ * 信令中转接口（signaling_relay_fn）会自动处理封装，无需本函数关心
  */
 void p2p_send_dtls_record(p2p_session_t *s, const struct sockaddr_in *addr,
                        const void *dtls_record, int record_len) {
-
-    uint8_t pkt[P2P_HDR_SIZE + sizeof(uint64_t) + P2P_MTU + 64];
 
     /* TURN 中继: CRYPTO 包通过 Send Indication 发送 */
     if (s->path_type == P2P_PATH_RELAY) {

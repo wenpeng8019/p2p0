@@ -394,25 +394,15 @@ fail_cleanup:
  * 构造内部明文 [type|flags|seq|payload]，通过 DTLS 加密后发送。
  * BIO 回调 p2p_dtls_send 会自动调用 p2p_send_dtls_record 输出密文。
  */
-static int mbedtls_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr,
-                                uint8_t type, uint8_t flags, uint16_t seq,
-                                const void *payload, int payload_len) {
+static ret_t mbedtls_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr,
+                                const void *plain, int plain_len) {
     (void)addr;  /* BIO 回调使用 s->active_addr */
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     if (!dtls || !dtls->handshake_done) return 0;
 
-    /* 构造内部 P2P 包: [type|flags|seq_hi|seq_lo|payload] */
-    uint8_t plain[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];
-    plain[0] = type;
-    plain[1] = flags;
-    plain[2] = (uint8_t)(seq >> 8);
-    plain[3] = (uint8_t)(seq & 0xFF);
-    if (payload_len > 0)
-        memcpy(plain + P2P_HDR_SIZE, payload, payload_len);
-
-    int ret = mbedtls_ssl_write(&dtls->ssl, plain, P2P_HDR_SIZE + payload_len);
+    int ret = mbedtls_ssl_write(&dtls->ssl, plain, plain_len);
     if (ret <= 0) return (ret == MBEDTLS_ERR_SSL_WANT_WRITE) ? 0 : -1;
-    return payload_len;
+    return plain_len;
 }
 
 /*

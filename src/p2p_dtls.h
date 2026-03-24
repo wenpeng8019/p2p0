@@ -48,14 +48,12 @@ typedef struct p2p_dtls_ops {
      * 明文格式: [type|flags|seq|payload]  （内层 P2P 包头 + 负载）
      * 密文通过 p2p_send_dtls_record() 发出
      *
-     * @param type/flags/seq  原始包头字段（DATA, ACK 等基础类型）
-     * @param payload         原始负载
-     * @param payload_len     负载长度
-     * @return                发送的负载字节数, 0=暂不可发, -1=失败
+     * @param plain           原始明文包数据
+     * @param plain_len       明文包长度
+     * @return                发送的明文包字节数, 0=暂不可发, -1=失败
      */
-    int   (*encrypt_send)(struct p2p_session *s, const struct sockaddr_in *addr,
-                          uint8_t type, uint8_t flags, uint16_t seq,
-                          const void *payload, int payload_len);
+    ret_t   (*encrypt_send)(struct p2p_session *s, const struct sockaddr_in *addr,
+                            const void *plain, int plain_len);
 
     /*
      * 解密收到的 DTLS 记录

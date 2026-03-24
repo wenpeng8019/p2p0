@@ -135,17 +135,10 @@ static int openssl_is_ready(p2p_session_t *s) {
 /*
  * 加密并发送: 打包内层 [type|flags|seq|payload] → SSL_write → flush
  */
-static int openssl_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr,
-                                uint8_t type, uint8_t flags, uint16_t seq,
-                                const void *payload, int payload_len) {
+static ret_t openssl_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr,
+                                const void *plain, int plain_len) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->dtls_data;
     if (!os || !os->handshake_done) return 0;
-
-    uint8_t plain[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];
-    p2p_pkt_hdr_encode(plain, type, flags, seq);
-    if (payload_len > 0)
-        memcpy(plain + P2P_HDR_SIZE, payload, payload_len);
-    int plain_len = P2P_HDR_SIZE + payload_len;
 
     int ret = SSL_write(os->ssl, plain, plain_len);
     if (ret <= 0) return -1;
@@ -156,7 +149,7 @@ static int openssl_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr
     while ((enc_len = BIO_read(os->write_bio, enc_buf, sizeof(enc_buf))) > 0) {
         p2p_send_dtls_record(s, addr, enc_buf, enc_len);
     }
-    return payload_len;
+    return plain_len;
 }
 
 /*
