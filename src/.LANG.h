@@ -310,7 +310,7 @@ enum {
     LA_F266,  /* "% Invalid signaling mode in configuration"  [p2p.c] */
     LA_F267,  /* "Local address detection done: %d address(es)" (%d)  [p2p_route.c] */
     LA_F268,  /* "Marked old path (idx=%d) as FAILED due to addr change\n" (%d)  [p2p_signal_compact.c] */
-    LA_F269,  /* "% NAT connected but no available path in path manager"  [p2p.c] */
+    LA_F269,  /* disabled "% NAT connected but no available path in path manager" */
     LA_F270,  /* "% No advanced transport layer enabled, using simple reliable layer"  [p2p.c] */
     LA_F271,  /* "% No auth_key provided, using default key (insecure)"  [p2p_signal_pubsub.c] */
     LA_F272,  /* "Nomination successful! Using! Using %s path %s:%d%s" (%s,%s,%d,%s)  [p2p_ice.c] */
@@ -379,8 +379,8 @@ enum {
     LA_F335,  /* "% Skipping local Host candidates (disabled)"  [p2p.c] */
     LA_F336,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
     LA_F337,  /* "% Starting internal thread"  [p2p.c] */
-    LA_F338,  /* "% State: CONNECTED → LOST (no relay)"  [p2p.c] */
-    LA_F339,  /* "% State: CONNECTED → RELAY (path lost)"  [p2p.c] */
+    LA_F338,  /* "% State: → LOST (all paths failed)"  [p2p.c] */
+    LA_F339,  /* disabled "% State: CONNECTED → RELAY (path lost)" */
     _LA_340,
     LA_F341,  /* "State: LOST → CONNECTED, path=PUNCH[%d]" (%d)  [p2p.c] */
     LA_F342,  /* "State: RELAY → CONNECTED, path=PUNCH[%d]" (%d)  [p2p.c] */
@@ -389,7 +389,7 @@ enum {
     LA_F345,  /* "% State: → PUNCHING"  [p2p.c] */
     _LA_346,
     _LA_347,
-    LA_F348,  /* "State: → RELAY, path[%d] (signaling)" (%d)  [p2p.c] */
+    LA_F348,  /* "State: → RELAY, path[%d]" (%d)  [p2p.c] */
     LA_F349,  /* "% Stopping internal thread"  [p2p.c] */
     LA_F350,  /* "% Storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
     LA_F351,  /* disabled "% Synced path after failover" */
@@ -474,13 +474,16 @@ enum {
     LA_F430,  /* "% LOST recovery: NAT connected but no path available"  [p2p.c] */
     LA_F431,  /* disabled "path[%d] addr is NULL" */
     LA_F432,  /* disabled "path[%d] addr is NULL (LOST recovery)" */
-    LA_F433,  /* "path[%d] addr is NULL (RELAY recovery)" (%d)  [p2p.c] */
+    LA_F433,  /* disabled "path[%d] addr is NULL (RELAY recovery)" */
     LA_F434,  /* "% RELAY path but TURN not allocated (dtls)"  [p2p_channel.c] */
     LA_F435,  /* "%s: CONN ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F436,  /* "%s: CONN_ACK ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F437,  /* "%s: REACH ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F438,  /* "%s: PUNCHING → RELAY (earlier CONN)" (%s)  [p2p_nat.c] */
     LA_F439,  /* "Ignore %s pkt from %s:%d, not connecting/connected" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F440,  /* "% NAT connected but no available path in path manager"  [p2p.c] */
+    LA_F441,  /* "% RELAY recovery: NAT connected but no path available"  [p2p.c] */
+    LA_F442,  /* disabled "Invalid state (%d): LOST but active_path=%d, path_type=%d" */
 
     LA_NUM
 };

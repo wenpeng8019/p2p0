@@ -281,7 +281,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F430] = "% LOST recovery: NAT connected but no path available",  /* SID:430 */
     [LA_F267] = "Local address detection done: %d address(es)",  /* SID:267 */
     [LA_F268] = "Marked old path (idx=%d) as FAILED due to addr change\n",  /* SID:268 */
-    [LA_F269] = "% NAT connected but no available path in path manager",  /* SID:269 */
+    [LA_F440] = "% NAT connected but no available path in path manager",  /* SID:440 */
     [LA_F270] = "% No advanced transport layer enabled, using simple reliable layer",  /* SID:270 */
     [LA_F271] = "% No auth_key provided, using default key (insecure)",  /* SID:271 */
     [LA_F272] = "Nomination successful! Using! Using %s path %s:%d%s",  /* SID:272 */
@@ -311,6 +311,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F296] = "REGISTERED: peer=%s\n",  /* SID:296 */
     [LA_F429] = "% RELAY path but TURN not allocated",  /* SID:429 */
     [LA_F434] = "% RELAY path but TURN not allocated (dtls)",  /* SID:434 */
+    [LA_F441] = "% RELAY recovery: NAT connected but no path available",  /* SID:441 */
     [LA_F297] = "% RELAY/COMPACT mode requires server_host",  /* SID:297 */
     [LA_F298] = "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d",  /* SID:298 */
     [LA_F299] = "Received ACK (status=%d, candidates_acked=%d)",  /* SID:299 */
@@ -352,14 +353,13 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F335] = "% Skipping local Host candidates (disabled)",  /* SID:335 */
     [LA_F336] = "Start internal thread failed(%d)",  /* SID:336 */
     [LA_F337] = "% Starting internal thread",  /* SID:337 */
-    [LA_F338] = "% State: CONNECTED → LOST (no relay)",  /* SID:338 */
-    [LA_F339] = "% State: CONNECTED → RELAY (path lost)",  /* SID:339 */
     [LA_F341] = "State: LOST → CONNECTED, path=PUNCH[%d]",  /* SID:341 */
     [LA_F342] = "State: RELAY → CONNECTED, path=PUNCH[%d]",  /* SID:342 */
     [LA_F343] = "State: → CONNECTED, path[%d]",  /* SID:343 */
     [LA_F344] = "% State: → ERROR (punch timeout, no relay available)",  /* SID:344 */
+    [LA_F338] = "% State: → LOST (all paths failed)",  /* SID:338 */
     [LA_F345] = "% State: → PUNCHING",  /* SID:345 */
-    [LA_F348] = "State: → RELAY, path[%d] (signaling)",  /* SID:348 */
+    [LA_F348] = "State: → RELAY, path[%d]",  /* SID:348 */
     [LA_F349] = "% Stopping internal thread",  /* SID:349 */
     [LA_F350] = "% Storage full, waiting for peer to come online",  /* SID:350 */
     [LA_F352] = "TURN 401 Unauthorized (realm=%s), authenticating...",  /* SID:352 */
@@ -416,7 +416,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F403] = "% connection closed by peer",  /* SID:403 */
     [LA_F404] = "ctr_drbg_seed failed: -0x%x",  /* SID:404 */
     [LA_F405] = "% p2p_ice_send_local_candidate called in non-RELAY mode",  /* SID:405 */
-    [LA_F433] = "path[%d] addr is NULL (RELAY recovery)",  /* SID:433 */
     [LA_F406] = "recv error %d",  /* SID:406 */
     [LA_F407] = "recv error %d while discarding",  /* SID:407 */
     [LA_F408] = "recv error %d while reading payload",  /* SID:408 */
@@ -430,6 +429,10 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
+    [LA_F442] = "Invalid state (%d): LOST but active_path=%d, path_type=%d",  /* SID:442 disabled */
+    [LA_F269] = "% NAT connected but no available path in path manager",  /* SID:269 disabled */
+    [LA_F339] = "% State: CONNECTED → RELAY (path lost)",  /* SID:339 disabled */
+    [LA_F433] = "path[%d] addr is NULL (RELAY recovery)",  /* SID:433 disabled */
     [LA_F431] = "path[%d] addr is NULL",  /* SID:431 disabled */
     [LA_F351] = "% Synced path after failover",  /* SID:351 disabled */
     [LA_F432] = "path[%d] addr is NULL (LOST recovery)",  /* SID:432 disabled */

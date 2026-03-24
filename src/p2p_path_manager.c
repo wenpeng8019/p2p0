@@ -592,8 +592,8 @@ static void record_switch(p2p_session_t *s, int from_path, int to_path,
     }
 
     // 维护切换计数与时间戳
-    pm->last_switch_time = now_ms;
     pm->total_switches++;
+    pm->last_switch_time = now_ms;
 
     // 清除挂起的切换
     pm->pending_switch_path = -2;
@@ -603,6 +603,16 @@ static void record_switch(p2p_session_t *s, int from_path, int to_path,
     pm->switch_history_idx = (idx + 1) % MAX_SWITCH_HISTORY;
     if (pm->switch_history_count < MAX_SWITCH_HISTORY)
         pm->switch_history_count++;
+}
+
+/*
+ * 重置切换相关状态（用于立即切换后的状态同步）
+ */
+void path_manager_switch_reset(struct p2p_session *s, uint64_t now_ms) {
+    path_manager_t *pm = &s->path_mgr;
+    pm->last_switch_time = now_ms;
+    pm->pending_switch_path = -2;
+    pm->debounce_timer_ms = 0;
 }
 
 /*
@@ -628,7 +638,6 @@ int path_manager_switch_path(p2p_session_t *s,  int target_path, const char *rea
     
     return 0;
 }
-
 
 /* ==========================================================================
  *                                 属性/状态访问与设置

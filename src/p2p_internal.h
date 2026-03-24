@@ -304,6 +304,7 @@ static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
     p2p_ice_reset(&s->ice_ctx);
     
     // 重置活跃路径
+    s->path_type = P2P_PATH_NONE;
     s->active_path = PATH_IDX_NONE;
     memset(&s->active_addr, 0, sizeof(s->active_addr));
     

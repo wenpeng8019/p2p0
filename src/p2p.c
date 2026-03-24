@@ -112,23 +112,24 @@ void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
 
     // 选择最佳路径
     int best_path = path_manager_select_best_path(s);
-    if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
+    if (best_path < -1) {  // -2=无可用路径
+        print("E:", LA_F("NAT connected but no available path in path manager", LA_F440, 440));
+        return;
+    }
 
-        path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
-        
-        // 根据路径类型决定 P2P 状态
-        if (best_path == PATH_IDX_SIGNALING) {
-            // 信令中转模式：NAT 未直连，通过信令服务器转发数据
-            print("I:", LA_F("State: → RELAY, path[%d] (signaling)", LA_F348, 348), best_path);
-            p2p_set_state(s, P2P_STATE_RELAY);
-        } else {
-            // 直连或 TURN 中继：NAT 已连接，P2P 数据直达
-            print("I:", LA_F("State: → CONNECTED, path[%d]", LA_F343, 343), best_path);
-            p2p_set_state(s, P2P_STATE_CONNECTED);
-        }
-    } 
-    // 不应该发生：NAT_CONNECTED 但路径管理器无可用路径（逻辑错误）
-    else print("E:", LA_F("NAT connected but no available path in path manager", LA_F269, 269));
+    if (best_path != s->active_path)
+        p2p_set_active_path(s, best_path);
+
+    path_manager_switch_reset(s, now_ms);
+    
+    // P2P 状态与 NAT 状态同步（NAT_RELAY ↔ P2P_STATE_RELAY）
+    if (s->nat.state == NAT_RELAY) {
+        print("I:", LA_F("State: → RELAY, path[%d]", LA_F348, 348), best_path);
+        p2p_set_state(s, P2P_STATE_RELAY);
+    } else {
+        print("I:", LA_F("State: → CONNECTED, path[%d]", LA_F343, 343), best_path);
+        p2p_set_state(s, P2P_STATE_CONNECTED);
+    }
 }
 
 /*
@@ -270,6 +271,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     }
 
     // 如果没有配置 STUN 服务器，并且未使用 COMPACT 模式，则无法进行 NAT 类型检测
+    s->nat_type = P2P_NAT_UNKNOWN;
     if (!s->cfg.stun_server && cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
         s->nat_type = P2P_NAT_UNDETECTABLE;
     }
@@ -384,7 +386,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     s->signaling_mode = cfg->signaling_mode;
     s->state = P2P_STATE_INIT;
     s->path_type = P2P_PATH_NONE;
-    s->nat_type = P2P_NAT_UNKNOWN;
+    s->active_path = PATH_IDX_NONE;
 
     //----------------------------
 
@@ -1064,38 +1066,28 @@ p2p_update(p2p_handle_t hdl) {
         // 重新选择最佳路径（PUNCH 应当优先）
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
-            const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
-            if (!addr) {
-                print("E:", LA_F("path[%d] addr is NULL (RELAY recovery)", LA_F433, 433), best_path);
-                return -1;  // 异常状态
-            }
-            s->path_type = P2P_PATH_PUNCH;
-            s->active_addr = *addr;
-            path_manager_switch_path(s, best_path, "nat_recovery", now_ms);
-            p2p_set_state(s, P2P_STATE_CONNECTED);
+            p2p_set_active_path(s, best_path);
+            path_manager_switch_reset(s, now_ms);
             print("I:", LA_F("State: RELAY → CONNECTED, path=PUNCH[%d]", LA_F342, 342), best_path);
+            p2p_set_state(s, P2P_STATE_CONNECTED);
+        } else {
+            print("W:", LA_F("RELAY recovery: NAT connected but no path available", LA_F441, 441));
         }
-        // else: 无可用路径，保持 RELAY 状态等待
     }
 
-    // 转换：CONNECTED → LOST/RELAY（NAT 连接丢失，可能恢复）
-    // LOST 是可恢复的数据链丢失状态，与旧版本的 timeout 错误处理不同
+    // 转换：CONNECTED/RELAY → LOST（NAT 连接丢失）
+    // NAT_LOST 表示所有数据通道都断了（PUNCH/TURN/SIGNALING），等待恢复
     if ((s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)
         && s->nat.state == NAT_LOST) {
         
         // 标记当前活跃路径为失效
         path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
         
-        // 尝试切换到中继路径
-        int best_path = path_manager_select_best_path(s);
-        path_manager_switch_path(s, best_path, "nat_lost_to_relay", now_ms);
-        if (best_path >= -1) {
-            p2p_set_state(s, P2P_STATE_RELAY);
-            print("W:", LA_F("State: CONNECTED → RELAY (path lost)", LA_F339, 339));
-        } else {
-            p2p_set_state(s, P2P_STATE_LOST);
-            print("W:", LA_F("State: CONNECTED → LOST (no relay)", LA_F338, 338));
-        }
+        // 清除活跃路径
+        p2p_set_active_path(s, PATH_IDX_NONE);
+        
+        print("W:", LA_F("State: → LOST (all paths failed)", LA_F338, 338));
+        p2p_set_state(s, P2P_STATE_LOST);
     }
 
     // 转换：LOST → CONNECTED（NAT 连接恢复）
@@ -1104,12 +1096,15 @@ p2p_update(p2p_handle_t hdl) {
         
         int best_path = path_manager_select_best_path(s);
         if (best_path >= -1) {
-            path_manager_switch_path(s, best_path, "lost_recovery", now_ms);
+            // 状态机立即切换（不走防抖）
+            p2p_set_active_path(s, best_path);
+            path_manager_switch_reset(s, now_ms);
             print("I:", LA_F("State: LOST → CONNECTED, path=PUNCH[%d]", LA_F341, 341), best_path);
+            p2p_set_state(s, P2P_STATE_CONNECTED);
         } else {
+            // 无可用路径，保持 LOST 状态
             print("W:", LA_F("LOST recovery: NAT connected but no path available", LA_F430, 430));
         }
-        p2p_set_state(s, P2P_STATE_CONNECTED);
     }
 
     // 转换：CONNECTED/RELAY/LOST → CLOSED
@@ -1221,71 +1216,43 @@ p2p_update(p2p_handle_t hdl) {
      * ======================================================================== */
 
     // LOST 状态下无活跃路径（active_path = -2），恢复由 NAT 层驱动，无需路径管理器维护
-    if (s->state > P2P_STATE_LOST) {
+    if (s->state > P2P_STATE_LOST) { assert(s->active_path >= -1 && s->path_type != P2P_PATH_NONE);
 
         // 路径健康检查（检测超时、失效路径）
         path_manager_tick(s, now_ms);
         
-        // 检查 failover 后的状态同步：如果活跃地址与路径管理器不一致，自动同步
-        // fixme: 这里为何有恢复
-        if (s->active_path >= -1) {  // -1=SIGNALING, >=0=候选
-
-//            const struct sockaddr_in *active_addr = p2p_get_path_addr(s, s->active_path);
-//
-//            if (active_addr && !sockaddr_equal(&s->active_addr, active_addr)) {
-//
-//                s->path_type = path_manager_get_path_type(s, s->active_path);
-//                s->active_addr = *active_addr;
-//
-//                print("I:", LA_F("Synced path after failover", LA_F351, 351));
-//
-//                // 同步 NAT 状态
-//                if (s->active_path == PATH_IDX_SIGNALING && s->nat.state != NAT_RELAY) {
-//                    s->nat.state = NAT_RELAY;
-//                } else if (s->active_path >= 0 && s->nat.state != NAT_CONNECTED) {
-//                    s->nat.state = NAT_CONNECTED;
-//                }
-//            }
-        }
-        
         // 周期性路径重选（每5秒检查一次是否有更优路径）
-        if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > 5000) {
-            s->path_mgr.last_reselect_ms = now_ms;
-            
-            int current_path = s->active_path;
+        if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > 5000) { s->path_mgr.last_reselect_ms = now_ms;
+
             int best_path = path_manager_select_best_path(s);
-            
-            // 如果找到更优路径
-            if (best_path >= -1 && best_path != current_path) {
-                
+            if (best_path != s->active_path) { assert(best_path >= -1);
+
+                // 如果找到更优路径
                 path_stats_t *new_stats = p2p_get_path_stats(s, best_path);
-                path_stats_t *old_stats = (current_path >= -1) ? p2p_get_path_stats(s, current_path) : NULL;
+                path_stats_t *old_stats = p2p_get_path_stats(s, s->active_path);
                 
                 // 判断是否值得切换（性能提升显著）
                 // 根据当前活跃路径类型查抽切换阈值
-                p2p_path_type_t cur_type = (current_path >= -1) ? p2p_path(hdl) : P2P_PATH_PUNCH;
-                if (cur_type == P2P_PATH_NONE) cur_type = P2P_PATH_PUNCH;
-                const path_threshold_config_t *thr = &s->path_mgr.thresholds[cur_type];
+                const path_threshold_config_t *thr = &s->path_mgr.thresholds[s->path_type];
 
-                if (!old_stats ||                                                                                   // 当前无路径，立即切换
-                    (new_stats && new_stats->rtt_ms + thr->rtt_threshold_ms < old_stats->rtt_ms) ||                 // RTT 显著改善
-                    (old_stats->loss_rate > thr->loss_threshold) ||                                                  // 当前路径丢包严重
-                    (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST && new_stats && new_stats->cost_score < old_stats->cost_score) // 直连优先模式：更低成本
+                if ((new_stats->rtt_ms < old_stats->rtt_ms - thr->rtt_threshold_ms) ||  // RTT 显著改善
+                    (old_stats->loss_rate > thr->loss_threshold) ||                     // 当前路径丢包严重
+                    (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST
+                     && new_stats->cost_score < old_stats->cost_score)                  // 直连优先模式：更低成本
                     ) {
 
                     /* 执行路径切换（含防抖、历史记录） */
                     int ret = path_manager_switch_path(s, best_path, "periodic reselect", now_ms);
                     if (ret == 0) {
-                        p2p_set_active_path(s, best_path);
                         print("I:", LA_F("Path switched to better route (idx=%d)", LA_F288, 288), best_path);
-                    } else if (ret == 1) {
+                    } else if (ret > 0) {
                         print("V:", LA_F("Path switch debounced, waiting for stability", LA_F287, 287));
                     }
                 }
             }
         }
-    }
-
+    } else assert(s->state != P2P_STATE_LOST || (s->active_path < -1 && s->path_type == P2P_PATH_NONE));
+    
     /* ========================================================================
      * 阶段 9：NAT 类型检测（后台定期运行 STUN 探测）
      * ======================================================================== */

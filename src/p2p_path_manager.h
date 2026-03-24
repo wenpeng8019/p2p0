@@ -477,6 +477,21 @@ int path_manager_select_best_path(struct p2p_session *s);
 int path_manager_switch_path(struct p2p_session *s, int target_path,
                               const char *reason, uint64_t now_ms);
 
+/*
+ * 重置切换相关状态（用于立即切换后的状态同步）
+ *
+ * 状态机硬切场景：先调用 p2p_set_active_path() 完成路径切换，
+ * 再调用此函数同步切换时间和清除防抖状态。
+ *
+ * 作用：
+ *   - 更新 last_switch_time（后续周期重选的冷却检查依赖此值）
+ *   - 清除 pending_switch_path 和 debounce_timer_ms（防抖状态）
+ *
+ * @param s         会话指针
+ * @param now_ms    当前时间（毫秒）
+ */
+void path_manager_switch_reset(struct p2p_session *s, uint64_t now_ms);
+
 /* ============================================================================
  * 属性/状态访问与设置
  * ============================================================================ */
