@@ -360,7 +360,7 @@ enum {
     LA_F316,  /* "Requested Srflx Candidate from %s" (%s)  [p2p_ice.c] */
     LA_F317,  /* "Resolve COMPACT signaling server address: %s:%d failed(%d)" (%s,%d,%d)  [p2p.c] */
     LA_F318,  /* "% SCTP (usrsctp) requested but library not linked"  [p2p.c] */
-    LA_F319,  /* "% SIGNALING path active but relay function not available"  [p2p_channel.c] */
+    LA_F319,  /* "% SIGNALING path but signaling relay not available"  [p2p_channel.c] */
     LA_F320,  /* "% SIGNALING path enabled (server supports relay)\n"  [p2p_signal_compact.c] */
     LA_F321,  /* "% SSL_CTX_new failed"  [p2p_dtls_openssl.c] */
     LA_F322,  /* "% SSL_new failed"  [p2p_dtls_openssl.c] */
@@ -392,7 +392,7 @@ enum {
     LA_F348,  /* "State: → RELAY, path[%d] (signaling)" (%d)  [p2p.c] */
     LA_F349,  /* "% Stopping internal thread"  [p2p.c] */
     LA_F350,  /* "% Storage full, waiting for peer to come online"  [p2p_signal_relay.c] */
-    LA_F351,  /* "% Synced path after failover"  [p2p.c] */
+    LA_F351,  /* disabled "% Synced path after failover" */
     LA_F352,  /* "TURN 401 Unauthorized (realm=%s), authenticating..." (%s)  [p2p_turn.c] */
     LA_F353,  /* "TURN Allocate failed with error %d" (%d)  [p2p_turn.c] */
     LA_F354,  /* "TURN Allocated relay %s:%u (lifetime=%us)" (%s,%u,%u)  [p2p_turn.c] */
@@ -463,23 +463,24 @@ enum {
     LA_F419,  /* "%s: invalid payload len=%d (need 6)" (%s,%d)  [p2p_nat.c] */
     LA_F420,  /* "Ignore %s pkt from %s:%d, not connected" (%s,%s,%d)  [p2p_nat.c] */
     LA_F421,  /* "Ignore %s pkt from %s:%d, not connecting" (%s,%s,%d)  [p2p_nat.c] */
-    LA_F422,  /* "Ignore %s pkt from %s:%d, not connecting/connected" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F422,  /* disabled "%s: failed to get addr for path[%d]" */
     LA_F423,  /* "%s: remote %s cand[%d]<%s:%d> (disabled)\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c] */
     LA_F424,  /* "%s: peer online, starting NAT punch\n" (%s)  [p2p_signal_compact.c] */
     LA_F425,  /* "%s: punch timeout, fallback punching using signaling relay" (%s)  [p2p_nat.c] */
-    LA_F426,  /* "%s: relay cand[%d] but TURN not allocated" (%s,%d)  [p2p_nat.c] */
+    LA_F426,  /* "%s: cand[%d]<%s:%d> send packet failed(%d)" (%s,%d,%s,%d,%d)  [p2p_nat.c] */
     LA_F427,  /* "%s sent via signaling relay" (%s)  [p2p_nat.c] */
     LA_F428,  /* "%s: reaching cand[%d] via signaling relay, seq=%u" (%s,%d,%u)  [p2p_nat.c] */
     LA_F429,  /* "% RELAY path but TURN not allocated"  [p2p_channel.c] */
     LA_F430,  /* "% LOST recovery: NAT connected but no path available"  [p2p.c] */
-    LA_F431,  /* "path[%d] addr is NULL" (%d)  [p2p.c] */
-    LA_F432,  /* "path[%d] addr is NULL (LOST recovery)" (%d)  [p2p.c] */
+    LA_F431,  /* disabled "path[%d] addr is NULL" */
+    LA_F432,  /* disabled "path[%d] addr is NULL (LOST recovery)" */
     LA_F433,  /* "path[%d] addr is NULL (RELAY recovery)" (%d)  [p2p.c] */
     LA_F434,  /* "% RELAY path but TURN not allocated (dtls)"  [p2p_channel.c] */
     LA_F435,  /* "%s: CONN ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F436,  /* "%s: CONN_ACK ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F437,  /* "%s: REACH ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F438,  /* "%s: PUNCHING → RELAY (earlier CONN)" (%s)  [p2p_nat.c] */
+    LA_F439,  /* "Ignore %s pkt from %s:%d, not connecting/connected" (%s,%s,%d)  [p2p_nat.c] */
 
     LA_NUM
 };

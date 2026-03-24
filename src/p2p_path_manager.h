@@ -466,7 +466,7 @@ int path_manager_select_best_path(struct p2p_session *s);
 
 /*
  * 切换到指定目标路径
- * + 支持防抖逻辑策略
+ * + 相比于直接 p2p_set_active_path（硬切）支持防抖逻辑策略
  *
  * @param s             会话指针
  * @param target_path   目标路径索引
@@ -480,15 +480,6 @@ int path_manager_switch_path(struct p2p_session *s, int target_path,
 /* ============================================================================
  * 属性/状态访问与设置
  * ============================================================================ */
-
-/*
- * 将路径索引转换为路径类型枚举
- *
- * @param s         会话指针
- * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
- * @return          P2P_PATH_LAN / P2P_PATH_PUNCH / P2P_PATH_RELAY / P2P_PATH_SIGNALING / P2P_PATH_NONE
- */
-p2p_path_type_t path_manager_get_path_type(struct p2p_session *s, int path_idx);
 
 /*
  * 检查是否有可用路径

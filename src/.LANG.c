@@ -117,6 +117,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F98] = "%s: batch punch skip (state=%d, use trickle)",  /* SID:98 */
     [LA_F173] = "%s: batch punch start (%d cands)",  /* SID:173 */
     [LA_F126] = "%s: batch punch: no cand, wait trickle",  /* SID:126 */
+    [LA_F426] = "%s: cand[%d]<%s:%d> send packet failed(%d)",  /* SID:426 */
     [LA_F104] = "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n",  /* SID:104 */
     [LA_F106] = "%s: duplicate remote cand<%s:%d> from signaling, skipped\n",  /* SID:106 */
     [LA_F107] = "%s: duplicate request ignored (sid=%u, already processing)\n",  /* SID:107 */
@@ -164,7 +165,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F148] = "%s: reaching updated: cand[%d], seq=%u->%u",  /* SID:148 */
     [LA_F151] = "%s: recorded peer conn_seq=%u for future CONN_ACK",  /* SID:151 */
     [LA_F91] = "%s: recv from cand[%d]",  /* SID:91 */
-    [LA_F426] = "%s: relay cand[%d] but TURN not allocated",  /* SID:426 */
     [LA_F154] = "%s: remote %s cand<%s:%d> (disabled)\n",  /* SID:154 */
     [LA_F423] = "%s: remote %s cand[%d]<%s:%d> (disabled)\n",  /* SID:423 */
     [LA_F153] = "%s: remote %s cand[%d]<%s:%d> accepted\n",  /* SID:153 */
@@ -270,7 +270,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F259] = "Handshake failed: %s (-0x%04x)",  /* SID:259 */
     [LA_F420] = "Ignore %s pkt from %s:%d, not connected",  /* SID:420 */
     [LA_F421] = "Ignore %s pkt from %s:%d, not connecting",  /* SID:421 */
-    [LA_F422] = "Ignore %s pkt from %s:%d, not connecting/connected",  /* SID:422 */
+    [LA_F439] = "Ignore %s pkt from %s:%d, not connecting/connected",  /* SID:439 */
     [LA_F260] = "Initialize PUBSUB signaling context failed(%d)",  /* SID:260 */
     [LA_F261] = "Initialize network subsystem failed(%d)",  /* SID:261 */
     [LA_F262] = "Initialize signaling mode: %d",  /* SID:262 */
@@ -333,7 +333,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F316] = "Requested Srflx Candidate from %s",  /* SID:316 */
     [LA_F317] = "Resolve COMPACT signaling server address: %s:%d failed(%d)",  /* SID:317 */
     [LA_F318] = "% SCTP (usrsctp) requested but library not linked",  /* SID:318 */
-    [LA_F319] = "% SIGNALING path active but relay function not available",  /* SID:319 */
+    [LA_F319] = "% SIGNALING path but signaling relay not available",  /* SID:319 */
     [LA_F320] = "% SIGNALING path enabled (server supports relay)\n",  /* SID:320 */
     [LA_F321] = "% SSL_CTX_new failed",  /* SID:321 */
     [LA_F322] = "% SSL_new failed",  /* SID:322 */
@@ -362,7 +362,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F348] = "State: → RELAY, path[%d] (signaling)",  /* SID:348 */
     [LA_F349] = "% Stopping internal thread",  /* SID:349 */
     [LA_F350] = "% Storage full, waiting for peer to come online",  /* SID:350 */
-    [LA_F351] = "% Synced path after failover",  /* SID:351 */
     [LA_F352] = "TURN 401 Unauthorized (realm=%s), authenticating...",  /* SID:352 */
     [LA_F353] = "TURN Allocate failed with error %d",  /* SID:353 */
     [LA_F354] = "TURN Allocated relay %s:%u (lifetime=%us)",  /* SID:354 */
@@ -417,8 +416,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F403] = "% connection closed by peer",  /* SID:403 */
     [LA_F404] = "ctr_drbg_seed failed: -0x%x",  /* SID:404 */
     [LA_F405] = "% p2p_ice_send_local_candidate called in non-RELAY mode",  /* SID:405 */
-    [LA_F431] = "path[%d] addr is NULL",  /* SID:431 */
-    [LA_F432] = "path[%d] addr is NULL (LOST recovery)",  /* SID:432 */
     [LA_F433] = "path[%d] addr is NULL (RELAY recovery)",  /* SID:433 */
     [LA_F406] = "recv error %d",  /* SID:406 */
     [LA_F407] = "recv error %d while discarding",  /* SID:407 */
@@ -433,6 +430,10 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
+    [LA_F431] = "path[%d] addr is NULL",  /* SID:431 disabled */
+    [LA_F351] = "% Synced path after failover",  /* SID:351 disabled */
+    [LA_F432] = "path[%d] addr is NULL (LOST recovery)",  /* SID:432 disabled */
+    [LA_F422] = "%s: failed to get addr for path[%d]",  /* SID:422 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

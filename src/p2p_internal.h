@@ -507,6 +507,60 @@ static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
  * 注意：这些函数需要 p2p_remote_candidate_entry 完整定义，故必须放在结构体之后
  * ============================================================================ */
 
+ static inline void p2p_set_active_path(p2p_session_t *s, int path_idx) {
+    if (path_idx == PATH_IDX_SIGNALING) {
+        if (!s->signaling.active) return;
+        s->active_path = path_idx;
+        s->active_addr = s->signaling.addr;
+        s->path_type = P2P_PATH_SIGNALING;
+    } else if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
+        p2p_remote_candidate_entry_t *e = &s->remote_cands[path_idx];
+        s->active_path = path_idx;
+        s->active_addr = e->addr;
+        if (e->type == P2P_CAND_RELAY) s->path_type = P2P_PATH_RELAY;
+        else if (e->stats.is_lan) s->path_type = P2P_PATH_LAN;
+        else s->path_type = P2P_PATH_PUNCH;
+    }
+    else {
+        s->active_path = PATH_IDX_NONE;
+        s->active_addr = (struct sockaddr_in){0};
+        s->path_type = P2P_PATH_NONE;
+    }
+}
+
+//-----------------------------------------------------------------------------
+
+static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
+
+    if (path_idx == PATH_IDX_SIGNALING) {
+        if (!s->signaling.active) return E_INVALID;
+        path_stats_init(&s->signaling.stats, 5);  /* cost_score=5 */
+    } else if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
+        p2p_remote_candidate_entry_t *c = &s->remote_cands[path_idx];
+        c->last_punch_send_ms = 0;
+        path_stats_init(&c->stats, 0);
+    } else return E_INVALID;
+
+    /* 如果重置的是活跃路径，切换到下一个最佳路径（可能是 PATH_IDX_NONE） */
+    if (s->active_path == path_idx) {
+        p2p_set_active_path(s, path_manager_select_best_path(s));
+    }
+    return E_NONE;
+}
+
+static inline p2p_path_type_t p2p_get_path_type(p2p_session_t *s, int path_idx) {
+    if (path_idx == PATH_IDX_SIGNALING)
+        return P2P_PATH_SIGNALING;
+    if (path_idx < 0 || path_idx >= s->remote_cand_cnt)
+        return P2P_PATH_NONE;
+    p2p_remote_candidate_entry_t *e = &s->remote_cands[path_idx];
+    if (e->type == P2P_CAND_RELAY)
+        return P2P_PATH_RELAY;
+    if (e->stats.is_lan)
+        return P2P_PATH_LAN;
+    return P2P_PATH_PUNCH;
+}
+
 static inline path_stats_t* p2p_get_path_stats(p2p_session_t *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
         return s->signaling.active ? &s->signaling.stats : NULL;
@@ -530,31 +584,6 @@ static inline int p2p_find_path_by_addr(p2p_session_t *s, const struct sockaddr_
         if (sockaddr_equal(&s->remote_cands[i].addr, addr)) return i;
     }
     return -2;
-}
-
-static inline void p2p_set_active_path(p2p_session_t *s, int path_idx) {
-    s->active_path = path_idx;
-    const struct sockaddr_in *addr = p2p_get_path_addr(s, path_idx);
-    if (addr) s->active_addr = *addr; 
-    else memset(&s->active_addr, 0, sizeof(s->active_addr));
-}
-
-static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
-    
-    if (path_idx == PATH_IDX_SIGNALING) {
-        if (!s->signaling.active) return E_INVALID;
-        path_stats_init(&s->signaling.stats, 5);  /* cost_score=5 */
-    } else if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
-        p2p_remote_candidate_entry_t *c = &s->remote_cands[path_idx];
-        c->last_punch_send_ms = 0;
-        path_stats_init(&c->stats, 0);
-    } else return E_INVALID;
-
-    /* 如果重置的是活跃路径，切换到下一个最佳路径（可能是 PATH_IDX_NONE） */
-    if (s->active_path == path_idx) {
-        p2p_set_active_path(s, path_manager_select_best_path(s));
-    }
-    return E_NONE;
 }
 
 /* ============================================================================

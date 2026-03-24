@@ -285,23 +285,20 @@ void nat_reset(nat_ctx_t *n) {
  * @param now        当前时间戳
  * @param reason     日志原因（如 "batch relay", "trickle relay", "relay+punch"）
  */
-static void bidirectional_confirmed(p2p_session_t *s, int path_idx, uint64_t now, const char *reason) {
+static void bidirectional_confirmed(p2p_session_t *s, int cand_path, uint64_t now, const char *reason) {
     nat_ctx_t *n = &s->nat;
     
     // 设置活跃路径（用于 nat_send_conn）
-    const struct sockaddr_in *addr = p2p_get_path_addr(s, path_idx);
-    s->path_type = path_manager_get_path_type(s, path_idx);
-    s->active_path = path_idx;
-    s->active_addr = addr ? *addr : (struct sockaddr_in){0};
-    
+    p2p_set_active_path(s, cand_path);
+
+    nat_send_conn(s, now);
+
     // 双向确认完成，进入 CONNECTING 状态
     n->state = NAT_CONNECTING;
     n->conn_start_ms = now;
     
-    nat_send_conn(s, now);
-    
     print("I:", LA_F("%s: PUNCHING → CONNECTING (%s%s)", LA_F102, 102),
-          TASK_NAT, reason, path_idx == PATH_IDX_SIGNALING ? ", signaling" : "");
+          TASK_NAT, reason, cand_path == PATH_IDX_SIGNALING ? ", signaling" : "");
 }
 
 /*
@@ -314,7 +311,7 @@ static void bidirectional_confirmed(p2p_session_t *s, int path_idx, uint64_t now
  * @param now       当前时间戳
  * @param reason    日志原因（如 "batch relay", "trickle relay"）
  */
-static void punch_relay(p2p_session_t *s, int cand_idx, uint64_t now, const char *reason) {
+static void confirm_relay(p2p_session_t *s, int cand_idx, uint64_t now, const char *reason) {
 
     nat_ctx_t *n = &s->nat;
     
@@ -322,8 +319,8 @@ static void punch_relay(p2p_session_t *s, int cand_idx, uint64_t now, const char
     path_manager_set_path_state(s, cand_idx, PATH_STATE_ACTIVE);
     
     // 首次设置 tx_confirmed（从 false → true）
-    if (!s->tx_confirmed) {
-        s->tx_confirmed = true;
+    if (!s->tx_confirmed) { s->tx_confirmed = true;
+
         print("I:", LA_F("%s: path[%d] relay UP", LA_F152, 152), 
               TASK_PATH, cand_idx);
         
@@ -395,7 +392,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
             // relay 候选：直接激活路径（不需要打洞），但也发 PUNCH 
             // + 一个情况是，如果双方都只有 relay 候选，则需要一个 PUNCH 包开启双向确认，此外也可用于 RTT 测量
             if (s->remote_cands[i].type == P2P_CAND_RELAY) {
-                punch_relay(s, i, n->punch_start, "batch relay");
+                confirm_relay(s, i, n->punch_start, "batch relay");
             }
             
             // 所有候选（包括 relay）都发送 PUNCH 包
@@ -431,7 +428,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
 
     // 根据候选类型处理
     if (entry->type == P2P_CAND_RELAY) {
-        punch_relay(s, idx, now, "trickle relay");
+        confirm_relay(s, idx, now, "trickle relay");
     }
     
     // 所有候选（包括 relay）都发送 PUNCH 包（用于双向确认和 RTT 测量）
@@ -797,14 +794,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
             // 设置活跃路径（用于 nat_send_conn_ack）
             // 注意：使用 target_path 而不是 cand_idx，因为 target_path 才是被确认可写的路径
-            const struct sockaddr_in *addr = p2p_get_path_addr(s, target_path);
-            if (!addr) {
-                print("E:", LA_F("%s: failed to get addr for path[%d]", LA_F422, 422), TASK_NAT, target_path);
-                return;
-            }
-            s->path_type = path_manager_get_path_type(s, target_path);
-            s->active_path = target_path;
-            s->active_addr = *addr;
+            p2p_set_active_path(s, target_path);
 
             n->peer_connecting = false;
             nat_send_conn_ack(s);
@@ -937,7 +927,7 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
     nat_ctx_t *n = &s->nat;
 
     if (n->state < NAT_CONNECTING) {
-        print("E:", LA_F("Ignore %s pkt from %s:%d, not connecting/connected", LA_F422, 422), PROTO,
+        print("E:", LA_F("Ignore %s pkt from %s:%d, not connecting/connected", LA_F439, 439), PROTO,
               inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return;
     }
@@ -1073,9 +1063,9 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
                         // 设置活跃路径（用于 nat_send_conn_ack）
                         s->active_path = PATH_IDX_SIGNALING;
-                        s->path_type = P2P_PATH_SIGNALING;
                         s->active_addr = s->signaling.addr;
-                        
+                        s->path_type = P2P_PATH_SIGNALING;
+
                         n->peer_connecting = false;
                         nat_send_conn_ack(s);
 
