@@ -83,13 +83,12 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F74] = "%s: CONNECTING → %s (recv DATA)",  /* SID:74 */
     [LA_F71] = "%s: CONNECTING → CLOSED (timeout, no relay)",  /* SID:71 */
     [LA_F436] = "%s: CONN_ACK ignored, upsert %s:%d failed",  /* SID:436 */
-    [LA_F103] = "%s: PUNCHING → %s (earlier CONN)",  /* SID:103 */
+    [LA_F103] = "%s: PUNCHING → %s (peer CONNECTING)",  /* SID:103 */
     [LA_F138] = "%s: PUNCHING → CLOSED (timeout %llums, %s signaling relay)",  /* SID:138 */
     [LA_F102] = "%s: PUNCHING → CONNECTING (%s%s)",  /* SID:102 */
-    [LA_F438] = "%s: PUNCHING → RELAY (earlier CONN)",  /* SID:438 */
+    [LA_F438] = "%s: PUNCHING → RELAY (peer CONNECTING)",  /* SID:438 */
     [LA_F75] = "%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n",  /* SID:75 */
     [LA_F76] = "%s: Peer addr changed -> %s:%d, retrying punch\n",  /* SID:76 */
-    [LA_F437] = "%s: REACH ignored, upsert %s:%d failed",  /* SID:437 */
     [LA_F77] = "%s: RELAY → CONNECTED (direct path recovered)",  /* SID:77 */
     [LA_F78] = "%s: RPC complete (sid=%u)\n",  /* SID:78 */
     [LA_F79] = "%s: RPC fail due to peer offline (sid=%u)\n",  /* SID:79 */
@@ -103,6 +102,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F87] = "%s: accepted",  /* SID:87 */
     [LA_F88] = "%s: accepted (ses_id=%llu)\n",  /* SID:88 */
     [LA_F89] = "%s: accepted (sid=%u)\n",  /* SID:89 */
+    [LA_F179] = "%s: accepted as cand[%d], target=%s:%d",  /* SID:179 */
     [LA_F90] = "%s: accepted for ack_seq=%u\n",  /* SID:90 */
     [LA_F92] = "%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n",  /* SID:92 */
     [LA_F93] = "%s: accepted sid=%u, msg=%u\n",  /* SID:93 */
@@ -131,6 +131,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F115] = "%s: ignored for sid=%u (current sid=%u)\n",  /* SID:115 */
     [LA_F116] = "%s: ignored in invalid state=%d\n",  /* SID:116 */
     [LA_F117] = "%s: ignored in state=%d\n",  /* SID:117 */
+    [LA_F437] = "%s: ignored, upsert %s:%d failed",  /* SID:437 */
     [LA_F118] = "%s: invalid ack_seq=%u\n",  /* SID:118 */
     [LA_F119] = "%s: invalid cand idx: %d (count: %d)",  /* SID:119 */
     [LA_F120] = "%s: invalid for non-relay req\n",  /* SID:120 */
@@ -187,7 +188,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F176] = "%s: status error(%d)\n",  /* SID:176 */
     [LA_F177] = "%s: sync complete (ses_id=%llu)\n",  /* SID:177 */
     [LA_F178] = "%s: sync complete (ses_id=%llu, mask=0x%04x)\n",  /* SID:178 */
-    [LA_F179] = "%s: target=%s:%d",  /* SID:179 */
     [LA_F180] = "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)\n",  /* SID:180 */
     [LA_F181] = "%s: timeout after %d retries , type unknown\n",  /* SID:181 */
     [LA_F183] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:183 */
@@ -201,6 +201,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F191] = "%s: unexpected ack_seq=%u mask=0x%04x\n",  /* SID:191 */
     [LA_F192] = "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n",  /* SID:192 */
     [LA_F193] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:193 */
+    [LA_F443] = "%s: unknown target cand %s:%d",  /* SID:443 */
     [LA_F150] = "%s: → CLOSED (recv FIN)",  /* SID:150 */
     [LA_F194] = "%s:%04d: %s",  /* SID:194 */
     [LA_F195] = "%s_ACK sent to %s:%d (try), echo_seq=%u",  /* SID:195 */

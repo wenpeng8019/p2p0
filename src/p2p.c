@@ -9,6 +9,15 @@
 #include "p2p_udp.h"
 #include "LANG.cn.h"
 
+/* ---- 信令重发配置 ---- */
+#define SIGNAL_MAX_RESEND_COUNT             12     /* 最大重发次数 (共约60秒) */
+#define SIGNAL_RESEND_INTERVAL_MS           5000   /* 信令重发间隔 (5秒，relay/compact/等) */
+#define SIGNAL_RESEND_INTERVAL_PUBSUB_MS    15000  /* PUBSUB 重发间隔 (15秒，给对方充足时间回复) */
+
+/* ---- 路径管理配置 ---- */
+#define PATH_RESELECT_INTERVAL_MS           5000   /* 路径重选间隔 (5秒检查一次是否有更优路径) */
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // 日志系统
 ///////////////////////////////////////////////////////////////////////////////
@@ -27,12 +36,6 @@ uint16_t             p2p_instrument_base = 0;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-/* ---- 信令重发配置 ---- */
-#define SIGNAL_RESEND_INTERVAL_MS           5000   /* 信令重发间隔 (5秒，relay/compact/等) */
-#define SIGNAL_RESEND_INTERVAL_PUBSUB_MS    15000  /* PUBSUB 重发间隔 (15秒，给对方充足时间回复) */
-#define SIGNAL_MAX_RESEND_COUNT             12     /* 最大重发次数 (共约60秒) */
-
-/* ---- 锁辅助函数（单线程模式下为空操作） ---- */
 #ifdef P2P_THREADED
 #define LOCK(s)   do { if ((s)->cfg.threaded) P_mutex_lock(&(s)->mtx); } while(0)
 #define UNLOCK(s) do { if ((s)->cfg.threaded) P_mutex_unlock(&(s)->mtx); } while(0)
@@ -1221,12 +1224,19 @@ p2p_update(p2p_handle_t hdl) {
         // 路径健康检查（检测超时、失效路径）
         path_manager_tick(s, now_ms);
         
-        // 周期性路径重选（每5秒检查一次是否有更优路径）
-        if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > 5000) { s->path_mgr.last_reselect_ms = now_ms;
+        // 周期性路径重选（检查是否有更优路径）
+        if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > PATH_RESELECT_INTERVAL_MS) { s->path_mgr.last_reselect_ms = now_ms;
 
             int best_path = path_manager_select_best_path(s);
-            if (best_path != s->active_path) { assert(best_path >= -1);
+            if (best_path != s->active_path) { 
+                
+                //assert(best_path >= -1); // fixme
+                if (best_path < 0) {
+                    print("W:", LA_F("best_path<0 && active_path=%d\n", 0, 0), s->active_path);
+                }
 
+                if (best_path >= -1) {
+                    
                 // 如果找到更优路径
                 path_stats_t *new_stats = p2p_get_path_stats(s, best_path);
                 path_stats_t *old_stats = p2p_get_path_stats(s, s->active_path);
@@ -1248,6 +1258,7 @@ p2p_update(p2p_handle_t hdl) {
                     } else if (ret > 0) {
                         print("V:", LA_F("Path switch debounced, waiting for stability", LA_F287, 287));
                     }
+                }
                 }
             }
         }

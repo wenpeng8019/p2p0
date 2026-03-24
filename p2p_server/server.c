@@ -1624,7 +1624,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
     } break;
 
-    // SIG_PKT_PEER_INFO/P2P_PKT_REACH/P2P_PKT_DATA/P2P_PKT_ACK/P2P_PKT_CRYPTO (+SESSION/RELAYED): relay 转发给对方
+    // SIG_PKT_PEER_INFO/P2P_PKT_REACH/P2P_PKT_DATA/P2P_PKT_ACK/P2P_PKT_CRYPTO (/RELAYED): relay 转发给对方
     // 格式：所有包都包含 session_id(8) 在 payload 开头
     case P2P_PKT_DATA:
     case P2P_PKT_ACK:
@@ -1635,20 +1635,20 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         if (!(hdr->flags & P2P_DATA_FLAG_SESSION)) {
             print("E:", LA_F("[Relay] %s: missing SESSION flag, dropped\n", LA_F86, 86),
                   (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
-                  (hdr->type == P2P_PKT_DATA) ? "DATA+SESSION" :
-                  (hdr->type == P2P_PKT_ACK) ? "ACK+SESSION" :
-                  (hdr->type == P2P_PKT_CRYPTO) ? "CRYPTO+SESSION" :
-                  (hdr->type == P2P_PKT_CONN) ? "CONN+SESSION" :
-                  (hdr->type == P2P_PKT_CONN_ACK) ? "CONN_ACK+SESSION" : "REACH+SESSION");
+                  (hdr->type == P2P_PKT_DATA) ? "RELAY-DATA" :
+                  (hdr->type == P2P_PKT_ACK) ? "RELAY-ACK" :
+                  (hdr->type == P2P_PKT_CRYPTO) ? "RELAY-CRYPTO" :
+                  (hdr->type == P2P_PKT_CONN) ? "RELAY-CONN" :
+                  (hdr->type == P2P_PKT_CONN_ACK) ? "RELAY-CONN_ACK" : "RELAY-REACH");
             return;
         }
     case SIG_PKT_PEER_INFO: {
         const char* PROTO = (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
-                           (hdr->type == P2P_PKT_DATA) ? "DATA+SESSION" :
-                           (hdr->type == P2P_PKT_ACK) ? "ACK+SESSION" :
-                           (hdr->type == P2P_PKT_CRYPTO) ? "CRYPTO+SESSION" :
-                           (hdr->type == P2P_PKT_CONN) ? "CONN+SESSION" :
-                           (hdr->type == P2P_PKT_CONN_ACK) ? "CONN_ACK+SESSION" : "REACH+SESSION";
+                           (hdr->type == P2P_PKT_DATA) ? "RELAY-DATA" :
+                           (hdr->type == P2P_PKT_ACK) ? "RELAY-ACK" :
+                           (hdr->type == P2P_PKT_CRYPTO) ? "RELAY-CRYPTO" :
+                           (hdr->type == P2P_PKT_CONN) ? "RELAY-CONN" :
+                           (hdr->type == P2P_PKT_CONN_ACK) ? "RELAY-CONN_ACK" : "RELAY-REACH";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);

@@ -144,7 +144,7 @@ enum {
     LA_F100,  /* "%s: bad payload(len=%d)\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F101,  /* "%s: bad payload(len=%d, need >=8)\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F102,  /* "%s: PUNCHING → CONNECTING (%s%s)" (%s,%s,%s)  [p2p_nat.c] */
-    LA_F103,  /* "%s: PUNCHING → %s (earlier CONN)" (%s,%s)  [p2p_nat.c] */
+    LA_F103,  /* "%s: PUNCHING → %s (peer CONNECTING)" (%s,%s)  [p2p_nat.c] */
     LA_F104,  /* "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n" (%s,%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
     _LA_105,
     LA_F106,  /* "%s: duplicate remote cand<%s:%d> from signaling, skipped\n" (%s,%s,%d)  [p2p_signal_compact.c] */
@@ -220,7 +220,7 @@ enum {
     LA_F176,  /* "%s: status error(%d)\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F177,  /* "%s: sync complete (ses_id=%llu)\n" (%s,%l)  [p2p_signal_compact.c] */
     LA_F178,  /* "%s: sync complete (ses_id=%llu, mask=0x%04x)\n" (%s,%l)  [p2p_signal_compact.c] */
-    LA_F179,  /* "%s: target=%s:%d" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F179,  /* "%s: accepted as cand[%d], target=%s:%d" (%s,%d,%s,%d)  [p2p_nat.c] */
     LA_F180,  /* "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F181,  /* "%s: timeout after %d retries , type unknown\n" (%s,%d)  [p2p_signal_compact.c] */
     _LA_182,
@@ -478,12 +478,13 @@ enum {
     LA_F434,  /* "% RELAY path but TURN not allocated (dtls)"  [p2p_channel.c] */
     LA_F435,  /* "%s: CONN ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F436,  /* "%s: CONN_ACK ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
-    LA_F437,  /* "%s: REACH ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
-    LA_F438,  /* "%s: PUNCHING → RELAY (earlier CONN)" (%s)  [p2p_nat.c] */
+    LA_F437,  /* "%s: ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F438,  /* "%s: PUNCHING → RELAY (peer CONNECTING)" (%s)  [p2p_nat.c] */
     LA_F439,  /* "Ignore %s pkt from %s:%d, not connecting/connected" (%s,%s,%d)  [p2p_nat.c] */
     LA_F440,  /* "% NAT connected but no available path in path manager"  [p2p.c] */
     LA_F441,  /* "% RELAY recovery: NAT connected but no path available"  [p2p.c] */
     LA_F442,  /* disabled "Invalid state (%d): LOST but active_path=%d, path_type=%d" */
+    LA_F443,  /* "%s: unknown target cand %s:%d" (%s,%s,%d)  [p2p_nat.c] */
 
     LA_NUM
 };
