@@ -154,7 +154,6 @@ typedef enum {
 typedef struct {
     struct sockaddr_in  server_addr;                    // 已解析的 TURN 服务器地址
     struct sockaddr_in  relay_addr;                     // 已分配的中继地址
-    uint8_t             tsx_id[12];                     // 当前事务 ID
     char                realm[128];                     // 认证域（401 响应中获取）
     char                nonce[128];                     // 随机数（401 响应中获取）
     uint8_t             key[16];                        // 长期凭证密钥 MD5(user:realm:pass)
@@ -187,11 +186,11 @@ void p2p_turn_tick(struct p2p_session *s, uint64_t now_ms);
 //-----------------------------------------------------------------------------
 
 /* 发起 TURN Allocate 请求（首次无认证） */
-int  p2p_turn_allocate(struct p2p_session *s);
+int p2p_turn_allocate(struct p2p_session *s);
 
 /* 通过 TURN 中继发送数据（Send Indication，无需认证） */
-int  p2p_turn_send_indication(struct p2p_session *s, const struct sockaddr_in *peer_addr,
-                              const uint8_t *data, int len);
+ret_t p2p_turn_send_indication(struct p2p_session *s, const struct sockaddr_in *peer_addr,
+                               const sock_msg_t msg[4], int num);
 
 //-----------------------------------------------------------------------------
 

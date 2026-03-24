@@ -632,8 +632,8 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s) {
             }
             printf("\n");
             */
-            
-            udp_send_to(s->sock, &stun_addr, req, len);
+
+            p2p_udp_send_to(s, &stun_addr, req, len);
             ctx->last_send_time = now;
             ctx->state = NAT_TEST_I_SENT;
             /* 不要在这里重置 retry_count，保留重试计数 */

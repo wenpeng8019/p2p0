@@ -111,7 +111,6 @@ typedef struct p2p_session {
     /* ======================== 配置与状态 ======================== */
     p2p_config_t                    cfg;                // 用户配置（STUN 服务器、模式等）
     p2p_state_t                     state;              // 连接状态 P2P_STATE_*
-    p2p_path_t                      path;               // 连接路径 P2P_PATH_*
 
     /* ======================== Socket 资源 ======================== */
     sock_t                          sock;               // UDP 套接字描述符
@@ -120,6 +119,7 @@ typedef struct p2p_session {
     /* ======================== 活跃路径 ======================== */
     int                             active_path;        // 当前活跃路径索引 (-2=无, -1=SIGNALING, >=0=候选)
     struct sockaddr_in              active_addr;        // 当前通信目标地址（与 active_path 一致）
+    p2p_path_type_t                 path_type;          // 连接路径 P2P_PATH_*
 
     /* ======================== 信令转发路径 ======================== */
     /*
@@ -558,21 +558,15 @@ static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
 }
 
 /* ============================================================================
- * NAT 状态同步 (p2p.c)
- * 
- * NAT 模块在进入 NAT_CONNECTED 状态时同步调用，触发 P2P 层状态转换和 on_connected 事件。
- * 确保数据包处理总是在 on_connected 之后发生（数据层会话一致性契约）。
- * ============================================================================ */
-void p2p_connected(struct p2p_session *s, uint64_t now_ms);
-
-/* ============================================================================
- * 通道发送接口 (p2p_channel.c)
-
+ * p2p 连接层
+ *
  * 所有传输模块（reliable / pseudotcp / sctp）通过 p2p_send_packet 发送:
  *   - 自动处理加密（如果 s->dtls 已就绪）
  *   - 自动处理中继封装（TURN / Compact 信令）
  *   - 调用者总是传"基础"包类型（DATA / ACK）
  * ============================================================================ */
+
+void p2p_connected(struct p2p_session *s, uint64_t now_ms);
 
 int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
                     uint8_t type, uint8_t flags, uint16_t seq,
@@ -582,6 +576,19 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
 void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
                   const void *dtls_record, int record_len);
 
+/* ============================================================================
+ * 实际链路发送接口（UDP 传输层直接调用）
+ * ============================================================================ */
+
+ret_t p2p_udp_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
+                          uint8_t type, uint8_t flags, uint16_t seq,
+                          const void *payload, int payload_len);
+
+ret_t p2p_turn_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
+                           uint8_t type, uint8_t flags, uint16_t seq,
+                           const void *payload, int payload_len);
+
+///////////////////////////////////////////////////////////////////////////////
 #pragma ide diagnostic pop
 #pragma clang diagnostic pop
 #endif /* P2P_INTERNAL_H */

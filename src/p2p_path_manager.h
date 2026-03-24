@@ -167,7 +167,7 @@ typedef struct {
  *
  * 阈值越小，切换越积极（如 LAN 出现时快速切回）；
  * 阈值越大，切换越保守（如 SIGNALING 转发作为最终降级）。
- * thresholds 数组以 p2p_path_t 枚举值为下标：
+ * thresholds 数组以 p2p_path_type_t 枚举值为下标：
  *   [P2P_PATH_LAN]       小阈值，快速切回 LAN
  *   [P2P_PATH_PUNCH]     标准阈值
  *   [P2P_PATH_RELAY]     保守阈值，避免不必要的 TURN 切换
@@ -181,14 +181,14 @@ typedef struct {
 } path_threshold_config_t;
 
 /*
- * 路径索引特殊值（内部索引，不是 p2p_path_t 类型枚举）
+ * 路径索引特殊值（内部索引，不是 p2p_path_type_t 类型枚举）
  * 
  * 说明：路径管理器使用整数索引标识路径在数据结构中的位置：
  *   - active_path >= 0：路径在 remote_cands[active_path] 数组中
  *   - active_path == -1：特殊路径（SIGNALING），在 path_mgr.signaling 结构中，不在数组里
  *   - active_path == -2：无有效路径
  * 
- * 通过 path_idx_to_type() 转换为公共 API 的 p2p_path_t 枚举类型。
+ * 通过 path_idx_to_type() 转换为公共 API 的 p2p_path_type_t 枚举类型。
  */
 #define PATH_IDX_NONE      (-2)  // 无有效路径
 #define PATH_IDX_SIGNALING (-1)  // 信令转发(SIGNALING)路径索引（不在候选数组中，非 TURN relay）
@@ -234,7 +234,7 @@ typedef struct {
     /* TURN 策略配置（TURN 是候选，此配置用于策略调整） */
     turn_config_t       turn_config;                // TURN 配置
 
-    /* 按路径类型的切换阈值（下标为 p2p_path_t：0=NONE 1=LAN 2=PUNCH 3=RELAY 4=SIGNALING） */
+    /* 按路径类型的切换阈值（下标为 p2p_path_type_t：0=NONE 1=LAN 2=PUNCH 3=RELAY 4=SIGNALING） */
     path_threshold_config_t thresholds[5];
 } path_manager_t;
 
@@ -488,7 +488,7 @@ int path_manager_switch_path(struct p2p_session *s, int target_path,
  * @param path_idx  路径索引（-1=SIGNALING, >=0=候选索引）
  * @return          P2P_PATH_LAN / P2P_PATH_PUNCH / P2P_PATH_RELAY / P2P_PATH_SIGNALING / P2P_PATH_NONE
  */
-p2p_path_t path_manager_get_path_type(struct p2p_session *s, int path_idx);
+p2p_path_type_t path_manager_get_path_type(struct p2p_session *s, int path_idx);
 
 /*
  * 检查是否有可用路径

@@ -80,14 +80,14 @@ static int pad4(uint8_t *buf, int off) {
 }
 
 /* 写入 STUN 消息头（20 字节） */
-static void write_stun_hdr(uint8_t *buf, uint16_t type, uint16_t body_len, const uint8_t tsx_id[12]) {
+static void write_stun_hdr(uint8_t *buf, uint16_t type, uint16_t body_len) {
     buf[0] = (uint8_t)(type >> 8);
     buf[1] = (uint8_t)(type & 0xFF);
     buf[2] = (uint8_t)(body_len >> 8);
     buf[3] = (uint8_t)(body_len & 0xFF);
     uint32_t magic = htonl(STUN_MAGIC);
     memcpy(buf + 4, &magic, 4);
-    memcpy(buf + 8, tsx_id, 12);
+    P_rand_bytes(buf + 8, 12);
 }
 
 /* 更新 STUN 头部中的消息体长度字段 */
@@ -249,9 +249,7 @@ static int turn_refresh(p2p_session_t *s) {
     print("V: %s", "TURN sending Refresh");
 
     uint8_t buf[768];
-    uint8_t tsx[12];
-    P_rand_bytes(tsx, 12);
-    write_stun_hdr(buf, TURN_REFRESH_REQUEST, 0, tsx);
+    write_stun_hdr(buf, TURN_REFRESH_REQUEST, 0);
 
     int off = 20;
 
@@ -259,7 +257,7 @@ static int turn_refresh(p2p_session_t *s) {
     off = append_auth_attrs(buf, off, t, s->cfg.turn_user);
     off = append_integrity(buf, off, t->key);
 
-    return udp_send_to(s->sock, &t->server_addr, buf, off);
+    return p2p_udp_send_to(s, &t->server_addr, buf, off);
 }
 
 /* ============================================================================
@@ -290,8 +288,7 @@ static int allocate_auth(p2p_session_t *s) {
     print("I: %s", "Retrying Allocate with long-term credentials");
 
     uint8_t buf[768];
-    P_rand_bytes(t->tsx_id, 12);
-    write_stun_hdr(buf, TURN_ALLOCATE_REQUEST, 0, t->tsx_id);
+    write_stun_hdr(buf, TURN_ALLOCATE_REQUEST, 0);
 
     int off = 20;
 
@@ -307,7 +304,7 @@ static int allocate_auth(p2p_session_t *s) {
     off = append_integrity(buf, off, t->key);
 
     t->state = TURN_AUTHENTICATING;
-    return udp_send_to(s->sock, &t->server_addr, buf, off);
+    return p2p_udp_send_to(s, &t->server_addr, buf, off);
 }
 
 
@@ -325,9 +322,7 @@ void p2p_turn_reset(p2p_session_t *s) {
     /* 主动释放 TURN 分配（Refresh lifetime=0，RFC 5766 Section 5） */
     if (t->state == TURN_ALLOCATED && t->has_key && s->cfg.turn_user) {
         uint8_t buf[768];
-        uint8_t tsx[12];
-        P_rand_bytes(tsx, 12);
-        write_stun_hdr(buf, TURN_REFRESH_REQUEST, 0, tsx);
+        write_stun_hdr(buf, TURN_REFRESH_REQUEST, 0);
 
         int off = 20;
         off = attr_hdr(buf, off, STUN_ATTR_LIFETIME, 4);
@@ -337,7 +332,7 @@ void p2p_turn_reset(p2p_session_t *s) {
         off = append_auth_attrs(buf, off, t, s->cfg.turn_user);
         off = append_integrity(buf, off, t->key);
 
-        udp_send_to(s->sock, &t->server_addr, buf, off);
+        p2p_udp_send_to(s, &t->server_addr, buf, off);
         print("V: %s", "TURN Refresh(lifetime=0) sent");
     }
 
@@ -370,8 +365,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
                  s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
 
     uint8_t buf[64];
-    P_rand_bytes(t->tsx_id, 12);
-    write_stun_hdr(buf, TURN_ALLOCATE_REQUEST, 8, t->tsx_id);
+    write_stun_hdr(buf, TURN_ALLOCATE_REQUEST, 8);
 
     /* REQUESTED-TRANSPORT: UDP (17) */
     int off = 20;
@@ -379,7 +373,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
     buf[off] = TRANSPORT_UDP; buf[off+1] = 0; buf[off+2] = 0; buf[off+3] = 0;
     off += 4;
 
-    int ret = udp_send_to(s->sock, &t->server_addr, buf, off);
+    int ret = p2p_udp_send_to(s, &t->server_addr, buf, off);
     if (ret <= 0) return -1;
     t->state = TURN_ALLOCATING;
     s->turn_pending++;
@@ -395,35 +389,43 @@ int p2p_turn_allocate(p2p_session_t *s) {
  * 消息结构:
  *   [STUN Header (20)]
  *   [XOR-PEER-ADDRESS (12)]
- *   [DATA (4 + padded data)]
+ *   [DATA-HDR (2+2)]
  * ============================================================================ */
-int p2p_turn_send_indication(p2p_session_t *s, const struct sockaddr_in *peer_addr,
-                             const uint8_t *data, int len) {
+ret_t p2p_turn_send_indication(p2p_session_t *s, const struct sockaddr_in *peer_addr,
+                               const sock_msg_t msg[4], int num) {
+    if (num > 4) return E_INVALID;
     turn_ctx_t *t = &s->turn;
-    if (t->state != TURN_ALLOCATED) return -1;
+    if (t->state != TURN_ALLOCATED) return E_NONE_CONTEXT;
 
-    uint8_t buf[1500];
-    int max_data = (int)sizeof(buf) - 20 - 12 - 8;  /* header + xor-peer + data-attr-hdr + padding */
-    if (len > max_data) return -1;
+    sock_msg_t msgs[6]; int len = 0;
+    for(int i=0;i<num;++i) {
+        msgs[1+i] = msg[i]; len += P_msg_len(&msg[i]);
+    }
 
-    uint8_t tsx[12];
-    P_rand_bytes(tsx, 12);
-    write_stun_hdr(buf, TURN_SEND_INDICATION, 0, tsx);
+    uint8_t buf[20 + 12 + 4/* header(20) + xor-peer(12) + data-attr-hdr(2+2) */];
+    if (len > P2P_MTU - (int)sizeof(buf)) return E_OUT_OF_CAPACITY;
+    P_msg_set(&msgs[0], buf, sizeof(buf));
 
-    int off = 20;
+    // header
+    write_stun_hdr(buf, TURN_SEND_INDICATION, 0); int off = 20; 
 
-    /* XOR-PEER-ADDRESS: 指定数据目标地址 */
+    // XOR-PEER-ADDRESS: 指定数据目标地址
     off = append_xor_addr(buf, off, STUN_ATTR_XOR_PEER_ADDRESS, peer_addr);
 
-    /* DATA: 实际负载 */
-    off = attr_hdr(buf, off, STUN_ATTR_DATA, (uint16_t)len);
-    memcpy(buf + off, data, len);
-    off = pad4(buf, off + len);
+    // DATA: 实际负载
+    off = attr_hdr(buf, off, STUN_ATTR_DATA, (uint16_t)len) + len;
 
-    /* 更新消息体长度 */
+    // 确保消息体长度为 4 字节对齐（RFC 5766 Section 11.3），不足部分填充 0
+    char padding[3] = {0};  // 4 字节对齐填充
+    if (len & 3) {
+        P_msg_set(&msgs[++num], padding, len = 4 - (len & 3));
+        off += len;
+    }
+
+    // 更新消息体长度
     update_body_len(buf, off);
 
-    return udp_send_to(s->sock, &t->server_addr, buf, off);
+    return P_msg_send_to(s->sock, msgs, num+1, &t->server_addr);
 }
 
 /* ============================================================================
@@ -733,9 +735,7 @@ static int turn_create_permission(p2p_session_t *s, const struct sockaddr_in *pe
           inet_ntoa(((struct sockaddr_in *)peer_addr)->sin_addr));
 
     uint8_t buf[768];
-    uint8_t tsx[12];
-    P_rand_bytes(tsx, 12);
-    write_stun_hdr(buf, TURN_CREATE_PERM_REQUEST, 0, tsx);
+    write_stun_hdr(buf, TURN_CREATE_PERM_REQUEST, 0);
 
     int off = 20;
 
@@ -746,7 +746,7 @@ static int turn_create_permission(p2p_session_t *s, const struct sockaddr_in *pe
     off = append_auth_attrs(buf, off, t, s->cfg.turn_user);
     off = append_integrity(buf, off, t->key);
 
-    int ret = udp_send_to(s->sock, &t->server_addr, buf, off);
+    int ret = p2p_udp_send_to(s, &t->server_addr, buf, off);
     if (ret > 0 && t->perm_count < TURN_MAX_PERMISSIONS) {
         t->perms[t->perm_count] = *peer_addr;
         t->perm_count++;

@@ -8,16 +8,15 @@
 #include "predefine.h"
 #include <p2pp.h>               /* p2p_packet_hdr_t 定义 */
 
-sock_t udp_open_socket(uint16_t port);
-ret_t udp_send_to(sock_t sock, const struct sockaddr_in *addr,
-                  const void *data, int len);
-ret_t udp_recv_from(sock_t sock, struct sockaddr_in *from,
-                    void *buf, int buf_size);
-ret_t udp_send_packet(sock_t sock, const struct sockaddr_in *addr,
-                      uint8_t type, uint8_t flags, uint16_t seq,
-                      const void *payload, int payload_len);
+struct p2p_session;
 
-void p2p_pkt_hdr_encode(uint8_t *buf, uint8_t type, uint8_t flags, uint16_t seq);
-void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr);
+ret_t p2p_udp_open(struct p2p_session *s, uint16_t port);
+void p2p_udp_close(struct p2p_session *s);
+
+ret_t p2p_udp_send_to(struct p2p_session *s, const struct sockaddr_in *addr,
+                      const void *data, int len);
+
+ret_t p2p_udp_recv_from(struct p2p_session *s, struct sockaddr_in *from,
+                        void *buf, int buf_size);
 
 #endif /* P2P_UDP_H */

@@ -99,7 +99,7 @@ typedef enum {
     P2P_PATH_PUNCH,                             // NAT 打洞
     P2P_PATH_RELAY,                             // 数据中继（TURN 服务器）
     P2P_PATH_SIGNALING                          // 信令服务器转发（最终降级方案）
-} p2p_path_t;
+} p2p_path_type_t;
 
 /*
  * NAT 类型

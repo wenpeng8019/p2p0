@@ -118,7 +118,7 @@ void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
             print("E:", LA_F("path[%d] addr is NULL", LA_F431, 431), best_path);
             return;
         }
-        s->path = path_manager_get_path_type(s, best_path);
+        s->path_type = path_manager_get_path_type(s, best_path);
         s->active_addr = *addr;
         path_manager_switch_path(s, best_path, "nat_punch_success", now_ms);
         
@@ -249,18 +249,17 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         return NULL;
     }
 
-    // 创建 UDP 套接字，port 0 为有效值，表示由操作系统分配随机端口
-    print("I:", LA_F("Open P2P UDP socket on port %d", LA_F273, 273), cfg->bind_port);
-    sock_t sock = udp_open_socket(cfg->bind_port);
-    if (sock == P_INVALID_SOCKET) {
-        print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F274, 274), cfg->bind_port, P_sock_errno());
-        return NULL;
-    }
-
     p2p_session_t *s = (p2p_session_t*)calloc(1, sizeof(*s));
     if (!s) {
         print("E:", LA_F("Failed to allocate memory for session", LA_F241, 241));
-        P_sock_close(sock);
+        return NULL;
+    }
+
+    // 创建 UDP 套接字，port 0 为有效值，表示由操作系统分配随机端口
+    print("I:", LA_F("Open P2P UDP socket on port %d", LA_F273, 273), cfg->bind_port);
+    if ((ret = p2p_udp_open(s, cfg->bind_port)) != E_NONE) {
+        print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F274, 274), cfg->bind_port, ret);
+        free(s);
         return NULL;
     }
 
@@ -270,7 +269,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_init(&s->sig_relay_ctx);
     else if ((ret = p2p_signal_pubsub_init(&s->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id)) != E_NONE) {
         print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F260, 260), ret);
-        free(s); P_sock_close(sock);
+        p2p_udp_close(s); free(s);
         return NULL;
     } else if (cfg->auth_key) {
         strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1);
@@ -287,7 +286,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 获取本地所有有效的网络地址
     if ((ret = route_detect_local(&s->route)) < 0) {
         print("E:", LA_F("Detect local network interfaces failed(%d)", LA_F230, 230), ret);
-        free(s); P_sock_close(sock);
+        p2p_udp_close(s); free(s);
         return NULL;
     }
 
@@ -299,7 +298,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("E:", LA_F("Failed to allocate memory for candidate lists", LA_F240, 240));
         if (s->local_cands) free(s->local_cands);
         if (s->remote_cands) free(s->remote_cands);
-        free(s); P_sock_close(sock);
+        p2p_udp_close(s); free(s);
         return NULL;
     }
     s->local_cand_cap = s->remote_cand_cap = initial_cand_cap;
@@ -311,7 +310,6 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     memset(s->local_peer_id, 0, sizeof(s->local_peer_id));
     strncpy(s->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
 
-    s->sock = sock;
     s->tcp_sock = P_INVALID_SOCKET;
 
     // 初始化虚拟链路层（基于 NAT 穿透的 P2P）
@@ -391,7 +389,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     s->signaling_mode = cfg->signaling_mode;
     s->state = P2P_STATE_INIT;
-    s->path = P2P_PATH_NONE;
+    s->path_type = P2P_PATH_NONE;
     s->nat_type = P2P_NAT_UNKNOWN;
 
     //----------------------------
@@ -763,7 +761,7 @@ p2p_update(p2p_handle_t hdl) {
     /* ========================================================================
      * 阶段 1：远程数据输入（被动接收所有网络数据包）
      * ======================================================================== */
-    while ((n = udp_recv_from(s->sock, &from, buf, sizeof(buf))) > 0) {
+    while ((n = p2p_udp_recv_from(s, &from, buf, sizeof(buf))) > 0) {
 
         // --------------------
         // STUN/TURN 协议包
@@ -989,7 +987,7 @@ p2p_update(p2p_handle_t hdl) {
                 break;
         }
 
-    } // while ((n = udp_recv_from(s->sock, &from, buf, sizeof(buf))) > 0)
+    } // while ((n = p2p_udp_recv_from(s->sock, &from, buf, sizeof(buf))) > 0)
 
     /* ========================================================================
      * 阶段 2：信令服务维护（主动拉取远端候选地址）
@@ -1039,9 +1037,8 @@ p2p_update(p2p_handle_t hdl) {
      * ======================================================================== */
 
     // 转换：REGISTERING/REGISTERED → PUNCHING（开始打洞）
-    // NAT >= PUNCHING 包括：PUNCHING（打洞中）、CONNECTING（双向确认，握手中）
     if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
-        && (s->nat.state >= NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
+        && (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
 
         print("I:", LA_F("State: → PUNCHING", LA_F345, 345));
         p2p_set_state(s, P2P_STATE_PUNCHING);
@@ -1078,7 +1075,7 @@ p2p_update(p2p_handle_t hdl) {
                 print("E:", LA_F("path[%d] addr is NULL (RELAY recovery)", LA_F433, 433), best_path);
                 return -1;  // 异常状态
             }
-            s->path = P2P_PATH_PUNCH;
+            s->path_type = P2P_PATH_PUNCH;
             s->active_addr = *addr;
             path_manager_switch_path(s, best_path, "nat_recovery", now_ms);
             p2p_set_state(s, P2P_STATE_CONNECTED);
@@ -1100,14 +1097,14 @@ p2p_update(p2p_handle_t hdl) {
         if (best_path >= -1 && s->signaling.active) {
             // 有 relay 可用：切换到中继路径
             const struct sockaddr_in *addr = p2p_get_path_addr(s, best_path);
-            s->path = path_manager_get_path_type(s, best_path);
+            s->path_type = path_manager_get_path_type(s, best_path);
             s->active_addr = addr ? *addr : s->signaling.addr;  // signaling 作为 fallback
             path_manager_switch_path(s, best_path, "nat_lost_to_relay", now_ms);
             p2p_set_state(s, P2P_STATE_RELAY);
             print("W:", LA_F("State: CONNECTED → RELAY (path lost)", LA_F339, 339));
         } else {
             // 无 relay 可用：进入 LOST 状态，通知应用层
-            s->path = P2P_PATH_NONE;
+            s->path_type = P2P_PATH_NONE;
             s->active_path = -2;
             p2p_set_state(s, P2P_STATE_LOST);
             print("W:", LA_F("State: CONNECTED → LOST (no relay)", LA_F338, 338));
@@ -1126,7 +1123,7 @@ p2p_update(p2p_handle_t hdl) {
                 print("E:", LA_F("path[%d] addr is NULL (LOST recovery)", LA_F432, 432), best_path);
                 return -1;  // 异常状态
             }
-            s->path = P2P_PATH_PUNCH;
+            s->path_type = P2P_PATH_PUNCH;
             s->active_addr = *addr;
             path_manager_switch_path(s, best_path, "lost_recovery", now_ms);
             print("I:", LA_F("State: LOST → CONNECTED, path=PUNCH[%d]", LA_F341, 341), best_path);
@@ -1256,7 +1253,7 @@ p2p_update(p2p_handle_t hdl) {
             const struct sockaddr_in *active_addr = p2p_get_path_addr(s, s->active_path);
             
             if (active_addr && !sockaddr_equal(&s->active_addr, active_addr)) {
-                s->path = path_manager_get_path_type(s, s->active_path);
+                s->path_type = path_manager_get_path_type(s, s->active_path);
                 s->active_addr = *active_addr;
                 
                 print("I:", LA_F("Synced path after failover", LA_F351, 351));
@@ -1285,7 +1282,7 @@ p2p_update(p2p_handle_t hdl) {
                 
                 // 判断是否值得切换（性能提升显著）
                 // 根据当前活跃路径类型查抽切换阈值
-                p2p_path_t cur_type = (current_path >= -1) ? p2p_path(hdl) : P2P_PATH_PUNCH;
+                p2p_path_type_t cur_type = (current_path >= -1) ? p2p_path(hdl) : P2P_PATH_PUNCH;
                 if (cur_type == P2P_PATH_NONE) cur_type = P2P_PATH_PUNCH;
                 const path_threshold_config_t *thr = &s->path_mgr.thresholds[cur_type];
 
@@ -1301,7 +1298,7 @@ p2p_update(p2p_handle_t hdl) {
                         /* 切换成功：同步上层状态 */
                         const struct sockaddr_in *new_addr = p2p_get_path_addr(s, best_path);
                         if (new_addr) {
-                            s->path = path_manager_get_path_type(s, best_path);
+                            s->path_type = path_manager_get_path_type(s, best_path);
                             s->active_addr = *new_addr;
                             
                             print("I:", LA_F("Path switched to better route (idx=%d)", LA_F288, 288), best_path);
@@ -1355,7 +1352,7 @@ p2p_probe(p2p_handle_t hdl) {
 
 int
 p2p_path(const p2p_handle_t hdl) {
-    return hdl ? ((p2p_session_t*)hdl)->path : P2P_PATH_NONE;
+    return hdl ? ((p2p_session_t*)hdl)->path_type : P2P_PATH_NONE;
 }
 
 bool

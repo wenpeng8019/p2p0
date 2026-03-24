@@ -106,7 +106,7 @@ static void update_quality(path_stats_t *p);
  *   LAN 候选（stats.is_lan）→ P2P_PATH_LAN
  *   其他候选 → P2P_PATH_PUNCH
  */
-p2p_path_t path_manager_get_path_type(p2p_session_t *s, int path_idx) {
+p2p_path_type_t path_manager_get_path_type(p2p_session_t *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
         return P2P_PATH_SIGNALING;
     if (path_idx < 0 || path_idx >= s->remote_cand_cnt)
@@ -300,7 +300,7 @@ static bool should_use_turn(p2p_session_t *s) {
     /* 检查是否存在非 TURN 的可用直连/中继路径（不含 SIGNALING） */
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         path_stats_t *st = &s->remote_cands[i].stats;
-        p2p_path_t type = path_manager_get_path_type(s, i);
+        p2p_path_type_t type = path_manager_get_path_type(s, i);
         if (type == P2P_PATH_RELAY) continue;  // 跳过 TURN/RELAY
         if (path_is_selectable(st->state)) {
             return false; // 存在直连/中继备选
@@ -328,7 +328,7 @@ static int select_path_connection_first(p2p_session_t *s) {
         path_stats_t *st = &s->remote_cands[i].stats;
         if (!path_is_selectable(st->state)) continue;
 
-        p2p_path_t type = path_manager_get_path_type(s, i);
+        p2p_path_type_t type = path_manager_get_path_type(s, i);
         
         if (type == P2P_PATH_RELAY) {
             /* TURN 路径：仅在 use_as_last_resort 时跳过 */
@@ -366,7 +366,7 @@ static int select_path_connection_first(p2p_session_t *s) {
         uint32_t min_turn_rtt = UINT32_MAX;
         for (int i = 0; i < s->remote_cand_cnt; i++) {
             path_stats_t *st = &s->remote_cands[i].stats;
-            p2p_path_t type = path_manager_get_path_type(s, i);
+            p2p_path_type_t type = path_manager_get_path_type(s, i);
             if (type == P2P_PATH_RELAY && path_is_selectable(st->state)) {
                 if (st->rtt_ms < min_turn_rtt) {
                     min_turn_rtt = st->rtt_ms;
@@ -397,7 +397,7 @@ static int select_path_performance_first(p2p_session_t *s) {
         path_stats_t *st = &s->remote_cands[i].stats;
         if (!path_is_selectable(st->state)) continue;
 
-        p2p_path_t type = path_manager_get_path_type(s, i);
+        p2p_path_type_t type = path_manager_get_path_type(s, i);
         
         /* TURN last_resort 检查 */
         if (type == P2P_PATH_RELAY && pm->turn_config.use_as_last_resort &&
@@ -447,7 +447,7 @@ static int select_path_hybrid(p2p_session_t *s) {
         path_stats_t *st = &s->remote_cands[i].stats;
         if (!path_is_selectable(st->state)) continue;
 
-        p2p_path_t type = path_manager_get_path_type(s, i);
+        p2p_path_type_t type = path_manager_get_path_type(s, i);
         
         if (type == P2P_PATH_RELAY) {
             if (st->rtt_ms < turn_rtt) {
@@ -481,7 +481,7 @@ static int select_path_hybrid(p2p_session_t *s) {
             return best_direct;
 
         /* 根据当前活跃路径类型取对应阈值（无活跃路径时使用标准PUNCH阈值） */
-        p2p_path_t cur_type = path_manager_get_path_type(s, s->active_path);
+        p2p_path_type_t cur_type = path_manager_get_path_type(s, s->active_path);
         if (cur_type == P2P_PATH_NONE) cur_type = P2P_PATH_PUNCH;
         const path_threshold_config_t *thr = &pm->thresholds[cur_type];
 
@@ -536,7 +536,7 @@ static bool should_debounce_switch(p2p_session_t *s, int target_path, uint64_t n
     path_manager_t *pm = &s->path_mgr;
     
     // 1. 冷却期检查：根据目标路径类型取对应的冷却时间
-    p2p_path_t target_type = path_manager_get_path_type(s, target_path);
+    p2p_path_type_t target_type = path_manager_get_path_type(s, target_path);
     uint64_t cooldown = pm->thresholds[target_type].cooldown_ms;
     if (cooldown == 0) cooldown = DEFAULT_COOLDOWN_MS;
     if (tick_diff(now_ms, pm->last_switch_time) < cooldown) {
@@ -803,7 +803,7 @@ int path_manager_get_turn_stats(p2p_session_t *s,
     int turn_count = 0;
     
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        p2p_path_t type = path_manager_get_path_type(s, i);
+        p2p_path_type_t type = path_manager_get_path_type(s, i);
         if (type != P2P_PATH_RELAY) continue;
         
         path_stats_t *st = &s->remote_cands[i].stats;

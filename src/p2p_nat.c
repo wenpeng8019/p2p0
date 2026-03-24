@@ -97,28 +97,22 @@ static void clear_reaching_queue(nat_ctx_t *n) {
  * @param payload     负载数据
  * @param payload_len 负载长度
  */
-static void cand_send_packet(p2p_session_t *s, int cand_idx,
-                             uint8_t type, uint8_t flags, uint16_t seq,
+static void cand_send_packet(p2p_session_t *s, int cand_idx, uint8_t type, uint16_t seq,
                              const uint8_t *payload, int payload_len) {
+
     assert(cand_idx >= 0 && cand_idx < s->remote_cand_cnt);
     const struct sockaddr_in *addr = &s->remote_cands[cand_idx].addr;
 
-    if (s->remote_cands[cand_idx].type == P2P_CAND_RELAY) {
-    
-        if (s->turn.state != TURN_ALLOCATED) {
-            print("W:", LA_F("%s: relay cand[%d] but TURN not allocated", LA_F426, 426),
-                  TASK_NAT, cand_idx);
-            return;
-        }
-        // TURN 中继：通过 Send Indication 发送
-        uint8_t pkt[P2P_HDR_SIZE + 32];
-        assert(payload_len <= 32);
-        p2p_pkt_hdr_encode(pkt, type, flags, seq);
-        if (payload && payload_len > 0)
-            memcpy(pkt + P2P_HDR_SIZE, payload, payload_len);
-        p2p_turn_send_indication(s, addr, pkt, P2P_HDR_SIZE + payload_len);
+    ret_t ret;
+    if (s->remote_cands[cand_idx].type == P2P_CAND_RELAY)
+        ret = p2p_turn_send_packet(s, addr, type, 0, seq, payload, payload_len);
+    else ret = p2p_udp_send_packet(s, addr, type, 0, seq, payload, payload_len);
+
+    if (ret < 0) {
+        print("E:", LA_F("%s: cand[%d]<%s:%d> send packet failed(%d)", LA_F426, 426),
+              TASK_NAT, cand_idx, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), ret);
+        return;
     }
-    else udp_send_packet(s->sock, addr, type, flags, seq, payload, payload_len);
 }
 
 /*
@@ -153,7 +147,7 @@ static void flush_reaching_queue(p2p_session_t *s, int writable_path) {
                   TASK_NAT, node->cand_idx, node->seq);
         } 
         else {
-            cand_send_packet(s, writable_path, P2P_PKT_REACH, 0, node->seq, ack_payload, 6);
+            cand_send_packet(s, writable_path, P2P_PKT_REACH, node->seq, ack_payload, 6);
 
             const struct sockaddr_in *addr = &s->remote_cands[writable_path].addr;
             print("V:", LA_F("%s: reaching cand[%d] via path[%d] to %s:%d, seq=%u", LA_F149, 149),
@@ -200,8 +194,8 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
     memcpy(payload, &entry->addr.sin_addr.s_addr, 4);  // network order
     memcpy(payload + 4, &entry->addr.sin_port, 2);     // network order
 
-    cand_send_packet(s, send_path, P2P_PKT_PUNCH, 0,
-                     n->punch_seq, payload, sizeof(payload));
+    cand_send_packet(s, send_path, P2P_PKT_PUNCH, n->punch_seq,
+                     payload, sizeof(payload));
 
     print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, path=%d", LA_F54, 54),
           PROTO, inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port),
@@ -231,7 +225,7 @@ static void nat_send_conn(p2p_session_t *s, uint64_t now) {
     // 使用统一发送接口（自动处理 TURN/信令中转/直连）
     p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, 0, 0, NULL, 0);
 
-    if (s->path == P2P_PATH_SIGNALING) {
+    if (s->path_type == P2P_PATH_SIGNALING) {
         print("V:", LA_F("%s sent via signaling relay", LA_F427, 427), PROTO);
     } else {
         print("V:", LA_F("%s sent to %s:%d", LA_F56, 56),
@@ -249,7 +243,7 @@ static void nat_send_conn_ack(p2p_session_t *s) {
     // 使用统一发送接口（自动处理 TURN/信令中转/直连）
     p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, 0, 0, NULL, 0);
 
-    if (s->path == P2P_PATH_SIGNALING) {
+    if (s->path_type == P2P_PATH_SIGNALING) {
         print("V:", LA_F("%s sent via signaling relay", LA_F427, 427), PROTO);
     } else {
         print("V:", LA_F("%s sent to %s:%d", LA_F56, 56),
@@ -296,7 +290,7 @@ static void bidirectional_confirmed(p2p_session_t *s, int path_idx, uint64_t now
     
     // 设置活跃路径（用于 nat_send_conn）
     const struct sockaddr_in *addr = p2p_get_path_addr(s, path_idx);
-    s->path = path_manager_get_path_type(s, path_idx);
+    s->path_type = path_manager_get_path_type(s, path_idx);
     s->active_path = path_idx;
     s->active_addr = addr ? *addr : (struct sockaddr_in){0};
     
@@ -461,14 +455,17 @@ void nat_send_fin(p2p_session_t *s) {
         return;
     }
 
-    udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
+    if (s->active_path < 0) return;
+    assert(s->path_type != P2P_PATH_SIGNALING);
+
+    cand_send_packet(s, s->active_path, P2P_PKT_FIN, 0, NULL, 0);
 
     print("V:", LA_F("%s sent to %s:%d", LA_F56, 56),
           PROTO, inet_ntoa(s->active_addr.sin_addr), ntohs(s->active_addr.sin_port));
 
     for (int i = 2; i--;) {
         P_usleep(50 * 1000); // 50ms 间隔重发
-        udp_send_packet(s->sock, &s->active_addr, P2P_PKT_FIN, 0, 0, NULL, 0);
+        cand_send_packet(s, s->active_path, P2P_PKT_FIN, 0, NULL, 0);
     }
 }
 
@@ -533,7 +530,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)
             && path_is_selectable(s->remote_cands[cand_idx].stats.state)) {
 
-            cand_send_packet(s, cand_idx, P2P_PKT_REACH, 0, hdr->seq, ack_payload, 6);
+            cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, 6);
             print("V:", LA_F("%s sent to %s:%d (writable), echo_seq=%u", LA_F53, 53),
                   PROTO2, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
         }
@@ -545,7 +542,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                 && (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF) || best_path != cand_idx)
                 && best_path >= 0 && path_is_selectable(s->remote_cands[best_path].stats.state)) {
 
-                cand_send_packet(s, best_path, P2P_PKT_REACH, 0, hdr->seq, ack_payload, 6);
+                cand_send_packet(s, best_path, P2P_PKT_REACH, hdr->seq, ack_payload, 6);
                 print("V:", LA_F("%s sent via best path[%d] to %s:%d, echo_seq=%u", LA_F57, 57),
                       PROTO2, best_path,
                       inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
@@ -556,7 +553,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
                 // 尝试原路发送
                 if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)) {
-                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, 0, hdr->seq, ack_payload, 6);
+                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, 6);
                     print("V:", LA_F("%s_ACK sent to %s:%d (try), echo_seq=%u", LA_F195, 195),
                           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
                 }
@@ -801,18 +798,22 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
             // 设置活跃路径（用于 nat_send_conn_ack）
             // 注意：使用 target_path 而不是 cand_idx，因为 target_path 才是被确认可写的路径
             const struct sockaddr_in *addr = p2p_get_path_addr(s, target_path);
-            s->path = path_manager_get_path_type(s, target_path);
+            if (!addr) {
+                print("E:", LA_F("%s: failed to get addr for path[%d]", LA_F422, 422), TASK_NAT, target_path);
+                return;
+            }
+            s->path_type = path_manager_get_path_type(s, target_path);
             s->active_path = target_path;
-            s->active_addr = addr ? *addr : (struct sockaddr_in){0};
+            s->active_addr = *addr;
 
             n->peer_connecting = false;
             nat_send_conn_ack(s);
 
-            n->state = target_path < 0 ? NAT_RELAY : NAT_CONNECTED;
+            n->state = NAT_CONNECTED;
             n->last_keepalive_send_ms = now;
             p2p_connected(s, now);
             
-            print("I:", LA_F("%s: PUNCHING → %s (earlier CONN)", LA_F103, 103), TASK_NAT, n->state == NAT_RELAY ? "RELAY" : "CONNECTED");
+            print("I:", LA_F("%s: PUNCHING → %s (earlier CONN)", LA_F103, 103), TASK_NAT, "CONNECTED");
         } 
         // 正常流程：进入 CONNECTING，发送 CONN
         // 注意：使用 target_path 而不是 cand_idx，因为 target_path 才是被确认可写的路径
@@ -1072,7 +1073,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
                         // 设置活跃路径（用于 nat_send_conn_ack）
                         s->active_path = PATH_IDX_SIGNALING;
-                        s->path = P2P_PATH_SIGNALING;
+                        s->path_type = P2P_PATH_SIGNALING;
                         s->active_addr = s->signaling.addr;
                         
                         n->peer_connecting = false;
@@ -1282,7 +1283,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         // 策略 1：信令中转模式（如果服务器支持）
         if (s->signaling_relay_fn) {
 
-            ret_t ret = s->signaling_relay_fn(s, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, 6);            
+            ret_t ret = s->signaling_relay_fn(s, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, 6);
             if (ret == E_NONE) {
 
                 // 发送成功，将节点出队并释放
@@ -1310,7 +1311,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 // 跳过 target 地址（已原路发送）
                 if (sockaddr_equal(&s->remote_cands[i].addr, &n->reaching_head->target)) continue;
 
-                cand_send_packet(s, i, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, 6);
+                cand_send_packet(s, i, P2P_PKT_REACH, n->reaching_head->seq, reach_payload, 6);
                 broadcast_cnt++;
             }
             

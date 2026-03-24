@@ -558,7 +558,7 @@ int p2p_ice_gather_candidates(p2p_session_t *s) {
             struct hostent *he = gethostbyname(s->cfg.stun_server);
             if (he) {
                 memcpy(&stun_addr.sin_addr, he->h_addr_list[0], he->h_length);
-                udp_send_to(s->sock, &stun_addr, stun_buf, slen);
+                p2p_udp_send_to(s, &stun_addr, stun_buf, slen);
                 print("I:", LA_F("Requested Srflx Candidate from %s", LA_F316, 316), s->cfg.stun_server);
             }
         }
@@ -735,7 +735,7 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     s->ice_ctx.state = P2P_ICE_STATE_COMPLETED;
     p2p_state_t old_state = s->state;
     s->state = P2P_STATE_CONNECTED;
-    s->path = P2P_PATH_PUNCH; 
+    s->path_type = P2P_PATH_PUNCH;
 
     /* 触发状态回调 */
     if (s->cfg.on_state) {

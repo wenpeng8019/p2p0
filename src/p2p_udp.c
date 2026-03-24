@@ -1,20 +1,20 @@
 
 #include "p2p_internal.h"
 
-sock_t udp_open_socket(uint16_t port) {
+ret_t p2p_udp_open(struct p2p_session *s, uint16_t port) {
 
-    sock_t sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock == P_INVALID_SOCKET) return P_INVALID_SOCKET;
+    s->sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s->sock == P_INVALID_SOCKET) return P_INVALID_SOCKET;
 
     // 设置为非阻塞模式
-    if (P_sock_nonblock(sock, true) != E_NONE) {
-        P_sock_close(sock);
+    if (P_sock_nonblock(s->sock, true) != E_NONE) {
+        P_sock_close(s->sock);
         return P_INVALID_SOCKET;
     }
 
     // 允许地址重用
     int opt = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
+    setsockopt(s->sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
     // 绑定
     struct sockaddr_in addr;
@@ -23,17 +23,25 @@ sock_t udp_open_socket(uint16_t port) {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
 
-    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        P_sock_close(sock);
+    if (bind(s->sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        P_sock_close(s->sock);
         return P_INVALID_SOCKET;
     }
 
-    return sock;
+    return E_NONE;
 }
 
-ret_t udp_send_to(sock_t sock, const struct sockaddr_in *addr,
-                  const void *buf, int len) {
-    ssize_t n = sendto(sock, (const char *)buf, len, 0,
+void p2p_udp_close(struct p2p_session *s) {
+    if (s->sock != P_INVALID_SOCKET) {
+        P_sock_close(s->sock);
+        s->sock = P_INVALID_SOCKET;
+    }
+}
+
+ret_t p2p_udp_send_to(struct p2p_session *s, const struct sockaddr_in *addr,
+                      const void *data, int len) {
+
+    ssize_t n = sendto(s->sock, (const char *)data, len, 0,
                        (const struct sockaddr *)addr, sizeof(*addr));
     if (n != len) {
         int e = P_sock_errno();
@@ -42,29 +50,16 @@ ret_t udp_send_to(sock_t sock, const struct sockaddr_in *addr,
     return (int)n;
 }
 
-ret_t udp_recv_from(sock_t sock, struct sockaddr_in *from,
-                    void *buf, int max_len) {
-    socklen_t fromlen = sizeof(*from);
-    ssize_t n = recvfrom(sock, (char *)buf, max_len, 0,
-                         (struct sockaddr *)from, &fromlen);
+ret_t p2p_udp_recv_from(struct p2p_session *s, struct sockaddr_in *from,
+                        void *buf, int buf_size) {
+
+    socklen_t sock_len = sizeof(*from);
+
+    ssize_t n = recvfrom(s->sock, (char *)buf, buf_size, 0, (struct sockaddr *)from, &sock_len);
     if (n < 0) {
         if (P_sock_is_wouldblock()) return E_BUSY;
         int e = P_sock_errno();
         return e ? E_EXTERNAL(e) : E_UNKNOWN;
     }
     return (int)n;
-}
-
-ret_t udp_send_packet(sock_t sock, const struct sockaddr_in *addr,
-                      uint8_t type, uint8_t flags, uint16_t seq,
-                      const void *payload, int payload_len) {
-    uint8_t buf[P2P_MTU];
-    int total = P2P_HDR_SIZE + payload_len;
-    if (total > P2P_MTU) return E_INVALID;
-
-    p2p_pkt_hdr_encode(buf, type, flags, seq);
-    if (payload_len > 0 && payload)
-        memcpy(buf + P2P_HDR_SIZE, payload, payload_len);
-
-    return udp_send_to(sock, addr, buf, total);
 }
