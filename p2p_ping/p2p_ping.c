@@ -200,13 +200,44 @@ static void tui_process_input(p2p_handle_t hdl) {
             if (g_len_in > 0) {
                 g_buf_in[g_len_in] = '\0';
                 
-                /* 在滚动区显示自己发出的消息 */
-                char line[576];
-                snprintf(line, sizeof(line), "%s: %s", g_my_name, g_buf_in);
-                tui_println(P2P_LOG_LEVEL_INFO, line);
+                /* 检查是否是 RPC 命令 */
+                if (strncmp(g_buf_in, "/req ", 5) == 0) {
+                    /* /req 命令：发送 MSG 请求 */
+                    const char *content = g_buf_in + 5;
+                    int content_len = g_len_in - 5;
+                    
+                    char line[576];
+                    snprintf(line, sizeof(line), "[RPC] Sending request: %s", content);
+                    tui_println(P2P_LOG_LEVEL_INFO, line);
+                    
+                    int ret = p2p_request(hdl, 1, content, content_len);
+                    if (ret < 0) {
+                        tui_println(P2P_LOG_LEVEL_WARN, "[RPC] Failed to send request (not supported or busy)");
+                    }
+                }
+                else if (strncmp(g_buf_in, "/resp ", 6) == 0) {
+                    /* /resp 命令：回复 MSG 请求 */
+                    const char *content = g_buf_in + 6;
+                    int content_len = g_len_in - 6;
+                    
+                    char line[576];
+                    snprintf(line, sizeof(line), "[RPC] Sending response: %s", content);
+                    tui_println(P2P_LOG_LEVEL_INFO, line);
+                    
+                    int ret = p2p_response(hdl, 0, content, content_len);
+                    if (ret < 0) {
+                        tui_println(P2P_LOG_LEVEL_WARN, "[RPC] Failed to send response (no pending request)");
+                    }
+                }
+                else {
+                    /* 普通消息：在滚动区显示自己发出的消息 */
+                    char line[576];
+                    snprintf(line, sizeof(line), "%s: %s", g_my_name, g_buf_in);
+                    tui_println(P2P_LOG_LEVEL_INFO, line);
 
-                /* 发送 */
-                p2p_send(hdl, g_buf_in, g_len_in);
+                    /* 发送 */
+                    p2p_send(hdl, g_buf_in, g_len_in);
+                }
 
                 /* 清空输入行 */
                 g_buf_in[g_len_in = 0] = '\0';
@@ -268,6 +299,46 @@ static void log_state_change(p2p_handle_t s) {
 static void on_state(p2p_handle_t s, p2p_state_t old_state, p2p_state_t new_state, void *userdata) {
     (void)s; (void)userdata;
     print("I:", LA_F("[EVENT] State: %s -> %s\n", LA_F49, 49), state_name(old_state), state_name(new_state));
+}
+
+/* MSG RPC 请求到达回调（B 端） */
+static void on_request(p2p_handle_t hdl, uint16_t sid, uint8_t msg, const void *data, int len, void *userdata) {
+    (void)hdl; (void)userdata;
+    
+    char line[576];
+    if (len > 0 && data) {
+        char buf[512];
+        int copy_len = len < (int)sizeof(buf) - 1 ? len : (int)sizeof(buf) - 1;
+        memcpy(buf, data, copy_len);
+        buf[copy_len] = '\0';
+        snprintf(line, sizeof(line), "[RPC REQ] sid=%u msg=%u: %s", sid, msg, buf);
+    } else {
+        snprintf(line, sizeof(line), "[RPC REQ] sid=%u msg=%u (no data)", sid, msg);
+    }
+    tui_println(P2P_LOG_LEVEL_INFO, line);
+}
+
+/* MSG RPC 应答到达回调（A 端） */
+static void on_response(p2p_handle_t hdl, uint16_t sid, uint8_t msg, const void *data, int len, void *userdata) {
+    (void)hdl; (void)userdata;
+    
+    char line[576];
+    if (len < 0) {
+        /* 错误响应 */
+        const char *err_msg = "unknown error";
+        if (msg == 0xFE) err_msg = "peer offline";
+        else if (msg == 0xFF) err_msg = "timeout";
+        snprintf(line, sizeof(line), "[RPC RESP] sid=%u ERROR: %s (code=%u)", sid, err_msg, msg);
+    } else if (len > 0 && data) {
+        char buf[512];
+        int copy_len = len < (int)sizeof(buf) - 1 ? len : (int)sizeof(buf) - 1;
+        memcpy(buf, data, copy_len);
+        buf[copy_len] = '\0';
+        snprintf(line, sizeof(line), "[RPC RESP] sid=%u code=%u: %s", sid, msg, buf);
+    } else {
+        snprintf(line, sizeof(line), "[RPC RESP] sid=%u code=%u (no data)", sid, msg);
+    }
+    tui_println(P2P_LOG_LEVEL_INFO, line);
 }
 
 static bool             g_running;
@@ -416,6 +487,8 @@ int main(int argc, char *argv[]) {
     cfg.gist_id         = ARGS_gist.str;
     cfg.bind_port       = 0;
     cfg.on_state        = on_state;
+    cfg.on_request      = on_request;
+    cfg.on_response     = on_response;
     cfg.userdata        = NULL;
     cfg.test_ice_host_off  = ARGS_no_host.i64 ? true : false;
     cfg.test_ice_srflx_off = ARGS_no_srflx.i64 ? true : false;
@@ -502,8 +575,10 @@ int main(int argc, char *argv[]) {
             if (!g_connected_once) { g_connected_once = true;
                 print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F37, 37));
                 tui_init();
-                if (g_term_height)
+                if (g_term_height) {
                     tui_println(P2P_LOG_LEVEL_INFO, LA_S("--- Connected ---", LA_S10, 10));
+                    tui_println(P2P_LOG_LEVEL_INFO, "[RPC] Commands: /req <msg> to send request, /resp <msg> to reply");
+                }
             }
 
             /* 接收对端消息 */

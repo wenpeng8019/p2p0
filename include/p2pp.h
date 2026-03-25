@@ -587,7 +587,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - A 收到此包后停止重发
  *
  * MSG_RESP (B → Server):
- *   payload: [session_id(8)][sid(2)][msg(1)][data(N)]
+ *   payload: [session_id(8)][sid(2)][code(1)][data(N)]
  *   包头: type=0x8A, flags=0, seq=0
  *   - session_id: 从 MSG_REQ relay 中取得的 A 的会话 ID
  *   - B 重发此包直到收到 Server → B 的 MSG_RESP_ACK
@@ -600,11 +600,11 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - Server 确认收到 B 的 MSG_RESP，B 停止重发
  *
  * MSG_RESP (Server → A, relay):
- *   payload: [session_id(8)][sid(2)][msg(1)][data(N)]
+ *   payload: [session_id(8)][sid(2)][code(1)][data(N)]
  *   包头: type=0x8A, flags=0, seq=0
  *   - session_id: A 的会话 ID（用于 A 端验证响应合法性）
  *   - sid: 对应的 MSG_REQ 序列号
- *   - msg: 响应码
+ *   - code: 响应码
  *   - data: 响应数据
  *   - Server 重发此包直到收到 A → Server 的 MSG_RESP_ACK
  *

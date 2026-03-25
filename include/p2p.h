@@ -416,10 +416,10 @@ p2p_recv(p2p_handle_t hdl, void *buf, int len);
  * 仅在 COMPACT 模式、服务器支持 MSG（REGISTER_ACK flags 含 SIG_REGACK_FLAG_MSG）
  * 且当前无挂起请求时有效。发送成功后通过 on_response 回调接收应答。
  *
- * @param hdl      会话句柄
- * @param msg 应用层消息类型（1 字节，应用自定义）
- * @param data     请求数据（最多 P2P_MSG_DATA_MAX 字节）
- * @param len      数据长度
+ * @param hdl       会话句柄
+ * @param msg       消息ID（1 字节，应用自定义）
+ * @param data      请求数据（最多 P2P_MSG_DATA_MAX 字节）
+ * @param len       数据长度
  * @return 0=已加入发送队列，-1=失败（不支持/已有挂起/参数错误/未注册）
  */
 int
@@ -428,14 +428,14 @@ p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len);
 /**
  * 回复对端的 MSG 请求（B 端，在 on_request 回调中或异步调用）。
  *
- * @param hdl      会话句柄
- * @param msg 应答消息类型（1 字节）
- * @param data     应答数据
- * @param len      数据长度
+ * @param hdl       会话句柄
+ * @param code      应答码（1 字节）
+ * @param data      应答数据
+ * @param len       数据长度
  * @return 0=成功，-1=失败（无挂起请求/参数错误）
  */
 int
-p2p_response(p2p_handle_t hdl, uint8_t msg, const void *data, int len);
+p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len);
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus

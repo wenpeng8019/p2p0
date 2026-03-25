@@ -140,6 +140,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F123] = "%s: invalid session_id=0\n",  /* SID:123 */
     [LA_F124] = "%s: keep-alive sent (%d cands)",  /* SID:124 */
     [LA_F125] = "%s: new request (sid=%u) overrides pending request (sid=%u)\n",  /* SID:125 */
+    [LA_F446] = "%s: no rpc request\n",  /* SID:446 */
     [LA_F129] = "%s: not connected, cannot send FIN",  /* SID:129 */
     [LA_F131] = "%s: old request ignored (sid=%u <= last_sid=%u)\n",  /* SID:131 */
     [LA_F162] = "%s: path rx UP (%s:%d)",  /* SID:162 */
@@ -281,6 +282,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F266] = "% Invalid signaling mode in configuration",  /* SID:266 */
     [LA_F430] = "% LOST recovery: NAT connected but no path available",  /* SID:430 */
     [LA_F267] = "Local address detection done: %d address(es)",  /* SID:267 */
+    [LA_F447] = "% MSG RPC not supported by server\n",  /* SID:447 */
     [LA_F440] = "% NAT connected but no available path in path manager",  /* SID:440 */
     [LA_F270] = "% No advanced transport layer enabled, using simple reliable layer",  /* SID:270 */
     [LA_F271] = "% No auth_key provided, using default key (insecure)",  /* SID:271 */

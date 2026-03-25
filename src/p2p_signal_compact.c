@@ -726,7 +726,10 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
     P_check(len == 0 || data, return E_INVALID;)
     P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
     P_check(ctx->state >= SIGNAL_COMPACT_REGISTERED, return E_NONE_CONTEXT;)    // 未注册
-    P_check(ctx->msg_support, return E_NO_SUPPORT;)                             // 服务器不支持 MSG
+    if (!ctx->msg_support) {
+        print("E:", LA_F("MSG RPC not supported by server\n", LA_F447, 447));
+        return E_NO_SUPPORT;
+    }
     
     if (ctx->req_state != 0) return E_BUSY;                                     // 已有挂起请求
 
@@ -758,7 +761,10 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
 
     P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
     P_check(len == 0 || data, return E_INVALID;)
-    P_check(ctx->resp_sid != 0, return E_INVALID;)
+    if (!ctx->resp_sid) {
+         print("E:", LA_F("%s: no rpc request\n", LA_F446, 446), PROTO);
+        return E_INVALID;
+    }
 
     // 缓存响应数据用于重发
     ctx->resp_code      = code;

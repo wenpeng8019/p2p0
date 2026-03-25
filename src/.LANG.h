@@ -487,6 +487,8 @@ enum {
     LA_F443,  /* "%s: unknown target cand %s:%d" (%s,%s,%d)  [p2p_nat.c] */
     LA_F444,  /* disabled "best_path<0 && active_path=%d, signaling=%d, state=%d\n" */
     LA_F445,  /* disabled "s->active_path=%d, path_stats.state=%d" */
+    LA_F446,  /* "%s: no rpc request\n" (%s)  [p2p_signal_compact.c] */
+    LA_F447,  /* "% MSG RPC not supported by server\n"  [p2p_signal_compact.c] */
 
     LA_NUM
 };

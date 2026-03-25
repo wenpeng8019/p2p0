@@ -1047,14 +1047,7 @@ static void remove_rpc_pending(compact_pair_t *pair) {
 }
 
 // 将配对加入 RPC 待确认链表
-static void enqueue_rpc_pending(compact_pair_t *pair, uint64_t now) {
-
-    if (pair->rpc_pending_next) {
-        remove_rpc_pending(pair);
-    }
-
-    pair->rpc_sent_time = now;
-    pair->rpc_retry = 0;
+static inline void enqueue_rpc_pending(compact_pair_t *pair) {
 
     pair->rpc_pending_next = (compact_pair_t*)(void*)-1;
     if (g_rpc_pending_rear) {
@@ -1082,7 +1075,10 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
         // 将第一项从队列头部移除
         compact_pair_t *q = g_rpc_pending_head;
         g_rpc_pending_head = q->rpc_pending_next;
-        q->rpc_pending_next = NULL;
+        if (g_rpc_pending_head == (void*)-1) {
+            g_rpc_pending_head = NULL;
+            g_rpc_pending_rear = NULL;
+        }
 
         // REQ 阶段：等待对端响应
         if (!q->rpc_responding) {
@@ -1092,11 +1088,6 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
                 print("W:", LA_F("MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%" PRIu64 ")\n", LA_F54, 54),
                       q->local_peer_id, q->rpc_last_sid, q->session_id);
 
-                // 已从链表移除（rpc_pending_next=NULL），transition 内部的 remove 是 no-op
-                if (g_rpc_pending_head == (void*)-1) {
-                    g_rpc_pending_head = NULL;
-                    g_rpc_pending_rear = NULL;
-                }
                 transition_to_resp_pending(udp_fd, q, now, SIG_MSG_FLAG_PEER_OFFLINE, 0, NULL, 0);
             }
             // 超过最大重传次数，发送超时错误
@@ -1104,10 +1095,6 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
                 print("W:", LA_F("MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%" PRIu64 ")\n", LA_F53, 53),
                       q->rpc_retry, q->local_peer_id, q->rpc_last_sid, q->session_id);
 
-                if (g_rpc_pending_head == (void*)-1) {
-                    g_rpc_pending_head = NULL;
-                    g_rpc_pending_rear = NULL;
-                }
                 transition_to_resp_pending(udp_fd, q, now, SIG_MSG_FLAG_TIMEOUT, 0, NULL, 0);
             }
             // 重传 MSG_REQ 给对端
@@ -1117,14 +1104,8 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
                 q->rpc_sent_time = now;
 
                 // 重新加入队尾（保持时间排序）
-                q->rpc_pending_next = (compact_pair_t*)(void*)-1;
-                if (g_rpc_pending_head == (void*)-1) {
-                    g_rpc_pending_head = q;
-                    g_rpc_pending_rear = q;
-                } else {
-                    g_rpc_pending_rear->rpc_pending_next = q;
-                    g_rpc_pending_rear = q;
-                }
+                enqueue_rpc_pending(q);
+
                 print("V:", LA_F("MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%" PRIu64 ")\n", LA_F55, 55),
                       q->local_peer_id, q->peer->local_peer_id,
                       q->rpc_last_sid, q->rpc_retry, MSG_REQ_MAX_RETRY, q->session_id);
@@ -1140,11 +1121,9 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
                 print("W:", LA_F("MSG_RESP gave up after %d retries, sid=%u (ses_id=%" PRIu64 ")\n", LA_F56, 56),
                       q->rpc_retry, q->rpc_last_sid, q->session_id);
 
-                if (g_rpc_pending_head == (void*)-1) {
-                    g_rpc_pending_head = NULL;
-                    g_rpc_pending_rear = NULL;
-                }
+                q->rpc_pending_next = NULL;
                 q->rpc_responding = false;
+                q->rpc_retry = 0;
             }
             // 从缓存重传 MSG_RESP
             else {
@@ -1153,14 +1132,8 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
                 q->rpc_sent_time = now;
 
                 // 重新加入队尾（保持时间排序）
-                q->rpc_pending_next = (compact_pair_t*)(void*)-1;
-                if (g_rpc_pending_head == (void*)-1) {
-                    g_rpc_pending_head = q;
-                    g_rpc_pending_rear = q;
-                } else {
-                    g_rpc_pending_rear->rpc_pending_next = q;
-                    g_rpc_pending_rear = q;
-                }
+                enqueue_rpc_pending(q);
+
                 print("V:", LA_F("MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%" PRIu64 ")\n", LA_F57, 57),
                       q->local_peer_id, q->rpc_last_sid, q->rpc_retry, MSG_RESP_MAX_RETRY, q->session_id);
 
@@ -1177,8 +1150,6 @@ static void retry_rpc_pending(sock_t udp_fd, uint64_t now) {
 // 缓存响应数据到 pair->rpc_* 并从 REQ 阶段转换到 RESP 阶段
 static void transition_to_resp_pending(sock_t udp_fd, compact_pair_t *requester, uint64_t now,
                                        uint8_t flags, uint8_t code, const uint8_t *data, int len) {
-    // 从 RPC 链表移除（REQ 阶段）
-    remove_rpc_pending(requester);
 
     // 状态转换为 RESP：直接复用 rpc_code 和 rpc_data 字段存储响应
     requester->rpc_responding = true;
@@ -1194,7 +1165,9 @@ static void transition_to_resp_pending(sock_t udp_fd, compact_pair_t *requester,
     }
 
     // 发送并加入 RPC 链表（RESP 阶段）
-    enqueue_rpc_pending(requester, now);
+    requester->rpc_sent_time = now;
+    requester->rpc_retry = 0;
+    enqueue_rpc_pending(requester);
     send_msg_resp_to_requester(udp_fd, requester);
 }
 
@@ -1823,7 +1796,9 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         send_msg_req_ack(udp_fd, from, from_str, requester->session_id, sid, 0);
 
         // 立即向对端转发 MSG_REQ
-        enqueue_rpc_pending(requester, P_tick_ms());
+        requester->rpc_sent_time = P_tick_ms();
+        requester->rpc_retry = 0;
+        enqueue_rpc_pending(requester);
         send_msg_req_to_peer(udp_fd, requester);
 
         print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%" PRIu64 ")\n", LA_F17, 17),
@@ -1896,6 +1871,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         }
 
         // 缓存响应数据并从 REQ 链表移到 RESP 链表，同时发送给请求方
+        remove_rpc_pending(requester);
         transition_to_resp_pending(udp_fd, requester, P_tick_ms(), 0, resp_code, resp_data, resp_len);
 
         print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u (ses_id=%" PRIu64 ")\n", LA_F16, 16),
@@ -1944,6 +1920,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 清理状态
         remove_rpc_pending(requester);
+        requester->rpc_responding = false;
+        requester->rpc_retry = 0;
 
         print("I:", LA_F("%s: RPC complete for '%s', sid=%u (ses_id=%" PRIu64 ")\n", LA_F22, 22),
                PROTO, requester->local_peer_id, sid, requester->session_id);
