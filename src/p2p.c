@@ -1219,7 +1219,7 @@ p2p_update(p2p_handle_t hdl) {
      * ======================================================================== */
 
     // LOST 状态下无活跃路径（active_path = -2），恢复由 NAT 层驱动，无需路径管理器维护
-    if (s->state > P2P_STATE_LOST) { assert(s->active_path >= -1 && s->path_type != P2P_PATH_NONE);
+    if (s->state > P2P_STATE_LOST) { assert(s->active_path >= PATH_IDX_SIGNALING && s->path_type != P2P_PATH_NONE);
 
         // 路径健康检查（检测超时、失效路径）
         path_manager_tick(s, now_ms);
@@ -1253,7 +1253,8 @@ p2p_update(p2p_handle_t hdl) {
                     }
                 }
             }
-            else assert(p2p_get_path_stats(s, s->active_path)->state == PATH_STATE_FAILED);
+            // 如果没有可用路径，那当前路径肯定是最后一个路径，且状态应该是 PATH_STATE_FAILED
+            else assert(best_path == s->active_path || p2p_get_path_stats(s, s->active_path)->state == PATH_STATE_FAILED);
         }
     } else assert(s->state != P2P_STATE_LOST || (s->active_path < PATH_IDX_SIGNALING && s->path_type == P2P_PATH_NONE));
     

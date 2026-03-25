@@ -309,7 +309,7 @@ enum {
     LA_F265,  /* "Invalid read state %d, resetting" (%d)  [p2p_signal_relay.c] */
     LA_F266,  /* "% Invalid signaling mode in configuration"  [p2p.c] */
     LA_F267,  /* "Local address detection done: %d address(es)" (%d)  [p2p_route.c] */
-    LA_F268,  /* "Marked old path (idx=%d) as FAILED due to addr change\n" (%d)  [p2p_signal_compact.c] */
+    LA_F268,  /* disabled "Marked old path (idx=%d) as FAILED due to addr change\n" */
     LA_F269,  /* disabled "% NAT connected but no available path in path manager" */
     LA_F270,  /* "% No advanced transport layer enabled, using simple reliable layer"  [p2p.c] */
     LA_F271,  /* "% No auth_key provided, using default key (insecure)"  [p2p_signal_pubsub.c] */
@@ -485,6 +485,8 @@ enum {
     LA_F441,  /* "% RELAY recovery: NAT connected but no path available"  [p2p.c] */
     LA_F442,  /* disabled "Invalid state (%d): LOST but active_path=%d, path_type=%d" */
     LA_F443,  /* "%s: unknown target cand %s:%d" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F444,  /* disabled "best_path<0 && active_path=%d, signaling=%d, state=%d\n" */
+    LA_F445,  /* disabled "s->active_path=%d, path_stats.state=%d" */
 
     LA_NUM
 };

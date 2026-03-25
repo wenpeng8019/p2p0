@@ -281,7 +281,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F266] = "% Invalid signaling mode in configuration",  /* SID:266 */
     [LA_F430] = "% LOST recovery: NAT connected but no path available",  /* SID:430 */
     [LA_F267] = "Local address detection done: %d address(es)",  /* SID:267 */
-    [LA_F268] = "Marked old path (idx=%d) as FAILED due to addr change\n",  /* SID:268 */
     [LA_F440] = "% NAT connected but no available path in path manager",  /* SID:440 */
     [LA_F270] = "% No advanced transport layer enabled, using simple reliable layer",  /* SID:270 */
     [LA_F271] = "% No auth_key provided, using default key (insecure)",  /* SID:271 */
@@ -430,6 +429,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
+    [LA_F445] = "s->active_path=%d, path_stats.state=%d",  /* SID:445 disabled */
+    [LA_F444] = "best_path<0 && active_path=%d, signaling=%d, state=%d\n",  /* SID:444 disabled */
+    [LA_F268] = "Marked old path (idx=%d) as FAILED due to addr change\n",  /* SID:268 disabled */
     [LA_F442] = "Invalid state (%d): LOST but active_path=%d, path_type=%d",  /* SID:442 disabled */
     [LA_F269] = "% NAT connected but no available path in path manager",  /* SID:269 disabled */
     [LA_F339] = "% State: CONNECTED → RELAY (path lost)",  /* SID:339 disabled */
