@@ -70,13 +70,13 @@ typedef struct {
     /* 性能指标（用于路径选择）
      * 
      * RTT 测量分层策略（混合模式）：
-     *   1. 探测层原路返回测量：
-     *      - probe_rtt_direct:      最新测量值（原始 RTT）
-     *      - probe_rtt_direct_srtt: EWMA 平滑值（用于路径选择，抗抖动）
-     *      - probe_rtt_direct_rttvar: RTT 方差（用于抖动评估）
+     *   1. RoundTrip 层原路返回测量：
+     *      - rt_rtt_direct:      最新测量值（原始 RTT）
+     *      - rt_rtt_direct_srtt: EWMA 平滑值（用于路径选择，抗抖动）
+     *      - rt_rtt_direct_rttvar: RTT 方差（用于抖动评估）
      * 
-     *   2. 探测层跨路径测量：
-     *      - probe_rtt_cross: 跨路径测量值（不平滑，仅参考）
+     *   2. RoundTrip 层跨路径测量：
+     *      - rt_rtt_cross: 跨路径测量值（不平滑，仅参考）
      *      - 场景：PUNCH(A) → peer → REACH(B)，测量的是 A出+B入 的组合延迟
      *      - 用途：冷打洞单向网络时的初步排序，选择时降权 +30%
      * 
@@ -85,39 +85,42 @@ typedef struct {
      * 
      *   4. 综合 RTT：
      *      - rtt_ms: 从三个源中自动选择最优值
-     *      - 优先级：data_rtt > probe_rtt_direct_srtt > probe_rtt_cross*1.3
+     *      - 优先级：data_rtt > rt_rtt_direct_srtt > rt_rtt_cross*1.3
      *      - rtt_variance: 综合抖动指标
      */
-    uint32_t            probe_rtt_direct;           // 探测层原路最新测量（0=未测量）
-    uint32_t            probe_rtt_direct_srtt;      // 探测层原路 EWMA 平滑值（路径选择用）
-    uint32_t            probe_rtt_direct_rttvar;    // 探测层原路 RTT 方差（抖动评估用）
-    uint32_t            probe_rtt_cross;            // 探测层跨路径测量（0=未测量，仅参考）
+    uint32_t            rt_rtt_direct;              // RoundTrip 层原路最新测量（0=未测量）
+    uint32_t            rt_rtt_direct_srtt;         // RoundTrip 层原路 EWMA 平滑值（路径选择用）
+    uint32_t            rt_rtt_direct_rttvar;       // RoundTrip 层原路 RTT 方差（抖动评估用）
+    uint32_t            rt_rtt_cross;               // RoundTrip 层跨路径测量（0=未测量，仅参考）
     uint32_t            data_rtt;                   // 数据层 SRTT（0=未测量，最可靠）
     
     uint32_t            rtt_ms;                     // 当前综合 RTT（毫秒，自动选择最优）
     uint32_t            rtt_min;                    // 最小 RTT（基线）
     uint32_t            rtt_max;                    // 最大 RTT
     uint32_t            rtt_variance;               // 综合延迟抖动
-    float               loss_rate;                  // 综合丢包率（0.0-1.0），取 probe 和 data 两层的最大值
+    float               loss_rate;                  // 综合丢包率（0.0-1.0），取 RoundTrip 和 data 两层的最大值
     float               data_loss_rate;             // 数据层丢包率（来自 reliable/SCTP/DTLS 传输层）
     uint64_t            bandwidth_bps;              // 估计带宽（bps）
-    
-    uint32_t            rtt_samples[RTT_SAMPLE_COUNT]; // RTT 样本环形缓冲区
-    int                 rtt_sample_idx;             // 当前样本索引
-    int                 rtt_sample_count;           // 有效样本数
     
     /* 健康检查 */
     uint64_t            last_recv_ms;               // 最后接收时间
     uint64_t            last_send_ms;               // 最后发送时间
-    uint64_t            probe_seq;                  // 探测序列号
+    uint64_t            state_timestamp_ms;         // 状态变更时间戳（FAILED/RECOVERING）
     int                 consecutive_timeouts;       // 连续超时次数
     
+    /* RoundTrip 层统计（用于 RoundTrip 层丢包率计算） */
+    uint32_t            rt_samples[RTT_SAMPLE_COUNT];  // RoundTrip 层样本环形缓冲区（rt_rtt_direct 历史）
+    int                 rt_sample_idx;              // 当前样本索引
+    int                 rt_sample_count;            // 有效样本数
+    uint64_t            rt_packets_sent;            // RoundTrip 包发送数（PUNCH/ALIVE，rt_track=true）
+    uint64_t            rt_packets_lost;            // RoundTrip 包丢包数（pending 队列超时）
+    
     /* 流量统计 */
-    uint64_t            total_bytes_sent;
-    uint64_t            total_bytes_recv;
-    uint64_t            total_packets_sent;
-    uint64_t            total_packets_recv;
-    uint64_t            total_packets_lost;
+    uint64_t            total_bytes_sent;           // 总发送字节数（所有包）
+    uint64_t            total_bytes_recv;           // 总接收字节数（所有包）
+    uint64_t            total_packets_sent;         // 总发送包数（所有包）
+    uint64_t            total_packets_recv;         // 总接收包数（所有包）
+    uint64_t            total_packets_lost;         // 总丢包数（RoundTrip 层+数据层）
     
     /* 路径质量预测 */
     uint64_t            last_quality_check_ms;      // 上次质量检查时间
@@ -246,6 +249,10 @@ static inline bool path_is_selectable(path_state_t state) {
     return state >= PATH_STATE_ACTIVE;
 }
 
+/* 辅助工具：枚举值转字符串（用于日志） */
+const char* path_state_str(path_state_t state);
+const char* path_quality_str(path_quality_t quality);
+
 /* ============================================================================
  * 初始化
  * ============================================================================ */
@@ -310,9 +317,10 @@ int path_manager_configure_turn(struct p2p_session *s,
  * 状态驱动（外部事件 → 驱动内部状态机）
  *
  * 两组统计接口：
- *   Group 1 — 探测层（probe, 面向所有路径）：
- *     path_manager_on_packet_recv / path_manager_on_packet_send / path_manager_on_packet_ack
+ *   Group 1 — RoundTrip 层（面向所有路径）：
+ *     path_manager_on_packet_send / path_manager_on_packet_recv
  *     用于控制包（PUNCH/REACH/ALIVE）在各路径上的 RTT 测量和丢包检测。
+ *     发送侧用 rt_track 参数，接收侧用 rt_ack 参数，接口对称统一。
  *     丢包由 path_manager_tick 扫描 pending 队列超时判定。
  *
  *   Group 2 — 数据层（data, 面向当前活跃路径）：
@@ -322,60 +330,41 @@ int path_manager_configure_turn(struct p2p_session *s,
  *     丢包率来自高级传输层 get_stats（基础 reliable 层无聚合丢包计数）。
  * ============================================================================ */
 
+/* ---- Group 1: RoundTrip 层统计（控制包 PUNCH/REACH/ALIVE 的 per-path RTT 测量） ---- */
+
+/*
+ * 记录包发送（流量统计 + 可选 RTT 追踪）
+ *
+ * @param s          会话指针
+ * @param path_idx   发送路径索引
+ * @param seq        数据包序列号
+ * @param now_ms     当前时间（毫秒）
+ * @param size       包大小（字节），0表示不计入流量统计
+ * @param rt_track   是否需要 RoundTrip 追踪（加入 pending 队列）
+ *                   true:  控制包需要 per-packet RTT 测量（PUNCH/ALIVE）
+ *                   false: 数据包或不需要 RTT 的控制包（DATA/ACK/CONN/REACH/FIN）
+ * @return           0=成功，-1=失败
+ */
+int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size, bool rt_track);
+
  /*
- * 记录数据包接收（更新路径活跃时间和流量统计）
- *
- * @param s         会话指针
- * @param path_idx  接收路径索引
- * @param now_ms    当前时间（毫秒）
- * @param size      包大小（字节），0表示不计入流量统计
- * @return          0=成功，-1=失败
- */
-int path_manager_on_packet_recv(struct p2p_session *s, int path_idx, uint64_t now_ms, uint32_t size);
-
-/* ---- Group 1: 探测层统计（控制包 PUNCH/REACH/ALIVE 的 per-path RTT 测量） ---- */
-
-/*
- * 记录探测包发送（开始 per-path RTT 测量）
- *
- * @param s         会话指针
- * @param path_idx  发送路径索引
- * @param seq       数据包序列号
- * @param now_ms    当前时间（毫秒）
- * @param size      包大小（字节），0表示不计入流量统计（仅用于RTT测量）
- * @return          0=成功，-1=失败
- */
-int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size);
-
-/*
- * 记录探测包确认（完成 per-path RTT 测量）
- *
- * 混合模式 RTT 测量策略：
- *   1. 原路返回（send_path == recv_path）：
- *      - 记录到 probe_rtt_direct（精确测量）
- *      - 用于 PUNCHING/CONNECTED 阶段的路径选择
- *      - 这是最准确的单路径 RTT
- * 
- *   2. 跨路径返回（send_path != recv_path）：
- *      - 记录到 probe_rtt_cross（估算值，仅参考）
- *      - 仅用于 PUNCHING 阶段冷打洞的初步排序
- *      - RTT = 发送路径延迟 + 接收路径延迟（非单路径真实延迟）
- *      - 路径选择时会降权处理（+30% 惩罚）
- * 
- *   3. 使用场景：
- *      - PUNCHING 阶段：接受跨路径测量（单向网络场景，无其他数据）
- *      - CONNECTED 阶段：应该都是原路返回（对称路径已建立）
- * 
- * @param s            会话指针
- * @param seq          确认的序列号
- * @param recv_path    接收路径索引（REACH 包来源路径）
- * @param now_ms       当前时间（毫秒）
- * @return             测量的 RTT（毫秒），或 -1（未找到对应发送记录）
- * 
- * @note 调用方需通过 target_addr 判断 send_path，然后比较 send_path == recv_path
- *       来确定是否原路返回，这样才能正确更新对应的 RTT 字段
- */
-int path_manager_on_packet_ack(struct p2p_session *s, uint32_t seq, int recv_path, uint64_t now_ms);
+  * 对接收到的数据包进行统计（更新路径活跃时间和流量统计 + 可选 RoundTrip 确认）
+  *
+  * 统一的接收侧接口，对应发送侧的 path_manager_on_packet_send：
+  *   - 发送侧：rt_track 参数表示是否需要 RoundTrip 追踪
+  *   - 接收侧：rt_ack 参数表示是否为 RoundTrip 确认
+  *
+  * @param s         会话指针
+  * @param path_idx  接收路径索引（回环路径）
+  * @param now_ms    当前时间（毫秒）
+  * @param size      包大小（字节），0表示不计入流量统计
+  * @param rt_ack    是否为 RoundTrip 确认包
+  *                  false: 普通接收包，仅统计流量和活跃时间
+  *                  true:  RoundTrip 包确认，完成 RTT 测量（使用 seq 参数）
+  * @param seq       RoundTrip 包序列号（rt_ack=true 时有效，compact 信令为 0）
+  * @return          成功时返回 0（普通包）或测量的 RTT 毫秒数（RoundTrip 确认），失败返回 -1
+  */
+int path_manager_on_packet_recv(struct p2p_session *s, int path_idx, uint64_t now_ms, uint32_t size, bool rt_ack, uint32_t seq);
 
 /* ---- Group 2: 数据层统计（活跃路径 DATA 包） ---- */
 
@@ -395,7 +384,7 @@ int path_manager_on_data_rtt(struct p2p_session *s, int path_idx, uint32_t rtt_m
  * 上报数据层丢包率（来自高级传输层 get_stats）
  *
  * 基础 reliable 层不暴露聚合丢包计数，因此该接口仅由 SCTP/DTLS 等
- * 高级传输层调用。路径管理器会取 probe 丢包率和 data 丢包率的最大值
+ * 高级传输层调用。路径管理器会取 RoundTrip 丢包率和 data 丢包率的最大值
  * 作为综合 loss_rate，用于质量评估和路径选择。
  *
  * @param s         会话指针
@@ -411,9 +400,9 @@ int path_manager_on_data_loss_rate(struct p2p_session *s, int path_idx, float lo
  * 获取路径的有效 RTT（按优先级选择最优测量值）
  *
  * 优先级策略（混合模式）：
- *   1. data_rtt > 0                    → 使用数据层 SRTT（最可靠，CONNECTED 阶段）
- *   2. probe_rtt_direct_srtt > 0       → 使用探测层原路 EWMA 平滑值（精确且抗抖动）
- *   3. probe_rtt_cross > 0             → 使用跨路径测量 * 1.3（降权，冷打洞阶段）
+ *   1. data_rtt > 0                   → 使用数据层 SRTT（最可靠，CONNECTED 阶段）
+ *   2. rt_rtt_direct_srtt > 0         → 使用 RoundTrip 层原路 EWMA 平滑值（精确且抗抖动）
+ *   3. rt_rtt_cross > 0               → 使用跨路径测量 * 1.3（降权，冷打洞阶段）
  *   4. 否则                            → 返回 UINT32_MAX（未测量，不可选）
  *
  * 跨路径测量降权原因：
@@ -427,11 +416,11 @@ int path_manager_on_data_loss_rate(struct p2p_session *s, int path_idx, float lo
  * @note 此函数用于路径选择和质量评估，确保使用最准确的 RTT 值
  */
 static inline uint32_t get_effective_rtt(const path_stats_t *p) {
-    if (p->data_rtt > 0) return p->data_rtt;                          // 最优：数据层 SRTT
-    if (p->probe_rtt_direct_srtt > 0) return p->probe_rtt_direct_srtt; // 次优：原路 EWMA 平滑
-    if (p->probe_rtt_cross > 0) {
+    if (p->data_rtt > 0) return p->data_rtt;                            // 最优：数据层 SRTT
+    if (p->rt_rtt_direct_srtt > 0) return p->rt_rtt_direct_srtt;        // 次优：原路 EWMA 平滑
+    if (p->rt_rtt_cross > 0) {
         // 跨路径测量降权：增加 30% 惩罚（避免混淆单路径真实延迟）
-        uint64_t penalized = (uint64_t)p->probe_rtt_cross * 13 / 10;
+        uint64_t penalized = (uint64_t)p->rt_rtt_cross * 13 / 10;
         return penalized > UINT32_MAX ? UINT32_MAX : (uint32_t)penalized;
     }
     return UINT32_MAX;  // 未测量
@@ -588,10 +577,6 @@ int path_manager_get_turn_stats(struct p2p_session *s,
                                  uint64_t *total_bytes_sent,
                                  uint64_t *total_bytes_recv,
                                  uint32_t *avg_rtt_ms);
-
-/* 工具函数：枚举值转字符串（用于日志） */
-const char* path_state_str(path_state_t state);
-const char* path_quality_str(path_quality_t quality);
 
 ///////////////////////////////////////////////////////////////////////////////
 #endif /* P2P_PATH_MANAGER_H */

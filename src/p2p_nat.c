@@ -96,9 +96,11 @@ static void clear_reaching_queue(nat_ctx_t *n) {
  * @param seq         包序列号
  * @param payload     负载数据
  * @param payload_len 负载长度
+ * @param now_ms      当前时间（毫秒）
+ * @param rt_track    是否需要 RoundTrip 追踪
  */
 static void cand_send_packet(p2p_session_t *s, int cand_idx, uint8_t type, uint16_t seq,
-                             const uint8_t *payload, int payload_len) {
+                             const uint8_t *payload, int payload_len, uint64_t now_ms, bool rt_track) {
 
     assert(cand_idx >= 0 && cand_idx < s->remote_cand_cnt);
     const struct sockaddr_in *addr = &s->remote_cands[cand_idx].addr;
@@ -113,6 +115,9 @@ static void cand_send_packet(p2p_session_t *s, int cand_idx, uint8_t type, uint1
               TASK_NAT, cand_idx, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), ret);
         return;
     }
+
+    /* 统计：流量统计 + 可选 RTT 追踪（PUNCH=true，其他控制包=false） */
+    path_manager_on_packet_send(s, cand_idx, seq, now_ms, 0, rt_track);
 }
 
 /*
@@ -123,8 +128,9 @@ static void cand_send_packet(p2p_session_t *s, int cand_idx, uint8_t type, uint1
  *
  * @param s              会话对象
  * @param writable_path  可写路径索引（必须 >= 0）
+ * @param now_ms         当前时间（毫秒）
  */
-static void flush_reaching_queue(p2p_session_t *s, int writable_path) {
+static void flush_reaching_queue(p2p_session_t *s, int writable_path, uint64_t now_ms) {
     nat_ctx_t *n = &s->nat;
 
     punch_reaching_t *node;
@@ -147,7 +153,7 @@ static void flush_reaching_queue(p2p_session_t *s, int writable_path) {
                   TASK_NAT, node->cand_idx, node->seq);
         } 
         else {
-            cand_send_packet(s, writable_path, P2P_PKT_REACH, node->seq, ack_payload, 6);
+            cand_send_packet(s, writable_path, P2P_PKT_REACH, node->seq, ack_payload, 6, now_ms, false);
 
             const struct sockaddr_in *addr = &s->remote_cands[writable_path].addr;
             print("V:", LA_F("%s: reaching cand[%d] via path[%d] to %s:%d, seq=%u", LA_F149, 149),
@@ -194,18 +200,15 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
     memcpy(payload, &entry->addr.sin_addr.s_addr, 4);  // network order
     memcpy(payload + 4, &entry->addr.sin_port, 2);     // network order
 
+    // PUNCH 是唯一需要 per-packet RTT 的 NAT 控制包，rt_track=true
     cand_send_packet(s, send_path, P2P_PKT_PUNCH, n->punch_seq,
-                     payload, sizeof(payload));
+                     payload, sizeof(payload), now, true);
 
     print("V:", LA_F("%s sent to %s:%d for %s, seq=%d, path=%d", LA_F54, 54),
           PROTO, inet_ntoa(entry->addr.sin_addr), ntohs(entry->addr.sin_port),
           reason, n->punch_seq, send_path);
 
     entry->last_punch_send_ms = now;
-
-    // 记录发送包用于 RTT 测量（收到 PUNCH_ACK 时通过 seq 匹配计算精确 per-path RTT）
-    // PUNCH包较小，不计入流量统计（size=0）
-    path_manager_on_packet_send(s, send_path, n->punch_seq, now, 0);
 }
 
 /*
@@ -223,7 +226,7 @@ static void nat_send_conn(p2p_session_t *s, uint64_t now) {
     nat_ctx_t *n = &s->nat;
 
     // 使用统一发送接口（自动处理 TURN/信令中转/直连）
-    p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, 0, 0, NULL, 0);
+    p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, 0, 0, NULL, 0, now);
 
     if (s->path_type == P2P_PATH_SIGNALING) {
         print("V:", LA_F("%s sent via signaling relay", LA_F427, 427), PROTO);
@@ -235,13 +238,13 @@ static void nat_send_conn(p2p_session_t *s, uint64_t now) {
     n->last_conn_send_ms = now;
 }
 
-static void nat_send_conn_ack(p2p_session_t *s) {
+static void nat_send_conn_ack(p2p_session_t *s, uint64_t now) {
     const char* PROTO = "CONN_ACK";
     
     if (instrument_option(P2P_INST_OPT_NAT_CONN_ACK_OFF)) return;
 
     // 使用统一发送接口（自动处理 TURN/信令中转/直连）
-    p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, 0, 0, NULL, 0);
+    p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, 0, 0, NULL, 0, now);
 
     if (s->path_type == P2P_PATH_SIGNALING) {
         print("V:", LA_F("%s sent via signaling relay", LA_F427, 427), PROTO);
@@ -325,7 +328,7 @@ static void relay_confirmed(p2p_session_t *s, int cand_idx, uint64_t now, const 
               TASK_PATH, cand_idx);
         
         // 首次确认 tx，flush reaching queue
-        flush_reaching_queue(s, cand_idx);
+        flush_reaching_queue(s, cand_idx, now);
         
         // 检查双向确认：
         //   正常场景：批量模式首次启动，rx_confirmed 为 false，不会触发
@@ -456,14 +459,15 @@ void nat_send_fin(p2p_session_t *s) {
     if (s->active_path < 0) return;
     assert(s->path_type != P2P_PATH_SIGNALING);
 
-    cand_send_packet(s, s->active_path, P2P_PKT_FIN, 0, NULL, 0);
+    uint64_t now = P_tick_ms();
+    cand_send_packet(s, s->active_path, P2P_PKT_FIN, 0, NULL, 0, now, false);
 
     print("V:", LA_F("%s sent to %s:%d", LA_F56, 56),
           PROTO, inet_ntoa(s->active_addr.sin_addr), ntohs(s->active_addr.sin_port));
 
     for (int i = 2; i--;) {
         P_usleep(50 * 1000); // 50ms 间隔重发
-        cand_send_packet(s, s->active_path, P2P_PKT_FIN, 0, NULL, 0);
+        cand_send_packet(s, s->active_path, P2P_PKT_FIN, 0, NULL, 0, now, false);
     }
 }
 
@@ -531,7 +535,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)
             && path_is_selectable(s->remote_cands[cand_idx].stats.state)) {
 
-            cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, 6);
+            cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, 6, now, false);
             print("V:", LA_F("%s sent to %s:%d (writable), echo_seq=%u", LA_F53, 53),
                   PROTO2, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
         }
@@ -543,7 +547,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                 && (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF) || best_path != cand_idx)
                 && best_path >= 0 && path_is_selectable(s->remote_cands[best_path].stats.state)) {
 
-                cand_send_packet(s, best_path, P2P_PKT_REACH, hdr->seq, ack_payload, 6);
+                cand_send_packet(s, best_path, P2P_PKT_REACH, hdr->seq, ack_payload, 6, now, false);
                 print("V:", LA_F("%s sent via best path[%d] to %s:%d, echo_seq=%u", LA_F57, 57),
                       PROTO2, best_path,
                       inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
@@ -554,7 +558,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
                 // 尝试原路发送
                 if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)) {
-                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, 6);
+                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, 6, now, false);
                     print("V:", LA_F("%s_ACK sent to %s:%d (try), echo_seq=%u", LA_F195, 195),
                           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
                 }
@@ -638,7 +642,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     }
 
     // PUNCH 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
-    path_manager_on_packet_recv(s, cand_idx, now, 0);
+    path_manager_on_packet_recv(s, cand_idx, now, 0, false, 0);
 
     // 标记 peer→me 方向 打通
     if (s->rx_confirmed) return;
@@ -730,12 +734,8 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     // 
     // 只有直连路径才需要 RTT 测量和统计更新（信令转发的 REACH 不更新 cand_idx 统计）
     if (path_idx >= 0) {
-
-        if (hdr->seq > 0)
-            path_manager_on_packet_ack(s, hdr->seq, path_idx, now);
-
-        // REACH 控制包不计入流量统计（size=0），但这里需要更新路径活跃时间、包计数和重置超时计数器
-        path_manager_on_packet_recv(s, path_idx, now, 0);
+        // PUNCH_ACK 控制包不计入流量统计（size=0），hdr->seq > 0 时完成 RoundTrip 测量
+        path_manager_on_packet_recv(s, path_idx, now, 0, hdr->seq > 0, hdr->seq);
     }
 
     // 如果该路径之前已激活，只更新统计即可，直接返回
@@ -777,7 +777,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
               TASK_NAT, hdr->seq);
 
         // 首次确认 tx_confirmed，处理所有 reaching 队列（此后不会再有新的 pending）
-        flush_reaching_queue(s, target_path);
+        flush_reaching_queue(s, target_path, now);
     }
 
     // 双向均确认 → NAT_CONNECTING（开始数据层握手）
@@ -787,7 +787,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     if (n->peer_connecting) {
 
         n->peer_connecting = false;
-        nat_send_conn_ack(s);
+        nat_send_conn_ack(s, now);
 
         // 对于首个打通的路径，直接（硬切）作为 p2p 活跃路径
         // 注意：使用 target_path 而不是 cand_idx，因为 target_path 才是被确认可写的路径
@@ -837,7 +837,7 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     }
 
     // CONN 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
-    path_manager_on_packet_recv(s, path_idx, now, 0);
+    path_manager_on_packet_recv(s, path_idx, now, 0, false, 0);
 
     // 如果本端还未进入 NAT_CONNECTING 状态，标记对方已经进入 CONNECTING 状态
     // + 此时需要等到本端进入 connected 后再回复 CONN_ACK，因为对方收到 CONN_ACK 后会立刻进入 CONNECTED 状态
@@ -852,7 +852,7 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     // + 注意，本端此时可能已经是 NAT_CONNECTED 状态，因为如果本端是先发送的 CONN
     //   那么对端对本地的 CONN_ACK 可能会先于对端自己的 CONN 到达，
     //   而本端在收到自己的 CONN_ACK 后会直接进入 NAT_CONNECTED 状态
-    nat_send_conn_ack(s);
+    nat_send_conn_ack(s, now);
 
     if (n->state == NAT_CONNECTING) { assert(!n->peer_connecting);
         n->state = s->active_path < 0 ? NAT_RELAY : NAT_CONNECTED;
@@ -903,7 +903,7 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     print("V:", LA_F("%s: recv from cand[%d]", LA_F91, 91), PROTO, path_idx);
 
     // CONN_ACK 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
-    path_manager_on_packet_recv(s, path_idx, now, 0);
+    path_manager_on_packet_recv(s, path_idx, now, 0, false, 0);
 
     // 进入 NAT_CONNECTED 状态
     if (n->state == NAT_CONNECTING) { assert(!n->peer_connecting);
@@ -935,7 +935,7 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
     // 记录统计数据包接收
     int path_idx = p2p_find_path_by_addr(s, from);
     if (path_idx >= -1)
-        path_manager_on_packet_recv(s, path_idx, now, data_len);
+        path_manager_on_packet_recv(s, path_idx, now, data_len, false, 0);
 
     // NAT_CONNECTING → NAT_CONNECTED（首次收到数据包）
     if (n->state == NAT_CONNECTING) { assert(!n->peer_connecting);
@@ -969,7 +969,7 @@ void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
     // ACK 控制包不计入流量统计（size=0），但需要更新路径活跃时间、包计数和重置超时计数器
     int path_idx = p2p_find_path_by_addr(s, from);
     if (path_idx >=-1) {
-        path_manager_on_packet_recv(s, path_idx, now, 0);
+        path_manager_on_packet_recv(s, path_idx, now, 0, false, 0);
     }
 }
 
@@ -1048,7 +1048,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
 
                         // 如果已经收到对方数据包
                         // 首次确认 tx_confirmed，处理所有 reaching 队列（此后不会再有新的 pending）
-                        if (s->rx_confirmed) flush_reaching_queue(s, PATH_IDX_SIGNALING);
+                        if (s->rx_confirmed) flush_reaching_queue(s, PATH_IDX_SIGNALING, now_ms);
                         else s->rx_confirmed = true;
                     }
                     else s->rx_confirmed = true;
@@ -1057,7 +1057,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                     if (n->peer_connecting) {
 
                         n->peer_connecting = false;
-                        nat_send_conn_ack(s);
+                        nat_send_conn_ack(s, now_ms);
 
                         // 设置活跃路径（用于 nat_send_conn_ack）
                         s->active_path = PATH_IDX_SIGNALING;
@@ -1296,7 +1296,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 // 跳过 target 地址（已原路发送）
                 if (sockaddr_equal(&s->remote_cands[i].addr, &n->reaching_head->target)) continue;
 
-                cand_send_packet(s, i, P2P_PKT_REACH, n->reaching_head->seq, reach_payload, 6);
+                cand_send_packet(s, i, P2P_PKT_REACH, n->reaching_head->seq, reach_payload, 6, now_ms, false);
                 broadcast_cnt++;
             }
             

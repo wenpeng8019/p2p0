@@ -944,7 +944,11 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
     print("V:", LA_F("%s: accepted\n", LA_F97, 97), PROTO);
 
     // 确认服务器未掉线
-    ctx->last_recv_time = P_tick_ms();
+    uint64_t now = P_tick_ms();
+    ctx->last_recv_time = now;
+    
+    // 通知路径管理器：ALIVE_ACK 确认（seq=0），完成 RoundTrip 测量
+    path_manager_on_packet_recv(s, PATH_IDX_SIGNALING, now, 0, true, 0);
 }
 
 /*
@@ -1146,11 +1150,12 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
                   TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
 
             // 标记旧的活跃路径为失效（地址已变更）
-            if (s->active_path >= 0 && s->active_path < s->remote_cand_cnt) {
-                path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
-                print("V:", LA_F("Marked old path (idx=%d) as FAILED due to addr change\n", LA_F268, 268),
-                       s->active_path);
-            }
+            // fixme: 这个逻辑好像有问题
+            // if (s->active_path >= 0 && s->active_path < s->remote_cand_cnt) {
+            //     path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
+            //     print("V:", LA_F("Marked old path (idx=%d) as FAILED due to addr change\n", LA_F268, 268),
+            //            s->active_path);
+            // }
 
             if (ctx->state >= SIGNAL_COMPACT_REGISTERED) {
 
@@ -1799,10 +1804,14 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
                     if (ret < 0)
                         print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
                               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
-                    else
+                    else {
                         printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F397, 397),
                                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
                                (int)sizeof(payload));
+                        
+                        // 通知路径管理器：ALIVE 是唯一需要 per-packet RTT 的信令包，rt_track=true
+                        path_manager_on_packet_send(s, PATH_IDX_SIGNALING, 0, now, 0, true);
+                    }
                 }
                 else print("W:", LA_F("%s skipped: session_id=0\n", LA_F65, 65), PROTO); 
             }
