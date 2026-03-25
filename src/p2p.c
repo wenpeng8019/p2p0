@@ -1225,18 +1225,12 @@ p2p_update(p2p_handle_t hdl) {
         path_manager_tick(s, now_ms);
         
         // 周期性路径重选（检查是否有更优路径）
-        if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > PATH_RESELECT_INTERVAL_MS) { s->path_mgr.last_reselect_ms = now_ms;
+        if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > PATH_RESELECT_INTERVAL_MS) { 
+            s->path_mgr.last_reselect_ms = now_ms;
 
-            int best_path = path_manager_select_best_path(s);
-            if (best_path != s->active_path) { 
+            int best_path = path_manager_select_best_path(s);        
+            if (best_path >= PATH_IDX_SIGNALING && best_path != s->active_path) { 
                 
-                //assert(best_path >= -1); // fixme
-                if (best_path < 0) {
-                    print("W:", LA_F("best_path<0 && active_path=%d\n", 0, 0), s->active_path);
-                }
-
-                if (best_path >= -1) {
-                    
                 // 如果找到更优路径
                 path_stats_t *new_stats = p2p_get_path_stats(s, best_path);
                 path_stats_t *old_stats = p2p_get_path_stats(s, s->active_path);
@@ -1244,7 +1238,6 @@ p2p_update(p2p_handle_t hdl) {
                 // 判断是否值得切换（性能提升显著）
                 // 根据当前活跃路径类型查抽切换阈值
                 const path_threshold_config_t *thr = &s->path_mgr.thresholds[s->path_type];
-
                 if ((new_stats->rtt_ms < old_stats->rtt_ms - thr->rtt_threshold_ms) ||  // RTT 显著改善
                     (old_stats->loss_rate > thr->loss_threshold) ||                     // 当前路径丢包严重
                     (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST
@@ -1259,10 +1252,10 @@ p2p_update(p2p_handle_t hdl) {
                         print("V:", LA_F("Path switch debounced, waiting for stability", LA_F287, 287));
                     }
                 }
-                }
             }
+            else assert(p2p_get_path_stats(s, s->active_path)->state == PATH_STATE_FAILED);
         }
-    } else assert(s->state != P2P_STATE_LOST || (s->active_path < -1 && s->path_type == P2P_PATH_NONE));
+    } else assert(s->state != P2P_STATE_LOST || (s->active_path < PATH_IDX_SIGNALING && s->path_type == P2P_PATH_NONE));
     
     /* ========================================================================
      * 阶段 9：NAT 类型检测（后台定期运行 STUN 探测）
