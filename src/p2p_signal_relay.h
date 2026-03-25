@@ -1,521 +1,293 @@
 /*
- * RELAY 模式信令（TCP, 离线缓存 + Trickle ICE）
+ * RELAY 模式信令（TCP，服务器中转 ICE 候选）
  *
  * ============================================================================
  * 协议概述
  * ============================================================================
  *
- * 基于中央服务器的信令交换模块，通过 TCP 长连接提供可靠的消息传递。
+ * 实现基于 TCP 的信令协议，通过服务器中转交换 ICE 候选信息。
  *
- * 核心改进：异步 ICE 候选交换
+ * 与 COMPACT 模式的核心区别：
  *
- * 标准 WebRTC/ICE 信令假设双方在线（RFC 5245/8445）：
- *   - Offer/Answer 通过 SIP/XMPP 等信令协议实时交换
- *   - 双方必须同时在线才能完成 ICE 协商
- *   - 不考虑用户登录/离线状态
+ * ┌──────────────────────────────────────────────────────────────────────┐
+ * │ COMPACT 模式：一步式配对注册（UDP 无状态设计）                        │
+ * │                                                                      │
+ * │   REGISTER(local_id, remote_id, candidates)                         │
+ * │       ↓                                                              │
+ * │   服务器建立 pair(A↔B)，等待双方注册成对                             │
+ * │       ↓                                                              │
+ * │   REGISTER_ACK(peer_online?, session_id, server_features)           │
+ * │                                                                      │
+ * │   特点：REGISTER 一次完成三方关系（自己-服务器-对方）                 │
+ * └──────────────────────────────────────────────────────────────────────┘
  *
- * RELAY 模式扩展支持异步场景：
- *   - 服务器维护用户在线状态（LOGIN/LOGOUT）
- *   - 对端离线时，服务器缓存 ICE 候选
- *   - 对端上线后，服务器主动推送缓存的候选（OFFER）
- *   - 支持完整的 Trickle ICE 增量候选交换
- *   - 适用于移动网络、弱网环境、异步通信场景
+ * ┌──────────────────────────────────────────────────────────────────────┐
+ * │ RELAY 模式：两阶段分离设计（TCP 有状态设计）                          │
+ * │                                                                      │
+ * │   阶段1: ONLINE(my_name)                                             │
+ * │       ↓                                                              │
+ * │   ONLINE_ACK(server_features)  ← 仅建立"客户端-服务器"连接           │
+ * │                                                                      │
+ * │   阶段2: CONNECT(target_name)                                        │
+ * │       ↓                                                              │
+ * │   CONNECT_ACK(peer_status, session_id)  ← 建立"我-对方"会话          │
+ * │                                                                      │
+ * │   特点：分离设计，ONLINE 后可发起多个 CONNECT，支持并发会话           │
+ * └──────────────────────────────────────────────────────────────────────┘
  *
- * 实际收益：
- *   - Alice 在办公室发起连接，Bob 在地铁离线
- *   - 服务器缓存 Alice 的候选
- *   - Bob 到站连上网络后自动收到缓存候选
- *   - P2P 连接自动建立，无需 Alice 重新发起
+ * 协议消息列表：
+ *   - ONLINE:        客户端上线（建立客户端-服务器连接）
+ *   - ONLINE_ACK:    服务器确认上线，返回服务器能力标志
+ *   - ALIVE:         客户端心跳保活（维持 TCP 长连接）
+ *   - CONNECT:       请求建立与对端的会话（申请连接对方）
+ *   - CONNECT_ACK:   服务器确认会话，返回 session_id 和对端在线状态
+ *   - PEER_INFO:     双向候选传输（Client→Server 上传，Server→Client 下发）
+ *   - PEER_INFO_ACK: 服务器确认候选，返回转发/缓存状态
+ *   - FORWARD:       P2P 失败后的数据包中继（可选）
  *
- * 注：与其他信令模式的对比请参考 doc/ARCHITECTURE.md
- *
- * ============================================================================
- * Trickle ICE 候选交换机制
- * ============================================================================
- *
- * 支持增量候选交换（Trickle ICE），允许候选在收集过程中即时发送，
- * 而非等待所有候选收集完成。
- *
- *   1. 登录阶段（建立连接）：
- *      - 客户端发送 LOGIN(peer_name)
- *      - 服务器回复 LOGIN_ACK(result)
- *        · result=0: 成功登录
- *        · result≠0: 失败（名称冲突、服务器满等）
- *      - 进入 CONNECTED 状态
- *
- *   2. 发起连接（CONNECT）：
- *      - 客户端发送 CONNECT(target_name, payload)
- *        · payload 包含：p2p_signaling_payload_hdr_t + N × p2p_candidate_t
- *        · N 可以是 1 到 8 个候选（支持批量和单个发送）
- *      - 服务器返回 CONNECT_ACK：
- *        · status=0: 对端在线，已转发为 P2P_RLY_OFFER
- *        · status=1: 对端离线，已缓存（等待对端上线后推送）
- *        · status=2: 缓存已满（停止发送，等待对端上线或超时）
- *        · candidates_acked: 本次确认的候选数量
- *      - 客户端根据 candidates_acked 更新 next_candidate_index
- *      - status=2 时：停止发送新候选，等待收到 OFFER（对端上线）
- *      - status=1 且所有候选已发送完：等待收到 OFFER（对端上线）
- *      - 两种等待状态均设置超时（建议 60 秒），超时后放弃连接（对端上线）
- *
- *   3. 对端在线场景（直接转发）：
- *
- *      Alice                 Server                    Bob
- *        |                     |                          |
- *        |--- CONNECT(3 cands)->|                          |
- *        |                     |--- OFFER(3 cands) ------>|  (立即转发)
- *        |<-- CONNECT_ACK -----|  (status=0, acked=3)     |
- *        |                     |<-- ANSWER(N cands) ------|
- *        |<-- FORWARD(N cands)-|                          |
- *        |                     |                          |
- *        |--- ANSWER(2 cands) ----------------------->    |  (继续 Trickle ICE)
- *        |                     |--- FORWARD(2 cands) ---->|
- *        |<=============== P2P ICE 连通性检查 ==============>|
- *
- *   4. 对端离线场景（候选缓存）：
- *
- *      Alice (在线)         Server                    Bob (离线)
- *        |                     |                          |
- *        |--- LOGIN ---------->|                          |
- *        |<-- LOGIN_ACK -------|                          |
- *        |                     |                          |
- *        |--- CONNECT(3 cands)->|  (解析并逐个缓存候选)    |
- *        |<-- CONNECT_ACK -----|  (status=1, acked=3)     |
- *        |    [等待 5s]        |                          |
- *        |--- CONNECT(2 cands)->|  (继续缓存)              |
- *        |<-- CONNECT_ACK -----|  (status=1, acked=2)     |
- *        |                     |  (Alice 已发送 5 个候选)  |
- *        |    ... Bob 上线 ...                            |
- *        |                     |<-- LOGIN -----------------|
- *        |                     |--- LOGIN_ACK ----------->|
- *        |                     |--- OFFER(5 cands) ------>|  (推送 Alice 缓存的候选)
- *        |                     |<-- ANSWER(N cands) ------|  (Bob 的候选)
- *        |<-- FORWARD(N cands)-|                          |  (转发给 Alice)
- *        |--- ANSWER(more) -------------------------------->|  (Alice 继续发送剩余候选)
- *        |                     |--- FORWARD(more) -------->|
- *        |<=============== P2P ICE 连通性检查 ==============>|
- *
- *   5. 缓存已满场景（停止发送）：
- *
- *      Alice (在线)         Server（缓存满）          Bob (离线)
- *        |                     |                          |
- *        |--- CONNECT(3 cands)->|  (尝试缓存)              |
- *        |<-- CONNECT_ACK -----|  (status=2, acked=0)     |
- *        |    [停止发送]       |  (缓存已满，拒绝新候选)   |
- *        |    [等待 60s]       |                          |
- *        |                     |                          |
- *        |    ... Bob 上线 ...                            |
- *        |                     |<-- LOGIN -----------------|
- *        |                     |--- LOGIN_ACK ----------->|
- *        |                     |--- OFFER(旧缓存) -------->|  (推送之前缓存的候选)
- *        |                     |<-- ANSWER(N cands) ------|  (Bob 的候选)
- *        |<-- FORWARD(N cands)-|                          |  (转发给 Alice，证明 Bob 已上线)
- *        |--- ANSWER(3 cands) -------------------------------->|  (Alice 继续发送剩余候选)
- *        |                     |--- FORWARD(3 cands) ----->|
- *        |<=============== P2P ICE 连通性检查 ==============>|
- *
- *      注：收到 status=2 后，Alice 停止发送并启动 60 秒超时计时器
- *          - Bob 上线时，服务器推送 OFFER 给 Bob（Alice 的缓存候选）
- *          - Bob 回应 ANSWER，服务器转发 FORWARD 给 Alice
- *          - Alice 收到 FORWARD 证明 Bob 已上线，用 ANSWER 继续发送剩余候选
- *          - 超时后仍未收到 FORWARD，则放弃连接
- *
- *   6. 不支持缓存场景（服务器配置缓存=0）：
- *
- *      Alice (在线)         Server（无缓存）          Bob (离线)
- *        |                     |                          |
- *        |--- CONNECT(3 cands)->|  (检查对端状态)          |
- *        |<-- CONNECT_ACK -----|  (status=2, acked=0)     |
- *        |    [停止发送]       |  (不缓存候选，但记录连接意图) |
- *        |    [等待 60s]       |                          |
- *        |                     |                          |
- *        |    ... Bob 上线 ...                            |
- *        |                     |<-- LOGIN -----------------|
- *        |                     |--- LOGIN_ACK ----------->|
- *        |                     |--- OFFER(empty) -------->|  (推送空 OFFER，告知 Alice 想连接)
- *        |                     |<-- ANSWER(N cands) ------|  (Bob 发送自己的候选)
- *        |<-- FORWARD(N cands)-|                          |  (转发给 Alice，证明 Bob 已上线)
- *        |--- ANSWER(3 cands) -------------------------------->|  (Alice 继续发送候选)
- *        |                     |--- FORWARD(3 cands) ----->|
- *        |<=============== P2P ICE 连通性检查 ==============>|
- *
- *      注：不支持缓存时，服务器仍记录"连接意图"（不保存候选数据）
- *          - Alice 收到 status=2，停止发送候选，等待 FORWARD
- *          - Bob 上线时，服务器推送空 OFFER（candidates=0，sender=Alice）
- *          - Bob 收到空 OFFER 知道"Alice 想连接"，发送 ANSWER（包含 Bob 的候选）
- *          - Alice 收到 FORWARD（Bob 的候选），用 ANSWER 继续发送自己的候选
- *          - 超时（60 秒）未收到 FORWARD，则放弃连接
- *          - 服务器实现：pending_intent_t 轻量级队列（sender + target，64B）
- *
- *   7. Trickle ICE 流程控制：
- *      - 客户端维护 next_candidate_index（下一个待发送候选的索引）
- *      - p2p_update() 每 5 秒检查是否有新候选需要发送
- *      - 收到 CONNECT_ACK 后，根据 candidates_acked 更新索引：
- *        · next_candidate_index += candidates_acked
- *      - 收到 OFFER 时，表示对端上线，继续发送剩余候选
- *      - 无需 FIN 标志，收集到的候选即发即连（完全 Trickle 模式）
+ * 协议详细格式参见 p2pp.h（RELAY 模式信令协议）。
  *
  * ============================================================================
- * 状态机
+ * 状态机（两阶段设计）
  * ============================================================================
  *
- *   DISCONNECTED ──→ CONNECTING ──→ CONNECTED ──→ ERROR
- *         ↑                               │             │
- *         └───────────────────────────────┴─────────────┘
- *                 (连接断开或错误时重连)
+ *   阶段1: 客户端上线（建立客户端-服务器连接）
+ *   ┌────────────────────────────────────────────────────┐
+ *   │  INIT ──→ CONNECTING ──→ WAIT_ONLINE_ACK ──→ ONLINE │
+ *   └────────────────────────────────────────────────────┘
+ *                                    ↓
+ *   阶段2: 建立会话（申请连接对方，进行候选交换）
+ *   ┌────────────────────────────────────────────────────┐
+ *   │  ONLINE ──→ WAIT_CONNECT_ACK ──→ EXCHANGING ──→ READY │
+ *   └────────────────────────────────────────────────────┘
  *
- *   - DISCONNECTED: 未连接或已断开
- *   - CONNECTING:   正在建立 TCP 连接
- *   - CONNECTED:    已登录，可以发送/接收消息
- *   - ERROR:        发生错误（网络异常、协议错误等）
+ *   - INIT:              未启动
+ *   - CONNECTING:        TCP 连接建立中
+ *   - WAIT_ONLINE_ACK:   已发送 ONLINE，等待 ONLINE_ACK
+ *   - ONLINE:            已上线，可以发起多个 CONNECT（核心状态）
+ *   - WAIT_CONNECT_ACK:  已发送 CONNECT，等待 CONNECT_ACK（分配 session_id）
+ *   - EXCHANGING:        候选交换中（上传/接收 PEER_INFO）
+ *   - READY:             候选交换完成，可以开始 P2P 打洞
  *
- * ============================================================================
- * 消息格式详解
- * ============================================================================
- *
- * 所有消息格式：[p2p_relay_hdr_t: 9B][payload: N bytes]
- *
- * 包头结构（p2p_relay_hdr_t）：
- *   - magic:  0x50325030 ("P2P0")，用于帧同步
- *   - type:   消息类型（见下方枚举）
- *   - length: payload 长度（不包括包头）
- *
- * LOGIN:
- *   payload: [name(32)]
- *   - name: 客户端 peer ID（字符串，最大 32 字节）
- *
- * LOGIN_ACK:
- *   payload: []
- *   - 无 payload，仅通过 TCP 连接成功/失败表示结果
- *   - 成功：保持连接，进入 CONNECTED 状态
- *   - 失败：服务器关闭连接
- *
- * CONNECT:
- *   payload: [target_name(32)][signaling_payload(variable)]
- *   - target_name: 目标 peer ID（字符串，32 字节）
- *   - signaling_payload: ICE 候选数据
- *     · [p2p_signaling_payload_hdr_t: 76B][candidates: N × 32B]
- *     · hdr.sender: 发送方 ID（将被服务器覆盖为登录时的 name）
- *     · hdr.target: 目标 ID（必须与 target_name 一致）
- *     · hdr.candidate_count: 本次包含的候选数量（1-8）
- *
- * CONNECT_ACK:
- *   payload: [p2p_relay_connect_ack_t: 4B]
- *   - status: 
- *     · 0 = 成功转发（对端在线）
- *     · 1 = 已缓存（对端离线）
- *     · 2 = 缓存已满（无法继续缓存，等待对端上线）
- *   - candidates_acked: 服务器确认的候选数量（0-255）
- *     · status=0（在线）: 等于 hdr.candidate_count（全部转发）
- *     · status=1（离线）: 等于实际缓存数量（可能小于请求数量）
- *     · status=2（已满）: 为 0（拒绝所有新候选）
- *   - reserved[2]: 保留字段
- *
- * 注：status=2 不是错误状态，客户端应停止发送并等待 OFFER（对端上线通知）
- *
- * OFFER:
- *   payload: [sender_name(32)][signaling_payload(variable)]
- *   - sender_name: 发起方 peer ID
- *   - signaling_payload: ICE 候选数据（格式同 CONNECT）
- *   - 场景 1: 对端在线，服务器将 CONNECT 立即转发为 OFFER
- *   - 场景 2: 对端上线（LOGIN），服务器将缓存的候选打包为 OFFER 推送
- *
- * ANSWER:
- *   payload: [target_name(32)][signaling_payload(variable)]
- *   - target_name: 目标 peer ID（OFFER 的发送方）
- *   - signaling_payload: 应答候选数据
- *   - 无 ACK（ANSWER 仅需单向转发，不缓存）
- *
- * FORWARD:
- *   payload: [sender_name(32)][signaling_payload(variable)]
- *   - sender_name: 原始发送方 peer ID
- *   - signaling_payload: 转发的候选数据
- *   - 服务器将 ANSWER 转发为 FORWARD 给发起方
- *
- * LIST:
- *   payload: []
- *   - 查询当前在线用户列表
- *
- * LIST_RES:
- *   payload: [count(4)][names(count × 32)]
- *   - count: 在线用户数量
- *   - names: 用户名列表（每个 32 字节）
- *
- * HEARTBEAT:
- *   payload: []
- *   - 客户端定期发送（如每 30 秒）
- *   - 服务器收到后更新 last_active 时间
- *   - 无响应，单向通知
+ * 注意：ONLINE 状态是稳定状态，可以在此状态下发起多个 CONNECT，
+ *       从而支持与多个对端并发建立会话（每个会话有独立的 session_id）。
  *
  * ============================================================================
- * 服务器缓存机制
+ * TCP 粘包处理
  * ============================================================================
  *
- * 服务器为每个注册用户维护离线候选缓存：
+ * TCP 是流式协议，需要状态机解包：
  *
- * 缓存单位：
- *   - pending_candidate_t 结构（~60 字节）
- *   - 包含：sender_name(32B) + p2p_candidate_t(23B) + timestamp(8B)
+ *   1. RECV_HEADER:  读取包头（9 字节）
+ *   2. RECV_PAYLOAD: 根据包头的 payload_len 读取负载
+ *   3. 循环处理直到 EAGAIN
  *
- * 缓存容量：
- *   - 服务器自行配置（取决于内存和并发用户数）
- *   - 客户端无需预知具体容量（通过 candidates_acked 动态感知）
- *
- * 缓存逻辑：
- *   1. 收到 CONNECT 时，服务器检查目标是否在线
- *   2. 在线：直接转发为 OFFER，返回 status=0
- *   3. 离线：
- *      - 解析 signaling_payload_hdr（76 字节）
- *      - for (i = 0; i < candidate_count; i++):
- *        · unpack_candidate(&cand, payload + 76 + i*32)
- *        · 缓存到 pending_candidates[count++]
- *      - 返回 candidates_acked = 实际缓存数量
- *   4. 对端上线（LOGIN）时：
- *      - 按发送者分组缓存的候选
- *      - 每个发送者构建一个 OFFER：
- *        · pack_signaling_payload_hdr(sender, target, ...)
- *        · for 循环 pack_candidate() 序列化候选
- *        · 发送 OFFER 给新登录用户
- *      - 清空已推送的缓存
- *
- * 缓存限制：
- *   - 超过服务器容量时，返回 status=2（candidates_acked=0）
- *   - 客户端收到 status=2 后：
- *     · 停止发送新候选（避免浪费带宽）
- *     · 等待 OFFER（对端上线后服务器推送）
- *     · 或等待超时（如 60 秒后放弃）
- *   - 可选策略：FIFO（先进先出，丢弃最早候选以腾出空间）
+ * 接收缓冲区：
+ *   - hdr_buf[9]:     包头缓冲区
+ *   - payload:        动态分配的负载缓冲区
+ *   - offset:         当前读取偏移
+ *   - expected:       期待的数据长度
  *
  * ============================================================================
- * 客户端状态追踪
+ * Trickle ICE 支持
  * ============================================================================
  *
- * 客户端维护以下字段实现 Trickle ICE：
+ * 候选列表分批上传，支持：
+ *   - 初始候选（HOST）立即上传
+ *   - TURN 候选后续 trickle 上传
+ *   - count=0 发送 FIN 标识结束
  *
- * total_candidates_sent:
- *   - 累计发送的候选总数（包括成功和失败的）
- *   - 用于统计和调试
- *
- * total_candidates_acked:
- *   - 服务器确认的候选总数（累加每次 CONNECT_ACK.candidates_acked）
- *   - 用于计算丢失率：loss_rate = 1 - (acked / sent)
- *
- * next_candidate_index:
- *   - 下一个待发送候选的索引（0-based）
- *   - p2p_update() 检查：if (session->local_candidate_count > next_index)
- *   - 收到 CONNECT_ACK: next_index += candidates_acked
- *   - 收到 OFFER: 继续发送剩余候选（对端已上线）
- *
- * 重传策略：
- *   - CONNECT 基于 TCP，无需应用层重传
- *   - 但需定期检查（每 5 秒）是否有新候选
- *   - 连接断开时，next_candidate_index 重置为 0
+ * 候选列表统一存储在 p2p_session 中，本模块只负责打包和发送。
  */
-
 #ifndef P2P_SIGNAL_RELAY_H
 #define P2P_SIGNAL_RELAY_H
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
 
 #include "predefine.h"
-#include <p2p.h>
-#include <p2pp.h>           /* RELAY 模式协议定义 */
+#include <p2pp.h>
 
-/* ============================================================================
- * 配置参数
- * ============================================================================ */
-
-/* 等待对端上线的超时时间（毫秒）
- * 当对端离线且服务器缓存已满（status=2）时，客户端会等待对端上线
- * 如果超过此时间仍未收到 FORWARD 消息，则放弃连接 */
-#ifndef P2P_RELAY_PEER_WAIT_TIMEOUT_MS
-#define P2P_RELAY_PEER_WAIT_TIMEOUT_MS  60000  /* 60 秒 */
-#endif
-
-/* 心跳发送间隔（毫秒）
- * 客户端定期向服务器发送 P2P_RLY_HEARTBEAT，防止服务器因超时将其踢下线
- * 服务器超时阈值为 RELAY_CLIENT_TIMEOUT（60 秒），心跳间隔取其 1/3 */
-#ifndef P2P_RELAY_HEARTBEAT_INTERVAL_MS
-#define P2P_RELAY_HEARTBEAT_INTERVAL_MS  20000  /* 20 秒 */
-#endif
-
-/* LOGIN_ACK 等待超时（毫秒）
- * 登录阶段等待服务器 LOGIN_ACK 响应的超时时间 */
-#ifndef P2P_RELAY_LOGIN_ACK_TIMEOUT_MS
-#define P2P_RELAY_LOGIN_ACK_TIMEOUT_MS  3000   /* 3 秒 */
-#endif
-
-/* CONNECT_ACK 等待超时（毫秒）
- * 发送 CONNECT 消息后等待服务器 ACK 的超时时间 */
-#ifndef P2P_RELAY_CONNECT_ACK_TIMEOUT_MS
-#define P2P_RELAY_CONNECT_ACK_TIMEOUT_MS  3000  /* 3 秒 */
-#endif
-
-/* ============================================================================
- * 信令上下文
- * ============================================================================ */
-
+/* 前向声明 */
 struct p2p_session;
 
-/* 信令连接状态 */
-typedef enum {
-    SIGNAL_DISCONNECTED = 0,  /* 未连接 */
-    SIGNAL_CONNECTING,        /* 连接中 */
-    SIGNAL_CONNECTED,         /* 已连接并登录成功 */
-    SIGNAL_ERROR              /* 错误状态 */
-} p2p_signal_relay_state_t;
+/* ============================================================================
+ * RELAY 模式参数配置
+ * ============================================================================ */
 
-/* TCP 读取状态机（异步 I/O） */
-typedef enum {
-    RELAY_READ_IDLE = 0,      /* 空闲：等待新消息 */
-    RELAY_READ_HEADER,        /* 正在读取消息头（9 字节） */
-    RELAY_READ_SENDER,        /* 正在读取 sender_name（32 字节） */
-    RELAY_READ_PAYLOAD,       /* 正在读取 payload（变长） */
-    RELAY_READ_DISCARD        /* 丢弃未处理的消息 */
-} relay_read_state_t;
+#define P2P_RELAY_HEARTBEAT_INTERVAL_MS     20000   /* 心跳间隔（毫秒）*/
+#define P2P_RELAY_ONLINE_ACK_TIMEOUT_MS     5000    /* ONLINE_ACK 超时（毫秒）*/
+#define P2P_RELAY_CONNECT_ACK_TIMEOUT_MS    5000    /* CONNECT_ACK 超时（毫秒）*/
+#define P2P_RELAY_CONNECT_RETRY_MAX         10      /* CONNECT 最大重试次数 */
+#define P2P_RELAY_TRICKLE_BATCH_MS          1000    /* Trickle 攒批窗口（毫秒）*/
+#define P2P_RELAY_MAX_CANDS_PER_PACKET      10      /* 每包最大候选数 */
 
-/*
- * 信令上下文结构
- *
- * 保存与信令服务器的连接状态和相关信息。
- */
+/* ============================================================================
+ * RELAY 信令状态
+ * ============================================================================ */
+
+typedef enum {
+    SIGNAL_RELAY_INIT = 0,          /* 未启动 */
+    SIGNAL_RELAY_CONNECTING,        /* TCP 连接建立中 */
+    SIGNAL_RELAY_WAIT_ONLINE_ACK,   /* 等待 ONLINE_ACK */
+    SIGNAL_RELAY_ONLINE,            /* 已上线 */
+    SIGNAL_RELAY_WAIT_CONNECT_ACK,  /* 等待 CONNECT_ACK */
+    SIGNAL_RELAY_EXCHANGING,        /* 候选交换中 */
+    SIGNAL_RELAY_READY,             /* 交换完成，可以打洞 */
+    SIGNAL_RELAY_ERROR              /* 错误状态 */
+} relay_state_t;
+
+/* ============================================================================
+ * TCP 接收状态机
+ * ============================================================================ */
+
+typedef enum {
+    RECV_STATE_HEADER = 0,          /* 读取包头（9 字节）*/
+    RECV_STATE_PAYLOAD              /* 读取负载（变长）*/
+} relay_recv_state_t;
+
+/* ============================================================================
+ * 发送 chunk（内存块 + 队列 + 回收机制）
+ * ============================================================================ */
+
+/* 发送 chunk（固定大小的内存块）*/
+typedef struct p2p_send_chunk {
+    uint8_t data[P2P_MTU];              /* 数据缓冲区 (1200 字节) */
+    int len;                            /* 有效数据长度 */
+    int offset;                         /* 已发送偏移 */
+    struct p2p_send_chunk *next;        /* 链表指针（用于队列和回收池）*/
+} p2p_send_chunk_t;
+
+/* ============================================================================
+ * RELAY 信令上下文
+ * ============================================================================ */
+
 typedef struct {
-    sock_t fd;                                   /* TCP socket 描述符 */
-    char my_name[P2P_PEER_ID_MAX];               /* 本地 peer 名称 */
-    char incoming_peer_name[P2P_PEER_ID_MAX];    /* 收到请求时的对端名称 */
-    struct sockaddr_in server_addr;              /* 服务器地址 */
-    p2p_signal_relay_state_t state;              /* 连接状态 */
-    uint64_t last_connect_attempt;               /* 最后连接尝试时间（毫秒） */
+    /* 基础状态 */
+    relay_state_t       state;                          /* 信令状态 */
+    sock_t              sockfd;                         /* TCP socket */
+    struct sockaddr_in  server_addr;                    /* 服务器地址 */
+    uint64_t            last_send_time;                 /* 上次发送时间 */
+    uint64_t            last_recv_time;                 /* 上次接收时间 */
+    uint64_t            heartbeat_time;                 /* 上次心跳时间 */
+    uint64_t            connect_time;                   /* 上次 CONNECT 发送时间 */
+    int                 connect_attempts;               /* CONNECT 尝试次数 */
+
+    /* 身份标识 */
+    char                local_peer_id[P2P_PEER_ID_MAX]; /* 本端名称 */
+    char                remote_peer_id[P2P_PEER_ID_MAX];/* 目标名称 */
+
+    /* 会话管理 */
+    uint64_t            session_id;                     /* 会话 ID（0=未分配）*/
+    bool                peer_online;                    /* 对端是否在线 */
+
+    /* 服务器能力（ONLINE_ACK 返回）*/
+    bool                feature_forward;                /* 支持数据包中继 */
+    bool                feature_msg;                    /* 支持 RPC 机制 */
+
+    /* Trickle ICE 控制 */
+    uint16_t            next_candidate_index;           /* 下一个要发送的候选索引 */
+    bool                local_candidates_fin;           /* 本地候选发送完成 */
+    bool                remote_candidates_fin;          /* 对端候选接收完成 */
+    uint64_t            trickle_last_time;              /* 上次 trickle 发送时间 */
+
+    /* TCP 接收状态机 */
+    relay_recv_state_t  recv_state;                     /* 接收状态 */
+    uint8_t             hdr_buf[9];                     /* 包头缓冲区 */
+    p2p_relay_hdr_t     hdr;                            /* 解析后的包头 */
+    uint8_t            *payload;                        /* 负载缓冲区（动态分配）*/
+    int                 payload_capacity;               /* 负载容量 */
+    int                 offset;                         /* 当前读取偏移 */
+    int                 expected;                       /* 期待的数据长度 */
+
+    /* 发送 chunk 回收池（动态内存 + 链表）*/
+    p2p_send_chunk_t   *chunk_free_list;                /* chunk 回收链表头 */
+    int                 chunk_free_count;               /* chunk 回收数量 */
     
-    /* ===== Trickle ICE 候选发送追踪 ===== */
-    int total_candidates_sent;                   /* 累计发送的候选总数（统计用） */
-    int total_candidates_acked;                  /* 服务器已确认缓存的总数（累加 CONNECT_ACK.candidates_acked） */
-    int next_candidate_index;                    /* 下次应从第几个候选开始发送（断点续传索引） */
-    
-    /* ===== 等待对端上线状态追踪（场景4/5/6） ===== */
-    bool waiting_for_peer;                       /* 是否正在等待对端上线（status=1/2 或所有候选已发送） */
-    char waiting_target[P2P_PEER_ID_MAX];        /* 等待的目标 peer 名称 */
-    uint64_t waiting_start_time;                 /* 开始等待的时间戳（毫秒） */
-    
-    /* ===== 异步 TCP 读取状态机 ===== */
-    relay_read_state_t read_state;               /* 当前读取状态 */
-    p2p_relay_hdr_t read_hdr;                    /* 正在读取的消息头 */
-    char read_sender[P2P_PEER_ID_MAX];           /* 正在读取的发送者名称 */
-    uint8_t *read_payload;                       /* 正在读取的 payload 缓冲区 */
-    int read_offset;                             /* 当前已读取的字节数 */
-    int read_expected;                           /* 当前阶段期望读取的总字节数 */
-    uint64_t last_heartbeat_ms;                  /* 上次发送心跳的时间（毫秒，0=尚未发送） */
-    
-    /* 注：
-     * - next_candidate_index 初始为 0
-     * - 每次收到 CONNECT_ACK 后：next_candidate_index += candidates_acked
-     * - p2p_update() 检查是否有新候选：if (local_candidate_count > next_candidate_index)
-     * - 收到 FORWARD 表示对端上线，继续发送剩余候选
-     * - waiting_for_peer=true 时，超时 60 秒后放弃连接
-     *
-     * 异步读取流程：
-     * - IDLE → HEADER: 开始读取 9 字节消息头
-     * - HEADER → SENDER/PAYLOAD/IDLE: 根据消息类型决定下一步
-     * - 每次 tick 只调用一次 recv()，返回值可能 < expected
-     * - 读取完成后才执行业务逻辑，避免循环阻塞
-     */
+    /* 发送队列 */
+    p2p_send_chunk_t   *send_queue_head;                /* 发送队列头 */
+    p2p_send_chunk_t   *send_queue_tail;                /* 发送队列尾 */
+    int                 send_queue_count;               /* 发送队列长度 */
+    p2p_send_chunk_t   *sending;                        /* 当前正在发送的 chunk */
+
 } p2p_signal_relay_ctx_t;
 
 /* ============================================================================
- * API 函数
+ * RELAY 信令 API
  * ============================================================================ */
 
 /*
- * 初始化信令上下文
- *
- * 设置初始状态为 DISCONNECTED，清空所有字段。
- *
- * @param ctx  信令上下文指针
+ * 初始化 RELAY 信令上下文
  */
 void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx);
 
 /*
-
- * 信令服务周期维护（拉取阶段）— 接收并处理来自服务器的消息
+ * 客户端上线（阶段1：建立与服务器的 TCP 连接）
  *
- * 处理 TCP 接收、心跳、超时检测：
- * - 循环读取 TCP 缓冲区中的所有消息（OFFER/FORWARD/CONNECT_ACK等）
- * - 发送心跳包保持连接
- * - 检测对端上线等待超时
- * - 连接建立后自动关闭信令连接
+ * 创建 TCP socket，连接到 RELAY 服务器，并发送 ONLINE 消息。
+ * 成功后进入 ONLINE 状态，可以发起多个 CONNECT 会话。
+ *
+ * @param s             P2P 会话
+ * @param local_peer_id 本端名称
+ * @param server        服务器地址
+ * @return              E_NONE=成功，其他=错误码
+ */
+ret_t p2p_signal_relay_online(struct p2p_session *s, const char *local_peer_id,
+                              const struct sockaddr_in *server);
+
+/*
+ * 建立与对端的会话（阶段2：发送 CONNECT 请求）
+ *
+ * 向服务器请求建立与目标对端的会话，服务器分配 session_id。
+ * 前提：必须已经处于 ONLINE 状态。
+ *
+ * @param s             P2P 会话
+ * @param remote_peer_id 目标对端名称
+ * @return              E_NONE=成功，其他=错误码
+ */
+ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id);
+
+/*
+ * 信令接收维护（拉取阶段）
+ *
+ * 处理 TCP 接收和协议解析：
+ *   - 读取 TCP 数据
+ *   - 状态机解包（RECV_HEADER → RECV_PAYLOAD）
+ *   - 分发处理各类协议消息
  *
  * 在 p2p_update() 的阶段 2（信令拉取）中调用。
  *
- * @param ctx  信令上下文
- * @param s    会话对象（用于处理收到的候选）
+ * @param s   P2P 会话
  */
-void p2p_signal_relay_tick_recv(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
+void p2p_signal_relay_tick_recv(struct p2p_session *s);
 
 /*
- * 信令输出（推送阶段）— 向对端发送本地候选地址
+ * 信令发送维护（推送阶段）
  *
- * 处理 Trickle ICE 增量发送：
- * - 从 next_candidate_index 开始断点续传剩余候选
- * - 每批次最多发送 8 个候选（协议限制）
- * - 处理对端离线、缓存满等状态
- * - 自动重发未确认或有新候选时
+ * 处理信令发送和重传：
+ *   - 心跳保活（ALIVE）
+ *   - CONNECT 重传
+ *   - 上传候选（PEER_INFO）
  *
  * 在 p2p_update() 的阶段 7（信令推送）中调用。
  *
- * @param ctx  信令上下文
- * @param s    会话对象
+ * @param s   P2P 会话
  */
-void p2p_signal_relay_tick_send(p2p_signal_relay_ctx_t *ctx, struct p2p_session *s);
+void p2p_signal_relay_tick_send(struct p2p_session *s);
 
 /*
- * 登录到信令服务器
+ * Trickle ICE：TURN Allocate 完成后，发送中继候选
  *
- * 建立 TCP 连接并发送 LOGIN 消息。连接是非阻塞的，
- * 需要调用 p2p_signal_relay_tick_recv() 完成握手。
- *
- * @param ctx       信令上下文
- * @param server_ip 服务器 IP 地址（字符串）
- * @param port      服务器端口
- * @param my_name   本地 peer 名称（最大 32 字节）
- * @return          0 成功发起连接，-1 失败（参数错误或 socket 创建失败）
+ * @param s   P2P 会话
  */
-ret_t p2p_signal_relay_login(p2p_signal_relay_ctx_t *ctx, const char *server_ip, int port, const char *my_name);
+void p2p_signal_relay_trickle_turn(struct p2p_session *s);
 
 /*
- * 发送 CONNECT 消息（发起连接）
+ * 断开连接，关闭 TCP socket
  *
- * 向目标 peer 发送候选信息。支持 Trickle ICE，可多次调用发送不同批次的候选。
- *
- * @param ctx         信令上下文
- * @param target_name 目标 peer 名称（字符串，最大 32 字节）
- * @param data        ICE 候选数据（已序列化的 signaling_payload）
- *                    格式：[p2p_signaling_payload_hdr_t: 76B][candidates: N×32B]
- * @param len         数据长度（76 + N*32 字节）
- * @return            发送结果状态码
- *                    - > 0: 对端在线，返回已转发的候选数量
- *                    - = 0: 对端离线，候选已缓存（等待对端上线后由服务器推送）
- *                    - = -1: 连接断开（网络错误）
- *                    - = -2: 缓存已满（停止发送，等待对端上线或超时）
+ * @param s   P2P 会话
+ * @return    E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_relay_send_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len);
+ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
 
-/*
- * 发送 ANSWER 消息（应答连接）
- *
- * 收到 OFFER 后，回复候选信息。同样支持 Trickle ICE，可分批发送。
- *
- * @param ctx         信令上下文
- * @param target_name 目标 peer 名称（OFFER 的发送方）
- * @param data        ICE 候选数据（格式同 send_connect）
- * @param len         数据长度
- * @return            0 成功，-1 失败（连接断开）
- */
-int  p2p_signal_relay_reply_connect(p2p_signal_relay_ctx_t *ctx, const char *target_name, const void *data, int len);
-
-/*
- * 关闭信令连接
- *
- * 关闭 TCP socket，重置状态为 DISCONNECTED。
- *
- * @param ctx  信令上下文
- */
-void p2p_signal_relay_close(p2p_signal_relay_ctx_t *ctx);
-
+#pragma clang diagnostic pop
 #endif /* P2P_SIGNAL_RELAY_H */
