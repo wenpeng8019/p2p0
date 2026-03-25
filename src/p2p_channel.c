@@ -54,7 +54,10 @@ ret_t p2p_turn_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
  */
 int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
                        uint8_t type, uint8_t flags, uint16_t seq,
-                       const void *payload, int payload_len) {
+                       const void *payload, int payload_len, uint64_t now_ms) {
+
+    /* 统计：数据包和非 RTT 追踪的控制包流量 */
+    path_manager_on_packet_send(s, s->active_path, seq, now_ms, payload_len, false);
 
     /* 加密路径: 有 payload 时加密，控制包（CONN/CONN_ACK）无 payload 不加密 */
     if (payload && s->dtls && s->dtls->is_ready(s)) {

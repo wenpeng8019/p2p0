@@ -600,7 +600,7 @@ void p2p_connected(struct p2p_session *s, uint64_t now_ms);
 
 int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
                     uint8_t type, uint8_t flags, uint16_t seq,
-                    const void *payload, int payload_len);
+                    const void *payload, int payload_len, uint64_t now_ms);
 
 /* 发送原始 DTLS 记录（加密模块的握手/加密输出使用） */
 void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,

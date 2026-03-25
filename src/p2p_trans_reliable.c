@@ -207,7 +207,8 @@ void reliable_tick_ack(struct p2p_session *s) {
                   ack_seq, sack, r->recv_base,
                   inet_ntoa(s->active_addr.sin_addr),
                   ntohs(s->active_addr.sin_port));
-    p2p_send_packet(s, &s->active_addr, P2P_PKT_ACK, 0, 0, ack_payload, 6);
+    uint64_t now = P_tick_ms();
+    p2p_send_packet(s, &s->active_addr, P2P_PKT_ACK, 0, 0, ack_payload, 6, now);
 }
 
 /*
@@ -231,12 +232,12 @@ void reliable_tick(struct p2p_session *s) {
 
         if (e->send_time == 0) {
             /* 首次发送 */
-            p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
+            p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len, now);
             e->send_time = now;
             e->retx_count = 0;
         } else if ((int)tick_diff(now, e->send_time) >= r->rto) {
             /* 超时重传 + 指数退避 */
-            p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len);
+            p2p_send_packet(s, &s->active_addr, P2P_PKT_DATA, 0, e->seq, e->data, e->len, now);
             e->send_time = now;
             e->retx_count++;
             r->rto = r->rto * 2;

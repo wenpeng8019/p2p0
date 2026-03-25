@@ -1163,6 +1163,8 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
                 p->state_timestamp_ms = now_ms;
 
                 // 故障转移：当前活跃路径失效时，选择新路径
+                // ! 这里的策略是，如果当前路径失效，且没有其他路径可用，则保持当前路径不变。
+                //   也就是当前路径依然存在，但状态却是 FAILED
                 if (s->active_path == path_idx) {
                     int new_path = path_manager_select_best_path(s);
                     if (new_path >= -1 && new_path != path_idx) {
