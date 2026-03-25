@@ -948,7 +948,10 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
     ctx->last_recv_time = now;
     
     // 通知路径管理器：ALIVE_ACK 确认（seq=0），完成 RoundTrip 测量
-    path_manager_on_packet_recv(s, PATH_IDX_SIGNALING, now, 0, true, 0);
+    // 仅当 SIGNALING 作为 relay 路径被启用时才统计 RTT
+    if (s->signaling.active) {
+        path_manager_on_packet_recv(s, PATH_IDX_SIGNALING, now, 0, true, 0);
+    }
 }
 
 /*
@@ -1810,7 +1813,10 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
                                (int)sizeof(payload));
                         
                         // 通知路径管理器：ALIVE 是唯一需要 per-packet RTT 的信令包，rt_track=true
-                        path_manager_on_packet_send(s, PATH_IDX_SIGNALING, 0, now, 0, true);
+                        // 仅当 SIGNALING 作为 relay 路径被启用时才统计 RTT
+                        if (s->signaling.active) {
+                            path_manager_on_packet_send(s, PATH_IDX_SIGNALING, 0, now, 0, true);
+                        }
                     }
                 }
                 else print("W:", LA_F("%s skipped: session_id=0\n", LA_F65, 65), PROTO); 
