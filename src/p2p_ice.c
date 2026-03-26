@@ -393,43 +393,17 @@ int p2p_ice_send_local_candidate(p2p_session_t *s, p2p_local_candidate_entry_t *
      * 检查 TCP 连接状态
      * 如果未连接，返回失败。批量重发由 p2p_update() 的定期逻辑处理。
      */
-    if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
-        print("W:", LA_F("[Trickle] TCP not connected, skipping single candidate send", LA_F387, 387));
+    if (s->sig_relay_ctx.state < SIGNAL_RELAY_EXCHANGING) {
+        print("W:", LA_F("[Trickle] RELAY not ready, skipping single candidate send", LA_F387, 387));
         return -1;
     }
-
-    /* 构建负载：Trickle ICE 模式（单个候选） */
-    uint8_t buf[sizeof(p2p_signaling_payload_hdr_t) + sizeof(p2p_candidate_t)];
-    int n = pack_signaling_payload_hdr(
-        s->local_peer_id,
-        s->remote_peer_id,
-        0,  /* timestamp */
-        0,  /* delay_trigger */
-        1,  /* candidate_count */
-        buf
-    );
-    n += pack_candidate(c, buf + n);
-    
-    /* 序列化完成 */
 
     /*
-     * 通过 TCP 发送到信令服务器（支持离线缓存，详见 p2p_ice.h）
-     *
-     * 返回值：
-     *   >0: 对端在线，候选已转发
-     *    0: 对端离线，候选已缓存在服务器
-     *   <0: 发送失败
+     * 新的 RELAY 协议不支持单个候选发送，由 tick_send() 批量处理
+     * 这里只需要确保候选已添加到 local_cands[] 中，然后由 tick_send 自动上传
      */
-    int ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, s->remote_peer_id, buf, n);
-    if (ret < 0) {
-        print("W:", LA_F("[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()", LA_F388, 388), ret);
-        return -1;
-    }
-
-    /* 发送成功（无论对端在线与否）*/
-    print("I:", LA_F("[Trickle] Sent 1 candidate to %s (online=%s)", LA_F386, 386), s->remote_peer_id,
-           ret > 0 ? LA_W("yes", LA_W22, 22) : LA_W("no (cached)", LA_W5, 5));
-    return ret > 0 ? ret : 0;
+    print("V:", LA_F("[Trickle] Candidate queued, will be uploaded by tick_send", LA_F386, 386));
+    return 0;
 }
 
 /* ============================================================================
@@ -743,26 +717,12 @@ void p2p_ice_on_check_success(p2p_session_t *s, const struct sockaddr_in *from) 
     }
 
     /* 被动方：发送 answer 给主动方 */
-    if (s->sig_relay_ctx.incoming_peer_name[0] != '\0') {
-        int cand_count = s->local_cand_cnt;
-        
-        uint8_t answer_buf[2048];
-        int answer_len = pack_signaling_payload_hdr(
-            s->sig_relay_ctx.my_name,
-            "",  /* target */
-            0,   /* timestamp */
-            0,   /* delay_trigger */
-            cand_count,
-            answer_buf
-        );
-        for (int i = 0; i < cand_count; i++) {
-            answer_len += pack_candidate(&s->local_cands[i], answer_buf + answer_len);
-        }
-        if (answer_len > 0) {
-            p2p_signal_relay_reply_connect(&s->sig_relay_ctx, s->sig_relay_ctx.incoming_peer_name, answer_buf, answer_len);
-            print("I:", LA_F("Sent answer to '%s'", LA_F329, 329), s->sig_relay_ctx.incoming_peer_name);
-        }
-    }
+    /*
+     * RELAY 新协议：不再有应答机制，候选交换是双向的
+     * 这里不需要发送 REPLY，只需要等待对端通过 PEER_INFO 发送候选
+     * 如果有未发送的本地候选，由 tick_send 自动上传
+     */
+    print("I:", LA_F("RELAY mode: bidirectional candidate exchange, no explicit reply needed", LA_F329, 329));
 }
 
 /* ============================================================================

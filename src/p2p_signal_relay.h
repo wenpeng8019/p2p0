@@ -24,7 +24,7 @@
  * ┌──────────────────────────────────────────────────────────────────────┐
  * │ RELAY 模式：两阶段分离设计（TCP 有状态设计）                          │
  * │                                                                      │
- * │   阶段1: ONLINE(my_name)                                             │
+ * │   阶段1: ONLINE(my_name, instance_id)                                │
  * │       ↓                                                              │
  * │   ONLINE_ACK(server_features)  ← 仅建立"客户端-服务器"连接           │
  * │                                                                      │
@@ -32,7 +32,8 @@
  * │       ↓                                                              │
  * │   CONNECT_ACK(peer_status, session_id)  ← 建立"我-对方"会话          │
  * │                                                                      │
- * │   特点：分离设计，ONLINE 后可发起多个 CONNECT，支持并发会话           │
+ * │   特点1：分离设计，ONLINE 后可发起多个 CONNECT，支持并发会话         │
+ * │   特点2：instance_id 机制允许 TCP 重连但保持数据上下文（会话可恢复） │
  * └──────────────────────────────────────────────────────────────────────┘
  *
  * 协议消息列表：
@@ -41,11 +42,32 @@
  *   - ALIVE:         客户端心跳保活（维持 TCP 长连接）
  *   - CONNECT:       请求建立与对端的会话（申请连接对方）
  *   - CONNECT_ACK:   服务器确认会话，返回 session_id 和对端在线状态
+ *   - DISCONNECT:    主动断开与对端会话（按 session_id）
  *   - PEER_INFO:     双向候选传输（Client→Server 上传，Server→Client 下发）
  *   - PEER_INFO_ACK: 服务器确认候选，返回转发/缓存状态
- *   - FORWARD:       P2P 失败后的数据包中继（可选）
+ *   - DATA:          P2P 失败后的数据包中继（可选）
+ *   - ACK:           P2P 失败后的确认包中继（可选）
+ *   - CRYPTO:        P2P 失败后的加密包中继（可选）
  *
  * 协议详细格式参见 p2pp.h（RELAY 模式信令协议）。
+ *
+ * ============================================================================
+ * 实例 ID 机制 (instance_id)
+ * ============================================================================
+ *
+ * 每次调用 online() 时，客户端生成新的 32 位随机数 instance_id（参考 RTP SSRC）。
+ * instance_id 与 name 一起在 ONLINE 消息中发送给服务器，用于标识客户端连接实例。
+ *
+ * 服务器处理逻辑：
+ *   - 相同的 (name, instance_id) → 重传，幂等处理
+ *   - 相同 name 但不同 instance_id → 客户端重连，服务器可以选择：
+ *     · 保持数据上下文（允许会话恢复，不立即清理 session_id）
+ *     · 重置数据上下文（清除旧会话，通知对端下线）
+ *
+ * 这种机制允许：
+ *   1. TCP 连接断开后，客户端可以重新 online() 并恢复之前的会话状态
+ *   2. 服务器可以根据 instance_id 区分"重传"和"重连"，避免误判
+ *   3. 支持更灵活的断线重连策略，提高网络不稳定时的可用性
  *
  * ============================================================================
  * 状态机（两阶段设计）
@@ -53,7 +75,7 @@
  *
  *   阶段1: 客户端上线（建立客户端-服务器连接）
  *   ┌────────────────────────────────────────────────────┐
- *   │  INIT ──→ CONNECTING ──→ WAIT_ONLINE_ACK ──→ ONLINE │
+ *   │  INIT ──→ ONLINE_ING ──→ WAIT_ONLINE_ACK ──→ ONLINE │
  *   └────────────────────────────────────────────────────┘
  *                                    ↓
  *   阶段2: 建立会话（申请连接对方，进行候选交换）
@@ -62,7 +84,7 @@
  *   └────────────────────────────────────────────────────┘
  *
  *   - INIT:              未启动
- *   - CONNECTING:        TCP 连接建立中
+ *   - ONLINE_ING:        TCP 连接建立中
  *   - WAIT_ONLINE_ACK:   已发送 ONLINE，等待 ONLINE_ACK
  *   - ONLINE:            已上线，可以发起多个 CONNECT（核心状态）
  *   - WAIT_CONNECT_ACK:  已发送 CONNECT，等待 CONNECT_ACK（分配 session_id）
@@ -78,12 +100,12 @@
  *
  * TCP 是流式协议，需要状态机解包：
  *
- *   1. RECV_HEADER:  读取包头（9 字节）
+ *   1. RECV_HEADER:  读取包头（sizeof(p2p_relay_hdr_t) 字节）
  *   2. RECV_PAYLOAD: 根据包头的 payload_len 读取负载
  *   3. 循环处理直到 EAGAIN
  *
  * 接收缓冲区：
- *   - hdr_buf[9]:     包头缓冲区
+ *   - hdr_buf[sizeof(p2p_relay_hdr_t)]: 包头缓冲区
  *   - payload:        动态分配的负载缓冲区
  *   - offset:         当前读取偏移
  *   - expected:       期待的数据长度
@@ -115,9 +137,7 @@ struct p2p_session;
  * ============================================================================ */
 
 #define P2P_RELAY_HEARTBEAT_INTERVAL_MS     20000   /* 心跳间隔（毫秒）*/
-#define P2P_RELAY_ONLINE_ACK_TIMEOUT_MS     5000    /* ONLINE_ACK 超时（毫秒）*/
-#define P2P_RELAY_CONNECT_ACK_TIMEOUT_MS    5000    /* CONNECT_ACK 超时（毫秒）*/
-#define P2P_RELAY_CONNECT_RETRY_MAX         10      /* CONNECT 最大重试次数 */
+#define P2P_RELAY_ACK_TIMEOUT_MS            5000    /* ACK 响应超时（毫秒）*/
 #define P2P_RELAY_TRICKLE_BATCH_MS          1000    /* Trickle 攒批窗口（毫秒）*/
 #define P2P_RELAY_MAX_CANDS_PER_PACKET      10      /* 每包最大候选数 */
 
@@ -127,7 +147,7 @@ struct p2p_session;
 
 typedef enum {
     SIGNAL_RELAY_INIT = 0,          /* 未启动 */
-    SIGNAL_RELAY_CONNECTING,        /* TCP 连接建立中 */
+    SIGNAL_RELAY_ONLINE_ING,        /* TCP 连接建立中 */
     SIGNAL_RELAY_WAIT_ONLINE_ACK,   /* 等待 ONLINE_ACK */
     SIGNAL_RELAY_ONLINE,            /* 已上线 */
     SIGNAL_RELAY_WAIT_CONNECT_ACK,  /* 等待 CONNECT_ACK */
@@ -141,7 +161,7 @@ typedef enum {
  * ============================================================================ */
 
 typedef enum {
-    RECV_STATE_HEADER = 0,          /* 读取包头（9 字节）*/
+    RECV_STATE_HEADER = 0,          /* 读取包头（sizeof(p2p_relay_hdr_t) 字节）*/
     RECV_STATE_PAYLOAD              /* 读取负载（变长）*/
 } relay_recv_state_t;
 
@@ -153,7 +173,6 @@ typedef enum {
 typedef struct p2p_send_chunk {
     uint8_t data[P2P_MTU];              /* 数据缓冲区 (1200 字节) */
     int len;                            /* 有效数据长度 */
-    int offset;                         /* 已发送偏移 */
     struct p2p_send_chunk *next;        /* 链表指针（用于队列和回收池）*/
 } p2p_send_chunk_t;
 
@@ -170,18 +189,18 @@ typedef struct {
     uint64_t            last_recv_time;                 /* 上次接收时间 */
     uint64_t            heartbeat_time;                 /* 上次心跳时间 */
     uint64_t            connect_time;                   /* 上次 CONNECT 发送时间 */
-    int                 connect_attempts;               /* CONNECT 尝试次数 */
 
     /* 身份标识 */
     char                local_peer_id[P2P_PEER_ID_MAX]; /* 本端名称 */
     char                remote_peer_id[P2P_PEER_ID_MAX];/* 目标名称 */
+    uint32_t            instance_id;                    /* 本次 online() 生成的实例 ID（参考 RTP SSRC）*/
 
     /* 会话管理 */
     uint64_t            session_id;                     /* 会话 ID（0=未分配）*/
     bool                peer_online;                    /* 对端是否在线 */
 
     /* 服务器能力（ONLINE_ACK 返回）*/
-    bool                feature_forward;                /* 支持数据包中继 */
+    bool                feature_relay;                  /* 支持数据包中继 */
     bool                feature_msg;                    /* 支持 RPC 机制 */
 
     /* Trickle ICE 控制 */
@@ -192,22 +211,19 @@ typedef struct {
 
     /* TCP 接收状态机 */
     relay_recv_state_t  recv_state;                     /* 接收状态 */
-    uint8_t             hdr_buf[9];                     /* 包头缓冲区 */
+    uint8_t             hdr_buf[sizeof(p2p_relay_hdr_t)]; /* 包头缓冲区 */
     p2p_relay_hdr_t     hdr;                            /* 解析后的包头 */
-    uint8_t            *payload;                        /* 负载缓冲区（动态分配）*/
-    int                 payload_capacity;               /* 负载容量 */
-    int                 offset;                         /* 当前读取偏移 */
-    int                 expected;                       /* 期待的数据长度 */
+    uint8_t             payload[P2P_MAX_PAYLOAD];       /* 负载缓冲区（固定 1196 字节）*/
+    uint16_t            offset;                         /* 当前读取偏移 */
+    
+    /* 发送队列 */
+    p2p_send_chunk_t   *send_queue_head;                /* 发送队列头（也是正在发送的chunk）*/
+    p2p_send_chunk_t   *send_queue_tail;                /* 发送队列尾 */
+    int                 send_offset;                    /* 当前 chunk 的已发送偏移 */
 
     /* 发送 chunk 回收池（动态内存 + 链表）*/
     p2p_send_chunk_t   *chunk_free_list;                /* chunk 回收链表头 */
     int                 chunk_free_count;               /* chunk 回收数量 */
-    
-    /* 发送队列 */
-    p2p_send_chunk_t   *send_queue_head;                /* 发送队列头 */
-    p2p_send_chunk_t   *send_queue_tail;                /* 发送队列尾 */
-    int                 send_queue_count;               /* 发送队列长度 */
-    p2p_send_chunk_t   *sending;                        /* 当前正在发送的 chunk */
 
 } p2p_signal_relay_ctx_t;
 
@@ -235,6 +251,18 @@ ret_t p2p_signal_relay_online(struct p2p_session *s, const char *local_peer_id,
                               const struct sockaddr_in *server);
 
 /*
+ * 客户端下线（阶段1：断开与服务器的 TCP 连接）
+ *
+ * 关闭 TCP socket，清理所有资源，回到 INIT 状态。
+ * 下线后需要重新调用 online() 才能使用信令服务。
+ *
+ * @param s   P2P 会话
+ * @return    E_NONE=成功，其他=错误码
+ */
+ret_t p2p_signal_relay_offline(struct p2p_session *s);
+
+
+/*
  * 建立与对端的会话（阶段2：发送 CONNECT 请求）
  *
  * 向服务器请求建立与目标对端的会话，服务器分配 session_id。
@@ -245,6 +273,27 @@ ret_t p2p_signal_relay_online(struct p2p_session *s, const char *local_peer_id,
  * @return              E_NONE=成功，其他=错误码
  */
 ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id);
+
+/*
+ * 断开当前会话（阶段2：发送 DISCONNECT 消息）
+ *
+ * 向服务器发送 DISCONNECT 消息，通知结束与对端的会话。
+ * 清理会话状态后回到 ONLINE 状态，可以再次发起 CONNECT。
+ * 前提：必须处于 EXCHANGING 或 READY 状态。
+ *
+ * @param s   P2P 会话
+ * @return    E_NONE=成功，其他=错误码
+ */
+ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
+
+/*
+ * Trickle ICE：TURN Allocate 完成后，发送中继候选
+ *
+ * @param s   P2P 会话
+ */
+void p2p_signal_relay_trickle_turn(struct p2p_session *s);
+
+//----------------------------------------------------------------------------
 
 /*
  * 信令接收维护（拉取阶段）
@@ -274,20 +323,6 @@ void p2p_signal_relay_tick_recv(struct p2p_session *s);
  */
 void p2p_signal_relay_tick_send(struct p2p_session *s);
 
-/*
- * Trickle ICE：TURN Allocate 完成后，发送中继候选
- *
- * @param s   P2P 会话
- */
-void p2p_signal_relay_trickle_turn(struct p2p_session *s);
-
-/*
- * 断开连接，关闭 TCP socket
- *
- * @param s   P2P 会话
- * @return    E_NONE=成功，其他=错误码
- */
-ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
-
+///////////////////////////////////////////////////////////////////////////////
 #pragma clang diagnostic pop
 #endif /* P2P_SIGNAL_RELAY_H */

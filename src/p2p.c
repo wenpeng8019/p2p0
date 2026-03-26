@@ -172,8 +172,7 @@ static void disconnect(p2p_session_t *s) {
     } 
     // RELAY 信令模式：
     else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
-
-        // todo 目前无 peer-level disconnect 协议，仅依赖 NAT FIN 
+        // todo 可接入 P2P_RLY_DISCONNECT 做 peer-level 主动断开通知
     }
 }
 
@@ -452,10 +451,10 @@ p2p_destroy(p2p_handle_t hdl) {
 
     // RELAY 信令模式：关闭 TCP 长连接（断开和服务器的连接, logout）
     if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY
-        && s->sig_relay_ctx.state != SIGNAL_DISCONNECTED) {
+        && s->sig_relay_ctx.state != SIGNAL_RELAY_INIT) {
 
         print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
-        p2p_signal_relay_close(&s->sig_relay_ctx);
+        p2p_signal_relay_offline(s);
     }
 
     free(s->local_cands);
@@ -569,17 +568,30 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             assert(s->cfg.server_host);
 
             // 首次连接：自动登录信令服务器（只执行一次）
-            if (s->sig_relay_ctx.state != SIGNAL_CONNECTED) {
+            if (s->sig_relay_ctx.state == SIGNAL_RELAY_INIT) {
 
                 print("I:", LA_F("Connecting to RELAY signaling server at %s:%d", LA_F220, 220),
                              s->cfg.server_host, s->cfg.server_port);
 
-                if ((ret = p2p_signal_relay_login(&s->sig_relay_ctx, s->cfg.server_host, s->cfg.server_port, s->local_peer_id)) != E_NONE) {
+                struct sockaddr_in server_addr;
+                memset(&server_addr, 0, sizeof(server_addr));
+                server_addr.sin_family = AF_INET;
+                server_addr.sin_port = htons(s->cfg.server_port);
+                inet_pton(AF_INET, s->cfg.server_host, &server_addr.sin_addr);
+
+                if ((ret = p2p_signal_relay_online(s, s->local_peer_id, &server_addr)) != E_NONE) {
                     print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F218, 218), ret);
                     s->state = P2P_STATE_ERROR;
                     UNLOCK(s);
                     return -1;
                 }
+            }
+
+            // 等待上线
+            if (s->sig_relay_ctx.state < SIGNAL_RELAY_ONLINE) {
+                print("I:", LA_F("Waiting for RELAY server ONLINE_ACK", LA_F535, 535));
+                UNLOCK(s);
+                return 0;
             }
 
             s->state = P2P_STATE_REGISTERING;
@@ -592,18 +604,10 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             // 如果指定了 remote_peer_id，立即发送初始 offer
             if (remote_peer_id && s->local_cand_cnt > 0) {
 
-                uint8_t buf[2048]; // fixme 这个缓冲区大小需要根据实际情况调整，确保足够容纳所有候选者的序列化数据
-                int n = pack_signaling_payload_hdr(s->local_peer_id, remote_peer_id,
-                                                   0/* timestamp */, 0/* delay_trigger */,
-                                                   s->local_cand_cnt, buf);
-                for (int i = 0; i < s->local_cand_cnt; i++) {
-                    n += pack_candidate(&s->local_cands[i], buf + n);
-                }
-
-                print("I:", LA_F("Sent initial offer(%d) to %s)", LA_F332, 332), n, remote_peer_id);
-                if ((ret = p2p_signal_relay_send_connect(&s->sig_relay_ctx, remote_peer_id, buf, n)) != E_NONE) {
-                    print("E:", LA_F("Send offer to RELAY signaling server failed(%d)", LA_F323, 323), ret);
-                    // todo
+                // RELAY 模式：发送 CONNECT 请求建立会话
+                print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
+                if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE) {
+                    print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
                 }
                 s->ice_ctx.signal_sent = true;
             }
@@ -1005,7 +1009,7 @@ p2p_update(p2p_handle_t hdl) {
     }
     else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
 
-        p2p_signal_relay_tick_recv(&s->sig_relay_ctx, s);
+        p2p_signal_relay_tick_recv(s);
     }
     else { assert(s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
         
@@ -1206,7 +1210,7 @@ p2p_update(p2p_handle_t hdl) {
     else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
 
         // Trickle ICE 增量发送候选（含断点续传）
-        p2p_signal_relay_tick_send(&s->sig_relay_ctx, s);
+        p2p_signal_relay_tick_send(s);
     }
     else { assert(s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
 

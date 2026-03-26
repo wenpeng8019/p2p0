@@ -1,19 +1,5 @@
 /*
  * COMPACT 模式信令实现（UDP 无状态）
- *
- * 日志原则：
- * - printf 用于调试级别的日志输出; print() 用于正式级别的日志输出（V/I/W/E）
- * - 对于主控流程（如 xxx_tick）
- *   > 在状态变更、或执行子步骤前，输出 I 级日志说明当前步骤和状态
- *   > 操作结果出现异常时，输出 W/E 级日志说明异常情况
- * - 对于响应流程（如收到某个包）
- *   > 在收到包时，调试打印包的详细信息；
- *   > 处理协议过程中，如果出现错误，输出 W/E 级日志说明异常情况
- *   > 如果最终成功处理了协议包，最后输出 V 级日志说明处理结果（如确认收到、状态变更等）
- * - 对于发包操作
- *   > 在发送包前，调试打印包的详细信息（目的地址、包类型、序列号、负载长度等）
- *   > 如果发送操作失败，输出 W/E 级日志说明异常情况
- *   > 如果发送成功，输出 V 级日志说明发送结果，包括包的关键信息
  */
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
@@ -230,10 +216,10 @@ static void send_register(p2p_session_t *s) {
 
     ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, n);
     if (ret < 0)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
     else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F397, 397),
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F489, 489),
                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), n);
 }
 
@@ -292,7 +278,7 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
 
         ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
         if (ret < 0)
-            print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+            print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
                   PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
         else
             printf(LA_F("[UDP] %s send to %s:%d, seq=%u, flags=0x%02x, len=%d\n", LA_F396, 396),
@@ -344,7 +330,7 @@ static void send_trickle_candidates(p2p_session_t *s) {
 
     ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
     if (ret < 0)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
     else
         printf(LA_F("[UDP] %s send to %s:%d, seq=%u, flags=0x%02x, len=%d\n", LA_F396, 396),
@@ -385,7 +371,7 @@ static void resend_rest_candidates_and_fin(p2p_session_t *s) {
 
         ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
         if (ret < 0)
-            print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+            print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
                   PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
         else
             printf(LA_F("[UDP] Resend %s to %s:%d, seq=%u, flags=0x%02x, len=%d\n", LA_F401, 401),
@@ -422,15 +408,15 @@ static void send_rpc_req(struct p2p_session *s) {
         n += ctx->req_data_len;
     }
 
-    print("V:", LA_F("%s sent, sid=%u, msg=%u, size=%d\n", LA_F61, 61),
+    print("V:", LA_F("%s sent, sid=%u, msg=%u, size=%d\n", LA_F450, 450),
           PROTO, ctx->req_sid, ctx->req_msg, ctx->req_data_len);
 
     ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_MSG_REQ, 0, 0, payload, n);
     if (ret < 0)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
     else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F397, 397),
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F489, 489),
                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), n);
 }
 
@@ -464,10 +450,10 @@ static void send_rpc_resp(struct p2p_session *s) {
 
     ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_MSG_RESP, 0, 0, payload, n);
     if (ret < 0)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
     else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F397, 397),
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F489, 489),
                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), n);
 }
 
@@ -491,7 +477,7 @@ static void send_nat_probe(struct p2p_session *s) {
 
     ret_t ret = p2p_udp_send_packet(s, &probe_addr, SIG_PKT_NAT_PROBE, 0, ctx->nat_probe_retries, NULL, 0);
     if (ret < 0)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
               PROTO, inet_ntoa(probe_addr.sin_addr), ctx->probe_port, E_EXT_CODE(ret));
     else
         printf(LA_F("[UDP] %s send to %s:%d, seq=%u, flags=0, len=0\n", LA_F395, 395),
@@ -596,10 +582,10 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_UNREGISTER, 0, 0, payload,
                                     (int) sizeof(payload));
     if (ret < 0)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
     else {
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F397, 397),
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F489, 489),
                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
                (int)sizeof(payload));
 
@@ -802,13 +788,13 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, flags, len);
 
     if (len < 22) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
     uint8_t status = payload[0];
     if (status >= 2) {
-        print("E:", LA_F("%s: status error(%d)\n", LA_F176, 176), PROTO, status);
+        print("E:", LA_F("%s: status error(%d)\n", LA_F463, 463), PROTO, status);
         return;
     }
 
@@ -870,7 +856,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         p2p_session_reset(s, false);
     }
 
-    print("V:", LA_F("%s: accepted, public=%s:%d ses_id=%" PRIu64 " max_cands=%d probe_port=%d relay=%s msg=%s\n", LA_F95, 95),
+    print("V:", LA_F("%s: accepted, public=%s:%d ses_id=%" PRIu64 " max_cands=%d probe_port=%d relay=%s msg=%s\n", LA_F453, 453),
           PROTO, inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port), 
           ctx->session_id, max_candidates, ctx->probe_port,
           ctx->relay_support ? "yes" : "no",
@@ -882,7 +868,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     // 标记进入 REGISTERED 状态（该状态将停止周期发送 REGISTER）
     ctx->state = SIGNAL_COMPACT_REGISTERED;
-    print("I:", LA_F("REGISTERED: peer=%s\n", LA_F296, 296), ctx->peer_online ? "online" : "offline");
+    print("I:", LA_F("REGISTERED: peer=%s\n", LA_F475, 475), ctx->peer_online ? "online" : "offline");
     if (s->state == P2P_STATE_REGISTERING) s->state = P2P_STATE_REGISTERED;
 
     // 如果服务器支持 NAT 探测端口，则启动 NAT_PROBE 探测流程
@@ -937,7 +923,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from) {
     const char* PROTO = "ALIVE_ACK";
 
-    printf(LA_F("[UDP] %s recv from %s:%d\n", LA_F393, 393),
+    printf(LA_F("[UDP] %s recv from %s:%d\n", LA_F487, 487),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -987,7 +973,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
     }
 
     if (len < (int)sizeof(uint64_t) + 2) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
@@ -1253,7 +1239,7 @@ void compact_on_peer_info_ack(struct p2p_session *s, uint16_t seq,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, len);
 
     if (len < (int)sizeof(uint64_t)) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
@@ -1313,7 +1299,7 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
     if (len < (int)sizeof(uint64_t)) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
@@ -1370,7 +1356,7 @@ void compact_on_request(struct p2p_session *s, uint8_t flags,
 
     // 最小长度：session_id(8) + sid(2) + msg(1) = 11
     if (len < 11) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
@@ -1442,7 +1428,7 @@ void compact_on_request_ack(struct p2p_session *s,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
 
     if (len < 11) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
@@ -1526,7 +1512,7 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
 
     // 检查最小负载长度：session_id(8) + sid(2) = 10
     if (len < 10) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
@@ -1597,7 +1583,7 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
         // 正常响应：需要包含 code 和可选的 data
         // 最小长度：session_id(8) + sid(2) + code(1) = 11
         if (len < 11) {
-            print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+            print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
             return;
         }
         res_code = payload[10];
@@ -1644,7 +1630,7 @@ void compact_on_response_ack(struct p2p_session *s,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
 
     if (len < 10) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
@@ -1699,7 +1685,7 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, len);
 
     if (len < 6) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F100, 100), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
 
@@ -1811,10 +1797,10 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
                                                     (int) sizeof(payload));
                     ctx->last_send_time = now;
                     if (ret < 0)
-                        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F394, 394), 
+                        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
                               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
                     else {
-                        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F397, 397),
+                        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F489, 489),
                                PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
                                (int)sizeof(payload));
                         
