@@ -223,7 +223,7 @@ static void handle_relay_signaling(int idx) {
     // 接收数据到缓冲区
     uint32_t buf_available = sizeof(client->recv_buf) - client->recv_len;
     if (buf_available == 0) {
-        printf(LA_F("[TCP] E: Receive buffer full for peer '%s' (possible protocol error)\n", LA_F115, 115), 
+        printf(LA_F("[TCP] E: Receive buffer full for peer '%s' (possible protocol error)\n", LA_F178, 178), 
                client->name);
         P_sock_close(fd);
         client->valid = false;
@@ -696,7 +696,7 @@ static void send_register_ack(sock_t udp_fd, const struct sockaddr_in *to, const
     if (n != sizeof(ack))
         print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F117, 117), PROTO, to_str, P_sock_errno());
     else
-        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n", LA_F120, 120), PROTO, to_str, hdr->flags, (int)n);     
+        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n", LA_F182, 182), PROTO, to_str, hdr->flags, (int)n);     
 }
 
 // 发送 PEER_OFF 通知: [hdr(4)][session_id(8)] = 12字节
@@ -808,7 +808,7 @@ static void send_msg_req_ack(sock_t udp_fd, const struct sockaddr_in *to, const 
     if (n != (ssize_t)sizeof(ack))
         print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F117, 117), PROTO, to_str, P_sock_errno());
     else
-        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F119, 119), PROTO, to_str, (int)n);
+        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F181, 181), PROTO, to_str, (int)n);
 }
 
 // 发送 MSG_REQ 给对端（Server→对端 relay）
@@ -1268,7 +1268,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     switch (hdr->type) {
     case SIG_PKT_REGISTER: { const char* PROTO = "REGISTER";
 
-        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len <= P2P_PEER_ID_MAX * 2 + 4) {
@@ -1468,7 +1468,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 【服务端可选实现】如果不处理此包类型，客户端自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制。
     case SIG_PKT_UNREGISTER: { const char* PROTO = "UNREGISTER";
 
-        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < P2P_PEER_ID_MAX * 2) {
@@ -1513,7 +1513,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 客户端定期发送以保持槽位活跃，更新 last_active 时间
     case SIG_PKT_ALIVE: { const char* PROTO = "ALIVE";
 
-        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 8) {
@@ -1547,7 +1547,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 if (n != (ssize_t)sizeof(ack))
                     print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F117, 117), ACK_PROTO, from_str, P_sock_errno());
                 else
-                    printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F119, 119), ACK_PROTO, from_str, (int)n);
+                    printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F181, 181), ACK_PROTO, from_str, (int)n);
             }
         }
     } break;
@@ -1556,7 +1556,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 格式: [hdr(4)][session_id(8)]，确认序号使用 hdr->seq
     case SIG_PKT_PEER_INFO_ACK: { const char* PROTO = "PEER_INFO_ACK";
 
-        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 8) {  // session_id(8)
@@ -1660,7 +1660,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                            (hdr->type == P2P_PKT_CONN) ? "RELAY-CONN" :
                            (hdr->type == P2P_PKT_CONN_ACK) ? "RELAY-CONN_ACK" : "RELAY-REACH";
 
-        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         // 所有需要 relay 的包格式都是 [session_id(8)][...]
@@ -1717,7 +1717,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // B→Server（不会有这种情况，B 只发 MSG_RESP）
     case SIG_PKT_MSG_REQ: { const char* PROTO = "MSG_REQ";
 
-        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 11) {
@@ -1847,7 +1847,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 格式: [session_id(8)][sid(2)][code(1)][data(N)]，code=响应码
     case SIG_PKT_MSG_RESP: { const char* PROTO = "MSG_RESP";
 
-        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 11) {  // session_id(8) + sid(2) + code(1) 响应码
@@ -1920,7 +1920,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     // 格式: [session_id(8)][sid(2)]
     case SIG_PKT_MSG_RESP_ACK: { const char* PROTO = "MSG_RESP_ACK";
 
-        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+        printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
         if (payload_len < 10) {  // session_id(8) + sid(2)
@@ -2030,7 +2030,7 @@ static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct socka
 
     uint16_t req_seq = ((uint16_t)buf[2] << 8) | buf[3];
 
-    printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F116, 116),
+    printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
            PROTO, from_str, req_seq, buf[1], len);
 
     // 构造应答包（NAT_PROBE_ACK）
@@ -2050,7 +2050,7 @@ static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct socka
     if (n != 10)
         print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F117, 117), PROTO_ACK, from_str, P_sock_errno());
     else
-        printf(LA_F("[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n", LA_F118, 118),
+        printf(LA_F("[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n", LA_F180, 180),
                PROTO_ACK, from_str, req_seq, (int)n);
 }
 

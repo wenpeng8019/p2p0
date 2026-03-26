@@ -128,6 +128,12 @@ typedef struct {
  *
  * NAT 检测属性：
  *   - CHANGE-REQUEST (0x0003): 请求服务器改变源 IP/Port
+ *
+ * ICE 专用属性 (RFC 5245 / RFC 8445)：
+ *   - PRIORITY (0x0024): 候选优先级（32位，网络字节序）
+ *   - USE-CANDIDATE (0x0025): 提名标志（无值，controlling 端使用）
+ *   - ICE-CONTROLLING (0x802A): Controlling 角色标识（64位 tie-breaker）
+ *   - ICE-CONTROLLED (0x8029): Controlled 角色标识（64位 tie-breaker）
  */
 #define STUN_ATTR_MAPPED_ADDR       0x0001  /* 映射地址（明文，已废弃） */
 #define STUN_ATTR_CHANGE_REQUEST    0x0003  /* 请求改变源地址/端口 */
@@ -135,7 +141,11 @@ typedef struct {
 #define STUN_ATTR_USERNAME          0x0006  /* 用户名 */
 #define STUN_ATTR_MESSAGE_INTEGRITY 0x0008  /* HMAC-SHA1 完整性校验 */
 #define STUN_ATTR_XOR_MAPPED_ADDR   0x0020  /* XOR 映射地址（推荐） */
+#define STUN_ATTR_PRIORITY          0x0024  /* ICE: 候选优先级 */
+#define STUN_ATTR_USE_CANDIDATE     0x0025  /* ICE: 提名标志 */
 #define STUN_ATTR_FINGERPRINT       0x8028  /* CRC32 指纹 */
+#define STUN_ATTR_ICE_CONTROLLED    0x8029  /* ICE: Controlled 角色 */
+#define STUN_ATTR_ICE_CONTROLLING   0x802A  /* ICE: Controlling 角色 */
 
 /*
  * CHANGE-REQUEST 属性标志位
@@ -164,6 +174,61 @@ struct p2p_session;
  */
 int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12],
                                    const char *username, const char *password);
+
+/*
+ * 构建 STUN Binding Response（用于回复对端的 ICE connectivity check）
+ *
+ * @param buf      输出缓冲区
+ * @param max_len  缓冲区大小
+ * @param tsx_id   事务 ID（从请求包偏移 8 处复制，12字节）
+ * @param mapped   对端的观测地址（from addr，写入 XOR-MAPPED-ADDRESS）
+ * @param password ICE 本地密码（用于 MESSAGE-INTEGRITY，NULL 则略过）
+ * @return         生成的响应长度，失败返回 -1
+ */
+int p2p_stun_build_binding_response(uint8_t *buf, int max_len, const uint8_t tsx_id[12],
+                                    const struct sockaddr_in *mapped, const char *password);
+
+/*
+ * 构建 ICE 标准的连通性检查包（STUN Binding Request + ICE 属性）
+ *
+ * 用于 ICE 标准模式下的连通性检查，包含以下属性：
+ *   - USERNAME: 格式为 "remote_ufrag:local_ufrag"（如提供）
+ *   - PRIORITY: 本地候选优先级（32位）
+ *   - ICE-CONTROLLING / ICE-CONTROLLED: 角色标识（64位 tie-breaker）
+ *   - USE-CANDIDATE: 提名标志（仅 controlling 端且提名时）
+ *   - MESSAGE-INTEGRITY: HMAC-SHA1（使用 remote_pwd）
+ *   - FINGERPRINT: CRC32
+ *
+ * @param buf            输出缓冲区
+ * @param max_len        缓冲区大小
+ * @param tsx_id         事务 ID（12字节，NULL 则自动生成）
+ * @param username       ICE 用户名（格式: "remote_ufrag:local_ufrag"，NULL 表示不包含）
+ * @param password       ICE 远端密码（用于 MESSAGE-INTEGRITY，NULL 表示不包含）
+ * @param priority       本地候选优先级（0 表示不包含 PRIORITY 属性）
+ * @param is_controlling 1=Controlling 角色, 0=Controlled 角色
+ * @param tie_breaker    64位 tie-breaker 值（用于角色冲突解决）
+ * @param use_candidate  是否携带 USE-CANDIDATE 属性（1=携带，0=不携带）
+ * @return               生成的请求长度，失败返回 -1
+ */
+int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
+                              const char *username, const char *password,
+                              uint32_t priority, int is_controlling, 
+                              uint64_t tie_breaker, int use_candidate);
+
+/*
+ * 检查 STUN 包是否包含 ICE 属性（用于 connectivity check 识别）
+ *
+ * 用于在包派发阶段判断一个 STUN 包是否为 ICE connectivity check 相关：
+ *   - PRIORITY: 候选优先级（connectivity check 必含）
+ *   - ICE-CONTROLLING / ICE-CONTROLLED: 角色标识
+ *   - USE-CANDIDATE: 提名标志
+ *
+ * @param buf   STUN 包数据
+ * @param len   包长度
+ * @return      1=包含 ICE 属性（应由 NAT 模块处理），0=普通 STUN 包（NAT 检测用）
+ */
+int p2p_stun_has_ice_attrs(const uint8_t *buf, int len);
+
 
 /*
  * 处理 STUN 响应包

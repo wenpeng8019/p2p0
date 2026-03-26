@@ -42,7 +42,7 @@ enum {
     LA_W2,  /* "enabled"  [server.c] */
 
     /* Strings (LA_S) */
-    LA_S3,  /* "[TCP] User list truncated (too many users)\n"  [server.c] */
+    LA_S3,  /* disabled "[TCP] User list truncated (too many users)\n" */
     _LA_4,
     LA_S5,  /* "Enable data relay support (COMPACT mode fallback)"  [server.c] */
     LA_S6,  /* "Enable MSG RPC support"  [server.c] */
@@ -134,17 +134,17 @@ enum {
     LA_F90,  /* "[TCP] Cached %d candidates for offline user '%s' (total=%d/%d)\n" (%d,%s,%d,%d)  [server.c] */
     LA_F91,  /* "[TCP] Cached %d candidates for offline user '%s', storage now FULL (%d/%d)\n" (%d,%s,%d,%d)  [server.c] */
     LA_F92,  /* "[TCP] Cannot allocate slot for offline user '%s'\n" (%s)  [server.c] */
-    LA_F93,  /* "[TCP] E: Invalid magic from peer '%s'\n" (%s)  [server.c] */
-    LA_F94,  /* "[TCP] Failed to receive payload from %s\n" (%s)  [server.c] */
-    LA_F95,  /* "[TCP] Failed to receive target name from %s\n" (%s)  [server.c] */
+    LA_F93,  /* disabled "[TCP] E: Invalid magic from peer '%s'\n" */
+    LA_F94,  /* disabled "[TCP] Failed to receive payload from %s\n" */
+    LA_F95,  /* disabled "[TCP] Failed to receive target name from %s\n" */
     LA_F96,  /* "[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n" (%s,%d,%d)  [server.c] */
     LA_F97,  /* "[TCP] Flushing %d pending candidates from '%s' to '%s'...\n" (%d,%s,%s)  [server.c] */
-    LA_F98,  /* "[TCP] I: Peer '%s' logged in\n" (%s)  [server.c] */
+    LA_F98,  /* "[TCP] I: Peer '%s' came online\n" (%s)  [server.c] */
     LA_F99,  /* "% [TCP] Max peers reached, rejecting connection\n"  [server.c] */
     LA_F100,  /* "[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n" (%d,%s,%s)  [server.c] */
     LA_F101,  /* "[TCP] New connection from %s:%d\n" (%s,%d)  [server.c] */
     LA_F102,  /* "[TCP] New sender '%s' replaces old sender '%s' (discarding %d old candidates)\n" (%s,%s,%d)  [server.c] */
-    LA_F103,  /* "[TCP] Payload too large (%u bytes) from %s\n" (%u,%s)  [server.c] */
+    LA_F103,  /* "[TCP] E: Packet too large (%u bytes) from peer '%s'\n" (%u,%s)  [server.c] */
     LA_F104,  /* "[TCP] Relaying %s from %s to %s (%u bytes)\n" (%s,%s,%s,%u)  [server.c] */
     LA_F105,  /* "[TCP] Sent %s with %d candidates to '%s' (from '%s')\n" (%s,%d,%s,%s)  [server.c] */
     LA_F106,  /* "[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n" (%s,%d,%d)  [server.c] */
@@ -156,12 +156,12 @@ enum {
     LA_F112,  /* "[TCP] Unknown message type %d from %s\n" (%d,%s)  [server.c] */
     LA_F113,  /* "[TCP] V: %s sent to '%s'\n" (%s,%s)  [server.c] */
     LA_F114,  /* "[TCP] V: Peer '%s' disconnected\n" (%s)  [server.c] */
-    LA_F115,  /* "[TCP] W: Client '%s' timeout (inactive for %.1f seconds)\n" (%s)  [server.c] */
-    LA_F116,  /* "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n" (%s,%s,%u)  [server.c] */
+    LA_F115,  /* "W: [TCP] Client '%s' timeout (inactive for %.1f seconds)\n" (%s)  [server.c] */
+    LA_F116,  /* "[TCP] recv ALIVE from %s\n" (%s)  [server.c] */
     LA_F117,  /* "[UDP] %s send to %s failed(%d)\n" (%s,%s,%d)  [server.c] */
-    LA_F118,  /* "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n" (%s,%s,%u,%d)  [server.c] */
-    LA_F119,  /* "[UDP] %s send to %s, seq=0, flags=0, len=%d\n" (%s,%s,%d)  [server.c] */
-    LA_F120,  /* "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n" (%s,%s,%d)  [server.c] */
+    LA_F118,  /* "[TCP] E: Packet too short (%u bytes)\n" (%u)  [server.c] */
+    LA_F119,  /* "[TCP] E: Invalid ONLINE payload length (%u, expected %zu)\n" (%u)  [server.c] */
+    LA_F120,  /* "[TCP] E: Payload too short for CONNECT/ANSWER (%u < %d)\n" (%u,%d)  [server.c] */
     LA_F121,  /* "[UDP] %s send to %s:%d failed(%d)\n" (%s,%s,%d,%d)  [server.c] */
     LA_F122,  /* "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n" (%s,%s,%d,%d)  [server.c] */
     LA_F123,  /* "[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n" (%s,%s,%d,%d,%d)  [server.c] */
@@ -219,7 +219,15 @@ enum {
     LA_S173,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
     LA_S174,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
     LA_S175,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S176,  /* "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)"  [server.c] */
+    LA_S176,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
+    LA_S177,  /* "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)"  [server.c] */
+
+    /* Formats (LA_F) */
+    LA_F178,  /* "[TCP] E: Receive buffer full for peer '%s' (possible protocol error)\n" (%s)  [server.c] */
+    LA_F179,  /* "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n" (%s,%s,%u)  [server.c] */
+    LA_F180,  /* "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n" (%s,%s,%u,%d)  [server.c] */
+    LA_F181,  /* "[UDP] %s send to %s, seq=0, flags=0, len=%d\n" (%s,%s,%d)  [server.c] */
+    LA_F182,  /* "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n" (%s,%s,%d)  [server.c] */
 
     LA_NUM
 };

@@ -513,8 +513,15 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
 
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
             p2p_signal_compact_trickle_turn(s);
-        else
-            p2p_ice_send_local_candidate(s, c);
+        if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+            p2p_signal_relay_trickle_turn(s);
+
+        // ICE 模式通过应用层回调接口来协商发送候选
+        else if (s->signaling_mode == P2P_SIGNALING_MODE_ICE && s->cfg.on_ice_candidate) {
+            char cand_str[256];
+            if (p2p_ice_export_candidate_entry(c, cand_str, sizeof(cand_str)) > 0)
+                s->cfg.on_ice_candidate((p2p_handle_t)s, cand_str, s->cfg.userdata);
+        }
 
         return 0;
     }

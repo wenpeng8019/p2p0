@@ -45,7 +45,7 @@ uint16_t             p2p_instrument_base = 0;
 #endif
 
 // 解析主机名
-static ret_t resolve_host(const char *host, uint16_t port, struct sockaddr_in *out) {
+static inline ret_t resolve_host(const char *host, uint16_t port, struct sockaddr_in *out) {
 
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
@@ -63,6 +63,96 @@ static ret_t resolve_host(const char *host, uint16_t port, struct sockaddr_in *o
     return E_NONE;
 }
 
+static inline void gather_local_candidates(p2p_session_t *s) {
+
+    s->local_cand_cnt = 0;
+
+    /* ======================== 1. 收集 Host 候选 ======================== */
+    /*
+     * Host Candidate 是本地网卡的 IP 地址。
+     * 在同一局域网内的对端可以直接使用此地址通信。
+     */
+    if (!s->cfg.test_ice_host_off) {
+
+        /* 获取本地端口 */
+        struct sockaddr_in loc; socklen_t len = sizeof(loc);
+        getsockname(s->sock, (struct sockaddr *)&loc, &len);
+
+        int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
+
+        for (int i = 0; i < s->route.addr_count; i++) {
+            int idx = p2p_cand_push_local(s);
+            if (idx < 0) {
+                print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S39, 39),
+                      inet_ntoa(s->route.local_addrs[i].sin_addr), ntohs(s->route.local_addrs[i].sin_port));
+                return;
+            }
+
+            p2p_local_candidate_entry_t *c = &s->local_cands[idx];
+            c->type = P2P_CAND_HOST;
+            c->addr = s->route.local_addrs[i];
+            c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
+
+            uint16_t local_pref = (uint16_t)(65535 - host_index++);
+            c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
+
+            print("I:", LA_F("Gathered Host candidate: %s:%d (priority=0x%08x)", LA_F203, 203),
+                  inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+        }
+    }
+    else print("I:", LA_F("Skipping Host Candidate gathering (disabled)", LA_F334, 334));
+
+    /* ======================== 2. 收集 Srflx 候选 ======================== */
+    /*
+     * Server Reflexive Candidate 是通过 STUN 服务器发现的公网地址。
+     * 用于穿透 NAT，让位于不同 NAT 后的对端能够通信。
+     */
+    if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT
+        && !s->cfg.test_ice_srflx_off && s->cfg.stun_server) {
+
+        uint8_t stun_buf[256];
+        int slen = p2p_stun_build_binding_request(stun_buf, sizeof(stun_buf), NULL, NULL, NULL);
+        if (slen > 0) {
+
+            /* 解析 STUN 服务器地址并发送请求 */
+            struct sockaddr_in stun_addr;
+            memset(&stun_addr, 0, sizeof(stun_addr));
+            stun_addr.sin_family = AF_INET;
+            stun_addr.sin_port = htons(s->cfg.stun_port ? s->cfg.stun_port : 3478);
+            struct hostent *he = gethostbyname(s->cfg.stun_server);
+            if (he) {
+                memcpy(&stun_addr.sin_addr, he->h_addr_list[0], he->h_length);
+                p2p_udp_send_to(s, &stun_addr, stun_buf, slen);
+                print("I:", LA_F("Requested Srflx Candidate from %s", LA_F316, 316), s->cfg.stun_server);
+            }
+        }
+    }
+
+    /* ======================== 3. 收集 Relay 候选 ======================== */
+    /*
+     * Relay Candidate 是通过 TURN 服务器分配的中继地址。
+     * 当直连和 STUN 穿透都失败时，使用中继作为最后的备选。
+     */
+    if (!s->cfg.test_ice_relay_off && s->cfg.turn_server) {
+        if (p2p_turn_allocate(s) == 0) {
+            print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F314, 314), s->cfg.turn_server);
+        }
+    }
+
+    /* ======================== 4. TCP 候选（可选） ======================== */
+    /*
+     * RFC 6544 扩展了 ICE 以支持 TCP 候选。
+     * 目前仅预留接口，未完全实现。
+     */
+    if (s->cfg.enable_tcp) {
+        for (int i = 0; i < s->local_cand_cnt; i++) {
+            if (s->local_cands[i].type == P2P_CAND_HOST) {
+                /* TODO: 建立 TCP 监听端口 */
+            }
+        }
+    }
+}
+
 /*
  * 统一状态转换 — 更新状态并触发回调
  *
@@ -72,7 +162,7 @@ static ret_t resolve_host(const char *host, uint16_t port, struct sockaddr_in *o
  *
  * 返回：true = 状态已变化，false = 状态未变（old == new）
  */
-static bool p2p_set_state(p2p_session_t *s, p2p_state_t new_state) {
+static inline bool p2p_set_state(p2p_session_t *s, p2p_state_t new_state) {
     
     p2p_state_t old_state = s->state;
     if (old_state == new_state) return false;
@@ -264,6 +354,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     print("I:", LA_F("Initialize signaling mode: %d", LA_F262, 262), (int)cfg->signaling_mode);
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_init(&s->sig_compact_ctx);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_init(&s->sig_relay_ctx);
+    else if (s->cfg.signaling_mode == P2P_SIGNALING_MODE_ICE) s->cfg.use_ice = true;    /* ICE 模式隐含 use_ice=true */
     else if ((ret = p2p_signal_pubsub_init(&s->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id)) != E_NONE) {
         print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F260, 260), ret);
         p2p_udp_close(s); free(s);
@@ -313,9 +404,6 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 初始化虚拟链路层（基于 NAT 穿透的 P2P）
     nat_init(&s->nat);
 
-    // 初始化基础传输层（reliable ARQ）
-    reliable_init(s);
-
     // 初始化路径管理器（多路径并行支持）
     p2p_path_strategy_t strategy = (p2p_path_strategy_t)(cfg->path_strategy);
     if (strategy < P2P_PATH_STRATEGY_CONNECTION_FIRST || strategy > P2P_PATH_STRATEGY_HYBRID) {
@@ -323,6 +411,9 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     }
     path_manager_init(s, strategy);
     print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F286, 286), strategy);
+
+    // 初始化基础传输层（reliable ARQ）
+    reliable_init(s);
 
     // 初始化传输层（可靠性模块，与加密层正交）
     s->trans = NULL;
@@ -381,14 +472,15 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     //----------------------------
 
-    p2p_ice_init(&s->ice_ctx);
-
     p2p_turn_init(&s->turn);
 
     s->signaling_mode = cfg->signaling_mode;
     s->state = P2P_STATE_INIT;
     s->path_type = P2P_PATH_NONE;
     s->active_path = PATH_IDX_NONE;
+
+    // 收集本地候选地址（Host/TURN）
+    gather_local_candidates(s);
 
     //----------------------------
 
@@ -517,30 +609,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
             s->state = P2P_STATE_REGISTERING;   // 进入注册阶段
 
-            // 获取本地绑定端口
-            struct sockaddr_in loc; socklen_t len = sizeof(loc);
-            getsockname(s->sock, (struct sockaddr *)&loc, &len);
-
-            // 将 route 中的本地地址（和本地绑定端口成对）转换为候选列表
-            if (!s->cfg.test_ice_host_off) {
-                for (int i = 0; i < s->route.addr_count; i++) {
-                    int idx = p2p_cand_push_local(s);
-                    if (idx < 0) {
-                        print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S39, 39),
-                              inet_ntoa(s->route.local_addrs[i].sin_addr), ntohs(s->route.local_addrs[i].sin_port));
-                        return idx;
-                    }
-
-                    p2p_local_candidate_entry_t *c = &s->local_cands[idx];
-                    c->type = P2P_CAND_HOST;
-                    c->addr = s->route.local_addrs[i];
-                    c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
-                    print("I:", LA_F("Append Host candidate: %s:%d", LA_F203, 203),
-                          inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
-                }
-            }
-            else print("I:", LA_F("Skipping local Host candidates (disabled)", LA_F335, 335));
-
             // 注册（连接）到 COMPACT 信令服务器
             print("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F312, 312),
                          inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
@@ -550,13 +618,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 s->state = P2P_STATE_ERROR;
                 UNLOCK(s);
                 return -1;
-            }
-
-            // TURN：异步收集 Relay 候选（响应到达后 trickle 发送给对端）
-            if (!s->cfg.test_ice_relay_off && s->cfg.turn_server) {
-                if (p2p_turn_allocate(s) == 0) {
-                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F315, 315), s->cfg.turn_server);
-                }
             }
 
             break;
@@ -596,11 +657,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
             s->state = P2P_STATE_REGISTERING;
 
-            // 收集 ICE 候选者
-            if (s->cfg.use_ice) {
-                p2p_ice_gather_candidates(s);
-            }
-
             // 如果指定了 remote_peer_id，立即发送初始 offer
             if (remote_peer_id && s->local_cand_cnt > 0) {
 
@@ -609,7 +665,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE) {
                     print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
                 }
-                s->ice_ctx.signal_sent = true;
             }
             // 被动模式：等待任意对等方的 offer
             else if (!remote_peer_id) {
@@ -627,11 +682,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             assert(s->cfg.gh_token && s->cfg.gist_id);
 
             s->state = P2P_STATE_REGISTERING;
-
-            // 收集候选者
-            if (s->cfg.use_ice) {
-                p2p_ice_gather_candidates(s);
-            }
 
             // 如果指定了 remote_peer_id
             if (remote_peer_id) {
@@ -651,6 +701,18 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 // SUB 模式：被动等待 offer，收到后自动回复
                 print("I:", LA_F("PUBSUB (SUB): waiting for offer from any peer", LA_F281, 281));
             }
+            break;
+        }
+
+        // 对于 ICE 模式（应用层自定义信令 + ICE 标准协议）
+        case P2P_SIGNALING_MODE_ICE: {
+
+            s->state = P2P_STATE_PUNCHING;
+
+            nat_punch(s, -1);
+
+            // 应用层自行负责信令通道：将收集到的候选发给对端，并通过 p2p_import_ice_sdp() 导入对端候选
+            print("I: %s", "ICE mode: starting NAT punching, waiting for application to exchange candidates and SDP via custom signaling");
             break;
         }
 
@@ -773,12 +835,21 @@ p2p_update(p2p_handle_t hdl) {
         //     两个 handler 内部会根据消息类型（Method）分别过滤处理
 
         if (n >= 20 && buf[0] < 2) { // STUN type 0x00xx or 0x01xx
-            uint32_t magic = ntohl(*(uint32_t *)(buf + 4));
-            if (magic == STUN_MAGIC) {
-                uint16_t msg_type = (buf[0] << 8) | buf[1];
-                printf(LA_F("Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F300, 300),
-                    inet_ntoa(from.sin_addr), ntohs(from.sin_port), msg_type, n);
-                p2p_stun_handle_packet(s, buf, n, &from);  // 处理 Binding Response
+            uint8_t* ptr = buf + 4; /* [4-7]:magic */
+            if (nget_l(ptr) == STUN_MAGIC) {
+
+                uint16_t msg_type = nget_s(buf); /* [0-1]:msg_type */
+                printf(LA_F("Recv STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F300, 300),
+                            inet_ntoa(from.sin_addr), ntohs(from.sin_port), msg_type, n);
+                
+                // 如果使用 ICE 协议进行打洞
+                if (s->cfg.use_ice && p2p_stun_has_ice_attrs(buf, n)) {
+                    nat_on_stun_packet(s, &from, now_ms, msg_type, buf, n);
+                    continue;
+                } 
+                
+                // STUN 模块处理（NAT 检测）
+                p2p_stun_handle_packet(s, buf, n, &from);
 
                 // TURN 响应处理（Allocate/Refresh/CreatePermission/Data Indication）
                 const uint8_t *inner_data = NULL;
@@ -1017,14 +1088,9 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     /* ========================================================================
-     * 阶段 3：ICE 候选收集（STUN/TURN 探测本地公网地址）
+     * 阶段 3：TURN 定时维护（Refresh 续期、权限同步）
      * ======================================================================== */
 
-    if (s->cfg.use_ice) {
-        p2p_ice_tick(s, now_ms);
-    }
-
-    /* TURN 定时维护（Refresh 续期、权限同步） */
     p2p_turn_tick(s, now_ms);
 
     /* ========================================================================
@@ -1369,6 +1435,85 @@ p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len) {
     int ret = p2p_signal_compact_response(s, code, data, len);
     UNLOCK(s);
     return ret;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// ICE / SDP 公开接口
+///////////////////////////////////////////////////////////////////////////////
+
+
+/*
+ * 获取本地候选数量
+ */
+int
+p2p_local_candidate_count(p2p_handle_t hdl) {
+    if (!hdl) return -1;
+    p2p_session_t *s = (p2p_session_t*)hdl;
+
+    LOCK(s);
+    int cnt = s->local_cand_cnt;
+    UNLOCK(s);
+
+    return cnt;
+}
+
+int
+p2p_remote_candidate_count(p2p_handle_t hdl) {
+    if (!hdl) return -1;
+    p2p_session_t *s = (p2p_session_t*)hdl;
+
+    LOCK(s);
+    int cnt = s->remote_cand_cnt;
+    UNLOCK(s);
+
+    return cnt;
+}
+
+/*
+ * 导出多个 ICE 候选，可选生成完整 SDP
+ * 包装 p2p_export_ice_sdp()，直接对外暴露
+ */
+int
+p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
+                   bool candidates_only,
+                   const char *ice_ufrag,
+                   const char *ice_pwd,
+                   const char *dtls_fingerprint) {
+    if (!hdl || !sdp_buf || buf_size <= 0) return -1;
+    p2p_session_t *s = (p2p_session_t*)hdl;
+
+    LOCK(s);
+    int cnt = s->local_cand_cnt;
+    UNLOCK(s);
+
+    return p2p_ice_export_sdp(s->local_cands, cnt, sdp_buf, buf_size,
+                                     candidates_only, ice_ufrag, ice_pwd, dtls_fingerprint);
+}
+
+/*
+ * 从 SDP 文本解析远端候选并添加到会话
+ */
+int
+p2p_import_ice_sdp(p2p_handle_t hdl, const char *sdp_text) {
+    if (!hdl || !sdp_text) return -1;
+    p2p_session_t *s = (p2p_session_t*)hdl;
+
+    /* 临时缓冲区：最多解析 64 个候选 */
+    p2p_remote_candidate_entry_t tmp[64];
+    int parsed = p2p_ice_import_sdp(sdp_text, tmp, 64);
+    if (parsed <= 0) return parsed;
+
+    LOCK(s);
+    int added = 0;
+    for (int i = 0; i < parsed; i++) {
+        int idx = p2p_cand_push_remote(s);
+        if (idx < 0) break;
+        s->remote_cands[idx] = tmp[i];
+        added++;
+    }
+    UNLOCK(s);
+
+    return added;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

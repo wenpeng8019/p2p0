@@ -192,21 +192,19 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
         print("I:", LA_F("Received valid signal from '%s'", LA_F304, 304), payload.sender);
         
         /* SUB 收到首个 offer（或发送者改变），重置 ICE 避免残留旧连接状态 */
-        if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
-            if (s->remote_cand_cnt > 0 || s->ice_ctx.state != P2P_ICE_STATE_INIT) {
-                printf(LA_F("First offer, resetting ICE and clearing %d stale candidates", LA_F254, 254), s->remote_cand_cnt);
+        // if (ctx->role == P2P_SIGNAL_ROLE_SUB && !ctx->answered) {
+        //     if (s->remote_cand_cnt > 0 || s->ice_ctx.state != P2P_ICE_STATE_INIT) {
+        //         printf(LA_F("First offer, resetting ICE and clearing %d stale candidates", LA_F254, 254), s->remote_cand_cnt);
 
-                // todo 需要这里初始化？
-                s->remote_cand_cnt = 0;
-                s->remote_host_cnt = 0;
-                s->remote_srflx_cnt = 0;
-                s->remote_relay_cnt = 0;
+        //         // todo 需要这里初始化？
+        //         s->remote_cand_cnt = 0;
+        //         s->remote_host_cnt = 0;
+        //         s->remote_srflx_cnt = 0;
+        //         s->remote_relay_cnt = 0;
 
-                s->ice_ctx.state = P2P_ICE_STATE_GATHERING_DONE;
-                s->ice_ctx.check_count = 0;
-                s->ice_ctx.check_last_ms = 0;
-            }
-        }
+        //         s->ice_ctx.state = P2P_ICE_STATE_GATHERING_DONE;
+        //     }
+        // }
         
         /* 添加远端 ICE 候选 */
         for (int i = 0; i < payload.candidate_count; i++) {
@@ -238,12 +236,12 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
                  c->type, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             
             /* Trickle ICE：如果 ICE 已在 CHECKING 状态，立即向新候选发送探测包 */
-            if (s->ice_ctx.state == P2P_ICE_STATE_CHECKING) {
+            // if (s->ice_ctx.state == P2P_ICE_STATE_CHECKING) {
 
-                printf(LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F385, 385),
-                              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
-                nat_punch(s, idx);
-            }
+            //     printf(LA_F("[Trickle] Immediately probing new candidate %s:%d", LA_F385, 385),
+            //                   inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            //     nat_punch(s, idx);
+            // }
         }
         
         /*
@@ -715,34 +713,34 @@ void p2p_signal_pubsub_tick_send(p2p_signal_pubsub_ctx_t *ctx, struct p2p_sessio
     uint64_t resend_interval = 5000;  /* SIGNAL_RESEND_INTERVAL_PUBSUB_MS */
     
     /* 检查是否需要（重）发送 */
-    if (!s->ice_ctx.signal_sent ||
-        (tick_diff(now, s->ice_ctx.last_signal_time) >= resend_interval) ||
-        (s->local_cand_cnt > s->ice_ctx.last_cand_cnt_sent)) {
-        
-        uint8_t pkt[2048];
-        int n = pack_signaling_payload_hdr(
-            s->local_peer_id,
-            s->remote_peer_id,
-            0,  /* timestamp */
-            0,  /* delay_trigger */
-            s->local_cand_cnt,
-            pkt
-        );
-        
-        for (int i = 0; i < s->local_cand_cnt; i++) {
-            n += pack_candidate(&s->local_cands[i], pkt + n);
-        }
-        
-        if (n > 0) {
-            p2p_signal_pubsub_send(ctx, s->remote_peer_id, pkt, n);
-            s->ice_ctx.signal_sent = true;
-            s->ice_ctx.last_signal_time = now;
-            s->ice_ctx.last_cand_cnt_sent = s->local_cand_cnt;
-            print("I: [SIGNALING] %s offer with %d to %s\n",
-                  s->ice_ctx.last_cand_cnt_sent > 0 ? LA_W("Resent", LA_W12, 12) : LA_W("Published", LA_W9, 9),
-                s->local_cand_cnt,
-                s->remote_peer_id);
-        }
-    }
+//    if (!s->ice_ctx.signal_sent ||
+//        (tick_diff(now, s->ice_ctx.last_signal_time) >= resend_interval) ||
+//        (s->local_cand_cnt > s->ice_ctx.last_cand_cnt_sent)) {
+//
+//        uint8_t pkt[2048];
+//        int n = pack_signaling_payload_hdr(
+//            s->local_peer_id,
+//            s->remote_peer_id,
+//            0,  /* timestamp */
+//            0,  /* delay_trigger */
+//            s->local_cand_cnt,
+//            pkt
+//        );
+//
+//        for (int i = 0; i < s->local_cand_cnt; i++) {
+//            n += pack_candidate(&s->local_cands[i], pkt + n);
+//        }
+//
+//        if (n > 0) {
+//            p2p_signal_pubsub_send(ctx, s->remote_peer_id, pkt, n);
+//            s->ice_ctx.signal_sent = true;
+//            s->ice_ctx.last_signal_time = now;
+//            s->ice_ctx.last_cand_cnt_sent = s->local_cand_cnt;
+//            print("I: [SIGNALING] %s offer with %d to %s\n",
+//                  s->ice_ctx.last_cand_cnt_sent > 0 ? LA_W("Resent", LA_W12, 12) : LA_W("Published", LA_W9, 9),
+//                s->local_cand_cnt,
+//                s->remote_peer_id);
+//        }
+//    }
 }
 

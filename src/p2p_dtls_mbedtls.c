@@ -314,7 +314,7 @@ static int dtls_init(p2p_session_t *s) {
                                 MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                 MBEDTLS_SSL_PRESET_DEFAULT);
     if (ret != 0) {
-        print("E:", LA_F("ssl_config_defaults failed: -0x%x", LA_F413, 413), -ret);
+        print("E:", LA_F("ssl_config_defaults failed: -0x%x", LA_F545, 545), -ret);
         goto fail_cleanup;
     }
                                 

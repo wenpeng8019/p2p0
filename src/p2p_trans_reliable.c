@@ -203,7 +203,7 @@ void reliable_tick_ack(struct p2p_session *s) {
     build_ack_payload(r, ack_payload);
     uint16_t ack_seq = nget_s(ack_payload);
     uint32_t sack = nget_l(ack_payload + 2);
-    printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F412, 412),
+    printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F541, 541),
                   ack_seq, sack, r->recv_base,
                   inet_ntoa(s->active_addr.sin_addr),
                   ntohs(s->active_addr.sin_port));
@@ -242,7 +242,7 @@ void reliable_tick(struct p2p_session *s) {
             e->retx_count++;
             r->rto = r->rto * 2;
             if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-            print("W:", LA_F("retry seq=%u retx=%d rto=%d", LA_F411, 411),
+            print("W:", LA_F("retry seq=%u retx=%d rto=%d", LA_F540, 540),
                          e->seq, e->retx_count, r->rto);
         }
     }

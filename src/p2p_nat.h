@@ -46,9 +46,9 @@ typedef struct {
 
     /* 打洞相关状态 */
     int                 punching;               // 打洞阶段。
-                                                //   0: remote_ice_done == false
-                                                //   1: remote_ice_done == true
-                                                //  -1: remote_ice_done == true 且超时后，如果存在信令中转服务，
+                                                //   0: remote_cand_done == false
+                                                //   1: remote_cand_done == true
+                                                //  -1: remote_cand_done == true 且超时后，如果存在信令中转服务，
                                                 //      则允许继续打洞一个超时周期。也就是在 relay 模式下进行握手
     uint64_t            punch_start;            // 打洞开始时间（计算打洞超时）
     uint16_t            punch_seq;              // 本地 PUNCH 包序列号（自增）
@@ -114,6 +114,21 @@ ret_t nat_punch(struct p2p_session *s, int idx);
 void nat_send_fin(struct p2p_session *s);
 
 //-----------------------------------------------------------------------------
+
+/*
+ * 通过（ICE connectivity check）STUN 包进行打洞
+ *
+ * 方案3架构：NAT 模块优先检查收到的 STUN 包
+ *   - 如果是 ICE connectivity check 响应（含 PRIORITY 等属性），NAT 模块处理
+ *   - 如果不是，返回 0，由调用方 fallback 到 p2p_stun_handle_packet（NAT 检测）
+ *
+ * @param s           会话对象
+ * @param buf         STUN 包数据
+ * @param len         包长度
+ * @param from        来源地址
+ */
+void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
+                        uint64_t now, uint16_t msg_type, const uint8_t *buf, int len);
 
 /*
  * 处理 PUNCH 包（NAT 打洞、保活）

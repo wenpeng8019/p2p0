@@ -51,7 +51,8 @@ typedef void (*p2p_log_callback_t)(p2p_log_level_t level, const char *tag, char 
 typedef enum {
     P2P_SIGNALING_MODE_COMPACT = 0,             // 简单无状态信令（UDP，无登录，无需 STUN 服务）
     P2P_SIGNALING_MODE_RELAY,                   // ICE 有状态信令（TCP，需登录，基于 STUN/ICE 协议）
-    P2P_SIGNALING_MODE_PUBSUB                   // 发布/订阅模式（Gist 交换信令，无登录，需 STUN 服务）
+    P2P_SIGNALING_MODE_PUBSUB,                  // 发布/订阅模式（Gist 交换信令，无登录，需 STUN 服务）
+    P2P_SIGNALING_MODE_ICE,                     // 标准 ICE 信令（APP，自定义，符合 RFC 5245）
 } p2p_signaling_t;
 
 /*
@@ -192,20 +193,47 @@ typedef void (*p2p_on_response_fn)(p2p_handle_t hdl, uint16_t sid,
                                    uint8_t msg, const void *data, int len,
                                    void *userdata);
 
+/*
+ * ICE 候选收集回调（仅 P2P_SIGNALING_MODE_ICE 模式，类似 WebRTC onicecandidate）
+ *
+ * 当收集到新的 ICE 候选时触发，用于 Trickle ICE 场景。
+ * 应用层通过自定义信令通道（如 WebSocket）将候选发送给对端。
+ *
+ * 参数：
+ *   hdl: 会话对象
+ *   candidate: 候选字符串（WebRTC 格式，无 "a=" 前缀和 "\r\n" 后缀）
+ *              格式示例: "candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host"
+ *              如果 candidate == NULL，表示候选收集完成（对应 WebRTC 的 event.candidate == null）
+ *   userdata: 用户自定义数据
+ *
+ * 典型用法：
+ *   void on_ice_candidate(p2p_handle_t hdl, const char *candidate, void *userdata) {
+ *       if (candidate) {
+ *           // 通过 WebSocket 发送给对端
+ *           websocket_send_candidate(candidate);
+ *       } else {
+ *           // 候选收集完成
+ *           websocket_send_candidate_complete();
+ *       }
+ *   }
+ */
+typedef void (*p2p_on_ice_candidate_fn)(p2p_handle_t hdl, const char *candidate, void *userdata);
+
 /* ---------- 配置结构 ---------- */
 
 typedef struct {
     uint16_t                bind_port;                  // 本地 UDP 端口 (0 = any)
     
     /* 信令配置 */
-    int                     signaling_mode;             // P2P_SIGNALING_MODE_* (连接时使用的信令模式)
+    p2p_signaling_t         signaling_mode;             // P2P_SIGNALING_MODE_* (连接时使用的信令模式)
     const char*             server_host;                // 信令服务器主机名 (用于 COMPACT/RELAY 模式)
     uint16_t                server_port;                // 信令服务器端口
     const char*             gh_token;                   // GitHub Token (用于 Gist API)
     const char*             gist_id;                    // Gist ID (用于 PUB/SUB 模式)
     
     /* 协议选择 */
-    bool                    use_ice;                    // false = SIMPLE (私有协议), true = ICE (RFC 5245)
+    bool                    use_ice;                    // false = (使用私有协议 PUNCH/REACH 打洞)，
+                                                        // true = ICE 标准协议 (RFC 5245，使用 STUN connectivity check) 打洞
     
     /* STUN/TURN 配置 (仅当 use_ice=true 或需要高级诊断时使用) */
     const char*             stun_server;                // STUN 服务器 (例如 stun.l.google.com)
@@ -249,6 +277,7 @@ typedef struct {
     p2p_on_data_fn          on_data;                    // 数据到达回调 (可选)
     p2p_on_request_fn       on_request;                 // MSG RPC 请求到达（B 端，服务器可选）
     p2p_on_response_fn      on_response;                // MSG RPC 应答到达（A 端，服务器可选）
+    p2p_on_ice_candidate_fn on_ice_candidate;           // ICE 候选收集回调（仅 ICE 模式，类似 WebRTC onicecandidate）
     void*                   userdata;                   // 用户自定义数据，传递给回调函数
 
     /* 测试选项 */
@@ -341,21 +370,11 @@ p2p_close(p2p_handle_t hdl);
 int
 p2p_update(p2p_handle_t hdl);
 
-/*
- * 获取当前连接状态 (P2P_STATE_* 枚举)。
+/**
+ * 获取当前连接状态
  */
 p2p_state_t
 p2p_state(p2p_handle_t hdl);
-
-/**
- * 获取信道外可达性探测状态。
- *
- * - P2P 已直连时（CONNECTED），直接返回 P2P_PROBE_STATE_CONNECTED，无需探测。
- * - 处于中继或断连状态时，返回当前探测进度或最近一次探测结论。
- * - 探测由库自动驱动，无需手动触发。
- */
-p2p_probe_state_t
-p2p_probe(p2p_handle_t hdl);
 
 /**
  * 获取本地 NAT 类型（由 STUN 检测得出，仅在 use_ice=true 时自动检测）。
@@ -378,6 +397,16 @@ p2p_probe(p2p_handle_t hdl);
  */
 int
 p2p_nat_type(p2p_handle_t hdl);
+
+/**
+ * 获取信道外可达性探测状态。
+ *
+ * - P2P 已直连时（CONNECTED），直接返回 P2P_PROBE_STATE_CONNECTED，无需探测。
+ * - 处于中继或断连状态时，返回当前探测进度或最近一次探测结论。
+ * - 探测由库自动驱动，无需手动触发。
+ */
+p2p_probe_state_t
+p2p_probe(p2p_handle_t hdl);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -436,6 +465,100 @@ p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len);
  */
 int
 p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len);
+
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * 获取本地候选数量
+ *
+ * @param hdl           会话句柄
+ * @return              本地候选数量
+ */
+int
+p2p_local_candidate_count(p2p_handle_t hdl);
+
+/**
+ * 获取远程候选数量
+ *
+ * @param hdl           会话句柄
+ * @return              本地候选数量
+ */
+int
+p2p_remote_candidate_count(p2p_handle_t hdl);
+
+//-----------------------------------------------------------------------------
+// ICE / SDP 接口（用于 P2P_SIGNALING_MODE_ICE 模式）
+//-----------------------------------------------------------------------------
+
+/**
+ * 导出单个 ICE 候选为 WebRTC 格式字符串（无 "a=" 前缀和 "\r\n" 后缀）
+ *
+ * 用于 Trickle ICE 场景，每收集一个候选立即发送给对端。
+ *
+ * @param hdl           会话句柄
+ * @param cand_index    候选索引（0 ~ local_cand_cnt-1）
+ * @param buf           输出缓冲区（建议至少 256 字节）
+ * @param buf_size      缓冲区大小
+ * @return              生成的字符串长度（不含 \0），失败返回 -1
+ *
+ * 输出示例："candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host"
+ */
+int
+p2p_export_ice_candidate(p2p_handle_t hdl, int cand_index, char *buf, int buf_size);
+
+/**
+ * 导出多个 ICE 候选为 SDP 格式（带 "a=" 前缀和 "\r\n" 后缀）
+ * 
+ * 支持两种模式：
+ * 1. 仅生成候选行（candidates_only=true）：嵌入已有 SDP
+ * 2. 生成完整 SDP（candidates_only=false）：包含 v=, o=, s=, t=, m=, ice-ufrag, ice-pwd, fingerprint, candidates
+ * 
+ * @param hdl               会话句柄
+ * @param sdp_buf           输出缓冲区
+ *                          - 仅候选：建议 2048 字节
+ *                          - 完整 SDP：建议 4096 字节
+ * @param buf_size          缓冲区大小
+ * @param candidates_only     1=生成完整 SDP, 0=仅生成候选行
+ * @param ice_ufrag         ICE 用户名片段（仅 candidates_only=false 时需要，否则传 NULL）
+ * @param ice_pwd           ICE 密码（仅 candidates_only=false 时需要，否则传 NULL）
+ * @param dtls_fingerprint  DTLS 指纹（可选，格式："sha-256 AB:CD:..."，可传 NULL）
+ * @return                  生成的 SDP 字符串总长度，失败返回 -1
+ * 
+ * 使用示例：
+ *   // 仅候选
+ *   int len = p2p_export_ice_sdp(hdl, buf, size, true, NULL, NULL, NULL);
+ * 
+ *   // 完整 SDP
+ *   int len = p2p_export_ice_sdp(hdl, buf, size, false,
+ *                                        "aB3d", "Xy7zK9pLm3nO1qW2", 
+ *                                        "sha-256 AB:CD:EF:...");
+ */
+int
+p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
+                   bool candidates_only,
+                   const char *ice_ufrag,
+                   const char *ice_pwd,
+                   const char *dtls_fingerprint);
+
+/**
+ * 从 SDP 文本解析远端 ICE 候选（支持 "a=candidate:" 行）
+ * 
+ * @param hdl           会话句柄
+ * @param sdp_text      SDP 文本（多行，每行一个候选）
+ * @return              解析并添加的候选数量，失败返回 -1
+ * 
+ * SDP 格式示例：
+ *   "a=candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host\r\n"
+ *   "a=candidate:2 1 UDP 1694498815 203.0.113.77 54320 typ srflx raddr 192.168.1.10 rport 54320\r\n"
+ */
+int
+p2p_import_ice_sdp(p2p_handle_t hdl, const char *sdp_text);
+
+
+///////////////////////////////////////////////////////////////////////////////
+
+void
+p2p_print(p2p_handle_t hdl);
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus

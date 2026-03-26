@@ -222,6 +222,67 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12]
  * @param password    密码（用于验证 MESSAGE-INTEGRITY，可选）
  * @return            0=成功，-1=失败
  */
+int p2p_stun_build_binding_response(uint8_t *buf, int max_len, const uint8_t tsx_id[12],
+                                    const struct sockaddr_in *mapped, const char *password) {
+    if (max_len < 20 || !tsx_id || !mapped) return -1;
+
+    /* 消息头：Type=0x0101(Binding Response), Length 稍后填 */
+    buf[0] = 0x01; buf[1] = 0x01;
+    buf[2] = 0x00; buf[3] = 0x00;
+    uint32_t magic_be = htonl(STUN_MAGIC);
+    memcpy(buf + 4, &magic_be, 4);
+    memcpy(buf + 8, tsx_id, 12);
+
+    int offset = 20;
+
+    /*
+     * XOR-MAPPED-ADDRESS (0x0020)
+     * X-Port = Port XOR 0x2112  (host order XOR)
+     * X-Addr = Addr XOR 0x2112A442
+     */
+    if (offset + 12 > max_len) return -1;
+    buf[offset++] = (uint8_t)(STUN_ATTR_XOR_MAPPED_ADDR >> 8);   /* 0x00 */
+    buf[offset++] = (uint8_t)(STUN_ATTR_XOR_MAPPED_ADDR & 0xFF); /* 0x20 */
+    buf[offset++] = 0x00;  /* attr len hi */
+    buf[offset++] = 0x08;  /* attr len lo: 8 bytes for IPv4 */
+    buf[offset++] = 0x00;  /* reserved */
+    buf[offset++] = 0x01;  /* family: IPv4 */
+    uint16_t xor_port = mapped->sin_port ^ htons(0x2112);
+    memcpy(buf + offset, &xor_port, 2); offset += 2;
+    uint32_t xor_addr;
+    memcpy(&xor_addr, &mapped->sin_addr, 4);
+    xor_addr ^= htonl(STUN_MAGIC);
+    memcpy(buf + offset, &xor_addr, 4); offset += 4;
+
+    /* 更新 Length（不含头部）*/
+    nwrite_s(buf + 2, (uint16_t)(offset - 20));
+
+    /* MESSAGE-INTEGRITY（可选）*/
+    if (password) {
+        if (offset + 24 > max_len) return -1;
+        int mi_payload = (offset - 20) + 24;
+        nwrite_s(buf + 2, (uint16_t)mi_payload);
+        uint8_t digest[20];
+        p2p_hmac_sha1((const uint8_t*)password, strlen(password), buf, offset, digest);
+        buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY >> 8);
+        buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY & 0xFF);
+        buf[offset++] = 0; buf[offset++] = 20;
+        memcpy(buf + offset, digest, 20); offset += 20;
+    }
+
+    /* FINGERPRINT（0x8028）*/
+    if (offset + 8 > max_len) return -1;
+    nwrite_s(buf + 2, (uint16_t)((offset - 20) + 8));
+    uint32_t crc = p2p_crc32(buf, offset) ^ 0x5354554e;
+    buf[offset++] = (uint8_t)(STUN_ATTR_FINGERPRINT >> 8);
+    buf[offset++] = (uint8_t)(STUN_ATTR_FINGERPRINT & 0xFF);
+    buf[offset++] = 0; buf[offset++] = 4;
+    uint32_t net_crc = htonl(crc);
+    memcpy(buf + offset, &net_crc, 4); offset += 4;
+
+    return offset;
+}
+
 static int p2p_stun_parse_response(const uint8_t *buf, int len, struct sockaddr_in *mapped_addr, const char *password) {
     if (len < 20) return -1; /* 最小为消息头长度 */
     
@@ -235,7 +296,7 @@ static int p2p_stun_parse_response(const uint8_t *buf, int len, struct sockaddr_
     if ((type & 0xFFFE) != 0x0100) return -1; 
     
     /* 验证 Magic Cookie */
-    uint32_t magic = ntohl(*(uint32_t *)(buf + 4));
+    uint32_t magic; memcpy(&magic, buf + 4, 4); magic = ntohl(magic);
     if (magic != STUN_MAGIC) return -1;
 
     /* 验证消息长度 */
@@ -323,6 +384,213 @@ static int p2p_stun_parse_response(const uint8_t *buf, int len, struct sockaddr_
     }
     
     return found ? 0 : -1;
+}
+
+/*
+ * ============================================================================
+ * 构建 ICE 标准的连通性检查包
+ * ============================================================================
+ *
+ * 构建符合 RFC 5245/8445 的 ICE 连通性检查包（STUN Binding Request + ICE 属性）。
+ *
+ * 与标准 STUN Binding Request 的区别：
+ *   1. 必须包含 PRIORITY 属性（本地候选优先级）
+ *   2. 必须包含 ICE-CONTROLLING 或 ICE-CONTROLLED 属性（角色标识）
+ *   3. 可选包含 USE-CANDIDATE 属性（controlling 端提名时）
+ *   4. USERNAME 使用 ICE 短期凭证格式："remote_ufrag:local_ufrag"
+ *   5. MESSAGE-INTEGRITY 使用远端密码（remote_pwd）计算
+ *
+ * 属性顺序（推荐）：
+ *   USERNAME → PRIORITY → ICE-CONTROLLING/CONTROLLED → USE-CANDIDATE → 
+ *   MESSAGE-INTEGRITY → FINGERPRINT
+ *
+ * @param buf            输出缓冲区
+ * @param max_len        缓冲区大小
+ * @param tsx_id         事务 ID（12字节，NULL 则自动生成）
+ * @param username       ICE 用户名（格式: "remote_ufrag:local_ufrag"，NULL 表示不包含）
+ * @param password       ICE 远端密码（用于 MESSAGE-INTEGRITY，NULL 表示不包含）
+ * @param priority       本地候选优先级（0 表示不包含 PRIORITY 属性）
+ * @param is_controlling 1=Controlling 角色, 0=Controlled 角色
+ * @param tie_breaker    64位 tie-breaker 值（用于角色冲突解决）
+ * @param use_candidate  是否携带 USE-CANDIDATE 属性（1=携带，0=不携带）
+ * @return               生成的请求长度，失败返回 -1
+ */
+int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
+                              const char *username, const char *password,
+                              uint32_t priority, int is_controlling, 
+                              uint64_t tie_breaker, int use_candidate) {
+    if (max_len < 20) return -1;
+    
+    /* STUN 消息头 (20 字节) */
+    buf[0] = 0x00; buf[1] = 0x01; /* Type: Binding Request (0x0001) */
+    buf[2] = 0x00; buf[3] = 0x00; /* Length: 初始为0，稍后更新 */
+    
+    /* Magic Cookie */
+    uint32_t magic = htonl(STUN_MAGIC);
+    memcpy(buf + 4, &magic, 4);
+    
+    /* Transaction ID */
+    if (tsx_id) {
+        memcpy(buf + 8, tsx_id, 12);
+    } else {
+        P_rand_bytes(buf + 8, 12);
+    }
+    
+    int offset = 20;
+
+    /* 1. USERNAME 属性 (0x0006) */
+    if (username) {
+        int ulen = strlen(username);
+        if (offset + 4 + ulen > max_len) return -1;
+        buf[offset++] = (uint8_t)(STUN_ATTR_USERNAME >> 8);
+        buf[offset++] = (uint8_t)(STUN_ATTR_USERNAME & 0xFF);
+        buf[offset++] = (uint8_t)(ulen >> 8);
+        buf[offset++] = (uint8_t)(ulen & 0xFF);
+        memcpy(buf + offset, username, ulen);
+        offset += ulen;
+        while (offset % 4) buf[offset++] = 0; /* 填充到4字节边界 */
+    }
+
+    /* 2. PRIORITY 属性 (0x0024) - ICE 专用 */
+    if (priority != 0) {
+        if (offset + 8 > max_len) return -1;
+        buf[offset++] = (uint8_t)(STUN_ATTR_PRIORITY >> 8);
+        buf[offset++] = (uint8_t)(STUN_ATTR_PRIORITY & 0xFF);
+        buf[offset++] = 0;   /* 长度高字节 */
+        buf[offset++] = 4;   /* 长度低字节 */
+        uint32_t net_priority = htonl(priority);
+        memcpy(buf + offset, &net_priority, 4);
+        offset += 4;
+    }
+
+    /* 3. ICE-CONTROLLING (0x802A) / ICE-CONTROLLED (0x8029) */
+    if (offset + 12 > max_len) return -1;
+    uint16_t role_attr = is_controlling ? STUN_ATTR_ICE_CONTROLLING : STUN_ATTR_ICE_CONTROLLED;
+    buf[offset++] = (uint8_t)(role_attr >> 8);
+    buf[offset++] = (uint8_t)(role_attr & 0xFF);
+    buf[offset++] = 0;   /* 长度高字节 */
+    buf[offset++] = 8;   /* 长度低字节（64位 tie-breaker） */
+    /* 手动转换 64 位到网络字节序（大端） */
+    buf[offset++] = (uint8_t)(tie_breaker >> 56);
+    buf[offset++] = (uint8_t)(tie_breaker >> 48);
+    buf[offset++] = (uint8_t)(tie_breaker >> 40);
+    buf[offset++] = (uint8_t)(tie_breaker >> 32);
+    buf[offset++] = (uint8_t)(tie_breaker >> 24);
+    buf[offset++] = (uint8_t)(tie_breaker >> 16);
+    buf[offset++] = (uint8_t)(tie_breaker >> 8);
+    buf[offset++] = (uint8_t)(tie_breaker & 0xFF);
+
+    /* 4. USE-CANDIDATE 属性 (0x0025) - 仅 controlling 端提名时 */
+    if (use_candidate && is_controlling) {
+        if (offset + 4 > max_len) return -1;
+        buf[offset++] = (uint8_t)(STUN_ATTR_USE_CANDIDATE >> 8);
+        buf[offset++] = (uint8_t)(STUN_ATTR_USE_CANDIDATE & 0xFF);
+        buf[offset++] = 0;   /* 长度高字节 */
+        buf[offset++] = 0;   /* 长度低字节（无值属性） */
+    }
+
+    /* 更新消息长度（MESSAGE-INTEGRITY 计算前） */
+    int payload_len = offset - 20;
+    nwrite_s(buf + 2, (uint16_t)payload_len);
+
+    /* 5. MESSAGE-INTEGRITY 属性 (0x0008) */
+    if (password) {
+        if (offset + 24 > max_len) return -1;
+        
+        /* 调整长度字段 */
+        int mi_len = 24;
+        payload_len += mi_len;
+        nwrite_s(buf + 2, (uint16_t)payload_len);
+
+        /* 计算 HMAC-SHA1 */
+        uint8_t digest[20];
+        p2p_hmac_sha1((const uint8_t*)password, strlen(password), buf, offset, digest);
+        
+        buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY >> 8);
+        buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY & 0xFF);
+        buf[offset++] = 0;
+        buf[offset++] = 20;
+        memcpy(buf + offset, digest, 20);
+        offset += 20;
+    }
+
+    /* 6. FINGERPRINT 属性 (0x8028) */
+    if (offset + 8 <= max_len) {
+        payload_len += 8;
+        nwrite_s(buf + 2, (uint16_t)payload_len);
+
+        uint32_t crc = p2p_crc32(buf, offset) ^ 0x5354554e;
+        buf[offset++] = (uint8_t)(STUN_ATTR_FINGERPRINT >> 8);
+        buf[offset++] = (uint8_t)(STUN_ATTR_FINGERPRINT & 0xFF);
+        buf[offset++] = 0;
+        buf[offset++] = 4;
+        uint32_t net_crc = htonl(crc);
+        memcpy(buf + offset, &net_crc, 4);
+        offset += 4;
+    }
+    
+    return offset;
+}
+
+/*
+ * ============================================================================
+ * 检查 STUN 包是否包含 ICE 属性
+ * ============================================================================
+ *
+ * 用于在包派发阶段快速判断一个 STUN 包是否为 ICE connectivity check 相关。
+ *
+ * 判断依据：
+ *   - PRIORITY (0x0024): ICE connectivity check 必含（RFC 5245）
+ *   - ICE-CONTROLLING (0x802A): Controlling 角色标识
+ *   - ICE-CONTROLLED (0x8029): Controlled 角色标识
+ *   - USE-CANDIDATE (0x0025): 提名标志
+ *
+ * 实现策略：
+ *   只要发现任一 ICE 专用属性，即判定为 ICE 包，应由 NAT 模块处理。
+ *   否则为普通 STUN 包（NAT 检测用），由 STUN 模块处理。
+ *
+ * @param buf   STUN 包数据
+ * @param len   包长度
+ * @return      1=包含 ICE 属性（应由 NAT 模块处理），0=普通 STUN 包
+ */
+int p2p_stun_has_ice_attrs(const uint8_t *buf, int len) {
+    if (len < 20) return 0; /* 最小为消息头长度 */
+    
+    /* 验证 Magic Cookie */
+    uint32_t magic; memcpy(&magic, buf + 4, 4); magic = ntohl(magic);
+    if (magic != STUN_MAGIC) return 0;
+
+    /* 验证消息长度 */
+    int msg_len = (buf[2] << 8) | buf[3];
+    if (msg_len + 20 > len) return 0;
+
+    /*
+     * 遍历属性，查找 ICE 专用属性
+     */
+    int offset = 20; /* 从消息头之后开始 */
+    while (offset + 4 <= 20 + msg_len) {
+        const uint8_t* ptr = buf + offset;
+        uint16_t attr_type = nget_s(ptr); ptr += 2;
+        uint16_t attr_len = nget_s(ptr);
+        
+        /*
+         * 检查是否为 ICE 专用属性：
+         *   - PRIORITY (0x0024): 候选优先级（connectivity check 必含）
+         *   - USE-CANDIDATE (0x0025): 提名标志
+         *   - ICE-CONTROLLED (0x8029): Controlled 角色
+         *   - ICE-CONTROLLING (0x802A): Controlling 角色
+         */
+        if (attr_type == STUN_ATTR_PRIORITY ||
+            attr_type == STUN_ATTR_USE_CANDIDATE ||
+            attr_type == STUN_ATTR_ICE_CONTROLLED ||
+            attr_type == STUN_ATTR_ICE_CONTROLLING) {
+            return 1; /* 发现 ICE 属性 */
+        }
+        
+        offset += 4 + ((attr_len + 3) & ~3); /* 跳到下一个属性（4字节对齐）*/
+    }
+    
+    return 0; /* 未发现 ICE 属性 */
 }
 
 /*
@@ -502,8 +770,15 @@ void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
             print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F417, 417),
                             inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                             c->priority);
-            /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
-            p2p_ice_send_local_candidate(s, c);
+            /* ICE 模式：通过应用层回调发送（Trickle ICE）*/
+            if (s->signaling_mode == P2P_SIGNALING_MODE_ICE && s->cfg.on_ice_candidate) {
+                char buf[256];
+                if (p2p_ice_export_candidate_entry(c, buf, sizeof(buf)) > 0)
+                    s->cfg.on_ice_candidate((p2p_handle_t)s, buf, s->cfg.userdata);
+            } else {
+                /* 即时发送：尝试立刻送达对端；若对端离线，p2p_update() 会周期性重发 */
+                //p2p_ice_send_local_candidate(s, c);
+            }
         }
         
         break;

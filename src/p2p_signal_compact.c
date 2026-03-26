@@ -1186,7 +1186,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             (ctx->remote_candidates_done & ctx->remote_candidates_mask) == ctx->remote_candidates_mask) {
 
             // 标记远程候选交换完成（供 NAT 层判断打洞超时使用）
-            s->remote_ice_done = true;
+            s->remote_cand_done = true;
 
             print("I:", LA_F("%s: sync complete (ses_id=%" PRIu64 ", mask=0x%04x)\n", LA_F178, 178),
                   TASK_ICE_REMOTE, ctx->session_id, (unsigned)ctx->remote_candidates_mask);

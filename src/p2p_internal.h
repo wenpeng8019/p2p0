@@ -165,7 +165,7 @@ typedef struct p2p_session {
     uint16_t                        remote_host_cnt;    // 对端 host 类型候选数量
     uint16_t                        remote_srflx_cnt;   // 对端 srflx 类型候选数量
     uint16_t                        remote_relay_cnt;   // 对端 relay 类型候选数量
-    bool                            remote_ice_done;    // 远端候选是否同步完成（由信令层设置，NAT 层判断超时用）
+    bool                            remote_cand_done;   // 远端候选是否同步完成（由信令层设置，NAT 层判断超时用）
     int                             turn_pending;       // TURN Allocate 待响应计数（>0 表示还有异步收集未完成）
 
     /* ===== 信令上下文/ICE（Interactive Connectivity Establishment）交换 ===== */
@@ -182,7 +182,6 @@ typedef struct p2p_session {
     p2p_signal_compact_ctx_t        sig_compact_ctx;    // COMPACT 模式信令上下文
     p2p_signal_relay_ctx_t          sig_relay_ctx;      // RELAY 模式信令上下文
     p2p_signal_pubsub_ctx_t         sig_pubsub_ctx;     // PUB/SUB 模式信令上下文
-    ice_ctx_t                       ice_ctx;            // ICE 上下文（RELAY/PUBSUB 信令模式）
 
     /* ======================== 中继服务 ======================== */
     turn_ctx_t                      turn;               // TURN 中继上下文
@@ -300,9 +299,8 @@ static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
     s->remote_host_cnt = 0;
     s->remote_srflx_cnt = 0;
     s->remote_relay_cnt = 0;
-    s->remote_ice_done = false;
-    p2p_ice_reset(&s->ice_ctx);
-    
+    s->remote_cand_done = false;
+
     // 重置活跃路径
     s->path_type = P2P_PATH_NONE;
     s->active_path = PATH_IDX_NONE;

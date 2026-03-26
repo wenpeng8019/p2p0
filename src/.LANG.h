@@ -46,10 +46,10 @@ enum {
     LA_W6,  /* "Open Internet (No NAT)"  [p2p_internal.h] */
     LA_W7,  /* "Port Restricted Cone NAT"  [p2p_internal.h] */
     LA_W8,  /* "PUB"  [p2p_signal_pubsub.c] */
-    LA_W9,  /* "Published"  [p2p_signal_pubsub.c] */
+    LA_W9,  /* disabled "Published" */
     LA_W10,  /* "punch"  [p2p_nat.c] */
     LA_W11,  /* disabled "Received signal from" */
-    LA_W12,  /* "Resent"  [p2p_signal_pubsub.c] */
+    LA_W12,  /* disabled "Resent" */
     LA_W13,  /* "Restricted Cone NAT"  [p2p_internal.h] */
     LA_W14,  /* "retry"  [p2p_nat.c] */
     LA_W15,  /* "SUB"  [p2p_signal_pubsub.c] */
@@ -77,14 +77,14 @@ enum {
     LA_S35,  /* "Gist GET failed"  [p2p_signal_pubsub.c] */
     LA_S36,  /* "Invalid channel_id format (security risk)"  [p2p_signal_pubsub.c] */
     LA_S37,  /* "Out of memory"  [p2p_signal_pubsub.c] */
-    LA_S38,  /* "Push host cand<%s:%d> failed(OOM)\n"  [p2p_ice.c] */
+    LA_S38,  /* disabled "Push host cand<%s:%d> failed(OOM)\n" */
     LA_S39,  /* "Push local cand<%s:%d> failed(OOM)\n"  [p2p.c] */
     LA_S40,  /* "Push remote cand<%s:%d> failed(OOM)\n"  [p2p_signal_pubsub.c] */
 
     /* Formats (LA_F) */
-    LA_F41,  /* "  ... and %d more pairs" (%d)  [p2p_ice.c] */
+    LA_F41,  /* disabled "  ... and %d more pairs" */
     LA_F42,  /* "  [%d] %s/%d" (%d,%s,%d)  [p2p_route.c] */
-    LA_F43,  /* "  [%d] L=%s:%d -> R=%s:%d, pri=0x%016llx" (%d,%s,%d,%s,%d)  [p2p_ice.c] */
+    LA_F43,  /* disabled "  [%d] L=%s:%d -> R=%s:%d, pri=0x%016llx" */
     LA_F44,  /* disabled "%s '%s' (%u %s)" */
     LA_F45,  /* "%s NOTIFY: accepted\n" (%s)  [p2p_signal_compact.c] */
     LA_F46,  /* "%s NOTIFY: ignored old notify base=%u (current=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
@@ -144,7 +144,7 @@ enum {
     LA_F100,  /* disabled "%s: bad payload len=%d\n" */
     LA_F101,  /* "%s: bad payload(len=%d, need >=8)\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F102,  /* "%s: PUNCHING → CONNECTING (%s%s)" (%s,%s,%s)  [p2p_nat.c] */
-    LA_F103,  /* "%s: PUNCHING → %s (peer CONNECTING)" (%s,%s)  [p2p_nat.c] */
+    LA_F103,  /* "%s: PUNCHING → %s" (%s,%s)  [p2p_nat.c] */
     LA_F104,  /* "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n" (%s,%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
     _LA_105,
     LA_F106,  /* "%s: duplicate remote cand<%s:%d> from signaling, skipped\n" (%s,%s,%d)  [p2p_signal_compact.c] */
@@ -244,7 +244,7 @@ enum {
     LA_F200,  /* "ACK: protocol mismatch, trans=%s has on_packet but received P2P_PKT_ACK" (%s)  [p2p.c] */
     LA_F201,  /* disabled "Added Remote Candidate: %d -> %s:%d" */
     LA_F202,  /* "% Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
-    LA_F203,  /* "Append Host candidate: %s:%d" (%s,%d)  [p2p.c] */
+    LA_F203,  /* "Gathered Host candidate: %s:%d (priority=0x%08x)" (%s,%d)  [p2p.c] */
     LA_F204,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
     LA_F205,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
     LA_F206,  /* "% BIO_new failed"  [p2p_dtls_openssl.c] */
@@ -266,7 +266,7 @@ enum {
     LA_F222,  /* disabled "% Connection closed while discarding" */
     LA_F223,  /* disabled "% Connection closed while reading payload" */
     LA_F224,  /* disabled "% Connection closed while reading sender" */
-    LA_F225,  /* "Connectivity checks timed out (sent %d rounds), giving up" (%d)  [p2p_ice.c] */
+    LA_F225,  /* disabled "Connectivity checks timed out (sent %d rounds), giving up" */
     LA_F226,  /* "Crypto layer '%s' init failed, continuing without encryption" (%s)  [p2p.c] */
     LA_F227,  /* "% DTLS (MbedTLS) requested but library not linked"  [p2p.c] */
     LA_F228,  /* "% DTLS handshake complete (MbedTLS)"  [p2p_dtls_mbedtls.c] */
@@ -275,7 +275,7 @@ enum {
     LA_F231,  /* "Detection completed %s" (%s)  [p2p_stun.c] */
     LA_F232,  /* disabled "Discarded %d bytes payload of message type %d" */
     LA_F233,  /* "Duplicate remote cand<%s:%d> from signaling, skipped" (%s,%d)  [p2p_signal_pubsub.c] */
-    LA_F234,  /* "Duplicate remote candidate<%s:%d> from signaling, skipped" (%s,%d)  [p2p_ice.c] */
+    LA_F234,  /* disabled "Duplicate remote candidate<%s:%d> from signaling, skipped" */
     LA_F235,  /* disabled "Failed to allocate %u bytes" */
     LA_F236,  /* disabled "% Failed to allocate ACK payload buffer" */
     LA_F237,  /* "% Failed to allocate DTLS context"  [p2p_dtls_mbedtls.c] */
@@ -295,10 +295,10 @@ enum {
     LA_F251,  /* "% Failed to send punch packet for new peer addr\n"  [p2p_signal_compact.c] */
     LA_F252,  /* disabled "% Failed to send target name" */
     LA_F253,  /* "Field %s is empty or too short" (%s)  [p2p_signal_pubsub.c] */
-    LA_F254,  /* "First offer, resetting ICE and clearing %d stale candidates" (%d)  [p2p_signal_pubsub.c] */
-    LA_F255,  /* "Formed check list with %d candidate pairs" (%d)  [p2p_ice.c] */
+    LA_F254,  /* disabled "First offer, resetting ICE and clearing %d stale candidates" */
+    LA_F255,  /* disabled "Formed check list with %d candidate pairs" */
     LA_F256,  /* "Gathered Relay Candidate %s:%u (priority=%u)" (%s,%u,%u)  [p2p_turn.c] */
-    LA_F257,  /* "Gathered host cand<%s:%d> (priority=0x%08x)" (%s,%d)  [p2p_ice.c] */
+    LA_F257,  /* disabled "Gathered host cand<%s:%d> (priority=0x%08x)" */
     LA_F258,  /* "% Handshake complete"  [p2p_dtls_mbedtls.c] */
     LA_F259,  /* "Handshake failed: %s (-0x%04x)" (%s)  [p2p_dtls_mbedtls.c] */
     LA_F260,  /* "Initialize PUBSUB signaling context failed(%d)" (%d)  [p2p.c] */
@@ -313,7 +313,7 @@ enum {
     LA_F269,  /* disabled "% NAT connected but no available path in path manager" */
     LA_F270,  /* "% No advanced transport layer enabled, using simple reliable layer"  [p2p.c] */
     LA_F271,  /* "% No auth_key provided, using default key (insecure)"  [p2p_signal_pubsub.c] */
-    LA_F272,  /* "Nomination successful! Using! Using %s path %s:%d%s" (%s,%s,%d,%s)  [p2p_ice.c] */
+    LA_F272,  /* disabled "Nomination successful! Using! Using %s path %s:%d%s" */
     LA_F273,  /* "Open P2P UDP socket on port %d" (%d)  [p2p.c] */
     LA_F274,  /* "Open P2P UDP socket on port %d failed(%d)" (%d,%d)  [p2p.c] */
     LA_F275,  /* "% OpenSSL requested but library not linked"  [p2p.c] */
@@ -335,13 +335,13 @@ enum {
     LA_F291,  /* disabled "Peer online, forwarded %d candidates" */
     LA_F292,  /* "Processing (role=%s)" (%s)  [p2p_signal_pubsub.c] */
     LA_F293,  /* "% PseudoTCP enabled as transport layer"  [p2p.c] */
-    LA_F294,  /* "Push prflx candidate<%s:%d> failed(OOM)" (%s,%d)  [p2p_ice.c] */
-    LA_F295,  /* "Push remote candidate<%s:%d> (type=%d) failed(OOM)" (%s,%d,%d)  [p2p_ice.c] */
+    LA_F294,  /* disabled "Push prflx candidate<%s:%d> failed(OOM)" */
+    LA_F295,  /* disabled "Push remote candidate<%s:%d> (type=%d) failed(OOM)" */
     LA_F296,  /* disabled "EXCHANGING: peer=%s, uploading candidates\n" */
     LA_F297,  /* "% RELAY/COMPACT mode requires server_host"  [p2p.c] */
     LA_F298,  /* "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d" (%d,%d,%d,%d)  [p2p_trans_reliable.c] */
     LA_F299,  /* disabled "Received ACK (status=%d, candidates_acked=%d)" */
-    LA_F300,  /* "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d" (%s,%d,%d)  [p2p.c] */
+    LA_F300,  /* "Recv STUN/TURN pkt from %s:%d, type=0x%04x, len=%d" (%s,%d,%d)  [p2p.c] */
     LA_F301,  /* "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d" (%s,%d,%u,%d)  [p2p.c] */
     LA_F302,  /* "Received UNKNOWN pkt type: 0x%02X"  [p2p.c] */
     LA_F303,  /* "Received remote candidate: type=%d, address=%s:%d" (%d,%s,%d)  [p2p_signal_pubsub.c] */
@@ -351,13 +351,13 @@ enum {
     LA_F307,  /* "Recv %s pkt from %s:%d seq=%u" (%s,%s,%d,%u)  [p2p_nat.c] */
     LA_F308,  /* "Recv %s pkt from %s:%d, ack_seq=%u, sack=0x%08x" (%s,%s,%d,%u)  [p2p_nat.c] */
     LA_F309,  /* "Recv %s pkt from %s:%d, seq=%u, len=%d" (%s,%s,%d,%u,%d)  [p2p_nat.c] */
-    LA_F310,  /* "Recv New Remote Candidate<%s:%d> (Peer Reflexive - symmetric NAT)" (%s,%d)  [p2p_ice.c] */
-    LA_F311,  /* "Recv New Remote Candidate<%s:%d> (type=%d)" (%s,%d,%d)  [p2p_ice.c] */
+    LA_F310,  /* disabled "Recv New Remote Candidate<%s:%d> (Peer Reflexive - symmetric NAT)" */
+    LA_F311,  /* disabled "Recv New Remote Candidate<%s:%d> (type=%d)" */
     LA_F312,  /* "Register to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
     LA_F313,  /* "Reliable transport initialized rto=%d win=%d" (%d,%d)  [p2p_trans_reliable.c] */
-    LA_F314,  /* "Requested Relay Candidate from %s" (%s)  [p2p_ice.c] */
-    LA_F315,  /* "Requested Relay Candidate from TURN %s" (%s)  [p2p.c] */
-    LA_F316,  /* "Requested Srflx Candidate from %s" (%s)  [p2p_ice.c] */
+    LA_F314,  /* "Requested Relay Candidate from TURN %s" (%s)  [p2p.c] */
+    LA_F315,  /* disabled "Requested Relay Candidate from TURN %s" */
+    LA_F316,  /* "Requested Srflx Candidate from %s" (%s)  [p2p.c] */
     LA_F317,  /* "Resolve COMPACT signaling server address: %s:%d failed(%d)" (%s,%d,%d)  [p2p.c] */
     LA_F318,  /* "% SCTP (usrsctp) requested but library not linked"  [p2p.c] */
     LA_F319,  /* "% SIGNALING path but signaling relay not available"  [p2p_channel.c] */
@@ -370,13 +370,13 @@ enum {
     LA_F326,  /* "% Sending FIN packet to peer before closing"  [p2p.c] */
     LA_F327,  /* "Sending Test I to %s:%d (len=%d)" (%s,%d,%d)  [p2p_stun.c] */
     LA_F328,  /* "% Sending UNREGISTER packet to COMPACT signaling server"  [p2p.c] */
-    LA_F329,  /* "% RELAY mode: bidirectional candidate exchange, no explicit reply needed"  [p2p_ice.c] */
+    LA_F329,  /* disabled "% RELAY mode: bidirectional candidate exchange, no explicit reply needed" */
     LA_F330,  /* disabled "Sent answer to '%s' (%d bytes)" */
     LA_F331,  /* disabled "Sent connect request to '%s' (%d bytes)" */
     LA_F332,  /* "Starting RELAY session with %s" (%s)  [p2p.c] */
     LA_F333,  /* "% Signal payload deserialization failed"  [p2p_signal_pubsub.c] */
-    LA_F334,  /* "% Skipping Host Candidate gathering (disabled)"  [p2p_ice.c] */
-    LA_F335,  /* "% Skipping local Host candidates (disabled)"  [p2p.c] */
+    LA_F334,  /* "% Skipping Host Candidate gathering (disabled)"  [p2p.c] */
+    LA_F335,  /* disabled "% Skipping local Host candidates (disabled)" */
     LA_F336,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
     LA_F337,  /* "% Starting internal thread"  [p2p.c] */
     LA_F338,  /* "% State: → LOST (all paths failed)"  [p2p.c] */
@@ -409,8 +409,8 @@ enum {
     LA_F365,  /* "Test III: Success! Detection completed %s" (%s)  [p2p_stun.c] */
     LA_F366,  /* "% Test III: Timeout"  [p2p_stun.c] */
     LA_F367,  /* "Transport layer '%s' init failed, falling back to simple reliable" (%s)  [p2p.c] */
-    LA_F368,  /* "UDP hole-punch probing remote candidates (%d candidates)" (%d)  [p2p_ice.c] */
-    LA_F369,  /* "UDP hole-punch probing remote candidates round %d/%d" (%d,%d)  [p2p_ice.c] */
+    LA_F368,  /* disabled "UDP hole-punch probing remote candidates (%d candidates)" */
+    LA_F369,  /* disabled "UDP hole-punch probing remote candidates round %d/%d" */
     LA_F370,  /* disabled "Unknown ACK status %d" */
     LA_F371,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
     LA_F372,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
@@ -426,9 +426,9 @@ enum {
     LA_F382,  /* disabled "[SIGNALING] Sent candidates (cached, peer offline) %d to %s" */
     LA_F383,  /* disabled "[SIGNALING] Sent candidates, forwarded [%d-%d] to %s (forwarded=%d)" */
     LA_F384,  /* disabled "% [SIGNALING] Server storage full, waiting for peer to come online" */
-    LA_F385,  /* "[Trickle] Immediately probing new candidate %s:%d" (%s,%d)  [p2p_signal_pubsub.c] */
-    LA_F386,  /* "% [Trickle] Candidate queued, will be uploaded by tick_send"  [p2p_ice.c] */
-    LA_F387,  /* "% [Trickle] RELAY not ready, skipping single candidate send"  [p2p_ice.c] */
+    LA_F385,  /* disabled "[Trickle] Immediately probing new candidate %s:%d" */
+    LA_F386,  /* disabled "% [Trickle] Candidate queued, will be uploaded by tick_send" */
+    LA_F387,  /* disabled "% [Trickle] RELAY not ready, skipping single candidate send" */
     LA_F388,  /* disabled "[Trickle] TCP send failed (ret=%d), will be retried by p2p_update()" */
     LA_F389,  /* "[UDP] %s recv from %s:%d, flags=0x%02x, len=%d\n" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F390,  /* "[UDP] %s recv from %s:%d, len=%d\n" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
@@ -446,24 +446,24 @@ enum {
     LA_F402,  /* "congestion detected, new ssthresh: %u, cwnd: %u" (%u,%u)  [p2p_trans_pseudotcp.c] */
     LA_F403,  /* "% connection closed by peer"  [p2p.c] */
     LA_F404,  /* "ctr_drbg_seed failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
-    LA_F405,  /* "% p2p_ice_send_local_candidate called in non-RELAY mode"  [p2p_ice.c] */
-    LA_F406,  /* disabled "recv error %d" */
-    LA_F407,  /* disabled "recv error %d while discarding" */
-    LA_F408,  /* disabled "recv error %d while reading payload" */
-    LA_F409,  /* disabled "recv error %d while reading sender" */
-    LA_F410,  /* disabled "relay_tick: recv header complete, magic=0x%x, type=%d, length=%u" */
-    LA_F411,  /* "retry seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
-    LA_F412,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
-    LA_F413,  /* "ssl_config_defaults failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
+    LA_F405,  /* disabled "% p2p_ice_send_local_candidate called in non-RELAY mode" */
+    LA_F406,  /* "Imported %d candidates from SDP" (%d)  [p2p_ice.c] */
+    LA_F407,  /* "Imported SDP candidate: %s:%d typ %s (priority=0x%08x)" (%s,%d,%s)  [p2p_ice.c] */
+    LA_F408,  /* "Invalid IP address: %s" (%s)  [p2p_ice.c] */
+    LA_F409,  /* "Unknown candidate type: %s" (%s)  [p2p_ice.c] */
+    LA_F410,  /* "Exported %d candidates to SDP (%d bytes)" (%d,%d)  [p2p_ice.c] */
+    LA_F411,  /* "Failed to parse SDP candidate line: %s" (%s)  [p2p_ice.c] */
+    LA_F412,  /* "% SDP export buffer overflow"  [p2p_ice.c] */
+    LA_F413,  /* "% WebRTC candidate export buffer overflow"  [p2p_ice.c] */
     LA_F414,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
-    LA_F415,  /* "starting NAT punch(Host candidate %d)" (%d)  [p2p_ice.c] */
+    LA_F415,  /* disabled "starting NAT punch(Host candidate %d)" */
     LA_F416,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
     LA_F417,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
     LA_F418,  /* "% ✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
     LA_F419,  /* "%s: invalid payload len=%d (need 6)" (%s,%d)  [p2p_nat.c] */
     LA_F420,  /* "Ignore %s pkt from %s:%d, not connected" (%s,%s,%d)  [p2p_nat.c] */
     LA_F421,  /* "Ignore %s pkt from %s:%d, not connecting" (%s,%s,%d)  [p2p_nat.c] */
-    LA_F422,  /* disabled "%s: failed to get addr for path[%d]" */
+    LA_F422,  /* "Recv ICE-STUN Binding Request from candidate %d (%s:%d)" (%d,%s,%d)  [p2p_nat.c] */
     LA_F423,  /* "%s: remote %s cand[%d]<%s:%d> (disabled)\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F424,  /* "%s: peer online, starting NAT punch\n" (%s)  [p2p_signal_compact.c] */
     LA_F425,  /* "%s: punch timeout, fallback punching using signaling relay" (%s)  [p2p_nat.c] */
@@ -480,7 +480,7 @@ enum {
     LA_F436,  /* "%s: CONN_ACK ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F437,  /* "%s: ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F438,  /* "%s: PUNCHING → RELAY (peer CONNECTING)" (%s)  [p2p_nat.c] */
-    LA_F439,  /* "Ignore %s pkt from %s:%d, not connecting/connected" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F439,  /* "Ignore %s pkt from %s:%d, valid state(%d)" (%s,%s,%d,%d)  [p2p_nat.c] */
     LA_F440,  /* "% NAT connected but no available path in path manager"  [p2p.c] */
     LA_F441,  /* "% RELAY recovery: NAT connected but no path available"  [p2p.c] */
     LA_F442,  /* disabled "Invalid state (%d): LOST but active_path=%d, path_type=%d" */
@@ -581,11 +581,22 @@ enum {
     LA_F537,  /* "disconnect: not in session (state=%d)\n" (%d)  [p2p_signal_relay.c] */
     LA_F538,  /* "payload size %u exceeds limit %u\n" (%u,%u)  [p2p_signal_relay.c] */
     LA_F539,  /* "[TCP] %s enqueue, ses_id=%llu\n" (%s,%l)  [p2p_signal_relay.c] */
+    LA_F540,  /* "retry seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F541,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
+    LA_F542,  /* "% Full SDP generation requires ice_ufrag and ice_pwd"  [p2p_ice.c] */
+    LA_F543,  /* "% Buffer size < 2048 may be insufficient for full SDP"  [p2p_ice.c] */
+    LA_F544,  /* "Recv ICE-STUN from %s:%d, upsert prflx failed" (%s,%d)  [p2p_nat.c] */
+    LA_F545,  /* "ssl_config_defaults failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
+    LA_F546,  /* disabled "ICE connectivity check: both directions confirmed (candidate %d)" */
+    LA_F547,  /* "Recv ICE-STUN Binding Response from candidate %d (%s:%d)" (%d,%s,%d)  [p2p_nat.c] */
+    LA_F548,  /* "%s: PUNCHING → %s (peer CONNECTING)" (%s,%s)  [p2p_nat.c] */
+    LA_F549,  /* "%s: path tx UP" (%s)  [p2p_nat.c] */
+    LA_F550,  /* "Recv unknown ICE-STUN msg_type=0x%04x from %s:%d" (%s,%d)  [p2p_nat.c] */
 
     LA_NUM
 };
 
 /* 格式字符串起始位置（用于验证） */
-#define LA_FMT_START LA_F41
+#define LA_FMT_START LA_F42
 
 #endif /* LANG_H__ */

@@ -10,8 +10,7 @@ int LA_server;
 static const char* s_lang_en[LA_NUM] = {
     [LA_W1] = "disabled",  /* SID:1 */
     [LA_W2] = "enabled",  /* SID:2 */
-    [LA_S3] = "[TCP] User list truncated (too many users)\n",  /* SID:3 */
-    [LA_S176] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:176 */
+    [LA_S177] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:177 */
     [LA_S5] = "Enable data relay support (COMPACT mode fallback)",  /* SID:5 */
     [LA_S6] = "Enable MSG RPC support",  /* SID:6 */
     [LA_S7] = "NAT type detection port (0=disabled)",  /* SID:7 */
@@ -87,6 +86,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F77] = "Starting P2P signal server on port %d\n",  /* SID:77 */
     [LA_F78] = "Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n",  /* SID:78 */
     [LA_F79] = "Unknown packet type 0x%02x from %s\n",  /* SID:79 */
+    [LA_F115] = "W: [TCP] Client '%s' timeout (inactive for %.1f seconds)\n",  /* SID:115 */
     [LA_F80] = "[Relay] %s for ses_id=%llu: peer unavailable (dropped)\n",  /* SID:80 */
     [LA_F81] = "[Relay] %s for unknown ses_id=%llu (dropped)\n",  /* SID:81 */
     [LA_F82] = "[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%llu)\n",  /* SID:82 */
@@ -100,17 +100,18 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F90] = "[TCP] Cached %d candidates for offline user '%s' (total=%d/%d)\n",  /* SID:90 */
     [LA_F91] = "[TCP] Cached %d candidates for offline user '%s', storage now FULL (%d/%d)\n",  /* SID:91 */
     [LA_F92] = "[TCP] Cannot allocate slot for offline user '%s'\n",  /* SID:92 */
-    [LA_F93] = "[TCP] E: Invalid magic from peer '%s'\n",  /* SID:93 */
-    [LA_F94] = "[TCP] Failed to receive payload from %s\n",  /* SID:94 */
-    [LA_F95] = "[TCP] Failed to receive target name from %s\n",  /* SID:95 */
+    [LA_F119] = "[TCP] E: Invalid ONLINE payload length (%u, expected %zu)\n",  /* SID:119 */
+    [LA_F103] = "[TCP] E: Packet too large (%u bytes) from peer '%s'\n",  /* SID:103 */
+    [LA_F118] = "[TCP] E: Packet too short (%u bytes)\n",  /* SID:118 */
+    [LA_F120] = "[TCP] E: Payload too short for CONNECT/ANSWER (%u < %d)\n",  /* SID:120 */
+    [LA_F178] = "[TCP] E: Receive buffer full for peer '%s' (possible protocol error)\n",  /* SID:178 */
     [LA_F96] = "[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n",  /* SID:96 */
     [LA_F97] = "[TCP] Flushing %d pending candidates from '%s' to '%s'...\n",  /* SID:97 */
-    [LA_F98] = "[TCP] I: Peer '%s' logged in\n",  /* SID:98 */
+    [LA_F98] = "[TCP] I: Peer '%s' came online\n",  /* SID:98 */
     [LA_F99] = "% [TCP] Max peers reached, rejecting connection\n",  /* SID:99 */
     [LA_F100] = "[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n",  /* SID:100 */
     [LA_F101] = "[TCP] New connection from %s:%d\n",  /* SID:101 */
     [LA_F102] = "[TCP] New sender '%s' replaces old sender '%s' (discarding %d old candidates)\n",  /* SID:102 */
-    [LA_F103] = "[TCP] Payload too large (%u bytes) from %s\n",  /* SID:103 */
     [LA_F104] = "[TCP] Relaying %s from %s to %s (%u bytes)\n",  /* SID:104 */
     [LA_F105] = "[TCP] Sent %s with %d candidates to '%s' (from '%s')\n",  /* SID:105 */
     [LA_F106] = "[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n",  /* SID:106 */
@@ -122,18 +123,23 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F112] = "[TCP] Unknown message type %d from %s\n",  /* SID:112 */
     [LA_F113] = "[TCP] V: %s sent to '%s'\n",  /* SID:113 */
     [LA_F114] = "[TCP] V: Peer '%s' disconnected\n",  /* SID:114 */
-    [LA_F115] = "[TCP] W: Client '%s' timeout (inactive for %.1f seconds)\n",  /* SID:115 */
-    [LA_F116] = "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:116 */
+    [LA_F116] = "[TCP] recv ALIVE from %s\n",  /* SID:116 */
+    [LA_F179] = "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:179 */
     [LA_F117] = "[UDP] %s send to %s failed(%d)\n",  /* SID:117 */
-    [LA_F118] = "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n",  /* SID:118 */
-    [LA_F119] = "[UDP] %s send to %s, seq=0, flags=0, len=%d\n",  /* SID:119 */
-    [LA_F120] = "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n",  /* SID:120 */
+    [LA_F180] = "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n",  /* SID:180 */
+    [LA_F181] = "[UDP] %s send to %s, seq=0, flags=0, len=%d\n",  /* SID:181 */
+    [LA_F182] = "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n",  /* SID:182 */
     [LA_F121] = "[UDP] %s send to %s:%d failed(%d)\n",  /* SID:121 */
     [LA_F122] = "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n",  /* SID:122 */
     [LA_F123] = "[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n",  /* SID:123 */
     [LA_F124] = "% net init failed\n",  /* SID:124 */
     [LA_F125] = "probe UDP bind failed(%d)\n",  /* SID:125 */
     [LA_F126] = "select failed(%d)\n",  /* SID:126 */
+    [LA_S3] = "[TCP] User list truncated (too many users)\n",  /* SID:3 disabled */
+    [LA_S176] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:176 disabled */
+    [LA_F93] = "[TCP] E: Invalid magic from peer '%s'\n",  /* SID:93 disabled */
+    [LA_F94] = "[TCP] Failed to receive payload from %s\n",  /* SID:94 disabled */
+    [LA_F95] = "[TCP] Failed to receive target name from %s\n",  /* SID:95 disabled */
     [LA_S175] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:175 disabled */
     [LA_S174] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:174 disabled */
     [LA_S173] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:173 disabled */

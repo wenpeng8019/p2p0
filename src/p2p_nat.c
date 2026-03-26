@@ -474,6 +474,122 @@ void nat_send_fin(p2p_session_t *s) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
+ * 处理 STUN 包（ICE connectivity check 响应）
+ *
+ * 注意事项：
+ *   - ICE connectivity check 是双向的：
+ *     * 收到 Binding Request（含 PRIORITY）→ rx_confirmed = true
+ *     * 收到 Binding Response（含 XOR-MAPPED-ADDRESS）→ tx_confirmed = true
+ *   - 双向确认后（rx + tx），NAT 状态机会在 nat_tick() 中转换为 NAT_CONNECTED
+ */
+void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
+                       uint64_t now, uint16_t msg_type, const uint8_t *buf, int len) {
+
+    // 前提是包含 ICE 属性
+    assert(p2p_stun_has_ice_attrs(buf, len));
+
+    // 获取候选路径，或添加为 peer-reflexive 候选（ICE 标准支持自动添加）
+    int path_idx = upsert_prflx(s, from);
+    if (path_idx < 0) {
+        print("W:", LA_F("Recv ICE-STUN from %s:%d, upsert prflx failed", LA_F544, 544),
+              inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+    }
+
+    nat_ctx_t *n = &s->nat;
+
+    // Binding Request（对端发来的 connectivity check）
+    if (msg_type == 0x0001) {
+
+        printf(LA_F("Recv ICE-STUN Binding Request from candidate %d (%s:%d)", LA_F422, 422),
+               path_idx, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
+        // 如果使用 ICE 协议打洞
+        if (s->cfg.use_ice) {
+
+            // 回复 Binding Response（RFC 8445 Section 7.3.1.4）
+            // 事务 ID 从请求包 buf[8..19] 复制，XOR-MAPPED-ADDRESS 填写对端观测地址
+            uint8_t resp[128];
+            int resp_len = p2p_stun_build_binding_response(resp, sizeof(resp), buf + 8, from, NULL);
+            if (resp_len > 0) {
+                p2p_udp_send_to(s, from, resp, resp_len);
+                path_manager_on_packet_send(s, path_idx, 0, now, 0, false);
+            }
+        }
+
+        // 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
+        path_manager_on_packet_recv(s, path_idx, now, len, false, 0);
+
+        // 标记 peer→me 方向 打通
+        if (s->rx_confirmed) return;
+        s->rx_confirmed = true;
+        print("I:", LA_F("%s: path rx UP (%s:%d)", LA_F162, 162),
+              TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+    }
+    // Binding Response（对端回复我们的 connectivity check）
+    else if (msg_type == 0x0101) {
+        
+        printf(LA_F("Recv ICE-STUN Binding Response from candidate %d (%s:%d)", LA_F547, 547),
+               path_idx, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
+        // ACK 控制包不计入流量统计（size=0），这里需要进行 RoundTrip 测量
+        path_manager_on_packet_recv(s, path_idx, now, 0, true, 0);
+
+        // 如果该路径之前已激活，只更新统计即可，直接返回
+        if (path_is_selectable(s->remote_cands[path_idx].stats.state)) return;
+
+        // 首次激活路径（INIT/PROBING/FAILED → ACTIVE），收到 REACH 证明路径可写
+        path_manager_set_path_state(s, path_idx, PATH_STATE_ACTIVE);
+
+        print("I:", LA_F("%s: path[%d] UP (%s:%d)", LA_F132, 132),
+            TASK_PATH, path_idx, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
+         // NAT_RELAY 状态下 retry 打洞成功：直接升级到 CONNECTED（保持数据层一致性）
+        // + p2p_update 会对该改状态的变更进行同步
+        if (n->state == NAT_RELAY) {
+            print("I:", LA_F("%s: RELAY → CONNECTED (direct path recovered)", LA_F77, 77), TASK_NAT);
+
+            n->state = NAT_CONNECTED;
+            n->last_keepalive_send_ms = now;
+            return;
+        }
+        // 只有 PUNCHING 状态才需要双向确认逻辑
+        // LOST 已建立过连接，不需要双向确认（由上层决定恢复策略）
+        if (n->state != NAT_PUNCHING) return;
+
+        // ---------- 双向确认逻辑 ----------
+
+        // peer→me 方向：收到 PUNCH_ACK 也证明入方向通（对方能发包给我们）
+        if (!s->rx_confirmed) { s->rx_confirmed = true;
+
+            print("I:", LA_F("%s: path rx UP (%s:%d)", LA_F162, 162),
+                TASK_NAT, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+        }
+
+        // me→peer 方向：收到 REACH 证明我们的 PUNCH 到达了对方
+        if (!s->tx_confirmed) { s->tx_confirmed = true;
+
+            print("I:", LA_F("%s: path tx UP", LA_F549, 549),
+                TASK_NAT);
+
+            // 首次确认 tx_confirmed，处理所有 reaching 队列（此后不会再有新的 pending）
+            flush_reaching_queue(s, path_idx, now);
+        }
+
+        // 对于首个打通的路径，直接（硬切）作为 p2p 活跃路径
+        // 注意：使用 path_idx 而不是 cand_idx，因为 path_idx 才是被确认可写的路径
+        p2p_set_active_path(s, path_idx);
+
+        n->state = NAT_CONNECTED;
+        n->last_keepalive_send_ms = now;
+        p2p_connected(s, now);
+
+        print("I:", LA_F("%s: PUNCHING → %s", LA_F103, 103), TASK_NAT, "CONNECTED");
+    }
+    else print("W:", LA_F("Recv unknown ICE-STUN msg_type=0x%04x from %s:%d", LA_F550, 550),
+               msg_type, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+}
+
+/*
  * 处理 PUNCH 包
  *
  * 协议：P2P_PKT_PUNCH (0x01)
@@ -636,11 +752,6 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         }
     }
 
-    // 通知 ICE 层（如果启用）
-    if (s->cfg.use_ice) {
-        p2p_ice_on_check_success(s, from);
-    }
-
     // PUNCH 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
     path_manager_on_packet_recv(s, cand_idx, now, 0, false, 0);
 
@@ -797,7 +908,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         n->last_keepalive_send_ms = now;
         p2p_connected(s, now);
 
-        print("I:", LA_F("%s: PUNCHING → %s (peer CONNECTING)", LA_F103, 103), TASK_NAT, "CONNECTED");
+        print("I:", LA_F("%s: PUNCHING → %s (peer CONNECTING)", LA_F548, 548), TASK_NAT, "CONNECTED");
     }
     // 正常流程：进入 CONNECTING，发送 CONN
     // 注意：使用 target_path 而不是 cand_idx，因为 target_path 才是被确认可写的路径
@@ -922,8 +1033,12 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
     nat_ctx_t *n = &s->nat;
 
     if (n->state < NAT_CONNECTING) {
-        print("E:", LA_F("Ignore %s pkt from %s:%d, not connecting/connected", LA_F439, 439), PROTO,
-              inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+
+        // ICE 模式没有 CONN 握手，所以对方可能先发送数据包
+        if (n->state < NAT_PUNCHING || !s->cfg.use_ice) {
+            print("E:", LA_F("Ignore %s pkt from %s:%d, valid state(%d)", LA_F439, 439), PROTO,
+                inet_ntoa(from->sin_addr), ntohs(from->sin_port), n->state);
+        }
         return;
     }
 
@@ -938,7 +1053,7 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
         path_manager_on_packet_recv(s, path_idx, now, data_len, false, 0);
 
     // NAT_CONNECTING → NAT_CONNECTED（首次收到数据包）
-    if (n->state == NAT_CONNECTING) { assert(!n->peer_connecting);
+    if (n->state <= NAT_CONNECTING) { assert(!n->peer_connecting);
         n->state = s->active_path < 0 ? NAT_RELAY : NAT_CONNECTED;
         n->last_keepalive_send_ms = now;
         p2p_connected(s, now);
@@ -1013,7 +1128,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         case NAT_PUNCHING:
 
             // ICE 候选交换完成后
-            if (s->remote_ice_done) {
+            if (s->remote_cand_done) {
 
                 // 首次 ICE 候选交换完成后，重置 punch 超时计时，以便准确计算打洞超时
                 if (!n->punching) { n->punching = 1; n->punch_start = now_ms; }
