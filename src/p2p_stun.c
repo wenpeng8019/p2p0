@@ -115,37 +115,6 @@ typedef struct {
 
 static nat_detect_ctx_t g_nat_detect_ctx = {0};
 
-// 获取本地 socket 绑定的地址
-static inline int get_local_address(sock_t sock, struct sockaddr_in *addr) {
-    socklen_t len = sizeof(*addr);
-    if (getsockname(sock, (struct sockaddr *)addr, &len) < 0) return -1;
-    return 0;
-}
-
-// 比较两个地址是否相同 (IP + Port)
-static inline int addr_equal(const struct sockaddr_in *a, const struct sockaddr_in *b) {
-    return (a->sin_addr.s_addr == b->sin_addr.s_addr &&
-            a->sin_port == b->sin_port);
-}
-
-// 解析主机名为 IPv4 地址
-static int resolve_host(const char *host, uint16_t port, struct sockaddr_in *out) {
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
-
-    char port_str[8];
-    snprintf(port_str, sizeof(port_str), "%u", port);
-
-    if (getaddrinfo(host, port_str, &hints, &res) != 0)
-        return -1;
-
-    memcpy(out, res->ai_addr, sizeof(*out));
-    freeaddrinfo(res);
-    return 0;
-}
-
 /*
  * ============================================================================
  * 解析 STUN Binding 响应（内部静态函数）
@@ -849,8 +818,9 @@ void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *fro
         // 检查本地地址是否与公网映射地址相同（如果是，则为开放网络，非 NAT）
         // + 此时该地址无需作为 Srflx 候选
         struct sockaddr_in local;
-        if (get_local_address(s->sock, &local) == 0) {
-            if (addr_equal(&mapped, &local)) {
+        socklen_t local_len = sizeof(local);
+        if (getsockname(s->sock, (struct sockaddr *)&local, &local_len) == 0) {
+            if (sockaddr_equal(&mapped, &local)) {
                 ctx->state = NAT_TEST_COMPLETED;
                 s->nat_type = P2P_NAT_OPEN;
                 print("I:", LA_F("Detection completed %s", LA_F231, 231), p2p_nat_type_str(P2P_NAT_OPEN));
@@ -885,7 +855,7 @@ void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *fro
         ctx->test_i2_success = true;
         ctx->retry_count = 0;
         ctx->state = NAT_TEST_I2_DONE;
-        ctx->symmetric_mapping = !addr_equal(&ctx->mapped_addr, &ctx->mapped_addr_alt);
+        ctx->symmetric_mapping = !sockaddr_equal(&ctx->mapped_addr, &ctx->mapped_addr_alt);
 
         print("I:", LA_F("Test I(alt): Mapped address: %s:%d", LA_F555, 555),
               inet_ntoa(mapped.sin_addr), ntohs(mapped.sin_port));

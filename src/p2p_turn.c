@@ -66,10 +66,8 @@
 
 /* 写入 STUN 属性头（4 字节），返回更新后的偏移 */
 static int attr_hdr(uint8_t *buf, int off, uint16_t type, uint16_t len) {
-    buf[off]   = (uint8_t)(type >> 8);
-    buf[off+1] = (uint8_t)(type & 0xFF);
-    buf[off+2] = (uint8_t)(len >> 8);
-    buf[off+3] = (uint8_t)(len & 0xFF);
+    nwrite_s(buf + off, type);
+    nwrite_s(buf + off + 2, len);
     return off + 4;
 }
 
@@ -81,20 +79,16 @@ static int pad4(uint8_t *buf, int off) {
 
 /* 写入 STUN 消息头（20 字节） */
 static void write_stun_hdr(uint8_t *buf, uint16_t type, uint16_t body_len) {
-    buf[0] = (uint8_t)(type >> 8);
-    buf[1] = (uint8_t)(type & 0xFF);
-    buf[2] = (uint8_t)(body_len >> 8);
-    buf[3] = (uint8_t)(body_len & 0xFF);
-    uint32_t magic = htonl(STUN_MAGIC);
-    memcpy(buf + 4, &magic, 4);
+    nwrite_s(buf, type);
+    nwrite_s(buf + 2, body_len);
+    nwrite_l(buf + 4, STUN_MAGIC);
     P_rand_bytes(buf + 8, 12);
 }
 
 /* 更新 STUN 头部中的消息体长度字段 */
 static void update_body_len(uint8_t *buf, int off) {
     uint16_t body = (uint16_t)(off - 20);
-    buf[2] = (uint8_t)(body >> 8);
-    buf[3] = (uint8_t)(body & 0xFF);
+    nwrite_s(buf + 2, body);
 }
 
 /* 安全遍历 STUN/TURN 属性（TLV + 4 字节对齐） */
@@ -138,8 +132,7 @@ static inline bool turn_parse_xor_addr_v4(const uint8_t *val, uint16_t len,
 static int append_integrity(uint8_t *buf, int off, const uint8_t key[16]) {
     /* MESSAGE-INTEGRITY */
     uint16_t mi_body = (uint16_t)(off - 20 + 24);
-    buf[2] = (uint8_t)(mi_body >> 8);
-    buf[3] = (uint8_t)(mi_body & 0xFF);
+    nwrite_s(buf + 2, mi_body);
 
     uint8_t digest[20];
     p2p_hmac_sha1(key, 16, buf, off, digest);
@@ -150,8 +143,7 @@ static int append_integrity(uint8_t *buf, int off, const uint8_t key[16]) {
 
     /* FINGERPRINT */
     uint16_t fp_body = (uint16_t)(off - 20 + 8);
-    buf[2] = (uint8_t)(fp_body >> 8);
-    buf[3] = (uint8_t)(fp_body & 0xFF);
+    nwrite_s(buf + 2, fp_body);
 
     uint32_t crc = p2p_crc32(buf, off) ^ 0x5354554e;
     off = attr_hdr(buf, off, STUN_ATTR_FINGERPRINT, 4);
@@ -200,13 +192,9 @@ static int append_xor_addr(uint8_t *buf, int off, uint16_t attr_type, const stru
     buf[off]   = 0;       /* reserved */
     buf[off+1] = 0x01;    /* family: IPv4 */
     uint16_t xport = ntohs(addr->sin_port) ^ 0x2112;
-    buf[off+2] = (uint8_t)(xport >> 8);
-    buf[off+3] = (uint8_t)(xport & 0xFF);
+    nwrite_s(buf + off + 2, xport);
     uint32_t xaddr = ntohl(addr->sin_addr.s_addr) ^ STUN_MAGIC;
-    buf[off+4] = (uint8_t)(xaddr >> 24);
-    buf[off+5] = (uint8_t)(xaddr >> 16);
-    buf[off+6] = (uint8_t)(xaddr >> 8);
-    buf[off+7] = (uint8_t)(xaddr & 0xFF);
+    nwrite_l(buf + off + 4, xaddr);
     return off + 8;
 }
 
@@ -333,6 +321,7 @@ static int allocate_auth(p2p_session_t *s) {
 /* ============================================================================
  * 初始化
  * ============================================================================ */
+
 void p2p_turn_init(turn_ctx_t *t) {
     memset(t, 0, sizeof(*t));
     t->state = TURN_IDLE;
@@ -736,6 +725,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const struct sockaddr_in *from,
  *   [FINGERPRINT (8)]
  * ============================================================================ */
 static int turn_create_permission(p2p_session_t *s, const struct sockaddr_in *peer_addr) {
+
     turn_ctx_t *t = &s->turn;
     if (t->state != TURN_ALLOCATED || !t->has_key) return -1;
     if (!s->cfg.turn_user) return -1;
@@ -774,6 +764,7 @@ static int turn_create_permission(p2p_session_t *s, const struct sockaddr_in *pe
  *   2. 权限同步（为新到达的远端候选创建 CreatePermission）
  * ============================================================================ */
 void p2p_turn_tick(p2p_session_t *s, uint64_t now_ms) {
+
     turn_ctx_t *t = &s->turn;
     if (t->state != TURN_ALLOCATED) return;
 

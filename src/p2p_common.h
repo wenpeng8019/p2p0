@@ -29,6 +29,24 @@ static inline int16_t seq_diff(uint16_t a, uint16_t b) {
     return (int16_t)(a - b);
 }
 
+/* 解析主机名为 IPv4 UDP 地址 */
+static inline ret_t resolve_host(const char *host, uint16_t port, struct sockaddr_in *out) {
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    char port_str[8];
+    snprintf(port_str, sizeof(port_str), "%u", port);
+
+    if (getaddrinfo(host, port_str, &hints, &res) != 0)
+        return -1;
+
+    memcpy(out, res->ai_addr, sizeof(*out));
+    freeaddrinfo(res);
+    return E_NONE;
+}
+
 /* ============================================================================
  * sockaddr ↔ wire 格式转换
  * ============================================================================ */
@@ -55,8 +73,7 @@ static inline void sockaddr_init_with_net(struct sockaddr_in *s, uint32_t* net_i
 }
 
 static inline bool sockaddr_equal(const struct sockaddr_in *a, const struct sockaddr_in *b) {
-    return a && b &&
-           a->sin_family == b->sin_family &&
+    return a->sin_family == b->sin_family &&
            a->sin_addr.s_addr == b->sin_addr.s_addr &&
            a->sin_port == b->sin_port;
 }

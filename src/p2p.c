@@ -44,25 +44,6 @@ uint16_t             p2p_instrument_base = 0;
 #define UNLOCK(s) ((void)0)
 #endif
 
-// 解析主机名
-static inline ret_t resolve_host(const char *host, uint16_t port, struct sockaddr_in *out) {
-
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
-
-    char port_str[8];
-    snprintf(port_str, sizeof(port_str), "%u", port);
-
-    if (getaddrinfo(host, port_str, &hints, &res) != 0)
-        return -1;
-
-    memcpy(out, res->ai_addr, sizeof(*out));
-    freeaddrinfo(res);
-    return E_NONE;
-}
-
 static inline void gather_local_candidates(p2p_session_t *s) {
 
     s->local_cand_cnt = 0;
@@ -318,6 +299,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
             return NULL;
         }
 
+        // todo 支持多个回调接口
         instrument_listen(p2p_instrument, NULL);
     }
 
@@ -483,6 +465,12 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 收集本地候选地址（Host/TURN）
     gather_local_candidates(s);
 
+    // 启动 STUN NAT 类型检测
+    // + 对于 COMPACT 以外的其他模式，检测到的公网反射地址会作为（srflx）本地候选地址
+    if (cfg->stun_server) {
+        p2p_stun_nat_detect_start(s, cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT);
+    }
+
     //----------------------------
 
     s->last_update = P_tick_ms();
@@ -578,8 +566,8 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
     // 设置对方 id
     if (remote_peer_id) {
-        memset(s->remote_peer_id, 0, sizeof(s->remote_peer_id));
         strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
+        s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
     } else s->remote_peer_id[0] = '\0';
 
     // 初始化 DTLS 加密层（需要 remote_peer_id 以确定自动角色）
@@ -610,10 +598,10 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
             s->state = P2P_STATE_REGISTERING;   // 进入注册阶段
 
-            // 注册（连接）到 COMPACT 信令服务器
             print("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F312, 312),
                          inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
 
+            // 注册（连接）到 COMPACT 信令服务器
             if ((ret = p2p_signal_compact_connect(s, s->local_peer_id, remote_peer_id, &server_addr)) != E_NONE) {
                 print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F217, 217), ret);
                 s->state = P2P_STATE_ERROR;
@@ -627,7 +615,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         // 对于 RELAY 模式
         case P2P_SIGNALING_MODE_RELAY: {
 
-            assert(s->cfg.server_host);
+            assert(s->cfg.server_host);         // p2p_create 成功会确保这个条件
 
             // 首次连接：自动登录信令服务器（只执行一次）
             if (s->sig_relay_ctx.state == SIGNAL_RELAY_INIT) {
