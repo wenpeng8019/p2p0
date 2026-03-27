@@ -115,7 +115,7 @@ enum {
     LA_F71,  /* "%s: CONNECTING → CLOSED (timeout, no relay)" (%s)  [p2p_nat.c] */
     LA_F72,  /* "%s: CONNECTING → %s (recv CONN)" (%s,%s)  [p2p_nat.c] */
     LA_F73,  /* "%s: CONNECTING → %s (recv CONN_ACK)" (%s,%s)  [p2p_nat.c] */
-    LA_F74,  /* "%s: CONNECTING → %s (recv DATA)" (%s,%s)  [p2p_nat.c] */
+    LA_F74,  /* "%s: %s → %s (recv DATA)" (%s,%s,%s)  [p2p_nat.c] */
     LA_F75,  /* "%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F76,  /* "%s: Peer addr changed -> %s:%d, retrying punch\n" (%s,%s,%d)  [p2p_signal_compact.c] */
     LA_F77,  /* "%s: RELAY → CONNECTED (direct path recovered)" (%s)  [p2p_nat.c] */
@@ -174,7 +174,7 @@ enum {
     _LA_130,
     LA_F131,  /* "%s: old request ignored (sid=%u <= last_sid=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F132,  /* "%s: path[%d] UP (%s:%d)" (%s,%d,%s,%d)  [p2p_nat.c] */
-    LA_F133,  /* "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n" (%s,%l)  [p2p_signal_compact.c] */
+    LA_F133,  /* "%s: path[%d] UP (recv DATA)" (%s,%d)  [p2p_nat.c] */
     LA_F134,  /* "%s: peer online, proceeding to ICE\n" (%s)  [p2p_signal_compact.c] */
     LA_F135,  /* "%s: peer reachable via signaling (RTT: %llu ms)" (%s,%l)  [p2p_probe.c] */
     LA_F136,  /* "%s: peer_info0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
@@ -592,6 +592,16 @@ enum {
     LA_F548,  /* "%s: PUNCHING → %s (peer CONNECTING)" (%s,%s)  [p2p_nat.c] */
     LA_F549,  /* "%s: path tx UP" (%s)  [p2p_nat.c] */
     LA_F550,  /* "Recv unknown ICE-STUN msg_type=0x%04x from %s:%d" (%s,%d)  [p2p_nat.c] */
+    LA_F551,  /* "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n" (%s,%l)  [p2p_signal_compact.c] */
+    LA_F552,  /* "Ignore %s pkt from unknown path %s:%d" (%s,%s,%d)  [p2p_nat.c] */
+    LA_F553,  /* "% Sending Test II with CHANGE-REQUEST(IP+PORT)"  [p2p_stun.c] */
+    LA_F554,  /* "% Sending Test III with CHANGE-REQUEST(PORT only)"  [p2p_stun.c] */
+    LA_F555,  /* "Test I(alt): Mapped address: %s:%d" (%s,%d)  [p2p_stun.c] */
+    LA_F556,  /* "% Sending Test I(alt) to CHANGED-ADDRESS"  [p2p_stun.c] */
+    LA_F557,  /* "% Failed to send Test I(alt), continue to Test III"  [p2p_stun.c] */
+    LA_F558,  /* "% No valid CHANGED-ADDRESS provided by STUN server, skipping Test I(alt)"  [p2p_stun.c] */
+    LA_F559,  /* "% Test I(alt): Timeout"  [p2p_stun.c] */
+    LA_F560,  /* "Test I: Changed address: %s:%d" (%s,%d)  [p2p_stun.c] */
 
     LA_NUM
 };

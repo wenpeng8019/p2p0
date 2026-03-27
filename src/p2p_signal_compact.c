@@ -1319,7 +1319,7 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     // 清除双方协商信息
     reset_peer(ctx);
 
-    print("I:", LA_F("%s: peer disconnected (ses_id=%" PRIu64 "), reset to REGISTERED\n", LA_F133, 133), PROTO, session_id);
+    print("I:", LA_F("%s: peer disconnected (ses_id=%" PRIu64 "), reset to REGISTERED\n", LA_F551, 551), PROTO, session_id);
 
     // 标记 NAT 为已关闭
     // + 这里将信令层的 peer close 转换为 NAT 层的 closed 状态，主循环会统一以 NAT 层的 NAT_CLOSED 状态机变更为准

@@ -71,12 +71,12 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F66] = "%s, retry remaining candidates and FIN to peer\n",  /* SID:66 */
     [LA_F67] = "%s, sent on %s\n",  /* SID:67 */
     [LA_F68] = "%s: %s timeout after %d retries (sid=%u)\n",  /* SID:68 */
+    [LA_F74] = "%s: %s → %s (recv DATA)",  /* SID:74 */
     [LA_F435] = "%s: CONN ignored, upsert %s:%d failed",  /* SID:435 */
     [LA_F69] = "%s: CONN timeout after %llums",  /* SID:69 */
     [LA_F127] = "%s: CONNECTED → LOST (no response %llums)\n",  /* SID:127 */
     [LA_F72] = "%s: CONNECTING → %s (recv CONN)",  /* SID:72 */
     [LA_F73] = "%s: CONNECTING → %s (recv CONN_ACK)",  /* SID:73 */
-    [LA_F74] = "%s: CONNECTING → %s (recv DATA)",  /* SID:74 */
     [LA_F71] = "%s: CONNECTING → CLOSED (timeout, no relay)",  /* SID:71 */
     [LA_F436] = "%s: CONN_ACK ignored, upsert %s:%d failed",  /* SID:436 */
     [LA_F103] = "%s: PUNCHING → %s",  /* SID:103 */
@@ -151,8 +151,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F549] = "%s: path tx UP",  /* SID:549 */
     [LA_F190] = "%s: path tx UP (echo seq=%u)",  /* SID:190 */
     [LA_F132] = "%s: path[%d] UP (%s:%d)",  /* SID:132 */
+    [LA_F133] = "%s: path[%d] UP (recv DATA)",  /* SID:133 */
     [LA_F152] = "%s: path[%d] relay UP",  /* SID:152 */
-    [LA_F133] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:133 */
+    [LA_F551] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:551 */
     [LA_F134] = "%s: peer online, proceeding to ICE\n",  /* SID:134 */
     [LA_F424] = "%s: peer online, starting NAT punch\n",  /* SID:424 */
     [LA_F135] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:135 */
@@ -266,6 +267,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F246] = "% Failed to reserve remote candidates (cnt=1)\n",  /* SID:246 */
     [LA_F247] = "Failed to resolve STUN server %s",  /* SID:247 */
     [LA_F248] = "Failed to resolve TURN server: %s",  /* SID:248 */
+    [LA_F557] = "% Failed to send Test I(alt), continue to Test III",  /* SID:557 */
     [LA_F251] = "% Failed to send punch packet for new peer addr\n",  /* SID:251 */
     [LA_F517] = "% Failed to set socket non-blocking\n",  /* SID:517 */
     [LA_F253] = "Field %s is empty or too short",  /* SID:253 */
@@ -277,6 +279,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F420] = "Ignore %s pkt from %s:%d, not connected",  /* SID:420 */
     [LA_F421] = "Ignore %s pkt from %s:%d, not connecting",  /* SID:421 */
     [LA_F439] = "Ignore %s pkt from %s:%d, valid state(%d)",  /* SID:439 */
+    [LA_F552] = "Ignore %s pkt from unknown path %s:%d",  /* SID:552 */
     [LA_F406] = "Imported %d candidates from SDP",  /* SID:406 */
     [LA_F407] = "Imported SDP candidate: %s:%d typ %s (priority=0x%08x)",  /* SID:407 */
     [LA_F260] = "Initialize PUBSUB signaling context failed(%d)",  /* SID:260 */
@@ -291,6 +294,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F440] = "% NAT connected but no available path in path manager",  /* SID:440 */
     [LA_F270] = "% No advanced transport layer enabled, using simple reliable layer",  /* SID:270 */
     [LA_F271] = "% No auth_key provided, using default key (insecure)",  /* SID:271 */
+    [LA_F558] = "% No valid CHANGED-ADDRESS provided by STUN server, skipping Test I(alt)",  /* SID:558 */
     [LA_F518] = "% ONLINE: ready to start session\n",  /* SID:518 */
     [LA_F273] = "Open P2P UDP socket on port %d",  /* SID:273 */
     [LA_F274] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:274 */
@@ -344,6 +348,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F325] = "Sending Allocate Request to %s:%d",  /* SID:325 */
     [LA_F326] = "% Sending FIN packet to peer before closing",  /* SID:326 */
     [LA_F327] = "Sending Test I to %s:%d (len=%d)",  /* SID:327 */
+    [LA_F556] = "% Sending Test I(alt) to CHANGED-ADDRESS",  /* SID:556 */
+    [LA_F553] = "% Sending Test II with CHANGE-REQUEST(IP+PORT)",  /* SID:553 */
+    [LA_F554] = "% Sending Test III with CHANGE-REQUEST(PORT only)",  /* SID:554 */
     [LA_F328] = "% Sending UNREGISTER packet to COMPACT signaling server",  /* SID:328 */
     [LA_F333] = "% Signal payload deserialization failed",  /* SID:333 */
     [LA_F334] = "% Skipping Host Candidate gathering (disabled)",  /* SID:334 */
@@ -376,6 +383,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F358] = "TURN Refresh failed (error=%d)",  /* SID:358 */
     [LA_F359] = "TURN Refresh ok (lifetime=%us)",  /* SID:359 */
     [LA_F360] = "% TURN auth required but no credentials configured",  /* SID:360 */
+    [LA_F555] = "Test I(alt): Mapped address: %s:%d",  /* SID:555 */
+    [LA_F559] = "% Test I(alt): Timeout",  /* SID:559 */
+    [LA_F560] = "Test I: Changed address: %s:%d",  /* SID:560 */
     [LA_F361] = "Test I: Mapped address: %s:%d",  /* SID:361 */
     [LA_F362] = "% Test I: Timeout",  /* SID:362 */
     [LA_F363] = "Test II: Success! Detection completed %s",  /* SID:363 */
