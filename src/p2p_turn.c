@@ -97,6 +97,36 @@ static void update_body_len(uint8_t *buf, int off) {
     buf[3] = (uint8_t)(body & 0xFF);
 }
 
+/* 安全遍历 STUN/TURN 属性（TLV + 4 字节对齐） */
+static inline bool turn_next_attr(const uint8_t **ptr, const uint8_t *end,
+                                  uint16_t *type, uint16_t *len,
+                                  const uint8_t **val) {
+    const uint8_t *p = *ptr;
+    if (!p || p + 4 > end) return false;
+
+    *type = nget_s(p);
+    *len  = nget_s(p + 2);
+    *val  = p + 4;
+
+    const uint8_t *next = *val + ((*len + 3) & ~3);
+    if (next > end) return false;
+
+    *ptr = next;
+    return true;
+}
+
+/* 解析 XOR-ADDRESS (IPv4): XOR-MAPPED / XOR-RELAYED / XOR-PEER */
+static inline bool turn_parse_xor_addr_v4(const uint8_t *val, uint16_t len,
+                                          struct sockaddr_in *addr) {
+    if (!val || !addr || len < 8 || val[1] != 0x01) return false;
+
+    addr->sin_family = AF_INET;
+    memcpy(&addr->sin_port, val + 2, 2);
+    memcpy(&addr->sin_addr, val + 4, 4);
+    stun_xor_addr(addr);
+    return true;
+}
+
 /*
  * 追加 MESSAGE-INTEGRITY (HMAC-SHA1, 24 bytes) + FINGERPRINT (CRC32, 8 bytes)
  *
@@ -181,23 +211,6 @@ static int append_xor_addr(uint8_t *buf, int off, uint16_t attr_type, const stru
 }
 
 /*
- * 从属性值中解析 XOR 地址（IPv4）
- *
- * 返回: true=解析成功, false=非 IPv4 或长度不足
- */
-static bool parse_xor_addr(const uint8_t *val, int len, struct sockaddr_in *out) {
-    if (len < 8 || val[1] != 0x01) return false;
-    memset(out, 0, sizeof(*out));
-    out->sin_family = AF_INET;
-    memcpy(&out->sin_port, val + 2, 2);
-    out->sin_port ^= htons(0x2112);
-    memcpy(&out->sin_addr, val + 4, 4);
-    uint32_t *ap = (uint32_t *)&out->sin_addr;
-    *ap ^= htonl(STUN_MAGIC);
-    return true;
-}
-
-/*
  * 计算长期凭证密钥: key = MD5(user ":" realm ":" pass)
  */
 static void compute_key(turn_ctx_t *t, const char *user, const char *pass) {
@@ -211,12 +224,21 @@ static void compute_key(turn_ctx_t *t, const char *user, const char *pass) {
 
 /* 解析 TURN 服务器地址 */
 static bool resolve_server(turn_ctx_t *t, const char *host, int port) {
-    memset(&t->server_addr, 0, sizeof(t->server_addr));
-    t->server_addr.sin_family = AF_INET;
-    t->server_addr.sin_port = htons(port ? port : 3478);
-    struct hostent *he = gethostbyname(host);
-    if (!he) return false;
-    memcpy(&t->server_addr.sin_addr, he->h_addr_list[0], he->h_length);
+    struct addrinfo hints;
+    struct addrinfo *res = NULL;
+    char port_str[8];
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    snprintf(port_str, sizeof(port_str), "%d", port ? port : 3478);
+    if (getaddrinfo(host, port_str, &hints, &res) != 0 || !res) {
+        return false;
+    }
+
+    memcpy(&t->server_addr, res->ai_addr, sizeof(t->server_addr));
+    freeaddrinfo(res);
     return true;
 }
 
@@ -436,8 +458,8 @@ ret_t p2p_turn_send_indication(p2p_session_t *s, const struct sockaddr_in *peer_
  *   1 = Data Indication（out_data/out_len/out_peer 已填充）
  *  -1 = 非 TURN 消息
  * ============================================================================ */
-int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
-                           const struct sockaddr_in *from,
+int p2p_turn_handle_packet(p2p_session_t *s, const struct sockaddr_in *from,
+                           uint16_t type, const uint8_t *buf, int len,
                            const uint8_t **out_data, int *out_len,
                            struct sockaddr_in *out_peer) {
     if (len < 20) return -1;
@@ -447,9 +469,8 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
         from->sin_addr.s_addr != s->turn.server_addr.sin_addr.s_addr)
         return -1;
 
-    turn_ctx_t *t = &s->turn;
-    uint16_t type    = (buf[0] << 8) | buf[1];
-    uint16_t msg_len = (buf[2] << 8) | buf[3];
+    turn_ctx_t *t = &s->turn; const uint8_t* ptr = buf + 2;
+    uint16_t msg_len = nget_s(ptr);
 
     /* 安全边界：消息体不超过实际接收长度 */
     if (20 + msg_len > len) msg_len = (uint16_t)(len - 20);
@@ -461,22 +482,18 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
         struct sockaddr_in relay = {0};
         uint32_t lifetime = 600;
 
-        int off = 20;
-        while (off + 4 <= 20 + msg_len) {
-            uint16_t at = (buf[off] << 8) | buf[off+1];
-            uint16_t al = (buf[off+2] << 8) | buf[off+3];
-            off += 4;
-            if (off + al > 20 + msg_len) break;  /* truncated attr */
+        const uint8_t *attr = buf + 20;
+        const uint8_t *end = buf + 20 + msg_len;
+        while (attr + 4 <= end) {
+            uint16_t at = 0, al = 0;
+            const uint8_t *val = NULL;
+            if (!turn_next_attr(&attr, end, &at, &al, &val)) break;
 
             if (at == STUN_ATTR_XOR_RELAYED_ADDRESS) {
-                parse_xor_addr(buf + off, al, &relay);
+                turn_parse_xor_addr_v4(val, al, &relay);
+            } else if (at == STUN_ATTR_LIFETIME && al >= 4) {
+                lifetime = nget_l(val);
             }
-            else if (at == STUN_ATTR_LIFETIME && al >= 4) {
-                lifetime = ((uint32_t)buf[off]<<24) | ((uint32_t)buf[off+1]<<16) |
-                           ((uint32_t)buf[off+2]<<8) | buf[off+3];
-            }
-
-            off += (al + 3) & ~3;
         }
 
         if (relay.sin_family != AF_INET) {
@@ -543,26 +560,22 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
         char realm[128] = {0};
         char nonce[128] = {0};
 
-        int off = 20;
-        while (off + 4 <= 20 + msg_len) {
-            uint16_t at = (buf[off] << 8) | buf[off+1];
-            uint16_t al = (buf[off+2] << 8) | buf[off+3];
-            off += 4;
-            if (off + al > 20 + msg_len) break;  /* truncated attr */
+        const uint8_t *attr = buf + 20;
+        const uint8_t *end = buf + 20 + msg_len;
+        while (attr + 4 <= end) {
+            uint16_t at = 0, al = 0;
+            const uint8_t *val = NULL;
+            if (!turn_next_attr(&attr, end, &at, &al, &val)) break;
 
             if (at == STUN_ATTR_ERROR_CODE && al >= 4) {
-                error_code = (buf[off+2] & 0x07) * 100 + buf[off+3];
-            }
-            else if (at == STUN_ATTR_REALM && al > 0 && al < (int)sizeof(realm)) {
-                memcpy(realm, buf + off, al);
+                error_code = (val[2] & 0x07) * 100 + val[3];
+            } else if (at == STUN_ATTR_REALM && al > 0 && al < (int)sizeof(realm)) {
+                memcpy(realm, val, al);
                 realm[al] = '\0';
-            }
-            else if (at == STUN_ATTR_NONCE && al > 0 && al < (int)sizeof(nonce)) {
-                memcpy(nonce, buf + off, al);
+            } else if (at == STUN_ATTR_NONCE && al > 0 && al < (int)sizeof(nonce)) {
+                memcpy(nonce, val, al);
                 nonce[al] = '\0';
             }
-
-            off += (al + 3) & ~3;
         }
 
         /* 401: 首次认证挑战 */
@@ -602,15 +615,14 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
      * ---------------------------------------------------------------- */
     if (type == TURN_CREATE_PERM_ERROR) {
         int error_code = 0;
-        int off = 20;
-        while (off + 4 <= 20 + msg_len) {
-            uint16_t at = (buf[off] << 8) | buf[off+1];
-            uint16_t al = (buf[off+2] << 8) | buf[off+3];
-            off += 4;
-            if (off + al > 20 + msg_len) break;
+        const uint8_t *attr = buf + 20;
+        const uint8_t *end = buf + 20 + msg_len;
+        while (attr + 4 <= end) {
+            uint16_t at = 0, al = 0;
+            const uint8_t *val = NULL;
+            if (!turn_next_attr(&attr, end, &at, &al, &val)) break;
             if (at == STUN_ATTR_ERROR_CODE && al >= 4)
-                error_code = (buf[off+2] & 0x07) * 100 + buf[off+3];
-            off += (al + 3) & ~3;
+                error_code = (val[2] & 0x07) * 100 + val[3];
         }
         print("E:", LA_F("TURN CreatePermission failed (error=%d)", LA_F355, 355), error_code);
         return 0;
@@ -621,17 +633,14 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
      * ---------------------------------------------------------------- */
     if (type == TURN_REFRESH_SUCCESS) {
         uint32_t lifetime = 600;
-        int off = 20;
-        while (off + 4 <= 20 + msg_len) {
-            uint16_t at = (buf[off] << 8) | buf[off+1];
-            uint16_t al = (buf[off+2] << 8) | buf[off+3];
-            off += 4;
-            if (off + al > 20 + msg_len) break;
-            if (at == STUN_ATTR_LIFETIME && al >= 4) {
-                lifetime = ((uint32_t)buf[off]<<24) | ((uint32_t)buf[off+1]<<16) |
-                           ((uint32_t)buf[off+2]<<8) | buf[off+3];
-            }
-            off += (al + 3) & ~3;
+        const uint8_t *attr = buf + 20;
+        const uint8_t *end = buf + 20 + msg_len;
+        while (attr + 4 <= end) {
+            uint16_t at = 0, al = 0;
+            const uint8_t *val = NULL;
+            if (!turn_next_attr(&attr, end, &at, &al, &val)) break;
+            if (at == STUN_ATTR_LIFETIME && al >= 4)
+                lifetime = nget_l(val);
         }
         t->lifetime = lifetime;
         t->last_refresh_ms = P_tick_ms();
@@ -645,19 +654,18 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
     if (type == TURN_REFRESH_ERROR) {
         int error_code = 0;
         char nonce[128] = {0};
-        int off = 20;
-        while (off + 4 <= 20 + msg_len) {
-            uint16_t at = (buf[off] << 8) | buf[off+1];
-            uint16_t al = (buf[off+2] << 8) | buf[off+3];
-            off += 4;
-            if (off + al > 20 + msg_len) break;
-            if (at == STUN_ATTR_ERROR_CODE && al >= 4)
-                error_code = (buf[off+2] & 0x07) * 100 + buf[off+3];
-            else if (at == STUN_ATTR_NONCE && al > 0 && al < (int)sizeof(nonce)) {
-                memcpy(nonce, buf + off, al);
+        const uint8_t *attr = buf + 20;
+        const uint8_t *end = buf + 20 + msg_len;
+        while (attr + 4 <= end) {
+            uint16_t at = 0, al = 0;
+            const uint8_t *val = NULL;
+            if (!turn_next_attr(&attr, end, &at, &al, &val)) break;
+            if (at == STUN_ATTR_ERROR_CODE && al >= 4) {
+                error_code = (val[2] & 0x07) * 100 + val[3];
+            } else if (at == STUN_ATTR_NONCE && al > 0 && al < (int)sizeof(nonce)) {
+                memcpy(nonce, val, al);
                 nonce[al] = '\0';
             }
-            off += (al + 3) & ~3;
         }
         /* 438: 更新 nonce 后重试 Refresh */
         if (error_code == 438 && nonce[0]) {
@@ -684,22 +692,19 @@ int p2p_turn_handle_packet(p2p_session_t *s, const uint8_t *buf, int len,
         const uint8_t *data = NULL;
         int data_len = 0;
 
-        int off = 20;
-        while (off + 4 <= 20 + msg_len) {
-            uint16_t at = (buf[off] << 8) | buf[off+1];
-            uint16_t al = (buf[off+2] << 8) | buf[off+3];
-            off += 4;
-            if (off + al > 20 + msg_len) break;  /* truncated attr */
+        const uint8_t *attr = buf + 20;
+        const uint8_t *end = buf + 20 + msg_len;
+        while (attr + 4 <= end) {
+            uint16_t at = 0, al = 0;
+            const uint8_t *val = NULL;
+            if (!turn_next_attr(&attr, end, &at, &al, &val)) break;
 
             if (at == STUN_ATTR_XOR_PEER_ADDRESS) {
-                parse_xor_addr(buf + off, al, &peer);
-            }
-            else if (at == STUN_ATTR_DATA) {
-                data = buf + off;
+                turn_parse_xor_addr_v4(val, al, &peer);
+            } else if (at == STUN_ATTR_DATA) {
+                data = val;
                 data_len = al;
             }
-
-            off += (al + 3) & ~3;
         }
 
         if (data && data_len > 0 && peer.sin_family == AF_INET) {

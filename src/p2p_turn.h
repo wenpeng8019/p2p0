@@ -202,8 +202,8 @@ ret_t p2p_turn_send_indication(struct p2p_session *s, const struct sockaddr_in *
  *   1 = Data Indication: 中继数据已提取到 out_data/out_len, 对端地址在 out_peer
  *  -1 = 非 TURN 消息（未处理）
  */
-int  p2p_turn_handle_packet(struct p2p_session *s, const uint8_t *buf, int len,
-                            const struct sockaddr_in *from,
+int  p2p_turn_handle_packet(struct p2p_session *s, const struct sockaddr_in *from,
+                            uint16_t type, const uint8_t *buf, int len,                            
                             const uint8_t **out_data, int *out_len,
                             struct sockaddr_in *out_peer);
 

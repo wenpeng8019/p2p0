@@ -262,7 +262,8 @@ static void disconnect(p2p_session_t *s) {
     } 
     // RELAY 信令模式：
     else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
-        // todo 可接入 P2P_RLY_DISCONNECT 做 peer-level 主动断开通知
+
+        p2p_signal_relay_disconnect(s);
     }
 }
 
@@ -818,50 +819,48 @@ p2p_update(p2p_handle_t hdl) {
 
     p2p_session_t *s = (p2p_session_t*)hdl;
 
-    uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; int n;
+    uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; uint8_t* pkt; int n;
 
-    P_clock _clk_now; P_clock_now(&_clk_now);
-    uint64_t now_ms = clock_ms(_clk_now);
+    uint64_t now_ms = P_tick_ms();
 
     /* ========================================================================
      * 阶段 1：远程数据输入（被动接收所有网络数据包）
      * ======================================================================== */
-    while ((n = p2p_udp_recv_from(s, &from, buf, sizeof(buf))) > 0) {
+    while ((n = p2p_udp_recv_from(s, &from, buf, sizeof(buf))) > 0) { pkt = buf;
 
         // --------------------
         // STUN/TURN 协议包
         // --------------------
         // 注：TURN 是 STUN 的扩展，共享相同的包格式和 Magic Cookie (0x2112A442)
         //     两个 handler 内部会根据消息类型（Method）分别过滤处理
-
-        if (n >= 20 && buf[0] < 2) { // STUN type 0x00xx or 0x01xx
-            uint8_t* ptr = buf + 4; /* [4-7]:magic */
+        if (n >= 20 && pkt[0] < 2) { // STUN type 0x00xx or 0x01xx
+            uint8_t* ptr = pkt + 4; /* [4-7]:magic */
             if (nget_l(ptr) == STUN_MAGIC) {
 
-                uint16_t msg_type = nget_s(buf); /* [0-1]:msg_type */
+                uint16_t type = nget_s(pkt); /* [0-1]:type */
                 printf(LA_F("Recv STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F300, 300),
-                            inet_ntoa(from.sin_addr), ntohs(from.sin_port), msg_type, n);
+                       inet_ntoa(from.sin_addr), ntohs(from.sin_port), type, n);
                 
-                // 如果使用 ICE 协议进行打洞
-                if (s->cfg.use_ice && p2p_stun_has_ice_attrs(buf, n)) {
-                    nat_on_stun_packet(s, &from, now_ms, msg_type, buf, n);
+                // 如果使用 ICE 机制进行打洞
+                if (s->cfg.use_ice && p2p_stun_has_ice_attrs(pkt, n)) {
+                    nat_on_stun_packet(s, &from, now_ms, type, pkt, n);
                     continue;
-                } 
+                }
                 
-                // STUN 模块处理（NAT 检测）
-                p2p_stun_handle_packet(s, buf, n, &from);
+                // STUN 模块处理（NAT 检测 / Srflx 地址探测）
+                if (p2p_stun_is_binding_response(type, pkt, n)) {
+                    p2p_stun_handle_packet(s, &from, type, pkt, n);
+                    continue;
+                }
 
                 // TURN 响应处理（Allocate/Refresh/CreatePermission/Data Indication）
-                const uint8_t *inner_data = NULL;
-                int inner_len = 0;
-                struct sockaddr_in inner_peer = {0};
-                int turn_ret = p2p_turn_handle_packet(s, buf, n, &from,
+                const uint8_t *inner_data = NULL; int inner_len = 0; struct sockaddr_in inner_peer = {0};
+                int turn_ret = p2p_turn_handle_packet(s, &from, type, pkt, n,
                                                       &inner_data, &inner_len, &inner_peer);
                 if (turn_ret == 1 && inner_data && inner_len >= P2P_HDR_SIZE) {
-                    // Data Indication: 内层为完整 P2P 包，重新注入主派发循环
-                    memmove(buf, inner_data, inner_len);
-                    n = inner_len;
-                    from = inner_peer;
+
+                    // Data Indication: 解包为内层完整 P2P 包，转换为 P2P 协议继续执行下面主派发循环
+                    pkt = (uint8_t*)inner_data; n = inner_len; from = inner_peer;
                     goto dispatch_p2p;
                 }
 
@@ -878,10 +877,10 @@ p2p_update(p2p_handle_t hdl) {
 
         // 获取 header
         p2p_packet_hdr_t hdr;
-        p2p_pkt_hdr_decode(buf, &hdr);
+        p2p_pkt_hdr_decode(pkt, &hdr);
 
         // 获取 payload
-        const uint8_t *payload = buf + P2P_HDR_SIZE;
+        const uint8_t *payload = pkt + P2P_HDR_SIZE;
         int payload_len = n - P2P_HDR_SIZE;
         uint8_t crypto_dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];  /* 解密输出缓冲区 */
 
@@ -1061,7 +1060,7 @@ p2p_update(p2p_handle_t hdl) {
                 break;
         }
 
-    } // while ((n = p2p_udp_recv_from(s->sock, &from, buf, sizeof(buf))) > 0)
+    } // while ((n = p2p_udp_recv_from(s->sock, &from, pkt, sizeof(pkt))) > 0)
 
     /* ========================================================================
      * 阶段 2：信令服务维护（主动拉取远端候选地址）
@@ -1201,9 +1200,9 @@ p2p_update(p2p_handle_t hdl) {
             int ready = !s->trans->is_ready || s->trans->is_ready(s);
             if (ready) {
                 // 由高级传输模块自行处理流的数据
-                n = ring_read(&s->stream.send_ring, buf, sizeof(buf));
+                n = ring_read(&s->stream.send_ring, pkt, sizeof(pkt));
                 if (n > 0) {
-                    int sent = s->trans->send_data(s, buf, n);
+                    int sent = s->trans->send_data(s, pkt, n);
                     if (sent > 0) {
                         s->stream.pending_bytes -= n;
                         s->stream.send_offset += n;
@@ -1332,7 +1331,7 @@ p2p_update(p2p_handle_t hdl) {
      * 阶段 9：NAT 类型检测（后台定期运行 STUN 探测）
      * ======================================================================== */
 
-    if (s->cfg.stun_server) p2p_stun_nat_detect_tick(s);
+    if (s->cfg.stun_server) p2p_stun_nat_detect_tick(s, now_ms);
     if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
         p2p_signal_compact_nat_detect_tick(s);
 

@@ -156,11 +156,12 @@ typedef struct {
 
 struct p2p_session;
 
-/*
- * ============================================================================
- * STUN 公开接口
- * ============================================================================
- */
+static void stun_xor_addr(struct sockaddr_in *addr) {
+    addr->sin_port ^= htons(0x2112);
+    *(uint32_t *)&addr->sin_addr ^= htonl(STUN_MAGIC);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 /*
  * 构建 STUN Binding 请求
@@ -187,6 +188,18 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12]
  */
 int p2p_stun_build_binding_response(uint8_t *buf, int max_len, const uint8_t tsx_id[12],
                                     const struct sockaddr_in *mapped, const char *password);
+
+// 用于 STUN/TURN 分流
+static inline bool p2p_stun_is_binding_response(uint16_t type, const uint8_t *buf, int len) {
+
+    assert(buf && len >= 20);
+    assert(nget_l(buf + 4) == STUN_MAGIC);
+
+    // 目前 STUN 只认 STUN Binding Success Response (0x0101)
+    return type == STUN_BINDING_RESPONSE;
+}
+
+//-----------------------------------------------------------------------------
 
 /*
  * 构建 ICE 标准的连通性检查包（STUN Binding Request + ICE 属性）
@@ -227,19 +240,26 @@ int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
  * @param len   包长度
  * @return      1=包含 ICE 属性（应由 NAT 模块处理），0=普通 STUN 包（NAT 检测用）
  */
-int p2p_stun_has_ice_attrs(const uint8_t *buf, int len);
+bool p2p_stun_has_ice_attrs(const uint8_t *buf, int len);
 
+///////////////////////////////////////////////////////////////////////////////
 
 /*
  * 处理 STUN 响应包
  * 功能：解析响应，提取映射地址（Srflx），推进 NAT 检测状态机
  */
-void p2p_stun_handle_packet(struct p2p_session *s, const uint8_t *buf, int len, const struct sockaddr_in *from);
+void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *from,
+                            uint16_t type, const uint8_t *buf, int len);
+
+///////////////////////////////////////////////////////////////////////////////
+
+ret_t p2p_stun_nat_detect_start(struct p2p_session *s, bool as_candidate);
 
 /*
  * STUN NAT 检测状态机 tick
  * 仅处理 STUN 路径（需配置 stun_server），COMPACT 路径由 compact_nat_detect_tick 处理
  */
-void p2p_stun_nat_detect_tick(struct p2p_session *s);
+void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms);
 
+///////////////////////////////////////////////////////////////////////////////
 #endif /* P2P_STUN_H */

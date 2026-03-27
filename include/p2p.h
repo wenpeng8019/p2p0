@@ -115,14 +115,15 @@ typedef enum {
  */
 typedef enum {
     P2P_NAT_UNKNOWN = 0,                        // 未知：检测尚未完成或未启动
+    P2P_NAT_UNDETECTABLE,                       // 不支持检测：未配置 STUN 服务器；或使用 COMPACT 信令但服务器返回检测端口为 0
+    P2P_NAT_BLOCKED,                            // UDP 不可达：无法联系 STUN 服务器（Test I 超时）
+    P2P_NAT_ERROR,                              // 错误：检测过程中出现异常
     P2P_NAT_OPEN,                               // 无 NAT：有公网 IP，映射地址 == 本地地址
     P2P_NAT_FULL_CONE,                          // 完全锥形：最容易穿透（Test II 成功）
     P2P_NAT_RESTRICTED,                         // 受限锥形（Test III 成功，Test II 失败）
     P2P_NAT_PORT_RESTRICTED,                    // 端口受限锥形（Test I 成功，II/III 均失败）
     P2P_NAT_SYMMETRIC,                          // 对称型 NAT：不同目标端口映射到不同外部端口;
                                                 // 仅 COMPACT 模式（服务器有 probe_port）可检测
-    P2P_NAT_BLOCKED,                            // UDP 不可达：无法联系 STUN 服务器（Test I 超时）
-    P2P_NAT_UNDETECTABLE,                       // 不支持检测：未配置 STUN 服务器；或使用 COMPACT 信令但服务器返回检测端口为 0
 } p2p_nat_type_t;
 
 /*
