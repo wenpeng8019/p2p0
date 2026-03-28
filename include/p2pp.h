@@ -872,51 +872,46 @@ typedef struct {
  *
  * P2P_RLY_ONLINE:
  *   payload: [name(32)][instance_id(4)]
- *   - name: 本地 peer 名称
- *   - instance_id: 客户端每次 online() 生成的 32 位随机数（参考 RTP SSRC）
- *     · instance_id 相同 → 重传，幂等处理
- *     · instance_id 不同 → 客户端重连，服务器保持/重置数据上下文
+ *   - name: 本地 peer 名称，定长 32 字节，0 填充
+ *   - instance_id: 客户端每次 online() 生成的 32 位随机数（网络字节序）
  *
  * P2P_RLY_ONLINE_ACK:
  *   payload: [features(1)][candidate_relay_max(1)]
- *   - features: 
- *     · 0x01 = RELAY（支持数据包中继）
- *     · 0x02 = MSG（支持 RPC 机制）
- *   - candidate_relay_max: 服务器允许的单包最大候选数（0=客户端使用默认值）
+ *   - features: 0x01=RELAY, 0x02=MSG
+ *   - candidate_relay_max: 单包最大候选数（0=客户端用默认）
  *
  * P2P_RLY_CONNECT:
  *   payload: [target_name(32)]
- *   - target_name: 目标 peer 名称
+ *   - target_name: 目标 peer 名称，定长 32 字节，0 填充
  *
  * P2P_RLY_CONNECT_ACK:
  *   payload: [status(1)][reserved(3)][session_id(8)]
- *   - status:
- *     · 0x00 = 对端在线
- *     · 0x01 = 对端离线
- *     · 0xFF = 错误（target 不存在等）
- *   - session_id: 分配的会话 ID（网络字节序）
+ *   - status: 0x00=对端在线, 0x01=离线, 0xFF=错误
+ *   - reserved: 3 字节保留，未使用
+ *   - session_id: 64 位会话 ID（网络字节序）
  *
  * P2P_RLY_DISCONNECT:
  *   payload: [session_id(8)]
  *   - session_id: 要断开的会话 ID（网络字节序）
- *   - 用途：主动通知服务器结束与对端的会话，服务器转发给对端
  *
- * P2P_RLY_PEER_INFO (双向):
+ * P2P_RLY_PEER_INFO:
  *   payload: [session_id(8)][candidate_count(1)][candidates(N*23)]
- *   - session_id: 会话 ID（网络字节序）
- *   - candidate_count > 0: 本段候选数量
- *   - candidate_count = 0: 传输完成（FIN）
- *   - 用途：
- *     · Client → Server: 上传候选
- *     · Server → Client: 下发候选（中转对端上传的候选）
+ *   - session_id: 64 位会话 ID（网络字节序）
+ *   - candidate_count: 本包候选数量，0=FIN
+ *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *
  * P2P_RLY_PEER_INFO_ACK:
  *   payload: [session_id(8)][forwarded_count(1)]
- *   - session_id: 会话 ID（网络字节序）
- *   - forwarded_count: 实际转发（或缓存）的候选数
- *     · > 0: 成功接受 N 个候选；若 N < 上传数，客户端从第 N+1 个重传
- *     · = 0: 所有候选已转发到对端（仅 FIN 发送后才出现）
- *   注：服务器仅在中转缓冲区有空间时才发送 ACK（flow control）
+ *   - session_id: 64 位会话 ID（网络字节序）
+ *   - forwarded_count: 实际转发/缓存的候选数，0=全部完成（仅 FIN 后）
+ *
+ * P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO:
+ *   payload: [target_name(32)][p2p_packet(N)] (Client→Server)
+ *   payload: [sender_name(32)][p2p_packet(N)] (Server→Target)
+ *   - p2p_packet: 完整 P2P 包（包头+payload）
+ *
+ * P2P_RLY_REQ / P2P_RLY_REQ_ACK / P2P_RLY_RESP / P2P_RLY_RESP_ACK:
+ *   详见下方 RPC 机制注释（与实现一致）
  *
  * P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO - P2P 包中继
  * ============================================================================
