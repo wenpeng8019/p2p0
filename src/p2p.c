@@ -47,6 +47,7 @@ uint16_t             p2p_instrument_base = 0;
 static inline void gather_local_candidates(p2p_session_t *s) {
 
     s->local_cand_cnt = 0;
+    s->turn_base = -1;  // 重新收集候选，当前尚无 TURN 候选
 
     /* ======================== 1. 收集 Host 候选 ======================== */
     /*
@@ -55,31 +56,36 @@ static inline void gather_local_candidates(p2p_session_t *s) {
      */
     if (!s->cfg.test_ice_host_off) {
 
-        /* 获取本地端口 */
-        struct sockaddr_in loc; socklen_t len = sizeof(loc);
-        getsockname(s->sock, (struct sockaddr *)&loc, &len);
+        const route_ctx_t *rt = route_shared_get();
+        if (rt && rt->addr_count > 0) {
+            
+            /* 获取本地端口 */
+            struct sockaddr_in loc; socklen_t len = sizeof(loc);
+            getsockname(s->sock, (struct sockaddr *)&loc, &len);
 
-        int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
+            int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
 
-        for (int i = 0; i < s->route.addr_count; i++) {
-            int idx = p2p_cand_push_local(s);
-            if (idx < 0) {
-                print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S39, 39),
-                      inet_ntoa(s->route.local_addrs[i].sin_addr), ntohs(s->route.local_addrs[i].sin_port));
-                return;
+            for (int i = 0; rt && i < rt->addr_count; i++) {
+                int idx = p2p_cand_push_local(s);
+                if (idx < 0) {
+                    print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S39, 39),
+                          inet_ntoa(rt->local_addrs[i].sin_addr), ntohs(rt->local_addrs[i].sin_port));
+                    return;
+                }
+
+                p2p_local_candidate_entry_t *c = &s->local_cands[idx];
+                c->type = P2P_CAND_HOST;
+                c->addr = rt->local_addrs[i];
+                c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
+
+                uint16_t local_pref = (uint16_t)(65535 - host_index++);
+                c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
+
+                print("I:", LA_F("Gathered Host candidate: %s:%d (priority=0x%08x)", LA_F203, 203),
+                      inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
             }
-
-            p2p_local_candidate_entry_t *c = &s->local_cands[idx];
-            c->type = P2P_CAND_HOST;
-            c->addr = s->route.local_addrs[i];
-            c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
-
-            uint16_t local_pref = (uint16_t)(65535 - host_index++);
-            c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
-
-            print("I:", LA_F("Gathered Host candidate: %s:%d (priority=0x%08x)", LA_F203, 203),
-                  inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
         }
+        else print("W:", LA_F("No shared local route addresses available, host candidates skipped", LA_F532, 532));
     }
     else print("I:", LA_F("Skipping Host Candidate gathering (disabled)", LA_F334, 334));
 
@@ -87,6 +93,10 @@ static inline void gather_local_candidates(p2p_session_t *s) {
     /*
      * Server Reflexive Candidate 是通过 STUN 服务器发现的公网地址。
      * 用于穿透 NAT，让位于不同 NAT 后的对端能够通信。
+     *
+     * 异步流程：
+         *   1. 发送 STUN Binding Request 时递增 stun_pending
+         *   2. 接收 STUN Binding Response 时，stun_add_srflx_candidate 递减 stun_pending
      */
     if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT
         && !s->cfg.test_ice_srflx_off && s->cfg.stun_server) {
@@ -104,6 +114,7 @@ static inline void gather_local_candidates(p2p_session_t *s) {
             if (he) {
                 memcpy(&stun_addr.sin_addr, he->h_addr_list[0], he->h_length);
                 p2p_udp_send_to(s, &stun_addr, stun_buf, slen);
+                s->stun_pending++;      /* 一次性 Srflx 候选待响应 */
                 print("I:", LA_F("Requested Srflx Candidate from %s", LA_F316, 316), s->cfg.stun_server);
             }
         }
@@ -113,6 +124,10 @@ static inline void gather_local_candidates(p2p_session_t *s) {
     /*
      * Relay Candidate 是通过 TURN 服务器分配的中继地址。
      * 当直连和 STUN 穿透都失败时，使用中继作为最后的备选。
+     *
+     * 异步流程：
+     *   1. p2p_turn_allocate() 发送请求时递增 turn_pending
+     *   2. 接收 Allocate Success 时，在 turn_handle_packet 中递减 turn_pending
      */
     if (!s->cfg.test_ice_relay_off && s->cfg.turn_server) {
         if (p2p_turn_allocate(s) == 0) {
@@ -352,11 +367,8 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         s->nat_type = P2P_NAT_UNDETECTABLE;
     }
 
-    // 初始化路由层（用于检测是否处于同一子网）
-    route_init(&s->route);
-
-    // 获取本地所有有效的网络地址
-    if ((ret = route_detect_local(&s->route)) < 0) {
+    // 初始化共享路由层（用于检测是否处于同一子网）
+    if ((ret = route_shared_acquire()) < 0) {
         print("E:", LA_F("Detect local network interfaces failed(%d)", LA_F230, 230), ret);
         p2p_udp_close(s); free(s);
         return NULL;
@@ -370,7 +382,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("E:", LA_F("Failed to allocate memory for candidate lists", LA_F240, 240));
         if (s->local_cands) free(s->local_cands);
         if (s->remote_cands) free(s->remote_cands);
-        p2p_udp_close(s); free(s);
+        p2p_udp_close(s); route_shared_release(); free(s);
         return NULL;
     }
     s->local_cand_cap = s->remote_cand_cap = initial_cand_cap;
@@ -481,7 +493,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         if ((ret = p2p_thread_start(s)) != E_NONE) {
             print("E:", LA_F("Start internal thread failed(%d)", LA_F336, 336), ret);
             P_sock_close(s->sock);
-            free(s->local_cands); free(s->remote_cands); free(s);
+            free(s->local_cands); free(s->remote_cands); route_shared_release(); free(s);
             return NULL;
         }
     }
@@ -540,6 +552,7 @@ p2p_destroy(p2p_handle_t hdl) {
 
     free(s->local_cands);
     free(s->remote_cands);
+    route_shared_release();
     free(s);
 }
 

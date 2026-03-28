@@ -339,8 +339,7 @@ static void send_connect(p2p_session_t *s) {
     }
 
     print("V:", LA_F("%s enqueued, target='%s'\n", LA_F492, 492), PROTO, ctx->remote_peer_id);
-
-    ctx->connect_time = P_tick_ms();
+    ctx->last_send_time = P_tick_ms();
 }
 
 /*
@@ -383,10 +382,12 @@ static void send_peer_info(p2p_session_t *s, bool send_fin) {
     if (send_fin) {
         print("V:", LA_F("%s sent FIN\n", LA_F495, 495), PROTO);
         ctx->local_candidates_fin = true;
+        ctx->trickle_batch_count = 0;  /* 重置批计数 */
     } else {
         print("V:", LA_F("%s sent %d candidates, next_idx=%d\n", LA_F494, 494),
               PROTO, cand_cnt, ctx->next_candidate_index + cand_cnt);
         ctx->next_candidate_index += cand_cnt;
+        ctx->trickle_batch_count = 0;  /* 重置批计数 */
     }
 
     ctx->last_send_time = P_tick_ms();
@@ -417,6 +418,14 @@ static void send_disconnect(p2p_session_t *s) {
 
     print("V:", LA_F("%s enqueued, ses_id=%" PRIu64 "\n", LA_F490, 490),
           PROTO, ctx->session_id);
+}
+
+static bool relay_wait_stun_candidates(p2p_session_t *s) {
+    p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
+    return ctx->state == SIGNAL_RELAY_EXCHANGING
+        && ctx->next_candidate_index == 0
+        && !ctx->local_candidates_fin
+        && s->stun_pending > 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -460,6 +469,12 @@ static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len)
     print("I:", LA_F("ONLINE: ready to start session\n", LA_F518, 518));
 
     ctx->heartbeat_time = P_tick_ms();
+
+    // 触发排队的 connect 请求
+    if (ctx->connected) {
+        ctx->state = SIGNAL_RELAY_WAIT_CONNECT_ACK;
+        send_connect(s);
+    }
 }
 
 /*
@@ -511,13 +526,17 @@ static void handle_connect_ack(p2p_session_t *s, const uint8_t *payload, int len
         nat_punch(s, -1/* all candidates */);
     }
 
-    // 立即发送第一批候选
-    if (s->local_cand_cnt > 0) {
-        send_peer_info(s, false);
-    } else {
-        // 没有候选，直接发送 FIN
-        send_peer_info(s, true);
+    // 重置攒批计数器
+    ctx->trickle_batch_count = 0;
+    ctx->trickle_last_time = P_tick_ms();
+
+    if (relay_wait_stun_candidates(s)) {
+        print("I:", LA_F("EXCHANGING: waiting for initial STUN candidates before upload\n", LA_F514, 514));
+        return;
     }
+
+    if (s->local_cand_cnt > 0) send_peer_info(s, false);
+    else send_peer_info(s, true);
 }
 
 /*
@@ -656,7 +675,6 @@ ret_t p2p_signal_relay_online(struct p2p_session *s, const char *local_peer_id,
     ctx->instance_id = rid;
 
     // local_peer_id 保存
-    memset(ctx->local_peer_id, 0, sizeof(ctx->local_peer_id));
     strncpy(ctx->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
     ctx->local_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
@@ -730,6 +748,9 @@ ret_t p2p_signal_relay_offline(struct p2p_session *s) {
     }
     ctx->chunk_free_count = 0;
 
+    ctx->connected = false;
+    ctx->trickle_batch_count = 0;  /* 重置攒批计数器 */
+    ctx->trickle_last_time = 0;     /* 重置攒批时间戳 */
     ctx->state = SIGNAL_RELAY_INIT;
 
     return E_NONE;
@@ -738,16 +759,26 @@ ret_t p2p_signal_relay_offline(struct p2p_session *s) {
 ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id) {
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
-    P_check(ctx->state == SIGNAL_RELAY_ONLINE, return E_NONE_CONTEXT;)
+    P_check(remote_peer_id && remote_peer_id[0], return E_INVALID;)
+    if (ctx->state == SIGNAL_RELAY_INIT || ctx->state == SIGNAL_RELAY_ERROR) {
+        return E_NONE_CONTEXT;
+    }
 
-    // 保存 remote_peer_id
-    memset(ctx->remote_peer_id, 0, sizeof(ctx->remote_peer_id));
+    // 已有 connect 意图/会话：同 target 幂等成功；不同 target 视为忙
+    if (ctx->connected) {
+        return strcmp(ctx->remote_peer_id, remote_peer_id) == 0 ? E_NONE : E_BUSY;
+    }
+
+    // 设置连接意图
     strncpy(ctx->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
     ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+    ctx->connected = true;
 
-    // 切换状态并发送 CONNECT
-    ctx->state = SIGNAL_RELAY_WAIT_CONNECT_ACK;
-    send_connect(s);
+    // 已上线：立即发送 CONNECT；否则等待 ONLINE_ACK 后自动触发
+    if (ctx->state == SIGNAL_RELAY_ONLINE) {
+        ctx->state = SIGNAL_RELAY_WAIT_CONNECT_ACK;
+        send_connect(s);
+    }
 
     return E_NONE;
 }
@@ -755,10 +786,20 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
 ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
-    // 检查状态：必须在 EXCHANGING 或 READY 状态
+    // 幂等：没有 connect 意图/会话则直接成功
+    if (!ctx->connected) {
+        return E_NONE;
+    }
+
+    // 尚未建立会话：取消 connect 意图
+    if (ctx->state <= SIGNAL_RELAY_ONLINE) {
+        *ctx->remote_peer_id = 0;
+        ctx->connected = false;
+        return E_NONE;
+    }
+
     if (ctx->state < SIGNAL_RELAY_EXCHANGING) {
-        print("W:", LA_F("disconnect: not in session (state=%d)\n", LA_F537, 537), (int)ctx->state);
-        return E_NONE_CONTEXT;
+        return E_BUSY;
     }
 
     // 发送 DISCONNECT 消息
@@ -770,32 +811,70 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
     ctx->next_candidate_index = 0;
     ctx->local_candidates_fin = false;
     ctx->remote_candidates_fin = false;
+    ctx->trickle_batch_count = 0;  /* 重置攒批计数器 */
     
     memset(ctx->remote_peer_id, 0, sizeof(ctx->remote_peer_id));
+    ctx->connected = false;
+
+    print("I:", LA_F("Disconnected, back to ONLINE state\n", LA_F536, 536));
 
     // 回到 ONLINE 状态（保持与服务器的连接）
     ctx->state = SIGNAL_RELAY_ONLINE;
-    print("I:", LA_F("Disconnected, back to ONLINE state\n", LA_F536, 536));
 
     return E_NONE;
 }
 
-void p2p_signal_relay_trickle_turn(struct p2p_session *s) {
+void p2p_signal_relay_trickle_candidate(struct p2p_session *s) {
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
-    if (ctx->state < SIGNAL_RELAY_EXCHANGING || ctx->local_candidates_fin) {
+    /* 状态校验：只在候选交换或完成阶段处理 trickle（与 COMPACT 对齐）*/
+    if ((ctx->state != SIGNAL_RELAY_EXCHANGING && ctx->state != SIGNAL_RELAY_READY) || 
+        ctx->local_candidates_fin) {
         return;
     }
 
-    // TURN 候选收集完成，立即发送
-    if (ctx->next_candidate_index < s->local_cand_cnt) {
-        print("I:", LA_F("Trickle TURN: uploading new candidates\n", LA_F528, 528));
+    if (ctx->state == SIGNAL_RELAY_EXCHANGING && ctx->next_candidate_index == 0) {
+        if (s->stun_pending > 0) return;
+
+        if (s->local_cand_cnt > 0) send_peer_info(s, false);
+        else send_peer_info(s, true);
+        return;
+    }
+
+    /* 检查是否有新候选 */
+    if (ctx->next_candidate_index >= s->local_cand_cnt) {
+        return;
+    }
+
+    /* O(1) 累加攒批计数：每次本地异步候选（STUN/TURN）增加 1 个 */
+    ctx->trickle_batch_count++;
+
+    /* 攒批时间窗口控制 */
+    uint64_t now = P_tick_ms();
+    uint8_t max_per_pkt = P2P_RELAY_MAX_CANDS_PER_PACKET;
+    bool should_send = false;
+
+    /* 满足两个条件之一就发送：
+     * 1. 当前批累积了最大数量
+     * 2. 上次发送后已经过了攒批时间窗口 */
+    if (ctx->trickle_batch_count >= max_per_pkt) {
+        print("I:", LA_F("Trickle TURN: batch full (%d cands), sending\n", LA_F527, 527),
+              ctx->trickle_batch_count);
+        should_send = true;
+    } else if (ctx->trickle_last_time && (now - ctx->trickle_last_time) >= P2P_RELAY_TRICKLE_BATCH_MS) {
+        print("I:", LA_F("Trickle TURN: batch timeout (%d cands), sending\n", LA_F526, 526),
+              ctx->trickle_batch_count);
+        should_send = true;
+    }
+
+    if (should_send) {
         send_peer_info(s, false);
-        ctx->trickle_last_time = P_tick_ms();
+        /* 注意：send_peer_info 内部会重置 trickle_batch_count */
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
 
 void p2p_signal_relay_tick_recv(struct p2p_session *s) {
 
@@ -987,6 +1066,10 @@ void p2p_signal_relay_tick_send(struct p2p_session *s) {
 
     // EXCHANGING: 上传候选（Trickle）
     if (ctx->state == SIGNAL_RELAY_EXCHANGING) {
+
+        if (relay_wait_stun_candidates(s)) {
+            return;
+        }
 
         if (!ctx->local_candidates_fin) {
 

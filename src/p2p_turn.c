@@ -387,7 +387,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
     int ret = p2p_udp_send_to(s, &t->server_addr, buf, off);
     if (ret <= 0) return -1;
     t->state = TURN_ALLOCATING;
-    s->turn_pending++;
+    s->turn_pending++;      /* 当前连接的 Relay 候选待响应 */
     return 0;
 }
 
@@ -511,17 +511,18 @@ int p2p_turn_handle_packet(p2p_session_t *s, const struct sockaddr_in *from,
         c->type = P2P_CAND_RELAY;
         c->addr = relay;
         c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
+        if (s->turn_base < 0) s->turn_base = idx;
 
         print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F256, 256),
                 inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
 
+        /* 当前连接的 Relay 候选收集完成 */
         if (s->turn_pending > 0) s->turn_pending--;
 
         if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
-            p2p_signal_compact_trickle_turn(s);
-        if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
-            p2p_signal_relay_trickle_turn(s);
-
+            p2p_signal_compact_trickle_candidate(s);
+        else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+            p2p_signal_relay_trickle_candidate(s);
         // ICE 模式通过应用层回调接口来协商发送候选
         else if (s->signaling_mode == P2P_SIGNALING_MODE_ICE && s->cfg.on_ice_candidate) {
             char cand_str[256];

@@ -282,9 +282,9 @@ typedef struct {
     /* REGISTER_ACK 返回的信息 */
     int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量 */
     struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器主端口探测到的）*/
-    bool                relay_support;                      /* 服务器是否支持中继 */
-    bool                msg_support;                        /* 服务器是否支持 RPC */
     uint16_t            probe_port;                         /* NAT 探测端口（0=不支持探测）*/
+    bool                feature_relay;                      /* 服务器是否支持中继 */
+    bool                feature_msg;                        /* 服务器是否支持 RPC */
 
     /* PEER_INFO 序列化同步控制 */
     uint16_t            candidates_mask;                    /* 后续候选队列 seq 窗口 mask，用于全部完成确认，同时意味着最多发 16 个包 */
@@ -391,10 +391,12 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
 ret_t p2p_signal_compact_disconnect(struct p2p_session *s);
 
 /*
- * TURN Allocate 完成后，Trickle 发送中继候选到对端
- * 在已发窗口后追加 PEER_INFO + FIN，完成 COMPACT 模式的异步候选交换
+ * 本地候选异步补发入口（支持 STUN/TURN）
+ *
+ * 若首批候选尚未发送，则在 stun_pending 清零后启动首批候选交换；
+ * 若首批已发送，则将新增本地候选按 trickle 方式补发给对端。
  */
-void p2p_signal_compact_trickle_turn(struct p2p_session *s);
+void p2p_signal_compact_trickle_candidate(struct p2p_session *s);
 
 /*
  * 通过 COMPACT 信令中转发送 REACH 包（NAT 打洞冷启动握手）

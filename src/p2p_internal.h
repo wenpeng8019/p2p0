@@ -135,7 +135,6 @@ typedef struct p2p_session {
     /* ======================== p2p 链路 ======================== */
 
     nat_ctx_t                       nat;                // NAT 穿透上下文
-    route_ctx_t                     route;              // 路由表上下文
     reliable_t                      reliable;           // 可靠传输层状态
     stream_t                        stream;             // 流传输层状态
     path_manager_t                  path_mgr;           // 路径管理器（多路径并行支持）
@@ -166,7 +165,9 @@ typedef struct p2p_session {
     uint16_t                        remote_srflx_cnt;   // 对端 srflx 类型候选数量
     uint16_t                        remote_relay_cnt;   // 对端 relay 类型候选数量
     bool                            remote_cand_done;   // 远端候选是否同步完成（由信令层设置，NAT 层判断超时用）
-    int                             turn_pending;       // TURN Allocate 待响应计数（>0 表示还有异步收集未完成）
+    int                             stun_pending;       // STUN/Srflx 候选待响应计数（一次性本地候选收集）
+    int                             turn_pending;       // TURN Allocate 待响应计数（本轮连接中的动态 Relay 候选）
+    int                             turn_base;          // local_cands 中首个 TURN 候选索引（-1 表示当前无 TURN 候选）
 
     /* ===== 信令上下文/ICE（Interactive Connectivity Establishment）交换 ===== */
     /*
@@ -324,11 +325,31 @@ static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
     // 如果是关闭连接（而非重置）
     if (closing) {
 
-        s->turn_pending = 0;            // 关闭 TURN 服务
+        // 清理本地 TURN 候选（TURN 候选随连接失效而失效）
+        if (s->turn_base >= 0) { assert(s->turn_base < s->local_cand_cnt);
+
+            // 优先从后向前 pop 掉 TURN 候选（多次连接后，TURN 候选都会位于 local_cands 队列的末尾）
+            while (s->local_cand_cnt > s->turn_base) {
+                if (s->local_cands[s->local_cand_cnt - 1].type != P2P_CAND_RELAY) break;
+                s->local_cand_cnt--;
+            }
+
+            // 如果 TURN 候选并非连续地位于末尾（首次连接可能和 STUN 候选交错）
+            // + 紧缩 turn_base..end 范围内的非 TURN 候选，覆盖掉前面的 TURN 候选
+            if (s->local_cand_cnt != s->turn_base) {
+                int j = s->turn_base;
+                for (int i = s->turn_base; i < s->local_cand_cnt; i++) {
+                    if (s->local_cands[i].type != P2P_CAND_RELAY)
+                        s->local_cands[j++] = s->local_cands[i];
+                }
+                s->local_cand_cnt = j;
+            }
+
+            s->turn_base = -1;
+        }
+        s->turn_pending = 0;            // 关闭当前 TURN 候选收集
         p2p_turn_reset(s);
-
         s->nat.state = NAT_CLOSED;      // 标记 NAT 已关闭
-
         s->state = P2P_STATE_CLOSED;    // 更新状态为已关闭
     }
     // 重置 NAT

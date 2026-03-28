@@ -774,7 +774,14 @@ static inline void stun_add_srflx_candidate(struct p2p_session *s, const struct 
     print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F417, 417),
           inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
 
-    if (s->signaling_mode == P2P_SIGNALING_MODE_ICE && s->cfg.on_ice_candidate) {
+    /* 一次性 Srflx 候选收集完成 */
+    if (s->stun_pending > 0) s->stun_pending--;
+
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+        p2p_signal_compact_trickle_candidate(s);
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+        p2p_signal_relay_trickle_candidate(s);
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_ICE && s->cfg.on_ice_candidate) {
         char sdp_a[256];
         if (p2p_ice_export_candidate_entry(c, sdp_a, sizeof(sdp_a)) > 0)
             s->cfg.on_ice_candidate((p2p_handle_t)s, sdp_a, s->cfg.userdata);

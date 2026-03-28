@@ -65,7 +65,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         if (s->cfg.test_ice_srflx_off) --s->remote_cand_cnt;
         else { s->remote_srflx_cnt++;
 
-            // 这里启动打洞需要依赖于信令服务器的 REGISTER_ACK 包中携带的 relay_support 标志
+            // 这里启动打洞需要依赖于信令服务器的 REGISTER_ACK 包中携带的 feature_relay 标志
             // + 该标志用于决定所使用的冷打洞机制，如果冷打洞不依赖服务器中转，则打洞可以不依赖 REGISTER_ACK 包
             if (s->sig_compact_ctx.state >= SIGNAL_COMPACT_REGISTERED && nat_punch(s, 0) != E_NONE) {
                 print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F137, 137),
@@ -299,7 +299,7 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
  * 行为：
  *   1. 在现有候选窗口后追加一个 PEER_INFO 包（seq = 已发包数 + 1）
  *   2. 扩展 candidates_mask，将新包纳入确认窗口
- *   3. 当所有 TURN 收集完毕（turn_pending==0）且候选已全部打包时，pack 自动附带 FIN
+ *   3. 当所有 TURN 候选收集完毕（turn_pending==0）且候选已全部打包时，pack 自动附带 FIN
  *   4. 如果当前状态已到 READY（前序包均已确认），回退到 ICE 以等待新包确认
  *   5. 支持攒批：多个 TURN 响应在 TRICKLE_BATCH_MS 窗口内合并为一个包
  */
@@ -339,6 +339,11 @@ static void send_trickle_candidates(p2p_session_t *s) {
 
     ctx->last_send_time = P_tick_ms();
     ctx->trickle_last_pack_time = s->turn_pending > 0 ? ctx->last_send_time : 0;
+}
+
+static bool compact_wait_stun_candidates(p2p_session_t *s) {
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    return ctx->state == SIGNAL_COMPACT_ICE && ctx->candidates_mask == 0 && s->stun_pending > 0;
 }
 
 /*
@@ -599,11 +604,23 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     return E_NONE;
 }
 
-void p2p_signal_compact_trickle_turn(p2p_session_t *s) {
-
+void p2p_signal_compact_trickle_candidate(p2p_session_t *s) {
+    
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     if (ctx->state != SIGNAL_COMPACT_ICE && ctx->state != SIGNAL_COMPACT_READY) return;
     if (!ctx->session_id) return;
+
+    if (ctx->state == SIGNAL_COMPACT_ICE && ctx->candidates_mask == 0) {
+        if (s->stun_pending > 0) {
+            print("V:", LA_F("%s: waiting for STUN candidates, stun_pending=%d\n", LA_F66, 66),
+                  TASK_ICE, s->stun_pending);
+            return;
+        }
+
+        send_rest_candidates_and_fin(s);
+        ctx->last_send_time = P_tick_ms();
+        return;
+    }
 
     uint16_t seq = ctx->trickle_seq_next;
     if (seq > 16) {
@@ -611,7 +628,7 @@ void p2p_signal_compact_trickle_turn(p2p_session_t *s) {
         return;
     }
 
-    // O(1) 累加：每次 TURN 响应带来 1 个新候选
+    // O(1) 累加：每次本地异步候选（STUN/TURN）带来 1 个新候选
     ctx->trickle_queue[seq]++;
 
     // 攒批间隔控制（固定窗口策略）
@@ -640,7 +657,7 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     P_check(!payload_len || payload, return E_INVALID;)
-    P_check(ctx->relay_support, return E_NO_SUPPORT;)
+    P_check(ctx->feature_relay, return E_NO_SUPPORT;)
     P_check(ctx->session_id, return E_NONE_CONTEXT;)
 
     // 构造完整负载：[session_id(8)][原始 payload]
@@ -712,7 +729,7 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
     P_check(len == 0 || data, return E_INVALID;)
     P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
     P_check(ctx->state >= SIGNAL_COMPACT_REGISTERED, return E_NONE_CONTEXT;)    // 未注册
-    if (!ctx->msg_support) {
+    if (!ctx->feature_msg) {
         print("E:", LA_F("MSG RPC not supported by server\n", LA_F447, 447));
         return E_NO_SUPPORT;
     }
@@ -814,8 +831,8 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    ctx->relay_support = (flags & SIG_REGACK_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
-    ctx->msg_support   = (flags & SIG_REGACK_FLAG_MSG)   != 0;      // 服务器是否支持 MSG RPC
+    ctx->feature_relay = (flags & SIG_REGACK_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
+    ctx->feature_msg   = (flags & SIG_REGACK_FLAG_MSG) != 0;      // 服务器是否支持 MSG RPC
     uint64_t ack_session_id = nget_ll(payload + 1);
     uint8_t max_candidates = payload[13];
 
@@ -823,7 +840,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         ctx->candidates_cached = max_candidates;
 
     // 根据服务器能力设置探测状态
-    if (ctx->msg_support) {
+    if (ctx->feature_msg) {
         s->probe_ctx.state = P2P_PROBE_STATE_READY;
     } else {
         s->probe_ctx.state = P2P_PROBE_STATE_NO_SUPPORT;
@@ -859,8 +876,8 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     print("V:", LA_F("%s: accepted, public=%s:%d ses_id=%" PRIu64 " max_cands=%d probe_port=%d relay=%s msg=%s\n", LA_F453, 453),
           PROTO, inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port), 
           ctx->session_id, max_candidates, ctx->probe_port,
-          ctx->relay_support ? "yes" : "no",
-          ctx->msg_support   ? "yes" : "no");
+          ctx->feature_relay ? "yes" : "no",
+          ctx->feature_msg ? "yes" : "no");
 
     // 如果对方在线
     // + 注意，此时对方可能已经是在线状态，也就是 SIG_PKT_PEER_INFO 可能先于 SIG_PKT_REGISTER_ACK 到达
@@ -884,7 +901,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     else s->nat_type = P2P_NAT_UNDETECTABLE;
 
     // 如果服务器支持数据中继
-    if (ctx->relay_support) {
+    if (ctx->feature_relay) {
 
         // 启动数据中继功能
         assert(!s->signaling_relay_fn);
@@ -904,8 +921,12 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
         print("I:", LA_F("%s: peer online, proceeding to ICE\n", LA_F134, 134), PROTO);
         ctx->state = SIGNAL_COMPACT_ICE;
-        send_rest_candidates_and_fin(s);
-        ctx->last_send_time = P_tick_ms();
+        if (compact_wait_stun_candidates(s)) {
+            print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F134, 134), TASK_ICE);
+        } else {
+            send_rest_candidates_and_fin(s);
+            ctx->last_send_time = P_tick_ms();
+        }
 
         // 启动 NAT 打洞
         assert(s->nat.state < NAT_PUNCHING);
@@ -1053,8 +1074,12 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         ctx->state = SIGNAL_COMPACT_ICE;
         print("I:", LA_F("%s: entered, %s arrived after REGISTERED\n", LA_F109, 109), TASK_ICE, PROTO);
 
-        send_rest_candidates_and_fin(s);
-        ctx->last_send_time = P_tick_ms();
+        if (compact_wait_stun_candidates(s)) {
+            print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F134, 134), TASK_ICE);
+        } else {
+            send_rest_candidates_and_fin(s);
+            ctx->last_send_time = P_tick_ms();
+        }
     }
 
     bool new_seq = false;
@@ -1711,8 +1736,9 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
 
     // 检测 OPEN：公网地址 IP 与任意本地地址相同（无 NAT）
     int is_open = 0;
-    for (int i = 0; i < s->route.addr_count; i++) {
-        if (ctx->public_addr.sin_addr.s_addr == s->route.local_addrs[i].sin_addr.s_addr) {
+    const route_ctx_t *rt = route_shared_get();
+    for (int i = 0; rt && i < rt->addr_count; i++) {
+        if (ctx->public_addr.sin_addr.s_addr == rt->local_addrs[i].sin_addr.s_addr) {
             is_open = 1;
             break;
         }
@@ -1951,6 +1977,14 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
             return;
         }
 
+        if (ctx->candidates_mask == 0) {
+            if (compact_wait_stun_candidates(s)) return;
+
+            send_rest_candidates_and_fin(s);
+            ctx->last_send_time = now;
+            return;
+        }
+
         // 如果有待发送的 trickle 候选，且超过了攒批间隔时间窗口
         if (ctx->trickle_last_pack_time && tick_diff(now, ctx->trickle_last_pack_time) >= TRICKLE_BATCH_MS
             && ctx->trickle_seq_next <= 16 && ctx->trickle_queue[ctx->trickle_seq_next] > 0) {
@@ -1967,8 +2001,7 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
     // READY 状态：检查是否有新候选需要发送（暂时为空，未来可扩展）
     else if (ctx->state == SIGNAL_COMPACT_READY) {
 
-        // TODO: 如果后续收集到新候选（如延迟的 STUN 响应），可在此发送
-        // 目前 COMPACT 模式在进入 READY 前已发送所有候选
+        // 延迟的本地候选（如 STUN/TURN）通过异步入口即时触发，这里无需额外处理
     }
 }
 

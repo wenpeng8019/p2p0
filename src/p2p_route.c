@@ -28,12 +28,47 @@ static int mask_to_prefix(uint32_t mask_net) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static route_ctx_t g_route_ctx;
+static int g_route_refcnt = 0;
+
 void route_init(route_ctx_t *rt) {
     memset(rt, 0, sizeof(*rt));
 }
 
 void route_final(route_ctx_t *rt) {
     if (rt->local_addrs) free(rt->local_addrs);
+    rt->local_addrs = NULL;
+    rt->local_masks = NULL;
+    rt->addr_count = 0;
+}
+
+ret_t route_shared_acquire(void) {
+    if (g_route_refcnt > 0) {
+        g_route_refcnt++;
+        return E_NONE;
+    }
+
+    route_init(&g_route_ctx);
+    ret_t ret = route_detect_local(&g_route_ctx);
+    if (ret < 0) {
+        route_final(&g_route_ctx);
+        return ret;
+    }
+
+    g_route_refcnt = 1;
+    return E_NONE;
+}
+
+void route_shared_release(void) {
+    if (g_route_refcnt <= 0) return;
+    g_route_refcnt--;
+    if (g_route_refcnt == 0) {
+        route_final(&g_route_ctx);
+    }
+}
+
+const route_ctx_t *route_shared_get(void) {
+    return g_route_refcnt > 0 ? &g_route_ctx : NULL;
 }
 
 // 检测获取本地所有有效的网络地址

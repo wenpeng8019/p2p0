@@ -147,13 +147,13 @@ struct p2p_session;
 
 typedef enum {
     SIGNAL_RELAY_INIT = 0,          /* 未启动 */
+    SIGNAL_RELAY_ERROR,              /* 错误状态 */
     SIGNAL_RELAY_ONLINE_ING,        /* TCP 连接建立中 */
     SIGNAL_RELAY_WAIT_ONLINE_ACK,   /* 等待 ONLINE_ACK */
     SIGNAL_RELAY_ONLINE,            /* 已上线 */
     SIGNAL_RELAY_WAIT_CONNECT_ACK,  /* 等待 CONNECT_ACK */
     SIGNAL_RELAY_EXCHANGING,        /* 候选交换中 */
-    SIGNAL_RELAY_READY,             /* 交换完成，可以打洞 */
-    SIGNAL_RELAY_ERROR              /* 错误状态 */
+    SIGNAL_RELAY_READY              /* 交换完成，可以打洞 */
 } relay_state_t;
 
 /* ============================================================================
@@ -188,12 +188,12 @@ typedef struct {
     uint64_t            last_send_time;                 /* 上次发送时间 */
     uint64_t            last_recv_time;                 /* 上次接收时间 */
     uint64_t            heartbeat_time;                 /* 上次心跳时间 */
-    uint64_t            connect_time;                   /* 上次 CONNECT 发送时间 */
 
     /* 身份标识 */
+    uint32_t            instance_id;                    /* 本次 online() 生成的实例 ID（参考 RTP SSRC）*/
     char                local_peer_id[P2P_PEER_ID_MAX]; /* 本端名称 */
     char                remote_peer_id[P2P_PEER_ID_MAX];/* 目标名称 */
-    uint32_t            instance_id;                    /* 本次 online() 生成的实例 ID（参考 RTP SSRC）*/
+    bool                connected;                      /* 是否存在 connect 意图/会话（用于幂等和异步触发） */
 
     /* 会话管理 */
     uint64_t            session_id;                     /* 会话 ID（0=未分配）*/
@@ -207,7 +207,8 @@ typedef struct {
     uint16_t            next_candidate_index;           /* 下一个要发送的候选索引 */
     bool                local_candidates_fin;           /* 本地候选发送完成 */
     bool                remote_candidates_fin;          /* 对端候选接收完成 */
-    uint64_t            trickle_last_time;              /* 上次 trickle 发送时间 */
+    uint64_t            trickle_last_time;              /* 上次 trickle 发送时间（用于攒批窗口控制）*/
+    uint8_t             trickle_batch_count;            /* 当前批次累积的候选数（实现攒批）*/
 
     /* TCP 接收状态机 */
     relay_recv_state_t  recv_state;                     /* 接收状态 */
@@ -287,11 +288,11 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
 ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
 
 /*
- * Trickle ICE：TURN Allocate 完成后，发送中继候选
+ * Trickle ICE：本地候选异步补发入口（支持 STUN/TURN）
  *
  * @param s   P2P 会话
  */
-void p2p_signal_relay_trickle_turn(struct p2p_session *s);
+void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
 
 //----------------------------------------------------------------------------
 
