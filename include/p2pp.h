@@ -674,7 +674,7 @@ typedef struct {
 /* RELAY 模式上线确认 (P2P_RLY_ONLINE_ACK) */
 typedef struct {
     uint8_t             features;                       // 服务器支持的功能标志
-    uint8_t             reserved[3];
+    uint8_t             candidate_relay_max;            // 服务器允许的单包最大候选数（0=客户端使用默认值）
 } p2p_relay_online_ack_t;
 
 /* RELAY 请求头（不含 data） */
@@ -745,23 +745,26 @@ typedef struct {
 typedef struct {
     uint64_t            session_id;                     // 会话 ID（网络字节序）
     uint8_t             candidate_count;                // 本段候选数量（0=FIN）
-    uint8_t             reserved[3];
     /* 后续跟随 candidate_count 个 p2p_candidate_t (每个23字节) */
 } p2p_relay_peer_info_t;
 
 /*
  * RELAY 模式候选确认 (P2P_RLY_PEER_INFO_ACK)
  *
- * Server → Client: 确认已将客户端上传的候选全部转发给对端
+ * Server → Client: 流控确认，告知本次实际转发（或缓存）的候选数量。
  *
- * 触发条件：
- *   - 对端在线时，每收到一段立即转发并确认
- *   - 对端离线时，缓存到对端上线后转发完成才确认
+ * 服务器仅在有能力转发（中转缓冲区有空间）时才发送 ACK；若缓冲区满则
+ * 不回复 ACK，直到有空间处理后再一并回复。客户端在未收到 ACK 前不应
+ * 发送下一批候选（流控门控）。
+ *
+ * forwarded_count 语义：
+ *   - > 0: 本批次成功接受（转发或缓存）的候选数；
+ *          若小于上传数，客户端需从该索引位置重传剩余候选
+ *   - = 0: 本端所有候选已全部转发到对端（仅在本端发送 FIN 后出现）
  */
 typedef struct {
     uint64_t            session_id;                     // 会话 ID（网络字节序）
-    uint8_t             status;                         // 0=已转发, 1=已缓存, 2=缓存满
-    uint8_t             reserved[3];
+    uint8_t             forwarded_count;                // 实际转发的候选数（0=全部完成，需已发 FIN）
 } p2p_relay_peer_info_ack_t;
 
 /*
@@ -830,8 +833,8 @@ typedef struct {
  *   │                            │   [sid=456][cnt=5]      │
  *   │                            │   (A 的 5 个候选)        │
  *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][status=0]    │
- *   │   (已转发给 B)              │  已转发确认              │
+ *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=5]       │
+ *   │   (已转发 5 个，ACK 解锁)   │  缓冲区有空间才回        │
  *   │                            │                         │
  *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=3]       │
  *   │   (再上传 3 个)             │                         │
@@ -839,7 +842,7 @@ typedef struct {
  *   │                            ├── PEER_INFO ───────────►│
  *   │                            │   [sid=456][cnt=3]      │
  *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][status=0]    │
+ *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=3]       │
  *   │                            │                         │
  *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=0]       │
  *   │   (上传完成，FIN)           │                         │
@@ -847,6 +850,9 @@ typedef struct {
  *   │                            ├── PEER_INFO ───────────►│
  *   │                            │   [sid=456][cnt=0]      │
  *   │                            │   (A 候选传输完成)       │
+ *   │                            │                         │
+ *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=0]       │
+ *   │   (fwd=0 表示全部完成)      │  FIN 确认               │
  *   │                            │                         │
  *   │<==================== P2P ICE 打洞 ====================>│
  *
@@ -864,16 +870,17 @@ typedef struct {
  *   │   (B 离线，但可上传)        │                         │
  *   │                            │                         │
  *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=5]       │
- *   │   (上传 5 个候选)           │  缓存这 5 个             │
+ *   │   (上传 5 个候选)           │  尝试缓存               │
+ *   │                            │  [缓冲区空间有限]        │
+ *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=3]       │
+ *   │   (仅缓存了 3 个)           │  有空间才回 ACK          │
  *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][status=1]    │
- *   │   (已缓存)                  │  缓存确认                │
+ *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=2]       │
+ *   │   (从第 4 个重传)           │  继续缓存                │
  *   │                            │                         │
- *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=3]       │
- *   │   (再上传 3 个)             │  继续缓存                │
- *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][status=2]    │
- *   │   (缓存满，block)           │  不再接受新候选          │
+ *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=2]       │
+ *   │   (再缓存 2 个，空间满)     │  暂不 ACK，等空间        │
+ *   │   [buffer full, no ACK]    │                         │
  *   │                            │                         │
  *   [等待对端上线...]            │                         │
  *   │                            │                         │
@@ -892,8 +899,9 @@ typedef struct {
  *   │                            │   [sid=456][cnt=0]      │
  *   │                            │   (A 的候选推送完成)     │
  *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  (通知 A：已推送给 B)    │
- *   │   [sid=123][status=0]      │                         │
+ *   │◄── PEER_INFO_ACK ──────────┤  (A 的缓存批推送完成)    │
+ *   │   [sid=123][fwd=5]         │  缓冲区空间有限情况下     │
+ *   │                            │  有空间才回 ACK          │
  *   │                            │                         │
  *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=2]       │
  *   │   (继续上传剩余候选)        │  B 在线，实时转发        │
@@ -965,10 +973,11 @@ typedef struct {
  *     · instance_id 不同 → 客户端重连，服务器保持/重置数据上下文
  *
  * P2P_RLY_ONLINE_ACK:
- *   payload: [features(1)][reserved(3)]
+ *   payload: [features(1)][candidate_relay_max(1)]
  *   - features: 
  *     · 0x01 = RELAY（支持数据包中继）
  *     · 0x02 = MSG（支持 RPC 机制）
+ *   - candidate_relay_max: 服务器允许的单包最大候选数（0=客户端使用默认值）
  *
  * P2P_RLY_CONNECT:
  *   payload: [target_name(32)]
@@ -988,7 +997,7 @@ typedef struct {
  *   - 用途：主动通知服务器结束与对端的会话，服务器转发给对端
  *
  * P2P_RLY_PEER_INFO (双向):
- *   payload: [session_id(8)][candidate_count(1)][reserved(3)][candidates(N*23)]
+ *   payload: [session_id(8)][candidate_count(1)][candidates(N*23)]
  *   - session_id: 会话 ID（网络字节序）
  *   - candidate_count > 0: 本段候选数量
  *   - candidate_count = 0: 传输完成（FIN）
@@ -997,12 +1006,12 @@ typedef struct {
  *     · Server → Client: 下发候选（中转对端上传的候选）
  *
  * P2P_RLY_PEER_INFO_ACK:
- *   payload: [session_id(8)][status(1)][reserved(3)]
+ *   payload: [session_id(8)][forwarded_count(1)]
  *   - session_id: 会话 ID（网络字节序）
- *   - status:
- *     · 0 = 已转发给对端
- *     · 1 = 已缓存（对端离线）
- *     · 2 = 缓存满（block，停止上传）
+ *   - forwarded_count: 实际转发（或缓存）的候选数
+ *     · > 0: 成功接受 N 个候选；若 N < 上传数，客户端从第 N+1 个重传
+ *     · = 0: 所有候选已转发到对端（仅 FIN 发送后才出现）
+ *   注：服务器仅在中转缓冲区有空间时才发送 ACK（flow control）
  *
  * P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO - P2P 包中继
  * ============================================================================

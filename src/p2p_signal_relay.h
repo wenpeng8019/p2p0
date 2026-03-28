@@ -80,7 +80,7 @@
  *                                    ↓
  *   阶段2: 建立会话（申请连接对方，进行候选交换）
  *   ┌────────────────────────────────────────────────────┐
- *   │  ONLINE ──→ WAIT_CONNECT_ACK ──→ EXCHANGING ──→ READY │
+ *   │  ONLINE ──→ WAIT_CONNECT_ACK ──→ WAIT_PEER ──→ EXCHANGING ──→ READY │
  *   └────────────────────────────────────────────────────┘
  *
  *   - INIT:              未启动
@@ -88,6 +88,7 @@
  *   - WAIT_ONLINE_ACK:   已发送 ONLINE，等待 ONLINE_ACK
  *   - ONLINE:            已上线，可以发起多个 CONNECT（核心状态）
  *   - WAIT_CONNECT_ACK:  已发送 CONNECT，等待 CONNECT_ACK（分配 session_id）
+ *   - WAIT_PEER:         已分配 session_id，但对端离线，等待首个 PEER_INFO
  *   - EXCHANGING:        候选交换中（上传/接收 PEER_INFO）
  *   - READY:             候选交换完成，可以开始 P2P 打洞
  *
@@ -152,8 +153,9 @@ typedef enum {
     SIGNAL_RELAY_WAIT_ONLINE_ACK,   /* 等待 ONLINE_ACK */
     SIGNAL_RELAY_ONLINE,            /* 已上线 */
     SIGNAL_RELAY_WAIT_CONNECT_ACK,  /* 等待 CONNECT_ACK */
+    SIGNAL_RELAY_WAIT_PEER,         /* 已分配会话，等待对端上线 */
     SIGNAL_RELAY_EXCHANGING,        /* 候选交换中 */
-    SIGNAL_RELAY_READY              /* 交换完成，可以打洞 */
+    SIGNAL_RELAY_READY              /* 交换完成，对端候选接收完成 */
 } relay_state_t;
 
 /* ============================================================================
@@ -202,11 +204,15 @@ typedef struct {
     /* 服务器能力（ONLINE_ACK 返回）*/
     bool                feature_relay;                  /* 支持数据包中继 */
     bool                feature_msg;                    /* 支持 RPC 机制 */
+    uint8_t             candidate_relay_max;            /* 服务器允许的单包最大候选数（0=使用本地默认）*/
 
     /* Trickle ICE 控制 */
     uint16_t            next_candidate_index;           /* 下一个要发送的候选索引 */
-    bool                local_candidates_fin;           /* 本地候选发送完成 */
-    bool                remote_candidates_fin;          /* 对端候选接收完成 */
+    bool                local_candidates_fin;           /* FIN 已发送（本端候选上传完成）*/
+    bool                remote_candidates_fin;          /* 对端候选接收完成（收到对端 FIN）*/
+    bool                awaiting_peer_info_ack;         /* 等待 PEER_INFO_ACK（流控门控）*/
+    bool                local_delivery_confirmed;       /* 服务器确认所有候选已转发到对端（收到 ACK=0）*/
+    uint8_t             last_sent_cand_count;           /* 上批 PEER_INFO 发送的候选数（用于 ACK 对账）*/
     uint64_t            trickle_last_time;              /* 上次 trickle 发送时间（用于攒批窗口控制）*/
     uint8_t             trickle_batch_count;            /* 当前批次累积的候选数（实现攒批）*/
 
@@ -280,7 +286,7 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
  *
  * 向服务器发送 DISCONNECT 消息，通知结束与对端的会话。
  * 清理会话状态后回到 ONLINE 状态，可以再次发起 CONNECT。
- * 前提：必须处于 EXCHANGING 或 READY 状态。
+ * 前提：必须处于 WAIT_PEER / EXCHANGING / READY 状态。
  *
  * @param s   P2P 会话
  * @return    E_NONE=成功，其他=错误码
