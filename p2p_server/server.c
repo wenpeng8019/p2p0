@@ -85,31 +85,50 @@ ARGS_PRE(cb_cn, cn,         0,   "cn",       LA_CS("Use Chinese language", LA_S1
 #define MSG_REQ_MAX_RETRY               5       // MSG_REQ 最大重传次数
 #define MSG_RESP_MAX_RETRY              10      // MSG_RESP 最大重传次数（比 REQ 更多，确保 A 端收到）
 
+// RELAY 模式 PEER_INFO 重传参数
+#define RELAY_PEER_INFO_RETRY_INTERVAL_MS   2000    // 重传间隔（毫秒）
+#define RELAY_PEER_INFO_MAX_RETRY           5       // 最大重传次数
+#define RELAY_PEER_INFO_CANDS_PER_PACKET    10      // 每包最大候选数
+
 // RELAY 模式客户端（TCP 长连接）
 typedef struct relay_client {
     bool                    valid;                              // 客户端是否有效（无效意味着未分配或已回收）
     char                    name[P2P_PEER_ID_MAX];              // 客户端名称（登录时提供）
     sock_t                  fd;                                 // 客户端 tcp 套接口描述符
     uint64_t                last_active;                        // 最后活跃时间（毫秒，用于检测死连接）
-    
+
     // ===== TCP 接收缓冲区（处理粘包/半包） =====
-    uint8_t                 recv_buf[65536];                    // TCP 接收缓冲区
+    uint8_t                 recv_buf[P2P_MTU];                  // TCP 接收缓冲区（单个 P2P 包大小）
     uint32_t                recv_len;                           // 当前缓冲区数据长度
-    uint32_t                expected_pkt_len;                   // 期望的完整包长度（header 解析后得到）
-    
+
     // ===== 在线连接跟踪（用于判断 OFFER/FORWARD） =====
     char                    current_peer[P2P_PEER_ID_MAX];      // 当前正在连接的对端（空字符串表示无活动连接）
-    
+
     // ===== 离线候选缓存（仅支持单一发送者） =====
-    // 注意：客户端仅支持一对一连接，不支持多方同时连接
-    // 如果新发送者发起连接，会覆盖旧发送者的缓存
-    // 场景4: 0 < pending_count < MAX_CANDIDATES (有候选缓存)
-    // 场景5: pending_count == MAX_CANDIDATES (缓存满，发送空 OFFER)
-    // 场景6: MAX_CANDIDATES == 0 (服务器不支持缓存，当前不存在此场景)
     char                    pending_sender[P2P_PEER_ID_MAX];    // 发送者名称（空字符串表示无连接请求）
     int                     pending_count;                      // 候选数量
     p2p_candidate_t         pending_candidates[MAX_CANDIDATES]; // 候选列表（网络格式，直接收发，无需 sockaddr 转换）
+
+    // ===== PEER_INFO 多次同步状态（向目标发送候选） =====
+    uint64_t                pi_session_id;                      // 同步所属的 session_id
+    char                    pi_target_name[P2P_PEER_ID_MAX];    // 目标客户端名称
+    int                     pi_total;                           // 总候选数
+    int                     pi_sent;                            // 已发送候选数
+    int                     pi_seq;                             // 当前待 ACK 的包序号（从1开始）
+    bool                    pi_fin_sent;                        // 是否已发送 FIN 包
+    bool                    pi_fin_acked;                       // 是否已收到 FIN ACK
+    int                     pi_retry;                           // 当前重传次数
+    uint64_t                pi_last_send_time;                  // 上次发送时间（毫秒）
+    bool                    pi_active;                          // 是否有待同步任务
+    p2p_candidate_t         pi_cands[MAX_CANDIDATES];           // 待同步候选缓存
+    int                     pi_cands_count;                     // 缓存候选数
+    struct relay_client*    pi_pending_next;                    // 待确认链表指针（NULL=空闲，(void*)-1=链表尾）
 } relay_client_t;
+
+// RELAY PEER_INFO 待确认链表
+static relay_client_t*      g_relay_pi_pending_head = NULL;
+static relay_client_t*      g_relay_pi_pending_rear = NULL;
+
 
 // COMPACT 模式配对记录（UDP 无状态）
 /* 注意：COMPACT 模式采用"配对缓存"机制：
@@ -208,115 +227,224 @@ static uint64_t generate_session_id(void) {
 #endif
 #define MOD_TAG "RELAY"
 
-// 前向声明
-static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet_len);
+// 将客户端加入 PEER_INFO 待确认链表
+static void enqueue_relay_pi_pending(relay_client_t *client) {
+    if (!client || client->pi_pending_next) return;  // 已在链表中
+    
+    client->pi_pending_next = (relay_client_t*)(void*)-1;  // 标记为链表尾
+    if (g_relay_pi_pending_rear) {
+        g_relay_pi_pending_rear->pi_pending_next = client;
+        g_relay_pi_pending_rear = client;
+    } else {
+        g_relay_pi_pending_head = client;
+        g_relay_pi_pending_rear = client;
+    }
+}
 
-// 处理 RELAY 模式信令（TCP 长连接，使用状态机处理粘包/半包）
-static void handle_relay_signaling(int idx) {
+// 从待确认链表移除
+static void remove_relay_pi_pending(relay_client_t *client) {
+    if (!g_relay_pi_pending_head || !client->pi_pending_next) return;
     
-    sock_t fd = g_relay_clients[idx].fd;
-    relay_client_t *client = &g_relay_clients[idx];
-    
-    // 更新最后活跃时间（收到任何数据都表示连接活跃）
-    client->last_active = P_tick_ms();
-    
-    // 接收数据到缓冲区
-    uint32_t buf_available = sizeof(client->recv_buf) - client->recv_len;
-    if (buf_available == 0) {
-        printf(LA_F("[TCP] E: Receive buffer full for peer '%s' (possible protocol error)\n", LA_F178, 178), 
-               client->name);
-        P_sock_close(fd);
-        client->valid = false;
-        client->current_peer[0] = '\0';
-        client->recv_len = 0;
-        client->expected_pkt_len = 0;
-        return;
-    }
-    
-    ssize_t n = recv(fd, (char *)(client->recv_buf + client->recv_len), buf_available, 0);
-    if (n <= 0) {
-        printf(LA_F("[TCP] V: Peer '%s' disconnected\n", LA_F114, 114), client->name);
-        P_sock_close(fd);
-        client->valid = false;
-        client->current_peer[0] = '\0';
-        client->recv_len = 0;
-        client->expected_pkt_len = 0;
-        return;
-    }
-    
-    client->recv_len += n;
-    
-    // 循环处理缓冲区中的所有完整协议包（处理粘包）
-    while (1) {
-        
-        // 步骤1: 检查是否有完整的 header（3 bytes）
-        if (client->recv_len < sizeof(p2p_relay_hdr_t)) {
-            // 数据不足，等待更多数据
-            break;
+    // 如果是头节点
+    if (g_relay_pi_pending_head == client) {
+        g_relay_pi_pending_head = client->pi_pending_next;
+        client->pi_pending_next = NULL;
+        if (g_relay_pi_pending_head == (relay_client_t*)(void*)-1) {
+            g_relay_pi_pending_head = NULL;
+            g_relay_pi_pending_rear = NULL;
+        } else {
+            g_relay_pi_pending_rear = NULL;
+            for (relay_client_t *p = g_relay_pi_pending_head; p && p != (relay_client_t*)(void*)-1; p = p->pi_pending_next) {
+                g_relay_pi_pending_rear = p;
+            }
         }
-        
-        // 步骤2: 解析 header 获取完整包长度
-        p2p_relay_hdr_t *hdr = (p2p_relay_hdr_t *)client->recv_buf;
-        
-        // 计算完整包长度（header + payload）
-        uint32_t full_pkt_len = sizeof(p2p_relay_hdr_t) + ntohs(hdr->size);
-        
-        // 防御：检查包长度是否合法（避免恶意超大包）
-        if (full_pkt_len > sizeof(client->recv_buf)) {
-            printf(LA_F("[TCP] E: Packet too large (%u bytes) from peer '%s'\n", LA_F103, 103), 
-                   full_pkt_len, client->name);
-            P_sock_close(fd);
-            client->valid = false;
-            client->current_peer[0] = '\0';
-            client->recv_len = 0;
-            client->expected_pkt_len = 0;
+        return;
+    }
+    
+    // 查找前驱节点
+    for (relay_client_t *prev = g_relay_pi_pending_head; prev && prev != (relay_client_t*)(void*)-1; prev = prev->pi_pending_next) {
+        if (prev->pi_pending_next == client) {
+            prev->pi_pending_next = client->pi_pending_next;
+            if (client == g_relay_pi_pending_rear) {
+                g_relay_pi_pending_rear = prev;
+            }
+            client->pi_pending_next = NULL;
             return;
         }
+    }
+}
+
+// 发送 PEER_INFO 包（TCP）
+// 格式: [type(1)][size(2)] [session_id(8)][candidate_count(1)][candidates(N*23)]
+static void send_relay_peer_info(relay_client_t *client, uint64_t session_id, int cand_count, p2p_candidate_t *cands) {
+    if (!client || client->fd == P_INVALID_SOCKET) return;
+    
+    uint8_t payload[8 + 1 + MAX_CANDIDATES * sizeof(p2p_candidate_t)];
+    nwrite_ll(payload, session_id);
+    payload[8] = (uint8_t)cand_count;
+    
+    int payload_len = 9;
+    if (cand_count > 0) {
+        memcpy(payload + 9, cands, cand_count * sizeof(p2p_candidate_t));
+        payload_len += cand_count * sizeof(p2p_candidate_t);
+    }
+    
+    p2p_relay_hdr_t hdr = {P2P_RLY_PEER_INFO, htons((uint16_t)payload_len)};
+    send(client->fd, (const char *)&hdr, sizeof(hdr), 0);
+    send(client->fd, (const char *)payload, payload_len, 0);
+    
+    printf(LA_F("[TCP] PEER_INFO sent to '%s', ses_id=%" PRIu64 ", cand_cnt=%d, fin=%d\n", LA_F185, 185),
+           client->name, session_id, cand_count, cand_count == 0 ? 1 : 0);
+}
+
+// 启动 PEER_INFO 多次同步
+static void relay_peer_info_start(relay_client_t *client, const char *target_name, uint64_t session_id, p2p_candidate_t *cands, int count) {
+    if (!client || !cands || count <= 0) return;
+    
+    // 初始化同步状态
+    client->pi_session_id = session_id;
+    strncpy(client->pi_target_name, target_name, P2P_PEER_ID_MAX - 1);
+    client->pi_target_name[P2P_PEER_ID_MAX - 1] = '\0';
+    client->pi_total = count > MAX_CANDIDATES ? MAX_CANDIDATES : count;
+    client->pi_sent = 0;
+    client->pi_seq = 1;
+    client->pi_fin_sent = false;
+    client->pi_fin_acked = false;
+    client->pi_retry = 0;
+    client->pi_last_send_time = P_tick_ms();
+    client->pi_active = true;
+    client->pi_cands_count = client->pi_total;
+    memcpy(client->pi_cands, cands, client->pi_cands_count * sizeof(p2p_candidate_t));
+    
+    // 立即发送首包
+    int first_batch = client->pi_cands_count < RELAY_PEER_INFO_CANDS_PER_PACKET ? client->pi_cands_count : RELAY_PEER_INFO_CANDS_PER_PACKET;
+    send_relay_peer_info(client, session_id, first_batch, client->pi_cands);
+    client->pi_sent = first_batch;
+    client->pi_last_send_time = P_tick_ms();
+    
+    // 加入待确认链表
+    enqueue_relay_pi_pending(client);
+    
+    printf(LA_F("[TCP] PEER_INFO sync started: '%s' → '%s', total=%d, first_batch=%d\n", LA_F186, 186),
+           client->name, target_name, client->pi_total, first_batch);
+}
+
+// 发送下一个 PEER_INFO 分包
+static void relay_peer_info_send_next(relay_client_t *client) {
+    if (!client || !client->pi_active || client->pi_fin_sent) return;
+    
+    // 检查是否还有剩余候选
+    int remaining = client->pi_cands_count - client->pi_sent;
+    if (remaining > 0) {
+        int batch_size = remaining < RELAY_PEER_INFO_CANDS_PER_PACKET ? remaining : RELAY_PEER_INFO_CANDS_PER_PACKET;
+        send_relay_peer_info(client, client->pi_session_id, batch_size, client->pi_cands + client->pi_sent);
+        client->pi_sent += batch_size;
+        client->pi_seq++;
+        client->pi_retry = 0;
+        client->pi_last_send_time = P_tick_ms();
+    } else if (!client->pi_fin_sent) {
+        // 发送 FIN 包（candidate_count=0）
+        send_relay_peer_info(client, client->pi_session_id, 0, NULL);
+        client->pi_fin_sent = true;
+        client->pi_retry = 0;
+        client->pi_last_send_time = P_tick_ms();
+        printf(LA_F("[TCP] PEER_INFO FIN sent to '%s'\n", LA_F187, 187), client->pi_target_name);
+    }
+}
+
+// 处理 PEER_INFO_ACK
+static void relay_peer_info_on_ack(relay_client_t *client, uint64_t session_id) {
+    if (!client || !client->pi_active) return;
+    if (client->pi_session_id != session_id) {
+        printf(LA_F("[TCP] W: PEER_INFO_ACK session mismatch: expect=%" PRIu64 ", got=%" PRIu64 "\n", LA_F188, 188),
+               client->pi_session_id, session_id);
+        return;
+    }
+    
+    // 收到 ACK，发送下一个包
+    client->pi_retry = 0;
+    
+    if (client->pi_fin_sent) {
+        // FIN 已 ACK，同步完成
+        client->pi_fin_acked = true;
+        client->pi_active = false;
+        remove_relay_pi_pending(client);
+        printf(LA_F("[TCP] PEER_INFO sync completed: '%s' → '%s', total=%d\n", LA_F189, 189),
+               client->name, client->pi_target_name, client->pi_total);
+    } else {
+        // 发送下一个分包
+        relay_peer_info_send_next(client);
+    }
+}
+
+// 重传当前包
+static void relay_peer_info_resend_current(relay_client_t *client) {
+    if (!client || !client->pi_active) return;
+    
+    if (client->pi_fin_sent) {
+        // 重传 FIN
+        send_relay_peer_info(client, client->pi_session_id, 0, NULL);
+    } else {
+        // 重传最后一批候选
+        int last_batch_start = client->pi_sent - RELAY_PEER_INFO_CANDS_PER_PACKET;
+        if (last_batch_start < 0) last_batch_start = 0;
+        int last_batch_count = client->pi_sent - last_batch_start;
+        send_relay_peer_info(client, client->pi_session_id, last_batch_count, client->pi_cands + last_batch_start);
+    }
+    client->pi_last_send_time = P_tick_ms();
+    printf(LA_F("[TCP] PEER_INFO retransmit to '%s', retry=%d/%d\n", LA_F190, 190),
+           client->pi_target_name, client->pi_retry, RELAY_PEER_INFO_MAX_RETRY);
+}
+
+// 周期性重传/超时处理（类似 retry_info0_pending）
+static void retry_relay_peer_info_pending(uint64_t now) {
+    if (!g_relay_pi_pending_head || g_relay_pi_pending_head == (relay_client_t*)(void*)-1) return;
+    
+    // 检查头节点是否需要重传（延迟检查）
+    if (tick_diff(now, g_relay_pi_pending_head->pi_last_send_time) < RELAY_PEER_INFO_RETRY_INTERVAL_MS) {
+        return;  // 头节点尚未超时，后续节点也必然未超时
+    }
+    
+    // 遍历链表，处理所有超时的节点
+    relay_client_t *q = g_relay_pi_pending_head;
+    while (q && q != (relay_client_t*)(void*)-1) {
+        relay_client_t *next = q->pi_pending_next;
         
-        // 步骤3: 检查是否接收完整包
-        if (client->recv_len < full_pkt_len) {
-            // 数据不足，等待更多数据（半包情况）
-            client->expected_pkt_len = full_pkt_len;
-            break;
+        // 检查是否超过最大重传次数
+        if (q->pi_retry >= RELAY_PEER_INFO_MAX_RETRY) {
+            printf(LA_F("[TCP] W: PEER_INFO max retry reached for '%s' → '%s', giving up\n", LA_F191, 191),
+                   q->name, q->pi_target_name);
+            q->pi_active = false;
+            remove_relay_pi_pending(q);
+            q = next;
+            continue;
         }
         
-        // 步骤4: 有完整包，调用处理函数
-        process_relay_packet(idx, client->recv_buf, full_pkt_len);
-        
-        // 步骤5: 从缓冲区移除已处理的包（处理粘包）
-        uint32_t remaining = client->recv_len - full_pkt_len;
-        if (remaining > 0) {
-            // 将剩余数据移到缓冲区开头
-            memmove(client->recv_buf, client->recv_buf + full_pkt_len, remaining);
+        // 连接已断开，清理状态
+        if (!q->valid || q->fd == P_INVALID_SOCKET) {
+            q->pi_active = false;
+            remove_relay_pi_pending(q);
+            q = next;
+            continue;
         }
-        client->recv_len = remaining;
-        client->expected_pkt_len = 0;
         
-        // 继续处理下一个包（如果有）
+        // 重传
+        q->pi_retry++;
+        relay_peer_info_resend_current(q);
+        q = next;
     }
 }
 
 // 处理单个完整的 RELAY 协议包
-static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet_len) {
-    
-    if (packet_len < sizeof(p2p_relay_hdr_t)) {
-        printf(LA_F("[TCP] E: Packet too short (%u bytes)\n", LA_F118, 118), packet_len);
-        return;
-    }
-    
-    p2p_relay_hdr_t hdr;
-    memcpy(&hdr, packet, sizeof(hdr));
-    
-    const uint8_t *payload = packet + sizeof(p2p_relay_hdr_t);
-    uint32_t payload_len = ntohs(hdr.size);
+static void process_relay_packet(int idx, uint8_t type, const uint8_t *payload, uint16_t payload_len) {
     
     sock_t fd = g_relay_clients[idx].fd;
     
     printf("Processing TCP packet from peer '%s': type=%d, payload_len=%u\n",
-           g_relay_clients[idx].name, hdr.type, payload_len);
+           g_relay_clients[idx].name, type, payload_len);
 
     // 用户上线
-    if (hdr.type == P2P_RLY_ONLINE) {
+    if (type == P2P_RLY_ONLINE) {
         const char* PROTO = "ONLINE";
         
         if (payload_len != sizeof(p2p_relay_online_t)) {
@@ -348,7 +476,7 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
             if (k == idx) continue;
             if (g_relay_clients[k].valid &&
                 g_relay_clients[k].fd == P_INVALID_SOCKET &&
-                strcmp(g_relay_clients[k].name, login.name) == 0 &&
+                strcmp(g_relay_clients[k].name, online.name) == 0 &&
                 g_relay_clients[k].pending_count > 0) {
 
                 /* Copy pending candidates from offline slot into online slot */
@@ -360,7 +488,7 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
                         g_relay_clients[k].pending_sender, P2P_PEER_ID_MAX);
 
                 printf(LA_F("[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n", LA_F100, 100),
-                       g_relay_clients[k].pending_count, g_relay_clients[k].pending_sender, login.name);
+                       g_relay_clients[k].pending_count, g_relay_clients[k].pending_sender, online.name);
 
                 /* Release the offline slot */
                 g_relay_clients[k].valid = false;
@@ -398,7 +526,7 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
             
             // 发送 OFFER
             p2p_relay_hdr_t relay_hdr = {
-                P2P_RLY_OFFER,
+                P2P_RLY_PEER_INFO,  // 使用 PEER_INFO 类型（服务器下发候选）
                 htons((uint16_t)(P2P_PEER_ID_MAX + offer_len))
             };
             
@@ -435,7 +563,7 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
             
             // 发送空 OFFER
             p2p_relay_hdr_t relay_hdr = {
-                P2P_RLY_OFFER,
+                P2P_RLY_PEER_INFO,  // 使用 PEER_INFO 类型
                 htons((uint16_t)(P2P_PEER_ID_MAX + empty_offer_len))
             };
             
@@ -451,8 +579,8 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
             printf(LA_F("[TCP] Storage full indication flushed to '%s'\n", LA_F108, 108), client->name);
         }
     }
-    // 信令转发：P2P_RLY_CONNECT → P2P_RLY_OFFER，P2P_RLY_ACCEPT → P2P_RLY_REPLY
-    else if (hdr.type == P2P_RLY_CONNECT || hdr.type == P2P_RLY_ACCEPT) {
+    // 信令转发：P2P_RLY_CONNECT（建立连接）
+    else if (type == P2P_RLY_CONNECT) {
 
         // 验证payload长度（至少包含target_name）
         if (payload_len < P2P_PEER_ID_MAX) {
@@ -469,8 +597,7 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
         uint32_t signaling_payload_len = payload_len - P2P_PEER_ID_MAX;
         const uint8_t *signaling_payload = payload + P2P_PEER_ID_MAX;
 
-        printf(LA_F("[TCP] Relaying %s from %s to %s (%u bytes)\n", LA_F104, 104), 
-               hdr.type == P2P_RLY_CONNECT ? "CONNECT" : "ACCEPT",
+        printf(LA_F("[TCP] Relaying CONNECT from %s to %s (%u bytes)\n", LA_F104, 104), 
                g_relay_clients[idx].name, target_name, signaling_payload_len);
 
         /* 解析负载头部以获取候选数量 */
@@ -489,19 +616,17 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
             if (g_relay_clients[i].valid && g_relay_clients[i].fd != P_INVALID_SOCKET &&
                 strcmp(g_relay_clients[i].name, target_name) == 0) {
                 
-                /* 目标在线：检查是否第一次连接（OFFER）或后续更新（FORWARD） */
-                bool is_first_offer = (g_relay_clients[i].current_peer[0] == '\0' || 
-                                       strcmp(g_relay_clients[i].current_peer, g_relay_clients[idx].name) != 0);
+                /* 目标在线：记录连接关系并准备转发 */
+                // 记录当前连接的对端
+                strncpy(g_relay_clients[i].current_peer, g_relay_clients[idx].name, P2P_PEER_ID_MAX - 1);
+                g_relay_clients[i].current_peer[P2P_PEER_ID_MAX - 1] = '\0';
                 
-                uint8_t relay_type = is_first_offer ? P2P_RLY_OFFER : P2P_RLY_REPLY;
+                // 同时记录发送者的连接对端
+                strncpy(g_relay_clients[idx].current_peer, target_name, P2P_PEER_ID_MAX - 1);
+                g_relay_clients[idx].current_peer[P2P_PEER_ID_MAX - 1] = '\0';
                 
-                // 第一次连接时，记录当前连接的对端
-                if (is_first_offer) {
-                    strncpy(g_relay_clients[i].current_peer, g_relay_clients[idx].name, P2P_PEER_ID_MAX - 1);
-                    g_relay_clients[i].current_peer[P2P_PEER_ID_MAX - 1] = '\0';
-                }
-                
-                p2p_relay_hdr_t relay_hdr = {relay_type,
+                // 直接转发信令负载（初始候选集合）
+                p2p_relay_hdr_t relay_hdr = {P2P_RLY_CONNECT,
                                               htons((uint16_t)(P2P_PEER_ID_MAX + signaling_payload_len))};
                 send(g_relay_clients[i].fd, (const char *)&relay_hdr, sizeof(relay_hdr), 0);
                 send(g_relay_clients[i].fd, g_relay_clients[idx].name, P2P_PEER_ID_MAX, 0);
@@ -510,9 +635,8 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
                 found = true;
                 ack_status = 0;  /* 成功转发 */
                 candidates_acked = candidates_in_payload;
-                printf(LA_F("[TCP] Sent %s with %d candidates to '%s' (from '%s')\n", LA_F105, 105),
-                       is_first_offer ? "OFFER" : "FORWARD", candidates_in_payload, 
-                       target_name, g_relay_clients[idx].name);
+                printf(LA_F("[TCP] Forwarded CONNECT with %d candidates to '%s' (from '%s')\n", LA_F105, 105),
+                       candidates_in_payload, target_name, g_relay_clients[idx].name);
                 break;
             }
         }
@@ -539,7 +663,6 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
                         g_relay_clients[i].fd = P_INVALID_SOCKET;  // offline marker
                         strncpy(g_relay_clients[i].name, target_name, P2P_PEER_ID_MAX);
                         g_relay_clients[i].recv_len = 0;
-                        g_relay_clients[i].expected_pkt_len = 0;
                         g_relay_clients[i].pending_count = 0;
                         g_relay_clients[i].pending_sender[0] = '\0';  // 空发送者（也表示无意图）
                         g_relay_clients[i].last_active = P_tick_ms();
@@ -606,13 +729,18 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
             }
         }
 
-        /* 仅对 P2P_RLY_CONNECT 发送 ACK（P2P_RLY_ACCEPT 不需要确认） */
-        if (hdr.type == P2P_RLY_CONNECT) {
-            p2p_relay_hdr_t ack_hdr = {P2P_RLY_CONNECT_ACK, htons(sizeof(p2p_relay_connect_ack_t))};
-            p2p_relay_connect_ack_t ack_payload = {ack_status, candidates_acked, {0, 0}};
+        /* 发送 CONNECT_ACK */
+        {
+            uint8_t ack_payload[4];  // [status(1)][candidates_acked(1)][reserved(2)]
+            ack_payload[0] = ack_status;
+            ack_payload[1] = candidates_acked;
+            ack_payload[2] = 0;
+            ack_payload[3] = 0;
+            
+            p2p_relay_hdr_t ack_hdr = {P2P_RLY_CONNECT_ACK, htons(4)};
             size_t sent1 = send(fd, (const char *)&ack_hdr, sizeof(ack_hdr), 0);
-            size_t sent2 = send(fd, (const char *)&ack_payload, sizeof(ack_payload), 0);
-            if (sent1 != sizeof(ack_hdr) || sent2 != sizeof(ack_payload)) {
+            size_t sent2 = send(fd, (const char *)ack_payload, 4, 0);
+            if (sent1 != sizeof(ack_hdr) || sent2 != 4) {
                 printf(LA_F("[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n", LA_F96, 96),
                        g_relay_clients[idx].name, (int)sent1, (int)sent2);
             } else {
@@ -621,18 +749,180 @@ static void process_relay_packet(int idx, const uint8_t *packet, uint32_t packet
             }
         }
     }
+    // P2P_RLY_PEER_INFO: 客户端发送候选给服务器，服务器转发给对端
+    else if (type == P2P_RLY_PEER_INFO) {
+        if (payload_len < 9) {  // session_id(8) + candidate_count(1)
+            printf(LA_F("[TCP] E: Invalid PEER_INFO payload length (%u < 9)\n", LA_F195, 195), payload_len);
+            return;
+        }
+        
+        uint64_t session_id;
+        nread_ll(&session_id, payload);
+        int cand_count = payload[8];
+        
+        printf(LA_F("[TCP] recv PEER_INFO from '%s', ses_id=%" PRIu64 ", cand_cnt=%d\n", LA_F196, 196),
+               g_relay_clients[idx].name, session_id, cand_count);
+        
+        // 查找对端（通过 current_peer）
+        if (g_relay_clients[idx].current_peer[0] == '\0') {
+            printf(LA_F("[TCP] W: PEER_INFO from '%s' but no active connection\n", LA_F197, 197),
+                   g_relay_clients[idx].name);
+            return;
+        }
+        
+        // 查找对端客户端
+        int target_idx = -1;
+        for (int i = 0; i < MAX_PEERS; i++) {
+            if (g_relay_clients[i].valid && g_relay_clients[i].fd != P_INVALID_SOCKET &&
+                strcmp(g_relay_clients[i].name, g_relay_clients[idx].current_peer) == 0) {
+                target_idx = i;
+                break;
+            }
+        }
+        
+        if (target_idx < 0) {
+            printf(LA_F("[TCP] W: PEER_INFO target '%s' not online\n", LA_F198, 198),
+                   g_relay_clients[idx].current_peer);
+            return;
+        }
+        
+        // 转发给对端（通过 peer_info 多次同步机制）
+        if (cand_count == 0) {
+            // FIN 包，直接转发
+            send_relay_peer_info(&g_relay_clients[target_idx], session_id, 0, NULL);
+        } else {
+            // 解析候选
+            p2p_candidate_t cands[MAX_CANDIDATES];
+            int actual_count = (payload_len - 9) / sizeof(p2p_candidate_t);
+            if (actual_count > cand_count) actual_count = cand_count;
+            if (actual_count > MAX_CANDIDATES) actual_count = MAX_CANDIDATES;
+            memcpy(cands, payload + 9, actual_count * sizeof(p2p_candidate_t));
+            
+            // 检查是否已有活跃的同步任务
+            if (g_relay_clients[target_idx].pi_active && 
+                g_relay_clients[target_idx].pi_session_id == session_id) {
+                // 追加候选到现有任务（如果有空间）
+                int space = MAX_CANDIDATES - g_relay_clients[target_idx].pi_cands_count;
+                if (space > 0) {
+                    int append_count = actual_count < space ? actual_count : space;
+                    memcpy(g_relay_clients[target_idx].pi_cands + g_relay_clients[target_idx].pi_cands_count,
+                           cands, append_count * sizeof(p2p_candidate_t));
+                    g_relay_clients[target_idx].pi_cands_count += append_count;
+                    g_relay_clients[target_idx].pi_total += append_count;
+                    printf(LA_F("[TCP] PEER_INFO appended %d candidates to existing sync\n", LA_F199, 199), append_count);
+                }
+            } else {
+                // 启动新的同步任务
+                relay_peer_info_start(&g_relay_clients[target_idx], g_relay_clients[idx].name,
+                                     session_id, cands, actual_count);
+            }
+        }
+        
+        // 发送 ACK 给发送者
+        uint8_t ack_payload[8];
+        nwrite_ll(ack_payload, session_id);
+        p2p_relay_hdr_t ack_hdr = {P2P_RLY_PEER_INFO_ACK, htons(8)};
+        send(fd, (const char *)&ack_hdr, sizeof(ack_hdr), 0);
+        send(fd, (const char *)ack_payload, 8, 0);
+        printf(LA_F("[TCP] PEER_INFO_ACK sent to '%s'\n", LA_F200, 200), g_relay_clients[idx].name);
+    }
+    // P2P_RLY_PEER_INFO_ACK: 客户端确认收到 PEER_INFO
+    else if (type == P2P_RLY_PEER_INFO_ACK) {
+        if (payload_len != 8) {
+            printf(LA_F("[TCP] E: Invalid PEER_INFO_ACK payload length (%u, expected 8)\n", LA_F193, 193), payload_len);
+            return;
+        }
+        
+        uint64_t session_id;
+        nread_ll(&session_id, payload);
+        printf(LA_F("[TCP] recv PEER_INFO_ACK from '%s', ses_id=%" PRIu64 "\n", LA_F194, 194),
+               g_relay_clients[idx].name, session_id);
+        
+        // 处理 ACK
+        relay_peer_info_on_ack(&g_relay_clients[idx], session_id);
+    }
     // 心跳包无需额外处理（前面已经更新了 last_active 时间）
-    else if (hdr.type == P2P_RLY_ALIVE) {
+    else if (type == P2P_RLY_ALIVE) {
         printf(LA_F("[TCP] recv ALIVE from %s\n", LA_F116, 116), g_relay_clients[idx].name);
     }
     // 未知消息类型
     else {
-        printf(LA_F("[TCP] Unknown message type %d from %s\n", LA_F112, 112), hdr.type, g_relay_clients[idx].name);
+        printf(LA_F("[TCP] Unknown message type %d from %s\n", LA_F112, 112), type, g_relay_clients[idx].name);
+    }
+}
+
+
+// 处理 RELAY 模式信令（TCP 长连接，使用状态机处理粘包/半包）
+static void handle_relay_signaling(int idx) {
+    
+    sock_t fd = g_relay_clients[idx].fd;
+    relay_client_t *client = &g_relay_clients[idx];
+    
+    // 更新最后活跃时间（收到任何数据都表示连接活跃）
+    client->last_active = P_tick_ms();
+    
+    // 接收数据到缓冲区
+    uint32_t buf_available = sizeof(client->recv_buf) - client->recv_len;
+    if (buf_available == 0) {
+        printf(LA_F("[TCP] E: Receive buffer full for peer '%s' (possible protocol error)\n", LA_F178, 178), 
+               client->name);
+        P_sock_close(fd);
+        client->valid = false;
+        client->current_peer[0] = '\0';
+        client->recv_len = 0;
+        return;
+    }
+    
+    ssize_t n = recv(fd, (char *)(client->recv_buf + client->recv_len), buf_available, 0);
+    if (n <= 0) {
+        printf(LA_F("[TCP] V: Peer '%s' disconnected\n", LA_F114, 114), client->name);
+        P_sock_close(fd);
+        client->valid = false;
+        client->current_peer[0] = '\0';
+        client->recv_len = 0;
+        return;
+    }
+    
+    client->recv_len += n;
+    
+    // 循环处理缓冲区中的所有完整协议包（处理粘包）
+    while (1) {
+        
+        // 数据不足，等待更多数据
+        if (client->recv_len < sizeof(p2p_relay_hdr_t)) break;
+        
+        p2p_relay_hdr_t *hdr = (p2p_relay_hdr_t *)client->recv_buf;
+        uint16_t payload_len = ntohs(hdr->size);
+        
+        // 检查包长度是否合法（避免恶意超大包）
+        if (payload_len > P2P_MAX_PAYLOAD) {
+            printf(LA_F("[TCP] E: payload too large (%u bytes) from peer '%s'\n", LA_F103, 103), 
+                   payload_len, client->name);
+            P_sock_close(fd);
+            client->valid = false;
+            client->current_peer[0] = '\0';
+            client->recv_len = 0;
+            return;
+        }
+        
+        // 数据不足，等待更多数据
+        uint32_t pkt_len = sizeof(p2p_relay_hdr_t) + payload_len;
+        if (client->recv_len < pkt_len) break;
+        
+        // 包数据完整，调用处理函数
+        process_relay_packet(idx, hdr->type, client->recv_buf + sizeof(p2p_relay_hdr_t), payload_len);
+        
+        // 从缓冲区移除已处理的包（处理粘包），也就是将剩余数据移到缓冲区开头
+        uint32_t remaining = client->recv_len - pkt_len;
+        if (remaining > 0)
+            memmove(client->recv_buf, client->recv_buf + pkt_len, remaining);
+        client->recv_len = remaining;
     }
 }
 
 // 清理过期的 Relay 模式客户端连接（检测死连接）
 static void cleanup_relay_clients(void) {
+    
     uint64_t now = P_tick_ms();
     for (int i = 0; i < MAX_PEERS; i++) {
         if (!g_relay_clients[i].valid ||
@@ -641,11 +931,16 @@ static void cleanup_relay_clients(void) {
         printf(LA_F("W: [TCP] Client '%s' timeout (inactive for %.1f seconds)\n", LA_F115, 115), 
                g_relay_clients[i].name, tick_diff(now, g_relay_clients[i].last_active) / 1000.0);
         
+        // 清理 PEER_INFO 同步状态
+        if (g_relay_clients[i].pi_active) {
+            g_relay_clients[i].pi_active = false;
+            remove_relay_pi_pending(&g_relay_clients[i]);
+        }
+        
         P_sock_close(g_relay_clients[i].fd);
         g_relay_clients[i].fd = P_INVALID_SOCKET;
         g_relay_clients[i].current_peer[0] = '\0';
         g_relay_clients[i].recv_len = 0;
-        g_relay_clients[i].expected_pkt_len = 0;
         g_relay_clients[i].valid = false;
     }
 }
@@ -2244,6 +2539,7 @@ int main(int argc, char *argv[]) {
         if (tick_diff(now, last_compact_retry_check) >= COMPACT_RETRY_INTERVAL_MS) {
             if (g_info0_pending_head) retry_info0_pending(udp_fd, now);
             if (g_rpc_pending_head)   retry_rpc_pending(udp_fd, now);
+            if (g_relay_pi_pending_head) retry_relay_peer_info_pending(now);
             last_compact_retry_check = now;
         }
 
@@ -2294,9 +2590,10 @@ int main(int argc, char *argv[]) {
                     g_relay_clients[i].fd = client_fd;
                     g_relay_clients[i].last_active = P_tick_ms();
                     g_relay_clients[i].recv_len = 0;
-                    g_relay_clients[i].expected_pkt_len = 0;
                     g_relay_clients[i].pending_count = 0;
                     g_relay_clients[i].pending_sender[0] = '\0';
+                    g_relay_clients[i].pi_active = false;
+                    g_relay_clients[i].pi_pending_next = NULL;
                     strncpy(g_relay_clients[i].name, "unknown", P2P_PEER_ID_MAX);
                     print("V:", LA_F("[TCP] New connection from %s:%d\n", LA_F101, 101), 
                           inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
