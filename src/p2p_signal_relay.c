@@ -203,22 +203,23 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
  *
  * 协议：P2P_RLY_ONLINE (0x01)
  * 包头: [type(1) | size(2)]
- * 负载: [name(32)]
+ * 负载: [name(32)][instance_id(4)]
  */
 static void send_online(p2p_session_t *s) {
     const char *PROTO = "ONLINE";
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
-    p2p_relay_online_t msg;
-    memset(&msg, 0, sizeof(msg));
-    strncpy(msg.name, ctx->local_peer_id, P2P_PEER_ID_MAX - 1);
-    msg.instance_id = htonl(ctx->instance_id);
+    // 直接构造 payload: name(32) + instance_id(4)
+    uint8_t payload[P2P_PEER_ID_MAX + 4];
+    memset(payload, 0, sizeof(payload));
+    strncpy((char*)payload, ctx->local_peer_id, P2P_PEER_ID_MAX - 1);
+    nwrite_l(payload + P2P_PEER_ID_MAX, ctx->instance_id);
 
     printf(LA_F("[TCP] %s enqueue, name='%s', rid=%u\n", LA_F530, 530),
            PROTO, ctx->local_peer_id, ctx->instance_id);
 
-    if (enqueue_message(ctx, P2P_RLY_ONLINE, (uint8_t*)&msg, sizeof(msg)) != 0) {
+    if (enqueue_message(ctx, P2P_RLY_ONLINE, payload, sizeof(payload)) != 0) {
         print("W:", LA_F("%s: send buffer busy, will retry\n", LA_F507, 507), PROTO);
         return;
     }
@@ -252,14 +253,14 @@ static void send_alive(p2p_session_t *s) {
 }
 
 /*
- * 发送 CONNECT 请求建立会话
+ * 发送 SYNC0 请求建立会话
  *
- * 协议：P2P_RLY_CONNECT (0x04)
+ * 协议：P2P_RLY_SYNC0 (0x04)
  * 包头: [type(1) | size(2)]
  * 负载: [target_name(32)]
  */
 static void send_connect(p2p_session_t *s) {
-    const char *PROTO = "CONNECT";
+    const char *PROTO = "SYNC0";
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
@@ -270,7 +271,7 @@ static void send_connect(p2p_session_t *s) {
     printf(LA_F("[TCP] %s enqueue, target='%s'\n", LA_F532, 532),
            PROTO, ctx->remote_peer_id);
 
-    if (enqueue_message(ctx, P2P_RLY_CONNECT, payload, sizeof(payload)) != 0) {
+    if (enqueue_message(ctx, P2P_RLY_SYNC0, payload, sizeof(payload)) != 0) {
         print("W:", LA_F("%s: send buffer busy, will retry\n", LA_F507, 507), PROTO);
         return;
     }
@@ -280,18 +281,18 @@ static void send_connect(p2p_session_t *s) {
 }
 
 /*
- * 发送 PEER_INFO 上传候选
+ * 发送 SYNC 上传候选
  *
- * 协议：P2P_RLY_PEER_INFO (0x06)
+ * 协议：P2P_RLY_SYNC (0x06)
  * 包头: [type(1) | size(2)]
  * 负载: [session_id(8)][candidate_count(1)][candidates(N*23)]
  *
  * FIN 语义（非独立协议）：
- *   - 仍使用 P2P_RLY_PEER_INFO
+ *   - 仍使用 P2P_RLY_SYNC
  *   - candidate_count = 0 表示本端候选发送完成（FIN）
  */
 static void send_peer_info(p2p_session_t *s) {
-    const char *PROTO = "PEER_INFO";
+    const char *PROTO = "SYNC";
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
@@ -318,7 +319,7 @@ static void send_peer_info(p2p_session_t *s) {
     else {
 
         // 单包上限：取服务器协商值和本地常量的较小值（服务器为 0 表示使用本地默认）
-        uint8_t srv_max = ctx->candidate_relay_max;
+        uint8_t srv_max = ctx->candidate_sync_max;
         int max_per_pkt = (srv_max > 0 && srv_max < PEER_INFO_CAND_UNIT) ? srv_max : PEER_INFO_CAND_UNIT;
 
         int start_idx = ctx->next_candidate_index;
@@ -338,7 +339,7 @@ static void send_peer_info(p2p_session_t *s) {
     printf(LA_F("[TCP] %s enqueue, ses_id=%" PRIu64 " cand_cnt=%d fin=%d\n", LA_F531, 531),
            PROTO, ctx->session_id, cand_cnt, send_fin ? 1 : 0);
 
-    if (enqueue_message(ctx, P2P_RLY_PEER_INFO, payload, payload_len) != 0) {
+    if (enqueue_message(ctx, P2P_RLY_SYNC, payload, payload_len) != 0) {
         print("W:", LA_F("%s: send buffer busy, will retry\n", LA_F507, 507), PROTO);
         return;
     }
@@ -363,14 +364,14 @@ static void send_peer_info(p2p_session_t *s) {
 }
 
 /*
- * 发送 DISCONNECT 断开会话
+ * 发送 FIN 结束会话
  *
- * 协议：P2P_RLY_DISCONNECT (0x08)
+ * 协议：P2P_RLY_FIN (0x08)
  * 包头: [type(1) | size(2)]
  * 负载: [session_id(8)]
  */
 static void send_disconnect(p2p_session_t *s) {
-    const char *PROTO = "DISCONNECT";
+    const char *PROTO = "FIN";
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
@@ -380,7 +381,7 @@ static void send_disconnect(p2p_session_t *s) {
     printf(LA_F("[TCP] %s enqueue, ses_id=%" PRIu64 "\n", LA_F539, 539),
            PROTO, ctx->session_id);
 
-    if (enqueue_message(ctx, P2P_RLY_DISCONNECT, payload, sizeof(payload)) != 0) {
+    if (enqueue_message(ctx, P2P_RLY_FIN, payload, sizeof(payload)) != 0) {
         print("W:", LA_F("%s: send buffer busy, will retry\n", LA_F507, 507), PROTO);
         return;
     }
@@ -415,7 +416,7 @@ static bool relay_wait_stun_candidates(p2p_session_t *s) {
  * 处理 ONLINE_ACK
  *
  * 协议：P2P_RLY_ONLINE_ACK (0x02)
- * 负载: [features(1)][candidate_relay_max(1)]
+ * 负载: [features(1)][candidate_sync_max(1)]
  */
 static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "ONLINE_ACK";
@@ -437,11 +438,11 @@ static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len)
     uint8_t features = payload[0];
     ctx->feature_relay = (features & P2P_RLY_FEATURE_RELAY) != 0;
     ctx->feature_msg = (features & P2P_RLY_FEATURE_MSG) != 0;
-    ctx->candidate_relay_max = (len >= 2) ? payload[1] : 0;
+    ctx->candidate_sync_max = (len >= 2) ? payload[1] : 0;
 
     print("V:", LA_F("%s: accepted, relay=%s msg=%s cand_max=%d\n", LA_F496, 496),
           PROTO, ctx->feature_relay ? "yes" : "no", ctx->feature_msg ? "yes" : "no",
-          ctx->candidate_relay_max ? ctx->candidate_relay_max : P2P_RELAY_MAX_CANDS_PER_PACKET);
+          ctx->candidate_sync_max ? ctx->candidate_sync_max : P2P_RELAY_MAX_CANDS_PER_PACKET);
 
     // 切换到 ONLINE 状态
     ctx->state = SIGNAL_RELAY_ONLINE;
@@ -457,13 +458,13 @@ static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len)
 }
 
 /*
- * 处理 CONNECT_ACK
+ * 处理 SYNC0_ACK
  *
- * 协议：P2P_RLY_CONNECT_ACK (0x05)
+ * 协议：P2P_RLY_SYNC0_ACK (0x05)
  * 负载: [status(1)][reserved(3)][session_id(8)]
  */
 static void handle_connect_ack(p2p_session_t *s, const uint8_t *payload, int len) {
-    const char *PROTO = "CONNECT_ACK";
+    const char *PROTO = "SYNC0_ACK";
 
     printf(LA_F("[TCP] %s recv, len=%d\n", LA_F533, 533), PROTO, len);
 
@@ -531,9 +532,9 @@ static void handle_connect_ack(p2p_session_t *s, const uint8_t *payload, int len
 }
 
 /*
- * 处理 PEER_INFO（服务器下发对端候选）
+ * 处理 SYNC（服务器下发对端候选）
  *
- * 协议：P2P_RLY_PEER_INFO (0x06)
+ * 协议：P2P_RLY_SYNC (0x06)
  * 负载: [session_id(8)][candidate_count(1)][candidates(N*23)]
  */
 static void handle_peer_info(p2p_session_t *s, const uint8_t *payload, int len) {
@@ -588,15 +589,15 @@ static void handle_peer_info(p2p_session_t *s, const uint8_t *payload, int len) 
 }
 
 /*
- * 处理 PEER_INFO_ACK（服务器流控确认，包含本批次实际转发数量）
+ * 处理 SYNC_ACK（服务器流控确认，包含本批次实际转发数量）
  *
- * 协议：P2P_RLY_PEER_INFO_ACK (0x07)
- * 负载: [session_id(8)][forwarded_count(1)]
+ * 协议：P2P_RLY_SYNC_ACK (0x07)
+ * 负载: [session_id(8)][confirmed_count(1)]
  *
  * 流程：
- *   - forwarded_count > 0: 服务器接受了 N 个候选（可能少于上传数）；
+ *   - confirmed_count > 0: 服务器接受了 N 个候选（可能少于上传数）；
  *     回滚 next_candidate_index 到实际接受点，继续发送剩余批次。
- *   - forwarded_count == 0 且 FIN 已发: 所有候选已转发到对端，标记完成。
+ *   - confirmed_count == 0 且 FIN 已发: 所有候选已转发到对端，标记完成。
  *
  * 服务器仅在中转缓冲区有空间时才发送 ACK（流量控制）。
  * 客户端在收到 ACK 前不得发送下一批候选。
@@ -628,28 +629,28 @@ static void handle_peer_info_ack(p2p_session_t *s, const uint8_t *payload, int l
     // 清除流控等待标志
     ctx->awaiting_peer_info_ack = false;
 
-    uint8_t forwarded_count = payload[8];
+    uint8_t confirmed_count = payload[8];
 
     // 如果本端已经发送过 FIN
     if (ctx->local_candidates_fin) {
 
-        if (forwarded_count == 0) {
+        if (confirmed_count == 0) {
             ctx->local_delivery_confirmed = true;
             print("I:", LA_F("%s: all candidates delivered to peer (fwd=0 after FIN)\n", LA_F502, 502), PROTO);
         } else {
-            print("W:", LA_F("%s: unexpected fwd=%d after FIN, ignored\n", LA_F508, 508), PROTO, forwarded_count);
+            print("W:", LA_F("%s: unexpected fwd=%d after FIN, ignored\n", LA_F508, 508), PROTO, confirmed_count);
         }
         return;
     }
 
-    // 对账：服务器实际接受了 forwarded_count 个，回滚多余部分
+    // 对账：服务器实际接受了 confirmed_count 个，回滚多余部分
     // next_candidate_index 已在 send_peer_info 中按 last_sent_cand_count 推进
-    // 实际应停在: (next - last_sent) + forwarded_count
+    // 实际应停在: (next - last_sent) + confirmed_count
     ctx->next_candidate_index =
-        ctx->next_candidate_index - ctx->last_sent_cand_count + forwarded_count;
+        ctx->next_candidate_index - ctx->last_sent_cand_count + confirmed_count;
 
     print("V:", LA_F("%s: forwarded=%d, next_idx adjusted to %d\n", LA_F502, 502),
-          PROTO, forwarded_count, ctx->next_candidate_index);
+          PROTO, confirmed_count, ctx->next_candidate_index);
 
     // 有就绪候选或达成 FIN 条件，则继续发 info 包
     // + 注意，send_peer_info 会重新将 awaiting_peer_info_ack 置 true
@@ -673,15 +674,15 @@ static void dispatch_message(p2p_session_t *s) {
             handle_online_ack(s, ctx->payload, ntohs(ctx->hdr.size));
             break;
 
-        case P2P_RLY_CONNECT_ACK:
+        case P2P_RLY_SYNC0_ACK:
             handle_connect_ack(s, ctx->payload, ntohs(ctx->hdr.size));
             break;
 
-        case P2P_RLY_PEER_INFO:
+        case P2P_RLY_SYNC:
             handle_peer_info(s, ctx->payload, ntohs(ctx->hdr.size));
             break;
 
-        case P2P_RLY_PEER_INFO_ACK:
+        case P2P_RLY_SYNC_ACK:
             handle_peer_info_ack(s, ctx->payload, ntohs(ctx->hdr.size));
             break;
 
@@ -908,7 +909,7 @@ void p2p_signal_relay_trickle_candidate(struct p2p_session *s) {
 
     /* 攒批时间窗口控制 */
     uint64_t now = P_tick_ms();
-    uint8_t max_per_pkt = ctx->candidate_relay_max ? ctx->candidate_relay_max : P2P_RELAY_MAX_CANDS_PER_PACKET;
+    uint8_t max_per_pkt = ctx->candidate_sync_max ? ctx->candidate_sync_max : P2P_RELAY_MAX_CANDS_PER_PACKET;
     bool should_send = false;
 
     /* 满足两个条件之一就发送：

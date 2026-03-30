@@ -204,7 +204,7 @@ typedef struct {
     /* 服务器能力（ONLINE_ACK 返回）*/
     bool                feature_relay;                  /* 支持数据包中继 */
     bool                feature_msg;                    /* 支持 RPC 机制 */
-    uint8_t             candidate_relay_max;            /* 服务器允许的单包最大候选数（0=使用本地默认）*/
+    uint8_t             candidate_sync_max;             /* 服务器允许的单包最大候选数（0=使用本地默认）*/
 
     /* Trickle ICE 控制 */
     uint16_t            next_candidate_index;           /* 下一个要发送的候选索引 */

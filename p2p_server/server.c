@@ -285,13 +285,13 @@ static void send_relay_peer_info(relay_client_t *client, uint64_t session_id, in
         payload_len += cand_count * sizeof(p2p_candidate_t);
     }
     
-    p2p_relay_hdr_t hdr = {P2P_RLY_PEER_INFO, htons((uint16_t)payload_len)};
+    p2p_relay_hdr_t hdr = {P2P_RLY_SYNC, htons((uint16_t)payload_len)};
     if (send_all(client, &hdr, sizeof(hdr)) < 0 || send_all(client, payload, payload_len) < 0) {
-        printf(LA_F("[TCP] W: Failed to send PEER_INFO to '%s' (queue full or disconnected)\n", 0, 0), client->name);
+        printf(LA_F("[TCP] W: Failed to send SYNC to '%s' (queue full or disconnected)\n", 0, 0), client->name);
         return;
     }
     
-    printf(LA_F("[TCP] PEER_INFO sent to '%s', ses_id=%" PRIu64 ", cand_cnt=%d, fin=%d\n", 0, 0),
+    printf(LA_F("[TCP] SYNC sent to '%s', ses_id=%" PRIu64 ", cand_cnt=%d, fin=%d\n", 0, 0),
            client->name, session_id, cand_count, cand_count == 0 ? 1 : 0);
 }
 
@@ -489,15 +489,21 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
     if (type == P2P_RLY_ONLINE) {
         const char* PROTO = "ONLINE";
         
-        if (payload_len != sizeof(p2p_relay_online_t)) {
-            printf(LA_F("[TCP] E: Invalid ONLINE payload length (%u, expected %zu)\n", 0, 0),
-                   payload_len, sizeof(p2p_relay_online_t));
+        // payload: [name(32)][instance_id(4)]
+        if (payload_len != P2P_PEER_ID_MAX + 4) {
+            printf(LA_F("[TCP] E: Invalid ONLINE payload length (%u, expected %d)\n", 0, 0),
+                   payload_len, P2P_PEER_ID_MAX + 4);
             return;
         }
         
-        p2p_relay_online_t online;
-        memcpy(&online, payload, sizeof(online));
-        strncpy(g_relay_clients[idx].name, online.name, P2P_PEER_ID_MAX);
+        // 直接读取 name（32字节）
+        memcpy(g_relay_clients[idx].name, payload, P2P_PEER_ID_MAX);
+        g_relay_clients[idx].name[P2P_PEER_ID_MAX - 1] = '\0';  // 确保 null-terminated
+        
+        // instance_id 暂时不用，但格式需保留
+        // uint32_t instance_id;
+        // nread_l(&instance_id, payload + P2P_PEER_ID_MAX);
+        
         g_relay_clients[idx].valid = true;
         g_relay_clients[idx].current_peer[0] = '\0';  // 初始化为无连接状态
 
@@ -520,7 +526,7 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
             if (k == idx) continue;
             if (g_relay_clients[k].valid &&
                 g_relay_clients[k].fd == P_INVALID_SOCKET &&
-                strcmp(g_relay_clients[k].name, online.name) == 0 &&
+                strcmp(g_relay_clients[k].name, g_relay_clients[idx].name) == 0 &&
                 g_relay_clients[k].pending_count > 0) {
 
                 /* Copy pending candidates from offline slot into online slot */
@@ -532,7 +538,7 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
                         g_relay_clients[k].pending_sender, P2P_PEER_ID_MAX);
 
                 printf(LA_F("[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n", 0, 0),
-                       g_relay_clients[k].pending_count, g_relay_clients[k].pending_sender, online.name);
+                       g_relay_clients[k].pending_count, g_relay_clients[k].pending_sender, g_relay_clients[idx].name);
 
                 /* Release the offline slot */
                 g_relay_clients[k].valid = false;
@@ -570,7 +576,7 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
             
             // 发送 OFFER
             p2p_relay_hdr_t relay_hdr = {
-                P2P_RLY_PEER_INFO,  // 使用 PEER_INFO 类型（服务器下发候选）
+                P2P_RLY_SYNC,  // 使用 SYNC 类型（服务器下发候选）
                 htons((uint16_t)(P2P_PEER_ID_MAX + offer_len))
             };
             
@@ -609,7 +615,7 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
             
             // 发送空 OFFER
             p2p_relay_hdr_t relay_hdr = {
-                P2P_RLY_PEER_INFO,  // 使用 PEER_INFO 类型
+                P2P_RLY_SYNC,  // 使用 SYNC 类型
                 htons((uint16_t)(P2P_PEER_ID_MAX + empty_offer_len))
             };
             
@@ -627,12 +633,12 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
             printf(LA_F("[TCP] Storage full indication flushed to '%s'\n", 0, 0), client->name);
         }
     }
-    // 信令转发：P2P_RLY_CONNECT（建立连接）
-    else if (type == P2P_RLY_CONNECT) {
+    // 信令转发：P2P_RLY_SYNC0（首次同步）
+    else if (type == P2P_RLY_SYNC0) {
 
         // 验证payload长度（至少包含target_name）
         if (payload_len < P2P_PEER_ID_MAX) {
-            printf(LA_F("[TCP] E: Payload too short for CONNECT/ANSWER (%u < %d)\n", 0, 0),
+            printf(LA_F("[TCP] E: Payload too short for SYNC0 (%u < %d)\n", 0, 0),
                    payload_len, P2P_PEER_ID_MAX);
             return;
         }
@@ -645,7 +651,7 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
         uint32_t signaling_payload_len = payload_len - P2P_PEER_ID_MAX;
         const uint8_t *signaling_payload = payload + P2P_PEER_ID_MAX;
 
-        printf(LA_F("[TCP] Relaying CONNECT from %s to %s (%u bytes)\n", LA_F104, 104), 
+        printf(LA_F("[TCP] Relaying SYNC0 from %s to %s (%u bytes)\n", LA_F104, 104), 
                g_relay_clients[idx].name, target_name, signaling_payload_len);
 
         /* 解析负载头部以获取候选数量 */
@@ -674,12 +680,12 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
                 g_relay_clients[idx].current_peer[P2P_PEER_ID_MAX - 1] = '\0';
                 
                 // 直接转发信令负载（初始候选集合）
-                p2p_relay_hdr_t relay_hdr = {P2P_RLY_CONNECT,
+                p2p_relay_hdr_t relay_hdr = {P2P_RLY_SYNC0,
                                               htons((uint16_t)(P2P_PEER_ID_MAX + signaling_payload_len))};
                 if (send_all(&g_relay_clients[i], &relay_hdr, sizeof(relay_hdr)) < 0 ||
                     send_all(&g_relay_clients[i], g_relay_clients[idx].name, P2P_PEER_ID_MAX) < 0 ||
                     send_all(&g_relay_clients[i], signaling_payload, signaling_payload_len) < 0) {
-                    printf(LA_F("[TCP] W: Failed to forward CONNECT to '%s' (from '%s')\n", 0, 0),
+                    printf(LA_F("[TCP] W: Failed to forward SYNC0 to '%s' (from '%s')\n", 0, 0),
                            target_name, g_relay_clients[idx].name);
                     ack_status = 3;  /* 转发失败 */
                     candidates_acked = 0;
@@ -687,7 +693,7 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
                     found = true;
                     ack_status = 0;  /* 成功转发 */
                     candidates_acked = candidates_in_payload;
-                    printf(LA_F("[TCP] Forwarded CONNECT with %d candidates to '%s' (from '%s')\n", LA_F105, 105),
+                    printf(LA_F("[TCP] Forwarded SYNC0 with %d candidates to '%s' (from '%s')\n", LA_F105, 105),
                            candidates_in_payload, target_name, g_relay_clients[idx].name);
                 }
                 break;
@@ -782,7 +788,7 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
             }
         }
 
-        /* 发送 CONNECT_ACK */
+        /* 发送 SYNC0_ACK */
         {
             uint8_t ack_payload[4];  // [status(1)][candidates_acked(1)][reserved(2)]
             ack_payload[0] = ack_status;
@@ -790,18 +796,18 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
             ack_payload[2] = 0;
             ack_payload[3] = 0;
             
-            p2p_relay_hdr_t ack_hdr = {P2P_RLY_CONNECT_ACK, htons(4)};
+            p2p_relay_hdr_t ack_hdr = {P2P_RLY_SYNC0_ACK, htons(4)};
             if (send_all(&g_relay_clients[idx], &ack_hdr, sizeof(ack_hdr)) < 0 || send_all(&g_relay_clients[idx], ack_payload, 4) < 0) {
-                printf(LA_F("[TCP] W: Failed to send CONNECT_ACK to %s\n", 0, 0),
+                printf(LA_F("[TCP] W: Failed to send SYNC0_ACK to %s\n", 0, 0),
                        g_relay_clients[idx].name);
             } else {
-                printf(LA_F("[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n", 0, 0),
+                printf(LA_F("[TCP] Sent SYNC0_ACK to %s (status=%d, candidates_acked=%d)\n", 0, 0),
                        g_relay_clients[idx].name, ack_status, candidates_acked);
             }
         }
     }
-    // P2P_RLY_PEER_INFO: 客户端发送候选给服务器，服务器转发给对端
-    else if (type == P2P_RLY_PEER_INFO) {
+    // P2P_RLY_SYNC: 客户端发送候选给服务器，服务器转发给对端
+    else if (type == P2P_RLY_SYNC) {
         if (payload_len < 9) {  // session_id(8) + candidate_count(1)
             printf(LA_F("[TCP] E: Invalid PEER_INFO payload length (%u < 9)\n", 0, 0), payload_len);
             return;
@@ -872,15 +878,15 @@ static void handle_relay_packet(int idx, uint8_t type, const uint8_t *payload, u
         // 发送 ACK 给发送者
         uint8_t ack_payload[8];
         nwrite_ll(ack_payload, session_id);
-        p2p_relay_hdr_t ack_hdr = {P2P_RLY_PEER_INFO_ACK, htons(8)};
+        p2p_relay_hdr_t ack_hdr = {P2P_RLY_SYNC_ACK, htons(8)};
         if (send_all(&g_relay_clients[idx], &ack_hdr, sizeof(ack_hdr)) < 0 || send_all(&g_relay_clients[idx], ack_payload, 8) < 0) {
             printf(LA_F("[TCP] W: Failed to send PEER_INFO_ACK to '%s'\n", 0, 0), g_relay_clients[idx].name);
         } else {
             printf(LA_F("[TCP] PEER_INFO_ACK sent to '%s'\n", 0, 0), g_relay_clients[idx].name);
         }
     }
-    // P2P_RLY_PEER_INFO_ACK: 客户端确认收到 PEER_INFO
-    else if (type == P2P_RLY_PEER_INFO_ACK) {
+    // P2P_RLY_SYNC_ACK: 客户端确认收到 SYNC
+    else if (type == P2P_RLY_SYNC_ACK) {
         if (payload_len != 8) {
             printf(LA_F("[TCP] E: Invalid PEER_INFO_ACK payload length (%u, expected 8)\n", 0, 0), payload_len);
             return;

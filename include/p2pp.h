@@ -627,17 +627,17 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 
 /* RELAY 模式消息类型 */
 typedef enum {
-    /* 会话管理 */
+    /* 在线管理 */
     P2P_RLY_ONLINE = 1,                     // 上线请求: Client -> Server
     P2P_RLY_ONLINE_ACK,                     // 上线确认: Server -> Client (含服务器功能标志)
     P2P_RLY_ALIVE,                          // 心跳: Client -> Server
 
-    /* ICE 候选交换 */
-    P2P_RLY_CONNECT,                        // 连接请求: Client -> Server (指定目标 peer)
-    P2P_RLY_CONNECT_ACK,                    // 连接应答: Server -> Client (对端状态 + session_id)
-    P2P_RLY_DISCONNECT,                     // 断开请求: Client -> Server / Server -> Client
-    P2P_RLY_PEER_INFO,                      // 候选传输: 双向 (Client -> Server 上传, Server -> Client 下发)
-    P2P_RLY_PEER_INFO_ACK,                  // 候选确认: Server -> Client (已转发给对端)
+    /* 会话同步 */
+    P2P_RLY_SYNC0,                          // 首次同步: Client -> Server (带 target + 首批候选)；Server -> Client（对接+首次同步）
+    P2P_RLY_SYNC0_ACK,                      // 首次同步应答: Server -> Client (status + session_id + confirmed_count)
+    P2P_RLY_SYNC,                           // 后续同步: 双向 (Client -> Server 上传, Server -> Client 下发)
+    P2P_RLY_SYNC_ACK,                       // 同步确认: Server -> Client (已转发给对端，confirmed_count == 0 表示 sync 完成)
+    P2P_RLY_FIN,                            // 会话结束: Client -> Server / Server -> Client
 
     /* P2P 数据中继（打洞失败降级） */
     P2P_RLY_DATA,                           // 中继 P2P 数据包: Client <-> Server <-> Client
@@ -651,221 +651,22 @@ typedef enum {
     P2P_RLY_RESP_ACK                        // 响应确认: Server -> Client
 } p2p_relay_type_t;
 
-/* RELAY 响应错误码（当 on_response 回调 len=-1 时，code 字段表示错误类型） */
-#define P2P_RLY_ERR_PEER_OFFLINE    0xFE    // 目标在等待响应期间离线
-#define P2P_RLY_ERR_TIMEOUT         0xFF    // 服务器转发请求超时
-
 /* RELAY 模式包头 (3 bytes) */
 typedef struct {
     uint8_t             type;
     uint16_t            size;
 } p2p_relay_hdr_t;
 
-/* RELAY 模式上线消息 (P2P_RLY_ONLINE) */
-typedef struct {
-    char                name[P2P_PEER_ID_MAX];          // 本地 peer 名称
-    uint32_t            instance_id;                    // 实例 ID（客户端每次 online() 生成随机数）
-} p2p_relay_online_t;
-
 /* RELAY 上线确认功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
 #define P2P_RLY_FEATURE_MSG         0x02    // 支持 MSG RPC 机制
 
-
-/*
- * RELAY 模式信令负载头部
- *
- * 用于封装 ICE 候选交换的元数据。
- * 序列化格式（76字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
- */
-typedef struct {
-    char                sender[P2P_PEER_ID_MAX];    // 发送方 peer_id
-    char                target[P2P_PEER_ID_MAX];    // 目标方 peer_id
-    uint32_t            timestamp;                  // 时间戳（用于排序和去重）
-    uint32_t            delay_trigger;              // 延迟触发打洞（毫秒）
-    int                 candidate_count;            // ICE 候选数量
-} p2p_signaling_payload_hdr_t;
+/* RELAY 响应错误码（当 on_response 回调 len=-1 时，code 字段表示错误类型） */
+#define P2P_RLY_ERR_PEER_OFFLINE    0xFE    // 目标在等待响应期间离线
+#define P2P_RLY_ERR_TIMEOUT         0xFF    // 服务器转发请求超时
 
 /* ============================================================================
- * RELAY 模式协议流程说明
- * ============================================================================
- *
- * 基础流程：上线 → 连接 → 候选交换 → P2P 打洞 → (降级) 数据中继
- *
- * 1. 上线流程（建立 TCP 长连接）
- * ============================================================================
- *
- *   Client                    Server
- *   │                            │
- *   ├── TCP Connect ────────────►│
- *   │                            │
- *   ├── ONLINE ─────────────────►│  [my_name][target_name]
- *   │                            │
- *   │◄── ONLINE_ACK ─────────────┤  [features]
- *   │   (features: RELAY|MSG)     │  告知服务器支持的功能
- *   │                            │
- *   [进入 ONLINE 状态]            │
- *   │                            │
- *   ├── ALIVE ──────────────────►│  (每 20 秒心跳)
- *   │                            │
- *
- * 2. 连接流程（建立会话）
- * ============================================================================
- *
- *   Client A                  Server
- *   │                            │
- *   ├── CONNECT ───────────────►│  [target_name]
- *   │                            │  查找 B 的状态
- *   │                            │
- *   │◄── CONNECT_ACK ────────────┤  [status][session_id]
- *   │   (status=0 在线/1 离线)   │  分配 session_id
- *   │                            │
- *   [收到 session_id，可以上传候选]
- *
- * 3. 候选交换流程（对端在线，实时转发）
- * ============================================================================
- *
- *   Client A                  Server                    Client B
- *   │                            │                         │
- *   ├── CONNECT ───────────────►│  [target=B]             │
- *   │                            │  B 在线                 │
- *   │◄── CONNECT_ACK ────────────┤  [status=0][sid=123]    │
- *   │                            │                         │
- *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=5]       │
- *   │   (上传 5 个候选)           │  立即转发给 B            │
- *   │                            │                         │
- *   │                            ├── PEER_INFO ───────────►│
- *   │                            │   [sid=456][cnt=5]      │
- *   │                            │   (A 的 5 个候选)        │
- *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=5]       │
- *   │   (已转发 5 个，ACK 解锁)   │  缓冲区有空间才回        │
- *   │                            │                         │
- *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=3]       │
- *   │   (再上传 3 个)             │                         │
- *   │                            │                         │
- *   │                            ├── PEER_INFO ───────────►│
- *   │                            │   [sid=456][cnt=3]      │
- *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=3]       │
- *   │                            │                         │
- *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=0]       │
- *   │   (上传完成，FIN)           │                         │
- *   │                            │                         │
- *   │                            ├── PEER_INFO ───────────►│
- *   │                            │   [sid=456][cnt=0]      │
- *   │                            │   (A 候选传输完成)       │
- *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=0]       │
- *   │   (fwd=0 表示全部完成)      │  FIN 确认               │
- *   │                            │                         │
- *   │<==================== P2P ICE 打洞 ====================>│
- *
- * 4. 候选交换流程（对端离线，缓存后推送）
- * ============================================================================
- *
- *   Client A (在线)           Server                    Client B (离线)
- *   │                            │                         │
- *   ├── ONLINE ─────────────────►│                         │
- *   │◄── ONLINE_ACK ─────────────┤                         │
- *   │                            │                         │
- *   ├── CONNECT ───────────────►│  [target=B]             │
- *   │                            │  B 离线                 │
- *   │◄── CONNECT_ACK ────────────┤  [status=1][sid=123]    │
- *   │   (B 离线，但可上传)        │                         │
- *   │                            │                         │
- *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=5]       │
- *   │   (上传 5 个候选)           │  尝试缓存               │
- *   │                            │  [缓冲区空间有限]        │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=3]       │
- *   │   (仅缓存了 3 个)           │  有空间才回 ACK          │
- *   │                            │                         │
- *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=2]       │
- *   │   (从第 4 个重传)           │  继续缓存                │
- *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  [sid=123][fwd=2]       │
- *   │   (再缓存 2 个，空间满)     │  暂不 ACK，等空间        │
- *   │   [buffer full, no ACK]    │                         │
- *   │                            │                         │
- *   [等待对端上线...]            │                         │
- *   │                            │                         │
- *   │    ... B 上线 ...          │                         │
- *   │                            │◄── ONLINE ──────────────┤
- *   │                            ├── ONLINE_ACK ──────────►│
- *   │                            │                         │
- *   │                            │◄── CONNECT ─────────────┤  [target=A]
- *   │                            ├── CONNECT_ACK ─────────►│  [status=0][sid=456]
- *   │                            │                         │
- *   │                            ├── PEER_INFO ───────────►│
- *   │                            │   [sid=456][cnt=8]      │
- *   │                            │   (推送 A 缓存的候选)    │
- *   │                            │                         │
- *   │                            ├── PEER_INFO ───────────►│
- *   │                            │   [sid=456][cnt=0]      │
- *   │                            │   (A 的候选推送完成)     │
- *   │                            │                         │
- *   │◄── PEER_INFO_ACK ──────────┤  (A 的缓存批推送完成)    │
- *   │   [sid=123][fwd=5]         │  缓冲区空间有限情况下     │
- *   │                            │  有空间才回 ACK          │
- *   │                            │                         │
- *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=2]       │
- *   │   (继续上传剩余候选)        │  B 在线，实时转发        │
- *   │                            │                         │
- *   │                            ├── PEER_INFO ───────────►│
- *   │                            │   [sid=456][cnt=2]      │
- *   │                            │                         │
- *   ├── PEER_INFO ──────────────►│  [sid=123][cnt=0]       │
- *   │   (上传完成)                │                         │
- *   │                            │                         │
- *   │                            ├── PEER_INFO ───────────►│
- *   │                            │   [sid=456][cnt=0]      │
- *   │                            │                         │
- *   │<==================== P2P ICE 打洞 ====================>│
- *
- * 5. TCP 粘包处理
- * ============================================================================
- *
- * RELAY 使用 TCP 传输，必须处理粘包/半包问题：
- *
- * 接收状态机：
- *   - RECV_HEADER: 读取包头（9 字节）
- *   - RECV_PAYLOAD: 读取 payload（length 字节）
- *
- * 包头格式：[magic: 4B][type: 1B][length: 4B]
- *   - magic = 0x50325030 ("P2P0")，帧同步标识
- *   - type = 消息类型枚举
- *   - length = payload 长度（不包括包头）
- *
- * 循环读取直到 EAGAIN：
- *   ```c
- *   for (;;) {
- *       switch (state) {
- *       case RECV_HEADER:
- *           n = recv(fd, buf + offset, sizeof(hdr) - offset, 0);
- *           if (n == 0) { close(); return; }
- *           if (n < 0 && EAGAIN) return;
- *           offset += n;
- *           if (offset == sizeof(hdr)) {
- *               state = RECV_PAYLOAD;
- *               offset = 0;
- *           }
- *           break;
- *       case RECV_PAYLOAD:
- *           n = recv(fd, payload + offset, length - offset, 0);
- *           if (n < 0 && EAGAIN) return;
- *           offset += n;
- *           if (offset == length) {
- *               dispatch(type, payload);
- *               state = RECV_HEADER;
- *               offset = 0;
- *           }
- *           break;
- *       }
- *   }
- *   ```
- *
- * ============================================================================
- * 消息格式详解
+ * RELAY 模式协议详细定义说明
  * ============================================================================
  *
  * 所有消息：[p2p_relay_hdr_t: 3B][payload: N bytes]
@@ -876,34 +677,38 @@ typedef struct {
  *   - instance_id: 客户端每次 online() 生成的 32 位随机数（网络字节序）
  *
  * P2P_RLY_ONLINE_ACK:
- *   payload: [features(1)][candidate_relay_max(1)]
+ *   payload: [features(1)][candidate_sync_max(1)]
  *   - features: 0x01=RELAY, 0x02=MSG
- *   - candidate_relay_max: 单包最大候选数（0=客户端用默认）
+ *   - candidate_sync_max: 单包最大候选数（0=客户端用默认）
  *
- * P2P_RLY_CONNECT:
- *   payload: [target_name(32)]
+ * P2P_RLY_SYNC0:
+ *   payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
  *   - target_name: 目标 peer 名称，定长 32 字节，0 填充
+ *   - candidate_count: 本端首批候选数量（可以为 0）
+ *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *
- * P2P_RLY_CONNECT_ACK:
- *   payload: [status(1)][reserved(3)][session_id(8)]
+ * P2P_RLY_SYNC0_ACK:
+ *   payload: [status(1)][reserved(3)][session_id(8)][confirmed_count(1)]
  *   - status: 0x00=对端在线, 0x01=离线, 0xFF=错误
  *   - reserved: 3 字节保留，未使用
  *   - session_id: 64 位会话 ID（网络字节序）
+ *   - confirmed_count: 实际确认处理的候选数（转发或缓存，与 SYNC_ACK 逻辑一致）
+ *   - 对端候选通过服务器下行 SYNC 消息推送（而非在 ACK 中返回）
  *
- * P2P_RLY_DISCONNECT:
- *   payload: [session_id(8)]
- *   - session_id: 要断开的会话 ID（网络字节序）
- *
- * P2P_RLY_PEER_INFO:
+ * P2P_RLY_SYNC:
  *   payload: [session_id(8)][candidate_count(1)][candidates(N*23)]
  *   - session_id: 64 位会话 ID（网络字节序）
  *   - candidate_count: 本包候选数量，0=FIN
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *
- * P2P_RLY_PEER_INFO_ACK:
- *   payload: [session_id(8)][forwarded_count(1)]
+ * P2P_RLY_SYNC_ACK:
+ *   payload: [session_id(8)][confirmed_count(1)]
  *   - session_id: 64 位会话 ID（网络字节序）
- *   - forwarded_count: 实际转发/缓存的候选数，0=全部完成（仅 FIN 后）
+ *   - confirmed_count: 实际确认处理的候选数（转发或缓存），0=全部完成（仅 FIN 后）
+ *
+ * P2P_RLY_FIN:
+ *   payload: [session_id(8)]
+ *   - session_id: 要结束的会话 ID（网络字节序）
  *
  * P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO:
  *   payload: [target_name(32)][p2p_packet(N)] (Client→Server)
@@ -911,44 +716,7 @@ typedef struct {
  *   - p2p_packet: 完整 P2P 包（包头+payload）
  *
  * P2P_RLY_REQ / P2P_RLY_REQ_ACK / P2P_RLY_RESP / P2P_RLY_RESP_ACK:
- *   详见下方 RPC 机制注释（与实现一致）
- *
- * P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO - P2P 包中继
- * ============================================================================
- *
- * 功能：P2P 打洞失败时，通过服务器转发数据/确认/加密包（降级方案）
- *
- * Client → Server:
- *   payload: [target_name(32)][p2p_packet(N)]
- *   - p2p_packet: 完整 P2P 包（包头+payload）
- *   - 对应关系：
- *     · P2P_RLY_DATA   <-> P2P_PKT_DATA
- *     · P2P_RLY_ACK    <-> P2P_PKT_ACK
- *     · P2P_RLY_CRYPTO <-> P2P_PKT_CRYPTO
- *
- * Server → Target:
- *   payload: [sender_name(32)][p2p_packet(N)]
- *   - 透传原始 P2P 包
- *
- * REQ/RESP 机制 - RPC 请求-应答
- * ============================================================================
- *
- * 功能：通过服务器中转实现可靠的请求-应答机制
- *
- * msg 特殊值：
- *   - msg=0: Echo 测试，自动回复
- *   - msg>0: 应用层自定义消息
- *
- * 流程（6 步）：
- *
- *   A                      Server                      B
- *   ├── REQ ──────────────►│  [target][sid][msg][data] │
- *   │◄── REQ_ACK ───────────┤  [sid][status]            │
- *   │                       ├── REQ ───────────────────►│  [sender][sid][msg][data]
- *   │                       │◄── RESP ──────────────────┤  [sid][code][data]
- *   │                       ├── RESP_ACK ──────────────►│  [sid]
- *   │◄── RESP ──────────────┤  [sid][code][data]        │
- *
+ * 
  * P2P_RLY_REQ (双向，A→Server, Server→B):
  *   payload: [target_name(32)][sid(2)][msg(1)][data(N)]  (A→Server)
  *   payload: [sender_name(32)][sid(2)][msg(1)][data(N)]  (Server→B)
@@ -992,12 +760,247 @@ typedef struct {
  *   0xFE: 目标在等待响应期间离线
  *   0xFF: 服务器转发超时
  *
- * TCP 特性优化：
+ * ============================================================================
+ * 协议流程详解
+ * ============================================================================
+ *
+ * 基础流程：上线 → 会话同步 → P2P 打洞 → (降级) 数据中继
+ *
+ * 1. 上线流程（建立 TCP 长连接）
+ * ============================================================================
+ *
+ *   Client                    Server
+ *   │                            │
+ *   ├── TCP Connect ────────────►│
+ *   │                            │
+ *   ├── ONLINE ─────────────────►│  [my_name][target_name]
+ *   │                            │
+ *   │◄── ONLINE_ACK ─────────────┤  [features]
+ *   │   (features: RELAY|MSG)     │  告知服务器支持的功能
+ *   │                            │
+ *   [进入 ONLINE 状态]            │
+ *   │                            │
+ *   ├── ALIVE ──────────────────►│  (每 20 秒心跳)
+ *   │                            │
+ *
+ * 2. 初始化会话同步（建立会话 + 首批候选同步）
+ * ============================================================================
+ *
+ *   Client A                  Server
+ *   │                            │
+ *   ├── SYNC0 ─────────────────►│  [target][cnt=5][cands]
+ *   │                            │  查找 B 的状态
+ *   │                            │  分配 session_id
+ *   │◄── SYNC0_ACK ──────────────┤  [status=0][sid][fwd=5]
+ *   │   (B 在线，已缓存 5 个)     │  返回实际缓存数
+ *   │                            │
+ *   [收到 session_id，可继续上传]  │
+ *
+ * 3. 后续会话同步（对端在线，实时转发）
+ * ============================================================================
+ *
+ *   Client A                  Server                    Client B
+ *   │                            │                         │
+ *   ├── SYNC0 ─────────────────►│  [target=B][cnt=5]     │
+ *   │                            │  B 在线，分配 sid=123   │
+ *   │◄── SYNC0_ACK ──────────────┤  [status=0][sid=123][fwd=5]
+ *   │   (已转发 5 个给 B)         │  立即转发给 B            │
+ *   │                            │                         │
+ *   │                            ├── SYNC ────────────────►│
+ *   │                            │   [sid=456][cnt=5]      │
+ *   │                            │   (A 的 5 个候选)        │
+ *   │                            │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=5]       │
+ *   │   (上传剩余 5 个候选)       │  立即转发给 B            │
+ *   │                            │                         │
+ *   │                            ├── SYNC ────────────────►│
+ *   │                            │   [sid=456][cnt=5]      │
+ *   │                            │   (A 的 5 个候选)        │
+ *   │                            │                         │
+ *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=5]       │
+ *   │   (已转发 5 个，ACK 解锁)   │  缓冲区有空间才回        │
+ *   │                            │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=3]       │
+ *   │   (再上传 3 个)             │                         │
+ *   │                            │                         │
+ *   │                            ├── SYNC ────────────────►│
+ *   │                            │   [sid=456][cnt=3]      │
+ *   │                            │                         │
+ *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=3]       │
+ *   │                            │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=0]       │
+ *   │   (上传完成，FIN)           │                         │
+ *   │                            │                         │
+ *   │                            ├── SYNC ────────────────►│
+ *   │                            │   [sid=456][cnt=0]      │
+ *   │                            │   (A 候选传输完成)       │
+ *   │                            │                         │
+ *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=0]       │
+ *   │   (fwd=0 表示全部完成)      │  FIN 确认               │
+ *   │                            │                         │
+ *   │<==================== P2P ICE 打洞 ====================>│
+ *
+ * 4. 后续会话同步（对端离线，缓存后推送）
+ * ============================================================================
+ *
+ *   Client A (在线)           Server                    Client B (离线)
+ *   │                            │                         │
+ *   ├── ONLINE ─────────────────►│                         │
+ *   │◄── ONLINE_ACK ─────────────┤                         │
+ *   │                            │                         │
+ *   ├── SYNC0 ─────────────────►│  [target=B][cnt=5]      │
+ *   │                            │  B 离线                 │
+ *   │◄── SYNC0_ACK ──────────────┤  [status=1][sid=123][fwd=5]
+ *   │   (B 离线，已缓存 5 个)     │  fwd 表示实际缓存数      │
+ *   │                            │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=5]       │
+ *   │   (上传 5 个候选)           │  尝试缓存               │
+ *   │                            │  [缓冲区空间有限]        │
+ *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=3]       │
+ *   │   (仅缓存了 3 个)           │  有空间才回 ACK          │
+ *   │                            │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=2]       │
+ *   │   (从第 4 个重传)           │  继续缓存                │
+ *   │                            │                         │
+ *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=2]       │
+ *   │   (再缓存 2 个，空间满)     │  暂不 ACK，等空间        │
+ *   │   [buffer full, no ACK]    │                         │
+ *   │                            │                         │
+ *   [等待对端上线...]            │                         │
+ *   │                            │                         │
+ *   │    ... B 上线 ...          │                         │
+ *   │                            │◄── ONLINE ──────────────┤
+ *   │                            ├── ONLINE_ACK ──────────►│
+ *   │                            │                         │
+ *   │                            │◄── SYNC0 ───────────────┤  [target=A][cnt=3]
+ *   │                            ├── SYNC0_ACK ───────────►│  [status=0][sid=456][cnt=5][A的首5候选]
+ *   │                            │                         │
+ *   │                            ├── SYNC ────────────────►│
+ *   │                            │   [sid=456][cnt=3]      │
+ *   │                            │   (推送 A 其余候选)      │
+ *   │                            │                         │
+ *   │                            ├── SYNC ────────────────►│
+ *   │                            │   [sid=456][cnt=0]      │
+ *   │                            │   (A 候选推送完成)       │
+ *   │                            │                         │
+ *   │◄── SYNC_ACK ───────────────┤  (缓存批推送完成)        │
+ *   │   [sid=123][fwd=5]         │  有空间才回 ACK          │
+ *   │                            │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=2]       │
+ *   │   (继续上传剩余候选)        │  B 在线，实时转发        │
+ *   │                            │                         │
+ *   │                            ├── SYNC ────────────────►│
+ *   │                            │   [sid=456][cnt=2]      │
+ *   │                            │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=0]       │
+ *   │   (上传完成)                │                         │
+ *   │                            │                         │
+ *   │                            ├── SYNC ────────────────►│
+ *   │                            │   [sid=456][cnt=0]      │
+ *   │                            │                         │
+ *   │<==================== P2P ICE 打洞 ====================>│
+ *
+ *
+ * 5. P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO - P2P 包中继
+ * ============================================================================
+ *
+ * 功能：P2P 打洞失败时，通过服务器转发数据/确认/加密包（降级方案）
+ *
+ * Client → Server:
+ *   payload: [target_name(32)][p2p_packet(N)]
+ *   - p2p_packet: 完整 P2P 包（包头+payload）
+ *   - 对应关系：
+ *     · P2P_RLY_DATA   <-> P2P_PKT_DATA
+ *     · P2P_RLY_ACK    <-> P2P_PKT_ACK
+ *     · P2P_RLY_CRYPTO <-> P2P_PKT_CRYPTO
+ *
+ * Server → Target:
+ *   payload: [sender_name(32)][p2p_packet(N)]
+ *   - 透传原始 P2P 包
+ *
+ * 6. REQ/RESP 机制 - RPC 请求-应答
+ * ============================================================================
+ *
+ * 功能：通过服务器中转实现可靠的请求-应答机制
+ *
+ * msg 特殊值：
+ *   - msg=0: Echo 测试，自动回复
+ *   - msg>0: 应用层自定义消息
+ *
+ * 流程（6 步）：
+ *
+ *   A                      Server                      B
+ *   ├── REQ ──────────────►│  [target][sid][msg][data] │
+ *   │◄── REQ_ACK ───────────┤  [sid][status]            │
+ *   │                       ├── REQ ───────────────────►│  [sender][sid][msg][data]
+ *   │                       │◄── RESP ──────────────────┤  [sid][code][data]
+ *   │                       ├── RESP_ACK ──────────────►│  [sid]
+ *   │◄── RESP ──────────────┤  [sid][code][data]        │
+ *
+ *
+ * ============================================================================
+ * TCP 特性优化
+ * ============================================================================
  *   - 无需 session_id：TCP 连接已标识客户端
  *   - 无需重传机制：TCP 保证可靠传输
  *   - ACK 可选：主要用于流量控制和错误检测
+ *
+ * TCP 粘包处理：
+ * RELAY 使用 TCP 传输，必须处理粘包/半包问题：
+ *
+ * 接收状态机：
+ *   - RECV_HEADER: 读取包头（9 字节）
+ *   - RECV_PAYLOAD: 读取 payload（length 字节）
+ *
+ * 包头格式：[magic: 4B][type: 1B][length: 4B]
+ *   - magic = 0x50325030 ("P2P0")，帧同步标识
+ *   - type = 消息类型枚举
+ *   - length = payload 长度（不包括包头）
+ *
+ * 循环读取直到 EAGAIN：
+ *   ```c
+ *   for (;;) {
+ *       switch (state) {
+ *       case RECV_HEADER:
+ *           n = recv(fd, buf + offset, sizeof(hdr) - offset, 0);
+ *           if (n == 0) { close(); return; }
+ *           if (n < 0 && EAGAIN) return;
+ *           offset += n;
+ *           if (offset == sizeof(hdr)) {
+ *               state = RECV_PAYLOAD;
+ *               offset = 0;
+ *           }
+ *           break;
+ *       case RECV_PAYLOAD:
+ *           n = recv(fd, payload + offset, length - offset, 0);
+ *           if (n < 0 && EAGAIN) return;
+ *           offset += n;
+ *           if (offset == length) {
+ *               dispatch(type, payload);
+ *               state = RECV_HEADER;
+ *               offset = 0;
+ *           }
+ *           break;
+ *       }
+ *   }
+ *   ```
  */
 
+
+/*
+ * RELAY 模式信令负载头部
+ * todo: 过时定义，目前用于 pubsub 模式
+ *
+ * 用于封装 ICE 候选交换的元数据。
+ * 序列化格式（76字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
+ */
+typedef struct {
+    char                sender[P2P_PEER_ID_MAX];    // 发送方 peer_id
+    char                target[P2P_PEER_ID_MAX];    // 目标方 peer_id
+    uint32_t            timestamp;                  // 时间戳（用于排序和去重）
+    uint32_t            delay_trigger;              // 延迟触发打洞（毫秒）
+    int                 candidate_count;            // ICE 候选数量
+} p2p_signaling_payload_hdr_t;
 
 #pragma pack(pop)
 #pragma ide diagnostic pop
