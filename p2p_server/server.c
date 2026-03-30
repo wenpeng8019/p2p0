@@ -228,6 +228,56 @@ static uint64_t generate_session_id(void) {
     return id;
 }
 
+// 创建新会话对
+static relay_session_pair_t* create_session(relay_client_t *client, const char *remote_peer_id) {
+    if (!client || !remote_peer_id) return NULL;
+    
+    relay_session_pair_t *s = (relay_session_pair_t*)calloc(1, sizeof(relay_session_pair_t));
+    if (!s) return NULL;
+    
+    s->valid = true;
+    s->local_client = client;
+    strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
+    s->session_id = generate_session_id();
+    
+    s->link_next = client->sessions;
+    client->sessions = s;
+    
+    HASH_ADD(hh_session, g_sessions_by_id, session_id, sizeof(uint64_t), s);
+    
+    // 构造peer key用于哈希
+    char peer_key[2 * P2P_PEER_ID_MAX];
+    memset(peer_key, 0, sizeof(peer_key));
+    strncpy(peer_key, client->local_peer_id, P2P_PEER_ID_MAX);
+    strncpy(peer_key + P2P_PEER_ID_MAX, remote_peer_id, P2P_PEER_ID_MAX);
+    HASH_ADD_KEYPTR(hh_peer, g_sessions_by_peer, peer_key, sizeof(peer_key), s);
+    
+    return s;
+}
+
+// 释放会话
+static void free_session(relay_session_pair_t *s) {
+    if (!s) return;
+    
+    if (s->local_client) {
+        relay_session_pair_t **p = &s->local_client->sessions;
+        while (*p && *p != s) p = &(*p)->link_next;
+        if (*p == s) *p = s->link_next;
+        
+        if (s->local_client->sending == s) s->local_client->sending = NULL;
+    }
+    
+    HASH_DELETE(hh_session, g_sessions_by_id, s);
+    HASH_DELETE(hh_peer, g_sessions_by_peer, s);
+    
+    if (s->peer) {
+        s->peer->peer = NULL;
+        free_session(s->peer);
+    }
+    
+    free(s);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifdef MOD_TAG
@@ -288,88 +338,7 @@ static int tcp_recv(relay_client_t *client, void *buf, size_t *len_io) {
     return 0;
 }
 
-// ===== Session 管理 =====
-
-// 创建新会话对
-static relay_session_pair_t* create_session(relay_client_t *client, const char *remote_peer_id) {
-    if (!client || !remote_peer_id) return NULL;
-    
-    relay_session_pair_t *s = (relay_session_pair_t*)calloc(1, sizeof(relay_session_pair_t));
-    if (!s) return NULL;
-    
-    s->valid = true;
-    s->local_client = client;
-    strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
-    s->session_id = generate_session_id();
-    
-    s->link_next = client->sessions;
-    client->sessions = s;
-    
-    HASH_ADD(hh_session, g_sessions_by_id, session_id, sizeof(uint64_t), s);
-    
-    // 构造peer key用于哈希
-    char peer_key[2 * P2P_PEER_ID_MAX];
-    memset(peer_key, 0, sizeof(peer_key));
-    strncpy(peer_key, client->local_peer_id, P2P_PEER_ID_MAX);
-    strncpy(peer_key + P2P_PEER_ID_MAX, remote_peer_id, P2P_PEER_ID_MAX);
-    HASH_ADD_KEYPTR(hh_peer, g_sessions_by_peer, peer_key, sizeof(peer_key), s);
-    
-    return s;
-}
-
-// 释放会话
-static void free_session(relay_session_pair_t *s) {
-    if (!s) return;
-    
-    if (s->local_client) {
-        relay_session_pair_t **p = &s->local_client->sessions;
-        while (*p && *p != s) p = &(*p)->link_next;
-        if (*p == s) *p = s->link_next;
-        
-        if (s->local_client->sending == s) s->local_client->sending = NULL;
-    }
-    
-    HASH_DELETE(hh_session, g_sessions_by_id, s);
-    HASH_DELETE(hh_peer, g_sessions_by_peer, s);
-    
-    if (s->peer) {
-        s->peer->peer = NULL;
-        free_session(s->peer);
-    }
-    
-    free(s);
-}
-
-// ===== 辅助发送函数 =====
-
-// 发送 SYNC 包（分包发送候选）
-static void send_relay_sync(relay_session_pair_t *s, int cand_count, p2p_candidate_t *cands) {
-    if (!s || !s->local_client || s->local_client->fd == P_INVALID_SOCKET) return;
-    
-    uint8_t payload[8 + 1 + MAX_CANDIDATES * sizeof(p2p_candidate_t)];
-    nwrite_ll(payload, s->session_id);
-    payload[8] = (uint8_t)cand_count;
-    
-    int payload_len = 9;
-    if (cand_count > 0 && cands) {
-        memcpy(payload + 9, cands, cand_count * sizeof(p2p_candidate_t));
-        payload_len += cand_count * sizeof(p2p_candidate_t);
-    }
-    
-    p2p_relay_hdr_t hdr = {P2P_RLY_SYNC, htons((uint16_t)payload_len)};
-    relay_client_t *client = s->local_client;
-    size_t hdr_len = sizeof(hdr);
-    size_t body_len = (size_t)payload_len;
-    if (tcp_send(client, &hdr, &hdr_len, "SYNC header") < 0 ||
-        tcp_send(client, payload, &body_len, "SYNC payload") < 0) {
-        return;
-    }
-    
-    printf(LA_F("[TCP] SYNC sent to '%s', ses=%" PRIu64 ", cnt=%d\n", 0, 0),
-           client->local_peer_id, s->session_id, cand_count);
-}
-
-// ===== 消息处理函数 =====
+//-----------------------------------------------------------------------------
 
 // 处理 SYNC0 消息（首次同步）
 static void handle_relay_sync0(relay_client_t *client, const uint8_t *payload, uint16_t len) {
@@ -456,17 +425,76 @@ static void handle_relay_sync0(relay_client_t *client, const uint8_t *payload, u
     }
 }
 
+// 处理 SYNC 消息（候选同步）
+static void handle_relay_sync(relay_client_t *client, relay_session_pair_t *s, uint64_t session_id,
+                              const uint8_t *payload, uint16_t len) {
+    if (len < 9) {
+        printf(LA_F("[TCP] E: Invalid SYNC length: %u\n", 0, 0), len);
+        return;
+    }
+
+    if (!s) {
+        printf(LA_F("[TCP] W: Session %" PRIu64 " not found\n", 0, 0), session_id);
+        return;
+    }
+
+    uint8_t cand_count = payload[8];
+    uint32_t expect_len = 9u + (uint32_t)cand_count * (uint32_t)sizeof(p2p_candidate_t);
+    if (cand_count > MAX_CANDIDATES || len != expect_len) {
+        printf(LA_F("[TCP] E: Invalid SYNC payload: cnt=%u, len=%u, expected=%u\n", 0, 0),
+               (unsigned)cand_count, len, expect_len);
+        return;
+    }
+
+    if (!s->peer || !s->peer->local_client) {
+        printf(LA_F("[TCP] W: SYNC dropped, session %" PRIu64 " not paired\n", 0, 0), session_id);
+        return;
+    }
+
+    relay_client_t *peer_client = s->peer->local_client;
+    p2p_relay_hdr_t hdr = {P2P_RLY_SYNC, htons(len)};
+    size_t hdr_len = sizeof(hdr);
+    size_t body_len = (size_t)len;
+    tcp_send(peer_client, &hdr, &hdr_len, "SYNC header");
+    tcp_send(peer_client, payload, &body_len, "SYNC payload");
+    (void)client;
+}
+
+// 处理 FIN 消息（会话结束）
+static void handle_relay_fin(relay_client_t *client, relay_session_pair_t *s, uint64_t session_id,
+                             const uint8_t *payload, uint16_t len) {
+    if (len != 8) {
+        printf(LA_F("[TCP] E: Invalid FIN length: %u\n", 0, 0), len);
+        return;
+    }
+
+    if (!s) {
+        printf(LA_F("[TCP] W: Session %" PRIu64 " not found\n", 0, 0), session_id);
+        return;
+    }
+
+    if (s->peer && s->peer->local_client) {
+        relay_client_t *peer_client = s->peer->local_client;
+        p2p_relay_hdr_t hdr = {P2P_RLY_FIN, htons(len)};
+        size_t hdr_len = sizeof(hdr);
+        size_t body_len = (size_t)len;
+        tcp_send(peer_client, &hdr, &hdr_len, "FIN header");
+        tcp_send(peer_client, payload, &body_len, "FIN payload");
+    }
+
+    printf(LA_F("[TCP] FIN: close session %" PRIu64 "\n", 0, 0), session_id);
+    free_session(s);
+    (void)client;
+}
+
 // 处理 DATA 消息
-static void handle_relay_data(relay_client_t *client, const uint8_t *payload, uint16_t len) {
+static void handle_relay_data(relay_client_t *client, relay_session_pair_t *s, uint64_t session_id,
+                              const uint8_t *payload, uint16_t len) {
     if (len < 8) {
         printf(LA_F("[TCP] E: Invalid DATA length: %u\n", 0, 0), len);
         return;
     }
-    
-    uint64_t session_id;
-    nread_ll(&session_id, payload);
-    relay_session_pair_t *s = NULL;
-    HASH_FIND(hh_session, g_sessions_by_id, &session_id, sizeof(uint64_t), s);
+
     if (!s || !s->peer || !s->peer->local_client) {
         printf(LA_F("[TCP] W: Session %" PRIu64 " not found or not paired\n", 0, 0), session_id);
         return;
@@ -483,46 +511,7 @@ static void handle_relay_data(relay_client_t *client, const uint8_t *payload, ui
     (void)client;
 }
 
-// 处理 SYNC/FIN 消息
-static void handle_relay_sync_or_fin(relay_client_t *client, uint8_t type, const uint8_t *payload, uint16_t len) {
-    if (len < 8) {
-        printf(LA_F("[TCP] E: Invalid %s length: %u\n", 0, 0),
-               type == P2P_RLY_SYNC ? "SYNC" : "FIN",
-               len);
-        return;
-    }
-    
-    uint64_t session_id;
-    nread_ll(&session_id, payload);
-    relay_session_pair_t *s = NULL;
-    HASH_FIND(hh_session, g_sessions_by_id, &session_id, sizeof(uint64_t), s);
-    
-    if (!s || !s->peer || !s->peer->local_client) {
-        printf(LA_F("[TCP] W: Session %" PRIu64 " not found\n", 0, 0), session_id);
-        return;
-    }
-    
-    relay_session_pair_t *peer_s = s->peer;
-    relay_client_t *peer_client = peer_s->local_client;
-    const char *type_name = (type == P2P_RLY_SYNC) ? "SYNC" :
-                            (type == P2P_RLY_FIN) ? "FIN" : "RELAY";
-    const char *header_reason = (type == P2P_RLY_SYNC) ? "SYNC header" :
-                                (type == P2P_RLY_FIN) ? "FIN header" : "RELAY header";
-    const char *payload_reason = (type == P2P_RLY_SYNC) ? "SYNC payload" :
-                                 (type == P2P_RLY_FIN) ? "FIN payload" : "RELAY payload";
-    
-    p2p_relay_hdr_t hdr = {type, htons(len)};
-    size_t hdr_len = sizeof(hdr);
-    size_t body_len = (size_t)len;
-    tcp_send(peer_client, &hdr, &hdr_len, header_reason);
-    tcp_send(peer_client, payload, &body_len, payload_reason);
-    (void)type_name;
-    (void)client;
-}
-
 //-----------------------------------------------------------------------------
-
-// 旧的 handle_relay_packet 函数已被移除，新实现在下方handle_relay_signaling中
 
 // 处理 RELAY 模式信令（TCP 长连接）- 统一接收+分发架构
 // 架构：client 统一接收完整消息到 recv_buf，解析后分发给对应的处理函数
@@ -602,14 +591,39 @@ static void handle_relay_signaling(int idx) {
                 client->recv_len = ack_len;
                 return;  // 注意：此时不加入哈希表，等 ACK 发送完成后再加入
             }
-            if (rc < 0) goto disconnect;
-            
-        } else if (type == P2P_RLY_SYNC0) {
+            if (rc < 0) goto disconnect;            
+        } 
+        else if (type == P2P_RLY_SYNC0) {
             handle_relay_sync0(client, payload, payload_len);
-        } else if (type == P2P_RLY_DATA) {
-            handle_relay_data(client, payload, payload_len);
-        } else {
-            handle_relay_sync_or_fin(client, type, payload, payload_len);
+        } 
+        else {
+
+            if (payload_len < 8) {
+                printf(LA_F("[TCP] E: Invalid RELAY length: %u\n", 0, 0), payload_len);
+                client->recv_len = 0;
+                continue;
+            }
+
+            uint64_t session_id;
+            nread_ll(&session_id, payload);
+            relay_session_pair_t *s = NULL;
+            HASH_FIND(hh_session, g_sessions_by_id, &session_id, sizeof(uint64_t), s);
+
+            switch (type) {
+            case P2P_RLY_SYNC:
+                handle_relay_sync(client, s, session_id, payload, payload_len);
+                break;
+            case P2P_RLY_FIN:
+                handle_relay_fin(client, s, session_id, payload, payload_len);
+                break;
+            case P2P_RLY_DATA:
+                handle_relay_data(client, s, session_id, payload, payload_len);
+                break;
+            default:
+                printf(LA_F("[TCP] E: Unsupported RELAY type=%u (session=%" PRIu64 ")\n", 0, 0),
+                       (unsigned)type, session_id);
+                goto disconnect;
+            }
         }
         
         // 重置缓冲区，准备接收下一个消息
