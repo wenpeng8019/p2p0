@@ -257,16 +257,17 @@ static void send_alive(p2p_session_t *s) {
  *
  * 协议：P2P_RLY_SYNC0 (0x04)
  * 包头: [type(1) | size(2)]
- * 负载: [target_name(32)]
+ * 负载: [candidate_count(1)][candidates(N*23)][target_name(32)]
  */
 static void send_connect(p2p_session_t *s) {
     const char *PROTO = "SYNC0";
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
-    uint8_t payload[P2P_PEER_ID_MAX];
+    uint8_t payload[1 + P2P_PEER_ID_MAX];
     memset(payload, 0, sizeof(payload));
-    strncpy((char*)payload, ctx->remote_peer_id, P2P_PEER_ID_MAX - 1);
+    payload[0] = 0; // SYNC0 不携带候选，候选通过后续 SYNC 上送
+    strncpy((char*)(payload + 1), ctx->remote_peer_id, P2P_PEER_ID_MAX - 1);
 
     printf(LA_F("[TCP] %s enqueue, target='%s'\n", LA_F532, 532),
            PROTO, ctx->remote_peer_id);
@@ -285,7 +286,7 @@ static void send_connect(p2p_session_t *s) {
  *
  * 协议：P2P_RLY_SYNC (0x06)
  * 包头: [type(1) | size(2)]
- * 负载: [session_id(8)][candidate_count(1)][candidates(N*23)]
+ * 负载: [candidate_count(1)][candidates(N*23)][session_id(8)]
  *
  * FIN 语义（非独立协议）：
  *   - 仍使用 P2P_RLY_SYNC
@@ -307,13 +308,10 @@ static void send_peer_info(p2p_session_t *s) {
 
     uint8_t payload[P2P_MAX_PAYLOAD];
     int cand_cnt = 0;
-    int payload_len = 9;
-
-    // 先写公共头 [session_id(8)][candidate_count(1)]
-    nwrite_ll(payload, ctx->session_id);
+    int payload_len = 1;
 
     // 发送 FIN（candidate_count = 0）
-    if (send_fin) payload[8] = 0;
+    if (send_fin) payload[0] = 0;
     
     // 打包候选列表
     else {
@@ -327,7 +325,7 @@ static void send_peer_info(p2p_session_t *s) {
         cand_cnt = remaining < max_per_pkt ? remaining : max_per_pkt;
         if (cand_cnt < 0) cand_cnt = 0;
 
-        payload[8] = (uint8_t)cand_cnt;
+        payload[0] = (uint8_t)cand_cnt;
 
         for (int i = 0; i < cand_cnt; i++) { int idx = start_idx + i;
             pack_candidate(&s->local_cands[idx], payload + payload_len);
@@ -335,6 +333,10 @@ static void send_peer_info(p2p_session_t *s) {
         }
         // next_candidate_index 在 enqueue 成功后才推进，避免 enqueue 失败导致候选丢失
     }
+
+    // session_id 位于 payload 尾部
+    nwrite_ll(payload + payload_len, ctx->session_id);
+    payload_len += 8;
 
     printf(LA_F("[TCP] %s enqueue, ses_id=%" PRIu64 " cand_cnt=%d fin=%d\n", LA_F531, 531),
            PROTO, ctx->session_id, cand_cnt, send_fin ? 1 : 0);
@@ -461,14 +463,14 @@ static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len)
  * 处理 SYNC0_ACK
  *
  * 协议：P2P_RLY_SYNC0_ACK (0x05)
- * 负载: [status(1)][reserved(3)][session_id(8)]
+ * 负载: [status(1)][session_id(8)][confirmed_count(1)]
  */
 static void handle_connect_ack(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "SYNC0_ACK";
 
     printf(LA_F("[TCP] %s recv, len=%d\n", LA_F533, 533), PROTO, len);
 
-    if (len < 12) {
+    if (len < 10) {
         print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
         return;
     }
@@ -481,7 +483,7 @@ static void handle_connect_ack(p2p_session_t *s, const uint8_t *payload, int len
     }
 
     uint8_t status = payload[0];
-    uint64_t session_id = nget_ll(payload + 4);
+    uint64_t session_id = nget_ll(payload + 1);
 
     if (status == 0xFF) {
         print("E:", LA_F("%s: error, target not found\n", LA_F501, 501), PROTO);
@@ -535,7 +537,7 @@ static void handle_connect_ack(p2p_session_t *s, const uint8_t *payload, int len
  * 处理 SYNC（服务器下发对端候选）
  *
  * 协议：P2P_RLY_SYNC (0x06)
- * 负载: [session_id(8)][candidate_count(1)][candidates(N*23)]
+ * 负载: [candidate_count(1)][candidates(N*23)][session_id(8)]
  */
 static void handle_peer_info(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "PEER_INFO";
@@ -573,16 +575,16 @@ static void handle_peer_info(p2p_session_t *s, const uint8_t *payload, int len) 
         }
     }
 
-    // session_id 校验放在 PEER_INFO 入口，候选解析函数仅处理候选负载
-    uint64_t session_id = nget_ll(payload);
+    // session_id 位于 payload 尾部
+    uint64_t session_id = nget_ll(payload + len - 8);
     if (session_id != ctx->session_id) {
         print("W:", LA_F("%s: session mismatch(local=%" PRIu64 " recv=%" PRIu64 ")\n", LA_F508, 508),
               PROTO, ctx->session_id, session_id);
         return;
     }
 
-    // 解析候选列表（跳过 session_id）
-    unpack_remote_candidates(s, payload + 8, len - 8);
+    // 解析候选列表（尾部 8 字节是 session_id）
+    unpack_remote_candidates(s, payload, len - 8);
 
     print("V:", LA_F("%s: processed, remote_cand_cnt=%d\n", LA_F503, 503),
           PROTO, s->remote_cand_cnt);

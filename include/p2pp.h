@@ -682,21 +682,20 @@ typedef struct {
  *   - candidate_sync_max: 单包最大候选数（0=客户端用默认）
  *
  * P2P_RLY_SYNC0:
- *   payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
+ *   payload: [candidate_count(1)][candidates(N*23)][target_name(32)]
  *   - target_name: 目标 peer 名称，定长 32 字节，0 填充
  *   - candidate_count: 本端首批候选数量（可以为 0）
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *
  * P2P_RLY_SYNC0_ACK:
- *   payload: [status(1)][reserved(3)][session_id(8)][confirmed_count(1)]
+ *   payload: [status(1)][session_id(8)][confirmed_count(1)]
  *   - status: 0x00=对端在线, 0x01=离线, 0xFF=错误
- *   - reserved: 3 字节保留，未使用
  *   - session_id: 64 位会话 ID（网络字节序）
  *   - confirmed_count: 实际确认处理的候选数（转发或缓存，与 SYNC_ACK 逻辑一致）
  *   - 对端候选通过服务器下行 SYNC 消息推送（而非在 ACK 中返回）
  *
  * P2P_RLY_SYNC:
- *   payload: [session_id(8)][candidate_count(1)][candidates(N*23)]
+ *   payload: [candidate_count(1)][candidates(N*23)][session_id(8)]
  *   - session_id: 64 位会话 ID（网络字节序）
  *   - candidate_count: 本包候选数量，0=FIN
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
