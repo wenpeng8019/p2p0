@@ -118,12 +118,11 @@ typedef struct session {
 static session_t*           g_sessions = NULL;
 static session_pair_t*      g_session_pirs = NULL;
 
-
 #pragma pack(push, 1)
 typedef struct buffer_item {
     struct buffer_item*     next;
     void*                   refer;
-    uint16_t                len;
+    uint8_t                 c;
 } buffer_item_t;
 #pragma pack(pop)
 #define ITEM2BUF(item)      ((uint8_t*)(item + 1))
@@ -135,8 +134,12 @@ typedef struct relay_session {
     session_t               base;
     struct relay_session*   peer;
     
-    buffer_item_t*          peer_pending;
+    /* 向对端发送的待处理队列 */
+    buffer_item_t*          peer_pending;                       // 由对端主动来取，用于控制发送节奏
+                                                                // + 即对端的发送队列最多只有来自本端的一个发送项
+                                                                //   当对端发送完来自本端的项后，会来此继续取下一项
     
+    /* 本地发送队列 */
     buffer_item_t*          send_head;
     buffer_item_t*          send_rear;
     struct relay_session*   send_next;
@@ -158,8 +161,8 @@ typedef struct relay_client {
 } relay_client_t;
 
 static relay_client_t       g_relay_clients[MAX_PEERS];
-static buffer_item_t*  g_relay_recycle = NULL;
-static buffer_item_t*  g_relay_recycleS = NULL;
+static buffer_item_t*       g_relay_recycle = NULL;
+static buffer_item_t*       g_relay_recycleS = NULL;
 
 #define RELAY_FRAME_SIZE         (sizeof(p2p_relay_hdr_t) + P2P_MAX_PAYLOAD)
 #define RELAY_SMALL_FRAME_SIZE   (sizeof(p2p_relay_hdr_t) + P2P_MAX_PAYLOAD / 4)
@@ -451,30 +454,27 @@ static int tcp_recv(relay_client_t *client, void *buf, size_t *len_io) {
 
 static buffer_item_t* relay_buf_alloc(uint16_t len) {
 
-    buffer_item_t **recycle_head = NULL; size_t capacity = 0;
+    buffer_item_t **recycle_head; size_t capacity; uint8_t c;
     if (len <= RELAY_SMALL_FRAME_SIZE) {
         recycle_head = &g_relay_recycleS;
         capacity = RELAY_SMALL_FRAME_SIZE;
+        c = 1;
     } else {
         recycle_head = &g_relay_recycle;
         capacity = RELAY_FRAME_SIZE;
+        c = 0;
     }
 
-    buffer_item_t *packet = *recycle_head;
-    if (packet) {
-        *recycle_head = packet->next;
-    } else {
-        packet = (buffer_item_t*)malloc(sizeof(buffer_item_t) + capacity);
-    }
-
-    if (!packet) return NULL;
-    packet->len = len;
-    return packet;
+    buffer_item_t *item = *recycle_head;
+    if (item) *recycle_head = item->next;
+    else if (!(item = (buffer_item_t*)malloc(sizeof(buffer_item_t) + capacity))) return NULL;
+    else item->c = c;    
+    return item;
 }
 
 static void relay_buf_free(buffer_item_t *buf_item) {
 
-    if (buf_item->len <= RELAY_SMALL_FRAME_SIZE) {
+    if (buf_item->c) {
         buf_item->next = g_relay_recycleS;
         g_relay_recycleS = buf_item;
         return;
@@ -486,33 +486,32 @@ static void relay_buf_free(buffer_item_t *buf_item) {
 static void relay_free_session(relay_session_t *s) {
 
     if (s->peer) {
-        relay_session_t *peer = s->peer;
-        s->peer = NULL;
+        relay_session_t *peer = s->peer; s->peer = NULL;
         peer->peer = NULL;
         relay_free_session(peer);
     }
 
+    // 从 client->sending 链表中摘除当前 session
     if (s->base.client) {
         relay_client_t *client = (relay_client_t*)s->base.client;
-
-        // 从 client->sending 链表中摘除当前 session，避免悬挂指针。
         relay_session_t **q = &client->sending_head;
         while (*q && *q != s) q = &(*q)->send_next;
         if (*q == s) {
             *q = s->send_next;
             client->send_offset = 0;
+            if (client->sending_head == NULL) client->sending_rear = NULL;
         }
     }
 
-    buffer_item_t *item = s->send_head;
-    while (item) {
-        buffer_item_t *next = item->next;
-        relay_buf_free(item);
-        item = next;
+    // 释放发送队列
+    while (s->send_head) {
+        buffer_item_t *next = s->send_head->next;
+        relay_buf_free(s->send_head);
+        s->send_head = next;
     }
-    s->send_head = NULL;
     s->send_rear = NULL;
 
+    // 释放对端待处理项
     if (s->peer_pending) {
         relay_buf_free(s->peer_pending);
         s->peer_pending = NULL;
@@ -521,24 +520,46 @@ static void relay_free_session(relay_session_t *s) {
     free_session(&s->base);
 }
 
+static void relay_clear_client(relay_client_t *c) {
+
+    P_sock_close(c->fd);
+    c->fd = P_INVALID_SOCKET;
+    c->base.valid = false;
+    c->online_ack_pending = false;
+    c->recv_len = 0;
+    if (c->recv_buf) {
+    relay_buf_free(BUF2ITEM(c->recv_buf));
+        c->recv_buf = NULL;
+    }
+    while (c->base.sessions) {
+        relay_free_session((relay_session_t*)c->base.sessions);
+    }
+    c->sending_head = c->sending_rear = NULL;
+    c->send_offset = 0;
+}
+
+//-----------------------------------------------------------------------------
+
 static void relay_session_send(relay_session_t *s, buffer_item_t* buf_item) {
 
     assert(s && s->base.client);
 
-    if (s->send_rear) s->send_rear->next = buf_item;
-    else s->send_head = buf_item;
-    s->send_rear = buf_item;
+    // 添加到 session 的本地发送队列
+    buf_item->next = NULL;
+    if (s->send_rear) {
+        s->send_rear->next = buf_item;
+        s->send_rear = buf_item;
+        return;
+    }
+
+    // 发送队列原本为空，添加 session 到客户端的发送链表头部（如果不在链表中）
+    assert(!s->send_next);
+    s->send_head = s->send_rear = buf_item;
 
     relay_client_t *client = (relay_client_t*)s->base.client;
-    if (s->send_next) return;
-
-    s->send_next = (relay_session_t*)-1;
-    if (client->sending_rear) {
+    if (client->sending_rear)
         client->sending_rear->send_next = s;
-    } else {
-        client->sending_head = s;
-        client->sending_rear = s;
-    }
+    else client->sending_head = client->sending_rear = s;
 }
 
 static void relay_session_send_sync0_ack(relay_session_t *s, uint8_t online) {
@@ -583,6 +604,10 @@ static void relay_session_send_sync_ack(relay_session_t *s, uint8_t confirmed_co
     payload[sizeof(uint64_t)] = confirmed_count;
 
     relay_session_send(s, buf_item);
+}
+
+static void relay_session_send_complete(relay_session_t *s, buffer_item_t* buf_item) {
+
 }
 
 //-----------------------------------------------------------------------------
@@ -2731,30 +2756,38 @@ int main(int argc, char *argv[]) {
             relay_client_t *client = &g_relay_clients[i];
             relay_session_t *sending_session = client->sending_head;
 
-            if ((client->online_ack_pending || (sending_session && sending_session->send_head)) 
+            // 如果当前正在等待发送中的数据
+            if ((client->online_ack_pending || sending_session) 
                 && FD_ISSET(client->fd, &write_fds)) {
 
-                // 1. 最优先处理 ONLINE_ACK 发送（复用 recv_buf）
+                // 当前正在发送 ONLINE_ACK
+                // + 此时还没有 session，复用 recv_buf 作为 send_buf，recv_len 作为已发送长度
                 if (client->online_ack_pending) {
 
                     size_t ack_total = sizeof(p2p_relay_hdr_t) + 2;
-                    size_t remaining = ack_total - client->recv_len;
-                    int rc = tcp_send(client, client->recv_buf + client->recv_len, &remaining, "ONLINE_ACK pending");
+                    size_t len = ack_total - client->recv_len;
+                    int rc = tcp_send(client, client->recv_buf + client->recv_len, &len, "ONLINE_ACK pending");
                     if (rc < 0) {
                         P_sock_close(client->fd);
+                        client->fd = P_INVALID_SOCKET;
                         client->base.valid = false;
+                        client->online_ack_pending = false;
+                        client->recv_len = 0;
                         if (client->recv_buf) {
                             relay_buf_free(BUF2ITEM(client->recv_buf));
                             client->recv_buf = NULL;
                         }
+                        while (client->base.sessions) {
+                            relay_free_session((relay_session_t*)client->base.sessions);
+                        }
                         continue;
                     }
 
-                    if (remaining > 0) { client->recv_len = (uint16_t)(client->recv_len + remaining);
+                    if (len > 0) { client->recv_len += len;
 
-                        if (client->recv_len >= ack_total) {
-                            client->online_ack_pending = false;
-                            client->recv_len = 0;
+                        // ONLINE_ACK 发送完成
+                        if (client->recv_len >= ack_total) { client->recv_len = 0;
+                            client->online_ack_pending = false;                        
                             printf(LA_F("[TCP] V: ONLINE_ACK sent to '%s'\n", LA_F221, 221), client->base.local_peer_id);
                         }
                     }
@@ -2763,61 +2796,43 @@ int main(int argc, char *argv[]) {
                     if (client->online_ack_pending) continue;
                 }
                 // 2. 处理 session 发送队列（与 ONLINE_ACK 分支互斥）
-                else {
+                else { assert(sending_session->send_head);
 
-                    buffer_item_t *item = sending_session ? sending_session->send_head : NULL;
-                    if (!item) {
-                        client->sending_head = sending_session->send_next;
-                        if (client->sending_head == (void*)-1) {
-                            client->sending_head = client->sending_rear = NULL;
-                        }
-                        sending_session->send_next = NULL;
-                        client->send_offset = 0;
-                        continue;
-                    }
+                    buffer_item_t *item = sending_session->send_head;
+                    const p2p_relay_hdr_t *hdr = (const p2p_relay_hdr_t *)ITEM2BUF(item);
 
                     // 原始入站 SYNC0 零拷贝包：首发时切换到重映射头部位置发送。
-                    if (client->send_offset == 0 && item->len >= (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_PEER_ID_MAX + 1)) {
-                        const uint8_t *buf = (const uint8_t *)ITEM2BUF(item);
-                        const p2p_relay_hdr_t *hdr0 = (const p2p_relay_hdr_t *)buf;
-                        if (hdr0->type == P2P_RLY_SYNC0) {
-                            uint8_t in_cnt = buf[sizeof(p2p_relay_hdr_t) + P2P_PEER_ID_MAX];
-                            uint16_t in_size = (uint16_t)(P2P_PEER_ID_MAX + 1 + in_cnt * sizeof(p2p_candidate_t));
-                            if (ntohs(hdr0->size) == in_size) {
-                                client->send_offset = (uint16_t)(P2P_PEER_ID_MAX - 8);
-                            }
-                        }
+                    if (client->send_offset == 0 && hdr->type == P2P_RLY_SYNC0) {
+                        client->send_offset += P2P_PEER_ID_MAX - sizeof(uint64_t);
                     }
 
-                    size_t remaining = item->len - client->send_offset;
-                    int rc = tcp_send(client, (const char *)ITEM2BUF(item) + client->send_offset,
-                                      &remaining, "session queue");
+                    const uint16_t len = (uint16_t)(sizeof(p2p_relay_hdr_t) + ntohs(hdr->size));
+                    size_t remaining = len - client->send_offset;
+                    int rc = tcp_send(client, (const char *)hdr + client->send_offset, &remaining, "session queue");
                     if (rc < 0) {
-                        P_sock_close(client->fd);
-                        client->base.valid = false;
-                        if (client->recv_buf) {
-                            relay_buf_free(BUF2ITEM(client->recv_buf));
-                            client->recv_buf = NULL;
-                        }
+                        relay_clear_client(client);
                         continue;
                     }
 
                     if (remaining > 0) { client->send_offset += (uint32_t)remaining;
 
                         // 当前 session 发送完成
-                        if (client->send_offset >= item->len) {
+                        if (client->send_offset >= len) { client->send_offset = 0;
 
-                            // todo refer pending 控制
+                            // 如果 item 有 refer，说明这是一个需要发送完成回调的包
+                            if (item->refer) {
+                                relay_session_send_complete((relay_session_t*)item->refer, item);
+                            }
 
-                            sending_session->send_head = item->next;
-                            if (!sending_session->send_head)
+                            // 删除已发送完成的 item
+                            if (!(sending_session->send_head = item->next))
                                 sending_session->send_rear = NULL;
                             relay_buf_free(item);
-                            client->send_offset = 0;
-
+                            
+                            // 如果 session 发送队列已空，发送下一条待发送 session
                             if (!sending_session->send_head) {
                                 client->sending_head = sending_session->send_next;
-                                sending_session->send_next = NULL;
+                                if (!client->sending_head) client->sending_rear = NULL;                            
                             }
                         }
                     }
