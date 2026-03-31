@@ -250,17 +250,17 @@ static void send_alive(p2p_session_t *s) {
  *
  * 协议：P2P_RLY_SYNC0 (0x04)
  * 包头: [type(1) | size(2)]
- * 负载: [candidate_count(1)][candidates(N*23)][target_name(32)]
+ * 负载: [target_name(32)][candidate_count(1)][candidates(N*23)]
  */
 static void send_connect(p2p_session_t *s) {
     const char *PROTO = "SYNC0";
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
-    uint8_t payload[1 + P2P_PEER_ID_MAX];
+    uint8_t payload[P2P_PEER_ID_MAX + 1];
     memset(payload, 0, sizeof(payload));
-    payload[0] = 0; // SYNC0 不携带候选，候选通过后续 SYNC 上送
-    strncpy((char*)(payload + 1), ctx->remote_peer_id, P2P_PEER_ID_MAX - 1);
+    strncpy((char*)payload, ctx->remote_peer_id, P2P_PEER_ID_MAX - 1);
+    payload[P2P_PEER_ID_MAX] = 0; // SYNC0 不携带候选，候选通过后续 SYNC 上送
 
     printf(LA_F("[TCP] %s enqueue, target='%s'\n", LA_F532, 532),
            PROTO, ctx->remote_peer_id);

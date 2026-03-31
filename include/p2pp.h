@@ -691,7 +691,7 @@ typedef struct {
  *   - candidate_sync_max: 单包最大候选数（0=客户端用默认）
  *
  * P2P_RLY_SYNC0:
- *   payload: [candidate_count(1)][candidates(N*23)][target_name(32)]
+ *   payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
  *   - target_name: 目标 peer 名称，定长 32 字节，0 填充
  *   - candidate_count: 本端首批候选数量（可以为 0）
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
