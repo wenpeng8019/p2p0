@@ -627,16 +627,18 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 
 /* RELAY 模式消息类型 */
 typedef enum {
+    P2P_RLY_ERROR = 0,                       // 错误包（仅服务器发送，包含错误码）
+
     /* 在线管理 */
-    P2P_RLY_ONLINE = 1,                     // 上线请求: Client -> Server
+    P2P_RLY_ONLINE,                         // 上线请求: Client -> Server
     P2P_RLY_ONLINE_ACK,                     // 上线确认: Server -> Client (含服务器功能标志)
     P2P_RLY_ALIVE,                          // 心跳: Client -> Server
 
     /* 会话同步 */
     P2P_RLY_SYNC0,                          // 首次同步: Client -> Server (带 target + 首批候选)；Server -> Client（对接+首次同步）
-    P2P_RLY_SYNC0_ACK,                      // 首次同步应答: Server -> Client (status + session_id + confirmed_count)
+    P2P_RLY_SYNC0_ACK,                      // 首次同步应答: Server -> Client (session_id + online，立即返回)
     P2P_RLY_SYNC,                           // 后续同步: 双向 (Client -> Server 上传, Server -> Client 下发)
-    P2P_RLY_SYNC_ACK,                       // 同步确认: Server -> Client (已转发给对端，confirmed_count == 0 表示 sync 完成)
+    P2P_RLY_SYNC_ACK,                       // 同步确认: Server -> Client (确认候选处理数量，confirmed_count == 0 可表示 FIN 完成)
     P2P_RLY_FIN,                            // 会话结束: Client -> Server / Server -> Client
 
     /* P2P 数据中继（打洞失败降级） */
@@ -660,6 +662,7 @@ typedef struct {
 /* RELAY 上线确认功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
 #define P2P_RLY_FEATURE_MSG         0x02    // 支持 MSG RPC 机制
+#define P2P_RLY_SYNC_FIN_MARKER     0xFF    // SYNC 负载尾部 FIN 标记字节
 
 /* RELAY 响应错误码（当 on_response 回调 len=-1 时，code 字段表示错误类型） */
 #define P2P_RLY_ERR_PEER_OFFLINE    0xFE    // 目标在等待响应期间离线
@@ -671,6 +674,12 @@ typedef struct {
  *
  * 所有消息：[p2p_relay_hdr_t: 3B][payload: N bytes]
  *
+ * P2P_RLY_ERROR:
+ *   payload: [type(1)][error_code(1)][error_msg(N)]
+ *   - type: 请求的 p2p_relay_type_t 类型（例如 P2P_RLY_SYNC0），用于指示哪个请求出错
+ *   - error_code: 0=未知错误, 1=协议错误, 2=服务器内部错误
+ *   - error_msg: 可选的错误描述文本（UTF-8 编码）
+ * 
  * P2P_RLY_ONLINE:
  *   payload: [name(32)][instance_id(4)]
  *   - name: 本地 peer 名称，定长 32 字节，0 填充
@@ -688,17 +697,18 @@ typedef struct {
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *
  * P2P_RLY_SYNC0_ACK:
- *   payload: [status(1)][session_id(8)][confirmed_count(1)]
- *   - status: 0x00=对端在线, 0x01=离线, 0xFF=错误
+ *   payload: [session_id(8)][online(1)]
  *   - session_id: 64 位会话 ID（网络字节序）
- *   - confirmed_count: 实际确认处理的候选数（转发或缓存，与 SYNC_ACK 逻辑一致）
- *   - 对端候选通过服务器下行 SYNC 消息推送（而非在 ACK 中返回）
+ *   - online: bool，0=对端离线，1=对端在线
+ *   - 该 ACK 对 SYNC0 请求立即返回，仅用于告知会话建立结果
+ *   - 若 SYNC0 携带 candidate_count>0，服务器会在候选已处理后，再额外返回一个 SYNC_ACK
  *
  * P2P_RLY_SYNC:
- *   payload: [candidate_count(1)][candidates(N*23)][session_id(8)]
+ *   payload: [session_id(8)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *   - session_id: 64 位会话 ID（网络字节序）
- *   - candidate_count: 本包候选数量，0=FIN
+ *   - candidate_count: 本包候选数量
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
+ *   - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
  *
  * P2P_RLY_SYNC_ACK:
  *   payload: [session_id(8)][confirmed_count(1)]
@@ -790,8 +800,11 @@ typedef struct {
  *   ├── SYNC0 ─────────────────►│  [target][cnt=5][cands]
  *   │                            │  查找 B 的状态
  *   │                            │  分配 session_id
- *   │◄── SYNC0_ACK ──────────────┤  [status=0][sid][fwd=5]
- *   │   (B 在线，已缓存 5 个)     │  返回实际缓存数
+ *   │◄── SYNC0_ACK ──────────────┤  [sid][online=1]
+ *   │   (立即返回，建立会话)       │
+ *   │                            │
+ *   │◄── SYNC_ACK ───────────────┤  [sid][fwd=5]
+ *   │   (仅当 SYNC0.cnt>0 才返回)  │  返回首批候选处理数
  *   │                            │
  *   [收到 session_id，可继续上传]  │
  *
@@ -802,12 +815,15 @@ typedef struct {
  *   │                            │                         │
  *   ├── SYNC0 ─────────────────►│  [target=B][cnt=5]     │
  *   │                            │  B 在线，分配 sid=123   │
- *   │◄── SYNC0_ACK ──────────────┤  [status=0][sid=123][fwd=5]
- *   │   (已转发 5 个给 B)         │  立即转发给 B            │
+ *   │◄── SYNC0_ACK ──────────────┤  [sid=123][online=1]
+ *   │   (立即返回)                │                          │
  *   │                            │                         │
  *   │                            ├── SYNC ────────────────►│
  *   │                            │   [sid=456][cnt=5]      │
  *   │                            │   (A 的 5 个候选)        │
+ *   │                            │                         │
+ *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=5]       │
+ *   │   (SYNC0 首批候选处理确认)   │                          │
  *   │                            │                         │
  *   ├── SYNC ──────────────────►│  [sid=123][cnt=5]       │
  *   │   (上传剩余 5 个候选)       │  立即转发给 B            │
@@ -827,12 +843,12 @@ typedef struct {
  *   │                            │                         │
  *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=3]       │
  *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=0]       │
- *   │   (上传完成，FIN)           │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=0][fin=0xFF] │
+ *   │   (上传完成，FIN 标记)       │                          │
  *   │                            │                         │
  *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=0]      │
- *   │                            │   (A 候选传输完成)       │
+ *   │                            │   [sid=456][cnt=0][fin=0xFF] │
+ *   │                            │   (A 候选传输完成)            │
  *   │                            │                         │
  *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=0]       │
  *   │   (fwd=0 表示全部完成)      │  FIN 确认               │
@@ -849,8 +865,8 @@ typedef struct {
  *   │                            │                         │
  *   ├── SYNC0 ─────────────────►│  [target=B][cnt=5]      │
  *   │                            │  B 离线                 │
- *   │◄── SYNC0_ACK ──────────────┤  [status=1][sid=123][fwd=5]
- *   │   (B 离线，已缓存 5 个)     │  fwd 表示实际缓存数      │
+ *   │◄── SYNC0_ACK ──────────────┤  [sid=123][online=0]
+ *   │   (立即返回，B 当前离线)     │                          │
  *   │                            │                         │
  *   ├── SYNC ──────────────────►│  [sid=123][cnt=5]       │
  *   │   (上传 5 个候选)           │  尝试缓存               │
@@ -872,18 +888,18 @@ typedef struct {
  *   │                            ├── ONLINE_ACK ──────────►│
  *   │                            │                         │
  *   │                            │◄── SYNC0 ───────────────┤  [target=A][cnt=3]
- *   │                            ├── SYNC0_ACK ───────────►│  [status=0][sid=456][cnt=5][A的首5候选]
+ *   │                            ├── SYNC0_ACK ───────────►│  [sid=456][online=1]
  *   │                            │                         │
  *   │                            ├── SYNC ────────────────►│
  *   │                            │   [sid=456][cnt=3]      │
  *   │                            │   (推送 A 其余候选)      │
  *   │                            │                         │
  *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=0]      │
- *   │                            │   (A 候选推送完成)       │
+ *   │                            │   [sid=456][cnt=0][fin=0xFF] │
+ *   │                            │   (A 候选推送完成)            │
  *   │                            │                         │
- *   │◄── SYNC_ACK ───────────────┤  (缓存批推送完成)        │
- *   │   [sid=123][fwd=5]         │  有空间才回 ACK          │
+ *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=5]       │
+ *   │   (对端上线后，补回 SYNC0 首批)│  有空间才回 ACK         │
  *   │                            │                         │
  *   ├── SYNC ──────────────────►│  [sid=123][cnt=2]       │
  *   │   (继续上传剩余候选)        │  B 在线，实时转发        │
@@ -891,11 +907,11 @@ typedef struct {
  *   │                            ├── SYNC ────────────────►│
  *   │                            │   [sid=456][cnt=2]      │
  *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=0]       │
- *   │   (上传完成)                │                         │
+ *   ├── SYNC ──────────────────►│  [sid=123][cnt=0][fin=0xFF] │
+ *   │   (上传完成，FIN 标记)       │                          │
  *   │                            │                         │
  *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=0]      │
+ *   │                            │   [sid=456][cnt=0][fin=0xFF] │
  *   │                            │                         │
  *   │<==================== P2P ICE 打洞 ====================>│
  *
