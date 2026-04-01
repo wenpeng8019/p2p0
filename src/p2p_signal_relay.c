@@ -404,6 +404,73 @@ static bool relay_wait_stun_candidates(p2p_session_t *s) {
         && (s->stun_pending > 0 || s->turn_pending > 0);
 }
 
+/*
+ * 通过 RELAY 服务器转发数据包（DATA/ACK/CRYPTO）
+ *
+ * 协议：P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO
+ * 包头: [type(1)][size(2)]
+ * 负载: [session_id(8)][P2P packet header(4)][payload(N)]
+ *
+ * 流控：发送后设置 awaiting_data_ready，收到 STATUS(READY) 后清除。
+ */
+ret_t p2p_signal_relay_data(p2p_session_t *s,
+                            uint8_t type, uint8_t flags, uint16_t seq,
+                            const void *payload, uint16_t payload_len) {
+
+    p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
+    P_check(!payload_len || payload, return E_INVALID;)
+    P_check(ctx->feature_relay, return E_NO_SUPPORT;)
+    P_check(ctx->session_id, return E_NONE_CONTEXT;)
+
+    // 流控检查：等待上一个转发完成
+    if (ctx->awaiting_data_ready) {
+        print("V:", LA_F("RELAY data throttled: awaiting READY\n", LA_F592, 592));
+        return E_BUSY;
+    }
+
+    // 映射 P2P 包类型到 RELAY 协议类型
+    uint8_t relay_type;
+    const char *proto;
+    switch (type) {
+        case P2P_PKT_DATA:   relay_type = P2P_RLY_DATA;   proto = "DATA";   break;
+        case P2P_PKT_ACK:    relay_type = P2P_RLY_ACK;    proto = "ACK";    break;
+        case P2P_PKT_CRYPTO: relay_type = P2P_RLY_CRYPTO; proto = "CRYPTO"; break;
+        default:
+            print("E:", LA_F("RELAY data: unsupported type 0x%02x\n", LA_F593, 593), type);
+            return E_INVALID;
+    }
+
+    // 构造负载: [session_id(8)][P2P hdr(4)][payload]
+    uint8_t relay_payload[P2P_MAX_PAYLOAD];
+    int total_len = P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE + payload_len;
+    if (total_len > P2P_MAX_PAYLOAD) {
+        print("E:", LA_F("RELAY %s: payload too large (%d)\n", LA_F586, 586), proto, total_len);
+        return E_OUT_OF_CAPACITY;
+    }
+
+    // session_id
+    nwrite_ll(relay_payload, ctx->session_id);
+
+    // P2P packet header
+    p2p_pkt_hdr_encode(relay_payload + P2P_RLY_SESS_ID_PSZ, type, flags, seq);
+
+    // payload
+    if (payload_len > 0 && payload)
+        memcpy(relay_payload + P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE, payload, payload_len);
+
+    if (enqueue_message(ctx, relay_type, relay_payload, total_len) != 0) {
+        print("W:", LA_F("RELAY %s: send buffer busy\n", LA_F587, 587), proto);
+        return E_BUSY;
+    }
+
+    ctx->awaiting_data_ready = true;
+
+    print("V:", LA_F("RELAY %s enqueued: ses_id=%" PRIu64 " seq=%u len=%d\n", LA_F583, 583),
+          proto, ctx->session_id, seq, payload_len);
+
+    return E_NONE;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -455,6 +522,13 @@ static void handle_relay_status(p2p_session_t *s, const uint8_t *payload, int le
         ctx->trickle_last_time = P_tick_ms();
         print("V:", LA_F("%s: session busy, will retry\n", LA_F566, 566), PROTO);
         break;
+    case P2P_RLY_CODE_READY:
+        // DATA/ACK/CRYPTO 转发确认，解除流控
+        if (req_type == P2P_RLY_DATA || req_type == P2P_RLY_ACK || req_type == P2P_RLY_CRYPTO) {
+            ctx->awaiting_data_ready = false;
+            print("V:", LA_F("%s: data relay ready, flow control released\n", LA_F582, 582), PROTO);
+        }
+        break;
     default:
         // NOT_ONLINE / PROTOCOL / INTERNAL / UNKNOWN → 致命错误
         print("E:", LA_F("%s: fatal error code=%u, entering ERROR state\n", LA_F531, 531),
@@ -495,6 +569,17 @@ static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len)
     print("V:", LA_F("%s: accepted, relay=%s msg=%s cand_max=%d\n", LA_F496, 496),
           PROTO, ctx->feature_relay ? "yes" : "no", ctx->feature_msg ? "yes" : "no",
           ctx->candidate_sync_max ? ctx->candidate_sync_max : P2P_RELAY_MAX_CANDS_PER_PACKET);
+
+    // 如果服务器支持数据中继
+    if (ctx->feature_relay) {
+        // 启动数据中继功能
+        if (!s->signaling_relay_fn) {
+            s->signaling_relay_fn = p2p_signal_relay_data;
+            // 将 SIGNALING 路径添加到路径管理器（作为 fallback）
+            path_manager_enable_signaling(s, &ctx->server_addr);
+            print("I:", LA_F("SIGNALING path enabled (server supports relay)\n", LA_F320, 320));
+        }
+    }
 
     // 切换到 ONLINE 状态
     ctx->state = SIGNAL_RELAY_ONLINE;
@@ -812,6 +897,115 @@ static void handle_relay_fin(p2p_session_t *s, const uint8_t *payload, int len) 
 }
 
 /*
+ * 处理服务器转发的 DATA/ACK/CRYPTO 包
+ *
+ * 负载格式: [session_id(8)][P2P hdr(4)][payload(N)]
+ *
+ * 处理流程：
+ *   1. 验证 session_id
+ *   2. 解析 P2P 包头
+ *   3. 根据类型调用相应处理函数（CRYPTO→解密后递归，DATA/ACK→reliable 层）
+ */
+static void handle_relay_data_recv(p2p_session_t *s, const uint8_t *payload, int len) {
+    p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
+    uint8_t relay_type = ctx->hdr.type;
+
+    const char *PROTO = relay_type == P2P_RLY_ACK ? "ACK"
+                      : relay_type == P2P_RLY_CRYPTO ? "CRYPTO"
+                      : "DATA";
+
+    // 最小长度: session_id(8) + P2P hdr(4)
+    if (len < (int)(P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE)) {
+        print("E:", LA_F("RELAY %s recv: bad payload(len=%d)\n", LA_F584, 584), PROTO, len);
+        return;
+    }
+
+    // 1. 验证 session_id
+    uint64_t session_id = nget_ll(payload);
+    if (session_id != ctx->session_id) {
+        print("W:", LA_F("RELAY %s recv: session mismatch(local=%" PRIu64 " recv=%" PRIu64 ")\n", LA_F585, 585),
+              PROTO, ctx->session_id, session_id);
+        return;
+    }
+
+    // 2. 提取 P2P 包头
+    const uint8_t *p2p_hdr = payload + P2P_RLY_SESS_ID_PSZ;
+    p2p_packet_hdr_t hdr;
+    p2p_pkt_hdr_decode(p2p_hdr, &hdr);
+
+    // 3. 提取 P2P 负载
+    const uint8_t *p2p_payload = p2p_hdr + P2P_HDR_SIZE;
+    int p2p_payload_len = len - P2P_RLY_SESS_ID_PSZ - P2P_HDR_SIZE;
+
+    uint64_t now = P_tick_ms();
+
+    // 4. 根据类型处理
+    switch (hdr.type) {
+
+    case P2P_PKT_CRYPTO: {
+        if (!s->dtls) {
+            print("W:", LA_F("RELAY CRYPTO recv: no DTLS context\n", LA_F590, 590));
+            break;
+        }
+        // 解密密文包
+        uint8_t dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];
+        int dec_len = s->dtls->decrypt_recv(s, p2p_payload, p2p_payload_len, dec_buf, sizeof(dec_buf));
+        if (dec_len >= P2P_HDR_SIZE) {
+            // 解析解密后的内层 P2P 包头
+            p2p_pkt_hdr_decode(dec_buf, &hdr);
+            p2p_payload = dec_buf + P2P_HDR_SIZE;
+            p2p_payload_len = dec_len - P2P_HDR_SIZE;
+            // 递归处理内层包
+            goto handle_inner;
+        }
+        break;
+    }
+
+    handle_inner:
+    case P2P_PKT_DATA:
+        // NAT 状态更新（使用服务器地址作为 from）
+        nat_on_data(s, &ctx->server_addr, now, hdr.seq, P2P_HDR_SIZE + p2p_payload_len);
+
+        // 高级传输层或基础 reliable 层
+        if (s->trans && s->trans->on_packet)
+            s->trans->on_packet(s, p2p_payload, p2p_payload_len);
+        else if (p2p_payload_len > 0)
+            reliable_on_data(s, hdr.seq, p2p_payload, p2p_payload_len);
+
+        print("V:", LA_F("RELAY DATA recv: seq=%u len=%d\n", LA_F591, 591), hdr.seq, p2p_payload_len);
+        break;
+
+    case P2P_PKT_ACK: {
+        if (p2p_payload_len < 6) {
+            print("E:", LA_F("RELAY ACK recv: invalid payload len=%d\n", LA_F589, 589), p2p_payload_len);
+            break;
+        }
+        uint16_t ack_seq = nget_s(p2p_payload);
+        uint32_t sack; nread_l(&sack, p2p_payload + 2);
+
+        // NAT 状态更新
+        nat_on_data_ack(s, &ctx->server_addr, now, ack_seq, sack);
+
+        // reliable 层处理
+        int old_srtt = s->reliable.srtt;
+        reliable_on_ack(s, ack_seq, sack, now);
+
+        // 同步 RTT 到路径管理器
+        if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0 && s->active_path >= -1) {
+            path_manager_on_data_rtt(s, s->active_path, (uint32_t)s->reliable.srtt);
+        }
+
+        print("V:", LA_F("RELAY ACK recv: ack_seq=%u sack=0x%08x\n", LA_F588, 588), ack_seq, sack);
+        break;
+    }
+
+    default:
+        print("W:", LA_F("RELAY recv: unexpected inner type 0x%02x\n", LA_F594, 594), hdr.type);
+        break;
+    }
+}
+
+/*
  * 消息分发
  */
 static void dispatch_message(p2p_session_t *s) {
@@ -841,6 +1035,12 @@ static void dispatch_message(p2p_session_t *s) {
 
         case P2P_RLY_FIN:
             handle_relay_fin(s, ctx->payload, ntohs(ctx->hdr.size));
+            break;
+
+        case P2P_RLY_DATA:
+        case P2P_RLY_ACK:
+        case P2P_RLY_CRYPTO:
+            handle_relay_data_recv(s, ctx->payload, ntohs(ctx->hdr.size));
             break;
 
         default:

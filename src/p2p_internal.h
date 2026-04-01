@@ -280,6 +280,30 @@ static inline const char* p2p_path_type_str(int type) {
     }
 }
 
+/* ============================================================================
+ * 内部候选地址定义（前移以供 p2p_session_reset 使用）
+ * ============================================================================ */
+
+/* 
+ * 候选地址类型
+ */
+typedef enum {
+    P2P_CAND_HOST  = 0,                         // 本地网卡地址（Host Candidate）
+    P2P_CAND_SRFLX,                             // Server 反射地址（Server Reflexive Candidate）
+    P2P_CAND_RELAY,                             // Server 中继地址（Relayed Candidate）
+    P2P_CAND_PRFLX                              // 对端反射地址（Peer Reflexive Candidate）
+} p2p_cand_type_t;
+
+static inline const char* p2p_candidate_type_str(p2p_cand_type_t type) {
+    switch (type) {
+        case P2P_CAND_HOST:             return "Host";
+        case P2P_CAND_SRFLX:            return "Srflx";
+        case P2P_CAND_PRFLX:            return "Prflx";
+        case P2P_CAND_RELAY:            return "Relay";
+        default:                        return "Unknown";
+    }
+}
+
 /*
  * 重置 session 连接状态
  *
@@ -357,38 +381,11 @@ static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
 }
 
 /* ============================================================================
- * 内部候选地址定义
+ * 内部候选地址定义（续）
  * ============================================================================ */
-
-/* 
- * 候选地址类型
- *
- * p2p 内部均使用此枚举存储候选类型。
- * 但不同信令模式（COMPACT、RELAY、PUBSUB）可根据其自身的协议定义，
- * 将这里的地址类型映射为不同的线协议值（如 p2p_ice_cand_type_t）
- */
-typedef enum {
-    P2P_CAND_HOST  = 0,                         // 本地网卡地址（Host Candidate）
-    P2P_CAND_SRFLX,                             // Server 反射地址（Server Reflexive Candidate）
-    P2P_CAND_RELAY,                             // Server 中继地址（Relayed Candidate）
-    P2P_CAND_PRFLX                              // 对端反射地址（Peer Reflexive Candidate）
-} p2p_cand_type_t;
-
-static inline const char* p2p_candidate_type_str(p2p_cand_type_t type) {
-    switch (type) {
-        case P2P_CAND_HOST:             return "Host";
-        case P2P_CAND_SRFLX:            return "Srflx";
-        case P2P_CAND_PRFLX:            return "Prflx";
-        case P2P_CAND_RELAY:            return "Relay";
-        default:                        return "Unknown";
-    }
-}
 
 /*
  * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
- *
- * 仅用于会话内部运算。网络传输使用 p2p_candidate_t（见 p2pp.h）。
- * 转换函数：pack_candidate() / unpack_candidate()，见下文。
  */
 struct p2p_local_candidate_entry {
     p2p_cand_type_t    type;                    // 候选类型

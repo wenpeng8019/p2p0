@@ -232,6 +232,9 @@ typedef struct {
     p2p_send_chunk_t   *chunk_free_list;                /* chunk 回收链表头 */
     int                 chunk_free_count;               /* chunk 回收数量 */
 
+    /* 数据中继流控 */
+    bool                awaiting_data_ready;            /* 等待 DATA/ACK/CRYPTO 转发确认（READY）*/
+
 } p2p_signal_relay_ctx_t;
 
 /* ============================================================================
@@ -299,6 +302,27 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
  * @param s   P2P 会话
  */
 void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
+
+/*
+ * 通过 RELAY 服务器转发数据包（DATA/ACK/CRYPTO）
+ *
+ * 此函数作为 signaling_relay_fn 回调，由 p2p_send_packet 调用。
+ * 格式：[type(1)][size(2)][session_id(8)][原始 payload]
+ *
+ * 流控：发送后设置 awaiting_data_ready，收到 STATUS(READY) 后清除。
+ *       如果 awaiting_data_ready 为 true，返回 E_BUSY。
+ *
+ * @param s           P2P 会话
+ * @param type        包类型（P2P_PKT_DATA / P2P_PKT_ACK / P2P_PKT_CRYPTO）
+ * @param flags       包标志
+ * @param seq         序列号
+ * @param payload     负载数据
+ * @param payload_len 负载长度
+ * @return            E_NONE=成功，E_BUSY=流控等待，其他=错误码
+ */
+ret_t p2p_signal_relay_data(struct p2p_session *s,
+                            uint8_t type, uint8_t flags, uint16_t seq,
+                            const void *payload, uint16_t payload_len);
 
 //----------------------------------------------------------------------------
 

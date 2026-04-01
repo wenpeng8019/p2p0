@@ -69,15 +69,15 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F66] = "%s, retry remaining candidates and FIN to peer\n",  /* SID:66 */
     [LA_F67] = "%s, sent on %s\n",  /* SID:67 */
     [LA_F68] = "%s: %s timeout after %d retries (sid=%u)\n",  /* SID:68 */
+    [LA_F74] = "%s: CONNECTING → CONNECTED (recv DATA)",  /* SID:74 */
     [LA_F435] = "%s: CONN ignored, upsert %s:%d failed",  /* SID:435 */
     [LA_F69] = "%s: CONN timeout after %llums",  /* SID:69 */
     [LA_F127] = "%s: CONNECTED → LOST (no response %llums)\n",  /* SID:127 */
     [LA_F72] = "%s: CONNECTING → CONNECTED (recv CONN)",  /* SID:72 */
     [LA_F73] = "%s: CONNECTING → CONNECTED (recv CONN_ACK)",  /* SID:73 */
-    [LA_F74] = "%s: CONNECTING → CONNECTED (recv DATA)",  /* SID:74 */
     [LA_F71] = "%s: CONNECTING → CLOSED (timeout, no relay)",  /* SID:71 */
     [LA_F436] = "%s: CONN_ACK ignored, upsert %s:%d failed",  /* SID:436 */
-    [LA_F103] = "%s: PUNCHING → CONNECTED (earlier CONN)",  /* [SID:103] UPDATED new: "%s: PUNCHING → %s" */
+    [LA_F103] = "%s: PUNCHING → CONNECTED (earlier CONN)",  /* SID:103 */
     [LA_F548] = "%s: PUNCHING → CONNECTED (earlier CONN)",  /* SID:548 */
     [LA_F138] = "%s: PUNCHING → CLOSED (timeout %llums, no relay)",  /* SID:138 */
     [LA_F102] = "%s: PUNCHING → CONNECTING (%s)",  /* SID:102 */
@@ -107,26 +107,29 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F497] = "%s: accepted, ses_id=%llu peer=%s\n",  /* SID:497 */
     [LA_F96] = "%s: accepted, waiting for response (sid=%u)\n",  /* SID:96 */
     [LA_F97] = "%s: accepted\n",  /* SID:97 */
+    [LA_F502] = "%s: forwarded to peer\n",  /* SID:502 */
+    [LA_F99] = "%s: bad payload(len=%d cand_cnt=%d)\n",  /* SID:99 */
     [LA_F498] = "%s: bad payload(len=%d)\n",  /* SID:498 */
     [LA_F121] = "%s: invalid payload len=%d (need 6)",  /* SID:121 */
-    [LA_F99] = "%s: bad payload(len=%d cand_cnt=%d)\n",  /* SID:99 */
     [LA_F455] = "%s: bad payload(len=%d)\n",  /* SID:455 */
+    [LA_F561] = "%s: bad payload(len=%d cand_cnt=%d)\n",  /* SID:561 new */
+    [LA_F562] = "%s: bad payload(len=%d)\n",  /* SID:562 new */
     [LA_F101] = "%s: bad payload(len=%d, need >=8)\n",  /* SID:101 */
     [LA_F98] = "%s: batch punch skip (state=%d, use trickle)",  /* SID:98 */
     [LA_F173] = "%s: batch punch start (%d cands)",  /* SID:173 */
     [LA_F126] = "%s: batch punch: no cand, wait trickle",  /* SID:126 */
-    [LA_F499] = "%s: cached (peer offline)\n",  /* SID:499 */
     [LA_F426] = "%s: relay cand[%d] but TURN not allocated",  /* SID:426 */
     [LA_F104] = "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n",  /* SID:104 */
+    [LA_F582] = "%s: data relay ready, flow control released\n",  /* SID:582 new */
     [LA_F106] = "%s: duplicate remote cand<%s:%d> from signaling, skipped\n",  /* SID:106 */
     [LA_F500] = "%s: duplicate remote cand<%s:%d>, skipped\n",  /* SID:500 */
     [LA_F107] = "%s: duplicate request ignored (sid=%u, already processing)\n",  /* SID:107 */
     [LA_F108] = "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n",  /* SID:108 */
     [LA_F109] = "%s: entered, %s arrived after REGISTERED\n",  /* SID:109 */
-    [LA_F501] = "%s: status error(%d)\n",  /* SID:501 */
     [LA_F110] = "%s: exchange timeout, retry %d/%d",  /* SID:110 */
     [LA_F111] = "%s: exchange timeout: peer not responding",  /* SID:111 */
-    [LA_F502] = "%s: forwarded to peer\n",  /* SID:502 */
+    [LA_F531] = "[TCP] %s enqueue, ses_id=%llu cand_cnt=%d fin=%d\n",  /* SID:531 */
+    [LA_F563] = "%s: forwarded=%d, next_idx adjusted to %d\n",  /* SID:563 new */
     [LA_F112] = "%s: ignored for duplicated seq=%u, already acked\n",  /* SID:112 */
     [LA_F113] = "%s: ignored for seq=%u (expect=%d)\n",  /* SID:113 */
     [LA_F114] = "%s: ignored for ses_id=%llu (local ses_id=%llu)\n",  /* SID:114 */
@@ -137,6 +140,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F118] = "%s: invalid ack_seq=%u\n",  /* SID:118 */
     [LA_F119] = "%s: invalid cand idx: %d (count: %d)",  /* SID:119 */
     [LA_F120] = "%s: invalid for non-relay req\n",  /* SID:120 */
+    [LA_F508] = "%s: session mismatch(local=%llu recv=%llu)\n",  /* SID:508 */
     [LA_F419] = "%s: invalid payload len=%d (need 6)",  /* SID:419 */
     [LA_F122] = "%s: invalid seq=%u\n",  /* SID:122 */
     [LA_F123] = "%s: invalid session_id=0\n",  /* SID:123 */
@@ -146,11 +150,13 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F129] = "%s: not connected, cannot send FIN",  /* SID:129 */
     [LA_F131] = "%s: old request ignored (sid=%u <= last_sid=%u)\n",  /* SID:131 */
     [LA_F162] = "%s: path rx UP (%s:%d)",  /* SID:162 */
-    [LA_F549] = "%s: path tx UP",  /* SID:549 new */
+    [LA_F549] = "%s: path tx UP",  /* SID:549 */
     [LA_F190] = "%s: path tx UP (echo seq=%u)",  /* SID:190 */
     [LA_F132] = "%s: path[%d] UP (%s:%d)",  /* SID:132 */
-    [LA_F152] = "%s: path[%d] relay UP",  /* SID:152 */
     [LA_F133] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:133 */
+    [LA_F152] = "%s: path[%d] relay UP",  /* SID:152 */
+    [LA_F504] = "%s: received FIN from peer\n",  /* SID:504 */
+    [LA_F551] = "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n",  /* SID:551 new */
     [LA_F134] = "%s: peer online, proceeding to ICE\n",  /* SID:134 */
     [LA_F424] = "%s: peer online, starting NAT punch\n",  /* SID:424 */
     [LA_F135] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:135 */
@@ -169,7 +175,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F146] = "%s: reaching relay via signaling FAILED (ret=%d), seq=%u",  /* SID:146 */
     [LA_F147] = "%s: reaching relay via signaling SUCCESS, seq=%u",  /* SID:147 */
     [LA_F148] = "%s: reaching updated: cand[%d], seq=%u->%u",  /* SID:148 */
-    [LA_F504] = "%s: received FIN from peer\n",  /* SID:504 */
+    [LA_F564] = "%s: received FIN marker from peer\n",  /* SID:564 new */
     [LA_F151] = "%s: recorded peer conn_seq=%u for future CONN_ACK",  /* SID:151 */
     [LA_F91] = "%s: recv from cand[%d]",  /* SID:91 */
     [LA_F154] = "%s: remote %s cand[%d]<%s:%d>, ignored due to instrument\n",  /* SID:154 */
@@ -177,6 +183,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F153] = "%s: remote %s cand[%d]<%s:%d> accepted\n",  /* SID:153 */
     [LA_F505] = "%s: remote_cands[] full, skipped %d candidates\n",  /* SID:505 */
     [LA_F156] = "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n",  /* SID:156 */
+    [LA_F530] = "[TCP] %s enqueue, name='%s'\n",  /* SID:530 */
+    [LA_F565] = "%s: req_type=%u code=%u\n",  /* SID:565 new */
     [LA_F157] = "%s: restarting periodic check",  /* SID:157 */
     [LA_F158] = "%s: retry(%d/%d) probe\n",  /* SID:158 */
     [LA_F159] = "%s: retry(%d/%d) req (sid=%u)\n",  /* SID:159 */
@@ -187,16 +195,17 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F163] = "%s: send failed(%d)",  /* SID:163 */
     [LA_F164] = "%s: sent MSG(msg=0, sid=%u)",  /* SID:164 */
     [LA_F165] = "%s: sent, sid=%u, code=%u, size=%d\n",  /* SID:165 */
+    [LA_F566] = "%s: session busy, will retry\n",  /* SID:566 new */
     [LA_F166] = "%s: session mismatch(local=%llu ack=%llu)\n",  /* SID:166 */
     [LA_F167] = "%s: session mismatch(local=%llu pkt=%llu)\n",  /* SID:167 */
-    [LA_F508] = "%s: session mismatch(local=%llu recv=%llu)\n",  /* SID:508 */
+    [LA_F567] = "%s: session mismatch(local=%llu recv=%llu)\n",  /* SID:567 */
     [LA_F168] = "%s: session mismatch(local=%llu, pkt=%llu)\n",  /* SID:168 */
+    [LA_F580] = "%s: session renewed by peer SYNC0 (local=%llu recv=%llu)\n",  /* SID:580 new */
     [LA_F169] = "%s: session validated, len=%d (ses_id=%llu)\n",  /* SID:169 */
     [LA_F170] = "%s: session_id mismatch (recv=%llu, expect=%llu)\n",  /* SID:170 */
     [LA_F172] = "%s: stale ACK(ack_inst=%u local_inst=%u), ignored\n",  /* SID:172 */
     [LA_F175] = "%s: started, sending first probe\n",  /* SID:175 */
     [LA_F463] = "%s: status error(%d)\n",  /* SID:463 */
-    [LA_F509] = "%s: storage full, stop uploading\n",  /* SID:509 */
     [LA_F177] = "%s: sync complete (ses_id=%llu)\n",  /* SID:177 */
     [LA_F178] = "%s: sync complete (ses_id=%llu, mask=0x%04x)\n",  /* SID:178 */
     [LA_F180] = "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)\n",  /* SID:180 */
@@ -210,10 +219,12 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F188] = "%s: triggered via COMPACT msg echo",  /* SID:188 */
     [LA_F189] = "%s: triggered via RELAY TUNE echo",  /* SID:189 */
     [LA_F191] = "%s: unexpected ack_seq=%u mask=0x%04x\n",  /* SID:191 */
+    [LA_F568] = "%s: unexpected fwd=%d after FIN, ignored\n",  /* SID:568 new */
     [LA_F192] = "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n",  /* SID:192 */
     [LA_F193] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:193 */
-    [LA_F510] = "%s: unknown status %d\n",  /* SID:510 */
     [LA_F443] = "%s: unknown target cand %s:%d",  /* SID:443 */
+    [LA_F569] = "%s: waiting for STUN candidates, stun_pending=%d\n",  /* SID:569 new */
+    [LA_F570] = "%s: waiting for initial STUN candidates before sending local queue\n",  /* SID:570 new */
     [LA_F150] = "%s: → CLOSED (recv FIN)",  /* SID:150 */
     [LA_F194] = "%s:%04d: %s",  /* SID:194 */
     [LA_F195] = "%s_ACK sent to %s:%d (try), echo_seq=%u",  /* SID:195 */
@@ -230,7 +241,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F208] = "% Bind failed",  /* SID:208 */
     [LA_F209] = "Bind failed to %d, port busy, trying random port",  /* SID:209 */
     [LA_F210] = "Bound to :%d",  /* SID:210 */
-    [LA_F543] = "% Buffer size < 2048 may be insufficient for full SDP",  /* SID:543 new */
+    [LA_F543] = "% Buffer size < 2048 may be insufficient for full SDP",  /* SID:543 */
     [LA_F211] = "% COMPACT mode requires explicit remote_peer_id",  /* SID:211 */
     [LA_F212] = "COMPACT relay payload too large: %d",  /* SID:212 */
     [LA_F213] = "COMPACT relay send failed: type=0x%02x, ret=%d",  /* SID:213 */
@@ -247,9 +258,12 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F229] = "Data stored in recv buffer seq=%u len=%d base=%u",  /* SID:229 */
     [LA_F230] = "Detect local network interfaces failed(%d)",  /* SID:230 */
     [LA_F231] = "Detection completed %s",  /* SID:231 */
-    [LA_F536] = "% Disconnected, back to ONLINE state\n",  /* SID:536 new */
+    [LA_F536] = "% Disconnected, back to ONLINE state\n",  /* SID:536 */
     [LA_F233] = "Duplicate remote cand<%s:%d> from signaling, skipped",  /* SID:233 */
     [LA_F514] = "REGISTERED: peer=%s\n",  /* SID:514 */
+    [LA_F571] = "REGISTERED: peer=%s\n",  /* SID:571 */
+    [LA_F581] = "% EXCHANGING: session reset by peer SYNC0\n",  /* SID:581 new */
+    [LA_F572] = "% EXCHANGING: waiting for initial STUN/TURN candidates before upload\n",  /* SID:572 new */
     [LA_F410] = "relay_tick: recv header complete, magic=0x%x, type=%d, length=%u",  /* SID:410 */
     [LA_F237] = "% Failed to allocate DTLS context",  /* SID:237 */
     [LA_F238] = "% Failed to allocate OpenSSL context",  /* SID:238 */
@@ -264,17 +278,19 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F246] = "% Failed to reserve remote candidates (cnt=1)\n",  /* SID:246 */
     [LA_F247] = "Failed to resolve STUN server %s",  /* SID:247 */
     [LA_F248] = "Failed to resolve TURN server: %s",  /* SID:248 */
+    [LA_F557] = "% Failed to send Test I(alt), continue to Test III",  /* SID:557 new */
     [LA_F251] = "% Failed to send punch packet for new peer addr\n",  /* SID:251 */
     [LA_F517] = "% Failed to set socket non-blocking\n",  /* SID:517 */
     [LA_F253] = "Field %s is empty or too short",  /* SID:253 */
-    [LA_F542] = "% Full SDP generation requires ice_ufrag and ice_pwd",  /* SID:542 new */
-    [LA_F203] = "Append Host candidate: %s:%d",  /* [SID:203] UPDATED new: "Gathered Host candidate: %s:%d (priority=0x%08x)" */
+    [LA_F542] = "% Full SDP generation requires ice_ufrag and ice_pwd",  /* SID:542 */
+    [LA_F203] = "Append Host candidate: %s:%d",  /* SID:203 */
     [LA_F256] = "Gathered Relay Candidate %s:%u (priority=%u)",  /* SID:256 */
     [LA_F258] = "% Handshake complete",  /* SID:258 */
     [LA_F259] = "Handshake failed: %s (-0x%04x)",  /* SID:259 */
     [LA_F420] = "Ignore %s pkt from %s:%d, not connected",  /* SID:420 */
     [LA_F421] = "Ignore %s pkt from %s:%d, not connecting",  /* SID:421 */
-    [LA_F439] = "Ignore %s pkt from %s:%d, not connecting/connected",  /* [SID:439] UPDATED new: "Ignore %s pkt from %s:%d, valid state(%d)" */
+    [LA_F439] = "Ignore %s pkt from %s:%d, not connecting/connected",  /* SID:439 */
+    [LA_F552] = "Ignore %s pkt from unknown path %s:%d",  /* SID:552 new */
     [LA_F406] = "recv error %d",  /* SID:406 */
     [LA_F407] = "recv error %d while discarding",  /* SID:407 */
     [LA_F260] = "Initialize PUBSUB signaling context failed(%d)",  /* SID:260 */
@@ -289,6 +305,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F440] = "% NAT connected but no available path in path manager",  /* SID:440 */
     [LA_F270] = "% No advanced transport layer enabled, using simple reliable layer",  /* SID:270 */
     [LA_F271] = "% No auth_key provided, using default key (insecure)",  /* SID:271 */
+    [LA_F532] = "[TCP] %s enqueue, target='%s'\n",  /* SID:532 */
+    [LA_F558] = "% No valid CHANGED-ADDRESS provided by STUN server, skipping Test I(alt)",  /* SID:558 new */
     [LA_F518] = "% ONLINE: ready to start session\n",  /* SID:518 */
     [LA_F273] = "Open P2P UDP socket on port %d",  /* SID:273 */
     [LA_F274] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:274 */
@@ -308,9 +326,21 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F293] = "% PseudoTCP enabled as transport layer",  /* SID:293 */
     [LA_F520] = "% READY: candidate exchange completed\n",  /* SID:520 */
     [LA_F475] = "REGISTERED: peer=%s\n",  /* SID:475 */
+    [LA_F583] = "RELAY %s enqueued: ses_id=%llu seq=%u len=%d\n",  /* SID:583 new */
+    [LA_F584] = "RELAY %s recv: bad payload(len=%d)\n",  /* SID:584 new */
+    [LA_F585] = "RELAY %s recv: session mismatch(local=%llu recv=%llu)\n",  /* SID:585 new */
+    [LA_F586] = "RELAY %s: payload too large (%d)\n",  /* SID:586 new */
+    [LA_F587] = "RELAY %s: send buffer busy\n",  /* SID:587 new */
+    [LA_F588] = "RELAY ACK recv: ack_seq=%u sack=0x%08x\n",  /* SID:588 new */
+    [LA_F589] = "RELAY ACK recv: invalid payload len=%d\n",  /* SID:589 new */
+    [LA_F590] = "% RELAY CRYPTO recv: no DTLS context\n",  /* SID:590 new */
+    [LA_F591] = "RELAY DATA recv: seq=%u len=%d\n",  /* SID:591 new */
+    [LA_F592] = "% RELAY data throttled: awaiting READY\n",  /* SID:592 new */
+    [LA_F593] = "RELAY data: unsupported type 0x%02x\n",  /* SID:593 new */
     [LA_F429] = "% RELAY path but TURN not allocated",  /* SID:429 */
     [LA_F434] = "% RELAY path but TURN not allocated (dtls)",  /* SID:434 */
     [LA_F441] = "% RELAY recovery: NAT connected but no path available",  /* SID:441 */
+    [LA_F594] = "RELAY recv: unexpected inner type 0x%02x\n",  /* SID:594 new */
     [LA_F297] = "% RELAY/COMPACT mode requires server_host",  /* SID:297 */
     [LA_F298] = "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d",  /* SID:298 */
     [LA_F301] = "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d",  /* SID:301 */
@@ -323,13 +353,13 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F308] = "Recv %s pkt from %s:%d, ack_seq=%u, sack=0x%08x",  /* SID:308 */
     [LA_F309] = "Recv %s pkt from %s:%d, seq=%u, len=%d",  /* SID:309 */
     [LA_F422] = "Ignore %s pkt from %s:%d, not connecting/connected",  /* SID:422 */
-    [LA_F547] = "Recv ICE-STUN Binding Response from candidate %d (%s:%d)",  /* SID:547 new */
-    [LA_F544] = "Recv ICE-STUN from %s:%d, upsert prflx failed",  /* SID:544 new */
-    [LA_F300] = "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d",  /* [SID:300] UPDATED new: "Recv STUN/TURN pkt from %s:%d, type=0x%04x, len=%d" */
-    [LA_F550] = "Recv unknown ICE-STUN msg_type=0x%04x from %s:%d",  /* SID:550 new */
+    [LA_F547] = "Recv ICE-STUN Binding Response from candidate %d (%s:%d)",  /* SID:547 */
+    [LA_F544] = "Recv ICE-STUN from %s:%d, upsert prflx failed",  /* SID:544 */
+    [LA_F300] = "Received STUN/TURN pkt from %s:%d, type=0x%04x, len=%d",  /* SID:300 */
+    [LA_F550] = "Recv unknown ICE-STUN msg_type=0x%04x from %s:%d",  /* SID:550 */
     [LA_F312] = "Register to COMPACT signaling server at %s:%d",  /* SID:312 */
     [LA_F313] = "Reliable transport initialized rto=%d win=%d",  /* SID:313 */
-    [LA_F314] = "Requested Relay Candidate from %s",  /* [SID:314] UPDATED new: "Requested Relay Candidate from TURN %s" */
+    [LA_F314] = "Requested Relay Candidate from %s",  /* SID:314 */
     [LA_F316] = "Requested Srflx Candidate from %s",  /* SID:316 */
     [LA_F317] = "Resolve COMPACT signaling server address: %s:%d failed(%d)",  /* SID:317 */
     [LA_F318] = "% SCTP (usrsctp) requested but library not linked",  /* SID:318 */
@@ -342,6 +372,9 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F325] = "Sending Allocate Request to %s:%d",  /* SID:325 */
     [LA_F326] = "% Sending FIN packet to peer before closing",  /* SID:326 */
     [LA_F327] = "Sending Test I to %s:%d (len=%d)",  /* SID:327 */
+    [LA_F556] = "% Sending Test I(alt) to CHANGED-ADDRESS",  /* SID:556 new */
+    [LA_F553] = "% Sending Test II with CHANGE-REQUEST(IP+PORT)",  /* SID:553 new */
+    [LA_F554] = "% Sending Test III with CHANGE-REQUEST(PORT only)",  /* SID:554 new */
     [LA_F328] = "% Sending UNREGISTER packet to COMPACT signaling server",  /* SID:328 */
     [LA_F333] = "% Signal payload deserialization failed",  /* SID:333 */
     [LA_F334] = "% Skipping Host Candidate gathering due to instrumentation",  /* SID:334 */
@@ -364,7 +397,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F525] = "% TCP connection closed by peer\n",  /* SID:525 */
     [LA_F527] = "% TCP send error\n",  /* SID:527 */
     [LA_F526] = "% TCP recv error\n",  /* SID:526 */
-    [LA_F534] = "% TCP send error\n",  /* SID:534 new */
+    [LA_F534] = "% TCP send error\n",  /* SID:534 */
     [LA_F352] = "TURN 401 Unauthorized (realm=%s), authenticating...",  /* SID:352 */
     [LA_F353] = "TURN Allocate failed with error %d",  /* SID:353 */
     [LA_F354] = "TURN Allocated relay %s:%u (lifetime=%us)",  /* SID:354 */
@@ -374,6 +407,9 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F358] = "TURN Refresh failed (error=%d)",  /* SID:358 */
     [LA_F359] = "TURN Refresh ok (lifetime=%us)",  /* SID:359 */
     [LA_F360] = "% TURN auth required but no credentials configured",  /* SID:360 */
+    [LA_F555] = "Test I(alt): Mapped address: %s:%d",  /* SID:555 new */
+    [LA_F559] = "% Test I(alt): Timeout",  /* SID:559 new */
+    [LA_F560] = "Test I: Changed address: %s:%d",  /* SID:560 new */
     [LA_F361] = "Test I: Mapped address: %s:%d",  /* SID:361 */
     [LA_F362] = "% Test I: Timeout",  /* SID:362 */
     [LA_F363] = "Test II: Success! Detection completed %s",  /* SID:363 */
@@ -381,12 +417,15 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F365] = "Test III: Success! Detection completed %s",  /* SID:365 */
     [LA_F366] = "% Test III: Timeout",  /* SID:366 */
     [LA_F367] = "Transport layer '%s' init failed, falling back to simple reliable",  /* SID:367 */
-    [LA_F528] = "% Trickle TURN: uploading new candidates\n",  /* SID:528 */
+    [LA_F573] = "Trickle TURN: batch full (%d cands), sending\n",  /* SID:573 new */
+    [LA_F574] = "Trickle TURN: batch timeout (%d cands), sending\n",  /* SID:574 new */
     [LA_F409] = "recv error %d while reading sender",  /* SID:409 */
     [LA_F529] = "Unknown message type %d\n",  /* SID:529 */
     [LA_F371] = "Unknown signaling mode: %d",  /* SID:371 */
     [LA_F372] = "Updating Gist field '%s'...",  /* SID:372 */
-    [LA_F535] = "% Waiting for RELAY server ONLINE_ACK",  /* SID:535 new */
+    [LA_F575] = "% WAIT_PEER: peer went offline, waiting for reconnect\n",  /* SID:575 new */
+    [LA_F576] = "% WAIT_PEER: session established, waiting for peer info\n",  /* SID:576 new */
+    [LA_F535] = "% Waiting for RELAY server ONLINE_ACK",  /* SID:535 */
     [LA_F413] = "ssl_config_defaults failed: -0x%x",  /* SID:413 */
     [LA_F374] = "[MbedTLS] DTLS role: %s (mode=%s)",  /* SID:374 */
     [LA_F375] = "% [OpenSSL] DTLS handshake completed",  /* SID:375 */
@@ -395,10 +434,10 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F378] = "[SCTP] bind failed: %s",  /* SID:378 */
     [LA_F379] = "[SCTP] connect failed: %s",  /* SID:379 */
     [LA_F380] = "[SCTP] sendv failed: %s",  /* SID:380 */
-    [LA_F530] = "[TCP] %s enqueue, name='%s'\n",  /* SID:530 */
-    [LA_F531] = "[TCP] %s enqueue, ses_id=%llu cand_cnt=%d fin=%d\n",  /* SID:531 */
-    [LA_F539] = "[TCP] %s enqueue, ses_id=%llu\n",  /* SID:539 new */
-    [LA_F532] = "[TCP] %s enqueue, target='%s'\n",  /* SID:532 */
+    [LA_F577] = "[TCP] %s enqueue, name='%s', rid=%u\n",  /* SID:577 new */
+    [LA_F578] = "[TCP] %s enqueue, ses_id=%llu cand_cnt=%d fin=%d\n",  /* SID:578 new */
+    [LA_F539] = "[TCP] %s enqueue, ses_id=%llu\n",  /* SID:539 */
+    [LA_F579] = "[TCP] %s enqueue, target='%s'\n",  /* SID:579 new */
     [LA_F533] = "[UDP] %s recv from %s:%d\n",  /* SID:533 */
     [LA_F389] = "[UDP] %s recv from %s:%d, flags=0x%02x, len=%d\n",  /* SID:389 */
     [LA_F390] = "[UDP] %s recv from %s:%d, len=%d\n",  /* SID:390 */
@@ -416,16 +455,21 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F402] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:402 */
     [LA_F403] = "% connection closed by peer",  /* SID:403 */
     [LA_F404] = "ctr_drbg_seed failed: -0x%x",  /* SID:404 */
-    [LA_F537] = "disconnect: not in session (state=%d)\n",  /* SID:537 new */
-    [LA_F538] = "payload size %u exceeds limit %u\n",  /* SID:538 new */
-    [LA_F540] = "retry seq=%u retx=%d rto=%d",  /* SID:540 new */
-    [LA_F541] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:541 new */
-    [LA_F545] = "ssl_config_defaults failed: -0x%x",  /* SID:545 new */
+    [LA_F538] = "payload size %u exceeds limit %u\n",  /* SID:538 */
+    [LA_F540] = "retry seq=%u retx=%d rto=%d",  /* SID:540 */
+    [LA_F541] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:541 */
+    [LA_F545] = "ssl_config_defaults failed: -0x%x",  /* SID:545 */
     [LA_F414] = "ssl_setup failed: -0x%x",  /* SID:414 */
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
-    [LA_F546] = "ICE connectivity check: both directions confirmed (candidate %d)",  /* SID:546 new */
+    [LA_F499] = "%s: cached (peer offline)\n",  /* SID:499 */
+    [LA_F501] = "%s: status error(%d)\n",  /* SID:501 */
+    [LA_F509] = "%s: storage full, stop uploading\n",  /* SID:509 */
+    [LA_F510] = "%s: unknown status %d\n",  /* SID:510 */
+    [LA_F528] = "% Trickle TURN: uploading new candidates\n",  /* SID:528 */
+    [LA_F537] = "disconnect: not in session (state=%d)\n",  /* SID:537 */
+    [LA_F546] = "ICE connectivity check: both directions confirmed (candidate %d)",  /* SID:546 */
     [LA_F315] = "Requested Relay Candidate from TURN %s",  /* SID:315 */
     [LA_F335] = "% Skipping local Host candidates due to instrument",  /* SID:335 */
     [LA_W9] = "Published",  /* SID:9 */

@@ -739,12 +739,30 @@ typedef struct {
  *   - session_id: 要结束的会话 ID（网络字节序）
 */
 #define P2P_RLY_FIN_PSZ             (P2P_RLY_SESS_ID_PSZ)
+
 /* P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO:
- *   payload: [target_name(32)][p2p_packet(N)] (Client→Server)
- *   payload: [sender_name(32)][p2p_packet(N)] (Server→Target)
- *   - p2p_packet: 完整 P2P 包（包头+payload）
  *
- * P2P_RLY_REQ / P2P_RLY_REQ_ACK / P2P_RLY_RESP / P2P_RLY_RESP_ACK:
+ *   与 P2P_PKT_DATA / P2P_PKT_ACK / P2P_PKT_CRYPTO 对齐，统一采用
+ *   "session_id + 对应 payload" 语义（等价于 P2P_DATA_FLAG_SESSION 场景）。
+ *
+ *   P2P_RLY_DATA:
+ *     payload: [session_id(8)][data(N)]
+ *
+ *   P2P_RLY_ACK:
+ *     payload: [session_id(8)][ack_seq(2)][sack(4)]
+ *
+ *   P2P_RLY_CRYPTO:
+ *     payload: [session_id(8)][crypto_data(N)]
+ *
+ *   说明：
+ *   - RELAY 的消息类型已区分 DATA/ACK/CRYPTO，因此负载无需再携带 p2p_packet_hdr_t。
+ *   - session_id 用于会话隔离与服务器路由（转发到配对会话）。
+ */
+#define P2P_RLY_DATA_PSZ(n)        (P2P_RLY_SESS_ID_PSZ + (n))
+#define P2P_RLY_ACK_PSZ            (P2P_RLY_SESS_ID_PSZ + 2u + 4u)
+#define P2P_RLY_CRYPTO_PSZ(n)      (P2P_RLY_SESS_ID_PSZ + (n))
+
+ /* P2P_RLY_REQ / P2P_RLY_REQ_ACK / P2P_RLY_RESP / P2P_RLY_RESP_ACK:
  * 
  * P2P_RLY_REQ (双向，A→Server, Server→B):
  *   payload: [target_name(32)][sid(2)][msg(1)][data(N)]  (A→Server)
@@ -811,6 +829,10 @@ typedef struct {
  *   │                            │
  *   ├── ALIVE ──────────────────►│  (每 20 秒心跳)
  *   │                            │
+
+ */
+
+/*
  *
  * 2. 初始化会话同步（建立会话 + 首批候选同步）
  * ============================================================================
@@ -942,16 +964,17 @@ typedef struct {
  * 功能：P2P 打洞失败时，通过服务器转发数据/确认/加密包（降级方案）
  *
  * Client → Server:
- *   payload: [target_name(32)][p2p_packet(N)]
- *   - p2p_packet: 完整 P2P 包（包头+payload）
+ *   P2P_RLY_DATA:   [session_id(8)][data(N)]
+ *   P2P_RLY_ACK:    [session_id(8)][ack_seq(2)][sack(4)]
+ *   P2P_RLY_CRYPTO: [session_id(8)][crypto_data(N)]
  *   - 对应关系：
  *     · P2P_RLY_DATA   <-> P2P_PKT_DATA
  *     · P2P_RLY_ACK    <-> P2P_PKT_ACK
  *     · P2P_RLY_CRYPTO <-> P2P_PKT_CRYPTO
+ *   - 与 P2P_DATA_FLAG_SESSION 的负载格式一致。
  *
  * Server → Target:
- *   payload: [sender_name(32)][p2p_packet(N)]
- *   - 透传原始 P2P 包
+ *   - 按目标侧 session_id 重写后转发同类型负载（DATA/ACK/CRYPTO）。
  *
  * 6. REQ/RESP 机制 - RPC 请求-应答
  * ============================================================================
@@ -976,7 +999,7 @@ typedef struct {
  * ============================================================================
  * TCP 特性优化
  * ============================================================================
- *   - 无需 session_id：TCP 连接已标识客户端
+ *   - 仍需 session_id：用于会话隔离与服务器路由到配对会话
  *   - 无需重传机制：TCP 保证可靠传输
  *   - ACK 可选：主要用于流量控制和错误检测
  *

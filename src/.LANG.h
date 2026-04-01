@@ -361,7 +361,7 @@ enum {
     LA_F317,  /* "Resolve COMPACT signaling server address: %s:%d failed(%d)" (%s,%d,%d)  [p2p.c] */
     LA_F318,  /* "% SCTP (usrsctp) requested but library not linked"  [p2p.c] */
     LA_F319,  /* "% SIGNALING path but signaling relay not available"  [p2p_channel.c] */
-    LA_F320,  /* "% SIGNALING path enabled (server supports relay)\n"  [p2p_signal_compact.c] */
+    LA_F320,  /* "% SIGNALING path enabled (server supports relay)\n"  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F321,  /* "% SSL_CTX_new failed"  [p2p_dtls_openssl.c] */
     LA_F322,  /* "% SSL_new failed"  [p2p_dtls_openssl.c] */
     LA_F323,  /* "Start RELAY session failed(%d)" (%d)  [p2p.c] */
@@ -623,6 +623,19 @@ enum {
     LA_F579,  /* "[TCP] %s enqueue, target='%s'\n" (%s,%s)  [p2p_signal_relay.c] */
     LA_F580,  /* "%s: session renewed by peer SYNC0 (local=%llu recv=%llu)\n" (%s,%l,%l)  [p2p_signal_relay.c] */
     LA_F581,  /* "% EXCHANGING: session reset by peer SYNC0\n"  [p2p_signal_relay.c] */
+    LA_F582,  /* "%s: data relay ready, flow control released\n" (%s)  [p2p_signal_relay.c] */
+    LA_F583,  /* "RELAY %s enqueued: ses_id=%llu seq=%u len=%d\n" (%s,%l,%u,%d)  [p2p_signal_relay.c] */
+    LA_F584,  /* "RELAY %s recv: bad payload(len=%d)\n" (%s,%d)  [p2p_signal_relay.c] */
+    LA_F585,  /* "RELAY %s recv: session mismatch(local=%llu recv=%llu)\n" (%s,%l,%l)  [p2p_signal_relay.c] */
+    LA_F586,  /* "RELAY %s: payload too large (%d)\n" (%s,%d)  [p2p_signal_relay.c] */
+    LA_F587,  /* "RELAY %s: send buffer busy\n" (%s)  [p2p_signal_relay.c] */
+    LA_F588,  /* "RELAY ACK recv: ack_seq=%u sack=0x%08x\n" (%u)  [p2p_signal_relay.c] */
+    LA_F589,  /* "RELAY ACK recv: invalid payload len=%d\n" (%d)  [p2p_signal_relay.c] */
+    LA_F590,  /* "% RELAY CRYPTO recv: no DTLS context\n"  [p2p_signal_relay.c] */
+    LA_F591,  /* "RELAY DATA recv: seq=%u len=%d\n" (%u,%d)  [p2p_signal_relay.c] */
+    LA_F592,  /* "% RELAY data throttled: awaiting READY\n"  [p2p_signal_relay.c] */
+    LA_F593,  /* "RELAY data: unsupported type 0x%02x\n"  [p2p_signal_relay.c] */
+    LA_F594,  /* "RELAY recv: unexpected inner type 0x%02x\n"  [p2p_signal_relay.c] */
 
     LA_NUM
 };

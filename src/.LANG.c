@@ -122,6 +122,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F126] = "%s: batch punch: no cand, wait trickle",  /* SID:126 */
     [LA_F426] = "%s: cand[%d]<%s:%d> send packet failed(%d)",  /* SID:426 */
     [LA_F104] = "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n",  /* SID:104 */
+    [LA_F582] = "%s: data relay ready, flow control released\n",  /* SID:582 */
     [LA_F106] = "%s: duplicate remote cand<%s:%d> from signaling, skipped\n",  /* SID:106 */
     [LA_F500] = "%s: duplicate remote cand<%s:%d>, skipped\n",  /* SID:500 */
     [LA_F107] = "%s: duplicate request ignored (sid=%u, already processing)\n",  /* SID:107 */
@@ -327,9 +328,21 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F293] = "% PseudoTCP enabled as transport layer",  /* SID:293 */
     [LA_F520] = "% READY: candidate exchange completed\n",  /* SID:520 */
     [LA_F475] = "REGISTERED: peer=%s\n",  /* SID:475 */
+    [LA_F583] = "RELAY %s enqueued: ses_id=%llu seq=%u len=%d\n",  /* SID:583 */
+    [LA_F584] = "RELAY %s recv: bad payload(len=%d)\n",  /* SID:584 */
+    [LA_F585] = "RELAY %s recv: session mismatch(local=%llu recv=%llu)\n",  /* SID:585 */
+    [LA_F586] = "RELAY %s: payload too large (%d)\n",  /* SID:586 */
+    [LA_F587] = "RELAY %s: send buffer busy\n",  /* SID:587 */
+    [LA_F588] = "RELAY ACK recv: ack_seq=%u sack=0x%08x\n",  /* SID:588 */
+    [LA_F589] = "RELAY ACK recv: invalid payload len=%d\n",  /* SID:589 */
+    [LA_F590] = "% RELAY CRYPTO recv: no DTLS context\n",  /* SID:590 */
+    [LA_F591] = "RELAY DATA recv: seq=%u len=%d\n",  /* SID:591 */
+    [LA_F592] = "% RELAY data throttled: awaiting READY\n",  /* SID:592 */
+    [LA_F593] = "RELAY data: unsupported type 0x%02x\n",  /* SID:593 */
     [LA_F429] = "% RELAY path but TURN not allocated",  /* SID:429 */
     [LA_F434] = "% RELAY path but TURN not allocated (dtls)",  /* SID:434 */
     [LA_F441] = "% RELAY recovery: NAT connected but no path available",  /* SID:441 */
+    [LA_F594] = "RELAY recv: unexpected inner type 0x%02x\n",  /* SID:594 */
     [LA_F297] = "% RELAY/COMPACT mode requires server_host",  /* SID:297 */
     [LA_F298] = "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d",  /* SID:298 */
     [LA_F301] = "Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d",  /* SID:301 */
