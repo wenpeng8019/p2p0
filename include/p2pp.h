@@ -659,6 +659,8 @@ typedef struct {
     uint16_t            size;
 } p2p_relay_hdr_t;
 
+#define P2P_RLY_SESS_ID_PSZ        (sizeof(uint64_t))    // session_id 大小（8 字节）
+
 /* RELAY 上线确认功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
 #define P2P_RLY_FEATURE_MSG         0x02    // 支持 MSG RPC 机制
@@ -679,47 +681,55 @@ typedef struct {
  *   - type: 请求的 p2p_relay_type_t 类型（例如 P2P_RLY_SYNC0），用于指示哪个请求出错
  *   - error_code: 0=未知错误, 1=协议错误, 2=服务器内部错误
  *   - error_msg: 可选的错误描述文本（UTF-8 编码）
- * 
- * P2P_RLY_ONLINE:
+ */
+#define P2P_RLY_ERROR_PSZ           2
+ /* P2P_RLY_ONLINE:
  *   payload: [name(32)][instance_id(4)]
  *   - name: 本地 peer 名称，定长 32 字节，0 填充
  *   - instance_id: 客户端每次 online() 生成的 32 位随机数（网络字节序）
- *
- * P2P_RLY_ONLINE_ACK:
+ */
+#define P2P_RLY_ONLINE_PSZ          (P2P_PEER_ID_MAX + sizeof(uint32_t))
+ /* P2P_RLY_ONLINE_ACK:
  *   payload: [features(1)][candidate_sync_max(1)]
  *   - features: 0x01=RELAY, 0x02=MSG
  *   - candidate_sync_max: 单包最大候选数（0=客户端用默认）
- *
- * P2P_RLY_SYNC0:
+ */
+#define P2P_RLY_ONLINE_ACK_PSZ      2
+ /* P2P_RLY_SYNC0:
  *   payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
  *   - target_name: 目标 peer 名称，定长 32 字节，0 填充
  *   - candidate_count: 本端首批候选数量（可以为 0）
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
- *
- * P2P_RLY_SYNC0_ACK:
+ */
+#define P2P_RLY_SYNC0_PSZ(n)        (P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t))
+ /* P2P_RLY_SYNC0_ACK:
  *   payload: [session_id(8)][online(1)]
  *   - session_id: 64 位会话 ID（网络字节序）
  *   - online: bool，0=对端离线，1=对端在线
  *   - 该 ACK 对 SYNC0 请求立即返回，仅用于告知会话建立结果
  *   - 若 SYNC0 携带 candidate_count>0，服务器会在候选已处理后，再额外返回一个 SYNC_ACK
- *
- * P2P_RLY_SYNC:
+ */
+#define P2P_RLY_SYNC0_ACK_PSZ       (P2P_RLY_SESS_ID_PSZ + 1u)
+ /* P2P_RLY_SYNC:
  *   payload: [session_id(8)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *   - session_id: 64 位会话 ID（网络字节序）
  *   - candidate_count: 本包候选数量
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *   - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
- *
- * P2P_RLY_SYNC_ACK:
+ */
+#define P2P_RLY_SYNC_PSZ(n, mk)     (P2P_RLY_SESS_ID_PSZ + 1u + (n)*sizeof(p2p_candidate_t) + ((mk) ? 1u : 0u))
+ /* P2P_RLY_SYNC_ACK:
  *   payload: [session_id(8)][confirmed_count(1)]
  *   - session_id: 64 位会话 ID（网络字节序）
  *   - confirmed_count: 实际确认处理的候选数（转发或缓存），0=全部完成（仅 FIN 后）
- *
- * P2P_RLY_FIN:
+ */
+#define P2P_RLY_SYNC_ACK_PSZ        (P2P_RLY_SESS_ID_PSZ + 1u)
+ /* P2P_RLY_FIN:
  *   payload: [session_id(8)]
  *   - session_id: 要结束的会话 ID（网络字节序）
- *
- * P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO:
+ */
+#define P2P_RLY_FIN_PSZ             (P2P_RLY_SESS_ID_PSZ)
+ /* P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO:
  *   payload: [target_name(32)][p2p_packet(N)] (Client→Server)
  *   payload: [sender_name(32)][p2p_packet(N)] (Server→Target)
  *   - p2p_packet: 完整 P2P 包（包头+payload）
