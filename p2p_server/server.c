@@ -1013,10 +1013,54 @@ static void handle_relay_signaling(int idx) {
                        payload_len, (uint32_t)(P2P_PEER_ID_MAX + 4));
                 goto disconnect;
             }
+            // 禁止重复 ONLINE
+            if (client->base.local_peer_id[0]) {
+                printf(LA_F("[TCP] E: Duplicate ONLINE from '%s'\n", LA_F190, 190), client->base.local_peer_id);
+                goto disconnect;
+            }
             
             memcpy(client->base.local_peer_id, payload, P2P_PEER_ID_MAX);
             client->base.local_peer_id[P2P_PEER_ID_MAX-1] = '\0';
             nread_l(&client->base.instance_id, payload + P2P_PEER_ID_MAX);
+
+            // 查找是否存在同名的已登录 client（断网重连场景）
+            // MAX_PEERS=128，ONLINE 低频操作，线性扫描足够
+            relay_client_t *old = NULL;
+            for (int i = 0; i < MAX_PEERS; i++) {
+                relay_client_t *c = &g_relay_clients[i];
+                if (c != client && c->base.valid && c->base.local_peer_id[0]
+                    && strcmp(c->base.local_peer_id, client->base.local_peer_id) == 0) {
+                    old = c; break;
+                }
+            }
+
+            // 如果存在同名 client，根据 instance_id 判断是否同实例重连
+            if (old) {
+                if (old->base.instance_id == client->base.instance_id) {
+                    // 同实例重连：迁移 fd 到旧槽位，保留会话状态
+                    printf(LA_F("[TCP] I: Peer '%s' reconnected (inst=%u), migrating fd\n", LA_F218, 218),
+                           client->base.local_peer_id, client->base.instance_id);
+                    P_sock_close(old->fd);
+                    old->fd = client->fd;
+                    old->base.last_active = P_tick_ms();
+                    old->online_ack_pending = false;
+                    old->recv_len = 0;
+                    // 交换 recv_buf：旧的释放，新的移交
+                    if (old->recv_buf) relay_buf_free(BUF2ITEM(old->recv_buf));
+                    old->recv_buf = client->recv_buf;
+                    client->recv_buf = NULL;
+                    // 当前槽位置为无效（fd 已移交，不 close）
+                    client->fd = P_INVALID_SOCKET;
+                    client->base.local_peer_id[0] = 0;
+                    client->base.valid = false;
+                    client = old;
+                } else {
+                    // 新实例：销毁旧 client 的所有状态
+                    printf(LA_F("[TCP] I: Peer '%s' new instance (old=%u, new=%u), destroying old\n", LA_F218, 218),
+                           client->base.local_peer_id, old->base.instance_id, client->base.instance_id);
+                    relay_clear_client(old);
+                }
+            }
             
             printf(LA_F("[TCP] Peer '%s' came online (inst=%u)\n", LA_F218, 218),
                      client->base.local_peer_id, client->base.instance_id);
