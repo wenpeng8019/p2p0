@@ -201,6 +201,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F167] = "%s: session mismatch(local=%llu pkt=%llu)\n",  /* SID:167 */
     [LA_F567] = "%s: session mismatch(local=%llu recv=%llu)\n",  /* SID:567 */
     [LA_F168] = "%s: session mismatch(local=%llu, pkt=%llu)\n",  /* SID:168 */
+    [LA_F580] = "%s: session renewed by peer SYNC0 (local=%llu recv=%llu)\n",  /* SID:580 */
     [LA_F169] = "%s: session validated, len=%d (ses_id=%llu)\n",  /* SID:169 */
     [LA_F170] = "%s: session_id mismatch (recv=%llu, expect=%llu)\n",  /* SID:170 */
     [LA_F172] = "%s: stale ACK(ack_inst=%u local_inst=%u), ignored\n",  /* SID:172 */
@@ -262,6 +263,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F233] = "Duplicate remote cand<%s:%d> from signaling, skipped",  /* SID:233 */
     [LA_F514] = "% EXCHANGING: first sync received, peer online\n",  /* SID:514 */
     [LA_F571] = "EXCHANGING: peer=%s, uploading candidates\n",  /* SID:571 */
+    [LA_F581] = "% EXCHANGING: session reset by peer SYNC0\n",  /* SID:581 */
     [LA_F572] = "% EXCHANGING: waiting for initial STUN/TURN candidates before upload\n",  /* SID:572 */
     [LA_F410] = "Exported %d candidates to SDP (%d bytes)",  /* SID:410 */
     [LA_F237] = "% Failed to allocate DTLS context",  /* SID:237 */

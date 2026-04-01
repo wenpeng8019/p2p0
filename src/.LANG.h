@@ -621,6 +621,8 @@ enum {
     LA_F577,  /* "[TCP] %s enqueue, name='%s', rid=%u\n" (%s,%s,%u)  [p2p_signal_relay.c] */
     LA_F578,  /* "[TCP] %s enqueue, ses_id=%llu cand_cnt=%d fin=%d\n" (%s,%l,%d,%d)  [p2p_signal_relay.c] */
     LA_F579,  /* "[TCP] %s enqueue, target='%s'\n" (%s,%s)  [p2p_signal_relay.c] */
+    LA_F580,  /* "%s: session renewed by peer SYNC0 (local=%llu recv=%llu)\n" (%s,%l,%l)  [p2p_signal_relay.c] */
+    LA_F581,  /* "% EXCHANGING: session reset by peer SYNC0\n"  [p2p_signal_relay.c] */
 
     LA_NUM
 };

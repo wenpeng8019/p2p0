@@ -635,7 +635,7 @@ typedef enum {
     P2P_RLY_ALIVE,                          // 心跳: Client -> Server
 
     /* 会话同步 */
-    P2P_RLY_SYNC0,                          // 首次同步: Client -> Server (带 target + 首批候选)；Server -> Client（对接+首次同步）
+    P2P_RLY_SYNC0,                          // 首次同步: 双向 (Client -> Server 带 target + 首批候选, Server -> Client 转发对端首批候选)
     P2P_RLY_SYNC0_ACK,                      // 首次同步应答: Server -> Client (session_id + online，立即返回)
     P2P_RLY_SYNC,                           // 后续同步: 双向 (Client -> Server 上传, Server -> Client 下发)
     P2P_RLY_SYNC_ACK,                       // 同步确认: Server -> Client (确认候选处理数量，confirmed_count == 0 可表示 FIN 完成)
@@ -702,11 +702,18 @@ typedef struct {
  *   - candidate_sync_max: 单包最大候选数（0=客户端用默认）
  */
 #define P2P_RLY_ONLINE_ACK_PSZ      2
- /* P2P_RLY_SYNC0:
- *   payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
- *   - target_name: 目标 peer 名称，定长 32 字节，0 填充
- *   - candidate_count: 本端首批候选数量（可以为 0）
- *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
+ /* P2P_RLY_SYNC0 (双向，上下行负载格式不同):
+ *
+ *   上行 Client -> Server:
+ *     payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
+ *     - target_name: 目标 peer 名称，定长 32 字节，0 填充
+ *     - candidate_count: 本端首批候选数量（可以为 0）
+ *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
+ *
+ *   下行 Server -> Client（转发对端的首批候选）:
+ *     payload: [session_id(8)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ *     - 格式同 P2P_RLY_SYNC，表示对端重新发起了连接
+ *     - 接收端应据此重置会话状态（session_id 变化时强制 p2p_session_reset）
  */
 #define P2P_RLY_SYNC0_PSZ(n)        (P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t))
  /* P2P_RLY_SYNC0_ACK:

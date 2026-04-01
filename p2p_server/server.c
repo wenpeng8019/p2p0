@@ -730,9 +730,12 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
 
         sync0_item = relay_buf_alloc(RELAY_FRAME_SIZE);
         if (!sync0_item) {
-            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F204, 204));
+            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F239, 239));
             return;
         }
+
+        // 标记该包是为了零拷贝转发而构造的，后续处理时会区分对待
+        ((p2p_relay_hdr_t *)client->recv_buf)->size = 0;
 
         // 构造零拷贝转发的 SYNC0 包
         hdr = (p2p_relay_hdr_t *)(client->recv_buf + P2P_PEER_ID_MAX - P2P_RLY_SESS_ID_PSZ);
@@ -747,14 +750,14 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
 
         sync0_item = relay_buf_alloc(RELAY_SMALL_FRAME_SIZE);
         if (!sync0_item) {
-            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F204, 204));
+            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F239, 239));
             return;
         }
 
         hdr = (p2p_relay_hdr_t *)(ITEM2BUF(sync0_item));
         hdr->size = P2P_RLY_SYNC_PSZ(0, false);
     }
-    hdr->type = P2P_RLY_SYNC;
+    hdr->type = P2P_RLY_SYNC0;
     hdr->size = htons(hdr->size);
 
     // 对端已在线
@@ -788,7 +791,7 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
 
             // 对端 SYNC0 转发给本端前，需要写入本端 session_id
             uint8_t *cached_sid = (uint8_t*)(hdr+1);
-            if (hdr->type == P2P_RLY_SYNC0) cached_sid += P2P_PEER_ID_MAX - P2P_RLY_SESS_ID_PSZ;
+            if (hdr->size == 0) cached_sid += P2P_PEER_ID_MAX - P2P_RLY_SESS_ID_PSZ;
             nwrite_ll(cached_sid, local_s->base.session_id);
 
             // 添加到本端发送队列，也要设置 refer
@@ -797,7 +800,7 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
             relay_session_send(local_s, remote_sync0_item);
 
             // 如果对端 sync0 发送的同步数据，发送 SYNC_ACK 告知对端同步数据已（确认）转发
-            if (hdr->type == P2P_RLY_SYNC0) {
+            if (hdr->size == 0) {
                 uint8_t remote_cand_count = cached_sid[P2P_RLY_SESS_ID_PSZ];
                 relay_session_send_sync_ack(remote_s, remote_cand_count);
             }
@@ -855,7 +858,7 @@ static void handle_relay_sync(relay_client_t *client, relay_session_t *s, uint8_
 
         sync_item = relay_buf_alloc(RELAY_FRAME_SIZE);
         if (!sync_item) {
-            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F204, 204));
+            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F239, 239));
             return;
         }
 
@@ -869,7 +872,7 @@ static void handle_relay_sync(relay_client_t *client, relay_session_t *s, uint8_
 
         sync_item = relay_buf_alloc(RELAY_SMALL_FRAME_SIZE);
         if (!sync_item) {
-            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F204, 204));
+            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F239, 239));
             return;
         }
 
@@ -1015,7 +1018,7 @@ static void handle_relay_signaling(int idx) {
             }
             // 禁止重复 ONLINE
             if (client->base.local_peer_id[0]) {
-                printf(LA_F("[TCP] E: Duplicate ONLINE from '%s'\n", LA_F190, 190), client->base.local_peer_id);
+                printf(LA_F("[TCP] E: Duplicate ONLINE from '%s'\n", LA_F237, 237), client->base.local_peer_id);
                 goto disconnect;
             }
             
@@ -1038,7 +1041,7 @@ static void handle_relay_signaling(int idx) {
             if (old) {
                 if (old->base.instance_id == client->base.instance_id) {
                     // 同实例重连：迁移 fd 到旧槽位，保留会话状态
-                    printf(LA_F("[TCP] I: Peer '%s' reconnected (inst=%u), migrating fd\n", LA_F218, 218),
+                    printf(LA_F("[TCP] I: Peer '%s' reconnected (inst=%u), migrating fd\n", LA_F240, 240),
                            client->base.local_peer_id, client->base.instance_id);
                     P_sock_close(old->fd);
                     old->fd = client->fd;
@@ -1062,7 +1065,7 @@ static void handle_relay_signaling(int idx) {
                 }
             }
             
-            printf(LA_F("[TCP] Peer '%s' came online (inst=%u)\n", LA_F218, 218),
+            printf(LA_F("[TCP] Peer '%s' came online (inst=%u)\n", LA_F241, 241),
                      client->base.local_peer_id, client->base.instance_id);
             
             // 就地修改 recv_buf 为 ONLINE_ACK (复用缓冲区)
@@ -1087,7 +1090,7 @@ static void handle_relay_signaling(int idx) {
         }
         // 除 ONLINE 外，所有消息都要求已完成登录
         else if (!client->base.local_peer_id[0]) {
-            printf(LA_F("[TCP] E: Message type=%u rejected: client not logged in\n", LA_F190, 190), (unsigned)type);
+            printf(LA_F("[TCP] E: Message type=%u rejected: client not logged in\n", LA_F238, 238), (unsigned)type);
             relay_send_error(client, type, P2P_RLY_EC_NOT_ONLINE);
             goto disconnect;
         }
@@ -1107,7 +1110,7 @@ static void handle_relay_signaling(int idx) {
             session_t *s = NULL;
             HASH_FIND(hh_session, g_sessions, &session_id, P2P_RLY_SESS_ID_PSZ, s);
             if (s == NULL || s->client != &client->base) {
-                printf(LA_F("[TCP] W: Unknown session %" PRIu64 " (type=%u)\n", LA_F196, 196), session_id, (unsigned)type);
+                printf(LA_F("[TCP] W: Unknown session %" PRIu64 " (type=%u)\n", LA_F244, 244), session_id, (unsigned)type);
                 client->recv_len = 0;
                 continue;
             }
@@ -1120,12 +1123,12 @@ static void handle_relay_signaling(int idx) {
             }
             // SYNC / DATA 等转发操作需要对端已连接
             else if (!rs->peer) {
-                printf(LA_F("[TCP] W: Session %" PRIu64 " peer not connected (type=%u)\n", LA_F196, 196), session_id, (unsigned)type);
+                printf(LA_F("[TCP] W: Session %" PRIu64 " peer not connected (type=%u)\n", LA_F243, 243), session_id, (unsigned)type);
                 relay_send_error(client, type, P2P_RLY_EC_PEER_OFFLINE);
             }
             // SYNC 转发需要前一个转发已完成（peer_pending 为空或 -1）
             else if (type == P2P_RLY_SYNC && rs->peer_pending && rs->peer_pending != (buffer_item_t*)-1) {
-                printf(LA_F("[TCP] W: Session %" PRIu64 " busy (pending sync)\n", LA_F196, 196), session_id);
+                printf(LA_F("[TCP] W: Session %" PRIu64 " busy (pending sync)\n", LA_F242, 242), session_id);
                 relay_send_error(client, type, P2P_RLY_EC_SESSION_BUSY);
             }
             else switch (type) {
@@ -2929,10 +2932,9 @@ int main(int argc, char *argv[]) {
                     const p2p_relay_hdr_t *hdr = (const p2p_relay_hdr_t *)ITEM2BUF(item);
 
                     // 原始入站 SYNC0 零拷贝包：首发时切换到重映射头部位置发送
-                    if (client->send_offset == 0 && hdr->type == P2P_RLY_SYNC0) {
-                        client->send_offset += P2P_PEER_ID_MAX - P2P_RLY_SESS_ID_PSZ;
-                    }
+                    if (hdr->size == 0) *(uint8_t**)&hdr += P2P_PEER_ID_MAX - P2P_RLY_SESS_ID_PSZ;
 
+                    // 零拷贝包：buf[0].size=0 是标记，实际长度从 overlaid header（偏移处）读取
                     const uint16_t len = (uint16_t)(sizeof(p2p_relay_hdr_t) + ntohs(hdr->size));
                     size_t remaining = len - client->send_offset;
                     int rc = tcp_send(client, (const char *)hdr + client->send_offset, &remaining, "session queue");
