@@ -28,11 +28,11 @@
  * │       ↓                                                              │
  * │   ONLINE_ACK(server_features)  ← 仅建立"客户端-服务器"连接           │
  * │                                                                      │
- * │   阶段2: CONNECT(target_name)                                        │
+ * │   阶段2: SYNC0(target_name)                                          │
  * │       ↓                                                              │
- * │   CONNECT_ACK(peer_status, session_id)  ← 建立"我-对方"会话          │
+ * │   SYNC0_ACK(peer_status, session_id)  ← 建立"我-对方"会话            │
  * │                                                                      │
- * │   特点1：分离设计，ONLINE 后可发起多个 CONNECT，支持并发会话         │
+ * │   特点1：分离设计，ONLINE 后可发起多个 SYNC0，支持并发会话           │
  * │   特点2：instance_id 机制允许 TCP 重连但保持数据上下文（会话可恢复） │
  * └──────────────────────────────────────────────────────────────────────┘
  *
@@ -40,11 +40,11 @@
  *   - ONLINE:        客户端上线（建立客户端-服务器连接）
  *   - ONLINE_ACK:    服务器确认上线，返回服务器能力标志
  *   - ALIVE:         客户端心跳保活（维持 TCP 长连接）
- *   - CONNECT:       请求建立与对端的会话（申请连接对方）
- *   - CONNECT_ACK:   服务器确认会话，返回 session_id 和对端在线状态
- *   - DISCONNECT:    主动断开与对端会话（按 session_id）
- *   - PEER_INFO:     双向候选传输（Client→Server 上传，Server→Client 下发）
- *   - PEER_INFO_ACK: 服务器确认候选，返回转发/缓存状态
+ *   - SYNC0:         请求建立与对端的会话（申请连接对方）
+ *   - SYNC0_ACK:     服务器确认会话，返回 session_id 和对端在线状态
+ *   - FIN:           主动断开与对端会话（按 session_id）
+ *   - SYNC:          双向候选传输（Client→Server 上传，Server→Client 下发）
+ *   - SYNC_ACK:      服务器确认候选，返回转发/缓存状态
  *   - DATA:          P2P 失败后的数据包中继（可选）
  *   - ACK:           P2P 失败后的确认包中继（可选）
  *   - CRYPTO:        P2P 失败后的加密包中继（可选）
@@ -80,19 +80,19 @@
  *                                    ↓
  *   阶段2: 建立会话（申请连接对方，进行候选交换）
  *   ┌────────────────────────────────────────────────────┐
- *   │  ONLINE ──→ WAIT_CONNECT_ACK ──→ WAIT_PEER ──→ EXCHANGING ──→ READY │
+ *   │  ONLINE ──→ WAIT_SYNC0_ACK ──→ WAIT_PEER ──→ EXCHANGING ──→ READY │
  *   └────────────────────────────────────────────────────┘
  *
  *   - INIT:              未启动
  *   - ONLINE_ING:        TCP 连接建立中
  *   - WAIT_ONLINE_ACK:   已发送 ONLINE，等待 ONLINE_ACK
- *   - ONLINE:            已上线，可以发起多个 CONNECT（核心状态）
- *   - WAIT_CONNECT_ACK:  已发送 CONNECT，等待 CONNECT_ACK（分配 session_id）
- *   - WAIT_PEER:         已分配 session_id，但对端离线，等待首个 PEER_INFO
- *   - EXCHANGING:        候选交换中（上传/接收 PEER_INFO）
+ *   - ONLINE:            已上线，可以发起多个 SYNC0（核心状态）
+ *   - WAIT_SYNC0_ACK:    已发送 SYNC0，等待 SYNC0_ACK（分配 session_id）
+ *   - WAIT_PEER:         已分配 session_id，但对端离线，等待首个 SYNC
+ *   - EXCHANGING:        候选交换中（上传/接收 SYNC）
  *   - READY:             候选交换完成，可以开始 P2P 打洞
  *
- * 注意：ONLINE 状态是稳定状态，可以在此状态下发起多个 CONNECT，
+ * 注意：ONLINE 状态是稳定状态，可以在此状态下发起多个 SYNC0，
  *       从而支持与多个对端并发建立会话（每个会话有独立的 session_id）。
  *
  * ============================================================================
@@ -152,7 +152,7 @@ typedef enum {
     SIGNAL_RELAY_ONLINE_ING,        /* TCP 连接建立中 */
     SIGNAL_RELAY_WAIT_ONLINE_ACK,   /* 等待 ONLINE_ACK */
     SIGNAL_RELAY_ONLINE,            /* 已上线 */
-    SIGNAL_RELAY_WAIT_CONNECT_ACK,  /* 等待 CONNECT_ACK */
+    SIGNAL_RELAY_WAIT_SYNC0_ACK,    /* 等待 SYNC0_ACK */
     SIGNAL_RELAY_WAIT_PEER,         /* 已分配会话，等待对端上线 */
     SIGNAL_RELAY_EXCHANGING,        /* 候选交换中 */
     SIGNAL_RELAY_READY              /* 交换完成，对端候选接收完成 */
@@ -210,9 +210,9 @@ typedef struct {
     uint16_t            next_candidate_index;           /* 下一个要发送的候选索引 */
     bool                local_candidates_fin;           /* FIN 已发送（本端候选上传完成）*/
     bool                remote_candidates_fin;          /* 对端候选接收完成（收到对端 FIN）*/
-    bool                awaiting_peer_info_ack;         /* 等待 PEER_INFO_ACK（流控门控）*/
+    bool                awaiting_sync_ack;              /* 等待 SYNC_ACK（流控门控）*/
     bool                local_delivery_confirmed;       /* 服务器确认所有候选已转发到对端（收到 ACK=0）*/
-    uint8_t             last_sent_cand_count;           /* 上批 PEER_INFO 发送的候选数（用于 ACK 对账）*/
+    uint8_t             last_sent_cand_count;           /* 上批 SYNC 发送的候选数（用于 ACK 对账）*/
     uint64_t            trickle_last_time;              /* 上次 trickle 发送时间（用于攒批窗口控制）*/
     uint8_t             trickle_batch_count;            /* 当前批次累积的候选数（实现攒批）*/
 
@@ -247,7 +247,7 @@ void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx);
  * 客户端上线（阶段1：建立与服务器的 TCP 连接）
  *
  * 创建 TCP socket，连接到 RELAY 服务器，并发送 ONLINE 消息。
- * 成功后进入 ONLINE 状态，可以发起多个 CONNECT 会话。
+ * 成功后进入 ONLINE 状态，可以发起多个 SYNC0 会话。
  *
  * @param s             P2P 会话
  * @param local_peer_id 本端名称
@@ -270,7 +270,7 @@ ret_t p2p_signal_relay_offline(struct p2p_session *s);
 
 
 /*
- * 建立与对端的会话（阶段2：发送 CONNECT 请求）
+ * 建立与对端的会话（阶段2：发送 SYNC0 请求）
  *
  * 向服务器请求建立与目标对端的会话，服务器分配 session_id。
  * 前提：必须已经处于 ONLINE 状态。
@@ -282,10 +282,10 @@ ret_t p2p_signal_relay_offline(struct p2p_session *s);
 ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id);
 
 /*
- * 断开当前会话（阶段2：发送 DISCONNECT 消息）
+ * 断开当前会话（阶段2：发送 FIN 消息）
  *
- * 向服务器发送 DISCONNECT 消息，通知结束与对端的会话。
- * 清理会话状态后回到 ONLINE 状态，可以再次发起 CONNECT。
+ * 向服务器发送 FIN 消息，通知结束与对端的会话。
+ * 清理会话状态后回到 ONLINE 状态，可以再次发起 SYNC0。
  * 前提：必须处于 WAIT_PEER / EXCHANGING / READY 状态。
  *
  * @param s   P2P 会话
@@ -321,8 +321,8 @@ void p2p_signal_relay_tick_recv(struct p2p_session *s);
  *
  * 处理信令发送和重传：
  *   - 心跳保活（ALIVE）
- *   - CONNECT 重传
- *   - 上传候选（PEER_INFO）
+ *   - SYNC0 重传
+ *   - 上传候选（SYNC）
  *
  * 在 p2p_update() 的阶段 7（信令推送）中调用。
  *

@@ -612,7 +612,7 @@ void p2p_signal_compact_trickle_candidate(p2p_session_t *s) {
 
     if (ctx->state == SIGNAL_COMPACT_ICE && ctx->candidates_mask == 0) {
         if (s->stun_pending > 0) {
-            print("V:", LA_F("%s: waiting for STUN candidates, stun_pending=%d\n", LA_F66, 66),
+            print("V:", LA_F("%s: waiting for STUN candidates, stun_pending=%d\n", LA_F569, 569),
                   TASK_ICE, s->stun_pending);
             return;
         }
@@ -805,7 +805,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, flags, len);
 
     if (len < 22) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 
@@ -922,7 +922,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         print("I:", LA_F("%s: peer online, proceeding to ICE\n", LA_F134, 134), PROTO);
         ctx->state = SIGNAL_COMPACT_ICE;
         if (compact_wait_stun_candidates(s)) {
-            print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F134, 134), TASK_ICE);
+            print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F570, 570), TASK_ICE);
         } else {
             send_rest_candidates_and_fin(s);
             ctx->last_send_time = P_tick_ms();
@@ -994,13 +994,13 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
     }
 
     if (len < (int)sizeof(uint64_t) + 2) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 
     int cand_cnt = payload[sizeof(uint64_t) + 1];
     if (len < (int)sizeof(uint64_t) + 2 + (int)sizeof(p2p_candidate_t) * cand_cnt) {
-        print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F99, 99), PROTO, len, cand_cnt);
+        print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F561, 561), PROTO, len, cand_cnt);
         return;
     }
 
@@ -1075,7 +1075,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         print("I:", LA_F("%s: entered, %s arrived after REGISTERED\n", LA_F109, 109), TASK_ICE, PROTO);
 
         if (compact_wait_stun_candidates(s)) {
-            print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F134, 134), TASK_ICE);
+            print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F570, 570), TASK_ICE);
         } else {
             send_rest_candidates_and_fin(s);
             ctx->last_send_time = P_tick_ms();
@@ -1264,7 +1264,7 @@ void compact_on_peer_info_ack(struct p2p_session *s, uint16_t seq,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, len);
 
     if (len < (int)sizeof(uint64_t)) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 
@@ -1324,7 +1324,7 @@ void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
     if (len < (int)sizeof(uint64_t)) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 
@@ -1381,7 +1381,7 @@ void compact_on_request(struct p2p_session *s, uint8_t flags,
 
     // 最小长度：session_id(8) + sid(2) + msg(1) = 11
     if (len < 11) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 
@@ -1453,7 +1453,7 @@ void compact_on_request_ack(struct p2p_session *s,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
 
     if (len < 11) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 
@@ -1537,7 +1537,7 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
 
     // 检查最小负载长度：session_id(8) + sid(2) = 10
     if (len < 10) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 
@@ -1608,7 +1608,7 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
         // 正常响应：需要包含 code 和可选的 data
         // 最小长度：session_id(8) + sid(2) + code(1) = 11
         if (len < 11) {
-            print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+            print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
             return;
         }
         res_code = payload[10];
@@ -1655,7 +1655,7 @@ void compact_on_response_ack(struct p2p_session *s,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
 
     if (len < 10) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 
@@ -1710,7 +1710,7 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, len);
 
     if (len < 6) {
-        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F455, 455), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
 

@@ -140,7 +140,7 @@ enum {
     LA_F96,  /* "%s: accepted, waiting for response (sid=%u)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F97,  /* "%s: accepted\n" (%s)  [p2p_signal_compact.c] */
     LA_F98,  /* "%s: batch punch skip (state=%d, use trickle)" (%s,%d)  [p2p_nat.c] */
-    LA_F99,  /* "%s: bad payload(len=%d cand_cnt=%d)\n" (%s,%d,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_F99,  /* "%s: bad FIN marker=0x%02x\n" (%s)  [p2p_signal_relay.c] */
     LA_F100,  /* disabled "%s: bad payload len=%d\n" */
     LA_F101,  /* "%s: bad payload(len=%d, need >=8)\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F102,  /* "%s: PUNCHING → CONNECTING (%s%s)" (%s,%s,%s)  [p2p_nat.c] */
@@ -496,7 +496,7 @@ enum {
     LA_F452,  /* disabled "%s sent\n" */
     LA_F453,  /* "%s: accepted, public=%s:%d ses_id=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n" (%s,%s,%d,%l,%d,%d,%s,%s)  [p2p_signal_compact.c] */
     LA_F454,  /* disabled "%s: accepted, ses_id=%llu peer=%s\n" */
-    LA_F455,  /* "%s: bad payload(len=%d)\n" (%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_F455,  /* "%s: bad payload(%d)\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F456,  /* disabled "%s: cached (peer offline)\n" */
     LA_F457,  /* disabled "%s: duplicate remote cand<%s:%d>, skipped\n" */
     LA_F458,  /* disabled "%s: forwarded to peer\n" */
@@ -537,25 +537,25 @@ enum {
     LA_F493,  /* "%s enqueued\n" (%s)  [p2p_signal_relay.c] */
     LA_F494,  /* "%s sent %d candidates, next_idx=%d\n" (%s,%d,%d)  [p2p_signal_relay.c] */
     LA_F495,  /* "%s sent FIN\n" (%s)  [p2p_signal_relay.c] */
-    LA_F496,  /* "%s: accepted, relay=%s msg=%s\n" (%s,%s,%s)  [p2p_signal_relay.c] */
+    LA_F496,  /* "%s: accepted, relay=%s msg=%s cand_max=%d\n" (%s,%s,%s,%d)  [p2p_signal_relay.c] */
     LA_F497,  /* "%s: accepted, ses_id=%llu peer=%s\n" (%s,%l,%s)  [p2p_signal_relay.c] */
     LA_F498,  /* "%s: bad payload len=%d\n" (%s,%d)  [p2p_signal_relay.c] */
-    LA_F499,  /* "%s: cached (peer offline)\n" (%s)  [p2p_signal_relay.c] */
+    LA_F499,  /* disabled "%s: cached (peer offline)\n" */
     LA_F500,  /* "%s: duplicate remote cand<%s:%d>, skipped\n" (%s,%s,%d)  [p2p_signal_relay.c] */
-    LA_F501,  /* "%s: error, target not found\n" (%s)  [p2p_signal_relay.c] */
-    LA_F502,  /* "%s: forwarded to peer\n" (%s)  [p2p_signal_relay.c] */
+    LA_F501,  /* disabled "%s: error, target not found\n" */
+    LA_F502,  /* "%s: all candidates delivered to peer (fwd=0 after FIN)\n" (%s)  [p2p_signal_relay.c] */
     LA_F503,  /* "%s: processed, remote_cand_cnt=%d\n" (%s,%d)  [p2p_signal_relay.c] */
-    LA_F504,  /* "%s: received FIN from peer\n" (%s)  [p2p_signal_relay.c] */
+    LA_F504,  /* "%s: peer closed session %llu\n" (%s,%l)  [p2p_signal_relay.c] */
     LA_F505,  /* "%s: remote_cands[] full, skipped %d candidates\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F506,  /* "%s: send buffer busy, skip\n" (%s)  [p2p_signal_relay.c] */
     LA_F507,  /* "%s: send buffer busy, will retry\n" (%s)  [p2p_signal_relay.c] */
-    LA_F508,  /* "%s: session mismatch(local=%llu recv=%llu)\n" (%s,%l,%l)  [p2p_signal_relay.c] */
-    LA_F509,  /* "%s: storage full, stop uploading\n" (%s)  [p2p_signal_relay.c] */
-    LA_F510,  /* "%s: unknown status %d\n" (%s,%d)  [p2p_signal_relay.c] */
+    LA_F508,  /* "%s: invalid online=%u, normalized to 0\n" (%s,%u)  [p2p_signal_relay.c] */
+    LA_F509,  /* disabled "%s: storage full, stop uploading\n" */
+    LA_F510,  /* disabled "%s: unknown status %d\n" */
     LA_F511,  /* disabled "% CONNECT timeout, max retries reached\n" */
     LA_F512,  /* disabled "CONNECT timeout, retrying (%d/%d)\n" */
     LA_F513,  /* "Connecting to %s:%d\n" (%s,%d)  [p2p_signal_relay.c] */
-    LA_F514,  /* "EXCHANGING: peer=%s, uploading candidates\n" (%s)  [p2p_signal_relay.c] */
+    LA_F514,  /* "% EXCHANGING: first sync received, peer online\n"  [p2p_signal_relay.c] */
     LA_F515,  /* disabled "Failed to allocate %d bytes for payload\n" */
     LA_F516,  /* "% Failed to create TCP socket\n"  [p2p_signal_relay.c] */
     LA_F517,  /* "% Failed to set socket non-blocking\n"  [p2p_signal_relay.c] */
@@ -569,16 +569,16 @@ enum {
     LA_F525,  /* "% TCP connection closed by peer\n"  [p2p_signal_relay.c] */
     LA_F526,  /* "% TCP recv error\n"  [p2p_signal_relay.c] */
     LA_F527,  /* "% TCP connection closed during send\n"  [p2p_signal_relay.c] */
-    LA_F528,  /* "% Trickle TURN: uploading new candidates\n"  [p2p_signal_relay.c] */
+    LA_F528,  /* disabled "% Trickle TURN: uploading new candidates\n" */
     LA_F529,  /* "Unknown message type %d\n" (%d)  [p2p_signal_relay.c] */
-    LA_F530,  /* "[TCP] %s enqueue, name='%s', rid=%u\n" (%s,%s,%u)  [p2p_signal_relay.c] */
-    LA_F531,  /* "[TCP] %s enqueue, ses_id=%llu cand_cnt=%d fin=%d\n" (%s,%l,%d,%d)  [p2p_signal_relay.c] */
-    LA_F532,  /* "[TCP] %s enqueue, target='%s'\n" (%s,%s)  [p2p_signal_relay.c] */
+    LA_F530,  /* "%s: req_type=%u code=%u msg=%.*s\n" (%s,%u,%u)  [p2p_signal_relay.c] */
+    LA_F531,  /* "%s: fatal error code=%u, entering ERROR state\n" (%s,%u)  [p2p_signal_relay.c] */
+    LA_F532,  /* "% No shared local route addresses available, host candidates skipped"  [p2p.c] */
     LA_F533,  /* "[TCP] %s recv, len=%d\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F534,  /* "% TCP send error\n"  [p2p_signal_relay.c] */
     LA_F535,  /* "% Waiting for RELAY server ONLINE_ACK"  [p2p.c] */
     LA_F536,  /* "% Disconnected, back to ONLINE state\n"  [p2p_signal_relay.c] */
-    LA_F537,  /* "disconnect: not in session (state=%d)\n" (%d)  [p2p_signal_relay.c] */
+    LA_F537,  /* disabled "disconnect: not in session (state=%d)\n" */
     LA_F538,  /* "payload size %u exceeds limit %u\n" (%u,%u)  [p2p_signal_relay.c] */
     LA_F539,  /* "[TCP] %s enqueue, ses_id=%llu\n" (%s,%l)  [p2p_signal_relay.c] */
     LA_F540,  /* "retry seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
@@ -602,6 +602,25 @@ enum {
     LA_F558,  /* "% No valid CHANGED-ADDRESS provided by STUN server, skipping Test I(alt)"  [p2p_stun.c] */
     LA_F559,  /* "% Test I(alt): Timeout"  [p2p_stun.c] */
     LA_F560,  /* "Test I: Changed address: %s:%d" (%s,%d)  [p2p_stun.c] */
+    LA_F561,  /* "%s: bad payload(len=%d cand_cnt=%d)\n" (%s,%d,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_F562,  /* "%s: bad payload(len=%d)\n" (%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_F563,  /* "%s: forwarded=%d, next_idx adjusted to %d\n" (%s,%d,%d)  [p2p_signal_relay.c] */
+    LA_F564,  /* "%s: received FIN marker from peer\n" (%s)  [p2p_signal_relay.c] */
+    LA_F565,  /* "%s: req_type=%u code=%u\n" (%s,%u,%u)  [p2p_signal_relay.c] */
+    LA_F566,  /* "%s: session busy, will retry\n" (%s)  [p2p_signal_relay.c] */
+    LA_F567,  /* "%s: session mismatch(local=%llu recv=%llu)\n" (%s,%l,%l)  [p2p_signal_relay.c] */
+    LA_F568,  /* "%s: unexpected fwd=%d after FIN, ignored\n" (%s,%d)  [p2p_signal_relay.c] */
+    LA_F569,  /* "%s: waiting for STUN candidates, stun_pending=%d\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F570,  /* "%s: waiting for initial STUN candidates before sending local queue\n" (%s)  [p2p_signal_compact.c] */
+    LA_F571,  /* "EXCHANGING: peer=%s, uploading candidates\n" (%s)  [p2p_signal_relay.c] */
+    LA_F572,  /* "% EXCHANGING: waiting for initial STUN/TURN candidates before upload\n"  [p2p_signal_relay.c] */
+    LA_F573,  /* "Trickle TURN: batch full (%d cands), sending\n" (%d)  [p2p_signal_relay.c] */
+    LA_F574,  /* "Trickle TURN: batch timeout (%d cands), sending\n" (%d)  [p2p_signal_relay.c] */
+    LA_F575,  /* "% WAIT_PEER: peer went offline, waiting for reconnect\n"  [p2p_signal_relay.c] */
+    LA_F576,  /* "% WAIT_PEER: session established, waiting for peer info\n"  [p2p_signal_relay.c] */
+    LA_F577,  /* "[TCP] %s enqueue, name='%s', rid=%u\n" (%s,%s,%u)  [p2p_signal_relay.c] */
+    LA_F578,  /* "[TCP] %s enqueue, ses_id=%llu cand_cnt=%d fin=%d\n" (%s,%l,%d,%d)  [p2p_signal_relay.c] */
+    LA_F579,  /* "[TCP] %s enqueue, target='%s'\n" (%s,%s)  [p2p_signal_relay.c] */
 
     LA_NUM
 };

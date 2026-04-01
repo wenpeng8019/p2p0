@@ -826,7 +826,7 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
 // 处理 SYNC 消息（候选同步）
 static void handle_relay_sync(relay_client_t *client, relay_session_t *s, uint8_t *payload, uint16_t len) {
 
-    if (len < 9) {
+    if (len < P2P_RLY_SYNC_PSZ(0, false)) {
         printf(LA_F("[TCP] E: Invalid SYNC length: %u\n", LA_F198, 198), len);
         return;
     }
