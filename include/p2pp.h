@@ -627,7 +627,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 
 /* RELAY 模式消息类型 */
 typedef enum {
-    P2P_RLY_ERROR = 0,                       // 错误包（仅服务器发送，包含错误码）
+    P2P_RLY_STATUS = 0,                      // 状态包（仅服务器发送，包含请求类型 + 状态码）
 
     /* 在线管理 */
     P2P_RLY_ONLINE,                         // 上线请求: Client -> Server
@@ -640,8 +640,6 @@ typedef enum {
     P2P_RLY_SYNC,                           // 后续同步: 双向 (Client -> Server 上传, Server -> Client 下发)
     P2P_RLY_SYNC_ACK,                       // 同步确认: Server -> Client (确认候选处理数量，confirmed_count == 0 可表示 FIN 完成)
     P2P_RLY_FIN,                            // 会话结束: Client -> Server / Server -> Client
-
-    P2P_RLY_STATUS,                         // 状态通知: Server -> Client（下面 DATA/ACK/CRYPTO/REQ 请求，会返回该状态通知）
 
     /* P2P 数据中继（打洞失败降级） */
     P2P_RLY_DATA,                           // 中继 P2P 数据包: Client <-> Server <-> Client
@@ -659,23 +657,21 @@ typedef struct {
     uint16_t            size;
 } p2p_relay_hdr_t;
 
-#define P2P_RLY_SESS_ID_PSZ        (sizeof(uint64_t))    // session_id 大小（8 字节）
+#define P2P_RLY_SESS_ID_PSZ        (sizeof(uint64_t))   // session_id 大小（8 字节）
 
-#define P2P_RLY_EC_UNKNOWN          0       // 未知错误
-#define P2P_RLY_EC_PROTOCOL         1       // 协议错误（未登录/非法状态）
-#define P2P_RLY_EC_INTERNAL         2       // 服务器内部错误
-#define P2P_RLY_EC_NOT_ONLINE       3       // 未完成 ONLINE 登录
-#define P2P_RLY_EC_PEER_OFFLINE     4       // 对端未连接（session 存在但 peer 为空）
-#define P2P_RLY_EC_SESSION_BUSY     5       // 会话忙（前一个转发尚未完成）
+#define P2P_RLY_CODE_READY           0                  // 服务器就绪，客户端可继续后续操作
+#define P2P_RLY_ERR(c)              (100+c)             // 错误码基数，code >= 100 表示错误
+#define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(0)      // 协议错误（未登录/非法状态）
+#define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(1)      // 服务器内部错误
+#define P2P_RLY_ERR_NOT_ONLINE      P2P_RLY_ERR(2)      // 未完成 ONLINE 登录
+#define P2P_RLY_ERR_PEER_OFFLINE    P2P_RLY_ERR(3)      // 对端未连接（session 存在但 peer 为空）
+#define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(4)      // 会话忙（前一个转发尚未完成）
+#define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(5)      // 服务器转发请求超时
 
 /* RELAY 上线确认功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
 #define P2P_RLY_FEATURE_MSG         0x02    // 支持 MSG RPC 机制
 #define P2P_RLY_SYNC_FIN_MARKER     0xFF    // SYNC 负载尾部 FIN 标记字节
-
-/* RELAY 响应错误码（当 on_response 回调 len=-1 时，code 字段表示错误类型） */
-#define P2P_RLY_ERR_PEER_OFFLINE    0xFE    // 目标在等待响应期间离线
-#define P2P_RLY_ERR_TIMEOUT         0xFF    // 服务器转发请求超时
 
 /* ============================================================================
  * RELAY 模式协议详细定义说明
@@ -683,13 +679,13 @@ typedef struct {
  *
  * 所有消息：[p2p_relay_hdr_t: 3B][payload: N bytes]
  *
- * P2P_RLY_ERROR:
- *   payload: [type(1)][error_code(1)][error_msg(N)]
+ * P2P_RLY_STATUS:
+ *   payload: [type(1)][status_code(1)][status_msg(N)]
  *   - type: 请求的 p2p_relay_type_t 类型（例如 P2P_RLY_SYNC0），用于指示哪个请求出错
- *   - error_code: 见 P2P_RLY_EC_* 定义
- *   - error_msg: 可选的错误描述文本（UTF-8 编码）
+ *   - status_code: 见 P2P_RLY_CODE_* 定义
+ *   - status_msg: 可选的状态描述文本（UTF-8 编码）
  */
-#define P2P_RLY_ERROR_PSZ           2
+#define P2P_RLY_STATUS_PSZ          2
  /* P2P_RLY_ONLINE:
  *   payload: [name(32)][instance_id(4)]
  *   - name: 本地 peer 名称，定长 32 字节，0 填充

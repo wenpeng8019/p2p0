@@ -411,17 +411,17 @@ static bool relay_wait_stun_candidates(p2p_session_t *s) {
  */
 
 /*
- * 处理 ERROR（服务器主动返回错误）
+ * 处理 STATUS（服务器主动返回状态）
  *
- * 协议：P2P_RLY_ERROR (0x00)
- * 负载: [type(1)][error_code(1)][error_msg(N)]
+ * 协议：P2P_RLY_STATUS (0x00)
+ * 负载: [type(1)][status_code(1)][status_msg(N)]
  */
-static void handle_relay_error(p2p_session_t *s, const uint8_t *payload, int len) {
-    const char *PROTO = "ERROR";
+static void handle_relay_status(p2p_session_t *s, const uint8_t *payload, int len) {
+    const char *PROTO = "STATUS";
 
     printf(LA_F("[TCP] %s recv, len=%d\n", LA_F533, 533), PROTO, len);
 
-    if (len < (int)P2P_RLY_ERROR_PSZ) {
+    if (len < (int)P2P_RLY_STATUS_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         s->sig_relay_ctx.state = SIGNAL_RELAY_ERROR;
         return;
@@ -429,19 +429,19 @@ static void handle_relay_error(p2p_session_t *s, const uint8_t *payload, int len
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
     uint8_t req_type = payload[0];
-    uint8_t err_code = payload[1];
+    uint8_t status_code = payload[1];
 
-    if (len > (int)P2P_RLY_ERROR_PSZ) {
-        int msg_len = len - (int)P2P_RLY_ERROR_PSZ;
+    if (len > (int)P2P_RLY_STATUS_PSZ) {
+        int msg_len = len - (int)P2P_RLY_STATUS_PSZ;
         print("W:", LA_F("%s: req_type=%u code=%u msg=%.*s\n", LA_F530, 530),
-              PROTO, (unsigned)req_type, (unsigned)err_code, msg_len, (const char *)(payload + P2P_RLY_ERROR_PSZ));
+              PROTO, (unsigned)req_type, (unsigned)status_code, msg_len, (const char *)(payload + P2P_RLY_STATUS_PSZ));
     } else {
         print("W:", LA_F("%s: req_type=%u code=%u\n", LA_F565, 565),
-              PROTO, (unsigned)req_type, (unsigned)err_code);
+              PROTO, (unsigned)req_type, (unsigned)status_code);
     }
 
-    switch (err_code) {
-    case P2P_RLY_EC_PEER_OFFLINE:
+    switch (status_code) {
+    case P2P_RLY_ERR_PEER_OFFLINE:
         // 对端未连接：会话仍存在，等待对端重新上线
         if (ctx->state >= SIGNAL_RELAY_EXCHANGING) {
             ctx->peer_online = false;
@@ -449,7 +449,7 @@ static void handle_relay_error(p2p_session_t *s, const uint8_t *payload, int len
             print("I:", LA_F("WAIT_PEER: peer went offline, waiting for reconnect\n", LA_F575, 575));
         }
         break;
-    case P2P_RLY_EC_SESSION_BUSY:
+    case P2P_RLY_ERR_BUSY:
         // 会话忙：前一个转发未完成，稍后重试
         ctx->awaiting_sync_ack = false;
         ctx->trickle_last_time = P_tick_ms();
@@ -458,7 +458,7 @@ static void handle_relay_error(p2p_session_t *s, const uint8_t *payload, int len
     default:
         // NOT_ONLINE / PROTOCOL / INTERNAL / UNKNOWN → 致命错误
         print("E:", LA_F("%s: fatal error code=%u, entering ERROR state\n", LA_F531, 531),
-              PROTO, (unsigned)err_code);
+              PROTO, (unsigned)status_code);
         ctx->state = SIGNAL_RELAY_ERROR;
         break;
     }
@@ -818,8 +818,8 @@ static void dispatch_message(p2p_session_t *s) {
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
     switch (ctx->hdr.type) {
-        case P2P_RLY_ERROR:
-            handle_relay_error(s, ctx->payload, ntohs(ctx->hdr.size));
+        case P2P_RLY_STATUS:
+            handle_relay_status(s, ctx->payload, ntohs(ctx->hdr.size));
             break;
 
         case P2P_RLY_ONLINE_ACK:
