@@ -127,6 +127,36 @@ target_include_directories(test_ping_ice PRIVATE
 )
 target_link_libraries(test_ping_ice stdc ${TEST_PLATFORM_LIBS})
 
+# RELAY 协议注册/上线单元测试
+add_executable(test_relay_register
+    test_relay_register.c
+)
+target_include_directories(test_relay_register PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_relay_register stdc ${TEST_PLATFORM_LIBS})
+
+# RELAY 协议生命周期单元测试 (ALIVE/FIN)
+add_executable(test_relay_lifecycle
+    test_relay_lifecycle.c
+)
+target_include_directories(test_relay_lifecycle PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_relay_lifecycle stdc ${TEST_PLATFORM_LIBS})
+
+# RELAY 数据中继协议单元测试 (DATA/ACK/CRYPTO)
+add_executable(test_relay_data
+    test_relay_data.c
+)
+target_include_directories(test_relay_data PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_relay_data stdc ${TEST_PLATFORM_LIBS})
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)
