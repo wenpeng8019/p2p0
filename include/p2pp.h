@@ -661,6 +661,13 @@ typedef struct {
 
 #define P2P_RLY_SESS_ID_PSZ        (sizeof(uint64_t))    // session_id 大小（8 字节）
 
+#define P2P_RLY_EC_UNKNOWN          0       // 未知错误
+#define P2P_RLY_EC_PROTOCOL         1       // 协议错误（未登录/非法状态）
+#define P2P_RLY_EC_INTERNAL         2       // 服务器内部错误
+#define P2P_RLY_EC_NOT_ONLINE       3       // 未完成 ONLINE 登录
+#define P2P_RLY_EC_PEER_OFFLINE     4       // 对端未连接（session 存在但 peer 为空）
+#define P2P_RLY_EC_SESSION_BUSY     5       // 会话忙（前一个转发尚未完成）
+
 /* RELAY 上线确认功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
 #define P2P_RLY_FEATURE_MSG         0x02    // 支持 MSG RPC 机制
@@ -679,7 +686,7 @@ typedef struct {
  * P2P_RLY_ERROR:
  *   payload: [type(1)][error_code(1)][error_msg(N)]
  *   - type: 请求的 p2p_relay_type_t 类型（例如 P2P_RLY_SYNC0），用于指示哪个请求出错
- *   - error_code: 0=未知错误, 1=协议错误, 2=服务器内部错误
+ *   - error_code: 见 P2P_RLY_EC_* 定义
  *   - error_msg: 可选的错误描述文本（UTF-8 编码）
  */
 #define P2P_RLY_ERROR_PSZ           2
