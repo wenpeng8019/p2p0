@@ -641,6 +641,8 @@ typedef enum {
     P2P_RLY_SYNC_ACK,                       // 同步确认: Server -> Client (确认候选处理数量，confirmed_count == 0 可表示 FIN 完成)
     P2P_RLY_FIN,                            // 会话结束: Client -> Server / Server -> Client
 
+    P2P_RLY_STATUS,                         // 状态通知: Server -> Client（下面 DATA/ACK/CRYPTO/REQ 请求，会返回该状态通知）
+
     /* P2P 数据中继（打洞失败降级） */
     P2P_RLY_DATA,                           // 中继 P2P 数据包: Client <-> Server <-> Client
     P2P_RLY_ACK,                            // 中继 P2P 确认包: Client <-> Server <-> Client
@@ -648,9 +650,7 @@ typedef enum {
 
     /* 消息 RPC（服务器中转的请求-应答机制） */
     P2P_RLY_REQ,                            // 请求: Client -> Server / Server -> Client (双向)
-    P2P_RLY_REQ_ACK,                        // 请求确认: Server -> Client
     P2P_RLY_RESP,                           // 响应: Client -> Server / Server -> Client (双向)
-    P2P_RLY_RESP_ACK                        // 响应确认: Server -> Client
 } p2p_relay_type_t;
 
 /* RELAY 模式包头 (3 bytes) */
@@ -724,26 +724,26 @@ typedef struct {
  *   - 若 SYNC0 携带 candidate_count>0，服务器会在候选已处理后，再额外返回一个 SYNC_ACK
  */
 #define P2P_RLY_SYNC0_ACK_PSZ       (P2P_RLY_SESS_ID_PSZ + 1u)
- /* P2P_RLY_SYNC:
+/* P2P_RLY_SYNC:
  *   payload: [session_id(8)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *   - session_id: 64 位会话 ID（网络字节序）
  *   - candidate_count: 本包候选数量
  *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *   - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
- */
+*/
 #define P2P_RLY_SYNC_PSZ(n, mk)     (P2P_RLY_SESS_ID_PSZ + 1u + (n)*sizeof(p2p_candidate_t) + ((mk) ? 1u : 0u))
- /* P2P_RLY_SYNC_ACK:
+/* P2P_RLY_SYNC_ACK:
  *   payload: [session_id(8)][confirmed_count(1)]
  *   - session_id: 64 位会话 ID（网络字节序）
  *   - confirmed_count: 实际确认处理的候选数（转发或缓存），0=全部完成（仅 FIN 后）
- */
+*/
 #define P2P_RLY_SYNC_ACK_PSZ        (P2P_RLY_SESS_ID_PSZ + 1u)
- /* P2P_RLY_FIN:
+/* P2P_RLY_FIN:
  *   payload: [session_id(8)]
  *   - session_id: 要结束的会话 ID（网络字节序）
- */
+*/
 #define P2P_RLY_FIN_PSZ             (P2P_RLY_SESS_ID_PSZ)
- /* P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO:
+/* P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO:
  *   payload: [target_name(32)][p2p_packet(N)] (Client→Server)
  *   payload: [sender_name(32)][p2p_packet(N)] (Server→Target)
  *   - p2p_packet: 完整 P2P 包（包头+payload）

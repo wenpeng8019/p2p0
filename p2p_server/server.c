@@ -15,7 +15,7 @@
  *
  * 日志原则：
  * - 调试级别：printf 输出协议包详细信息（Send/Received XXX pkt...）
- * - 正式级别：printf 输出带前缀的日志（[UDP]/[TCP] + V/I/W/E:）
+ * - 正式级别：print(level, ...) 输出带 MOD_TAG 前缀的结构化日志
  * 
  * 对于收包处理：
  *   > 收到包时，调试打印包的详细信息
@@ -332,7 +332,7 @@ static int build_session(client_t *client, const char *remote_peer_id,
     else if (pair->sessions[0]) { assert(!pair->sessions[1]);
 
         if (pair->sessions[0]->client == client) {
-            printf(LA_F("[TCP] E: Duplicate session create blocked: '%s' -> '%s'\n", LA_F191, 191),
+            print("E:", LA_F("Duplicate session create blocked: '%s' -> '%s'\n", LA_F266, 266),
                     client->local_peer_id, remote_peer_id);
             free(s);
             return -1;
@@ -343,7 +343,7 @@ static int build_session(client_t *client, const char *remote_peer_id,
     else { assert(pair->sessions[1]);
 
         if (pair->sessions[1]->client == client) {
-            printf(LA_F("[TCP] E: Duplicate session create blocked: '%s' -> '%s'\n", LA_F191, 191),
+            print("E:", LA_F("Duplicate session create blocked: '%s' -> '%s'\n", LA_F266, 266),
                     client->local_peer_id, remote_peer_id);
             free(s);
             return -1;
@@ -423,11 +423,11 @@ static int tcp_send(relay_client_t *client, const void *buf, size_t *len_io, con
         if (n < 0) {
             if (P_sock_is_interrupted()) continue;
             if (P_sock_is_wouldblock()) return 1;
-            printf(LA_F("[TCP] E: send() failed while sending %s: errno=%d\n", LA_F211, 211), reason, P_sock_errno());
+            print("E:", LA_F("send(%s) failed: errno=%d\n", LA_F278, 278), reason, P_sock_errno());
             return -2;
         }
         if (n == 0) {
-            printf(LA_F("[TCP] I: Client closed connection (EOF on send, reason=%s)\n", LA_F215, 215), reason);
+            print("I:", LA_F("Client closed connection (EOF on send, reason=%s)\n", LA_F265, 265), reason);
             return -1;
         }
         *len_io += (size_t)n;
@@ -448,11 +448,11 @@ static int tcp_recv(relay_client_t *client, void *buf, size_t *len_io) {
         if (n < 0) {
             if (P_sock_is_interrupted()) continue;
             if (P_sock_is_wouldblock()) return 1;
-            printf(LA_F("[TCP] E: recv() failed: errno=%d\n", LA_F210, 210), P_sock_errno());
+            print("E:", LA_F("recv() failed: errno=%d\n", LA_F277, 277), P_sock_errno());
             return -2;
         }
         if (n == 0) {
-            printf(LA_F("[TCP] I: Client closed connection (EOF on recv)\n", LA_F214, 214));
+            print("I:", LA_F("% Client closed connection (EOF on recv)\n", LA_F249, 249));
             return -1;
         }
         *len_io += (size_t)n;
@@ -593,7 +593,7 @@ static void relay_session_send_sync0_ack(relay_session_t *s, uint8_t online) {
     uint16_t payload_len = P2P_RLY_SYNC0_ACK_PSZ;
     buffer_item_t *buf_item = relay_buf_alloc(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) {
-        printf(LA_F("[TCP] W: SYNC0_ACK queue busy for '%s', drop\n", LA_F224, 224), client->base.local_peer_id);
+        print("W:", LA_F("SYNC0_ACK queue busy for '%s', drop\n", LA_F273, 273), client->base.local_peer_id);
         return;
     }
 
@@ -616,7 +616,7 @@ static void relay_session_send_sync_ack(relay_session_t *s, uint8_t confirmed_co
     uint16_t payload_len = P2P_RLY_SYNC_ACK_PSZ;
     buffer_item_t *buf_item = relay_buf_alloc(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) {
-        printf(LA_F("[TCP] W: SYNC_ACK queue busy for '%s', drop\n", LA_F225, 225), client->base.local_peer_id);
+        print("W:", LA_F("SYNC_ACK queue busy for '%s', drop\n", LA_F274, 274), client->base.local_peer_id);
         return;
     }
 
@@ -689,16 +689,17 @@ static void relay_send_error(relay_client_t *client, uint8_t req_type, uint8_t e
 // 处理 SYNC0 消息（首次同步）
 // payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
 static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_t len) {
+    const char *PROTO = "SYNC0";
 
     if (len < P2P_PEER_ID_MAX + 1) {
-        printf(LA_F("[TCP] E: Invalid SYNC0 length: %u\n", LA_F201, 201), len);
+        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F257, 257), PROTO, len);
         return;
     }
     uint8_t cand_count = payload[P2P_PEER_ID_MAX];
     uint32_t expect_len = P2P_RLY_SYNC0_PSZ(cand_count);
     if (len != expect_len) {
-        printf(LA_F("[TCP] E: Invalid SYNC0 payload: cnt=%d, len=%u, expected=%u\n", LA_F202, 202),
-               cand_count, len, expect_len);
+        print("E:", LA_F("%s: bad payload(cnt=%d, len=%u, expected=%u)\n", LA_F255, 255),
+               PROTO, cand_count, len, expect_len);
         return;
     }
 
@@ -708,7 +709,7 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
     relay_session_t *local_s = NULL, *remote_s = NULL;
     int side = build_session(&client->base, (const char *)payload, (session_t**)&local_s, (session_t**)&remote_s, sizeof(relay_session_t));
     if (side < 0) {
-        printf(LA_F("[TCP] E: Failed to build session for '%s'\n", LA_F192, 192), (const char *)payload);
+        print("E:", LA_F("%s: build_session failed for '%s'\n", LA_F258, 258), PROTO, (const char *)payload);
         return;
     }
 
@@ -716,8 +717,8 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
     if (cand_count > MAX_CANDIDATES) 
         cand_count = MAX_CANDIDATES;
 
-    printf(LA_F("[TCP] SYNC0: local='%s' remote='%s' side=%d peer_online=%d candidates=%d\n", LA_F220, 220),
-           client->base.local_peer_id, (const char *)payload, side, remote_s ? 1 : 0, cand_count);
+    print("V:", LA_F("%s: local='%s', remote='%s', side=%d, peer_online=%d, cands=%d\n", LA_F261, 261),
+           PROTO, client->base.local_peer_id, (const char *)payload, side, remote_s ? 1 : 0, cand_count);
 
     // 立即返回 SYNC0_ACK（会话建立确认）
     // + SYNC0_ACK 告知会话建立结果：session_id + 对端在线状态
@@ -730,7 +731,7 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
 
         sync0_item = relay_buf_alloc(RELAY_FRAME_SIZE);
         if (!sync0_item) {
-            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F239, 239));
+            print("E:", LA_F("%s: OOM for zero-copy recv buffer\n", LA_F253, 253), PROTO);
             return;
         }
 
@@ -750,7 +751,7 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
 
         sync0_item = relay_buf_alloc(RELAY_SMALL_FRAME_SIZE);
         if (!sync0_item) {
-            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F239, 239));
+            print("E:", LA_F("%s: OOM for zero-copy recv buffer\n", LA_F253, 253), PROTO);
             return;
         }
 
@@ -811,7 +812,7 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
         // 如果本端 sync0 发送的同步数据，发送 SYNC_ACK 告知本端同步数据已（确认）转发
         if (cand_count) relay_session_send_sync_ack(local_s, cand_count);
 
-        printf(LA_F("[TCP] I: SYNC0 forwarded to peer, candidates=%d\n", LA_F216, 216), cand_count);
+        print("I:", LA_F("%s: forwarded to peer, cands=%d\n", LA_F260, 260), PROTO, cand_count);
     }
     // 对端未在线，将 sync0 包缓存到 local_s->peer_pending
     else {
@@ -821,16 +822,17 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
         }
         local_s->peer_pending = sync0_item;
 
-        printf(LA_F("[TCP] W: Peer '%s' offline, cached SYNC0 candidates=%d\n", LA_F222, 222), 
-               (const char *)payload, cand_count);
+        print("W:", LA_F("%s: peer '%s' offline, cached cands=%d\n", LA_F262, 262), 
+               PROTO, (const char *)payload, cand_count);
     }
 }
 
 // 处理 SYNC 消息（候选同步）
 static void handle_relay_sync(relay_client_t *client, relay_session_t *s, uint8_t *payload, uint16_t len) {
+    const char *PROTO = "SYNC";
 
     if (len < P2P_RLY_SYNC_PSZ(0, false)) {
-        printf(LA_F("[TCP] E: Invalid SYNC length: %u\n", LA_F198, 198), len);
+        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F257, 257), PROTO, len);
         return;
     }
 
@@ -839,14 +841,14 @@ static void handle_relay_sync(relay_client_t *client, relay_session_t *s, uint8_
     if (len == payload_sz + 1u) {
 
         if (payload[payload_sz] != P2P_RLY_SYNC_FIN_MARKER) {
-            printf(LA_F("[TCP] E: Invalid SYNC FIN marker: 0x%02x\n", LA_F197, 197), payload[payload_sz]);
+            print("E:", LA_F("%s: bad FIN marker=0x%02x\n", LA_F254, 254), PROTO, payload[payload_sz]);
             return;
         }
     }
     else if (len != payload_sz) {
 
-        printf(LA_F("[TCP] E: Invalid SYNC payload: cnt=%u, len=%u, expected=%u(+1 fin)\n", LA_F200, 200),
-               (unsigned)cand_count, len, payload_sz);
+        print("E:", LA_F("%s: bad payload(cnt=%u, len=%u, expected=%u+1fin)\n", LA_F256, 256),
+               PROTO, (unsigned)cand_count, len, payload_sz);
 
         return;
     }
@@ -858,7 +860,7 @@ static void handle_relay_sync(relay_client_t *client, relay_session_t *s, uint8_
 
         sync_item = relay_buf_alloc(RELAY_FRAME_SIZE);
         if (!sync_item) {
-            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F239, 239));
+            print("E:", LA_F("%s: OOM for zero-copy recv buffer\n", LA_F253, 253), PROTO);
             return;
         }
 
@@ -872,7 +874,7 @@ static void handle_relay_sync(relay_client_t *client, relay_session_t *s, uint8_
 
         sync_item = relay_buf_alloc(RELAY_SMALL_FRAME_SIZE);
         if (!sync_item) {
-            printf(LA_F("[TCP] E: OOM for SYNC0 zero-copy recv buffer\n", LA_F239, 239));
+            print("E:", LA_F("%s: OOM for zero-copy recv buffer\n", LA_F253, 253), PROTO);
             return;
         }
 
@@ -907,19 +909,20 @@ static void handle_relay_sync(relay_client_t *client, relay_session_t *s, uint8_
 
 // 处理 FIN 消息（会话结束）
 static void handle_relay_fin(relay_session_t *s, uint8_t *payload, uint16_t len) {
+    const char *PROTO = "FIN";
 
     if (len != P2P_RLY_FIN_PSZ) {
-        printf(LA_F("[TCP] E: Invalid FIN length: %u\n", LA_F194, 194), len);
+        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F257, 257), PROTO, len);
         return;
     }
 
-    printf(LA_F("[TCP] FIN: close session %" PRIu64 "\n", LA_F212, 212), s->base.session_id);
+    print("I:", LA_F("%s: close ses_id=%" PRIu64 "\n", LA_F259, 259), PROTO, s->base.session_id);
 
     if (s->peer) {
 
         buffer_item_t *buf_item = relay_buf_alloc(RELAY_SMALL_FRAME_SIZE);
         if (!buf_item) {
-            printf(LA_F("[TCP] E: OOM for FIN relay buffer\n", LA_F204, 204));
+            print("E:", LA_F("%s: OOM for relay buffer\n", LA_F252, 252), PROTO);
             relay_free_session(s);
             return;
         }
@@ -944,9 +947,10 @@ static void handle_relay_fin(relay_session_t *s, uint8_t *payload, uint16_t len)
 
 // 处理 DATA 消息
 static void handle_relay_data(relay_client_t *client, relay_session_t *s, const uint8_t *payload, uint16_t len) {
+    const char *PROTO = "DATA";
 
     if (len < 8) {
-        printf(LA_F("[TCP] E: Invalid DATA length: %u\n", LA_F193, 193), len);
+        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F257, 257), PROTO, len);
         return;
     }
 
@@ -974,7 +978,7 @@ static void handle_relay_signaling(int idx) {
         // 状态检查：ONLINE_ACK 未完成前不应接收新消息
         // + 此时 recv_buf 已被 ONLINE_ACK 复用 send_buf，接收新消息会覆盖未发送的 ACK 内容
         if (client->online_ack_pending) {
-            printf(LA_F("[TCP] E: Client sent data before ONLINE_ACK completed\n", LA_F190, 190));
+            print("E:", LA_F("% Client sent data before ONLINE_ACK completed\n", LA_F251, 251));
             goto disconnect;
         }
 
@@ -991,7 +995,7 @@ static void handle_relay_signaling(int idx) {
         uint8_t type = client->recv_buf[0]; uint8_t* ptr = client->recv_buf + 1;
         uint16_t payload_len = nget_s(ptr);
         if (payload_len > P2P_MAX_PAYLOAD) {
-            printf(LA_F("[TCP] E: Invalid payload len %u\n", LA_F203, 203), payload_len);
+            print("E:", LA_F("bad payload len %u\n", LA_F276, 276), payload_len);
             goto disconnect;
         }
         
@@ -1012,13 +1016,13 @@ static void handle_relay_signaling(int idx) {
 
             // 处理 ONLINE 消息：[name(32)][instance_id(4)]
             if (payload_len != P2P_PEER_ID_MAX + 4) {
-                printf(LA_F("[TCP] E: Invalid ONLINE payload length: %u (expected %u)\n", LA_F195, 195), 
+                print("E:", LA_F("ONLINE: bad payload(len=%u, expected=%u)\n", LA_F270, 270), 
                        payload_len, (uint32_t)(P2P_PEER_ID_MAX + 4));
                 goto disconnect;
             }
             // 禁止重复 ONLINE
             if (client->base.local_peer_id[0]) {
-                printf(LA_F("[TCP] E: Duplicate ONLINE from '%s'\n", LA_F237, 237), client->base.local_peer_id);
+                print("E:", LA_F("ONLINE: duplicate from '%s'\n", LA_F271, 271), client->base.local_peer_id);
                 goto disconnect;
             }
             
@@ -1041,7 +1045,7 @@ static void handle_relay_signaling(int idx) {
             if (old) {
                 if (old->base.instance_id == client->base.instance_id) {
                     // 同实例重连：迁移 fd 到旧槽位，保留会话状态
-                    printf(LA_F("[TCP] I: Peer '%s' reconnected (inst=%u), migrating fd\n", LA_F240, 240),
+                    print("I:", LA_F("ONLINE: '%s' reconnected (inst=%u), migrating fd\n", LA_F269, 269),
                            client->base.local_peer_id, client->base.instance_id);
                     P_sock_close(old->fd);
                     old->fd = client->fd;
@@ -1059,13 +1063,13 @@ static void handle_relay_signaling(int idx) {
                     client = old;
                 } else {
                     // 新实例：销毁旧 client 的所有状态
-                    printf(LA_F("[TCP] I: Peer '%s' new instance (old=%u, new=%u), destroying old\n", LA_F218, 218),
+                    print("I:", LA_F("ONLINE: '%s' new instance (old=%u, new=%u), destroying old\n", LA_F268, 268),
                            client->base.local_peer_id, old->base.instance_id, client->base.instance_id);
                     relay_clear_client(old);
                 }
             }
             
-            printf(LA_F("[TCP] Peer '%s' came online (inst=%u)\n", LA_F241, 241),
+            print("I:", LA_F("ONLINE: '%s' came online (inst=%u)\n", LA_F267, 267),
                      client->base.local_peer_id, client->base.instance_id);
             
             // 就地修改 recv_buf 为 ONLINE_ACK (复用缓冲区)
@@ -1090,7 +1094,7 @@ static void handle_relay_signaling(int idx) {
         }
         // 除 ONLINE 外，所有消息都要求已完成登录
         else if (!client->base.local_peer_id[0]) {
-            printf(LA_F("[TCP] E: Message type=%u rejected: client not logged in\n", LA_F238, 238), (unsigned)type);
+            print("E:", LA_F("type=%u rejected: client not logged in\n", LA_F281, 281), (unsigned)type);
             relay_send_error(client, type, P2P_RLY_EC_NOT_ONLINE);
             goto disconnect;
         }
@@ -1100,7 +1104,7 @@ static void handle_relay_signaling(int idx) {
         }
         else {
             if (payload_len < P2P_RLY_SESS_ID_PSZ) {
-                printf(LA_F("[TCP] E: Invalid RELAY length: %u\n", LA_F196, 196), payload_len);
+                print("E:", LA_F("bad payload len %u (type=%u)\n", LA_F275, 275), payload_len, (unsigned)type);
                 client->recv_len = 0;
                 continue;
             }
@@ -1110,7 +1114,7 @@ static void handle_relay_signaling(int idx) {
             session_t *s = NULL;
             HASH_FIND(hh_session, g_sessions, &session_id, P2P_RLY_SESS_ID_PSZ, s);
             if (s == NULL || s->client != &client->base) {
-                printf(LA_F("[TCP] W: Unknown session %" PRIu64 " (type=%u)\n", LA_F244, 244), session_id, (unsigned)type);
+                print("W:", LA_F("unknown ses_id=%" PRIu64 " (type=%u)\n", LA_F282, 282), session_id, (unsigned)type);
                 client->recv_len = 0;
                 continue;
             }
@@ -1123,12 +1127,12 @@ static void handle_relay_signaling(int idx) {
             }
             // SYNC / DATA 等转发操作需要对端已连接
             else if (!rs->peer) {
-                printf(LA_F("[TCP] W: Session %" PRIu64 " peer not connected (type=%u)\n", LA_F243, 243), session_id, (unsigned)type);
+                print("W:", LA_F("ses_id=%" PRIu64 " peer not connected (type=%u)\n", LA_F280, 280), session_id, (unsigned)type);
                 relay_send_error(client, type, P2P_RLY_EC_PEER_OFFLINE);
             }
             // SYNC 转发需要前一个转发已完成（peer_pending 为空或 -1）
             else if (type == P2P_RLY_SYNC && rs->peer_pending && rs->peer_pending != (buffer_item_t*)-1) {
-                printf(LA_F("[TCP] W: Session %" PRIu64 " busy (pending sync)\n", LA_F242, 242), session_id);
+                print("W:", LA_F("ses_id=%" PRIu64 " busy (pending sync)\n", LA_F279, 279), session_id);
                 relay_send_error(client, type, P2P_RLY_EC_SESSION_BUSY);
             }
             else switch (type) {
@@ -1139,7 +1143,7 @@ static void handle_relay_signaling(int idx) {
                 handle_relay_data(client, rs, payload, payload_len);
                 break;
             default:
-                printf(LA_F("[TCP] E: Unsupported RELAY type=%u (session=%" PRIu64 ")\n", LA_F209, 209),
+                print("E:", LA_F("unsupported type=%u (ses_id=%" PRIu64 ")\n", LA_F283, 283),
                        (unsigned)type, session_id);
                 goto disconnect;
             }
@@ -1151,9 +1155,9 @@ static void handle_relay_signaling(int idx) {
     
 disconnect:
     if (client->base.local_peer_id[0]) {
-        printf(LA_F("[TCP] Peer '%s' disconnected\n", LA_F219, 219), client->base.local_peer_id);
+        print("I:", LA_F("'%s' disconnected\n", LA_F263, 263), client->base.local_peer_id);
     } else {
-        printf(LA_F("[TCP] Client disconnected (not yet logged in)\n", LA_F189, 189));
+        print("I:", LA_F("% Client disconnected (not yet logged in)\n", LA_F250, 250));
     }
     relay_clear_client(client);
 }
@@ -1167,7 +1171,7 @@ static void cleanup_relay_clients(void) {
         if (!c->base.valid || c->fd == P_INVALID_SOCKET) continue;
         if (tick_diff(now, c->base.last_active) <= RELAY_CLIENT_TIMEOUT_S * 1000) continue;
 
-        printf(LA_F("W: [TCP] Client '%s' timeout (inactive for %.1f sec)\n", LA_F188, 188), 
+        print("W:", LA_F("'%s' timeout (inactive for %.1f sec)\n", LA_F264, 264), 
                c->base.local_peer_id, tick_diff(now, c->base.last_active) / 1000.0);
         
         relay_clear_client(c);
@@ -2918,7 +2922,7 @@ int main(int argc, char *argv[]) {
                         // ONLINE_ACK 发送完成
                         if (client->recv_len >= ack_total) { client->recv_len = 0;
                             client->online_ack_pending = false;                        
-                            printf(LA_F("[TCP] V: ONLINE_ACK sent to '%s'\n", LA_F221, 221), client->base.local_peer_id);
+                            print("V:", LA_F("ONLINE_ACK sent to '%s'\n", LA_F272, 272), client->base.local_peer_id);
                         }
                     }
 

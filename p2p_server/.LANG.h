@@ -237,44 +237,44 @@ enum {
     LA_S187,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
 
     /* Formats (LA_F) */
-    LA_F188,  /* "W: [TCP] Client '%s' timeout (inactive for %.1f sec)\n" (%s)  [server.c] */
-    LA_F189,  /* "% [TCP] Client disconnected (not yet logged in)\n"  [server.c] */
-    LA_F190,  /* "% [TCP] E: Client sent data before ONLINE_ACK completed\n"  [server.c] */
-    LA_F191,  /* "[TCP] E: Duplicate session create blocked: '%s' -> '%s'\n" (%s,%s)  [server.c] */
-    LA_F192,  /* "[TCP] E: Failed to build session for '%s'\n" (%s)  [server.c] */
-    LA_F193,  /* "[TCP] E: Invalid DATA length: %u\n" (%u)  [server.c] */
-    LA_F194,  /* "[TCP] E: Invalid FIN length: %u\n" (%u)  [server.c] */
-    LA_F195,  /* "[TCP] E: Invalid ONLINE payload length: %u (expected %u)\n" (%u,%u)  [server.c] */
-    LA_F196,  /* "[TCP] E: Invalid RELAY length: %u\n" (%u)  [server.c] */
-    LA_F197,  /* "[TCP] E: Invalid SYNC FIN marker: 0x%02x\n"  [server.c] */
-    LA_F198,  /* "[TCP] E: Invalid SYNC length: %u\n" (%u)  [server.c] */
+    LA_F188,  /* disabled "W: [TCP] Client '%s' timeout (inactive for %.1f sec)\n" */
+    LA_F189,  /* disabled "% [TCP] Client disconnected (not yet logged in)\n" */
+    LA_F190,  /* disabled "% [TCP] E: Client sent data before ONLINE_ACK completed\n" */
+    LA_F191,  /* disabled "[TCP] E: Duplicate session create blocked: '%s' -> '%s'\n" */
+    LA_F192,  /* disabled "[TCP] E: Failed to build session for '%s'\n" */
+    LA_F193,  /* disabled "[TCP] E: Invalid DATA length: %u\n" */
+    LA_F194,  /* disabled "[TCP] E: Invalid FIN length: %u\n" */
+    LA_F195,  /* disabled "[TCP] E: Invalid ONLINE payload length: %u (expected %u)\n" */
+    LA_F196,  /* disabled "[TCP] E: Invalid RELAY length: %u\n" */
+    LA_F197,  /* disabled "[TCP] E: Invalid SYNC FIN marker: 0x%02x\n" */
+    LA_F198,  /* disabled "[TCP] E: Invalid SYNC length: %u\n" */
     LA_F199,  /* disabled "[TCP] E: Invalid SYNC payload: cnt=%u exceeds max=%u\n" */
-    LA_F200,  /* "[TCP] E: Invalid SYNC payload: cnt=%u, len=%u, expected=%u(+1 fin)\n" (%u,%u,%u)  [server.c] */
-    LA_F201,  /* "[TCP] E: Invalid SYNC0 length: %u\n" (%u)  [server.c] */
-    LA_F202,  /* "[TCP] E: Invalid SYNC0 payload: cnt=%d, len=%u, expected=%u\n" (%d,%u,%u)  [server.c] */
-    LA_F203,  /* "[TCP] E: Invalid payload len %u\n" (%u)  [server.c] */
-    LA_F204,  /* "% [TCP] E: OOM for FIN relay buffer\n"  [server.c] */
+    LA_F200,  /* disabled "[TCP] E: Invalid SYNC payload: cnt=%u, len=%u, expected=%u(+1 fin)\n" */
+    LA_F201,  /* disabled "[TCP] E: Invalid SYNC0 length: %u\n" */
+    LA_F202,  /* disabled "[TCP] E: Invalid SYNC0 payload: cnt=%d, len=%u, expected=%u\n" */
+    LA_F203,  /* disabled "[TCP] E: Invalid payload len %u\n" */
+    LA_F204,  /* disabled "% [TCP] E: OOM for FIN relay buffer\n" */
     LA_F205,  /* disabled "% [TCP] E: OOM for SYNC0_ACK frame\n" */
     LA_F206,  /* disabled "% [TCP] E: OOM for SYNC_ACK frame\n" */
     LA_F207,  /* disabled "[TCP] E: SYNC payload session mismatch: parsed=%llu, head=%llu\n" */
     LA_F208,  /* disabled "% [TCP] E: SYNC0 rejected before ONLINE_ACK/login completion\n" */
-    LA_F209,  /* "[TCP] E: Unsupported RELAY type=%u (session=%llu)\n" (%u,%l)  [server.c] */
-    LA_F210,  /* "[TCP] E: recv() failed: errno=%d\n" (%d)  [server.c] */
-    LA_F211,  /* "[TCP] E: send() failed while sending %s: errno=%d\n" (%s,%d)  [server.c] */
-    LA_F212,  /* "[TCP] FIN: close session %llu\n" (%l)  [server.c] */
+    LA_F209,  /* disabled "[TCP] E: Unsupported RELAY type=%u (session=%llu)\n" */
+    LA_F210,  /* disabled "[TCP] E: recv() failed: errno=%d\n" */
+    LA_F211,  /* disabled "[TCP] E: send() failed while sending %s: errno=%d\n" */
+    LA_F212,  /* disabled "[TCP] FIN: close session %llu\n" */
     LA_F213,  /* "% [TCP] Failed to set client socket to non-blocking mode\n"  [server.c] */
-    LA_F214,  /* "% [TCP] I: Client closed connection (EOF on recv)\n"  [server.c] */
-    LA_F215,  /* "[TCP] I: Client closed connection (EOF on send, reason=%s)\n" (%s)  [server.c] */
-    LA_F216,  /* "[TCP] I: SYNC0 forwarded to peer, candidates=%d\n" (%d)  [server.c] */
+    LA_F214,  /* disabled "% [TCP] I: Client closed connection (EOF on recv)\n" */
+    LA_F215,  /* disabled "[TCP] I: Client closed connection (EOF on send, reason=%s)\n" */
+    LA_F216,  /* disabled "[TCP] I: SYNC0 forwarded to peer, candidates=%d\n" */
     LA_F217,  /* "% [TCP] OOM: cannot allocate recv buffer for new client\n"  [server.c] */
-    LA_F218,  /* "[TCP] I: Peer '%s' new instance (old=%u, new=%u), destroying old\n" (%s,%u,%u)  [server.c] */
-    LA_F219,  /* "[TCP] Peer '%s' disconnected\n" (%s)  [server.c] */
-    LA_F220,  /* "[TCP] SYNC0: local='%s' remote='%s' side=%d peer_online=%d candidates=%d\n" (%s,%s,%d,%d,%d)  [server.c] */
-    LA_F221,  /* "[TCP] V: ONLINE_ACK sent to '%s'\n" (%s)  [server.c] */
-    LA_F222,  /* "[TCP] W: Peer '%s' offline, cached SYNC0 candidates=%d\n" (%s,%d)  [server.c] */
+    LA_F218,  /* disabled "[TCP] I: Peer '%s' new instance (old=%u, new=%u), destroying old\n" */
+    LA_F219,  /* disabled "[TCP] Peer '%s' disconnected\n" */
+    LA_F220,  /* disabled "[TCP] SYNC0: local='%s' remote='%s' side=%d peer_online=%d candidates=%d\n" */
+    LA_F221,  /* disabled "[TCP] V: ONLINE_ACK sent to '%s'\n" */
+    LA_F222,  /* disabled "[TCP] W: Peer '%s' offline, cached SYNC0 candidates=%d\n" */
     LA_F223,  /* disabled "[TCP] W: SYNC dropped, session %llu not paired\n" */
-    LA_F224,  /* "[TCP] W: SYNC0_ACK queue busy for '%s', drop\n" (%s)  [server.c] */
-    LA_F225,  /* "[TCP] W: SYNC_ACK queue busy for '%s', drop\n" (%s)  [server.c] */
+    LA_F224,  /* disabled "[TCP] W: SYNC0_ACK queue busy for '%s', drop\n" */
+    LA_F225,  /* disabled "[TCP] W: SYNC_ACK queue busy for '%s', drop\n" */
     LA_F226,  /* disabled "[TCP] W: Session %llu not found or not paired\n" */
     LA_F227,  /* disabled "[TCP] W: Session %llu not found\n" */
     LA_F228,  /* disabled "[TCP] W: Session %llu peer offline\n" */
@@ -290,24 +290,65 @@ enum {
     LA_S236,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
 
     /* Formats (LA_F) */
-    LA_F237,  /* "[TCP] E: Duplicate ONLINE from '%s'\n" (%s)  [server.c] */
-    LA_F238,  /* "[TCP] E: Message type=%u rejected: client not logged in\n" (%u)  [server.c] */
-    LA_F239,  /* "% [TCP] E: OOM for SYNC0 zero-copy recv buffer\n"  [server.c] */
-    LA_F240,  /* "[TCP] I: Peer '%s' reconnected (inst=%u), migrating fd\n" (%s,%u)  [server.c] */
-    LA_F241,  /* "[TCP] Peer '%s' came online (inst=%u)\n" (%s,%u)  [server.c] */
-    LA_F242,  /* "[TCP] W: Session %llu busy (pending sync)\n" (%l)  [server.c] */
-    LA_F243,  /* "[TCP] W: Session %llu peer not connected (type=%u)\n" (%l,%u)  [server.c] */
-    LA_F244,  /* "[TCP] W: Unknown session %llu (type=%u)\n" (%l,%u)  [server.c] */
+    LA_F237,  /* disabled "[TCP] E: Duplicate ONLINE from '%s'\n" */
+    LA_F238,  /* disabled "[TCP] E: Message type=%u rejected: client not logged in\n" */
+    LA_F239,  /* disabled "% [TCP] E: OOM for SYNC0 zero-copy recv buffer\n" */
+    LA_F240,  /* disabled "[TCP] I: Peer '%s' reconnected (inst=%u), migrating fd\n" */
+    LA_F241,  /* disabled "[TCP] Peer '%s' came online (inst=%u)\n" */
+    LA_F242,  /* disabled "[TCP] W: Session %llu busy (pending sync)\n" */
+    LA_F243,  /* disabled "[TCP] W: Session %llu peer not connected (type=%u)\n" */
+    LA_F244,  /* disabled "[TCP] W: Unknown session %llu (type=%u)\n" */
 
     /* Strings (LA_S) */
     LA_S245,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
     LA_S246,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S247,  /* "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)"  [server.c] */
+    LA_S247,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
+    LA_S248,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
+
+    /* Formats (LA_F) */
+    LA_F249,  /* "% Client closed connection (EOF on recv)\n"  [server.c] */
+    LA_F250,  /* "% Client disconnected (not yet logged in)\n"  [server.c] */
+    LA_F251,  /* "% Client sent data before ONLINE_ACK completed\n"  [server.c] */
+    LA_F252,  /* "%s: OOM for relay buffer\n" (%s)  [server.c] */
+    LA_F253,  /* "%s: OOM for zero-copy recv buffer\n" (%s)  [server.c] */
+    LA_F254,  /* "%s: bad FIN marker=0x%02x\n" (%s)  [server.c] */
+    LA_F255,  /* "%s: bad payload(cnt=%d, len=%u, expected=%u)\n" (%s,%d,%u,%u)  [server.c] */
+    LA_F256,  /* "%s: bad payload(cnt=%u, len=%u, expected=%u+1fin)\n" (%s,%u,%u,%u)  [server.c] */
+    LA_F257,  /* "%s: bad payload(len=%u)\n" (%s,%u)  [server.c] */
+    LA_F258,  /* "%s: build_session failed for '%s'\n" (%s,%s)  [server.c] */
+    LA_F259,  /* "%s: close ses_id=%llu\n" (%s,%l)  [server.c] */
+    LA_F260,  /* "%s: forwarded to peer, cands=%d\n" (%s,%d)  [server.c] */
+    LA_F261,  /* "%s: local='%s', remote='%s', side=%d, peer_online=%d, cands=%d\n" (%s,%s,%s,%d,%d,%d)  [server.c] */
+    LA_F262,  /* "%s: peer '%s' offline, cached cands=%d\n" (%s,%s,%d)  [server.c] */
+    LA_F263,  /* "'%s' disconnected\n" (%s)  [server.c] */
+    LA_F264,  /* "'%s' timeout (inactive for %.1f sec)\n" (%s)  [server.c] */
+    LA_F265,  /* "Client closed connection (EOF on send, reason=%s)\n" (%s)  [server.c] */
+    LA_F266,  /* "Duplicate session create blocked: '%s' -> '%s'\n" (%s,%s)  [server.c] */
+    LA_F267,  /* "ONLINE: '%s' came online (inst=%u)\n" (%s,%u)  [server.c] */
+    LA_F268,  /* "ONLINE: '%s' new instance (old=%u, new=%u), destroying old\n" (%s,%u,%u)  [server.c] */
+    LA_F269,  /* "ONLINE: '%s' reconnected (inst=%u), migrating fd\n" (%s,%u)  [server.c] */
+    LA_F270,  /* "ONLINE: bad payload(len=%u, expected=%u)\n" (%u,%u)  [server.c] */
+    LA_F271,  /* "ONLINE: duplicate from '%s'\n" (%s)  [server.c] */
+    LA_F272,  /* "ONLINE_ACK sent to '%s'\n" (%s)  [server.c] */
+    LA_F273,  /* "SYNC0_ACK queue busy for '%s', drop\n" (%s)  [server.c] */
+    LA_F274,  /* "SYNC_ACK queue busy for '%s', drop\n" (%s)  [server.c] */
+    LA_F275,  /* "bad payload len %u (type=%u)\n" (%u,%u)  [server.c] */
+    LA_F276,  /* "bad payload len %u\n" (%u)  [server.c] */
+    LA_F277,  /* "recv() failed: errno=%d\n" (%d)  [server.c] */
+    LA_F278,  /* "send(%s) failed: errno=%d\n" (%s,%d)  [server.c] */
+    LA_F279,  /* "ses_id=%llu busy (pending sync)\n" (%l)  [server.c] */
+    LA_F280,  /* "ses_id=%llu peer not connected (type=%u)\n" (%l,%u)  [server.c] */
+    LA_F281,  /* "type=%u rejected: client not logged in\n" (%u)  [server.c] */
+    LA_F282,  /* "unknown ses_id=%llu (type=%u)\n" (%l,%u)  [server.c] */
+    LA_F283,  /* "unsupported type=%u (ses_id=%llu)\n" (%u,%l)  [server.c] */
+
+    /* Strings (LA_S) */
+    LA_S284,  /* "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)"  [server.c] */
 
     LA_NUM
 };
 
 /* 格式字符串起始位置（用于验证） */
-#define LA_FMT_START LA_F12
+#define LA_FMT_START LA_F249
 
 #endif /* LANG_H__ */
