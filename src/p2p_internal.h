@@ -305,6 +305,16 @@ static inline const char* p2p_candidate_type_str(p2p_cand_type_t type) {
 }
 
 /*
+ * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
+ */
+struct p2p_local_candidate_entry {
+    p2p_cand_type_t    type;                    // 候选类型
+    uint32_t           priority;                // 候选优先级
+    struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
+    struct sockaddr_in base_addr;               // 基础地址（平台原生 16B）
+};
+
+/*
  * 重置 session 连接状态
  *
  * @param closing  true = 连接断开（释放 TURN 分配，NAT 已 CLOSED）
@@ -383,16 +393,6 @@ static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
 /* ============================================================================
  * 内部候选地址定义（续）
  * ============================================================================ */
-
-/*
- * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
- */
-struct p2p_local_candidate_entry {
-    p2p_cand_type_t    type;                    // 候选类型
-    uint32_t           priority;                // 候选优先级
-    struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
-    struct sockaddr_in base_addr;               // 基础地址（平台原生 16B）
-};
 
 /*
  * 远端候选地址

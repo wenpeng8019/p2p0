@@ -22,8 +22,7 @@
  *   2. 协议转换（WebRTC 互操作）★
  *      - SDP 导出：
  *        • p2p_ice_export_candidate() - 单个候选（WebRTC 格式，无前缀后缀）
- *        • p2p_ice_export_candidates() - 批量候选（SDP 格式，带前缀后缀）
- *        • p2p_ice_export_sdp() - 向后兼容别名（指向 export_candidates）
+ *        • p2p_ice_export_sdp() - 批量候选（SDP 格式，带前缀后缀）
  *      - SDP 导入：p2p_import_ice_sdp() - 解析 SDP 候选为内部格式
  *      - STUN 构造：p2p_ice_build_connectivity_check() - 生成 ICE 标准 STUN 包
  *      - Priority 算法：p2p_ice_calc_priority() - RFC 5245 标准优先级计算
@@ -37,7 +36,7 @@
  *        │ (单个候选，WebRTC 格式)     │ 无 "a=" 前缀，无 "\r\n" 后缀    │
  *        │                            │ ✅ 对应 event.candidate.candidate │
  *        ├─────────────────────────────────────────────────────────────┤
- *        │ p2p_ice_export_candidates()│ "a=candidate:1 1 UDP ...\r\n"   │
+ *        │ p2p_ice_export_sdp()       │ "a=candidate:1 1 UDP ...\r\n"   │
  *        │ (批量候选，SDP 格式)       │ 带 "a=" 前缀，带 "\r\n" 后缀     │
  *        │                            │ ✅ 对应 SDP 文本中的 a 行        │
  *        └─────────────────────────────────────────────────────────────┘
@@ -275,14 +274,10 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  *      用途: Trickle ICE 模式，逐个发送给 WebRTC
  *      对应: event.candidate.candidate 字符串
  *
- *   2. p2p_ice_export_candidates() - 批量候选（SDP 格式）
+ *   2. p2p_ice_export_sdp() - 批量候选（SDP 格式）
  *      输出: "a=candidate:1 1 UDP 2130706431...\r\n" × N
  *      用途: 批量模式，嵌入完整 SDP 文本
  *      对应: SDP 文本中的 a=candidate 行
- *
- *   3. p2p_ice_export_sdp() - 向后兼容别名
- *      等价于 p2p_ice_export_candidates()
- *      保持现有代码兼容性
  *
  * 【典型使用场景】
  *
@@ -293,7 +288,7 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  *
  *   场景 2: 批量传输
  *     - 等待收集完成后一次性发送
- *     - 使用 p2p_ice_export_candidates() → 分割 → 逐个 addIceCandidate
+ *     - 使用 p2p_ice_export_sdp() → 分割 → 逐个 addIceCandidate
  *     - 减少信令轮次
  *
  *   场景 3: 完整 SDP 构建（信令模块负责）
@@ -322,7 +317,7 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  * @param buf_size  缓冲区大小
  * @return          生成的字符串长度（不含 \0），失败返回 -1
  */
-int p2p_ice_export_candidate_entry(const p2p_local_candidate_entry_t *cand, char *buf, int buf_size);
+int p2p_ice_export_candidate(const p2p_local_candidate_entry_t *cand, char *buf, int buf_size);
 
 /*
  * 导出多个候选为 SDP 格式（带 a= 前缀和 \r\n 后缀）
@@ -368,13 +363,13 @@ int p2p_ice_export_candidate_entry(const p2p_local_candidate_entry_t *cand, char
  * @return 生成的 SDP 字符串总长度，失败返回 -1
  *
  * 使用示例：
- *   // 方式1: 仅候选（嵌入已有 SDP）
- *   int len = p2p_ice_export_candidates(cands, cnt, buf, size, 0, NULL, NULL, NULL);
+ *   // 方式1: 仅候选
+ *   int len = p2p_ice_export_sdp(cands, cnt, buf, size, true, NULL, NULL, NULL);
  *
  *   // 方式2: 完整 SDP（自包含格式）
- *   int len = p2p_export_ice_sdp(cands, cnt, buf, size, 1,
- *                                        "aB3d", "Xy7zK9pLm3nO1qW2", 
- *                                        "sha-256 AB:CD:EF:...");
+ *   int len = p2p_ice_export_sdp(cands, cnt, buf, size, false,
+ *                                "aB3d", "Xy7zK9pLm3nO1qW2", 
+ *                                "sha-256 AB:CD:EF:...");
  */
 int p2p_ice_export_sdp(const p2p_local_candidate_entry_t *cands, int cnt,
                        char *sdp_buf, int buf_size, bool candidates_only,
@@ -413,13 +408,11 @@ int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands
  * @param use_candidate  是否携带 USE-CANDIDATE 属性
  * @return               生成的请求长度，失败返回 -1
  */
-int p2p_ice_build_connectivity_check(
-    uint8_t *buf, int max_len,
-    const char *local_ufrag, const char *local_pwd,
-    const char *remote_ufrag, const char *remote_pwd,
-    uint32_t priority, int is_controlling, 
-    uint64_t tie_breaker, int use_candidate
-);
+int p2p_ice_build_connectivity_check(uint8_t *buf, int max_len,
+                                     const char *local_ufrag, const char *local_pwd,
+                                     const char *remote_ufrag, const char *remote_pwd,
+                                     uint32_t priority, int is_controlling, 
+                                     uint64_t tie_breaker, int use_candidate);
 
 ///////////////////////////////////////////////////////////////////////////////
 #endif /* P2P_ICE_H */

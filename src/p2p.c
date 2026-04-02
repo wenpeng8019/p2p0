@@ -1487,7 +1487,8 @@ p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
     UNLOCK(s);
 
     return p2p_ice_export_sdp(s->local_cands, cnt, sdp_buf, buf_size,
-                                     candidates_only, ice_ufrag, ice_pwd, dtls_fingerprint);
+                               candidates_only, ice_ufrag, ice_pwd,
+                               dtls_fingerprint);
 }
 
 /*

@@ -352,7 +352,7 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  * │                               │ ✅ Trickle ICE 模式（逐个发送）         │
  * │                               │ ✅ 对应 event.candidate.candidate      │
  * ├──────────────────────────────────────────────────────────────────────┤
- * │ p2p_ice_export_candidates()   │ 完整 SDP 行（带前缀和后缀）            │
+ * │ p2p_ice_export_sdp()          │ 完整 SDP 行（带前缀和后缀）            │
  * │ (批量候选)                    │ "a=candidate:1 1 UDP 2130706431...\r\n"│
  * │                               │ ✅ 包含 "a=" 前缀                       │
  * │                               │ ✅ 包含 "\r\n" 行终止符                 │
@@ -362,7 +362,7 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  *
  * 【核心差异】
  *   • p2p_ice_export_candidate():   输出纯候选字符串，直接用于 WebRTC
- *   • p2p_ice_export_candidates():  输出 SDP 行，用于嵌入完整 SDP
+ *   • p2p_ice_export_sdp():         输出 SDP 行，用于嵌入完整 SDP
  *   • foundation 之后的内容完全相同
  *
  * ============================================================================
@@ -483,9 +483,9 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  *   方式 2: 批量模式 - 一次性发送所有候选（需分割）
  *   ```c
  *   char sdp_buf[2048];
- *   int len = p2p_ice_export_candidates(s->local_cands, s->local_cand_cnt, 
- *                                        sdp_buf, sizeof(sdp_buf), 
- *                                        0, NULL, NULL, NULL);  // 仅候选
+ *   int len = p2p_ice_export_sdp(s->local_cands, s->local_cand_cnt, 
+ *                                  sdp_buf, sizeof(sdp_buf), 
+ *                                  0, NULL, NULL, NULL);  // 仅候选
  *   
  *   // 遍历每一行，去除 "a=" 前缀和 "\r\n" 后缀
  *   char *line = sdp_buf;
@@ -508,12 +508,12 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  *   const char *ice_pwd = "Xy7zK9pLm3nO1qW2aBcD";
  *   const char *dtls_fingerprint = "sha-256 AB:CD:EF:01:23:45:67:89";
  *   
- *   int len = p2p_ice_export_candidates(s->local_cands, s->local_cand_cnt, 
- *                                        sdp_buf, sizeof(sdp_buf), 
- *                                        1,                 // generate_full=1
- *                                        ice_ufrag, 
- *                                        ice_pwd, 
- *                                        dtls_fingerprint); // 可选
+ *   int len = p2p_ice_export_sdp(s->local_cands, s->local_cand_cnt, 
+ *                                  sdp_buf, sizeof(sdp_buf), 
+ *                                  1,                 // generate_full=1
+ *                                  ice_ufrag, 
+ *                                  ice_pwd, 
+ *                                  dtls_fingerprint); // 可选
  *   
  *   if (len > 0) {
  *       // sdp_buf 包含完整的 SDP offer，可直接发送
@@ -568,7 +568,7 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  * ============================================================================
  *
  * 【批量模式】
- *   - 使用 p2p_ice_export_candidates() 一次性导出所有候选
+ *   - 使用 p2p_ice_export_sdp() 一次性导出所有候选
  *   - 输出多行 "a=candidate:..." 字符串
  *   - 适合传统 SDP offer/answer 交换
  *   - 需要等待候选收集完成
@@ -582,7 +582,7 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  *   - 本项目支持：通过 nat_punch(s, idx) 逐个打洞
  *
  * 【完整 SDP 模式】
- *   - 使用 p2p_ice_export_candidates() 并设置 generate_full=1
+ *   - 使用 p2p_ice_export_sdp() 并设置 generate_full=1
  *   - 输出包含 v=, o=, s=, t=, m=, ice-ufrag, ice-pwd, fingerprint, candidates
  *   - 适合与 WebRTC 进行完整 SDP offer/answer 交换
  *   - 无需手动拼接 SDP 各部分
@@ -601,8 +601,8 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  *     ```c
  *     // 一次导出所有候选
  *     char buf[2048];
- *     int len = p2p_ice_export_candidates(s->local_cands, cnt, buf, sizeof(buf),
- *                                          0, NULL, NULL, NULL);  // 仅候选
+ *     int len = p2p_ice_export_sdp(s->local_cands, cnt, buf, sizeof(buf),
+ *                                    0, NULL, NULL, NULL);  // 仅候选
  *     // 需要分割并去除 "a=" 前缀，然后逐个发送
  *     ```
  *
@@ -645,10 +645,8 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  *
  * 输出格式："candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host"
  */
-int p2p_ice_export_candidate_entry(
-    const p2p_local_candidate_entry_t *cand,
-    char *buf, int buf_size
-) {
+int p2p_ice_export_candidate(const p2p_local_candidate_entry_t *cand, char *buf, int buf_size ) {
+
     if (!cand || !buf || buf_size < 100) return -1;
     
     /* 候选类型字符串映射 */
@@ -739,21 +737,19 @@ int p2p_ice_export_candidate_entry(
  *
  * 使用示例：
  *   // 方式1: 仅候选（嵌入已有 SDP）
- *   int len = p2p_ice_export_candidates(cands, cnt, buf, size, 0, NULL, NULL, NULL);
+ *   int len = p2p_ice_export_sdp(cands, cnt, buf, size, 0, NULL, NULL, NULL);
  *
  *   // 方式2: 完整 SDP（自包含格式）
- *   int len = p2p_export_ice_sdp(cands, cnt, buf, size, 1,
+ *   int len = p2p_ice_export_sdp(cands, cnt, buf, size, 1,
  *                                        "aB3d", "Xy7zK9pLm3nO1qW2", 
  *                                        "sha-256 AB:CD:EF:...");
  */
-int p2p_ice_export_candidates(
-    const p2p_local_candidate_entry_t *cands, int cnt,
-    char *sdp_buf, int buf_size,
-    bool candidates_only,
-    const char *ice_ufrag,
-    const char *ice_pwd,
-    const char *dtls_fingerprint
-) {
+int p2p_ice_export_sdp(const p2p_local_candidate_entry_t *cands, int cnt,
+                       char *sdp_buf, int buf_size, bool candidates_only,
+                       const char *ice_ufrag,
+                       const char *ice_pwd,
+                       const char *dtls_fingerprint) {
+
     if (!cands || !sdp_buf || buf_size < 100) return -1;
     
     /* 参数校验 */
@@ -881,10 +877,8 @@ overflow:
  *
  * 简化实现：使用 sscanf 解析固定格式，不支持扩展属性
  */
-int p2p_ice_import_sdp(
-    const char *sdp_text,
-    p2p_remote_candidate_entry_t *cands, int max_cands
-) {
+int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands, int max_cands) {
+
     if (!sdp_text || !cands || max_cands <= 0) return -1;
     
     int count = 0;
@@ -979,13 +973,12 @@ int p2p_ice_import_sdp(
  *
  * 将 ICE 凭证（ufrag/pwd）组合为 STUN 认证参数，调用底层 STUN 构建函数。
  */
-int p2p_ice_build_connectivity_check(
-    uint8_t *buf, int max_len,
-    const char *local_ufrag, const char *local_pwd,
-    const char *remote_ufrag, const char *remote_pwd,
-    uint32_t priority, int is_controlling, 
-    uint64_t tie_breaker, int use_candidate
-) {
+int p2p_ice_build_connectivity_check(uint8_t *buf, int max_len,
+                                     const char *local_ufrag, const char *local_pwd,
+                                     const char *remote_ufrag, const char *remote_pwd,
+                                     uint32_t priority, int is_controlling, 
+                                     uint64_t tie_breaker, int use_candidate) {
+                                        
     /* 构造 USERNAME 字段: "remote_ufrag:local_ufrag" */
     char username[256];
     if (remote_ufrag && local_ufrag) {

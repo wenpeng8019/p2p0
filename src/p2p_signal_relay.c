@@ -1013,34 +1013,34 @@ static void dispatch_message(p2p_session_t *s) {
 
     switch (ctx->hdr.type) {
         case P2P_RLY_STATUS:
-            handle_relay_status(s, ctx->payload, ntohs(ctx->hdr.size));
+            handle_relay_status(s, ctx->payload, (int)ctx->hdr.size);
             break;
 
         case P2P_RLY_ONLINE_ACK:
-            handle_online_ack(s, ctx->payload, ntohs(ctx->hdr.size));
+            handle_online_ack(s, ctx->payload, (int)ctx->hdr.size);
             break;
 
         case P2P_RLY_SYNC0_ACK:
-            handle_sync0_ack(s, ctx->payload, ntohs(ctx->hdr.size));
+            handle_sync0_ack(s, ctx->payload, (int)ctx->hdr.size);
             break;
 
         case P2P_RLY_SYNC_ACK:
-            handle_sync_ack(s, ctx->payload, ntohs(ctx->hdr.size));
+            handle_sync_ack(s, ctx->payload, (int)ctx->hdr.size);
             break;
 
         case P2P_RLY_SYNC0:  // 服务器转发对端 SYNC0 首批候选（格式同 SYNC）
         case P2P_RLY_SYNC:
-            handle_sync(s, ctx->payload, ntohs(ctx->hdr.size), ctx->hdr.type == P2P_RLY_SYNC0);
+            handle_sync(s, ctx->payload, (int)ctx->hdr.size, ctx->hdr.type == P2P_RLY_SYNC0);
             break;
 
         case P2P_RLY_FIN:
-            handle_relay_fin(s, ctx->payload, ntohs(ctx->hdr.size));
+            handle_relay_fin(s, ctx->payload, (int)ctx->hdr.size);
             break;
 
         case P2P_RLY_DATA:
         case P2P_RLY_ACK:
         case P2P_RLY_CRYPTO:
-            handle_relay_data_recv(s, ctx->payload, ntohs(ctx->hdr.size));
+            handle_relay_data_recv(s, ctx->payload, (int)ctx->hdr.size);
             break;
 
         default:

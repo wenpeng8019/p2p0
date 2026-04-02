@@ -550,9 +550,16 @@ int main(int argc, char *argv[]) {
     // if (ARGS_disable_lan.i64) print("I:", LA_F("[TEST] LAN shortcut disabled - forcing NAT punch\n", LA_F39, 39));
     if (ARGS_echo.i64) print("I:", LA_F("[Chat] Echo mode enabled: received messages will be echoed back.\n", LA_F36, 36));
 
+    bool connect_pending = false;
+    uint64_t connect_retry_at = 0;
+
     if (p2p_connect(hdl, target_name) < 0) {
         print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
         return 1;
+    }
+    if (p2p_state(hdl) == P2P_STATE_INIT) {
+        connect_pending = true;
+        connect_retry_at = P_tick_ms() + 500;
     }
 
     if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F34, 34), mode_name, target_name); }
@@ -567,6 +574,19 @@ int main(int argc, char *argv[]) {
     while(g_running) {
 
         p2p_update(hdl);
+
+        // RELAY 模式下，首次 p2p_connect 可能在 ONLINE_ACK 前返回，需延后重试一次启动会话。
+        if (connect_pending && p2p_state(hdl) == P2P_STATE_INIT && P_tick_ms() >= connect_retry_at) {
+            if (p2p_connect(hdl, target_name) < 0) {
+                print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
+                break;
+            }
+            connect_retry_at = P_tick_ms() + 500;
+        }
+        if (p2p_state(hdl) != P2P_STATE_INIT) {
+            connect_pending = false;
+        }
+
         log_state_change(hdl);
 
         if (p2p_is_ready(hdl)) {

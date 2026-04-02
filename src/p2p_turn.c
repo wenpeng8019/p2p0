@@ -526,7 +526,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const struct sockaddr_in *from,
         // ICE 模式通过应用层回调接口来协商发送候选
         else if (s->signaling_mode == P2P_SIGNALING_MODE_ICE && s->cfg.on_ice_candidate) {
             char cand_str[256];
-            if (p2p_ice_export_candidate_entry(c, cand_str, sizeof(cand_str)) > 0)
+            if (p2p_ice_export_candidate(c, cand_str, sizeof(cand_str)) > 0)
                 s->cfg.on_ice_candidate((p2p_handle_t)s, cand_str, s->cfg.userdata);
         }
 

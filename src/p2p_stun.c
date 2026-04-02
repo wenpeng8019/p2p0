@@ -783,7 +783,7 @@ static inline void stun_add_srflx_candidate(struct p2p_session *s, const struct 
         p2p_signal_relay_trickle_candidate(s);
     else if (s->signaling_mode == P2P_SIGNALING_MODE_ICE && s->cfg.on_ice_candidate) {
         char sdp_a[256];
-        if (p2p_ice_export_candidate_entry(c, sdp_a, sizeof(sdp_a)) > 0)
+        if (p2p_ice_export_candidate(c, sdp_a, sizeof(sdp_a)) > 0)
             s->cfg.on_ice_candidate((p2p_handle_t)s, sdp_a, s->cfg.userdata);
     }
 }

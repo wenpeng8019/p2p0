@@ -77,55 +77,55 @@ target_include_directories(test_compact_relay PRIVATE
 )
 target_link_libraries(test_compact_relay stdc ${TEST_PLATFORM_LIBS})
 
-# P2P Ping 客户端单元测试模版
-add_executable(test_ping_template
-    test_ping_template.c
+# P2P Ping 客户端单元测试模版 (COMPACT 模式)
+add_executable(test_ping_c_template
+    test_ping_c_template.c
 )
-target_include_directories(test_ping_template PRIVATE
+target_include_directories(test_ping_c_template PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_template stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_c_template stdc ${TEST_PLATFORM_LIBS})
 
-# P2P Ping 双客户端连接测试模板（Alice <-> Bob）
-add_executable(test_ping2_template
-    test_ping2_template.c
+# P2P Ping 双客户端连接测试模板 (COMPACT 模式, Alice <-> Bob)
+add_executable(test_ping2_c_template
+    test_ping2_c_template.c
 )
-target_include_directories(test_ping2_template PRIVATE
+target_include_directories(test_ping2_c_template PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping2_template stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping2_c_template stdc ${TEST_PLATFORM_LIBS})
 
-# P2P Ping 消息互发测试（基于 instrument req/resp）
-add_executable(test_ping_msg
-    test_ping_msg.c
+# P2P Ping 消息互发测试 (COMPACT 模式, 基于 instrument req/resp)
+add_executable(test_ping_c_msg
+    test_ping_c_msg.c
 )
-target_include_directories(test_ping_msg PRIVATE
+target_include_directories(test_ping_c_msg PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_msg stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_c_msg stdc ${TEST_PLATFORM_LIBS})
 
-# P2P 重连测试集合（双端崩溃重连 + 单端崩溃重连）
-add_executable(test_ping_reconnect
-    test_ping_reconnect.c
+# P2P 重连测试集合 (COMPACT 模式, 双端崩溃重连 + 单端崩溃重连)
+add_executable(test_ping_c_reconnect
+    test_ping_c_reconnect.c
 )
-target_include_directories(test_ping_reconnect PRIVATE
+target_include_directories(test_ping_c_reconnect PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_reconnect stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_c_reconnect stdc ${TEST_PLATFORM_LIBS})
 
-# P2P ICE 候选测试集合（候选过滤验证）
-add_executable(test_ping_ice
-    test_ping_ice.c
+# P2P ICE 候选测试集合 (COMPACT 模式, 候选过滤验证)
+add_executable(test_ping_c_ice
+    test_ping_c_ice.c
 )
-target_include_directories(test_ping_ice PRIVATE
+target_include_directories(test_ping_c_ice PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_ice stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_c_ice stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY 协议注册/上线单元测试
 add_executable(test_relay_register
@@ -156,6 +156,46 @@ target_include_directories(test_relay_data PRIVATE
     ${CMAKE_SOURCE_DIR}/stdc
 )
 target_link_libraries(test_relay_data stdc ${TEST_PLATFORM_LIBS})
+
+# P2P Ping 客户端单元测试模版 (RELAY 模式)
+add_executable(test_ping_r_template
+    test_ping_r_template.c
+)
+target_include_directories(test_ping_r_template PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_r_template stdc ${TEST_PLATFORM_LIBS})
+
+# P2P Ping 消息互发测试 (RELAY 模式, 基于 instrument req/resp)
+add_executable(test_ping_r_msg
+    test_ping_r_msg.c
+)
+target_include_directories(test_ping_r_msg PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_r_msg stdc ${TEST_PLATFORM_LIBS})
+
+# P2P 重连测试集合 (RELAY 模式, 双端崩溃重连 + 单端崩溃重连)
+add_executable(test_ping_r_reconnect
+    test_ping_r_reconnect.c
+)
+target_include_directories(test_ping_r_reconnect PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_r_reconnect stdc ${TEST_PLATFORM_LIBS})
+
+# P2P ICE 候选测试集合 (RELAY 模式, 候选过滤验证)
+add_executable(test_ping_r_ice
+    test_ping_r_ice.c
+)
+target_include_directories(test_ping_r_ice PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_r_ice stdc ${TEST_PLATFORM_LIBS})
 
 # 添加测试
 enable_testing()
