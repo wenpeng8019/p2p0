@@ -4,10 +4,8 @@
  * ============================================================================
  * 测试目标
  * ============================================================================
- * 验证 p2p_server 对 RELAY 协议 DATA/ACK/CRYPTO 中继转发的处理逻辑：
- * - P2P_RLY_DATA: 数据包转发
- * - P2P_RLY_ACK: 确认包转发
- * - P2P_RLY_CRYPTO: 加密包转发
+ * 验证 p2p_server 对 RELAY 协议 DATA 中继转发的处理逻辑：
+ * - P2P_RLY_DATA: 数据包转发（内层 P2P hdr 区分 DATA/ACK/CRYPTO）
  * - STATUS(READY): 流控确认
  *
  * ============================================================================
@@ -314,13 +312,13 @@ static int build_relay_data(uint8_t *buf, int buf_size, uint64_t session_id,
 }
 
 // 构造 ACK 包
-// payload: [session_id(8)][ack_seq(2)][sack(4)]
+// payload: [session_id(8)][P2P_hdr(4)][ack_seq(2)][sack(4)]
 static int build_relay_ack(uint8_t *buf, int buf_size, uint64_t session_id,
                            uint16_t ack_seq, uint32_t sack) {
-    uint16_t payload_len = 8 + 2 + 4;  // session_id + ack_seq + sack
+    uint16_t payload_len = 8 + 4 + 2 + 4;  // session_id + P2P_hdr + ack_seq + sack
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_ACK;
+    buf[0] = P2P_RLY_DATA;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -329,15 +327,21 @@ static int build_relay_ack(uint8_t *buf, int buf_size, uint64_t session_id,
         buf[3 + i] = (session_id >> (56 - i * 8)) & 0xFF;
     }
     
+    // P2P header (4 bytes)
+    buf[11] = P2P_PKT_ACK;
+    buf[12] = 0;
+    buf[13] = 0;
+    buf[14] = 0;
+    
     // ack_seq (2 bytes, network order)
-    buf[11] = (ack_seq >> 8) & 0xFF;
-    buf[12] = ack_seq & 0xFF;
+    buf[15] = (ack_seq >> 8) & 0xFF;
+    buf[16] = ack_seq & 0xFF;
     
     // sack (4 bytes, network order)
-    buf[13] = (sack >> 24) & 0xFF;
-    buf[14] = (sack >> 16) & 0xFF;
-    buf[15] = (sack >> 8) & 0xFF;
-    buf[16] = sack & 0xFF;
+    buf[17] = (sack >> 24) & 0xFF;
+    buf[18] = (sack >> 16) & 0xFF;
+    buf[19] = (sack >> 8) & 0xFF;
+    buf[20] = sack & 0xFF;
     
     return 3 + payload_len;
 }
@@ -349,7 +353,7 @@ static int build_relay_crypto(uint8_t *buf, int buf_size, uint64_t session_id,
     uint16_t payload_len = 8 + 4 + crypto_len;
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_CRYPTO;
+    buf[0] = P2P_RLY_DATA;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -393,7 +397,7 @@ typedef struct {
 
 typedef struct {
     int received;
-    uint8_t type;           // P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO
+    uint8_t type;           // P2P_RLY_DATA (all relay data uses this)
     uint64_t session_id;
     // For DATA/CRYPTO:
     uint8_t data[1024];
@@ -497,8 +501,8 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt) {
             return 0;
         }
         
-        if (type == P2P_RLY_ACK && payload_len >= 14) {
-            // ACK: [session_id(8)][ack_seq(2)][sack(4)]
+        if (type == P2P_RLY_DATA && payload_len >= 12) {
+            // All relay data: [session_id(8)][P2P_hdr(4)][data(N)]
             pkt->received = 1;
             pkt->type = type;
             
@@ -508,31 +512,20 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt) {
                 pkt->session_id = (pkt->session_id << 8) | recv_buf[3 + j];
             }
             
-            // ack_seq (2 bytes)
-            pkt->ack_seq = ((uint16_t)recv_buf[11] << 8) | recv_buf[12];
-            
-            // sack (4 bytes)
-            pkt->sack = ((uint32_t)recv_buf[13] << 24) | ((uint32_t)recv_buf[14] << 16) |
-                        ((uint32_t)recv_buf[15] << 8) | recv_buf[16];
-            
-            pkt->data_len = 0;
-            return 1;
-        }
-        else if ((type == P2P_RLY_DATA || type == P2P_RLY_CRYPTO) && payload_len >= 12) {
-            // DATA/CRYPTO: [session_id(8)][P2P_hdr(4)][data(N)]
-            pkt->received = 1;
-            pkt->type = type;
-            
-            // session_id (8 bytes)
-            pkt->session_id = 0;
-            for (int j = 0; j < 8; j++) {
-                pkt->session_id = (pkt->session_id << 8) | recv_buf[3 + j];
-            }
-            
-            // data (after session_id + P2P_hdr)
-            pkt->data_len = payload_len - 12;  // subtract session_id(8) + P2P_hdr(4)
-            if (pkt->data_len > 0 && pkt->data_len <= (int)sizeof(pkt->data)) {
-                memcpy(pkt->data, recv_buf + 3 + 8 + 4, pkt->data_len);  // start at 15
+            // Check inner P2P hdr type
+            uint8_t inner_type = recv_buf[3 + 8];  // P2P hdr type byte
+            if (inner_type == P2P_PKT_ACK && payload_len >= 18) {
+                // ACK: [session_id(8)][P2P_hdr(4)][ack_seq(2)][sack(4)]
+                pkt->ack_seq = ((uint16_t)recv_buf[15] << 8) | recv_buf[16];
+                pkt->sack = ((uint32_t)recv_buf[17] << 24) | ((uint32_t)recv_buf[18] << 16) |
+                            ((uint32_t)recv_buf[19] << 8) | recv_buf[20];
+                pkt->data_len = 0;
+            } else {
+                // DATA/CRYPTO/etc: copy payload after P2P hdr
+                pkt->data_len = payload_len - 12;  // subtract session_id(8) + P2P_hdr(4)
+                if (pkt->data_len > 0 && pkt->data_len <= (int)sizeof(pkt->data)) {
+                    memcpy(pkt->data, recv_buf + 3 + 8 + 4, pkt->data_len);  // start at 15
+                }
             }
             return 1;
         }
@@ -730,7 +723,7 @@ static void test_relay_ack_forwarded(void) {
         return;
     }
     
-    if (recv_pkt.type != P2P_RLY_ACK) {
+    if (recv_pkt.type != P2P_RLY_DATA) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "wrong packet type");
@@ -800,7 +793,7 @@ static void test_relay_crypto_forwarded(void) {
         return;
     }
     
-    if (recv_pkt.type != P2P_RLY_CRYPTO) {
+    if (recv_pkt.type != P2P_RLY_DATA) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "wrong packet type");

@@ -139,9 +139,19 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         unpack_candidate(c = &s->remote_cands[idx], payload + offset);
 
         // 检查重复
-        if (p2p_find_remote_candidate_by_addr(s, &c->addr) >= 0) {
-            print("W:", LA_F("%s: duplicate remote cand<%s:%d>, skipped\n", LA_F500, 500),
-                  TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+        int dup_idx = p2p_find_remote_candidate_by_addr(s, &c->addr);
+        if (dup_idx >= 0) {
+            // 如果已有候选是 prflx（PUNCH 先到），用信令带来的准确类型覆盖
+            if (s->remote_cands[dup_idx].type == P2P_CAND_PRFLX && c->type != P2P_CAND_PRFLX) {
+                s->remote_cands[dup_idx].type = c->type;
+                s->remote_cands[dup_idx].priority = c->priority;
+                print("I:", LA_F("%s: promoted prflx cand[%d]<%s:%d> → %s\n", LA_F500, 500),
+                      TASK_ICE_REMOTE, dup_idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                      p2p_candidate_type_str(c->type));
+            } else {
+                print("V:", LA_F("%s: duplicate remote cand<%s:%d>, skipped\n", LA_F500, 500),
+                      TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            }
             continue;
         }
 
@@ -405,11 +415,12 @@ static bool relay_wait_stun_candidates(p2p_session_t *s) {
 }
 
 /*
- * 通过 RELAY 服务器转发数据包（DATA/ACK/CRYPTO）
+ * 通过 RELAY 服务器转发数据包（DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK）
  *
- * 协议：P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO
+ * 协议：P2P_RLY_DATA
  * 包头: [type(1)][size(2)]
  * 负载: [session_id(8)][P2P packet header(4)][payload(N)]
+ * 内层 P2P hdr.type 区分实际包类型。
  *
  * 流控：发送后设置 awaiting_data_ready，收到 STATUS(READY) 后清除。
  */
@@ -428,13 +439,15 @@ ret_t p2p_signal_relay_data(p2p_session_t *s,
         return E_BUSY;
     }
 
-    // 映射 P2P 包类型到 RELAY 协议类型
-    uint8_t relay_type;
+    // 所有类型统一使用 P2P_RLY_DATA 隧道，内层 P2P hdr 保留真实类型
     const char *proto;
     switch (type) {
-        case P2P_PKT_DATA:   relay_type = P2P_RLY_DATA;   proto = "DATA";   break;
-        case P2P_PKT_ACK:    relay_type = P2P_RLY_ACK;    proto = "ACK";    break;
-        case P2P_PKT_CRYPTO: relay_type = P2P_RLY_CRYPTO; proto = "CRYPTO"; break;
+        case P2P_PKT_DATA:     proto = "DATA";     break;
+        case P2P_PKT_ACK:      proto = "ACK";      break;
+        case P2P_PKT_CRYPTO:   proto = "CRYPTO";   break;
+        case P2P_PKT_REACH:    proto = "REACH";    break;
+        case P2P_PKT_CONN:     proto = "CONN";     break;
+        case P2P_PKT_CONN_ACK: proto = "CONN_ACK"; break;
         default:
             print("E:", LA_F("RELAY data: unsupported type 0x%02x\n", LA_F593, 593), type);
             return E_INVALID;
@@ -458,7 +471,7 @@ ret_t p2p_signal_relay_data(p2p_session_t *s,
     if (payload_len > 0 && payload)
         memcpy(relay_payload + P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE, payload, payload_len);
 
-    if (enqueue_message(ctx, relay_type, relay_payload, total_len) != 0) {
+    if (enqueue_message(ctx, P2P_RLY_DATA, relay_payload, total_len) != 0) {
         print("W:", LA_F("RELAY %s: send buffer busy\n", LA_F587, 587), proto);
         return E_BUSY;
     }
@@ -500,12 +513,13 @@ static void handle_relay_status(p2p_session_t *s, const uint8_t *payload, int le
     uint8_t req_type = payload[0];
     uint8_t status_code = payload[1];
 
+    const char *lvl = (status_code == P2P_RLY_CODE_READY) ? "V:" : "W:";
     if (len > (int)P2P_RLY_STATUS_PSZ) {
         int msg_len = len - (int)P2P_RLY_STATUS_PSZ;
-        print("W:", LA_F("%s: req_type=%u code=%u msg=%.*s\n", LA_F530, 530),
+        print(lvl, LA_F("%s: req_type=%u code=%u msg=%.*s\n", LA_F530, 530),
               PROTO, (unsigned)req_type, (unsigned)status_code, msg_len, (const char *)(payload + P2P_RLY_STATUS_PSZ));
     } else {
-        print("W:", LA_F("%s: req_type=%u code=%u\n", LA_F565, 565),
+        print(lvl, LA_F("%s: req_type=%u code=%u\n", LA_F565, 565),
               PROTO, (unsigned)req_type, (unsigned)status_code);
     }
 
@@ -525,8 +539,8 @@ static void handle_relay_status(p2p_session_t *s, const uint8_t *payload, int le
         print("V:", LA_F("%s: session busy, will retry\n", LA_F566, 566), PROTO);
         break;
     case P2P_RLY_CODE_READY:
-        // DATA/ACK/CRYPTO 转发确认，解除流控
-        if (req_type == P2P_RLY_DATA || req_type == P2P_RLY_ACK || req_type == P2P_RLY_CRYPTO) {
+        // DATA 转发确认，解除流控
+        if (req_type == P2P_RLY_DATA) {
             ctx->awaiting_data_ready = false;
             print("V:", LA_F("%s: data relay ready, flow control released\n", LA_F582, 582), PROTO);
         }
@@ -634,7 +648,6 @@ static void handle_sync0_ack(p2p_session_t *s, const uint8_t *payload, int len) 
     ctx->peer_online = (online != 0);
     ctx->next_candidate_index = 0;
     ctx->local_candidates_fin = false;
-    ctx->remote_candidates_fin = false;
     ctx->awaiting_sync_ack = false;
     ctx->local_delivery_confirmed = false;
     ctx->last_sent_cand_count = 0;
@@ -658,10 +671,8 @@ static void handle_sync0_ack(p2p_session_t *s, const uint8_t *payload, int len) 
     print("I:", LA_F("EXCHANGING: peer=%s, uploading candidates\n", LA_F571, 571),
           ctx->peer_online ? "online" : "offline");
 
-    // 启动 NAT 打洞（使用已收集的候选）
-    if (s->remote_cand_cnt > 0) {
-        nat_punch(s, -1/* all candidates */);
-    }
+    // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
+    nat_punch(s, -1/* all candidates */);
 
     if (relay_wait_stun_candidates(s)) {
         print("I:", LA_F("EXCHANGING: waiting for initial STUN/TURN candidates before upload\n", LA_F572, 572));
@@ -776,10 +787,8 @@ static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool 
         ctx->state = SIGNAL_RELAY_EXCHANGING;
         print("I:", LA_F("EXCHANGING: first sync received, peer online\n", LA_F514, 514));
 
-        // 启动 NAT 打洞（使用当前已收集的远端候选）
-        if (s->remote_cand_cnt > 0) {
-            nat_punch(s, -1/* all candidates */);
-        }
+        // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
+        nat_punch(s, -1/* all candidates */);
 
         if (relay_wait_stun_candidates(s)) {
             print("I:", LA_F("EXCHANGING: waiting for initial STUN/TURN candidates before upload\n", LA_F572, 572));
@@ -810,7 +819,6 @@ static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool 
             ctx->peer_online = true;
             ctx->next_candidate_index = 0;
             ctx->local_candidates_fin = false;
-            ctx->remote_candidates_fin = false;
             ctx->awaiting_sync_ack = false;
             ctx->local_delivery_confirmed = false;
             ctx->last_sent_cand_count = 0;
@@ -848,7 +856,7 @@ static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool 
     unpack_remote_candidates(s, payload + P2P_RLY_SESS_ID_PSZ, (int)(base_len - P2P_RLY_SESS_ID_PSZ));
 
     if (has_fin) {
-        ctx->remote_candidates_fin = true;
+        s->remote_cand_done = true;
         print("I:", LA_F("%s: received FIN marker from peer\n", LA_F564, 564), TASK_ICE_REMOTE);
     }
 
@@ -890,7 +898,6 @@ static void handle_relay_fin(p2p_session_t *s, const uint8_t *payload, int len) 
     memset(ctx->remote_peer_id, 0, sizeof(ctx->remote_peer_id));
     ctx->next_candidate_index = 0;
     ctx->local_candidates_fin = false;
-    ctx->remote_candidates_fin = false;
     ctx->awaiting_sync_ack = false;
     ctx->local_delivery_confirmed = false;
     ctx->last_sent_cand_count = 0;
@@ -912,11 +919,8 @@ static void handle_relay_fin(p2p_session_t *s, const uint8_t *payload, int len) 
  */
 static void handle_relay_data_recv(p2p_session_t *s, const uint8_t *payload, int len) {
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
-    uint8_t relay_type = ctx->hdr.type;
 
-    const char *PROTO = relay_type == P2P_RLY_ACK ? "ACK"
-                      : relay_type == P2P_RLY_CRYPTO ? "CRYPTO"
-                      : "DATA";
+    const char *PROTO = "DATA";
 
     // 最小长度: session_id(8) + P2P hdr(4)
     if (len < (int)(P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE)) {
@@ -939,7 +943,7 @@ static void handle_relay_data_recv(p2p_session_t *s, const uint8_t *payload, int
 
     // 3. 提取 P2P 负载
     const uint8_t *p2p_payload = p2p_hdr + P2P_HDR_SIZE;
-    int p2p_payload_len = len - P2P_RLY_SESS_ID_PSZ - P2P_HDR_SIZE;
+    int p2p_payload_len = len - (int)P2P_RLY_SESS_ID_PSZ - P2P_HDR_SIZE;
 
     uint64_t now = P_tick_ms();
 
@@ -1003,6 +1007,22 @@ static void handle_relay_data_recv(p2p_session_t *s, const uint8_t *payload, int
         break;
     }
 
+    case P2P_PKT_REACH:
+        // 信令服务器中转过来的 REACH 包（冷打洞应答），from 使用服务器地址
+        nat_on_reach(s, &hdr, p2p_payload, p2p_payload_len, &ctx->server_addr, now);
+        print("V:", LA_F("RELAY REACH recv: seq=%u\n", 0, 0), hdr.seq);
+        break;
+
+    case P2P_PKT_CONN:
+        nat_on_conn(s, &hdr, &ctx->server_addr, now);
+        print("V:", LA_F("RELAY CONN recv: seq=%u\n", 0, 0), hdr.seq);
+        break;
+
+    case P2P_PKT_CONN_ACK:
+        nat_on_conn_ack(s, &hdr, &ctx->server_addr, now);
+        print("V:", LA_F("RELAY CONN_ACK recv: seq=%u\n", 0, 0), hdr.seq);
+        break;
+
     default:
         print("W:", LA_F("RELAY recv: unexpected inner type 0x%02x\n", LA_F594, 594), hdr.type);
         break;
@@ -1042,8 +1062,6 @@ static void dispatch_message(p2p_session_t *s) {
             break;
 
         case P2P_RLY_DATA:
-        case P2P_RLY_ACK:
-        case P2P_RLY_CRYPTO:
             handle_relay_data_recv(s, ctx->payload, (int)ctx->hdr.size);
             break;
 
@@ -1225,7 +1243,6 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
     ctx->peer_online = false;
     ctx->next_candidate_index = 0;
     ctx->local_candidates_fin = false;
-    ctx->remote_candidates_fin = false;
     ctx->awaiting_sync_ack = false;
     ctx->local_delivery_confirmed = false;
     ctx->last_sent_cand_count = 0;
@@ -1524,7 +1541,7 @@ void p2p_signal_relay_tick_send(struct p2p_session *s) {
         }
 
         // READY: 本端所有候选已被服务器确认转发到对端，且已收到对端全部候选
-        if (ctx->local_delivery_confirmed && ctx->remote_candidates_fin) {
+        if (ctx->local_delivery_confirmed && s->remote_cand_done) {
             print("I:", LA_F("READY: candidate exchange completed\n", LA_F520, 520));
             ctx->state = SIGNAL_RELAY_READY;
         }

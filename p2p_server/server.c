@@ -475,7 +475,7 @@ static buffer_item_t* relay_buf_alloc(uint16_t len) {
 
     buffer_item_t *item = *recycle_head;
     if (item) *recycle_head = item->next;
-    else if (!(item = (buffer_item_t*)malloc(sizeof(buffer_item_t) + capacity))) return NULL;
+    else if (!((item = (buffer_item_t*)malloc(sizeof(buffer_item_t) + capacity)))) return NULL;
     else item->flags = flags;
     item->refer = NULL;
     return item;
@@ -699,9 +699,7 @@ static void relay_session_send_complete(relay_session_t *s, buffer_item_t* buf_i
             if (candidate_count)
                 relay_session_send_sync_ack(s, candidate_count);
         }
-        else if (p_hdr->type == P2P_RLY_DATA
-              || p_hdr->type == P2P_RLY_ACK
-              || p_hdr->type == P2P_RLY_CRYPTO) {
+        else if (p_hdr->type == P2P_RLY_DATA) {
             relay_session_send_status(s, p_hdr->type, P2P_RLY_CODE_READY);
         }
     }
@@ -968,19 +966,11 @@ static void handle_relay_fin(relay_session_t *s, uint8_t *payload, uint16_t len)
     relay_free_session(s);
 }
 
-// 处理 DATA/ACK/CRYPTO 消息（零拷贝转发）
+// 处理 DATA 消息（零拷贝转发）
 static void handle_relay_data(relay_client_t *client, relay_session_t *s, uint8_t *payload, uint16_t len) {
-    uint8_t type = ((p2p_relay_hdr_t *)client->recv_buf)->type;
-    const char *PROTO = type == P2P_RLY_ACK ? "ACK"
-                      : type == P2P_RLY_CRYPTO ? "CRYPTO"
-                      : "DATA";
+    const char *PROTO = "DATA";
 
     if (len < P2P_RLY_SESS_ID_PSZ) {
-        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F257, 257), PROTO, len);
-        return;
-    }
-
-    if (type == P2P_RLY_ACK && len != P2P_RLY_ACK_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F257, 257), PROTO, len);
         return;
     }
@@ -991,7 +981,7 @@ static void handle_relay_data(relay_client_t *client, relay_session_t *s, uint8_
     buffer_item_t *new_recv = relay_buf_alloc(RELAY_FRAME_SIZE);
     if (!new_recv) {
         print("E:", LA_F("%s: OOM for zero-copy recv buffer\n", LA_F253, 253), PROTO);
-        relay_session_send_status(s, type, P2P_RLY_ERR_INTERNAL);
+        relay_session_send_status(s, P2P_RLY_DATA, P2P_RLY_ERR_INTERNAL);
         return;
     }
 
@@ -1019,7 +1009,7 @@ static void handle_relay_data(relay_client_t *client, relay_session_t *s, uint8_
 // 流程：read header → read full payload → dispatch → reset buffer
 static void handle_relay_signaling(int idx) {
     relay_client_t *client = &g_relay_clients[idx]; 
-    sock_t fd = client->fd; assert(client->recv_buf);
+    assert(client->recv_buf);
 
     client->base.last_active = P_tick_ms();
     for(;;) {
@@ -1147,7 +1137,7 @@ static void handle_relay_signaling(int idx) {
             relay_send_error(client, type, P2P_RLY_ERR_NOT_ONLINE);
             goto disconnect;
         }
-        else if (type == P2P_RLY_ALIVE);    // 心跳包：last_active 已在循环入口更新，无需额外处理
+        else if (type == P2P_RLY_ALIVE) {} // 心跳包：last_active 已在循环入口更新，无需额外处理
         else if (type == P2P_RLY_SYNC0) {
             handle_relay_sync0(client, payload, payload_len);
         }
@@ -1179,11 +1169,9 @@ static void handle_relay_signaling(int idx) {
                 print("W:", LA_F("ses_id=%" PRIu64 " peer not connected (type=%u)\n", LA_F280, 280), session_id, (unsigned)type);
                 relay_send_error(client, type, P2P_RLY_ERR_PEER_OFFLINE);
             }
-            // SYNC / DATA / ACK / CRYPTO 转发时，最多允许一个在发、一个待发，超过则返回 BUSY
+            // SYNC / DATA 转发时，最多允许一个在发、一个待发，超过则返回 BUSY
             else if ((type == P2P_RLY_SYNC
-                   || type == P2P_RLY_DATA
-                   || type == P2P_RLY_ACK
-                   || type == P2P_RLY_CRYPTO)
+                   || type == P2P_RLY_DATA)
                   && rs->peer_pending && rs->peer_pending != (buffer_item_t*)-1) {
                 print("W:", LA_F("ses_id=%" PRIu64 " busy (pending relay)\n", LA_F288, 288), session_id);
                 relay_session_send_status(rs, type, P2P_RLY_ERR_BUSY);
@@ -1193,8 +1181,6 @@ static void handle_relay_signaling(int idx) {
                 handle_relay_sync(client, rs, payload, payload_len);
                 break;
             case P2P_RLY_DATA:
-            case P2P_RLY_ACK:
-            case P2P_RLY_CRYPTO:
                 handle_relay_data(client, rs, payload, payload_len);
                 break;
             default:
@@ -3013,7 +2999,7 @@ int main(int argc, char *argv[]) {
                             }
 
                             // 删除已发送完成的 item
-                            if (!(sending_session->send_head = item->next))
+                            if (!((sending_session->send_head = item->next)))
                                 sending_session->send_rear = NULL;
                             relay_buf_free(item);
                             

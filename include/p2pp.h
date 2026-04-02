@@ -642,9 +642,7 @@ typedef enum {
     P2P_RLY_FIN,                            // 会话结束: Client -> Server / Server -> Client
 
     /* P2P 数据中继（打洞失败降级） */
-    P2P_RLY_DATA,                           // 中继 P2P 数据包: Client <-> Server <-> Client
-    P2P_RLY_ACK,                            // 中继 P2P 确认包: Client <-> Server <-> Client
-    P2P_RLY_CRYPTO,                         // 中继 P2P 加密包: Client <-> Server <-> Client
+    P2P_RLY_DATA,                           // 中继 P2P 数据包: Client <-> Server <-> Client (内层 P2P hdr 区分类型)
 
     /* 消息 RPC（服务器中转的请求-应答机制） */
     P2P_RLY_REQ,                            // 请求: Client -> Server / Server -> Client (双向)
@@ -740,27 +738,16 @@ typedef struct {
 */
 #define P2P_RLY_FIN_PSZ             (P2P_RLY_SESS_ID_PSZ)
 
-/* P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO:
- *
- *   与 P2P_PKT_DATA / P2P_PKT_ACK / P2P_PKT_CRYPTO 对齐，统一采用
- *   "session_id + 对应 payload" 语义（等价于 P2P_DATA_FLAG_SESSION 场景）。
- *
- *   P2P_RLY_DATA:
- *     payload: [session_id(8)][data(N)]
- *
- *   P2P_RLY_ACK:
- *     payload: [session_id(8)][ack_seq(2)][sack(4)]
- *
- *   P2P_RLY_CRYPTO:
- *     payload: [session_id(8)][crypto_data(N)]
+/* P2P_RLY_DATA:
+ *   所有 TCP relay 数据包 payload 统一格式: [session_id(8)][P2P hdr(4)][data]
+ *   P2P hdr = [type(1)][flags(1)][seq(2)]，内层 type 区分实际包类型
+ *   (DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK 等均通过 P2P_RLY_DATA 隧道传输)
  *
  *   说明：
- *   - RELAY 的消息类型已区分 DATA/ACK/CRYPTO，因此负载无需再携带 p2p_packet_hdr_t。
  *   - session_id 用于会话隔离与服务器路由（转发到配对会话）。
+ *   - 服务器零拷贝转发，仅重写 session_id，不解析内层 P2P hdr。
  */
-#define P2P_RLY_DATA_PSZ(n)        (P2P_RLY_SESS_ID_PSZ + (n))
-#define P2P_RLY_ACK_PSZ            (P2P_RLY_SESS_ID_PSZ + 2u + 4u)
-#define P2P_RLY_CRYPTO_PSZ(n)      (P2P_RLY_SESS_ID_PSZ + (n))
+#define P2P_RLY_DATA_PSZ(n)        (P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE + (n))
 
  /* P2P_RLY_REQ / P2P_RLY_REQ_ACK / P2P_RLY_RESP / P2P_RLY_RESP_ACK:
  * 
@@ -958,23 +945,18 @@ typedef struct {
  *   │<==================== P2P ICE 打洞 ====================>│
  *
  *
- * 5. P2P_RLY_DATA / P2P_RLY_ACK / P2P_RLY_CRYPTO - P2P 包中继
+ * 5. P2P_RLY_DATA - P2P 包中继
  * ============================================================================
  *
- * 功能：P2P 打洞失败时，通过服务器转发数据/确认/加密包（降级方案）
+ * 功能：P2P 打洞失败时，通过服务器转发 P2P 包（降级方案）
  *
  * Client → Server:
- *   P2P_RLY_DATA:   [session_id(8)][data(N)]
- *   P2P_RLY_ACK:    [session_id(8)][ack_seq(2)][sack(4)]
- *   P2P_RLY_CRYPTO: [session_id(8)][crypto_data(N)]
- *   - 对应关系：
- *     · P2P_RLY_DATA   <-> P2P_PKT_DATA
- *     · P2P_RLY_ACK    <-> P2P_PKT_ACK
- *     · P2P_RLY_CRYPTO <-> P2P_PKT_CRYPTO
- *   - 与 P2P_DATA_FLAG_SESSION 的负载格式一致。
+ *   P2P_RLY_DATA: [session_id(8)][P2P hdr(4)][payload(N)]
+ *   - 内层 P2P hdr.type 区分: DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK
+ *   - 服务器零拷贝转发，仅重写 session_id。
  *
  * Server → Target:
- *   - 按目标侧 session_id 重写后转发同类型负载（DATA/ACK/CRYPTO）。
+ *   - 按目标侧 session_id 重写后原样转发。
  *
  * 6. REQ/RESP 机制 - RPC 请求-应答
  * ============================================================================

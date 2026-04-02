@@ -923,8 +923,8 @@ int main(int argc, char *argv[]) {
     
     test_message_exchange();
     test_non_interactive_mode();
-    // test_log_collection();        // 暂时跳过 - 需要更多调试
-    // test_data_relay();            // 暂时跳过 - 需要更多调试
+    test_log_collection();
+    test_data_relay();
     
     // 清理
     printf("\n[*] Cleaning up...\n");

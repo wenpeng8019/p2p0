@@ -98,6 +98,8 @@ static inline void gather_local_candidates(p2p_session_t *s) {
          *   1. 发送 STUN Binding Request 时递增 stun_pending
          *   2. 接收 STUN Binding Response 时，stun_add_srflx_candidate 递减 stun_pending
      */
+#if 0 /* 当前由 NAT 检测 Test I 阶段（as_candidate=true）统一获取 srflx，
+       * 避免重复请求。未来计划：为每个本地网络接口分别获取 srflx 地址 */
     if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT
         && !s->cfg.test_ice_srflx_off && s->cfg.stun_server) {
 
@@ -119,6 +121,7 @@ static inline void gather_local_candidates(p2p_session_t *s) {
             }
         }
     }
+#endif
 
     /* ======================== 3. 收集 Relay 候选 ======================== */
     /*
@@ -234,16 +237,18 @@ static void disconnect(p2p_session_t *s) {
     assert(s->state != P2P_STATE_CLOSED);
 
     p2p_state_t old_state = s->state;
-    p2p_session_reset(s, true);  // 这会设置 s->state = P2P_STATE_CLOSED
 
     // NAT 层 FIN（仅在已连接状态，重复发送提高 UDP 可靠性）
+    // 必须在 session_reset 之前发送，reset 会清除 NAT 状态和路径信息
     if (old_state >= P2P_STATE_LOST) {
-
         print("V:", LA_F("Sending FIN packet to peer before closing", LA_F326, 326));
-
         nat_send_fin(s);
+    }
 
-        // 触发回调
+    p2p_session_reset(s, true);  // 这会设置 s->state = P2P_STATE_CLOSED
+
+    // 触发回调
+    if (old_state >= P2P_STATE_LOST) {
         if (s->cfg.on_state) s->cfg.on_state(s, old_state, P2P_STATE_CLOSED, s->cfg.userdata);
     }
 
@@ -1062,7 +1067,7 @@ p2p_update(p2p_handle_t hdl) {
                 break;
         }
 
-    } // while ((n = p2p_udp_recv_from(s->sock, &from, pkt, sizeof(pkt))) > 0)
+    } // while ((n = p2p_udp_recv_from(s, &from, buf, sizeof(buf))) > 0)
 
     /* ========================================================================
      * 阶段 2：信令服务维护（主动拉取远端候选地址）
@@ -1202,9 +1207,9 @@ p2p_update(p2p_handle_t hdl) {
             int ready = !s->trans->is_ready || s->trans->is_ready(s);
             if (ready) {
                 // 由高级传输模块自行处理流的数据
-                n = ring_read(&s->stream.send_ring, pkt, sizeof(pkt));
+                n = ring_read(&s->stream.send_ring, buf, sizeof(buf));
                 if (n > 0) {
-                    int sent = s->trans->send_data(s, pkt, n);
+                    int sent = s->trans->send_data(s, buf, n);
                     if (sent > 0) {
                         s->stream.pending_bytes -= n;
                         s->stream.send_offset += n;

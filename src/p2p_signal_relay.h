@@ -209,7 +209,6 @@ typedef struct {
     /* Trickle ICE 控制 */
     uint16_t            next_candidate_index;           /* 下一个要发送的候选索引 */
     bool                local_candidates_fin;           /* FIN 已发送（本端候选上传完成）*/
-    bool                remote_candidates_fin;          /* 对端候选接收完成（收到对端 FIN）*/
     bool                awaiting_sync_ack;              /* 等待 SYNC_ACK（流控门控）*/
     bool                local_delivery_confirmed;       /* 服务器确认所有候选已转发到对端（收到 ACK=0）*/
     uint8_t             last_sent_cand_count;           /* 上批 SYNC 发送的候选数（用于 ACK 对账）*/

@@ -474,8 +474,8 @@ int main(int argc, char *argv[]) {
     cfg.dtls_backend    = dtls_backend;
     cfg.use_pseudotcp   = ARGS_pseudo.i64 ? 1 : 0;
     cfg.use_ice         = !ARGS_compact.i64;
-    cfg.stun_server     = ARGS_stun.str ? ARGS_stun.str : "stun.miwifi.com"; // 国内 STUN 服务器（小米）
-    //cfg.stun_server     = "stun.cloudflare.com";
+    cfg.stun_server     = ARGS_stun.str ? ARGS_stun.str : "stun.cloudflare.com"; // 
+    //cfg.stun_server     = "stun.miwifi.com"; 国内 STUN 服务器（小米）
     //cfg.stun_server     = "stun.qq.com"; // 国内 STUN 服务器（腾讯）
     //cfg.stun_server     = "stun.l.google.com";
     cfg.stun_port       = 3478;

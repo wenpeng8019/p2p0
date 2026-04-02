@@ -84,9 +84,18 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
     for (int i = 0, idx; i < cand_cnt; i++, offset += (int)sizeof(p2p_candidate_t)) {
 
         unpack_candidate(c = &s->remote_cands[idx = s->remote_cand_cnt], payload + offset);
-        if (p2p_find_remote_candidate_by_addr(s, &c->addr) >= 0) {
-            print("W:", LA_F("%s: duplicate remote cand<%s:%d> from signaling, skipped\n", LA_F106, 106),
-                  TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+        int dup_idx = p2p_find_remote_candidate_by_addr(s, &c->addr);
+        if (dup_idx >= 0) {
+            if (s->remote_cands[dup_idx].type == P2P_CAND_PRFLX && c->type != P2P_CAND_PRFLX) {
+                s->remote_cands[dup_idx].type = c->type;
+                s->remote_cands[dup_idx].priority = c->priority;
+                print("I:", LA_F("%s: promoted prflx cand[%d]<%s:%d> → %s\n", LA_F106, 106),
+                      TASK_ICE_REMOTE, dup_idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                      p2p_candidate_type_str(c->type));
+            } else {
+                print("V:", LA_F("%s: duplicate remote cand<%s:%d> from signaling, skipped\n", LA_F106, 106),
+                      TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+            }
             continue;
         }
 
