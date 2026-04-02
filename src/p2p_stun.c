@@ -1040,11 +1040,11 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
     /* Test I 完成，启动 Test II */
     case NAT_TEST_I_DONE: {
 
-        /* 如果配置了 skip_nat_detection，跳过 Test II/III（因为大多数公共 STUN 服务器不支持） */
-        if (s->cfg.skip_nat_detection) {
+        /* 如果配置了 skip_stun_test，跳过 Test II/III（因为大多数公共 STUN 服务器不支持） */
+        if (s->cfg.skip_stun_test) {
             ctx->state = NAT_TEST_COMPLETED;
             s->nat_type = P2P_NAT_UNKNOWN;
-            print("I:", LA_F("NAT detection skipped (skip_nat_detection=true), Srflx gathered", LA_F560, 560));
+            print("I:", LA_F("NAT detection skipped (skip_stun_test=true), Srflx gathered", LA_F560, 560));
             return;
         }
 

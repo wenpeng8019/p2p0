@@ -22,6 +22,7 @@
 #include "LANG.cn.h"
 
 // 命令行参数定义
+ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", LA_S20, 20));
 ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable DTLS (MbedTLS)", LA_S15, 15));
 ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S16, 16));
 ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S17, 17));
@@ -36,7 +37,7 @@ ARGS_S(false, stun,         0,   "stun",         LA_CS("STUN server address", LA
 ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S25, 25));
 ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S26, 26));
 ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S24, 24));
-ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", LA_S20, 20));
+ARGS_B(false, skip_stun_test, 0, "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", 0, 0));
 ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S40, 40));
 ARGS_B(false, no_host,      0,   "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S50, 50));
 ARGS_B(false, no_srflx,     0,   "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S52, 52));
@@ -427,6 +428,7 @@ int main(int argc, char *argv[]) {
         &ARGS_DEF_turn,
         &ARGS_DEF_turn_user,
         &ARGS_DEF_turn_pass,
+        &ARGS_DEF_skip_stun_test,
         &ARGS_DEF_log,
         &ARGS_DEF_debugger,
         &ARGS_DEF_no_host,
@@ -481,6 +483,7 @@ int main(int argc, char *argv[]) {
     cfg.turn_port       = ARGS_turn.str ? 3478 : 0;
     cfg.turn_user       = ARGS_turn_user.str;
     cfg.turn_pass       = ARGS_turn_pass.str;
+    cfg.skip_stun_test  = ARGS_skip_stun_test.i64 ? true : false;
     cfg.server_host     = server_host;
     cfg.server_port     = server_port;
     cfg.gh_token        = ARGS_github.str;
