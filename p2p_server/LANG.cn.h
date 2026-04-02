@@ -67,8 +67,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F59] = "NAT probe socket listening on port %d\n",  /* SID:59 new */
     [LA_F60] = "NAT probe: %s (port %d)\n",  /* SID:60 new */
     [LA_F61] = "P2P Signaling Server listening on port %d (TCP + UDP)...\n",  /* SID:61 new */
-    [LA_F62] = "PEER_INFO resent, %s <-> %s, attempt %d/%d (ses_id=%llu)\n",  /* SID:62 new */
-    [LA_F63] = "PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:63 new */
+    [LA_F62] = "SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%llu)\n",  /* SID:62 new */
+    [LA_F63] = "SYNC retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:63 new */
     [LA_F64] = "Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n",  /* SID:64 new */
     [LA_F65] = "Relay %s seq=%u: '%s' -> '%s' (ses_id=%llu)\n",  /* SID:65 new */
     [LA_F66] = "Relay support: %s\n",  /* SID:66 new */

@@ -8,8 +8,8 @@
  * 实现简单的 UDP 信令协议，用于交换对端地址信息，包括双方的公网地址：
  *   - REGISTER:      向服务器注册自己的 ID 和初始候选地址
  *   - REGISTER_ACK:  服务器确认，返回对端状态和缓存能力
- *   - PEER_INFO:     序列化候选同步包（服务器首发 seq=0 并分配 session_id，后续 P2P 传输）
- *   - PEER_INFO_ACK: 候选接收确认，用于可靠传输控制
+ *   - SYNC:     序列化候选同步包（服务器首发 seq=0 并分配 session_id，后续 P2P 传输）
+ *   - SYNC_ACK: 候选接收确认，用于可靠传输控制
  *   - NAT_PROBE:     NAT 类型探测请求（可选，发往服务器探测端口）
  *   - NAT_PROBE_ACK: NAT 探测响应，返回第二次映射地址
  *   - DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION: 会话隔离和中继转发
@@ -23,12 +23,12 @@
  *   IDLE ──→ REGISTERING ──→ REGISTERED ──→ READY
  *                     │                           │
  *                     └───────────────────────────┘
- *                         (收到 PEER_INFO seq=0)
+ *                         (收到 SYNC seq=0)
  *
  *   - IDLE:        未启动
  *   - REGISTERING: 已发送 REGISTER，等待 REGISTER_ACK
- *   - REGISTERED:  已收到 ACK，等待服务器 PEER_INFO(seq=0)（首次分配 session_id）
- *   - READY:       已收到 PEER_INFO 和 session_id，开始打洞并继续同步剩余候选
+ *   - REGISTERED:  已收到 ACK，等待服务器 SYNC(seq=0)（首次分配 session_id）
+ *   - READY:       已收到 SYNC 和 session_id，开始打洞并继续同步剩余候选
  *
  * 候选列表统一存储在 p2p_session 中，本模块只负责序列化和发送。
  */
@@ -57,7 +57,7 @@ struct p2p_session;
  *       instance_id 不同 → 客户端重启，服务器重置旧会话（清除 session_id、通知对端下线）
  *     · 初始值 0 不合法（服务器忽略），客户端必须保证非零
  *   注意：candidate_count 仅表示本次 REGISTER 包中的候选数量（受 UDP MTU 限制），
- *   不代表总候选数。即使服务器缓存能力足够，客户端也必须通过后续 PEER_INFO
+ *   不代表总候选数。即使服务器缓存能力足够，客户端也必须通过后续 SYNC
  *   序列化传输剩余候选，并发送 FIN 包明确结束，否则对端无法判断是否还有更多候选。
  *
  * REGISTER_ACK:
@@ -68,7 +68,7 @@ struct p2p_session;
  *   public_ip/port: 客户端的公网地址（服务器主端口观察到的 UDP 源地址）
  *   probe_port: NAT 探测端口号（0=不支持探测，>0=探测端口）
  *
- * PEER_INFO (seq 字段在包头 hdr.seq):
+ * SYNC (seq 字段在包头 hdr.seq):
  *   [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
  *   - session_id: 会话 ID（网络字节序，64位）
  *     · seq=0: 服务器发送，session_id 由服务器生成（首次分配）
@@ -95,9 +95,9 @@ struct p2p_session;
  *   [local_peer_id(32)][remote_peer_id(32)]
  *   包头: type=0x88, flags=0, seq=0
  *   客户端主动断开时发送，请求服务器立即释放配对槽位
- *   服务器收到后会向对端发送 PEER_OFF 通知
+ *   服务器收到后会向对端发送 FIN 通知
  *
- * PEER_OFF (服务器 → 客户端，下行通知):
+ * FIN (服务器 → 客户端，下行通知):
  *   [session_id(8)]
  *   包头: type=0x89, flags=0, seq=0
  *   - session_id: 已断开的会话 ID（网络字节序，64位）
@@ -111,7 +111,7 @@ struct p2p_session;
  * 利用 REGISTER 和 NAT_PROBE 两次通讯，参考 STUN RFC 5389/5780，探测 NAT 类型：
  *
  * 1. 服务器配置：
- *    - 主端口（如 3478）：处理 REGISTER/PEER_INFO 等主要协议
+ *    - 主端口（如 3478）：处理 REGISTER/SYNC 等主要协议
  *    - 探测端口（如 3479）：仅处理 NAT_PROBE，可选功能
  *    - 若不配置探测端口，则 REGISTER_ACK 中 probe_port = 0
  *
@@ -187,7 +187,7 @@ struct p2p_session;
  *      3) 收到 NAT_PROBE_ACK，获得 Mapped_Addr2
  *      4) 比较 Mapped_Port1 vs Mapped_Port2，写入 nat_detected_result
  *      5) 若 probe_port == 0，结论为 P2P_NAT_UNDETECTABLE（无法探测）
- *    - 整个探测在 REGISTERED 状态完成（等待 PEER_INFO 期间，不阻塞主流程）
+ *    - 整个探测在 REGISTERED 状态完成（等待 SYNC 期间，不阻塞主流程）
  *    - 探测失败（超时）不影响 P2P 打洞，降级为普通打洞策略
  *
  * 7. 优化建议：
@@ -204,7 +204,7 @@ struct p2p_session;
  *
  * 1. 分配时机：
  *    - 服务器检测到双方都注册成功（REGISTER 都到达）
- *    - 服务器向双方发送 PEER_INFO(seq=0) 时，首次分配 session_id
+ *    - 服务器向双方发送 SYNC(seq=0) 时，首次分配 session_id
  *    - 每个方向独立分配（A→B 和 B→A 的 session_id 不同）
  *
  * 2. session_id 生成策略：
@@ -213,22 +213,22 @@ struct p2p_session;
  *    - 安全性：无法预测，防止跨会话注入攻击
  *
  * 3. 使用场景：
- *    - PEER_INFO(seq>0)：客户端继续同步候选时，携带 session_id
- *    - PEER_INFO_ACK：客户端确认收到 PEER_INFO，携带 session_id
+ *    - SYNC(seq>0)：客户端继续同步候选时，携带 session_id
+ *    - SYNC_ACK：客户端确认收到 SYNC，携带 session_id
  *    - DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION：会话隔离和中继转发
  *
  * 4. 服务器索引：
  *    - 双索引机制：session_id（O(1)查找）+ peer_key（local_id+remote_id）
  *    - 通过 session_id 快速定位转发目标（无需遍历）
  *
- * PEER_INFO_ACK:
+ * SYNC_ACK:
  *   [session_id(8)]
- *   包头: type=0x85, flags=0, seq=确认的 PEER_INFO 序列号
- *   - session_id: 会话 ID（网络字节序，64位，与对应的 PEER_INFO 一致）
- *   - seq: 确认的 PEER_INFO 序列号（seq=0 表示确认服务器下发的 PEER_INFO(seq=0)）
+ *   包头: type=0x85, flags=0, seq=确认的 SYNC 序列号
+ *   - session_id: 会话 ID（网络字节序，64位，与对应的 SYNC 一致）
+ *   - seq: 确认的 SYNC 序列号（seq=0 表示确认服务器下发的 SYNC(seq=0)）
  *   - seq 窗口: 0..16（客户端接收端仅接受 1..16）
  *
- * PEER_INFO(seq=0) 的两种语义：
+ * SYNC(seq=0) 的两种语义：
  *   - base_index=0: 服务器下发的首个候选列表（candidate_count>=1）
  *   - base_index!=0: 对端公网地址变更通知（candidate_count=1）
  *     - base_index 作为 8 位循环通知序号（1..255 循环）
@@ -244,8 +244,8 @@ struct p2p_session;
  *     2. 中继转发：服务器通过 session_id 查找目标对端
  */
 
-/* PEER_INFO flags */
-#define SIG_PEER_INFO_FIN  0x01     /* 候选列表发送完毕 */
+/* SYNC flags */
+#define SIG_SYNC_FIN  0x01     /* 候选列表发送完毕 */
 
 /*
  * COMPACT 模式候选类型枚举
@@ -257,7 +257,7 @@ struct p2p_session;
 typedef enum {
     SIGNAL_COMPACT_INIT = 0,        /* 未启动 */
     SIGNAL_COMPACT_REGISTERING,     /* 等待 REGISTER_ACK */
-    SIGNAL_COMPACT_REGISTERED,      /* 已注册，等待 PEER_INFO(seq=0) */
+    SIGNAL_COMPACT_REGISTERED,      /* 已注册，等待 SYNC(seq=0) */
     SIGNAL_COMPACT_ICE,             /* 向对方发送后续候选队列、和 FIN */
     SIGNAL_COMPACT_READY            /* 如果已经完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
 } p2p_signal_compact_state_t;
@@ -277,7 +277,7 @@ typedef struct {
 
     /* 和对方的会话 */
     uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配），在 REGISTER_ACK 中首次获得 */
-    bool                peer_online;                        /* 对端是否在线；REGISTER_ACK 和 PEER_INFO 都会导致 online 为 true */
+    bool                peer_online;                        /* 对端是否在线；REGISTER_ACK 和 SYNC 都会导致 online 为 true */
 
     /* REGISTER_ACK 返回的信息 */
     int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量 */
@@ -286,7 +286,7 @@ typedef struct {
     bool                feature_relay;                      /* 服务器是否支持中继 */
     bool                feature_msg;                        /* 服务器是否支持 RPC */
 
-    /* PEER_INFO 序列化同步控制 */
+    /* SYNC 序列化同步控制 */
     uint16_t            candidates_mask;                    /* 后续候选队列 seq 窗口 mask，用于全部完成确认，同时意味着最多发 16 个包 */
     uint16_t            candidates_acked;                   /* 后续候选队列对方确认的窗口 */
     uint16_t            trickle_idx_base;                   /* trickle 候选队列在 local_cands 中的起始索引 */
@@ -294,14 +294,14 @@ typedef struct {
     uint8_t             trickle_seq_next;                   /* 下一个 trickle 包的 seq（累加目标，flush 后自增） */
     uint8_t             trickle_queue[17];                  /* trickle 候选队列包队列，记录每个包所携带的候选队列数量（1-based，索引 1-16） */
     uint64_t            trickle_last_pack_time;             /* 上次打包发送 trickle 包的时间，用于累积批发送 trickle 候选队列 */
-    bool                remote_candidates_0;                /* 是否已收到 PEER_INFO seq=0（首批候选），该包由信令服务器维护 */
-    uint16_t            remote_candidates_mask;             /* 对端候选队列 seq 窗口 mask，用于判断是否收到过某个 seq 的 PEER_INFO 包 */
+    bool                remote_candidates_0;                /* 是否已收到 SYNC seq=0（首批候选），该包由信令服务器维护 */
+    uint16_t            remote_candidates_mask;             /* 对端候选队列 seq 窗口 mask，用于判断是否收到过某个 seq 的 SYNC 包 */
     uint16_t            remote_candidates_done;             /* 对端候选队列 seq 窗口完成 mask，表示已收到过且确认过的 seq（即对端已应用） */
     uint8_t             remote_addr_notify_seq;             /* 最近一次已应用的地址变更通知序号（base_index，1..255） */
 
     /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
     struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */
-    uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 PEER_INFO 重传定时器）*/
+    uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 SYNC 重传定时器）*/
     int16_t             nat_probe_retries;                  /* 失败重试次数（不包括首次执行）*/
     uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
 
@@ -463,19 +463,19 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 /* 处理 ALIVE_ACK（保活确认） */
 void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from);
 
-/* 处理 PEER_INFO（对端候选信息） */
-void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
+/* 处理 SYNC（对端候选信息） */
+void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
                           const uint8_t *payload, int len,
                           const struct sockaddr_in *from);
 
-/* 处理 PEER_INFO_ACK（对端候选确认） */
-void compact_on_peer_info_ack(struct p2p_session *s, uint16_t seq,
+/* 处理 SYNC_ACK（对端候选确认） */
+void compact_on_sync_ack(struct p2p_session *s, uint16_t seq,
                                const uint8_t *payload, int len,
                                const struct sockaddr_in *from);
 
-/* 处理 PEER_OFF（对端离线通知） */
-void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
-                         const struct sockaddr_in *from);
+/* 处理 FIN（对端离线通知） */
+void compact_on_fin(struct p2p_session *s, const uint8_t *payload, int len,
+                    const struct sockaddr_in *from);
 
 /* 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）*/
 void compact_on_request(struct p2p_session *s, uint8_t flags,

@@ -162,7 +162,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F134] = "%s: peer online, proceeding to ICE\n",  /* SID:134 */
     [LA_F424] = "%s: peer online, starting NAT punch\n",  /* SID:424 */
     [LA_F135] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:135 */
-    [LA_F136] = "%s: peer_info0 srflx cand[%d]<%s:%d>%s\n",  /* SID:136 */
+    [LA_F136] = "%s: sync0 srflx cand[%d]<%s:%d>%s\n",  /* SID:136 */
     [LA_F503] = "%s: processed, remote_cand_cnt=%d\n",  /* SID:503 */
     [LA_F140] = "%s: punch cand[%d] %s:%d (%s)",  /* SID:140 */
     [LA_F137] = "%s: punch remote cand[%d]<%s:%d> failed\n",  /* SID:137 */
@@ -184,7 +184,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F423] = "%s: remote %s cand[%d]<%s:%d> (disabled)\n",  /* SID:423 */
     [LA_F153] = "%s: remote %s cand[%d]<%s:%d> accepted\n",  /* SID:153 */
     [LA_F505] = "%s: remote_cands[] full, skipped %d candidates\n",  /* SID:505 */
-    [LA_F156] = "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n",  /* SID:156 */
+    [LA_F156] = "%s: renew session due to session_id changed by sync0 (local=%llu pkt=%llu)\n",  /* SID:156 */
     [LA_F530] = "%s: req_type=%u code=%u msg=%.*s\n",  /* SID:530 */
     [LA_F565] = "%s: req_type=%u code=%u\n",  /* SID:565 */
     [LA_F157] = "%s: restarting periodic check",  /* SID:157 */
@@ -222,7 +222,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F189] = "%s: triggered via RELAY TUNE echo",  /* SID:189 */
     [LA_F191] = "%s: unexpected ack_seq=%u mask=0x%04x\n",  /* SID:191 */
     [LA_F568] = "%s: unexpected fwd=%d after FIN, ignored\n",  /* SID:568 */
-    [LA_F192] = "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n",  /* SID:192 */
+    [LA_F192] = "%s: unexpected non-srflx cand in sync0, treating as srflx\n",  /* SID:192 */
     [LA_F193] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:193 */
     [LA_F443] = "%s: unknown target cand %s:%d",  /* SID:443 */
     [LA_F569] = "%s: waiting for STUN candidates, stun_pending=%d\n",  /* SID:569 */
@@ -314,8 +314,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F274] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:274 */
     [LA_F275] = "% OpenSSL requested but library not linked",  /* SID:275 */
     [LA_F276] = "Out-of-window packet discarded seq=%u base=%u",  /* SID:276 */
-    [LA_F278] = "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n",  /* SID:278 */
-    [LA_F279] = "% PEER_INFO(trickle): seq overflow, cannot trickle more\n",  /* SID:279 */
+    [LA_F278] = "SYNC(trickle): batching, queued %d cand(s) for seq=%u\n",  /* SID:278 */
+    [LA_F279] = "% SYNC(trickle): seq overflow, cannot trickle more\n",  /* SID:279 */
     [LA_F280] = "% PUBSUB (PUB): gathering candidates, waiting for STUN before publishing",  /* SID:280 */
     [LA_F281] = "% PUBSUB (SUB): waiting for offer from any peer",  /* SID:281 */
     [LA_F282] = "% PUBSUB mode requires gh_token and gist_id",  /* SID:282 */

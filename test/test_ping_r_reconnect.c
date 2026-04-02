@@ -13,7 +13,7 @@
  *
  * 2. single_crash: 单端崩溃重连 + 双向消息验证
  *    - 启动 alice/bob，等待连接成功，发送消息验证
- *    - 停止 alice（Bob 在线收到 PEER_OFF）
+ *    - 停止 alice（Bob 在线收到 FIN）
  *    - 重新启动 alice
  *    - 验证重连后双向消息收发正常
  */
@@ -432,7 +432,7 @@ static void test_relay_both_crash(void) {
 
 ///////////////////////////////////////////////////////////////////////////////
 // 测试 2: 单端崩溃重连 + 双向消息验证 (RELAY 模式)
-//   Alice 停止 → Bob 在线收 PEER_OFF → Alice 重启 → 双向消息
+//   Alice 停止 → Bob 在线收 FIN → Alice 重启 → 双向消息
 ///////////////////////////////////////////////////////////////////////////////
 
 static void test_relay_single_crash(void) {
@@ -483,12 +483,12 @@ static void test_relay_single_crash(void) {
     }
     P_usleep(300 * 1000);
 
-    // 4. 停止 Alice（Bob 在线收 PEER_OFF）
+    // 4. 停止 Alice（Bob 在线收 FIN）
     printf("[4] Stopping Alice to simulate disconnect...\n");
     uint16_t old_alice_rid = g_alice.rid;
     stop_client(&g_alice);
     P_usleep(1000 * 1000);
-    printf("    Bob should have received PEER_OFF\n");
+    printf("    Bob should have received FIN\n");
 
     // 5. 重启 Alice
     printf("[5] Restarting Alice...\n");

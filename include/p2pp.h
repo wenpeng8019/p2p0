@@ -106,7 +106,7 @@ typedef struct {
 /*
  * flags 字段说明：
  * - 对于 P2P_PKT_DATA: 可能包含分片标志、优先级等
- * - 对于 SIG_PKT_PEER_INFO: 0x01 = SIG_PEER_INFO_FIN（候选列表发送完毕）
+ * - 对于 SIG_PKT_SYNC: 0x01 = SIG_SYNC_FIN（候选列表发送完毕）
  * - 对于其他包类型: 预留，置 0
  * - 具体含义由各协议类型自行定义
  */
@@ -329,7 +329,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  * 候选列表序列化同步机制:
  *
- * 由于 UDP 包大小限制，候选列表需要分批传输。通过序列化的 PEER_INFO 包完成可靠同步：
+ * 由于 UDP 包大小限制，候选列表需要分批传输。通过序列化的 SYNC 包完成可靠同步：
  *
  *   1. 注册阶段（仅发送一次）：
  *      - 客户端发送 REGISTER（含 instance_id 与 UDP 包可容纳的最大候选列表）
@@ -339,10 +339,10 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *      - 收到 ACK 后停止 REGISTER，进入 REGISTERED 状态
  *
  *   2. 候选同步阶段（序列化 + 确认）：
- *      - 双方上线后，服务器发送 PEER_INFO(seq=0)，包含缓存的对端候选
- *      - 客户端收到后发送 PEER_INFO_ACK（携带 session_id）确认
- *      - 客户端通过 PEER_INFO(seq=1,2,3,...) 继续同步剩余候选（携带 session_id）
- *      - 对端通过 PEER_INFO_ACK 确认，未确认则重发
+ *      - 双方上线后，服务器发送 SYNC(seq=0)，包含缓存的对端候选
+ *      - 客户端收到后发送 SYNC_ACK（携带 session_id）确认
+ *      - 客户端通过 SYNC(seq=1,2,3,...) 继续同步剩余候选（携带 session_id）
+ *      - 对端通过 SYNC_ACK 确认，未确认则重发
  *      - 允许乱序：seq>0 可能先于 seq=0 到达，接收端按 seq 位图去重并最终收敛
  *
  *   3. 离线缓存流程：
@@ -356,16 +356,16 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        |    ... Bob 上线 ...                              |
  *        |                       |<-- REGISTER ------------|
  *        |                       |--- REGISTER_ACK -------->|  (peer_online=1, max=5)
- *        |<-- PEER_INFO(seq=0) --|--- PEER_INFO(seq=0) --->|  (包含缓存的 5 个候选 + session_id)
- *        |--- PEER_INFO_ACK ----->|<-- PEER_INFO_ACK -------|  (携带 session_id)
+ *        |<-- SYNC(seq=0) --|--- SYNC(seq=0) --->|  (包含缓存的 5 个候选 + session_id)
+ *        |--- SYNC_ACK ----->|<-- SYNC_ACK -------|  (携带 session_id)
  *        |                       |                          |
- *        |<=============== P2P PEER_INFO 序列化同步 ========>|  (所有包携带 session_id)
- *        |--- PEER_INFO(seq=1, base=5) ----------------->  |  (从第 6 个候选开始)
- *        |<-- PEER_INFO_ACK(seq=1) ----------------------  |
- *        |--- PEER_INFO(seq=2, base=10) ---------------->  |
- *        |<-- PEER_INFO_ACK(seq=2) ----------------------  |
- *        |--- PEER_INFO(seq=3, count=0, FIN) ----------->  |  (结束标识)
- *        |<-- PEER_INFO_ACK(seq=3) ----------------------  |
+ *        |<=============== P2P SYNC 序列化同步 ========>|  (所有包携带 session_id)
+ *        |--- SYNC(seq=1, base=5) ----------------->  |  (从第 6 个候选开始)
+ *        |<-- SYNC_ACK(seq=1) ----------------------  |
+ *        |--- SYNC(seq=2, base=10) ---------------->  |
+ *        |<-- SYNC_ACK(seq=2) ----------------------  |
+ *        |--- SYNC(seq=3, count=0, FIN) ----------->  |  (结束标识)
+ *        |<-- SYNC_ACK(seq=3) ----------------------  |
  *
  * 注：REGISTER 仅在注册阶段发送，收到 REGISTER_ACK 后停止（直到重连）
  */
@@ -375,9 +375,9 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_REGISTER_ACK    0x81        // 注册确认（告知 session_id、本端缓存能力、公网地址、探测端口、中继支持）
 #define SIG_PKT_UNREGISTER      0x82        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
                                             // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
-#define SIG_PKT_PEER_INFO       0x83        // 候选列表同步包（序列化传输）
-#define SIG_PKT_PEER_INFO_ACK   0x84        // 候选列表确认（确认指定序列号）
-#define SIG_PKT_PEER_OFF        0x85        // 服务器下行通知：对端已离线/断开
+#define SIG_PKT_SYNC            0x83        // 候选列表同步包（序列化传输）
+#define SIG_PKT_SYNC_ACK        0x84        // 候选列表确认（确认指定序列号）
+#define SIG_PKT_FIN             0x85        // 服务器下行通知：对端已离线/断开
 
 #define SIG_PKT_ALIVE           0x86        // 保活包（可选，客户端定期发送以维持注册状态）
 #define SIG_PKT_ALIVE_ACK       0x87        // 保活确认（服务器回复以确认注册状态）
@@ -457,8 +457,8 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_MSG_ERR_PEER_OFFLINE    0xFE    // B端在等待响应期间离线（区别于 REQ_ACK 时已知离线）
 #define SIG_MSG_ERR_TIMEOUT         0xFF    // 服务器转发请求超时
 
-/* PEER_INFO 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_PEER_INFO_FIN           0x01    // 候选列表发送完毕
+/* SYNC 标志位（p2p_packet_hdr_t.flags） */
+#define SIG_SYNC_FIN                0x01    // 候选列表发送完毕
 
 /*
  * COMPACT 模式消息格式（以下均为 payload 部分，前面需加 4 字节包头）:
@@ -492,7 +492,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   payload: [local_peer_id(32)][remote_peer_id(32)]
  *   包头: type=0x88, flags=0, seq=0
  *   客户端主动断开时发送，请求服务器立即释放配对槽位
- *   服务器收到后会向对端发送 PEER_OFF 通知
+ *   服务器收到后会向对端发送 FIN 通知
  *
  * ALIVE:
  *   payload: [session_id(8)]
@@ -505,14 +505,14 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   包头: type=0x87, flags=0, seq=0
  *   服务器回复确认，表示槽位仍然有效
  *
- * PEER_OFF:
+ * FIN:
  *   payload: [session_id(8)]
- *   包头: type=0x89, flags=0, seq=0
+ *   包头: type=0x85, flags=0, seq=0
  *   服务器下行通知：对端已离线/断开连接
  *   - session_id: 已断开的会话 ID（网络字节序，64位）
  *   客户端收到此包后应停止该会话的所有传输和重传
  *
- * PEER_INFO:
+ * SYNC:
  *   payload: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*23)]
  *   包头: type=0x84, flags=见下, seq=序列号
  *   - session_id: 会话 ID（网络字节序，64位，来自 REGISTER_ACK）
@@ -523,15 +523,15 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *       * base_index 作为 8 位循环通知序号（1..255 循环）
  *       * 接收端按循环序比较新旧，旧通知可忽略但仍需 ACK
  *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用 REGISTER_ACK 中的 session_id
- *   - flags: 包头的 flags 字段可设置 SIG_PEER_INFO_FIN (0x01) 表示候选列表发送完毕
+ *   - flags: 包头的 flags 字段可设置 SIG_SYNC_FIN (0x01) 表示候选列表发送完毕
  *   - seq 窗口: 0..16（0 为服务器首包，1..16 为后续候选批次）
  *   - 乱序处理: 允许 seq>0 先于 seq=0 到达；接收端按序号位图去重，重复包仅 ACK 不重复入表
  *
- * PEER_INFO_ACK:
+ * SYNC_ACK:
  *   payload: [session_id(8)]
- *   包头: type=0x85, flags=0, seq=确认的 PEER_INFO 序列号
+ *   包头: type=0x85, flags=0, seq=确认的 SYNC 序列号
  *   - session_id: 会话 ID（网络字节序，64位）
- *   - seq: 确认的 PEER_INFO 序列号（0 表示确认服务器下发的 PEER_INFO(seq=0)）
+ *   - seq: 确认的 SYNC 序列号（0 表示确认服务器下发的 SYNC(seq=0)）
  *   - seq 窗口: 0..16（客户端接收端仅接受 1..16）
  *
  * NAT_PROBE:
@@ -747,11 +747,11 @@ typedef struct {
  *   - session_id 用于会话隔离与服务器路由（转发到配对会话）。
  *   - 服务器零拷贝转发，仅重写 session_id，不解析内层 P2P hdr。
  */
-#define P2P_RLY_DATA_PSZ(n)        (P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE + (n))
+#define P2P_RLY_DATA_PSZ(n)         (P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE + (n))
 
 /* P2P_RLY_REQ / P2P_RLY_RESP 最小负载长度（session_id + sid + msg/code = 11 字节） */
-#define P2P_RLY_REQ_MIN_PSZ        (P2P_RLY_SESS_ID_PSZ + 3)
-#define P2P_RLY_RESP_MIN_PSZ       (P2P_RLY_SESS_ID_PSZ + 3)
+#define P2P_RLY_REQ_MIN_PSZ         (P2P_RLY_SESS_ID_PSZ + 3)
+#define P2P_RLY_RESP_MIN_PSZ        (P2P_RLY_SESS_ID_PSZ + 3)
 
 /* P2P_RLY_REQ / P2P_RLY_RESP — 基于会话的 MSG RPC
  *

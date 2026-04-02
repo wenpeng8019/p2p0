@@ -92,8 +92,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F271] = "ONLINE: duplicate from '%s'\n",  /* SID:271 */
     [LA_F272] = "ONLINE_ACK sent to '%s'\n",  /* SID:272 */
     [LA_F61] = "P2P Signaling Server listening on port %d (TCP + UDP)...\n",  /* SID:61 */
-    [LA_F62] = "PEER_INFO resent, %s <-> %s, attempt %d/%d (ses_id=%llu)\n",  /* SID:62 */
-    [LA_F63] = "PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:63 */
+    [LA_F62] = "SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%llu)\n",  /* SID:62 */
+    [LA_F63] = "SYNC retransmit failed: %s <-> %s (gave up after %d tries)\n",  /* SID:63 */
     [LA_F64] = "Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n",  /* SID:64 */
     [LA_F65] = "Relay %s seq=%u: '%s' -> '%s' (ses_id=%llu)\n",  /* SID:65 */
     [LA_F66] = "Relay support: %s\n",  /* SID:66 */

@@ -393,12 +393,12 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
     return 0;
 }
 
-// 构造 PEER_INFO_ACK 包
+// 构造 SYNC_ACK 包
 // 协议: [hdr(4)][session_id(8)]
-static int build_peer_info_ack(uint8_t *buf, int buf_size, uint64_t session_id, uint16_t seq) {
+static int build_sync_ack(uint8_t *buf, int buf_size, uint64_t session_id, uint16_t seq) {
     if (buf_size < 4 + 8) return -1;
     
-    buf[0] = SIG_PKT_PEER_INFO_ACK;
+    buf[0] = SIG_PKT_SYNC_ACK;
     buf[1] = 0;  // flags
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
@@ -430,7 +430,7 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt_out) {
     struct sockaddr_in from;
     socklen_t from_len = sizeof(from);
     
-    // 可能需要跳过 PEER_INFO 等其他包
+    // 可能需要跳过 SYNC 等其他包
     for (int i = 0; i < 5; i++) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
@@ -448,7 +448,7 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt_out) {
     return 0;
 }
 
-// 消费所有待处理的 PEER_INFO 等包，并发送 ACK
+// 消费所有待处理的 SYNC 等包，并发送 ACK
 static void drain_pending_packets(sock_t sock) {
     P_sock_rcvtimeo(sock, 500);
     uint8_t recv_buf[512];
@@ -466,8 +466,8 @@ static void drain_pending_packets(sock_t sock) {
                               (struct sockaddr*)&from, &from_len);
         if (n <= 0) break;
         
-        // 如果是 PEER_INFO，发送 ACK
-        if (n >= 14 && recv_buf[0] == SIG_PKT_PEER_INFO) {
+        // 如果是 SYNC，发送 ACK
+        if (n >= 14 && recv_buf[0] == SIG_PKT_SYNC) {
             uint16_t seq = ((uint16_t)recv_buf[2] << 8) | recv_buf[3];
             uint64_t session_id = 0;
             for (int j = 0; j < 8; j++) {
@@ -475,7 +475,7 @@ static void drain_pending_packets(sock_t sock) {
             }
             
             uint8_t ack[16];
-            int ack_len = build_peer_info_ack(ack, sizeof(ack), session_id, seq);
+            int ack_len = build_sync_ack(ack, sizeof(ack), session_id, seq);
             sendto(sock, (const char*)ack, ack_len, 0,
                    (struct sockaddr*)&server_addr, sizeof(server_addr));
         }
@@ -546,7 +546,7 @@ static void test_relay_data_forwarded(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -620,7 +620,7 @@ static void test_relay_ack_forwarded(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -685,7 +685,7 @@ static void test_relay_crypto_forwarded(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -900,7 +900,7 @@ static void test_relay_bidirectional(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     

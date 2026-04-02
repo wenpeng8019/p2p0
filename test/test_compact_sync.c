@@ -1,18 +1,18 @@
 /*
- * test_compact_peer_info.c - COMPACT PEER_INFO 协议单元测试
+ * test_compact_sync.c - COMPACT SYNC 协议单元测试
  *
  * ============================================================================
  * 测试目标
  * ============================================================================
- * 验证 p2p_server 对 COMPACT 协议 PEER_INFO/PEER_INFO_ACK 包的处理逻辑
+ * 验证 p2p_server 对 COMPACT 协议 SYNC/SYNC_ACK 包的处理逻辑
  *
  * ============================================================================
  * 测试方法
  * ============================================================================
  * 1. 启动 p2p_server 子进程，监听指定端口
  * 2. 通过 instrument 机制收集 server 的实时日志
- * 3. 客户端注册配对后，验证 server 发送 PEER_INFO(seq=0) 包
- * 4. 发送 PEER_INFO_ACK 确认，验证 server 停止重传
+ * 3. 客户端注册配对后，验证 server 发送 SYNC(seq=0) 包
+ * 4. 发送 SYNC_ACK 确认，验证 server 停止重传
  *
  * ============================================================================
  * 测试用例分类
@@ -21,41 +21,41 @@
  * 一、正常功能测试（验证满足各种需求场景）
  * ---------------------------------------------------------------------------
  *
- * 测试 1: peer_info_on_pairing
- *   目标：验证配对完成后 server 向双方发送 PEER_INFO
+ * 测试 1: sync_on_pairing
+ *   目标：验证配对完成后 server 向双方发送 SYNC
  *   方法：Alice 注册等待 Bob → Bob 注册等待 Alice
  *   预期：
- *     - 双方配对后各收到 PEER_INFO(seq=0)
- *     - PEER_INFO 包含正确的 session_id 和候选地址
+ *     - 双方配对后各收到 SYNC(seq=0)
+ *     - SYNC 包含正确的 session_id 和候选地址
  *     - server 日志含 "Pairing complete"
  *
- * 测试 2: peer_info_ack_stops_retransmit
+ * 测试 2: sync_ack_stops_retransmit
  *   目标：验证客户端发送 ACK 后 server 停止重传
- *   方法：配对后发送 PEER_INFO_ACK(seq=0)
+ *   方法：配对后发送 SYNC_ACK(seq=0)
  *   预期：
  *     - server 日志含 "confirmed"
- *     - 不再收到重传的 PEER_INFO
+ *     - 不再收到重传的 SYNC
  *
- * 测试 3: peer_info_with_candidates
- *   目标：验证 server 在 PEER_INFO 中包含对端候选地址
- *   方法：Alice 注册时携带候选地址 → Bob 配对后收到 PEER_INFO
+ * 测试 3: sync_with_candidates
+ *   目标：验证 server 在 SYNC 中包含对端候选地址
+ *   方法：Alice 注册时携带候选地址 → Bob 配对后收到 SYNC
  *   预期：
- *     - Bob 收到的 PEER_INFO 包含 Alice 的候选列表
+ *     - Bob 收到的 SYNC 包含 Alice 的候选列表
  *     - candidate_count >= 2（至少公网地址 + Alice 注册的候选）
  *
  * 二、失败验证测试（各种异常输入的防御）
  * ---------------------------------------------------------------------------
  *
- * 测试 4: peer_info_ack_bad_payload
- *   目标：验证 server 对畸形 PEER_INFO_ACK 包的防御
- *   方法：发送 payload 过短的 PEER_INFO_ACK 包
+ * 测试 4: sync_ack_bad_payload
+ *   目标：验证 server 对畸形 SYNC_ACK 包的防御
+ *   方法：发送 payload 过短的 SYNC_ACK 包
  *   预期：
  *     - server 日志含 "bad payload"
- *     - 继续正常重传 PEER_INFO
+ *     - 继续正常重传 SYNC
  *
- * 测试 5: peer_info_ack_invalid_session
+ * 测试 5: sync_ack_invalid_session
  *   目标：验证 server 对无效 session_id 的处理
- *   方法：发送包含错误 session_id 的 PEER_INFO_ACK
+ *   方法：发送包含错误 session_id 的 SYNC_ACK
  *   预期：
  *     - server 日志含 "unknown ses_id"
  *     - 不影响正常配对的重传
@@ -63,16 +63,16 @@
  * 三、边界/临界态测试（状态转换与幂等性）
  * ---------------------------------------------------------------------------
  *
- * 测试 6: peer_info_retransmit
- *   目标：验证 server 在无 ACK 时正确重传 PEER_INFO
+ * 测试 6: sync_retransmit
+ *   目标：验证 server 在无 ACK 时正确重传 SYNC
  *   方法：配对后不发送 ACK，等待重传
  *   预期：
- *     - 收到多次 PEER_INFO(seq=0)
+ *     - 收到多次 SYNC(seq=0)
  *     - server 日志含 "resent" 或 "retransmit"
  *
- * 测试 7: peer_info_ack_duplicate
+ * 测试 7: sync_ack_duplicate
  *   目标：验证重复 ACK 是幂等操作
- *   方法：发送两次相同的 PEER_INFO_ACK
+ *   方法：发送两次相同的 SYNC_ACK
  *   预期：
  *     - 两次都被接受
  *     - 不触发异常
@@ -83,10 +83,10 @@
  * 依赖：p2p_server 可执行文件（需支持 instrument 日志）
  * 
  * 用法：
- *   ./test_compact_peer_info <server_path> [port]
+ *   ./test_compact_sync <server_path> [port]
  *
  * 示例：
- *   ./test_compact_peer_info ./p2p_server 9333
+ *   ./test_compact_sync ./p2p_server 9333
  */
 
 #define MOD_TAG "TEST"
@@ -216,12 +216,12 @@ static int build_register(uint8_t *buf, int buf_size,
     return n;
 }
 
-// 构造 PEER_INFO_ACK 包
+// 构造 SYNC_ACK 包
 // 协议: [hdr(4)][session_id(8)]
-static int build_peer_info_ack(uint8_t *buf, int buf_size, uint64_t session_id, uint16_t seq) {
+static int build_sync_ack(uint8_t *buf, int buf_size, uint64_t session_id, uint16_t seq) {
     if (buf_size < 4 + 8) return -1;
     
-    buf[0] = SIG_PKT_PEER_INFO_ACK;
+    buf[0] = SIG_PKT_SYNC_ACK;
     buf[1] = 0;  // flags
     buf[2] = (seq >> 8) & 0xFF;   // seq high (network order)
     buf[3] = seq & 0xFF;          // seq low
@@ -234,21 +234,21 @@ static int build_peer_info_ack(uint8_t *buf, int buf_size, uint64_t session_id, 
     return 12;
 }
 
-// PEER_INFO 解析结果
+// SYNC 解析结果
 typedef struct {
     int received;
     uint64_t session_id;
     uint8_t base_index;
     uint8_t candidate_count;
     p2p_candidate_t candidates[16];
-} peer_info_t;
+} sync_t;
 
-// 解析 PEER_INFO 包
-static void parse_peer_info(const uint8_t *buf, int len, peer_info_t *info) {
+// 解析 SYNC 包
+static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
     memset(info, 0, sizeof(*info));
     
     if (len < 4 + 8 + 1 + 1) return;  // header + session_id + base_index + count
-    if (buf[0] != SIG_PKT_PEER_INFO) return;
+    if (buf[0] != SIG_PKT_SYNC) return;
     
     info->received = 1;
     
@@ -302,10 +302,10 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
     return 0;
 }
 
-// 发送 PEER_INFO_ACK
-static void send_peer_info_ack(sock_t sock, uint64_t session_id, uint16_t seq) {
+// 发送 SYNC_ACK
+static void send_sync_ack(sock_t sock, uint64_t session_id, uint16_t seq) {
     uint8_t pkt[16];
-    int len = build_peer_info_ack(pkt, sizeof(pkt), session_id, seq);
+    int len = build_sync_ack(pkt, sizeof(pkt), session_id, seq);
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -321,9 +321,9 @@ static void send_peer_info_ack(sock_t sock, uint64_t session_id, uint16_t seq) {
 // 测试用例
 ///////////////////////////////////////////////////////////////////////////////
 
-// 测试 1: 配对时收到 PEER_INFO
-static void test_peer_info_on_pairing(void) {
-    const char *TEST_NAME = "peer_info_on_pairing";
+// 测试 1: 配对时收到 SYNC
+static void test_sync_on_pairing(void) {
+    const char *TEST_NAME = "sync_on_pairing";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -361,7 +361,7 @@ static void test_peer_info_on_pairing(void) {
     }
     printf("    Bob session_id: 0x%llx\n", (unsigned long long)session_bob);
     
-    // 等待并接收 PEER_INFO
+    // 等待并接收 SYNC
     P_sock_rcvtimeo(sock_alice, RECV_TIMEOUT_MS);
     P_sock_rcvtimeo(sock_bob, RECV_TIMEOUT_MS);
     
@@ -369,27 +369,27 @@ static void test_peer_info_on_pairing(void) {
     struct sockaddr_in from;
     socklen_t from_len;
     
-    peer_info_t info_alice = {0};
-    peer_info_t info_bob = {0};
+    sync_t info_alice = {0};
+    sync_t info_bob = {0};
     
-    // Alice 接收 PEER_INFO（可能先收到 REGISTER_ACK 更新，跳过）
+    // Alice 接收 SYNC（可能先收到 REGISTER_ACK 更新，跳过）
     for (int i = 0; i < 3; i++) {
         from_len = sizeof(from);
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_PEER_INFO) {
-            parse_peer_info(recv_buf, (int)n, &info_alice);
+        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+            parse_sync(recv_buf, (int)n, &info_alice);
             break;
         }
     }
     
-    // Bob 接收 PEER_INFO
+    // Bob 接收 SYNC
     for (int i = 0; i < 3; i++) {
         from_len = sizeof(from);
         ssize_t n = recvfrom(sock_bob, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_PEER_INFO) {
-            parse_peer_info(recv_buf, (int)n, &info_bob);
+        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+            parse_sync(recv_buf, (int)n, &info_bob);
             break;
         }
     }
@@ -400,17 +400,17 @@ static void test_peer_info_on_pairing(void) {
     P_usleep(100 * 1000);
     
     if (!info_alice.received || !info_bob.received) {
-        TEST_FAIL(TEST_NAME, "PEER_INFO not received by both peers");
+        TEST_FAIL(TEST_NAME, "SYNC not received by both peers");
         return;
     }
     
     if (info_alice.session_id != session_alice) {
-        TEST_FAIL(TEST_NAME, "Alice PEER_INFO session_id mismatch");
+        TEST_FAIL(TEST_NAME, "Alice SYNC session_id mismatch");
         return;
     }
     
     if (info_bob.session_id != session_bob) {
-        TEST_FAIL(TEST_NAME, "Bob PEER_INFO session_id mismatch");
+        TEST_FAIL(TEST_NAME, "Bob SYNC session_id mismatch");
         return;
     }
     
@@ -423,8 +423,8 @@ static void test_peer_info_on_pairing(void) {
 }
 
 // 测试 2: ACK 停止重传
-static void test_peer_info_ack_stops_retransmit(void) {
-    const char *TEST_NAME = "peer_info_ack_stops_retransmit";
+static void test_sync_ack_stops_retransmit(void) {
+    const char *TEST_NAME = "sync_ack_stops_retransmit";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -451,18 +451,18 @@ static void test_peer_info_ack_stops_retransmit(void) {
         return;
     }
     
-    // 接收 PEER_INFO
+    // 接收 SYNC
     P_sock_rcvtimeo(sock_alice, RECV_TIMEOUT_MS);
     uint8_t recv_buf[256];
     struct sockaddr_in from;
     socklen_t from_len = sizeof(from);
     
-    peer_info_t info = {0};
+    sync_t info = {0};
     for (int i = 0; i < 3; i++) {
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_PEER_INFO) {
-            parse_peer_info(recv_buf, (int)n, &info);
+        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+            parse_sync(recv_buf, (int)n, &info);
             break;
         }
     }
@@ -470,18 +470,18 @@ static void test_peer_info_ack_stops_retransmit(void) {
     if (!info.received) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "PEER_INFO not received");
+        TEST_FAIL(TEST_NAME, "SYNC not received");
         return;
     }
     
     clear_logs();
     
     // 发送 ACK
-    send_peer_info_ack(sock_alice, session_alice, 0);
+    send_sync_ack(sock_alice, session_alice, 0);
     
     P_usleep(200 * 1000);
     
-    // 等待超过重传间隔，不应再收到 PEER_INFO
+    // 等待超过重传间隔，不应再收到 SYNC
     P_sock_rcvtimeo(sock_alice, RETRANSMIT_WAIT_MS);
     ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                           (struct sockaddr*)&from, &from_len);
@@ -489,17 +489,17 @@ static void test_peer_info_ack_stops_retransmit(void) {
     P_sock_close(sock_alice);
     P_sock_close(sock_bob);
     
-    if (n > 0 && recv_buf[0] == SIG_PKT_PEER_INFO) {
-        TEST_FAIL(TEST_NAME, "should not receive PEER_INFO after ACK");
+    if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+        TEST_FAIL(TEST_NAME, "should not receive SYNC after ACK");
         return;
     }
     
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 3: PEER_INFO 包含对端候选地址
-static void test_peer_info_with_candidates(void) {
-    const char *TEST_NAME = "peer_info_with_candidates";
+// 测试 3: SYNC 包含对端候选地址
+static void test_sync_with_candidates(void) {
+    const char *TEST_NAME = "sync_with_candidates";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -538,18 +538,18 @@ static void test_peer_info_with_candidates(void) {
         return;
     }
     
-    // Bob 接收 PEER_INFO（应包含 Alice 的候选）
+    // Bob 接收 SYNC（应包含 Alice 的候选）
     P_sock_rcvtimeo(sock_bob, RECV_TIMEOUT_MS);
     uint8_t recv_buf[256];
     struct sockaddr_in from;
     socklen_t from_len = sizeof(from);
     
-    peer_info_t info = {0};
+    sync_t info = {0};
     for (int i = 0; i < 3; i++) {
         ssize_t n = recvfrom(sock_bob, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_PEER_INFO) {
-            parse_peer_info(recv_buf, (int)n, &info);
+        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+            parse_sync(recv_buf, (int)n, &info);
             break;
         }
     }
@@ -558,7 +558,7 @@ static void test_peer_info_with_candidates(void) {
     P_sock_close(sock_bob);
     
     if (!info.received) {
-        TEST_FAIL(TEST_NAME, "PEER_INFO not received");
+        TEST_FAIL(TEST_NAME, "SYNC not received");
         return;
     }
     
@@ -574,9 +574,9 @@ static void test_peer_info_with_candidates(void) {
     printf("    Bob received %d candidates from Alice\n", info.candidate_count);
 }
 
-// 测试 4: 畸形 PEER_INFO_ACK 包
-static void test_peer_info_ack_bad_payload(void) {
-    const char *TEST_NAME = "peer_info_ack_bad_payload";
+// 测试 4: 畸形 SYNC_ACK 包
+static void test_sync_ack_bad_payload(void) {
+    const char *TEST_NAME = "sync_ack_bad_payload";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -585,9 +585,9 @@ static void test_peer_info_ack_bad_payload(void) {
     uint8_t drain_buf[256];
     while (recvfrom(g_sock, (char*)drain_buf, sizeof(drain_buf), 0, NULL, NULL) > 0);
     
-    // 构造太短的 PEER_INFO_ACK 包
+    // 构造太短的 SYNC_ACK 包
     uint8_t pkt[8];
-    pkt[0] = SIG_PKT_PEER_INFO_ACK;
+    pkt[0] = SIG_PKT_SYNC_ACK;
     pkt[1] = 0;
     pkt[2] = 0;
     pkt[3] = 0;
@@ -613,14 +613,14 @@ static void test_peer_info_ack_bad_payload(void) {
 }
 
 // 测试 5: 无效 session_id 的 ACK
-static void test_peer_info_ack_invalid_session(void) {
-    const char *TEST_NAME = "peer_info_ack_invalid_session";
+static void test_sync_ack_invalid_session(void) {
+    const char *TEST_NAME = "sync_ack_invalid_session";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
     // 发送包含无效 session_id 的 ACK
     uint64_t fake_session = 0x1234567890ABCDEF;
-    send_peer_info_ack(g_sock, fake_session, 0);
+    send_sync_ack(g_sock, fake_session, 0);
     
     P_usleep(100 * 1000);
     
@@ -629,9 +629,9 @@ static void test_peer_info_ack_invalid_session(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 6: PEER_INFO 重传
-static void test_peer_info_retransmit(void) {
-    const char *TEST_NAME = "peer_info_retransmit";
+// 测试 6: SYNC 重传
+static void test_sync_retransmit(void) {
+    const char *TEST_NAME = "sync_retransmit";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -658,30 +658,30 @@ static void test_peer_info_retransmit(void) {
         return;
     }
     
-    // 接收第一个 PEER_INFO
+    // 接收第一个 SYNC
     P_sock_rcvtimeo(sock_alice, RECV_TIMEOUT_MS);
     uint8_t recv_buf[256];
     struct sockaddr_in from;
     socklen_t from_len = sizeof(from);
     
-    int peer_info_count = 0;
+    int sync_count = 0;
     for (int i = 0; i < 3; i++) {
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_PEER_INFO) {
-            peer_info_count++;
+        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+            sync_count++;
             break;
         }
     }
     
-    if (peer_info_count == 0) {
+    if (sync_count == 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "first PEER_INFO not received");
+        TEST_FAIL(TEST_NAME, "first SYNC not received");
         return;
     }
     
-    printf("    First PEER_INFO received, waiting for retransmit...\n");
+    printf("    First SYNC received, waiting for retransmit...\n");
     
     // 不发送 ACK，等待重传
     P_sock_rcvtimeo(sock_alice, RETRANSMIT_WAIT_MS + 500);
@@ -689,16 +689,16 @@ static void test_peer_info_retransmit(void) {
                           (struct sockaddr*)&from, &from_len);
     
     // 发送 ACK 停止后续重传
-    send_peer_info_ack(sock_alice, session_alice, 0);
-    send_peer_info_ack(sock_bob, session_bob, 0);
+    send_sync_ack(sock_alice, session_alice, 0);
+    send_sync_ack(sock_bob, session_bob, 0);
     
     P_sock_close(sock_alice);
     P_sock_close(sock_bob);
     
     P_usleep(100 * 1000);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_PEER_INFO) {
-        TEST_FAIL(TEST_NAME, "retransmit PEER_INFO not received");
+    if (n <= 0 || recv_buf[0] != SIG_PKT_SYNC) {
+        TEST_FAIL(TEST_NAME, "retransmit SYNC not received");
         return;
     }
     
@@ -708,12 +708,12 @@ static void test_peer_info_retransmit(void) {
     }
     
     TEST_PASS(TEST_NAME);
-    printf("    Received %d PEER_INFO packets (first + retransmit)\n", 2);
+    printf("    Received %d SYNC packets (first + retransmit)\n", 2);
 }
 
 // 测试 7: 重复 ACK
-static void test_peer_info_ack_duplicate(void) {
-    const char *TEST_NAME = "peer_info_ack_duplicate";
+static void test_sync_ack_duplicate(void) {
+    const char *TEST_NAME = "sync_ack_duplicate";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -740,7 +740,7 @@ static void test_peer_info_ack_duplicate(void) {
         return;
     }
     
-    // 接收 PEER_INFO
+    // 接收 SYNC
     P_sock_rcvtimeo(sock_alice, RECV_TIMEOUT_MS);
     uint8_t recv_buf[256];
     struct sockaddr_in from;
@@ -749,14 +749,14 @@ static void test_peer_info_ack_duplicate(void) {
     for (int i = 0; i < 3; i++) {
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_PEER_INFO) break;
+        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) break;
     }
     
     // 发送两次 ACK
-    send_peer_info_ack(sock_alice, session_alice, 0);
+    send_sync_ack(sock_alice, session_alice, 0);
     P_usleep(100 * 1000);
     
-    send_peer_info_ack(sock_alice, session_alice, 0);
+    send_sync_ack(sock_alice, session_alice, 0);
     P_usleep(100 * 1000);
     
     P_sock_close(sock_alice);
@@ -787,7 +787,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    printf("=== COMPACT PEER_INFO Protocol Tests ===\n");
+    printf("=== COMPACT SYNC Protocol Tests ===\n");
     printf("Server path: %s\n", server_path);
     printf("Server addr: %s:%d\n", g_server_host, g_server_port);
     printf("\n");
@@ -829,17 +829,17 @@ int main(int argc, char *argv[]) {
     printf("\n[*] Running tests...\n");
     
     // 一、正常功能测试
-    test_peer_info_on_pairing();
-    test_peer_info_ack_stops_retransmit();
-    test_peer_info_with_candidates();
+    test_sync_on_pairing();
+    test_sync_ack_stops_retransmit();
+    test_sync_with_candidates();
     
     // 二、失败验证测试
-    test_peer_info_ack_bad_payload();
-    test_peer_info_ack_invalid_session();
+    test_sync_ack_bad_payload();
+    test_sync_ack_invalid_session();
     
     // 三、边界/临界态测试
-    test_peer_info_retransmit();
-    test_peer_info_ack_duplicate();
+    test_sync_retransmit();
+    test_sync_ack_duplicate();
     
     // 清理
     if (g_sock != P_INVALID_SOCKET) {

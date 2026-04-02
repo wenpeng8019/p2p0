@@ -228,7 +228,7 @@ void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
  * 主动断开 — 通过 NAT 层和信令层双通道通知对端
  *
  * NAT FIN:  UDP 直连（不可靠，重复发送提高成功率）
- * 信令 FIN: 通过信令服务器转发（COMPACT: UNREGISTER → PEER_OFF）
+ * 信令 FIN: 通过信令服务器转发（COMPACT: UNREGISTER → FIN）
  *
  * 由 p2p_close 调用；p2p_destroy 作为兜底也会调用
  */
@@ -1027,7 +1027,7 @@ p2p_update(p2p_handle_t hdl) {
                 break;
 
             // --------------------
-            // COMPACT 模式的信令包（REGISTER_ACK、PEER_INFO、PEER_INFO_ACK 等）
+            // COMPACT 模式的信令包（REGISTER_ACK、SYNC、SYNC_ACK 等）
             // --------------------
 
             case SIG_PKT_REGISTER_ACK:
@@ -1036,14 +1036,14 @@ p2p_update(p2p_handle_t hdl) {
             case SIG_PKT_ALIVE_ACK:
                 compact_on_alive_ack(s, &from);
                 break;
-            case SIG_PKT_PEER_INFO:
-                compact_on_peer_info(s, hdr.seq, hdr.flags, payload, payload_len, &from);
+            case SIG_PKT_SYNC:
+                compact_on_sync(s, hdr.seq, hdr.flags, payload, payload_len, &from);
                 break;
-            case SIG_PKT_PEER_INFO_ACK:
-                compact_on_peer_info_ack(s, hdr.seq, payload, payload_len, &from);
+            case SIG_PKT_SYNC_ACK:
+                compact_on_sync_ack(s, hdr.seq, payload, payload_len, &from);
                 break;
-            case SIG_PKT_PEER_OFF:
-                compact_on_peer_off(s, payload, payload_len, &from);
+            case SIG_PKT_FIN:
+                compact_on_fin(s, payload, payload_len, &from);
                 break;
             case SIG_PKT_NAT_PROBE_ACK:
                 compact_on_nat_probe_ack(s, hdr.seq, payload, payload_len, &from);
@@ -1187,7 +1187,7 @@ p2p_update(p2p_handle_t hdl) {
     }
 
     // 转换：CONNECTED/RELAY/LOST → CLOSED
-    // + NAT FIN 和信令 PEER_OFF 都归一化为 NAT_CLOSED，统一在此处理
+    // + NAT FIN 和信令 FIN 都归一化为 NAT_CLOSED，统一在此处理
     if (s->state >= P2P_STATE_LOST
         && s->nat.state == NAT_CLOSED) {
         peer_disconnect(s);

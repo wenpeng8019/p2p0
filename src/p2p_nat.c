@@ -1327,7 +1327,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         //    对方发往旧公网地址的包将被丢弃。
         //    恢复：本端重新向对方发送 PUNCH 即可刷新 NAT 映射。
         //          若双方同时映射失效，则需通过信令服务器重新交换地址。
-        //          若服务器支持地址动态更新维护机制（PEER_INFO seq=0 + base_index
+        //          若服务器支持地址动态更新维护机制（SYNC seq=0 + base_index
         //          地址变更通知），则无需重新 REGISTER，服务器会在 ALIVE/REGISTER
         //          包中检测到源地址变化并主动通知对端。
         //
@@ -1344,7 +1344,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         //    对方 NAT 为 Symmetric 类型，映射端口在空闲一段时间后被回收，
         //    新的出站包获得不同公网端口，旧端口失效。
         //    恢复：需要对方通过信令服务器通知新地址（地址变更通知机制，
-        //          PEER_INFO seq=0 + base_index 循环序号）。
+        //          SYNC seq=0 + base_index 循环序号）。
         //          若服务器支持地址动态更新维护机制，则对方只需继续发送
         //          ALIVE/REGISTER，服务器自动检测源地址变化并通知本端。
         //

@@ -335,12 +335,12 @@ static int wait_peer_off(sock_t sock, uint64_t *session_id_out) {
     struct sockaddr_in from;
     socklen_t from_len = sizeof(from);
     
-    // 可能需要跳过 PEER_INFO 等其他包
+    // 可能需要跳过 SYNC 等其他包
     for (int i = 0; i < 5; i++) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         
-        if (n >= 12 && recv_buf[0] == SIG_PKT_PEER_OFF) {
+        if (n >= 12 && recv_buf[0] == SIG_PKT_FIN) {
             if (session_id_out) {
                 *session_id_out = 0;
                 for (int j = 0; j < 8; j++) {
@@ -520,7 +520,7 @@ static void test_unregister_notifies_peer(void) {
         return;
     }
     
-    // 消费双方的 PEER_INFO 包
+    // 消费双方的 SYNC 包
     P_usleep(100 * 1000);
     P_sock_rcvtimeo(sock_alice, 500);
     P_sock_rcvtimeo(sock_bob, 500);
@@ -671,7 +671,7 @@ static void test_peer_off_on_reregister(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     P_usleep(100 * 1000);
     P_sock_rcvtimeo(sock_alice, 500);
     P_sock_rcvtimeo(sock_bob, 500);

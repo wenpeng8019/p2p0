@@ -177,7 +177,7 @@ enum {
     LA_F133,  /* "%s: path[%d] UP (recv DATA)" (%s,%d)  [p2p_nat.c] */
     LA_F134,  /* "%s: peer online, proceeding to ICE\n" (%s)  [p2p_signal_compact.c] */
     LA_F135,  /* "%s: peer reachable via signaling (RTT: %llu ms)" (%s,%l)  [p2p_probe.c] */
-    LA_F136,  /* "%s: peer_info0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
+    LA_F136,  /* "%s: sync0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
     LA_F137,  /* "%s: punch remote cand[%d]<%s:%d> failed\n" (%s,%d,%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F138,  /* "%s: PUNCHING → CLOSED (timeout %llums, %s signaling relay)" (%s,%l,%s)  [p2p_nat.c] */
     LA_F139,  /* "%s: punching %d/%d candidates (elapsed: %llu ms)" (%s,%d,%d,%l)  [p2p_nat.c] */
@@ -197,7 +197,7 @@ enum {
     LA_F153,  /* "%s: remote %s cand[%d]<%s:%d> accepted\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c, p2p_nat.c] */
     LA_F154,  /* "%s: remote %s cand<%s:%d> (disabled)\n" (%s,%s,%s,%d)  [p2p_nat.c] */
     _LA_155,
-    LA_F156,  /* "%s: renew session due to session_id changed by info0 (local=%llu pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
+    LA_F156,  /* "%s: renew session due to session_id changed by sync0 (local=%llu pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
     LA_F157,  /* "%s: restarting periodic check" (%s)  [p2p_probe.c] */
     LA_F158,  /* "%s: retry(%d/%d) probe\n" (%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F159,  /* "%s: retry(%d/%d) req (sid=%u)\n" (%s,%d,%d,%u)  [p2p_signal_compact.c] */
@@ -233,7 +233,7 @@ enum {
     LA_F189,  /* "%s: triggered via RELAY TUNE echo" (%s)  [p2p_probe.c] */
     LA_F190,  /* "%s: path tx UP (echo seq=%u)" (%s,%u)  [p2p_nat.c] */
     LA_F191,  /* "%s: unexpected ack_seq=%u mask=0x%04x\n" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F192,  /* "%s: unexpected non-srflx cand in peer_info0, treating as srflx\n" (%s)  [p2p_signal_compact.c] */
+    LA_F192,  /* "%s: unexpected non-srflx cand in sync0, treating as srflx\n" (%s)  [p2p_signal_compact.c] */
     LA_F193,  /* "%s: unexpected remote cand type %d, skipped\n" (%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F194,  /* "%s:%04d: %s" (%s,%s)  [p2p_dtls_mbedtls.c] */
     LA_F195,  /* "%s_ACK sent to %s:%d (try), echo_seq=%u" (%s,%s,%d,%u)  [p2p_nat.c] */
@@ -319,8 +319,8 @@ enum {
     LA_F275,  /* "% OpenSSL requested but library not linked"  [p2p.c] */
     LA_F276,  /* "Out-of-window packet discarded seq=%u base=%u" (%u,%u)  [p2p_trans_reliable.c] */
     LA_F277,  /* disabled "% P2P connected, closing signaling TCP connection" */
-    LA_F278,  /* "PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n" (%d,%u)  [p2p_signal_compact.c] */
-    LA_F279,  /* "% PEER_INFO(trickle): seq overflow, cannot trickle more\n"  [p2p_signal_compact.c] */
+    LA_F278,  /* "SYNC(trickle): batching, queued %d cand(s) for seq=%u\n" (%d,%u)  [p2p_signal_compact.c] */
+    LA_F279,  /* "% SYNC(trickle): seq overflow, cannot trickle more\n"  [p2p_signal_compact.c] */
     LA_F280,  /* "% PUBSUB (PUB): gathering candidates, waiting for STUN before publishing"  [p2p.c] */
     LA_F281,  /* "% PUBSUB (SUB): waiting for offer from any peer"  [p2p.c] */
     LA_F282,  /* "% PUBSUB mode requires gh_token and gist_id"  [p2p.c] */

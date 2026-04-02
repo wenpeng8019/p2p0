@@ -889,7 +889,7 @@ static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool 
     uint64_t session_id = nget_ll(payload);
     if (session_id != ctx->session_id) {
 
-        // SYNC0：对端重新发起连接，强制重置会话（类似 compact 的 info0 session 重置）
+        // SYNC0：对端重新发起连接，强制重置会话（类似 compact 的 sync0 session 重置）
         if (is_sync0) {
             print("W:", LA_F("%s: session renewed by peer SYNC0 (local=%" PRIu64 " recv=%" PRIu64 ")\n", LA_F580, 580),
                   PROTO, ctx->session_id, session_id);

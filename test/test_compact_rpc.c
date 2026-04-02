@@ -532,7 +532,7 @@ static int wait_msg_req_relay(sock_t sock, msg_req_relay_t *req_out) {
     struct sockaddr_in from;
     socklen_t from_len = sizeof(from);
     
-    // 可能需要跳过 PEER_INFO 等其他包
+    // 可能需要跳过 SYNC 等其他包
     for (int i = 0; i < 10; i++) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
@@ -569,7 +569,7 @@ static int wait_msg_resp(sock_t sock, msg_resp_t *resp_out) {
     return 0;
 }
 
-// 消费所有待处理的 PEER_INFO 等包
+// 消费所有待处理的 SYNC 等包
 static void drain_pending_packets(sock_t sock) {
     P_sock_rcvtimeo(sock, 200);
     uint8_t discard[512];
@@ -617,7 +617,7 @@ static void test_msg_req_ack(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -678,7 +678,7 @@ static void test_msg_req_forwarded(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -756,7 +756,7 @@ static void test_msg_resp_forwarded(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -836,7 +836,7 @@ static void test_msg_rpc_complete(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -1040,7 +1040,7 @@ static void test_msg_req_retransmit(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -1102,7 +1102,7 @@ static void test_msg_new_sid_cancels_old(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
@@ -1170,7 +1170,7 @@ static void test_msg_obsolete_sid_ignored(void) {
         return;
     }
     
-    // 消费 PEER_INFO 包
+    // 消费 SYNC 包
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     

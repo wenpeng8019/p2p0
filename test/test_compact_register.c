@@ -36,7 +36,7 @@
  *   预期：
  *     - Alice 首次收到 status=0 (PEER_OFFLINE)
  *     - Bob 注册后收到 status=1 (PEER_ONLINE)
- *     - 至少一方收到 PEER_INFO 包
+ *     - 至少一方收到 SYNC 包
  *     - 或 server 日志含 "Pairing complete"
  *
  * 测试 7: register_with_candidates
@@ -321,7 +321,7 @@ static int send_register_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_
     // 设置超时
     P_sock_rcvtimeo(g_sock, timeout_ms);
     
-    // 接收（跳过非 REGISTER_ACK 的包，如 PEER_INFO）
+    // 接收（跳过非 REGISTER_ACK 的包，如 SYNC）
     uint8_t recv_buf[256];
     struct sockaddr_in from;
     socklen_t from_len;
@@ -336,7 +336,7 @@ static int send_register_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_
             return 0;
         }
         if (recv_buf[0] == SIG_PKT_REGISTER_ACK) break;
-        // 收到其他包（如 PEER_INFO），继续接收
+        // 收到其他包（如 SYNC），继续接收
     }
     
     if (recv_buf[0] != SIG_PKT_REGISTER_ACK) {
@@ -480,31 +480,31 @@ static void test_register_peer_online(void) {
     printf("    Bob registered, session_id=0x%016llx, peer online!\n", 
            (unsigned long long)ack_bob.session_id);
     
-    // 等待 PEER_INFO 包
+    // 等待 SYNC 包
     P_usleep(200 * 1000);
     
-    // 检查是否收到 PEER_INFO（同时清空缓冲区中的其他包）
+    // 检查是否收到 SYNC（同时清空缓冲区中的其他包）
     uint8_t recv_buf[256];
-    int got_peer_info = 0;
+    int got_sync = 0;
     for (int i = 0; i < 10; i++) {
         int n = recv_packet(recv_buf, sizeof(recv_buf), 100);
         if (n <= 0) break;
-        if (recv_buf[0] == SIG_PKT_PEER_INFO) {
-            got_peer_info = 1;
-            printf("    Received PEER_INFO, len=%d\n", n);
+        if (recv_buf[0] == SIG_PKT_SYNC) {
+            got_sync = 1;
+            printf("    Received SYNC, len=%d\n", n);
         }
     }
     
     // 等待日志收集
     P_usleep(100 * 1000);
     
-    if (got_peer_info) {
-        // 收到 PEER_INFO 就说明配对成功
+    if (got_sync) {
+        // 收到 SYNC 就说明配对成功
         TEST_PASS(TEST_NAME);
         return;
     }
     
-    // PEER_INFO 可能发给 Alice 了（我们用的是 Bob 的视角），检查 server 日志
+    // SYNC 可能发给 Alice 了（我们用的是 Bob 的视角），检查 server 日志
     if (find_log("Pairing complete") >= 0) {
         TEST_PASS(TEST_NAME);
     } else {
@@ -1107,7 +1107,7 @@ static void test_register_reconnect_after_disconnect(void) {
     P_usleep(200 * 1000);
     printf("    Alice unregistered\n");
     
-    // 清空 Alice socket 缓冲区（可能有先前的 PEER_INFO）
+    // 清空 Alice socket 缓冲区（可能有先前的 SYNC）
     P_sock_rcvtimeo(sock_alice, 50);
     while (recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0, NULL, NULL) > 0);
     
@@ -1117,7 +1117,7 @@ static void test_register_reconnect_after_disconnect(void) {
     sendto(sock_alice, (const char*)pkt, len, 0,
            (struct sockaddr*)&server_addr, sizeof(server_addr));
     
-    // 循环接收直到收到 REGISTER_ACK（可能先收到 PEER_INFO）
+    // 循环接收直到收到 REGISTER_ACK（可能先收到 SYNC）
     P_sock_rcvtimeo(sock_alice, RECV_TIMEOUT_MS);
     int retry = 0;
     while (retry < 3) {

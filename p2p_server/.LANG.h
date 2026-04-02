@@ -103,8 +103,8 @@ enum {
     LA_F59,  /* "NAT probe socket listening on port %d\n" (%d)  [server.c] */
     LA_F60,  /* "NAT probe: %s (port %d)\n" (%s,%d)  [server.c] */
     LA_F61,  /* "P2P Signaling Server listening on port %d (TCP + UDP)...\n" (%d)  [server.c] */
-    LA_F62,  /* "PEER_INFO resent, %s <-> %s, attempt %d/%d (ses_id=%llu)\n" (%s,%s,%d,%d,%l)  [server.c] */
-    LA_F63,  /* "PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
+    LA_F62,  /* "SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%llu)\n" (%s,%s,%d,%d,%l)  [server.c] */
+    LA_F63,  /* "SYNC retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
     LA_F64,  /* "Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n" (%d,%d)  [server.c] */
     LA_F65,  /* "Relay %s seq=%u: '%s' -> '%s' (ses_id=%llu)\n" (%s,%u,%s,%s,%l)  [server.c] */
     LA_F66,  /* "Relay support: %s\n" (%s)  [server.c] */

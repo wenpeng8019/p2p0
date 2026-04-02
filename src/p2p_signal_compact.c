@@ -10,11 +10,11 @@
 #include "p2p_probe.h"
 
 #define REGISTER_INTERVAL_MS            1000    /* 注册重发间隔 */
-#define PEER_INFO_INTERVAL_MS           500     /* PEER_INFO 重发间隔 */
+#define SYNC_INTERVAL_MS           500     /* SYNC 重发间隔 */
 #define MAX_REGISTER_ATTEMPTS           10      /* 最大 REGISTER 重发次数 */
 #define REGISTER_KEEPALIVE_INTERVAL_MS  20000   /* REGISTERED 状态保活重注册间隔（防服务器超时清除槽位） */
 #define TRICKLE_BATCH_MS                1000    /* TURN trickle 攒批窗口（多个 TURN 响应在此窗口内合并为一个包） */
-#define MAX_CANDS_PER_PACKET            10      /* 每个 PEER_INFO 包最大候选数 */
+#define MAX_CANDS_PER_PACKET            10      /* 每个 SYNC 包最大候选数 */
 #define NAT_PROBE_MAX_RETRIES           3       /* NAT_PROBE 最大发送次数 */
 #define NAT_PROBE_INTERVAL_MS           1000    /* NAT_PROBE 重发间隔 */
 #define ICE_TIMEOUT_MS                  30000   /* ICE 状态超时（30秒），防止永久停留 */
@@ -31,7 +31,7 @@
 #define TASK_RPC                        "RPC"
 
 /*
- * 解析 PEER_INFO 负载，追加到 session 的 remote_cands[]
+ * 解析 SYNC 负载，追加到 session 的 remote_cands[]
  * 注意：这里对方的候选列表顺序并未按对方原始顺序排序，而是 FIFO 追加到 remote_cands[] 中
  *
  * 格式: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*23)]
@@ -43,7 +43,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
     int offset = sizeof(uint64_t) + 2;  // 第一个 candidates 列表的起始位置
     p2p_remote_candidate_entry_t*c;
 
-    // 对于 peer_info0, 即由 server 维护的双方握手包
+    // 对于 sync0, 即由 server 维护的双方握手包
     if (payload[sizeof(uint64_t)]/* base_index */ == 0) {
 
         unpack_candidate(c = &s->remote_cands[0], payload + offset);
@@ -52,13 +52,13 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         // 其首个地址候选（idx=0）肯定有效，即肯定是（服务器观察到的）对方公网地址
         if ((p2p_cand_type_t)c->type != P2P_CAND_SRFLX) {
 
-            print("W:", LA_F("%s: unexpected non-srflx cand in peer_info0, treating as srflx\n", LA_F192, 192),
+            print("W:", LA_F("%s: unexpected non-srflx cand in sync0, treating as srflx\n", LA_F192, 192),
                   TASK_ICE_REMOTE);
 
             c->type = P2P_CAND_SRFLX;
         }
 
-        print("I:", LA_F("%s: peer_info0 srflx cand[%d]<%s:%d>%s\n", LA_F136, 136),
+        print("I:", LA_F("%s: sync0 srflx cand[%d]<%s:%d>%s\n", LA_F136, 136),
                         TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                         s->cfg.test_ice_srflx_off ? " (disabled)" : "");
 
@@ -75,7 +75,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
         --cand_cnt; offset += (int)sizeof(p2p_candidate_t);
     }
-    // 如果 peer_info0 以外的其他 info 包先到达，则需要保留 cand[0] 给对方（在 info0 中的）的公网地址
+    // 如果 sync0 以外的其他 info 包先到达，则需要保留 cand[0] 给对方（在 sync0 中的）的公网地址
     else if (s->remote_cand_cnt == 0 && !s->cfg.test_ice_srflx_off) {
         memset(&s->remote_cands[0], 0, sizeof(p2p_remote_candidate_entry_t));
         s->remote_cand_cnt = 1;
@@ -128,17 +128,17 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
     }
 }
 
-/* 一个 PEER_INFO 包所承载的候选数量（单位）
- * + 这里 10（字节）表示 PEER_INFO 负载头：[session_id(8)][base_index(1)][candidate_count(1)] = 10 字节
+/* 一个 SYNC 包所承载的候选数量（单位）
+ * + 这里 10（字节）表示 SYNC 负载头：[session_id(8)][base_index(1)][candidate_count(1)] = 10 字节
  *   负载头后面的剩余空间就是候选列表，通过预定义、和 MTU 上限共同限制计算得出该单位大小
  */
-#define PEER_INFO_CAND_UNIT \
+#define SYNC_CAND_UNIT \
     (((P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2) / (int)sizeof(p2p_candidate_t)) < MAX_CANDS_PER_PACKET \
      ? ((P2P_MAX_PAYLOAD - sizeof(uint64_t) - 2) / (int)sizeof(p2p_candidate_t)) \
      : MAX_CANDS_PER_PACKET)
 
 /*
- * 构建 PEER_INFO 的候选队列，返回 payload 总长度
+ * 构建 SYNC 的候选队列，返回 payload 总长度
  *
  * 格式: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*23)]
  */
@@ -149,10 +149,10 @@ static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payloa
     int base_index, cnt;
 
     // 对于 trickle 候选队列的前面部分，也就是首批一次性发送的候选队列
-    // + 此时 ICE 包的候选队列数量都是以 PEER_INFO_CAND_UNIT 为单位的
+    // + 此时 ICE 包的候选队列数量都是以 SYNC_CAND_UNIT 为单位的
     if (seq < ctx->trickle_seq_base) {
 
-        const int cand_unit = PEER_INFO_CAND_UNIT;
+        const int cand_unit = SYNC_CAND_UNIT;
         base_index = ctx->candidates_cached + (int)(seq - 1) * cand_unit;
         if (base_index > s->local_cand_cnt) base_index = s->local_cand_cnt;
 
@@ -168,9 +168,9 @@ static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payloa
         cnt = ctx->trickle_queue[seq];
     }
 
-    // 对于最后一个 PEER_INFO 包，设置 FIN 标志
+    // 对于最后一个 SYNC 包，设置 FIN 标志
     if (seq == 16 || (!s->turn_pending && base_index + cnt >= s->local_cand_cnt)) {
-        *r_flags |= SIG_PEER_INFO_FIN;
+        *r_flags |= SIG_SYNC_FIN;
     }
 
     payload[sizeof(uint64_t)] = (uint8_t)base_index;
@@ -233,11 +233,11 @@ static void send_register(p2p_session_t *s) {
 }
 
 /*
- * 在首次收到 PEER_INFO 包，且已经收到 REGISTER_ACK 的情况下，发送剩余候选队列和 FIN 包给对方
- * 注意：首次收到的 PEER_INFO 包，可能是服务器下发的 seq=0 的 PEER_INFO 包；
- *       也可能是对方发送的 seq!=1 的 PEER_INFO 包（在并发网络状况下，对方的 PEER_INFO 包可能先到达）
+ * 在首次收到 SYNC 包，且已经收到 REGISTER_ACK 的情况下，发送剩余候选队列和 FIN 包给对方
+ * 注意：首次收到的 SYNC 包，可能是服务器下发的 seq=0 的 SYNC 包；
+ *       也可能是对方发送的 seq!=1 的 SYNC 包（在并发网络状况下，对方的 SYNC 包可能先到达）
  *
- * 协议：SIG_PKT_PEER_INFO (0x03)
+ * 协议：SIG_PKT_SYNC (0x03)
  * 包头: [type=0x03 | flags=见下 | seq=1-16]
  * 负载: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
  *   - session_id: 会话 ID（网络字节序，64位）
@@ -248,7 +248,7 @@ static void send_register(p2p_session_t *s) {
  *           SIG_PKT_FLAG_FIN (0x01) 表示发送完毕
  */
 static void send_rest_candidates_and_fin(p2p_session_t *s) {
-    const char* PROTO = "PEER_INFO";
+    const char* PROTO = "SYNC";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     assert(ctx->state == SIGNAL_COMPACT_ICE && ctx->session_id);
@@ -259,7 +259,7 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
     if (cand_remain < 0) cand_remain = 0;
 
     // 至少发送一个包（即使没有剩余候选），以确保对方收到 FIN 信号
-    const int cand_unit = PEER_INFO_CAND_UNIT;
+    const int cand_unit = SYNC_CAND_UNIT;
     int pkt_cnt = cand_remain == 0 ? 1 : (cand_remain + cand_unit - 1) / cand_unit; // 单位 ceil 取整
     if (pkt_cnt >= 16) { pkt_cnt = 16;                                              // 目前协议设计最多支持 16 个包（seq=1-16）
         ctx->candidates_mask = 0xFFFFu;
@@ -285,7 +285,7 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
 
         uint8_t flags = 0; int payload_len = pack_local_candidates(s, seq, payload, &flags);
 
-        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
+        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC, flags, seq, payload, payload_len);
         if (ret < 0)
             print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
                   PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
@@ -306,7 +306,7 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
  * 向对方发送新收集到的中继候选（Trickle ICE）
  *
  * 行为：
- *   1. 在现有候选窗口后追加一个 PEER_INFO 包（seq = 已发包数 + 1）
+ *   1. 在现有候选窗口后追加一个 SYNC 包（seq = 已发包数 + 1）
  *   2. 扩展 candidates_mask，将新包纳入确认窗口
  *   3. 当所有 TURN 候选收集完毕（turn_pending==0）且候选已全部打包时，pack 自动附带 FIN
  *   4. 如果当前状态已到 READY（前序包均已确认），回退到 ICE 以等待新包确认
@@ -315,7 +315,7 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
 
 /* 将攒批累积的 trickle 候选打包发送（trickle_turn 和 tick flush 共用） */
 static void send_trickle_candidates(p2p_session_t *s) {
-    const char* PROTO = "PEER_INFO(trickle)";
+    const char* PROTO = "SYNC(trickle)";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     uint16_t seq = ctx->trickle_seq_next;
@@ -337,7 +337,7 @@ static void send_trickle_candidates(p2p_session_t *s) {
     print("I:", LA_F("%s: trickled %d cand(s), seq=%u (ses_id=%" PRIu64 ")\n", LA_F187, 187),
           PROTO, new_cands, seq, ctx->session_id);
 
-    ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
+    ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC, flags, seq, payload, payload_len);
     if (ret < 0)
         print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
@@ -356,15 +356,15 @@ static bool compact_wait_stun_candidates(p2p_session_t *s) {
 }
 
 /*
- * 周期将未确认的 PEER_INFO 包重发给对方
+ * 周期将未确认的 SYNC 包重发给对方
  *
- * 协议：SIG_PKT_PEER_INFO (0x03) - 重传机制
+ * 协议：SIG_PKT_SYNC (0x03) - 重传机制
  * 包头: [type=0x03 | flags=见下 | seq=1-16]
  * 负载: [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
- * 说明: 重发所有未收到 ACK 的 PEER_INFO 包
+ * 说明: 重发所有未收到 ACK 的 SYNC 包
  */
 static void resend_rest_candidates_and_fin(p2p_session_t *s) {
-    const char* PROTO = "PEER_INFO";
+    const char* PROTO = "SYNC";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     assert(ctx->state == SIGNAL_COMPACT_ICE && ctx->session_id);
@@ -383,7 +383,7 @@ static void resend_rest_candidates_and_fin(p2p_session_t *s) {
         uint8_t flags = 0;
         int payload_len = pack_local_candidates(s, seq, payload, &flags);
 
-        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_PEER_INFO, flags, seq, payload, payload_len);
+        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC, flags, seq, payload, payload_len);
         if (ret < 0)
             print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
                   PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
@@ -633,7 +633,7 @@ void p2p_signal_compact_trickle_candidate(p2p_session_t *s) {
 
     uint16_t seq = ctx->trickle_seq_next;
     if (seq > 16) {
-        print("W:", LA_F("PEER_INFO(trickle): seq overflow, cannot trickle more\n", LA_F279, 279));
+        print("W:", LA_F("SYNC(trickle): seq overflow, cannot trickle more\n", LA_F279, 279));
         return;
     }
 
@@ -643,7 +643,7 @@ void p2p_signal_compact_trickle_candidate(p2p_session_t *s) {
     // 攒批间隔控制（固定窗口策略）
     uint64_t now = P_tick_ms();
     if (ctx->trickle_last_pack_time && tick_diff(now, ctx->trickle_last_pack_time) < TRICKLE_BATCH_MS) {
-        print("V:", LA_F("PEER_INFO(trickle): batching, queued %d cand(s) for seq=%u\n", LA_F278, 278),
+        print("V:", LA_F("SYNC(trickle): batching, queued %d cand(s) for seq=%u\n", LA_F278, 278),
               ctx->trickle_queue[seq], seq);
         return;
     }
@@ -845,7 +845,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     uint64_t ack_session_id = nget_ll(payload + 1);
     uint8_t max_candidates = payload[13];
 
-    if (ctx->candidates_cached > max_candidates)      // 计算服务器实际缓存的候选数量，作为后续发送 PEER_INFO 包的基准
+    if (ctx->candidates_cached > max_candidates)      // 计算服务器实际缓存的候选数量，作为后续发送 SYNC 包的基准
         ctx->candidates_cached = max_candidates;
 
     // 根据服务器能力设置探测状态
@@ -871,7 +871,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         print("E:", LA_F("%s: session mismatch(local=%" PRIu64 " ack=%" PRIu64 ")\n", LA_F166, 166),
               PROTO, ctx->session_id, ack_session_id);
 
-        // 之前"提前"收到的 PEER_INFO 包都是无效的，以 REGISTER_ACK 的 ses_id 为准
+        // 之前"提前"收到的 SYNC 包都是无效的，以 REGISTER_ACK 的 ses_id 为准
         ctx->session_id = ack_session_id;
         ctx->peer_online = false;
 
@@ -889,7 +889,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
           ctx->feature_msg ? "yes" : "no");
 
     // 如果对方在线
-    // + 注意，此时对方可能已经是在线状态，也就是 SIG_PKT_PEER_INFO 可能先于 SIG_PKT_REGISTER_ACK 到达
+    // + 注意，此时对方可能已经是在线状态，也就是 SIG_PKT_SYNC 可能先于 SIG_PKT_REGISTER_ACK 到达
     if (status == SIG_REGACK_PEER_ONLINE) ctx->peer_online = true;
 
     // 标记进入 REGISTERED 状态（该状态将停止周期发送 REGISTER）
@@ -923,7 +923,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     // 如果对方在线，直接进入 ICE 阶段，发送后续候选队列和 FIN 包
     // + 这里可能存在两种情况：
-    //   1. PEER_INFO 先于 REGISTER_ACK 到达，此时先到达的 PEER_INFO 会先将 peer_online 标记为 true
+    //   1. SYNC 先于 REGISTER_ACK 到达，此时先到达的 SYNC 会先将 peer_online 标记为 true
     //      注意，并发场景下，此时 REGISTER_ACK 可能并未携带 SIG_REGACK_PEER_ONLINE 标识
     //   2. REGISTER_ACK 先到达，且携带 SIG_REGACK_PEER_ONLINE 标识，此时直接标记 peer_online 为 true
     if (ctx->peer_online) {
@@ -977,9 +977,9 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
 }
 
 /*
- * 处理 PEER_INFO，对端发送过来的对端的候选地址信息
+ * 处理 SYNC，对端发送过来的对端的候选地址信息
  *
- * 协议：SIG_PKT_PEER_INFO (0x83)
+ * 协议：SIG_PKT_SYNC (0x83)
  * 包头: [type=0x83 | flags=见下 | seq=序列号]
  * 负载: [session_id(8) | base_index(1) | candidate_count(1) | candidates(N*7)]
  *   - session_id: 会话 ID（网络字节序，64位）
@@ -987,12 +987,12 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
  *   - candidate_count: 本批候选数量，0 表示结束标识
  *   - seq=0: 服务器发送，包含缓存的对端候选，首次分配 session_id
  *   - seq>0: 客户端发送，继续同步剩余候选
- *   - flags: SIG_PEER_INFO_FIN (0x01) 表示候选列表发送完毕
+ *   - flags: SIG_SYNC_FIN (0x01) 表示候选列表发送完毕
  */
-void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
+void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
                           const uint8_t *payload, int len,
                           const struct sockaddr_in *from) {
-    const char* PROTO = "PEER_INFO";
+    const char* PROTO = "SYNC";
 
     printf(LA_F("[UDP] %s recv from %s:%d, seq=%u, flags=0x%02x, len=%d\n", LA_F391, 391),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, flags, len);
@@ -1013,8 +1013,8 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    // 服务器发送的第一个 PEER_INFO，至少有一个对方公网的候选地址，且肯定不带 FIN 标识
-    if (seq == 0 && (!cand_cnt || (flags & SIG_PEER_INFO_FIN))) {
+    // 服务器发送的第一个 SYNC，至少有一个对方公网的候选地址，且肯定不带 FIN 标识
+    if (seq == 0 && (!cand_cnt || (flags & SIG_SYNC_FIN))) {
         print("E:", LA_F("%s seq=0: invalid(cand_cnt=%d flags=0x%02x)\n", LA_F64, 64), PROTO, cand_cnt, flags);
         return;
     }
@@ -1035,18 +1035,18 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     uint8_t base_index = payload[sizeof(uint64_t)];
 
-    // 并行网络中，PEER_INFO 可能先于 REGISTER_ACK 到达，所以此时 session_id 可能还未设置
+    // 并行网络中，SYNC 可能先于 REGISTER_ACK 到达，所以此时 session_id 可能还未设置
     if (!ctx->session_id) ctx->session_id = session_id;
 
     // 如果 session_id 不一致
     else if (ctx->session_id != session_id) {
 
-        // 对于 info0 包，意味着对方可能重新发起连接了（例如对端崩溃重启）
+        // 对于 sync0 包，意味着对方可能重新发起连接了（例如对端崩溃重启）
         // ! 根据协议，对方将自己的 session 重置，并不会影响自己和信令服务之间的连接和数据状态
         if (seq == 0 && base_index == 0) {
 
             // 此时本端只能被迫强制重连
-            print("W:", LA_F("%s: renew session due to session_id changed by info0 (local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F156, 156),
+            print("W:", LA_F("%s: renew session due to session_id changed by sync0 (local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F156, 156),
                   PROTO, ctx->session_id, session_id);
 
             // 如果 p2p 之前已经连接成功过，即业务层可能已经完成部分通讯
@@ -1093,7 +1093,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     bool new_seq = false;
 
-    // seq!=0 说明是对端发来的后续 PEER_INFO 包
+    // seq!=0 说明是对端发来的后续 SYNC 包
     if (seq != 0) {
 
         print("V:", LA_F("%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n", LA_F92, 92), PROTO, seq, cand_cnt, flags);
@@ -1102,7 +1102,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         if ((new_seq = (ctx->remote_candidates_done & (1u << (seq - 1))) == 0)) {
 
             // 对于 FIN 包，计算对方候选地址集合序列掩码（即计算全集区间）
-            if ((flags & SIG_PEER_INFO_FIN) || !cand_cnt) {
+            if ((flags & SIG_SYNC_FIN) || !cand_cnt) {
 
                 ctx->remote_candidates_mask = (1u << seq) - 1u;
             }
@@ -1120,8 +1120,8 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
             ctx->remote_candidates_done |= 1u << (seq - 1);
         }
     }
-    // seq=0 则是服务器维护的 PEER_INFO 包（可能是首个 info0，也可能是对端的公网地址变更通知）
-    // base_index = 0 意味着首个 info0
+    // seq=0 则是服务器维护的 SYNC 包（可能是首个 sync0，也可能是对端的公网地址变更通知）
+    // base_index = 0 意味着首个 sync0
     else if (base_index == 0) {
 
         print("V:", LA_F("%s seq=0: accepted cand_cnt=%d\n", LA_F63, 63), PROTO, cand_cnt);
@@ -1129,8 +1129,8 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         // 排重
         if (!ctx->remote_candidates_0) {
 
-            // 维护分配远端候选列表的空间（作为首个 PEER_INFO 包，候选队列基准 base_index 肯定是 0）
-            // + 注意，seq=0 的 PEER_INFO 包的 base_index 字段值可以不为 0（协议上 base_index !=0 说明是对方公网地址发生变更的通知）
+            // 维护分配远端候选列表的空间（作为首个 SYNC 包，候选队列基准 base_index 肯定是 0）
+            // + 注意，seq=0 的 SYNC 包的 base_index 字段值可以不为 0（协议上 base_index !=0 说明是对方公网地址发生变更的通知）
             if (p2p_remote_cands_reserve(s, cand_cnt) != E_NONE) {
                 print("E:", LA_F("Failed to reserve remote candidates (cnt=%d)\n", LA_F245, 245), cand_cnt);
                 return;
@@ -1143,7 +1143,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
         }
     }
     // base_index!=0 说明是对方公网地址变更通知。此时 pkt 必须只携带一个候选地址（即变更后的公网地址），且不带 FIN 标识
-    else if (cand_cnt != 1 || (flags & SIG_PEER_INFO_FIN)) {
+    else if (cand_cnt != 1 || (flags & SIG_SYNC_FIN)) {
 
         print("E:", LA_F("%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n", LA_F48, 48),
               PROTO, base_index, cand_cnt, flags);
@@ -1228,14 +1228,14 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
     }
 
     /*
-     * 发送 PEER_INFO_ACK 确认包
+     * 发送 SYNC_ACK 确认包
      * 说明: 确认收到对方的候选地址包
      *
-     * 协议：SIG_PKT_PEER_INFO_ACK (0x04)
-     * 包头: [type=0x04 | flags=0 | seq=被确认的PEER_INFO包序号]
+     * 协议：SIG_PKT_SYNC_ACK (0x04)
+     * 包头: [type=0x04 | flags=0 | seq=被确认的SYNC包序号]
      * 负载: [session_id(8)]
      *   - session_id: 会话 ID（网络字节序，64位）
-     *   - seq: 被确认的 PEER_INFO 包的序列号
+     *   - seq: 被确认的 SYNC 包的序列号
      */
     {
         uint8_t ack_payload[sizeof(uint64_t)];
@@ -1243,7 +1243,7 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
         print("V:", LA_F("%s_ACK sent, seq=%u (ses_id=%" PRIu64 ")\n", LA_F196, 196), PROTO, seq, ctx->session_id);
 
-        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_PEER_INFO_ACK, 0, seq, ack_payload,
+        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC_ACK, 0, seq, ack_payload,
                                         sizeof(ack_payload));
         if (ret < 0)
             print("E:", LA_F("[UDP] %s_ACK send to %s:%d failed(%d)\n", LA_F398, 398), 
@@ -1256,18 +1256,18 @@ void compact_on_peer_info(struct p2p_session *s, uint16_t seq, uint8_t flags,
 }
 
 /*
- * 处理 PEER_INFO_ACK，对端确认已收到自己发过去的候选地址信息
+ * 处理 SYNC_ACK，对端确认已收到自己发过去的候选地址信息
  *
- * 协议：SIG_PKT_PEER_INFO_ACK (0x84)
- * 包头: [type=0x84 | flags=0 | seq=确认的 PEER_INFO 序列号]
+ * 协议：SIG_PKT_SYNC_ACK (0x84)
+ * 包头: [type=0x84 | flags=0 | seq=确认的 SYNC 序列号]
  * 负载: [session_id(8)]
  *   - session_id: 会话 ID（网络字节序，64位）
- *   - seq: 确认的 PEER_INFO 序列号（0 表示确认服务器下发的 PEER_INFO(seq=0)）
+ *   - seq: 确认的 SYNC 序列号（0 表示确认服务器下发的 SYNC(seq=0)）
  */
-void compact_on_peer_info_ack(struct p2p_session *s, uint16_t seq,
+void compact_on_sync_ack(struct p2p_session *s, uint16_t seq,
                                const uint8_t *payload, int len,
                                const struct sockaddr_in *from) {
-    const char* PROTO = "PEER_INFO_ACK";
+    const char* PROTO = "SYNC_ACK";
 
     printf(LA_F("[UDP] %s recv from %s:%d, seq=%u, len=%d\n", LA_F392, 392),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, len);
@@ -1316,16 +1316,16 @@ void compact_on_peer_info_ack(struct p2p_session *s, uint16_t seq,
 }
 
 /*
- * 处理 PEER_OFF，对端离线通知
+ * 处理 FIN，对端离线通知
  *
- * 协议：SIG_PKT_PEER_OFF (0x85)
+ * 协议：SIG_PKT_FIN (0x85)
  * 包头: [type=0x85 | flags=0 | seq=0]
  * 负载: [session_id(8)]
  *   - session_id: 已断开的会话 ID（网络字节序，64位）
  */
-void compact_on_peer_off(struct p2p_session *s, const uint8_t *payload, int len,
-                         const struct sockaddr_in *from) {
-    const char* PROTO = "PEER_OFF";
+void compact_on_fin(struct p2p_session *s, const uint8_t *payload, int len,
+                    const struct sockaddr_in *from) {
+    const char* PROTO = "FIN";
 
     printf(LA_F("[UDP] %s recv from %s:%d, len=%d\n", LA_F390, 390),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
@@ -2000,7 +2000,7 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
             send_trickle_candidates(s);
         }
 
-        if (tick_diff(now, ctx->last_send_time) < PEER_INFO_INTERVAL_MS) return;
+        if (tick_diff(now, ctx->last_send_time) < SYNC_INTERVAL_MS) return;
 
         print("V:", LA_F("%s, retry remaining candidates and FIN to peer\n", LA_F66, 66), TASK_ICE);
 

@@ -78,9 +78,9 @@ ARGS_PRE(cb_cn, cn,         0,   "cn",       LA_CS("Use Chinese language", LA_S1
 #define RELAY_CLIENT_TIMEOUT_S          60
 
 #define COMPACT_RETRY_INTERVAL_MS       1000    // COMPACT 模式重传检查间隔（毫秒）
-// COMPACT 模式 PEER_INFO 重传参数
-#define PEER_INFO0_RETRY_INTERVAL_MS    2000    // 重传间隔（毫秒）
-#define PEER_INFO0_MAX_RETRY            5       // 最大重传次数
+// COMPACT 模式 SYNC 重传参数
+#define SYNC0_RETRY_INTERVAL_MS    2000    // 重传间隔（毫秒）
+#define SYNC0_MAX_RETRY            5       // 最大重传次数
 
 // COMPACT 模式 MSG RPC 重传参数
 #define MSG_RPC_RETRY_INTERVAL_MS       1000    // MSG RPC 统一重传间隔（毫秒）
@@ -209,12 +209,12 @@ typedef struct compact_pair {
     uint64_t                last_active;                        // 最后活跃时间（毫秒）
     uint64_t                session_id;                         // 会话 ID（服务器分配，唯一标识一个配对，64位随机数）
 
-    // PEER_INFO(seq=0) 可靠传输（首包 + 地址变更通知）
-    int                     info0_acked;                        // 是否已收到首包 ACK，-1 表示未收到确认但已放弃
-    struct compact_pair*    info0_pending_next;                 // 待确认链表指针（-1 表示链表最后一个）
-    uint64_t                info0_sent_time;                    // 当前待确认 seq=0 最近发送时间（毫秒）
-    int                     info0_retry;                        // 当前待确认 seq=0 重传次数
-    uint8_t                 info0_base_index;                   // 当前待确认 seq=0 的 base_index（0=首包，!=0 地址变更通知）
+    // SYNC(seq=0) 可靠传输（首包 + 地址变更通知）
+    int                     sync0_acked;                        // 是否已收到首包 ACK，-1 表示未收到确认但已放弃
+    struct compact_pair*    sync0_pending_next;                 // 待确认链表指针（-1 表示链表最后一个）
+    uint64_t                sync0_sent_time;                    // 当前待确认 seq=0 最近发送时间（毫秒）
+    int                     sync0_retry;                        // 当前待确认 seq=0 重传次数
+    uint8_t                 sync0_base_index;                   // 当前待确认 seq=0 的 base_index（0=首包，!=0 地址变更通知）
 
     // MSG RPC（请求-响应机制，共用字段存储两个阶段的数据）
     uint16_t                rpc_last_sid;                       // 最后一次完成或正在执行的 RPC 序列号（0=未使用）
@@ -242,9 +242,9 @@ static compact_pair_t       g_compact_pairs[MAX_PEERS];
 static compact_pair_t*      g_pairs_by_session = NULL;         // 按 session_id 索引
 static compact_pair_t*      g_pairs_by_peer = NULL;            // 按 (local_peer_id, remote_peer_id) 索引
 
-// PEER_INFO(seq=0) 待确认链表（仅包含已发送首包但未收到 ACK 的配对）
-static compact_pair_t*      g_compact_info0_pending_head = NULL;
-static compact_pair_t*      g_compact_info0_pending_rear = NULL;
+// SYNC(seq=0) 待确认链表（仅包含已发送首包但未收到 ACK 的配对）
+static compact_pair_t*      g_compact_sync0_pending_head = NULL;
+static compact_pair_t*      g_compact_sync0_pending_rear = NULL;
 
 // MSG RPC 待确认链表（统一管理 REQ 和 RESP 阶段，通过 rpc_responding 区分）
 static compact_pair_t*      g_rpc_pending_head = NULL;
@@ -1504,14 +1504,14 @@ static void send_register_ack(sock_t udp_fd, const struct sockaddr_in *to, const
         printf(LA_F("[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n", LA_F182, 182), PROTO, to_str, hdr->flags, (int)n);     
 }
 
-// 发送 PEER_OFF 通知: [hdr(4)][session_id(8)] = 12字节
+// 发送 FIN 通知: [hdr(4)][session_id(8)] = 12字节
 // 并标记对端已断开 (peer->peer = -1)
-static void send_peer_off(sock_t udp_fd, compact_pair_t *peer, const char *reason) {
-    const char* PROTO = "PEER_OFF";
+static void send_fin(sock_t udp_fd, compact_pair_t *peer, const char *reason) {
+    const char* PROTO = "FIN";
 
     uint8_t pkt[4 + 8];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
-    hdr->type = SIG_PKT_PEER_OFF; hdr->flags = 0; hdr->seq = htons(0);
+    hdr->type = SIG_PKT_FIN; hdr->flags = 0; hdr->seq = htons(0);
     nwrite_ll(pkt + 4, peer->session_id);
 
     print("V:", LA_F("Send %s: peer='%s', reason=%s, ses_id=%" PRIu64 "\n", LA_F69, 69),
@@ -1529,15 +1529,15 @@ static void send_peer_off(sock_t udp_fd, compact_pair_t *peer, const char *reaso
     peer->peer = (compact_pair_t*)(void*)-1;
 }
 
-// 发送 PEER_INFO(seq=0)（base_index=0 首包；base_index!=0 地址变更通知）
-static void send_peer_info_seq0(sock_t udp_fd, compact_pair_t *pair, uint8_t base_index) {
-    const char* PROTO = "PEER_INFO";
+// 发送 SYNC(seq=0)（base_index=0 首包；base_index!=0 地址变更通知）
+static void send_sync0(sock_t udp_fd, compact_pair_t *pair, uint8_t base_index) {
+    const char* PROTO = "SYNC";
 
     assert(pair && PEER_ONLINE(pair));
 
     uint8_t pkt[4 + P2P_PEER_ID_MAX + 2 + MAX_CANDIDATES * sizeof(p2p_candidate_t)];  // 包头 + session_id + base_index + candidates
     p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)pkt;
-    resp_hdr->type = SIG_PKT_PEER_INFO;
+    resp_hdr->type = SIG_PKT_SYNC;
     resp_hdr->flags = 0;
     resp_hdr->seq = htons(0);
 
@@ -1726,90 +1726,90 @@ static void send_msg_resp_to_requester(sock_t udp_fd, compact_pair_t *pair) {
 //-----------------------------------------------------------------------------
 
 // 从待确认链表移除
-static void remove_info0_pending(compact_pair_t *pair) {
+static void remove_sync0_pending(compact_pair_t *pair) {
 
-    if (!g_compact_info0_pending_head || !pair->info0_pending_next) return;
+    if (!g_compact_sync0_pending_head || !pair->sync0_pending_next) return;
 
     // 如果是头节点
-    if (g_compact_info0_pending_head == pair) {
-        g_compact_info0_pending_head = pair->info0_pending_next;
-        pair->info0_pending_next = NULL;
-        if (g_compact_info0_pending_head == (void*)-1) {
-            g_compact_info0_pending_head = NULL;
-            g_compact_info0_pending_rear = NULL;
+    if (g_compact_sync0_pending_head == pair) {
+        g_compact_sync0_pending_head = pair->sync0_pending_next;
+        pair->sync0_pending_next = NULL;
+        if (g_compact_sync0_pending_head == (void*)-1) {
+            g_compact_sync0_pending_head = NULL;
+            g_compact_sync0_pending_rear = NULL;
         }
         return;
     }
 
-    compact_pair_t *prev = g_compact_info0_pending_head;
-    while (prev->info0_pending_next != pair) {
-        if (prev->info0_pending_next == (void*)-1) return;  // 没有找到
-        prev = prev->info0_pending_next;
+    compact_pair_t *prev = g_compact_sync0_pending_head;
+    while (prev->sync0_pending_next != pair) {
+        if (prev->sync0_pending_next == (void*)-1) return;  // 没有找到
+        prev = prev->sync0_pending_next;
     }
 
-    prev->info0_pending_next = pair->info0_pending_next;
+    prev->sync0_pending_next = pair->sync0_pending_next;
     
     // 如果移除的是尾节点，更新尾指针
-    if (pair->info0_pending_next == (void*)-1) {
-        g_compact_info0_pending_rear = prev;
+    if (pair->sync0_pending_next == (void*)-1) {
+        g_compact_sync0_pending_rear = prev;
     }
     
-    pair->info0_pending_next = NULL;
+    pair->sync0_pending_next = NULL;
 }
 
-// 将配对加入 PEER_INFO(seq=0) 待确认链表
-static void enqueue_info0_pending(compact_pair_t *pair, uint8_t base_index, uint64_t now) {
+// 将配对加入 SYNC(seq=0) 待确认链表
+static void enqueue_sync0_pending(compact_pair_t *pair, uint8_t base_index, uint64_t now) {
 
-    if (pair->info0_pending_next) {
-        remove_info0_pending(pair);
+    if (pair->sync0_pending_next) {
+        remove_sync0_pending(pair);
     }
 
-    pair->info0_base_index = base_index;
-    pair->info0_retry = 0;
-    pair->info0_sent_time = now;
+    pair->sync0_base_index = base_index;
+    pair->sync0_retry = 0;
+    pair->sync0_sent_time = now;
 
-    pair->info0_pending_next = (compact_pair_t*)(void*)-1;
-    if (g_compact_info0_pending_rear) {
-        g_compact_info0_pending_rear->info0_pending_next = pair;
-        g_compact_info0_pending_rear = pair;
+    pair->sync0_pending_next = (compact_pair_t*)(void*)-1;
+    if (g_compact_sync0_pending_rear) {
+        g_compact_sync0_pending_rear->sync0_pending_next = pair;
+        g_compact_sync0_pending_rear = pair;
     } else {
-        g_compact_info0_pending_head = pair;
-        g_compact_info0_pending_rear = pair;
+        g_compact_sync0_pending_head = pair;
+        g_compact_sync0_pending_rear = pair;
     }
 }
 
-// 检查并重传未确认的 PEER_INFO 包
-static void retry_info0_pending(sock_t udp_fd, uint64_t now) {
+// 检查并重传未确认的 SYNC 包
+static void retry_sync0_pending(sock_t udp_fd, uint64_t now) {
 
-    if (!g_compact_info0_pending_head) return;
+    if (!g_compact_sync0_pending_head) return;
 
     for(;;) {
 
         // 队列按时间排序，一旦遇到未超时的节点，后面都不会超时
-        if (tick_diff(now, g_compact_info0_pending_head->info0_sent_time) < PEER_INFO0_RETRY_INTERVAL_MS) {
+        if (tick_diff(now, g_compact_sync0_pending_head->sync0_sent_time) < SYNC0_RETRY_INTERVAL_MS) {
             return;
         }
 
         // 将第一项移除
-        compact_pair_t *q = g_compact_info0_pending_head;
-        g_compact_info0_pending_head = q->info0_pending_next;
+        compact_pair_t *q = g_compact_sync0_pending_head;
+        g_compact_sync0_pending_head = q->sync0_pending_next;
 
         // 检查是否超过最大重传次数
-        if (q->info0_retry >= PEER_INFO0_MAX_RETRY) {
+        if (q->sync0_retry >= SYNC0_MAX_RETRY) {
             
             // 超过最大重传次数，从链表移除（放弃）
-            print("W:", LA_F("PEER_INFO retransmit failed: %s <-> %s (gave up after %d tries)\n", LA_F63, 63),
-                   q->local_peer_id, q->remote_peer_id, q->info0_retry);
+            print("W:", LA_F("SYNC retransmit failed: %s <-> %s (gave up after %d tries)\n", LA_F63, 63),
+                   q->local_peer_id, q->remote_peer_id, q->sync0_retry);
 
-            q->info0_pending_next = NULL;
-            if (q->info0_base_index == 0) {
-                q->info0_acked = -1;  // 首包失败：标记为已放弃
+            q->sync0_pending_next = NULL;
+            if (q->sync0_base_index == 0) {
+                q->sync0_acked = -1;  // 首包失败：标记为已放弃
             }
 
             // 如果这是最后一项
-            if (g_compact_info0_pending_head == (void*)-1) {
-                g_compact_info0_pending_head = NULL;
-                g_compact_info0_pending_rear = NULL;
+            if (g_compact_sync0_pending_head == (void*)-1) {
+                g_compact_sync0_pending_head = NULL;
+                g_compact_sync0_pending_rear = NULL;
                 return;
             }
         }
@@ -1818,37 +1818,37 @@ static void retry_info0_pending(sock_t udp_fd, uint64_t now) {
             // 检查对端是否仍在线（可能在 pending 期间断开）
             if (!PEER_ONLINE(q)) {
                 // 对端已断开，从链表移除
-                q->info0_pending_next = NULL;
-                if (g_compact_info0_pending_head == (void*)-1) {
-                    g_compact_info0_pending_head = NULL;
-                    g_compact_info0_pending_rear = NULL;
+                q->sync0_pending_next = NULL;
+                if (g_compact_sync0_pending_head == (void*)-1) {
+                    g_compact_sync0_pending_head = NULL;
+                    g_compact_sync0_pending_rear = NULL;
                     return;
                 }
                 continue;  // 处理下一个
             }
 
-            send_peer_info_seq0(udp_fd, q, q->info0_base_index);
+            send_sync0(udp_fd, q, q->sync0_base_index);
 
             // 更新时间和重传次数
-            q->info0_retry++;
-            q->info0_sent_time = now;
+            q->sync0_retry++;
+            q->sync0_sent_time = now;
 
             // 如果这是最后一项
-            if (g_compact_info0_pending_head == (void*)-1) {
-                g_compact_info0_pending_head = q;
+            if (g_compact_sync0_pending_head == (void*)-1) {
+                g_compact_sync0_pending_head = q;
             }
             // 重新加到队尾（因为时间更新了，按时间排序）
             else {
-                q->info0_pending_next = (compact_pair_t*)(void*)-1;
-                g_compact_info0_pending_rear->info0_pending_next = q;
-                g_compact_info0_pending_rear = q;
+                q->sync0_pending_next = (compact_pair_t*)(void*)-1;
+                g_compact_sync0_pending_rear->sync0_pending_next = q;
+                g_compact_sync0_pending_rear = q;
             }
 
-            print("V:", LA_F("PEER_INFO resent, %s <-> %s, attempt %d/%d (ses_id=%" PRIu64 ")\n", LA_F62, 62),
+            print("V:", LA_F("SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%" PRIu64 ")\n", LA_F62, 62),
                    q->local_peer_id, q->remote_peer_id,
-                   q->info0_retry, PEER_INFO0_MAX_RETRY, q->session_id);
+                   q->sync0_retry, SYNC0_MAX_RETRY, q->session_id);
 
-            if (g_compact_info0_pending_head == q) return;
+            if (g_compact_sync0_pending_head == q) return;
         }
     }
 }
@@ -2027,20 +2027,20 @@ static bool check_addr_change(sock_t udp_fd, compact_pair_t *pair, const struct 
     // 如果对方在线，通知对方
     if (PEER_ONLINE(pair)) {
 
-        // 首包已成功确认（info0_acked > 0），立即发送地址变更通知
-        if (pair->peer->info0_acked > 0) {
+        // 首包已成功确认（sync0_acked > 0），立即发送地址变更通知
+        if (pair->peer->sync0_acked > 0) {
 
             pair->peer->addr_notify_seq = (uint8_t)(pair->peer->addr_notify_seq + 1);
             if (pair->peer->addr_notify_seq == 0) pair->peer->addr_notify_seq = 1;
 
-            send_peer_info_seq0(udp_fd, pair->peer, pair->peer->addr_notify_seq);
-            enqueue_info0_pending(pair->peer, pair->peer->addr_notify_seq, P_tick_ms());
+            send_sync0(udp_fd, pair->peer, pair->peer->addr_notify_seq);
+            enqueue_sync0_pending(pair->peer, pair->peer->addr_notify_seq, P_tick_ms());
 
             print("I:", LA_F("Addr changed for '%s', notifying '%s' (ses_id=%" PRIu64 ")\n", LA_F48, 48),
                   pair->local_peer_id, pair->peer->local_peer_id, pair->peer->session_id);
         }
-        // 首包未确认（info0_acked == 0）或已放弃（info0_acked < 0）
-        else if (pair->peer->info0_acked == 0) {
+        // 首包未确认（sync0_acked == 0）或已放弃（sync0_acked < 0）
+        else if (pair->peer->sync0_acked == 0) {
             // 正在同步中，延期发送地址变更通知（等 ACK 后再发）
             // 设置 addr_notify_seq = 1 标记有延期通知
             if (pair->peer->addr_notify_seq == 0) pair->peer->addr_notify_seq = 1;
@@ -2048,7 +2048,7 @@ static bool check_addr_change(sock_t udp_fd, compact_pair_t *pair, const struct 
             print("I:", LA_F("Addr changed for '%s', defer notification until first ACK (ses_id=%" PRIu64 ")\n", LA_F46, 46),
                   pair->local_peer_id, pair->peer->session_id);
         }
-        // info0_acked < 0：首包已放弃，不再发送任何通知
+        // sync0_acked < 0：首包已放弃，不再发送任何通知
         else print("W:", LA_F("Addr changed for '%s', but first info packet was abandoned (ses_id=%" PRIu64 ")\n", LA_F45, 45),
                    pair->local_peer_id, pair->peer->session_id);
     }
@@ -2143,7 +2143,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                     // 添加到 peer_key/session 索引
                     HASH_ADD(hh_peer, g_pairs_by_peer, local_peer_id, P2P_PEER_ID_MAX * 2, &g_compact_pairs[i]);
 
-                    g_compact_pairs[i].info0_pending_next = NULL;
+                    g_compact_pairs[i].sync0_pending_next = NULL;
                     g_compact_pairs[i].rpc_pending_next = NULL;
 
                     break;
@@ -2164,10 +2164,10 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                    PROTO, P2P_PEER_ID_MAX, local_peer_id, local->instance_id, instance_id);
 
             // 通知对端下线（如果对端在线且有 session_id）
-            if (PEER_ONLINE(local)) send_peer_off(udp_fd, local->peer, "reregister");
+            if (PEER_ONLINE(local)) send_fin(udp_fd, local->peer, "reregister");
 
             // 从待确认链表移除
-            if (local->info0_pending_next) remove_info0_pending(local);
+            if (local->sync0_pending_next) remove_sync0_pending(local);
 
             // 清理 RPC pending 状态（可能有旧会话的 RPC 正在重传）
             if (local->rpc_pending_next) remove_rpc_pending(local);
@@ -2185,7 +2185,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 重置 session 数据
         local->addr_notify_seq = 0;
-        local->info0_acked = 0;
+        local->sync0_acked = 0;
         local->rpc_last_sid = 0;
 
         // 记录本端的候选列表
@@ -2217,14 +2217,14 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             remote = &g_compact_pairs[remote_idx];
 
             // 对端之前的连接已断开（peer == -1），需重置其 session 后重新 pairing
-            // + 对端客户端收到不同 session_id 的 PEER_INFO 0 应该自动重置状态
+            // + 对端客户端收到不同 session_id 的 SYNC 0 应该自动重置状态
             if (remote->peer == (compact_pair_t*)-1) {
 
                 print("I:", LA_F("%s: reset '%.*s'(disconnected) session for re-pairing\n", LA_F42, 42),
                        PROTO, P2P_PEER_ID_MAX, remote->local_peer_id);
 
                 // 清理 remote 的 pending 状态
-                if (remote->info0_pending_next) remove_info0_pending(remote);
+                if (remote->sync0_pending_next) remove_sync0_pending(remote);
                 if (remote->rpc_pending_next) remove_rpc_pending(remote);
 
                 // 重置 remote 的 session id
@@ -2234,7 +2234,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
                 // 重置 session 数据
                 remote->addr_notify_seq = 0;
-                remote->info0_acked = 0;
+                remote->sync0_acked = 0;
                 remote->rpc_last_sid = 0;
 
                 remote->peer = NULL;
@@ -2249,12 +2249,12 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 // session_id 已在 REGISTER 阶段分配
                 assert(local->session_id != 0 && remote->session_id != 0);
 
-                // 向双方发送服务器维护的首个 PEER_INFO(seq=0, base_index=0)
-                send_peer_info_seq0(udp_fd, local, 0);
-                enqueue_info0_pending(local, 0, local->last_active);
+                // 向双方发送服务器维护的首个 SYNC(seq=0, base_index=0)
+                send_sync0(udp_fd, local, 0);
+                enqueue_sync0_pending(local, 0, local->last_active);
 
-                send_peer_info_seq0(udp_fd, remote, 0);
-                enqueue_info0_pending(remote, 0, local->last_active);
+                send_sync0(udp_fd, remote, 0);
+                enqueue_sync0_pending(remote, 0, local->last_active);
 
                 print("I:", LA_F("Pairing complete: '%.*s'(%d cands) <-> '%.*s'(%d cands)\n", LA_F64, 64),
                        P2P_PEER_ID_MAX, local_peer_id, remote->candidate_count,
@@ -2293,13 +2293,13 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             print("V:", LA_F("%s: accepted, releasing slot for '%s' -> '%s'\n", LA_F24, 24),
                    PROTO, local_peer_id, remote_peer_id);
 
-            // 向对端发送 PEER_OFF 通知
+            // 向对端发送 FIN 通知
             if (PEER_ONLINE(pair)) {
-                send_peer_off(udp_fd, pair->peer, "unregister");
+                send_fin(udp_fd, pair->peer, "unregister");
             }
             
             // 从待确认链表移除
-            if (pair->info0_pending_next) remove_info0_pending(pair);
+            if (pair->sync0_pending_next) remove_sync0_pending(pair);
 
             // 从 MSG RPC 链表移除
             if (pair->rpc_pending_next) remove_rpc_pending(pair);
@@ -2355,9 +2355,9 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         }
     } break;
 
-    // SIG_PKT_PEER_INFO_ACK: ACK 确认收到 PEER_INFO 包
+    // SIG_PKT_SYNC_ACK: ACK 确认收到 SYNC 包
     // 格式: [hdr(4)][session_id(8)]，确认序号使用 hdr->seq
-    case SIG_PKT_PEER_INFO_ACK: { const char* PROTO = "PEER_INFO_ACK";
+    case SIG_PKT_SYNC_ACK: { const char* PROTO = "SYNC_ACK";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F179, 179),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
@@ -2381,35 +2381,35 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         print("V:", LA_F("%s accepted, seq=%u, ses_id=%" PRIu64 "\n", LA_F14, 14),
               PROTO, ack_seq, session_id);
 
-        // ack_seq=0 的 ACK 是对服务器发送的首个 PEER_INFO 的确认，服务器需要处理
+        // ack_seq=0 的 ACK 是对服务器发送的首个 SYNC 的确认，服务器需要处理
         if (ack_seq == 0) {
 
             if (pair && pair->valid) {
                 check_addr_change(udp_fd, pair, from);
 
                 // 标记为已确认，从待确认链表移除
-                bool is_first_ack = (!pair->info0_acked && pair->info0_base_index == 0);
+                bool is_first_ack = (!pair->sync0_acked && pair->sync0_base_index == 0);
                 if (is_first_ack) {
-                    pair->info0_acked = 1;
+                    pair->sync0_acked = 1;
 
                     print("V:", LA_F("%s: confirmed '%s', retries=%d (ses_id=%" PRIu64 ")\n", LA_F29, 29),
-                           PROTO, pair->local_peer_id, pair->info0_retry, session_id);
+                           PROTO, pair->local_peer_id, pair->sync0_retry, session_id);
                 }
 
                 // 从待确认链表移除（首包和地址变更通知都走 seq=0 ACK）
-                if (pair->info0_pending_next) {
-                    remove_info0_pending(pair);
+                if (pair->sync0_pending_next) {
+                    remove_sync0_pending(pair);
                 }
 
-                pair->info0_base_index = 0;
-                pair->info0_retry = 0;
-                pair->info0_sent_time = 0;
+                pair->sync0_base_index = 0;
+                pair->sync0_retry = 0;
+                pair->sync0_sent_time = 0;
 
                 // 如果首包 ACK 且有延期的地址变更通知（addr_notify_seq != 0），则立即发送地址变更通知
                 if (is_first_ack && pair->addr_notify_seq != 0) {
 
-                    send_peer_info_seq0(udp_fd, pair, pair->addr_notify_seq);
-                    enqueue_info0_pending(pair, pair->addr_notify_seq, P_tick_ms());
+                    send_sync0(udp_fd, pair, pair->addr_notify_seq);
+                    enqueue_sync0_pending(pair, pair->addr_notify_seq, P_tick_ms());
 
                     print("I:", LA_F("Addr changed for '%s', deferred notifying '%s' (ses_id=%" PRIu64 ")\n", LA_F47, 47),
                           pair->peer->local_peer_id, pair->local_peer_id, pair->peer->session_id);
@@ -2437,7 +2437,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
     } break;
 
-    // SIG_PKT_PEER_INFO/P2P_PKT_REACH/P2P_PKT_DATA/P2P_PKT_ACK/P2P_PKT_CRYPTO (/RELAYED): relay 转发给对方
+    // SIG_PKT_SYNC/P2P_PKT_REACH/P2P_PKT_DATA/P2P_PKT_ACK/P2P_PKT_CRYPTO (/RELAYED): relay 转发给对方
     // 格式：所有包都包含 session_id(8) 在 payload 开头
     case P2P_PKT_DATA:
     case P2P_PKT_ACK:
@@ -2447,7 +2447,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     case P2P_PKT_REACH:
         if (!(hdr->flags & P2P_DATA_FLAG_SESSION)) {
             print("E:", LA_F("[Relay] %s: missing SESSION flag, dropped\n", LA_F86, 86),
-                  (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
+                  (hdr->type == SIG_PKT_SYNC) ? "SYNC" :
                   (hdr->type == P2P_PKT_DATA) ? "RELAY-DATA" :
                   (hdr->type == P2P_PKT_ACK) ? "RELAY-ACK" :
                   (hdr->type == P2P_PKT_CRYPTO) ? "RELAY-CRYPTO" :
@@ -2455,8 +2455,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                   (hdr->type == P2P_PKT_CONN_ACK) ? "RELAY-CONN_ACK" : "RELAY-REACH");
             return;
         }
-    case SIG_PKT_PEER_INFO: {
-        const char* PROTO = (hdr->type == SIG_PKT_PEER_INFO) ? "PEER_INFO" :
+    case SIG_PKT_SYNC: {
+        const char* PROTO = (hdr->type == SIG_PKT_SYNC) ? "SYNC" :
                            (hdr->type == P2P_PKT_DATA) ? "RELAY-DATA" :
                            (hdr->type == P2P_PKT_ACK) ? "RELAY-ACK" :
                            (hdr->type == P2P_PKT_CRYPTO) ? "RELAY-CRYPTO" :
@@ -2472,8 +2472,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             return;
         }
 
-        // SIG_PKT_PEER_INFO 特殊处理：seq=0 是服务器维护的包，不应该出现在这里
-        if (hdr->type == SIG_PKT_PEER_INFO && hdr->seq == 0) {
+        // SIG_PKT_SYNC 特殊处理：seq=0 是服务器维护的包，不应该出现在这里
+        if (hdr->type == SIG_PKT_SYNC && hdr->seq == 0) {
             print("E:", LA_F("[Relay] %s seq=0 from client %s (server-only, dropped)\n", LA_F83, 83), PROTO, from_str);
             return;
         }
@@ -2505,7 +2505,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         sendto(udp_fd, (const char *)buf, 4 + payload_len, 0,
                (struct sockaddr *)&pair->peer->addr, sizeof(pair->peer->addr));
 
-        if (hdr->type == SIG_PKT_PEER_INFO || hdr->type == P2P_PKT_REACH || 
+        if (hdr->type == SIG_PKT_SYNC || hdr->type == P2P_PKT_REACH || 
             hdr->type == P2P_PKT_DATA || hdr->type == P2P_PKT_CRYPTO) {
             print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu64 ")\n", LA_F82, 82),
                    PROTO, ntohs(hdr->seq), pair->local_peer_id, pair->remote_peer_id, session_id);
@@ -2785,15 +2785,15 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
                g_compact_pairs[i].local_peer_id, g_compact_pairs[i].remote_peer_id,
                tick_diff(now, g_compact_pairs[i].last_active) / 1000.0);
         
-        // 向对端发送 PEER_OFF 通知（如果对端在线且有 session_id）
+        // 向对端发送 FIN 通知（如果对端在线且有 session_id）
         if (PEER_ONLINE(&g_compact_pairs[i]) && 
             g_compact_pairs[i].peer->session_id != 0) {
-            send_peer_off(udp_fd, g_compact_pairs[i].peer, "timeout");
+            send_fin(udp_fd, g_compact_pairs[i].peer, "timeout");
         }
         
         // 从待确认链表移除
-        if (g_compact_pairs[i].info0_pending_next) {
-            remove_info0_pending(&g_compact_pairs[i]);
+        if (g_compact_pairs[i].sync0_pending_next) {
+            remove_sync0_pending(&g_compact_pairs[i]);
         }
 
         // 从 MSG RPC 链表移除
@@ -2810,9 +2810,9 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
         g_compact_pairs[i].peer = NULL;  // 清空指针
         g_compact_pairs[i].session_id = 0;
         g_compact_pairs[i].addr_notify_seq = 0;
-        g_compact_pairs[i].info0_base_index = 0;
-        g_compact_pairs[i].info0_retry = 0;
-        g_compact_pairs[i].info0_sent_time = 0;
+        g_compact_pairs[i].sync0_base_index = 0;
+        g_compact_pairs[i].sync0_retry = 0;
+        g_compact_pairs[i].sync0_sent_time = 0;
         g_compact_pairs[i].rpc_last_sid = 0;
         g_compact_pairs[i].rpc_responding = false;
         g_compact_pairs[i].rpc_data_len = 0;
@@ -3045,9 +3045,9 @@ int main(int argc, char *argv[]) {
             last_cleanup = now;
         }
         
-        // 检查并重传未确认的 PEER_INFO 包 + MSG RPC 包（每秒检查一次）
+        // 检查并重传未确认的 SYNC 包 + MSG RPC 包（每秒检查一次）
         if (tick_diff(now, last_compact_retry_check) >= COMPACT_RETRY_INTERVAL_MS) {
-            if (g_compact_info0_pending_head) retry_info0_pending(udp_fd, now);
+            if (g_compact_sync0_pending_head) retry_sync0_pending(udp_fd, now);
             if (g_rpc_pending_head)   retry_rpc_pending(udp_fd, now);
             if (g_relay_rpc_pending_head)  retry_relay_rpc_pending(now);
             last_compact_retry_check = now;

@@ -38,16 +38,16 @@ target_include_directories(test_compact_register PRIVATE
 target_link_libraries(test_compact_register stdc ${TEST_PLATFORM_LIBS})
 
 # COMPACT PEER_INFO 协议单元测试
-add_executable(test_compact_peer_info
-    test_compact_peer_info.c
+add_executable(test_compact_sync
+    test_compact_sync.c
 )
-target_include_directories(test_compact_peer_info PRIVATE
+target_include_directories(test_compact_sync PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_compact_peer_info stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_compact_sync stdc ${TEST_PLATFORM_LIBS})
 
-# COMPACT 生命周期协议单元测试 (ALIVE/UNREGISTER/PEER_OFF)
+# COMPACT 生命周期协议单元测试 (ALIVE/UNREGISTER/FIN)
 add_executable(test_compact_lifecycle
     test_compact_lifecycle.c
 )
