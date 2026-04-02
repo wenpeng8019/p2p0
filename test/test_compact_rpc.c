@@ -1,5 +1,5 @@
 /*
- * test_compact_msg.c - COMPACT MSG RPC 协议单元测试
+ * test_compact_rpc.c - COMPACT RPC 协议单元测试
  *
  * ============================================================================
  * 测试目标
@@ -104,10 +104,10 @@
  * 依赖：p2p_server 可执行文件（需支持 instrument 日志）
  * 
  * 用法：
- *   ./test_compact_msg <server_path> [port]
+ *   ./test_compact_rpc <server_path> [port]
  *
  * 示例：
- *   ./test_compact_msg ./p2p_server 9555
+ *   ./test_compact_rpc ./p2p_server 9555
  */
 
 #define MOD_TAG "TEST"

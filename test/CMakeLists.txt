@@ -57,15 +57,15 @@ target_include_directories(test_compact_lifecycle PRIVATE
 )
 target_link_libraries(test_compact_lifecycle stdc ${TEST_PLATFORM_LIBS})
 
-# COMPACT MSG RPC 协议单元测试
-add_executable(test_compact_msg
-    test_compact_msg.c
+# COMPACT RPC 协议单元测试
+add_executable(test_compact_rpc
+    test_compact_rpc.c
 )
-target_include_directories(test_compact_msg PRIVATE
+target_include_directories(test_compact_rpc PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_compact_msg stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_compact_rpc stdc ${TEST_PLATFORM_LIBS})
 
 # COMPACT RELAY/NAT_PROBE 协议单元测试
 add_executable(test_compact_relay
@@ -156,6 +156,16 @@ target_include_directories(test_relay_data PRIVATE
     ${CMAKE_SOURCE_DIR}/stdc
 )
 target_link_libraries(test_relay_data stdc ${TEST_PLATFORM_LIBS})
+
+# RELAY RPC 协议单元测试
+add_executable(test_relay_rpc
+    test_relay_rpc.c
+)
+target_include_directories(test_relay_rpc PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_relay_rpc stdc ${TEST_PLATFORM_LIBS})
 
 # P2P Ping 客户端单元测试模版 (RELAY 模式)
 add_executable(test_ping_r_template

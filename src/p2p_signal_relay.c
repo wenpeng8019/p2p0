@@ -484,6 +484,94 @@ ret_t p2p_signal_relay_data(p2p_session_t *s,
     return E_NONE;
 }
 
+/*
+ * 通过 RELAY 服务器向对端发起 RPC 请求
+ */
+ret_t p2p_signal_relay_request(p2p_session_t *s,
+                               uint8_t msg, const void *data, int len) {
+
+    p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
+
+    P_check(len == 0 || data, return E_INVALID;)
+    P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
+    P_check(ctx->state >= SIGNAL_RELAY_ONLINE, return E_NONE_CONTEXT;)
+    if (!ctx->feature_msg) {
+        print("E:", LA_F("MSG RPC not supported by server\n", LA_F447, 447));
+        return E_NO_SUPPORT;
+    }
+    P_check(ctx->session_id, return E_NONE_CONTEXT;)
+
+    if (ctx->rpc_req_state != 0) return E_BUSY;
+
+    // 生成非零循环序列号
+    static uint16_t _rly_sid_base = 0;
+    uint16_t sid = ++_rly_sid_base;
+    if (sid == 0) sid = ++_rly_sid_base;
+
+    ctx->rpc_req_sid   = sid;
+    ctx->rpc_req_msg   = msg;
+
+    ctx->rpc_req_state = 1;
+
+    // 构造 payload: [session_id(8)][sid(2)][msg(1)][data(N)]
+    uint8_t payload[P2P_MAX_PAYLOAD]; int n = 0;
+    nwrite_ll(payload + n, ctx->session_id); n += P2P_RLY_SESS_ID_PSZ;
+    nwrite_s(payload + n, sid); n += 2;
+    payload[n++] = msg;
+    if (len > 0 && data) {
+        memcpy(payload + n, data, (size_t)len);
+        n += len;
+    }
+
+    if (enqueue_message(ctx, P2P_RLY_REQ, payload, n) != 0) {
+        ctx->rpc_req_state = 0;
+        ctx->rpc_req_sid   = 0;
+        return E_BUSY;
+    }
+
+    print("I:", LA_F("MSG_REQ sent: sid=%u, msg=%u, data_len=%d\n", LA_F78, 78), sid, msg, len);
+    return E_NONE;
+}
+
+/*
+ * 通过 RELAY 服务器向请求方回复 RPC 响应
+ */
+ret_t p2p_signal_relay_response(p2p_session_t *s,
+                                uint8_t code, const void *data, int len) {
+
+    p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
+
+    P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
+    P_check(len == 0 || data, return E_INVALID;)
+    if (!ctx->rpc_resp_sid) {
+        print("E:", LA_F("MSG_RESP: no pending request\n", LA_F446, 446));
+        return E_INVALID;
+    }
+
+    uint16_t sid = ctx->rpc_resp_sid;
+
+    // 构造 payload: [session_id(8)][sid(2)][code(1)][data(N)]
+    uint8_t payload[P2P_MAX_PAYLOAD]; int n = 0;
+    nwrite_ll(payload + n, ctx->session_id); n += P2P_RLY_SESS_ID_PSZ;
+    nwrite_s(payload + n, sid); n += 2;
+    payload[n++] = code;
+    if (len > 0 && data) {
+        memcpy(payload + n, data, (size_t)len);
+        n += len;
+    }
+
+    if (enqueue_message(ctx, P2P_RLY_RESP, payload, n) != 0) {
+        return E_BUSY;
+    }
+
+    // 标记请求已处理
+    ctx->rpc_resp_sid = 0;
+    ctx->rpc_last_sid = sid;
+
+    print("I:", LA_F("MSG_RESP sent: sid=%u, code=%u, data_len=%d\n", LA_F78, 78), sid, code, len);
+    return E_NONE;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -1030,6 +1118,121 @@ static void handle_relay_data_recv(p2p_session_t *s, const uint8_t *payload, int
 }
 
 /*
+ * 处理服务器转发的 RPC 请求（B端接收）
+ *
+ * 负载格式: [session_id(8)][sid(2)][msg(1)][data(N)]
+ */
+static void handle_relay_req_recv(p2p_session_t *s, const uint8_t *payload, int len) {
+    const char *PROTO = "MSG_REQ";
+
+    if (len < P2P_RLY_REQ_MIN_PSZ) {
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
+        return;
+    }
+
+    p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
+
+    uint64_t session_id = nget_ll(payload);
+    uint16_t sid = nget_s(payload + P2P_RLY_SESS_ID_PSZ);
+    uint8_t  msg = payload[P2P_RLY_SESS_ID_PSZ + 2];
+    const uint8_t *req_data = payload + P2P_RLY_REQ_MIN_PSZ;
+    int req_len = len - P2P_RLY_REQ_MIN_PSZ;
+
+    // 验证 session_id
+    if (session_id != ctx->session_id) {
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")\n", LA_F170, 170),
+              PROTO, session_id, ctx->session_id);
+        return;
+    }
+
+    // 去重：忽略正在处理的相同请求
+    if (ctx->rpc_resp_sid == sid) {
+        print("V:", LA_F("%s: duplicate request ignored (sid=%u)\n", LA_F107, 107), PROTO, sid);
+        return;
+    }
+
+    // 忽略旧请求
+    if (ctx->rpc_last_sid != 0 && !uint16_circle_newer(sid, ctx->rpc_last_sid)) {
+        print("V:", LA_F("%s: old request ignored (sid=%u <= last_sid=%u)\n", LA_F131, 131),
+              PROTO, sid, ctx->rpc_last_sid);
+        return;
+    }
+
+    ctx->rpc_resp_sid = sid;
+
+    // msg=0: 自动 echo 回复
+    if (msg == 0) {
+        print("V:", LA_F("%s msg=0: echo reply (sid=%u, len=%d)\n", LA_F49, 49), PROTO, sid, req_len);
+        p2p_signal_relay_response(s, 0, req_data, req_len);
+        return;
+    }
+
+    print("V:", LA_F("%s: accepted sid=%u, msg=%u\n", LA_F93, 93), PROTO, sid, msg);
+
+    if (s->cfg.on_request)
+        s->cfg.on_request((p2p_handle_t)s, sid, msg, req_data, req_len, s->cfg.userdata);
+}
+
+/*
+ * 处理服务器转发的 RPC 响应（A端接收）
+ *
+ * 负载格式: [session_id(8)][sid(2)][code(1)][data(N)]
+ */
+static void handle_relay_resp_recv(p2p_session_t *s, const uint8_t *payload, int len) {
+    const char *PROTO = "MSG_RESP";
+
+    if (len < P2P_RLY_RESP_MIN_PSZ) {
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
+        return;
+    }
+
+    p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
+
+    uint64_t session_id = nget_ll(payload);
+    uint16_t sid  = nget_s(payload + P2P_RLY_SESS_ID_PSZ);
+    uint8_t  code = payload[P2P_RLY_SESS_ID_PSZ + 2];
+    const uint8_t *res_data = payload + P2P_RLY_RESP_MIN_PSZ;
+    int res_len = len - P2P_RLY_RESP_MIN_PSZ;
+
+    // 验证 session_id
+    if (session_id != ctx->session_id) {
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")\n", LA_F170, 170),
+              PROTO, session_id, ctx->session_id);
+        return;
+    }
+
+    // 仅命中当前挂起请求
+    if (!(ctx->rpc_req_state == 1 && ctx->rpc_req_sid == sid)) {
+        print("V:", LA_F("%s: irrelevant response (sid=%u, current sid=%u, state=%d)\n", LA_F108, 108),
+              PROTO, sid, ctx->rpc_req_sid, (int)ctx->rpc_req_state);
+        return;
+    }
+
+    // 错误响应
+    if (code >= SIG_MSG_ERR_PEER_OFFLINE) {
+        if (code == SIG_MSG_ERR_PEER_OFFLINE)
+            print("W:", LA_F("%s: peer offline (sid=%u)\n", LA_F79, 79), PROTO, sid);
+        else
+            print("W:", LA_F("%s: timeout (sid=%u)\n", LA_F80, 80), PROTO, sid);
+
+        ctx->rpc_req_state = 0;
+        ctx->rpc_req_sid   = 0;
+
+        if (s->cfg.on_response)
+            s->cfg.on_response((p2p_handle_t)s, sid, code, NULL, -1, s->cfg.userdata);
+        return;
+    }
+
+    print("I:", LA_F("%s: RPC complete (sid=%u)\n", LA_F78, 78), PROTO, sid);
+
+    ctx->rpc_req_state = 0;
+    ctx->rpc_req_sid   = 0;
+
+    if (s->cfg.on_response)
+        s->cfg.on_response((p2p_handle_t)s, sid, code, res_data, res_len, s->cfg.userdata);
+}
+
+/*
  * 消息分发
  */
 static void dispatch_message(p2p_session_t *s) {
@@ -1063,6 +1266,14 @@ static void dispatch_message(p2p_session_t *s) {
 
         case P2P_RLY_DATA:
             handle_relay_data_recv(s, ctx->payload, (int)ctx->hdr.size);
+            break;
+
+        case P2P_RLY_REQ:
+            handle_relay_req_recv(s, ctx->payload, (int)ctx->hdr.size);
+            break;
+
+        case P2P_RLY_RESP:
+            handle_relay_resp_recv(s, ctx->payload, (int)ctx->hdr.size);
             break;
 
         default:

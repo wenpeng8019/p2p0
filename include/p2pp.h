@@ -749,50 +749,35 @@ typedef struct {
  */
 #define P2P_RLY_DATA_PSZ(n)        (P2P_RLY_SESS_ID_PSZ + P2P_HDR_SIZE + (n))
 
- /* P2P_RLY_REQ / P2P_RLY_REQ_ACK / P2P_RLY_RESP / P2P_RLY_RESP_ACK:
- * 
- * P2P_RLY_REQ (双向，A→Server, Server→B):
- *   payload: [target_name(32)][sid(2)][msg(1)][data(N)]  (A→Server)
- *   payload: [sender_name(32)][sid(2)][msg(1)][data(N)]  (Server→B)
+/* P2P_RLY_REQ / P2P_RLY_RESP 最小负载长度（session_id + sid + msg/code = 11 字节） */
+#define P2P_RLY_REQ_MIN_PSZ        (P2P_RLY_SESS_ID_PSZ + 3)
+#define P2P_RLY_RESP_MIN_PSZ       (P2P_RLY_SESS_ID_PSZ + 3)
+
+/* P2P_RLY_REQ / P2P_RLY_RESP — 基于会话的 MSG RPC
  *
- * P2P_RLY_REQ_ACK:
- *   payload: [sid(2)][status(1)]
- *   - status: 0=成功, 1=目标不在线
+ * 与 COMPACT 模式的 MSG RPC 对应，但基于 TCP 可靠传输，无需应用层重传。
+ * 使用 session_id 路由（与 SYNC/DATA 一致），服务器零拷贝转发时仅重写 session_id。
+ *
+ * P2P_RLY_REQ (双向，A→Server, Server→B):
+ *   payload: [session_id(8)][sid(2)][msg(1)][data(N)]
+ *   - session_id: 发送方的会话 ID（服务器转发时重写为接收方的 session_id）
+ *   - sid: 序列号（非零，循环递增）
+ *   - msg: 消息类型（0=echo 自动回复，>0=应用自定义）
+ *   - data: 请求数据（最大 P2P_MSG_DATA_MAX 字节）
  *
  * P2P_RLY_RESP (双向，B→Server, Server→A):
- *   payload: [sid(2)][code(1)][data(N)]
- *
- * P2P_RLY_REQ (Server → B, relay，复用相同协议类型):
- *   payload: [sender_name(32)][sid(2)][msg(1)][data(N)]
- *   - sender_name: 请求发起方名称（B 通过此识别来源）
- *   - sid: 透传 A 的 sid（B 响应时需要回传）
- *   - 注：通过 target_name/sender_name 字段语义区分方向
- *
- * P2P_RLY_REQ_ACK (Server → A):
- *   payload: [sid(2)][status(1)]
- *   - sid: 对应的请求序列号
- *   - status: 0=成功转发给 B; 1=目标 B 不在线; 2=服务器错误
- *
- * P2P_RLY_RESP (B → Server):
- *   payload: [sid(2)][code(1)][data(N)]
- *   - sid: 对应的请求序列号（来自 REQ）
- *   - code: 响应码（0=成功，应用自定义）
+ *   payload: [session_id(8)][sid(2)][code(1)][data(N)]
+ *   - session_id: 本端会话 ID（服务器转发时重写为请求方的 session_id）
+ *   - sid: 对应请求的序列号
+ *   - code: 响应码（0=成功，应用自定义；0xFE/0xFF=错误，见下）
  *   - data: 响应数据
  *
- * P2P_RLY_RESP_ACK (Server → B):
- *   payload: [sid(2)]
- *   - sid: 对应的响应序列号（确认收到）
+ * 特殊错误码（服务器生成的错误响应，on_response 回调 len=-1）：
+ *   0xFE (SIG_MSG_ERR_PEER_OFFLINE): 对端在等待响应期间离线
+ *   0xFF (SIG_MSG_ERR_TIMEOUT): 服务器转发超时
  *
- * P2P_RLY_RESP (Server → A, relay，复用相同协议类型):
- *   payload: [sid(2)][code(1)][data(N)]
- *   - sid: 对应的请求序列号（A 用此匹配原始请求）
- *   - code: 响应码
- *   - data: 响应数据
- *   - 注：Server→A 和 B→Server 使用相同格式，通过 TCP 连接区分
- *
- * 特殊错误码（当 on_response 回调 len=-1 时，code 字段表示错误类型）：
- *   0xFE: 目标在等待响应期间离线
- *   0xFF: 服务器转发超时
+ * 流控：使用 rpc_pending 通道（独立于 SYNC/DATA 的 peer_pending），
+ *      每个方向同时最多一个 RPC 消息在传输中。
  *
  * ============================================================================
  * 协议流程详解
@@ -816,10 +801,6 @@ typedef struct {
  *   │                            │
  *   ├── ALIVE ──────────────────►│  (每 20 秒心跳)
  *   │                            │
-
- */
-
-/*
  *
  * 2. 初始化会话同步（建立会话 + 首批候选同步）
  * ============================================================================
@@ -961,21 +942,36 @@ typedef struct {
  * 6. REQ/RESP 机制 - RPC 请求-应答
  * ============================================================================
  *
- * 功能：通过服务器中转实现可靠的请求-应答机制
+ * 功能：通过服务器中转实现可靠的请求-应答机制（TCP 传输，无需 ACK/重传）
  *
  * msg 特殊值：
- *   - msg=0: Echo 测试，自动回复
- *   - msg>0: 应用层自定义消息
+ *   - msg=0: Echo 测试，B端自动回复相同数据，无需应用层介入
+ *   - msg>0: 应用层自定义消息类型，需 on_request 回调处理
  *
- * 流程（6 步）：
+ * 流控：使用 rpc_pending 通道（独立于 SYNC/DATA 的 peer_pending），
+ *       每个方向同时最多一个 RPC 消息在传输中。
  *
- *   A                      Server                      B
- *   ├── REQ ──────────────►│  [target][sid][msg][data] │
- *   │◄── REQ_ACK ───────────┤  [sid][status]            │
- *   │                       ├── REQ ───────────────────►│  [sender][sid][msg][data]
- *   │                       │◄── RESP ──────────────────┤  [sid][code][data]
- *   │                       ├── RESP_ACK ──────────────►│  [sid]
- *   │◄── RESP ──────────────┤  [sid][code][data]        │
+ * 错误处理（服务器生成错误 RESP 返回给 A）：
+ *   - 对端离线: code=0xFE (SIG_MSG_ERR_PEER_OFFLINE)
+ *   - 转发超时: code=0xFF (SIG_MSG_ERR_TIMEOUT)
+ *
+ * 流程（4 步）：
+ *
+ *   A (requester)         Server                    B (responder)
+ *   │                        │                        │
+ *   ├── RLY_REQ ────────────►│                        │
+ *   │  [ses_id_A][sid][msg]  │                        │
+ *   │  [data]                │                        │
+ *   │                        ├── RLY_REQ ────────────►│
+ *   │                        │  [ses_id_B][sid][msg]  │
+ *   │                        │  [data]                │
+ *   │                        │                        │
+ *   │                        │◄── RLY_RESP ───────────┤
+ *   │                        │  [ses_id_B][sid][code] │
+ *   │                        │  [data]                │
+ *   │◄── RLY_RESP ──────────┤                        │
+ *   │  [ses_id_A][sid][code] │                        │
+ *   │  [data]                │
  *
  *
  * ============================================================================

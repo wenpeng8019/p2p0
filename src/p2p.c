@@ -1422,10 +1422,15 @@ p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len) {
 
     if (!hdl) return -1;
     p2p_session_t *s = (p2p_session_t*)hdl;
-    if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) return -1;
 
     LOCK(s);
-    int ret = p2p_signal_compact_request(s, msg, data, len);
+    int ret;
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+        ret = p2p_signal_compact_request(s, msg, data, len);
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+        ret = p2p_signal_relay_request(s, msg, data, len);
+    else
+        ret = -1;
     UNLOCK(s);
     return ret;
 }
@@ -1435,10 +1440,15 @@ p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len) {
 
     if (!hdl) return -1;
     p2p_session_t *s = (p2p_session_t*)hdl;
-    if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT) return -1;
 
     LOCK(s);
-    int ret = p2p_signal_compact_response(s, code, data, len);
+    int ret;
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+        ret = p2p_signal_compact_response(s, code, data, len);
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+        ret = p2p_signal_relay_response(s, code, data, len);
+    else
+        ret = -1;
     UNLOCK(s);
     return ret;
 }

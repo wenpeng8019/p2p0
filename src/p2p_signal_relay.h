@@ -234,6 +234,13 @@ typedef struct {
     /* 数据中继流控 */
     bool                awaiting_data_ready;            /* 等待 DATA/ACK/CRYPTO 转发确认（READY）*/
 
+    /* MSG RPC 状态 */
+    uint16_t            rpc_last_sid;                   /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
+    uint8_t             rpc_req_state;                  /* A端: 0=空闲 1=等待 RESP */
+    uint16_t            rpc_req_sid;                    /* A端: 当前挂起的 RPC 序列号（0=无挂起）*/
+    uint8_t             rpc_req_msg;                    /* A端: 挂起请求的消息 ID */
+    uint16_t            rpc_resp_sid;                   /* B端: 待回应的 RPC 序列号（0=无）*/
+
 } p2p_signal_relay_ctx_t;
 
 /* ============================================================================
@@ -322,6 +329,30 @@ void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
 ret_t p2p_signal_relay_data(struct p2p_session *s,
                             uint8_t type, uint8_t flags, uint16_t seq,
                             const void *payload, uint16_t payload_len);
+
+/*
+ * 通过 RELAY 服务器向对端发起 RPC 请求
+ *
+ * @param s    P2P 会话
+ * @param msg  消息类型（0=echo，>0=应用自定义）
+ * @param data 请求数据
+ * @param len  数据长度
+ * @return     E_NONE=成功，E_BUSY=已有挂起请求，其他=错误码
+ */
+ret_t p2p_signal_relay_request(struct p2p_session *s,
+                               uint8_t msg, const void *data, int len);
+
+/*
+ * 通过 RELAY 服务器向请求方回复 RPC 响应
+ *
+ * @param s    P2P 会话
+ * @param code 响应码
+ * @param data 响应数据
+ * @param len  数据长度
+ * @return     E_NONE=成功，其他=错误码
+ */
+ret_t p2p_signal_relay_response(struct p2p_session *s,
+                                uint8_t code, const void *data, int len);
 
 //----------------------------------------------------------------------------
 
