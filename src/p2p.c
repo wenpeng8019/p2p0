@@ -479,6 +479,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     // 启动 STUN NAT 类型检测
     // + 对于 COMPACT 以外的其他模式，检测到的公网反射地址会作为（srflx）本地候选地址
+    // + 如果 skip_nat_detection=true，仅执行 Test I 获取公网地址，跳过 Test II/III
     if (cfg->stun_server) {
         p2p_stun_nat_detect_start(s, cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT);
     }

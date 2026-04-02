@@ -984,9 +984,9 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
     /* 检查超时 */
     if (tick_diff(now_ms, ctx->last_send_time) > STUN_TEST_TIMEOUT_MS) {
 
-        /* 重试 */
-        if (ctx->retry_count < STUN_MAX_RETRIES) { ctx->retry_count++;
-            // 回退操作，重新执行当前测试步骤
+        /* 重试：回退状态，让状态机推进代码重新发送请求 */
+        if (ctx->retry_count < STUN_MAX_RETRIES) {
+            ctx->retry_count++;
             switch (ctx->state) {
             case NAT_TEST_I_SENT: ctx->state = NAT_TEST_IDLE; break;
             case NAT_TEST_II_SENT: ctx->state = NAT_TEST_I_DONE; break;
@@ -994,41 +994,44 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
             case NAT_TEST_III_SENT: ctx->state = NAT_TEST_I2_DONE; break;
             default: break;
             }
-            return;
-        }
-
+        } 
         /* 超时失败，进入下一个测试 */
-        switch (ctx->state) {
-        case NAT_TEST_I_SENT:
-            print("W:", LA_F("Test I: Timeout", LA_F362, 362));
-            ctx->state = NAT_TEST_COMPLETED;
-            s->nat_type = P2P_NAT_BLOCKED;      // 无法联系 STUN 服务器
-            return;
+        else {
+            switch (ctx->state) {
+            case NAT_TEST_I_SENT:
+                print("W:", LA_F("Test I: Timeout", LA_F362, 362));
+                ctx->state = NAT_TEST_COMPLETED;
+                s->nat_type = P2P_NAT_BLOCKED;      // 无法联系 STUN 服务器
+                return;
 
-        case NAT_TEST_II_SENT:
-            print("W:", LA_F("Test II: Timeout (need Test III)", LA_F364, 364));
-            ctx->test_ii_success = false;
-            ctx->state = NAT_TEST_II_DONE;
-            break;
+            case NAT_TEST_II_SENT:
+                /* RFC 3489 CHANGE-REQUEST 通常不被现代 STUN 服务器支持，超时是预期行为 */
+                print("I:", LA_F("Test II: Timeout (need Test III)", LA_F364, 364));
+                ctx->test_ii_success = false;
+                ctx->state = NAT_TEST_II_DONE;
+                break;
 
-        case NAT_TEST_I2_SENT:
-            print("W:", LA_F("Test I(alt): Timeout", LA_F559, 559));
-            ctx->test_i2_success = false;
-            ctx->state = NAT_TEST_I2_DONE;
-            break;
+            case NAT_TEST_I2_SENT:
+                /* RFC 3489 CHANGE-REQUEST 通常不被现代 STUN 服务器支持，超时是预期行为 */
+                print("I:", LA_F("Test I(alt): Timeout", LA_F559, 559));
+                ctx->test_i2_success = false;
+                ctx->state = NAT_TEST_I2_DONE;
+                break;
 
-        case NAT_TEST_III_SENT:
-            print("W:", LA_F("Test III: Timeout", LA_F366, 366));
-            ctx->test_iii_success = false;
-            ctx->state = NAT_TEST_III_DONE;
-            break;
+            case NAT_TEST_III_SENT:
+                /* RFC 3489 CHANGE-REQUEST 通常不被现代 STUN 服务器支持，超时是预期行为 */
+                print("I:", LA_F("Test III: Timeout", LA_F366, 366));
+                ctx->test_iii_success = false;
+                ctx->state = NAT_TEST_III_DONE;
+                break;
 
-        default:
-            break;
+            default:
+                break;
+            }
+
+            ctx->retry_count = 0;
+            ctx->last_send_time = now_ms;
         }
-
-        ctx->retry_count = 0;
-        ctx->last_send_time = now_ms;
     }
     
     /* 状态机推进 */
@@ -1036,6 +1039,14 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
 
     /* Test I 完成，启动 Test II */
     case NAT_TEST_I_DONE: {
+
+        /* 如果配置了 skip_nat_detection，跳过 Test II/III（因为大多数公共 STUN 服务器不支持） */
+        if (s->cfg.skip_nat_detection) {
+            ctx->state = NAT_TEST_COMPLETED;
+            s->nat_type = P2P_NAT_UNKNOWN;
+            print("I:", LA_F("NAT detection skipped (skip_nat_detection=true), Srflx gathered", LA_F560, 560));
+            return;
+        }
 
         /* Test II: 请求服务器从不同 IP+Port 响应 (CHANGE-REQUEST flags=0x06)
          * + 也就是用带有 STUN_FLAG_CHANGE_IP | STUN_FLAG_CHANGE_PORT 选项的请求，重新请求服务器

@@ -286,6 +286,9 @@ typedef struct {
     bool                    test_ice_host_off;          // 禁用 Host 候选（不收集本地网卡地址）
     bool                    test_ice_srflx_off;         // 禁用 Srflx 候选（不收集 NAT 反射地址）
     bool                    test_ice_relay_off;         // 禁用 Relay 候选（不收集 TURN 中继地址）
+    bool                    skip_nat_detection;         // 跳过 NAT 类型检测（RFC 3489 Test II/III）
+                                                        // 大多数公共 STUN 服务器不支持 CHANGE-REQUEST
+                                                        // 设为 true 可跳过这些会超时的测试
 
 } p2p_config_t;
 
