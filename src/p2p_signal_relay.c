@@ -490,6 +490,8 @@ static void handle_relay_status(p2p_session_t *s, const uint8_t *payload, int le
 
     if (len < (int)P2P_RLY_STATUS_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
+        P_sock_close(s->sig_relay_ctx.sockfd);
+        s->sig_relay_ctx.sockfd = P_INVALID_SOCKET;
         s->sig_relay_ctx.state = SIGNAL_RELAY_ERROR;
         return;
     }
@@ -533,6 +535,8 @@ static void handle_relay_status(p2p_session_t *s, const uint8_t *payload, int le
         // NOT_ONLINE / PROTOCOL / INTERNAL / UNKNOWN → 致命错误
         print("E:", LA_F("%s: fatal error code=%u, entering ERROR state\n", LA_F531, 531),
               PROTO, (unsigned)status_code);
+        P_sock_close(ctx->sockfd);
+        ctx->sockfd = P_INVALID_SOCKET;
         ctx->state = SIGNAL_RELAY_ERROR;
         break;
     }
@@ -1319,6 +1323,8 @@ void p2p_signal_relay_tick_recv(struct p2p_session *s) {
             send_online(s);
         } else if (ret < 0) {
             print("E:", LA_F("TCP connect failed (select error)\n", LA_F521, 521));
+            P_sock_close(ctx->sockfd);
+            ctx->sockfd = P_INVALID_SOCKET;
             ctx->state = SIGNAL_RELAY_ERROR;
         }
         return;
@@ -1347,6 +1353,8 @@ void p2p_signal_relay_tick_recv(struct p2p_session *s) {
                     if (ctx->hdr.size > P2P_MAX_PAYLOAD) {
                         print("E:", LA_F("payload size %u exceeds limit %u\n", LA_F538, 538),
                               ctx->hdr.size, P2P_MAX_PAYLOAD);
+                        P_sock_close(ctx->sockfd);
+                        ctx->sockfd = P_INVALID_SOCKET;
                         ctx->state = SIGNAL_RELAY_ERROR;
                         return;
                     }
@@ -1382,10 +1390,14 @@ void p2p_signal_relay_tick_recv(struct p2p_session *s) {
 
         if (n == 0) { // 连接关闭            
             print("I:", LA_F("TCP connection closed by peer\n", LA_F525, 525));
+            P_sock_close(ctx->sockfd);
+            ctx->sockfd = P_INVALID_SOCKET;
             ctx->state = SIGNAL_RELAY_ERROR;
         }
         else if (!P_sock_is_wouldblock()) {   // 出现错误
             print("E:", LA_F("TCP recv error\n", LA_F526, 526));
+            P_sock_close(ctx->sockfd);
+            ctx->sockfd = P_INVALID_SOCKET;
             ctx->state = SIGNAL_RELAY_ERROR;
         }
         return;
@@ -1435,12 +1447,16 @@ void p2p_signal_relay_tick_send(struct p2p_session *s) {
         else if (!n) {  // 连接关闭
 
             print("E:", LA_F("TCP connection closed during send\n", LA_F527, 527));
+            P_sock_close(ctx->sockfd);
+            ctx->sockfd = P_INVALID_SOCKET;
             ctx->state = SIGNAL_RELAY_ERROR;
             return;
         }
         else if (!P_sock_is_wouldblock()) { // 出现错误
 
             print("E:", LA_F("TCP send error\n", LA_F534, 534));
+            P_sock_close(ctx->sockfd);
+            ctx->sockfd = P_INVALID_SOCKET;
             ctx->state = SIGNAL_RELAY_ERROR;
             
             // 错误时出队并回收当前 chunk
@@ -1469,6 +1485,8 @@ void p2p_signal_relay_tick_send(struct p2p_session *s) {
         if (tick_diff(now, ctx->last_send_time) > P2P_RELAY_ACK_TIMEOUT_MS) {
             print("E:", LA_F("%s timeout\n", LA_F519, 519), 
                   ctx->state == SIGNAL_RELAY_WAIT_ONLINE_ACK ? "ONLINE_ACK" : "SYNC0_ACK");
+            P_sock_close(ctx->sockfd);
+            ctx->sockfd = P_INVALID_SOCKET;
             ctx->state = SIGNAL_RELAY_ERROR;
         }
         return;
