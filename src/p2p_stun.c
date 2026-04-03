@@ -840,7 +840,7 @@ void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *fro
         
         /* alt_addr 已在 stun_parse_binding_response 中解析 */
         if (ctx->alt_addr.sin_family == AF_INET) {
-            print("I:", LA_F("Test I: Changed address: %s:%d", LA_F560, 560),
+            print("I:", LA_F("Test I: Changed address: %s:%d", LA_F613, 613),
                   inet_ntoa(ctx->alt_addr.sin_addr), ntohs(ctx->alt_addr.sin_port));
         }
         

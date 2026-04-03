@@ -141,7 +141,7 @@ static void flush_reaching_queue(p2p_session_t *s, int writable_path, uint64_t n
         if (!n->reaching_head) n->reaching_rear = NULL;
 
         // 构造 REACH 负载：回显 target_addr
-        uint8_t ack_payload[6];
+        uint8_t ack_payload[P2P_PKT_REACH_PSZ];
         memcpy(ack_payload, &node->target.sin_addr.s_addr, 4);
         memcpy(ack_payload + 4, &node->target.sin_port, 2);
 
@@ -153,7 +153,7 @@ static void flush_reaching_queue(p2p_session_t *s, int writable_path, uint64_t n
                   TASK_NAT, node->cand_idx, node->seq);
         } 
         else {
-            cand_send_packet(s, writable_path, P2P_PKT_REACH, node->seq, ack_payload, 6, now_ms, false);
+            cand_send_packet(s, writable_path, P2P_PKT_REACH, node->seq, ack_payload, P2P_PKT_REACH_PSZ, now_ms, false);
 
             const struct sockaddr_in *addr = &s->remote_cands[writable_path].addr;
             print("V:", LA_F("%s: reaching cand[%d] via path[%d] to %s:%d, seq=%u", LA_F149, 149),
@@ -196,7 +196,7 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
     }
 
     // 构造负载: [target_addr(4B) | target_port(2B)]
-    uint8_t payload[6];
+    uint8_t payload[P2P_PKT_PUNCH_PSZ];
     memcpy(payload, &entry->addr.sin_addr.s_addr, 4);  // network order
     memcpy(payload + 4, &entry->addr.sin_port, 2);     // network order
 
@@ -613,7 +613,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
 
     // 校验负载长度
-    if (payload_len < 6) {
+    if (payload_len < (int)P2P_PKT_PUNCH_PSZ) {
         print("W:", LA_F("%s: invalid payload len=%d (need 6)", LA_F419, 419), PROTO, payload_len);
         return;
     }
@@ -642,7 +642,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     {   const char* PROTO2 = "REACH";
 
         // 构造 REACH 负载：回显 target_addr
-        uint8_t ack_payload[6];
+        uint8_t ack_payload[P2P_PKT_REACH_PSZ];
         memcpy(ack_payload, &target_addr.sin_addr.s_addr, 4);
         memcpy(ack_payload + 4, &target_addr.sin_port, 2);
 
@@ -650,7 +650,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
         if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)
             && path_is_selectable(s->remote_cands[cand_idx].stats.state)) {
 
-            cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, 6, now, false);
+            cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
             print("V:", LA_F("%s sent to %s:%d (writable), echo_seq=%u", LA_F53, 53),
                   PROTO2, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
         }
@@ -662,7 +662,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
                 && (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF) || best_path != cand_idx)
                 && best_path >= 0 && path_is_selectable(s->remote_cands[best_path].stats.state)) {
 
-                cand_send_packet(s, best_path, P2P_PKT_REACH, hdr->seq, ack_payload, 6, now, false);
+                cand_send_packet(s, best_path, P2P_PKT_REACH, hdr->seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
                 print("V:", LA_F("%s sent via best path[%d] to %s:%d, echo_seq=%u", LA_F57, 57),
                       PROTO2, best_path,
                       inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
@@ -673,7 +673,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
 
                 // 尝试原路发送
                 if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)) {
-                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, 6, now, false);
+                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
                     print("V:", LA_F("%s_ACK sent to %s:%d (try), echo_seq=%u", LA_F195, 195),
                           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
                 }
@@ -783,7 +783,7 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     const char* PROTO = "REACH";
 
     // 校验负载长度：标准格式 6B (target_addr)
-    if (payload_len < 6) {
+    if (payload_len < (int)P2P_PKT_REACH_PSZ) {
         print("W:", LA_F("%s: bad payload(%d)", LA_F121, 121), 
               PROTO, payload_len);
         return;
@@ -1395,14 +1395,14 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
         n->last_reaching_send_ms = now_ms;
 
         // 构造 REACH 负载：[target_addr(6)]
-        uint8_t reach_payload[6];
+        uint8_t reach_payload[P2P_PKT_REACH_PSZ];
         memcpy(reach_payload, &n->reaching_head->target.sin_addr.s_addr, 4);
         memcpy(reach_payload + 4, &n->reaching_head->target.sin_port, 2);
         
         // 策略 1：信令中转模式（如果服务器支持）
         if (s->signaling_relay_fn) {
 
-            ret_t ret = s->signaling_relay_fn(s, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, 6);
+            ret_t ret = s->signaling_relay_fn(s, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, P2P_PKT_REACH_PSZ);
             if (ret == E_NONE) {
 
                 // 发送成功，将节点出队并释放
@@ -1430,7 +1430,7 @@ void nat_tick(p2p_session_t *s, uint64_t now_ms) {
                 // 跳过 target 地址（已原路发送）
                 if (sockaddr_equal(&s->remote_cands[i].addr, &n->reaching_head->target)) continue;
 
-                cand_send_packet(s, i, P2P_PKT_REACH, n->reaching_head->seq, reach_payload, 6, now_ms, false);
+                cand_send_packet(s, i, P2P_PKT_REACH, n->reaching_head->seq, reach_payload, P2P_PKT_REACH_PSZ, now_ms, false);
                 broadcast_cnt++;
             }
             

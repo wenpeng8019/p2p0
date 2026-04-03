@@ -37,7 +37,7 @@ ARGS_S(false, stun,         0,   "stun",         LA_CS("STUN server address", LA
 ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S25, 25));
 ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S26, 26));
 ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S24, 24));
-ARGS_B(false, skip_stun_test, 0, "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", 0, 0));
+ARGS_B(false, skip_stun_test, 0, "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", LA_S54, 54));
 ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S40, 40));
 ARGS_B(false, no_host,      0,   "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S50, 50));
 ARGS_B(false, no_srflx,     0,   "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S52, 52));

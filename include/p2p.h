@@ -187,12 +187,14 @@ typedef void (*p2p_on_request_fn)(p2p_handle_t hdl, uint16_t sid,
  *           正常响应时表示状态码，失败时表示错误类型
  * - data/len : 应答数据；len=-1 表示失败，具体错误见 msg 字段：
  *              msg=原始请求msg: B 不在线（在 REQ_ACK 阶段已知，立即失败）
- *              msg=SIG_MSG_ERR_PEER_OFFLINE (0xFE): B 在等待响应期间离线
- *              msg=SIG_MSG_ERR_TIMEOUT (0xFF): 服务器向 B 转发请求超时
+ *              msg=P2P_MSG_ERR_PEER_OFFLINE (0xFF): B 在等待响应期间离线
+ *              msg=P2P_MSG_ERR_TIMEOUT (0xFE): 服务器向 B 转发请求超时
  */
 typedef void (*p2p_on_response_fn)(p2p_handle_t hdl, uint16_t sid,
                                    uint8_t msg, const void *data, int len,
                                    void *userdata);
+#define P2P_MSG_ERR_TIMEOUT         0xFE    // 服务器转发请求超时
+#define P2P_MSG_ERR_PEER_OFFLINE    0xFF    // B端在等待响应期间离线（区别于 REQ_ACK 时已知离线）
 
 /*
  * ICE 候选收集回调（仅 P2P_SIGNALING_MODE_ICE 模式，类似 WebRTC onicecandidate）

@@ -1,36 +1,93 @@
 /*
- * COMPACT 模式信令（UDP, 缓存配对机制 + 公网地址探测）
+ * COMPACT 模式信令（UDP，单步注册 + 公网地址探测）
  *
  * ============================================================================
  * 协议概述
  * ============================================================================
  *
- * 实现简单的 UDP 信令协议，用于交换对端地址信息，包括双方的公网地址：
- *   - REGISTER:      向服务器注册自己的 ID 和初始候选地址
- *   - REGISTER_ACK:  服务器确认，返回对端状态和缓存能力
- *   - SYNC:     序列化候选同步包（服务器首发 seq=0 并分配 session_id，后续 P2P 传输）
- *   - SYNC_ACK: 候选接收确认，用于可靠传输控制
- *   - NAT_PROBE:     NAT 类型探测请求（可选，发往服务器探测端口）
- *   - NAT_PROBE_ACK: NAT 探测响应，返回第二次映射地址
- *   - DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION: 会话隔离和中继转发
+ * 基于 UDP 的轻量信令协议，通过服务器交换候选地址，完成 P2P 打洞。
  *
- * 候选列表序列化同步机制详见 p2pp.h（COMPACT 模式信令服务协议节）。
+ * 与 RELAY（TCP 两阶段分离）相比，COMPACT 采用 UDP 无状态设计：
+ *   - 无独立的 ONLINE 稳定态，ONLINE 兼含候选注册（embedded candidates）
+ *   - SYNC0 取代 RELAY 的第二阶段请求，同样返回 session_id 和对端在线状态
+ *   - AUTH_KEY（ONLINE_ACK 中分配）取代 TCP 长连接作为 client↔server 认证令牌
+ *
+ * 协议消息列表：
+ *   - ONLINE:        客户端上线（注册本端 ID + 初始候选地址，获取 auth_key）
+ *   - ONLINE_ACK:    服务器确认，返回 auth_key、公网地址、服务器能力
+ *   - SYNC0:         建立与对端的会话（获取 session_id）
+ *   - SYNC0_ACK:     服务器确认会话，返回 session_id 和对端在线状态
+ *   - ALIVE:         保活心跳（维持 UDP 配对槽位）
+ *   - SYNC:          双向候选传输（Client→Server 上传，Server→Client 下发）
+ *   - SYNC_ACK:      候选接收确认（可靠传输控制）
+ *   - OFFLINE:    主动下线，释放配对槽位，服务器通知对端 FIN
+ *   - FIN:           服务器通知本端：对端已离线
+ *   - NAT_PROBE:     NAT 类型探测（发往服务器探测端口，可选）
+ *   - NAT_PROBE_ACK: 返回探测端口观察到的映射地址
+ *
+ * 协议详细格式参见 p2pp.h（COMPACT 模式信令协议节）。
  *
  * ============================================================================
- * 状态机
+ * 实例 ID 机制 (instance_id)
  * ============================================================================
  *
- *   IDLE ──→ REGISTERING ──→ REGISTERED ──→ READY
- *                     │                           │
- *                     └───────────────────────────┘
- *                         (收到 SYNC seq=0)
+ * 每次调用 online() 时生成新的 32 位随机数 instance_id（参考 RTP SSRC）。
+ * 服务器处理逻辑：
+ *   - 相同 (peer_id, instance_id) → 重传，幂等处理
+ *   - 相同 peer_id 但不同 instance_id → 客户端重启，重置旧会话，通知对端下线
  *
- *   - IDLE:        未启动
- *   - REGISTERING: 已发送 REGISTER，等待 REGISTER_ACK
- *   - REGISTERED:  已收到 ACK，等待服务器 SYNC(seq=0)（首次分配 session_id）
- *   - READY:       已收到 SYNC 和 session_id，开始打洞并继续同步剩余候选
+ * ============================================================================
+ * 状态机（两阶段设计）
+ * ============================================================================
  *
- * 候选列表统一存储在 p2p_session 中，本模块只负责序列化和发送。
+ *   阶段1: online() / offline()
+ *   ┌────────────────────────────────────────────────────────────────────────────┐
+ *   │  INIT ──→ WAIT_ONLINE_ACK ──→ ONLINE          ← disconnect() 回退到此     │
+ *   │                           ↘ (connect() 已调用，ONLINE_ACK 直接到阶段2)    │
+ *   └────────────────────────────────────────────────────────────────────────────┘
+ *                              ↓ connect()（ONLINE 状态立即发 SYNC0）
+ *   阶段2: connect() / disconnect()
+ *   ┌──────────────────────────────────────────────────────────────────────────┐
+ *   │  WAIT_SYNC0_ACK ──→ WAIT_PEER ──→ SYNCING ──→ READY                     │
+ *   └──────────────────────────────────────────────────────────────────────────┘
+ *
+ *   - INIT:            未启动
+ *   - WAIT_ONLINE_ACK: 已发送 ONLINE，等待 ONLINE_ACK（获取 auth_key）
+ *   - ONLINE:          已收到 ONLINE_ACK（auth_key 有效），等待 connect() 触发 SYNC0
+ *   - WAIT_SYNC0_ACK:  已发送 SYNC0，等待 SYNC0_ACK（获取 session_id）
+ *   - WAIT_PEER:       已分配 session_id，等待对端上线（服务器下发 SYNC seq=0）
+ *   - SYNCING:         候选同步中（接收/发送 SYNC）
+ *   - READY:           候选同步完成，开始 P2P 打洞
+ *
+ * connect() 可先于 ONLINE_ACK 调用（仅存储 remote_peer_id），
+ * 收到 ONLINE_ACK 后自动触发 SYNC0（懒触发，与 RELAY 模式一致）。
+ *
+ * ============================================================================
+ * NAT 类型探测（可选）
+ * ============================================================================
+ *
+ * 利用主端口和探测端口的两次映射观察，参考 RFC 5780 单 IP 简化模式：
+ *   - ONLINE → ONLINE_ACK：主端口返回 Mapped_Addr1 + probe_port
+ *   - NAT_PROBE → NAT_PROBE_ACK：探测端口返回 Mapped_Addr2（使用相同本地端口）
+ *
+ * 三分类判断：
+ *   - Local_IP == Mapped_IP1          → OPEN（无 NAT）
+ *   - Mapped_Port1 == Mapped_Port2    → CONE（端口一致性 NAT，含三种 Cone 子类型）
+ *   - Mapped_Port1 != Mapped_Port2    → SYMMETRIC（端口随机 NAT）
+ *   - probe_port == 0                 → UNDETECTABLE（服务器不支持探测）
+ *
+ * 探测在 WAIT_SYNC0_ACK 期间后台进行，超时不影响打洞主流程。
+ *
+ * ============================================================================
+ * Trickle 候选支持
+ * ============================================================================
+ *
+ * 候选列表分批上传（SYNC seq 1..16 窗口），支持：
+ *   - HOST/公网候选随 ONLINE 首批嵌入上传（embedded candidates）
+ *   - STUN/TURN 候选后续 trickle 补发
+ *   - count=0 + FIN flag 标识发送结束
+ *
+ * 候选列表统一存储在 p2p_session 中，本模块只负责打包和发送。
  */
 #ifndef P2P_SIGNAL_COMPACT_H
 #define P2P_SIGNAL_COMPACT_H
@@ -43,209 +100,8 @@
 /* 前向声明 */
 struct p2p_session;
 
-/* ============================================================================
- * COMPACT 模式消息格式
- * ============================================================================
- *
- * 候选地址使用 p2p_candidate_t（定义在 p2pp.h），每个 23 字节。
- *
- * REGISTER:
- *   [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
- *   - instance_id: 客户端每次调用 connect() 时生成的 32 位随机数（参考 RTP SSRC）
- *     · 服务器用于区分"同一 peer_key 的重新注册"和"正常重传"：
- *       instance_id 相同 → 重传，幂等处理；
- *       instance_id 不同 → 客户端重启，服务器重置旧会话（清除 session_id、通知对端下线）
- *     · 初始值 0 不合法（服务器忽略），客户端必须保证非零
- *   注意：candidate_count 仅表示本次 REGISTER 包中的候选数量（受 UDP MTU 限制），
- *   不代表总候选数。即使服务器缓存能力足够，客户端也必须通过后续 SYNC
- *   序列化传输剩余候选，并发送 FIN 包明确结束，否则对端无法判断是否还有更多候选。
- *
- * REGISTER_ACK:
- *   [status(1)][session_id(8)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
- *   status: 0=成功/对端离线, 1=成功/对端在线, >=2=错误码
- *   session_id: 本端会话 ID（网络字节序，64位，注册成功后立即分配）
- *   max_candidates: 服务器为对端缓存的最大候选数量（0=不支持缓存）
- *   public_ip/port: 客户端的公网地址（服务器主端口观察到的 UDP 源地址）
- *   probe_port: NAT 探测端口号（0=不支持探测，>0=探测端口）
- *
- * SYNC (seq 字段在包头 hdr.seq):
- *   [session_id(8)][base_index(1)][candidate_count(1)][candidates(N*7)]
- *   - session_id: 会话 ID（网络字节序，64位）
- *     · seq=0: 服务器发送，session_id 由服务器生成（首次分配）
- *     · seq>0: 客户端发送，session_id 使用服务器分配的值
- *   - base_index: 本批候选的起始索引（0-based）
- *   - candidate_count: 本批候选数量，0 表示结束标识（FIN）
- *   - seq=0: 服务器发送，base_index=0，包含缓存的候选，首次分配 session_id
- *   - seq>0: 客户端/服务器继续同步剩余候选，使用已分配的 session_id
- *   - flags: 可包含 FIN 标志（0x01）表示候选列表发送完毕
- *
- * NAT_PROBE (客户端 → 服务器探测端口):
- *   payload: 空（无需额外字段）
- *   包头: type=0x86, flags=0, seq=客户端分配的请求号
- *   - seq 字段可用于匹配响应，客户端可递增或随机分配
- *   - 客户端收到 REGISTER_ACK 后，若 probe_port > 0，则向该端口发送此包
- *
- * NAT_PROBE_ACK (服务器探测端口 → 客户端):
- *   [probe_ip(4)][probe_port(2)]
- *   包头: type=0x87, flags=0, seq=对应的 NAT_PROBE 请求 seq
- *   - probe_ip/port: 服务器在探测端口观察到的客户端源地址（第二次映射）
- *   - seq: 复制请求包的 seq，用于客户端匹配响应
- *
- * UNREGISTER (客户端 → 服务器):
- *   [local_peer_id(32)][remote_peer_id(32)]
- *   包头: type=0x88, flags=0, seq=0
- *   客户端主动断开时发送，请求服务器立即释放配对槽位
- *   服务器收到后会向对端发送 FIN 通知
- *
- * FIN (服务器 → 客户端，下行通知):
- *   [session_id(8)]
- *   包头: type=0x89, flags=0, seq=0
- *   - session_id: 已断开的会话 ID（网络字节序，64位）
- *   服务器通知客户端：对端已主动断开或离线
- *   客户端收到后应停止该会话的所有传输和重传，清理相关资源
- *
- * ============================================================================
- * NAT 类型探测方案
- * ============================================================================
- *
- * 利用 REGISTER 和 NAT_PROBE 两次通讯，参考 STUN RFC 5389/5780，探测 NAT 类型：
- *
- * 1. 服务器配置：
- *    - 主端口（如 3478）：处理 REGISTER/SYNC 等主要协议
- *    - 探测端口（如 3479）：仅处理 NAT_PROBE，可选功能
- *    - 若不配置探测端口，则 REGISTER_ACK 中 probe_port = 0
- *
- * 2. 第一次通讯（REGISTER → REGISTER_ACK，主端口）：
- *    - 客户端从本地地址 Local_IP:Local_Port 向主端口发送 REGISTER
- *    - 服务器主端口观察到源地址 Mapped_IP1:Mapped_Port1
- *    - REGISTER_ACK 返回：
- *      · public_ip/public_port = Mapped_IP1:Mapped_Port1（主端口映射）
- *      · probe_port = 3479（探测端口号，0 表示不支持）
- *
- * 3. 第二次通讯（NAT_PROBE → NAT_PROBE_ACK，探测端口）：
- *    - 客户端收到 REGISTER_ACK 后，若 probe_port > 0，则：
- *      · 向 Server_IP:probe_port 发送 NAT_PROBE（使用相同的本地端口）
- *      · 类似 STUN 的 Change Port Request
- *    - 服务器探测端口观察到源地址 Mapped_IP2:Mapped_Port2
- *    - NAT_PROBE_ACK 返回 probe_ip/probe_port = Mapped_IP2:Mapped_Port2
- *
- * 4. NAT 类型判断（三分类模型）：
- *
- *    ┌─────────────────────────────────────────────────────────────────────┐
- *    │ 条件                                    │ 结论                       │
- *    ├─────────────────────────────────────────────────────────────────────┤
- *    │ Local_IP == Mapped_IP1                  │ OPEN（无 NAT，公网直连）   │
- *    │ Mapped_Port1 == Mapped_Port2            │ CONE（端口一致性 NAT）     │
- *    │ Mapped_Port1 != Mapped_Port2            │ SYMMETRIC（端口随机 NAT）  │
- *    └─────────────────────────────────────────────────────────────────────┘
- *
- *    OPEN：
- *      - 本地 IP 与服务器观察到的源 IP 一致，无地址转换
- *      - P2P 直连无障碍
- *
- *    CONE（端口一致性 NAT）：
- *      - 同一本地端口对不同目标（主端口/探测端口）映射外部端口相同
- *      - 对应 RFC 3489 中的 Full Cone / Restricted Cone / Port Restricted Cone
- *      - 由于 COMPACT 使用单 IP 服务器，无法通过 CHANGE-IP 测试区分三种子类型
- *      - P2P 打洞成功率高（约 80–95%，取决于对端类型）
- *      - 报告为 P2P_NAT_FULL_CONE（最乐观估计，打洞策略相同）
- *
- *    SYMMETRIC（端口随机 NAT）：
- *      - 同一本地端口对不同目标映射的外部端口不同
- *      - 对应 RFC 3489 中的 Symmetric NAT
- *      - P2P 打洞成功率低（需端口预测或依赖中继）
- *      - 报告为 P2P_NAT_SYMMETRIC
- *
- * 5. 与 RFC 3489 全量检测的对比：
- *
- *    RFC 3489 完整流程需要服务器拥有两个独立 IP（双 IP 服务器）：
- *      Test I:   获取 Mapped_Addr
- *      Test II:  CHANGE-IP + CHANGE-PORT → 识别 Full Cone
- *      Test III: CHANGE-PORT only       → 区分 Restricted / Port Restricted
- *
- *    COMPACT 是单 IP 服务器模式，CHANGE-IP 测试天然不可能，因此：
- *
- *    ┌───────────────────┬───────────────┬───────────────────────────────────┐
- *    │ RFC 3489 类型      │ COMPACT 结论  │ 原因                               │
- *    ├───────────────────┼───────────────┼───────────────────────────────────┤
- *    │ Open (No NAT)     │ OPEN          │ ✅ 可精确识别（本地 IP = 映射 IP） │
- *    │ Full Cone         │ CONE          │ ✅ 端口一致性可判断               │
- *    │ Restricted Cone   │ CONE          │ ⚠️ 无法与 Full Cone 区分          │
- *    │ Port Restricted   │ CONE          │ ⚠️ 无法与 Full Cone 区分          │
- *    │ Symmetric         │ SYMMETRIC     │ ✅ 端口随机性可判断               │
- *    │ UDP Blocked       │ TIMEOUT       │ ✅ 注册/探测超时推断              │
- *    └───────────────────┴───────────────┴───────────────────────────────────┘
- *
- *    三种 Cone 子类型在 P2P 打洞策略上并无本质差异（都需要对端先打洞），
- *    故此处合并为 CONE 已满足实际需求。
- *
- * 6. 实现要点：
- *    - 服务器配置：主端口必选，探测端口可选（建议与主端口同 IP 不同端口）
- *    - 客户端流程：
- *      1) 发送 REGISTER 到主端口，获得 Mapped_Addr1 + probe_port
- *      2) 若 probe_port > 0，发送 NAT_PROBE 到探测端口（使用包头 seq 匹配响应）
- *      3) 收到 NAT_PROBE_ACK，获得 Mapped_Addr2
- *      4) 比较 Mapped_Port1 vs Mapped_Port2，写入 nat_detected_result
- *      5) 若 probe_port == 0，结论为 P2P_NAT_UNDETECTABLE（无法探测）
- *    - 整个探测在 REGISTERED 状态完成（等待 SYNC 期间，不阻塞主流程）
- *    - 探测失败（超时）不影响 P2P 打洞，降级为普通打洞策略
- *
- * 7. 优化建议：
- *    - 探测结果可缓存（如 5 分钟），避免每次连接都重新探测
- *    - NAT_PROBE 可设置超时（如 500ms × 3 次重试），快速失败
- *    - 探测端口可与主端口同进程监听（通过 SO_REUSEPORT 或 select 多路复用）
- *
- * ============================================================================
- * 会话标识机制（session_id）
- * ============================================================================
- *
- * 为了支持同一对端的多个并发连接，服务器在双方首次配对成功时为每个方向分配
- * 唯一的 64 位会话 ID（session_id）：
- *
- * 1. 分配时机：
- *    - 服务器检测到双方都注册成功（REGISTER 都到达）
- *    - 服务器向双方发送 SYNC(seq=0) 时，首次分配 session_id
- *    - 每个方向独立分配（A→B 和 B→A 的 session_id 不同）
- *
- * 2. session_id 生成策略：
- *    - 64 位加密安全随机数（使用 arc4random/rand_s/urandom）
- *    - 冲突概率：1/2^64 ≈ 5.4×10^-20（几乎不可能）
- *    - 安全性：无法预测，防止跨会话注入攻击
- *
- * 3. 使用场景：
- *    - SYNC(seq>0)：客户端继续同步候选时，携带 session_id
- *    - SYNC_ACK：客户端确认收到 SYNC，携带 session_id
- *    - DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION：会话隔离和中继转发
- *
- * 4. 服务器索引：
- *    - 双索引机制：session_id（O(1)查找）+ peer_key（local_id+remote_id）
- *    - 通过 session_id 快速定位转发目标（无需遍历）
- *
- * SYNC_ACK:
- *   [session_id(8)]
- *   包头: type=0x85, flags=0, seq=确认的 SYNC 序列号
- *   - session_id: 会话 ID（网络字节序，64位，与对应的 SYNC 一致）
- *   - seq: 确认的 SYNC 序列号（seq=0 表示确认服务器下发的 SYNC(seq=0)）
- *   - seq 窗口: 0..16（客户端接收端仅接受 1..16）
- *
- * SYNC(seq=0) 的两种语义：
- *   - base_index=0: 服务器下发的首个候选列表（candidate_count>=1）
- *   - base_index!=0: 对端公网地址变更通知（candidate_count=1）
- *     - base_index 作为 8 位循环通知序号（1..255 循环）
- *     - 接收端按循环序比较，仅应用更新的通知；旧通知可忽略但仍需 ACK
- *
- * DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION（会话隔离和中继转发）:
- *   [session_id(8)][payload(N)]
- *   包头: type=0x20/0x21/0x22, flags=0x01, seq=数据序列号
- *   - session_id: 会话 ID（网络字节序，64位）
- *   - payload: 原始数据/ACK/DTLS 内容
- *   用于：
- *     1. 会话隔离：过滤旧会话重传的包（解决重连污染问题）
- *     2. 中继转发：服务器通过 session_id 查找目标对端
- */
-
 /* SYNC flags */
-#define SIG_SYNC_FIN  0x01     /* 候选列表发送完毕 */
+#define SIG_SYNC_FLAG_FIN  0x01     /* 候选列表发送完毕 */
 
 /*
  * COMPACT 模式候选类型枚举
@@ -255,11 +111,13 @@ struct p2p_session;
 
 /* 信令状态 */
 typedef enum {
-    SIGNAL_COMPACT_INIT = 0,        /* 未启动 */
-    SIGNAL_COMPACT_REGISTERING,     /* 等待 ONLINE_ACK */
-    SIGNAL_COMPACT_ONLINE,          /* 已上线，等待 SYNC0_ACK 和 SYNC(seq=0) */
-    SIGNAL_COMPACT_ICE,             /* 向对方发送后续候选队列、和 FIN */
-    SIGNAL_COMPACT_READY            /* 如果已经完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
+    SIGNAL_COMPACT_INIT = 0,                                /* 未启动 */
+    SIGNAL_COMPACT_WAIT_ONLINE_ACK,                         /* 已发送 ONLINE，等待 ONLINE_ACK */
+    SIGNAL_COMPACT_ONLINE,                                  /* 已上线, 收到 ONLINE_ACK */
+    SIGNAL_COMPACT_WAIT_SYNC0_ACK,                          /* 发送 SYNC0，等待 SYNC0_ACK */
+    SIGNAL_COMPACT_WAIT_PEER,                               /* 已收到 SYNC0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
+    SIGNAL_COMPACT_SYNCING,                                 /* 收到 PEER SYNC0 或 SYNC0_ACK online=1，向对方同步后续候选队列和 FIN */
+    SIGNAL_COMPACT_READY                                    /* 已完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
 } p2p_signal_compact_state_t;
 
 /* COMPACT 信令上下文 */
@@ -273,12 +131,14 @@ typedef struct {
 
     /* ONLINE 重发控制（仅 REGISTERING 状态） */
     uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
-    int                 online_attempts;                    /* ONLINE/SYNC0 总共尝试次数 */
+    int                 sig_attempts;                    /* ONLINE/SYNC0 总共尝试次数 */
+
+    /* 和服务器的会话 */
+    uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 ONLINE_ACK 中获得，用于 SYNC0/ALIVE */
 
     /* 和对方的会话 */
-    uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配），在 ONLINE_ACK 中首次获得 */
-    bool                peer_online;                        /* 对端是否在线；ONLINE_ACK 和 SYNC 都会导致 online 为 true */
-    bool                sync0_acked;                        /* SYNC0 已被服务器确认（收到 SYNC0_ACK） */
+    uint64_t            session_id;                         /* 对端配对会话 ID（64位，0=尚未分配），在 SYNC0_ACK 中首次获得，用于 SYNC/FIN/DATA relay/MSG */
+    bool                peer_online;                        /* 对端是否在线；SYNC0_ACK 和 SYNC 都会导致 online 为 true */
 
     /* REGISTER_ACK 返回的信息 */
     int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量（ONLINE_ACK 中 max_candidates 限制） */
@@ -337,28 +197,27 @@ void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx);
 /*
  * 信令服务周期维护（拉取阶段）— 注册重试、保活
  * 
- * 处理 REGISTERING/REGISTERED/READY 状态下的信令维护：
- * - REGISTERING：定期重发 REGISTER 包
- * - REGISTERED/READY：定期发送 keepalive 保持槽位
+ * 处理各信令状态下的维护任务：
+ * - WAIT_ONLINE_ACK：定期重发 ONLINE（获取 auth_key）
+ * - WAIT_SYNC0_ACK：定期重发 SYNC0（获取 session_id）
+ * - ONLINE/WAIT_PEER/SYNCING/READY：发送 ALIVE keepalive 保持服务器槽位
  * 
  * 在 p2p_update() 的阶段 2（信令拉取）中调用。
  * 
  * @param s   P2P 会话
- * @return    0 正常，-1 错误
  */
 void p2p_signal_compact_tick_recv(struct p2p_session *s);
 
 /*
  * 信令输出（推送阶段）— 向对端发送候选地址
  * 
- * 处理 ICE/READY 状态下向对端推送本地候选：
- * - ICE：定期重发剩余候选和 FIN
+ * 处理 SYNCING/READY 状态下向对端推送本地候选：
+ * - SYNCING：定期重发剩余候选和 FIN，直到对端全部确认（进入 READY）
  * - READY：发送新收集到的候选（如果有）
  * 
  * 在 p2p_update() 的阶段 7（信令推送）中调用。
  * 
  * @param s   P2P 会话
- * @return    0 正常，-1 错误
  */
 void p2p_signal_compact_tick_send(struct p2p_session *s);
 
@@ -371,23 +230,41 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
 //-----------------------------------------------------------------------------
 
 /*
- * 开始信令交换（发送 ONLINE + 自动队列 SYNC0）
+ * 阶段1：客户端上线（发送 ONLINE，建立 client↔server 关系，获取 auth_key）
  *
- * @param s             会话对象（包含候选列表）
+ * @param s             会话对象
  * @param local_peer_id 本端 ID
- * @param remote_peer_id 对端 ID
  * @param server        服务器地址
- * @param verbose       是否输出详细日志
- * @return              =0 成功，!=0 错误码
+ * @return              E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
-                               const struct sockaddr_in *server);
+ret_t p2p_signal_compact_online(struct p2p_session *s, const char *local_peer_id,
+                                const struct sockaddr_in *server);
 
 /*
- * 结束信令交换（发送 UNREGISTER）
+ * 阶段1：客户端下线（发送 OFFLINE，清理服务器上的全部状态，回到 INIT）
  *
  * @param s 会话对象
- * @return =0 成功，!=0 错误码
+ * @return  E_NONE=成功，其他=错误码
+ */
+ret_t p2p_signal_compact_offline(struct p2p_session *s);
+
+/*
+ * 阶段2：建立与对端的会话（发送 SYNC0，建立 client↔peer 关系，获取 session_id）
+ *
+ * 若尚未收到 ONLINE_ACK（WAIT_ONLINE_ACK 状态），将在收到后自动触发 SYNC0。
+ * 前提：必须已经调用过 online()。
+ *
+ * @param s              会话对象
+ * @param remote_peer_id 目标对端 ID
+ * @return               E_NONE=成功，E_NONE_CONTEXT=未上线，E_BUSY=已连接其他对端，其他=错误码
+ */
+ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_id);
+
+/*
+ * 阶段2：断开与对端的会话（发送 OFFLINE，清理 peer 会话，回到 ONLINE 等待下次 connect()）
+ *
+ * @param s 会话对象
+ * @return  E_NONE=成功，其他=错误码
  */
 ret_t p2p_signal_compact_disconnect(struct p2p_session *s);
 
@@ -404,7 +281,7 @@ void p2p_signal_compact_trickle_candidate(struct p2p_session *s);
  *
  * @param s       会话对象
  * @param type    P2P 包类型
- * @param flags   flags 标志（接口内部会添加 P2P_DATA_FLAG_SESSION）
+ * @param flags   flags 标志（接口内部会添加 P2P_RELAY_FLAG_SESSION）
  * @param seq     序列号
  * @param payload 原始负载
  * @param payload_len 负载长度

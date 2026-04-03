@@ -180,16 +180,12 @@ static int find_log(const char *pattern) {
 // 构造 ONLINE 包
 static int build_online(uint8_t *buf, int buf_size,
                         const char *local_peer_id,
-                        const char *remote_peer_id,
                         uint32_t instance_id) {
-    if (buf_size < 4 + 32 + 32 + 4) return -1;
+    if (buf_size < 4 + 32 + 4) return -1;
     int n = 0;
     buf[n++] = SIG_PKT_ONLINE; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
     memset(buf + n, 0, 32);
     if (local_peer_id) strncpy((char*)(buf + n), local_peer_id, 31);
-    n += 32;
-    memset(buf + n, 0, 32);
-    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
     n += 32;
     buf[n++] = (instance_id >> 24) & 0xFF;
     buf[n++] = (instance_id >> 16) & 0xFF;
@@ -199,15 +195,19 @@ static int build_online(uint8_t *buf, int buf_size,
 }
 
 #define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
-    build_online(buf, buf_size, local, remote, inst_id)
+    build_online(buf, buf_size, local, inst_id)
 
 // 构造 SYNC0 包
-static int build_sync0(uint8_t *buf, int buf_size, uint64_t session_id,
+static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
+                       const char *remote_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
-    if (buf_size < 4 + 8 + 1) return -1;
+    if (buf_size < 4 + 8 + 32 + 1) return -1;
     int n = 0;
     buf[n++] = SIG_PKT_SYNC0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
-    for (int i = 0; i < 8; i++) buf[n++] = (session_id >> (56 - i * 8)) & 0xFF;
+    for (int i = 0; i < 8; i++) buf[n++] = (auth_key >> (56 - i * 8)) & 0xFF;
+    memset(buf + n, 0, 32);
+    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
+    n += 32;
     if (candidate_count > 255) candidate_count = 255;
     buf[n++] = (uint8_t)candidate_count;
     for (int i = 0; i < candidate_count && candidates; i++) {
@@ -275,7 +275,7 @@ static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
 static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
-    int len = build_online(pkt, sizeof(pkt), local, remote, inst_id);
+    int len = build_online(pkt, sizeof(pkt), local, inst_id);
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -295,15 +295,15 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
                           (struct sockaddr*)&from, &from_len);
     
     if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) {
-        uint64_t session_id = 0;
+        uint64_t auth_key = 0;
         for (int i = 0; i < 8; i++) {
-            session_id = (session_id << 8) | recv_buf[5 + i];
+            auth_key = (auth_key << 8) | recv_buf[8 + i];
         }
-        // 发送 SYNC0
-        len = build_sync0(pkt, sizeof(pkt), session_id, cand_count, cands);
+        // 发送 SYNC0（携带 auth_key + remote_peer_id）
+        len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
-        return session_id;
+        return auth_key;
     }
     return 0;
 }

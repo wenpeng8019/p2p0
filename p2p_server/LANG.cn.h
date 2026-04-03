@@ -80,8 +80,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F72] = "Send %s: ses_id=%llu, sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d\n",  /* SID:72 new */
     [LA_F73] = "Send %s: ses_id=%llu, sid=%u, peer='%s'\n",  /* SID:73 new */
     [LA_F74] = "Send %s: ses_id=%llu, sid=%u, status=%u\n",  /* SID:74 new */
-    [LA_F75] = "Send %s: status=%s, max_cands=%d, relay=%s, msg=%s, public=%s:%d, probe=%d, ses_id=%llu, inst_id=%u\n",  /* SID:75 new */
-    [LA_F76] = "Send %s: status=error (no slot available)\n",  /* SID:76 new */
+    [LA_F75] = "Send %s: max_cands=%d, relay=%s, msg=%s, public=%s:%d, probe=%d, ses_id=%llu, inst_id=%u\n",  /* SID:75 */
+    [LA_F76] = "Send %s: rejected (no slot available)\n",  /* SID:76 */
     [LA_F77] = "Starting P2P signal server on port %d\n",  /* SID:77 new */
     [LA_F78] = "Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n",  /* SID:78 new */
     [LA_F79] = "Unknown packet type 0x%02x from %s\n",  /* SID:79 new */

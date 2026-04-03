@@ -75,22 +75,22 @@
  *
  *   阶段1: 客户端上线（建立客户端-服务器连接）
  *   ┌────────────────────────────────────────────────────┐
- *   │  INIT ──→ ONLINE_ING ──→ WAIT_ONLINE_ACK ──→ ONLINE │
+ *   │  INIT ──→ CONNECTING ──→ WAIT_ONLINE_ACK ──→ ONLINE │
  *   └────────────────────────────────────────────────────┘
  *                                    ↓
  *   阶段2: 建立会话（申请连接对方，进行候选交换）
  *   ┌────────────────────────────────────────────────────┐
- *   │  ONLINE ──→ WAIT_SYNC0_ACK ──→ WAIT_PEER ──→ EXCHANGING ──→ READY │
+ *   ONLINE ──→ WAIT_SYNC0_ACK ──→ WAIT_PEER ──→ SYNCING ──→ READY │
  *   └────────────────────────────────────────────────────┘
  *
  *   - INIT:              未启动
- *   - ONLINE_ING:        TCP 连接建立中
+ *   - CONNECTING:        TCP 连接建立中
  *   - WAIT_ONLINE_ACK:   已发送 ONLINE，等待 ONLINE_ACK
  *   - ONLINE:            已上线，可以发起多个 SYNC0（核心状态）
  *   - WAIT_SYNC0_ACK:    已发送 SYNC0，等待 SYNC0_ACK（分配 session_id）
  *   - WAIT_PEER:         已分配 session_id，但对端离线，等待首个 SYNC
- *   - EXCHANGING:        候选交换中（上传/接收 SYNC）
- *   - READY:             候选交换完成，可以开始 P2P 打洞
+ *   - SYNCING:           候选同步中（上传/接收 SYNC）
+ *   - READY:             候选同步完成，可以开始 P2P 打洞
  *
  * 注意：ONLINE 状态是稳定状态，可以在此状态下发起多个 SYNC0，
  *       从而支持与多个对端并发建立会话（每个会话有独立的 session_id）。
@@ -148,13 +148,13 @@ struct p2p_session;
 
 typedef enum {
     SIGNAL_RELAY_INIT = 0,          /* 未启动 */
-    SIGNAL_RELAY_ERROR,              /* 错误状态 */
-    SIGNAL_RELAY_ONLINE_ING,        /* TCP 连接建立中 */
+    SIGNAL_RELAY_ERROR,             /* 错误状态 */
+    SIGNAL_RELAY_CONNECTING,        /* TCP 连接建立中 */
     SIGNAL_RELAY_WAIT_ONLINE_ACK,   /* 等待 ONLINE_ACK */
     SIGNAL_RELAY_ONLINE,            /* 已上线 */
     SIGNAL_RELAY_WAIT_SYNC0_ACK,    /* 等待 SYNC0_ACK */
     SIGNAL_RELAY_WAIT_PEER,         /* 已分配会话，等待对端上线 */
-    SIGNAL_RELAY_EXCHANGING,        /* 候选交换中 */
+    SIGNAL_RELAY_SYNCING,           /* 候选同步中 */
     SIGNAL_RELAY_READY              /* 交换完成，对端候选接收完成 */
 } relay_state_t;
 
@@ -295,7 +295,7 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
  *
  * 向服务器发送 FIN 消息，通知结束与对端的会话。
  * 清理会话状态后回到 ONLINE 状态，可以再次发起 SYNC0。
- * 前提：必须处于 WAIT_PEER / EXCHANGING / READY 状态。
+ * 前提：必须处于 WAIT_PEER / SYNCING / READY 状态。
  *
  * @param s   P2P 会话
  * @return    E_NONE=成功，其他=错误码

@@ -4,14 +4,14 @@
  * ============================================================================
  * 测试目标
  * ============================================================================
- * 验证 p2p_server 对 COMPACT 协议 REGISTER/UNREGISTER 包的处理逻辑
+ * 验证 p2p_server 对 COMPACT 协议 REGISTER/OFFLINE 包的处理逻辑
  *
  * ============================================================================
  * 测试方法
  * ============================================================================
  * 1. 启动 p2p_server 子进程，监听指定端口
  * 2. 通过 instrument 机制收集 server 的实时日志
- * 3. 测试程序作为客户端，构造 REGISTER/UNREGISTER 包发送给 server
+ * 3. 测试程序作为客户端，构造 REGISTER/OFFLINE 包发送给 server
  * 4. 验证响应包（REGISTER_ACK）的内容和 server 日志
  *
  * ============================================================================
@@ -48,7 +48,7 @@
  *
  * 测试 8: unregister
  *   目标：验证客户端主动断开时 server 正确释放资源
- *   方法：先注册，再发送 UNREGISTER 包
+ *   方法：先注册，再发送 OFFLINE 包
  *   预期：
  *     - server 日志含 "releasing slot"
  *     - 再次用相同 peer_id 注册时分配新的 session_id
@@ -71,8 +71,8 @@
  *     - server 日志含 "invalid instance_id"
  *
  * 测试 9: unregister_bad_payload
- *   目标：验证 server 对畸形 UNREGISTER 包的防御
- *   方法：发送一个过短的 UNREGISTER 包
+ *   目标：验证 server 对畸形 OFFLINE 包的防御
+ *   方法：发送一个过短的 OFFLINE 包
  *   预期：
  *     - server 日志含 "bad payload"
  *
@@ -117,7 +117,7 @@
  *
  * 测试 13: register_reconnect_after_disconnect
  *   目标：验证 peer 断开后重新注册的场景
- *   方法：Alice/Bob 配对 → Alice UNREGISTER → Alice 重新注册
+ *   方法：Alice/Bob 配对 → Alice OFFLINE → Alice 重新注册
  *   预期：
  *     - Alice 重新注册后收到 status=1 (PEER_ONLINE)（Bob 仍在线）
  *     - 或 Bob 收到 PEER_OFF 通知后 Alice 收到 status=0
@@ -223,9 +223,8 @@ static int find_log(const char *pattern) {
 // 构造 ONLINE 包
 static int build_online(uint8_t *buf, int buf_size,
                         const char *local_peer_id,
-                        const char *remote_peer_id,
                         uint32_t instance_id) {
-    if (buf_size < 4 + 32 + 32 + 4) return -1;
+    if (buf_size < 4 + 32 + 4) return -1;
     
     int n = 0;
     
@@ -240,11 +239,6 @@ static int build_online(uint8_t *buf, int buf_size,
     if (local_peer_id) strncpy((char*)(buf + n), local_peer_id, 31);
     n += 32;
     
-    // remote_peer_id (32 bytes)
-    memset(buf + n, 0, 32);
-    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
-    n += 32;
-    
     // instance_id (4 bytes, 网络字节序)
     buf[n++] = (instance_id >> 24) & 0xFF;
     buf[n++] = (instance_id >> 16) & 0xFF;
@@ -256,12 +250,13 @@ static int build_online(uint8_t *buf, int buf_size,
 
 // 兼容别名（部分测试用例仍使用旧名）
 #define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
-    build_online(buf, buf_size, local, remote, inst_id)
+    build_online(buf, buf_size, local, inst_id)
 
-// 构造 SYNC0 包：[hdr(4)][session_id(8)][candidate_count(1)][candidates(N*sizeof)]
-static int build_sync0(uint8_t *buf, int buf_size, uint64_t session_id,
+// 构造 SYNC0 包：[hdr(4)][auth_key(8)][remote_peer_id(32)][candidate_count(1)][candidates(N*sizeof)]
+static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
+                       const char *remote_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
-    if (buf_size < 4 + 8 + 1) return -1;
+    if (buf_size < 4 + 8 + 32 + 1) return -1;
     
     int n = 0;
     buf[n++] = SIG_PKT_SYNC0;
@@ -269,8 +264,13 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t session_id,
     buf[n++] = 0;
     buf[n++] = 0;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) buf[n++] = (session_id >> (56 - i * 8)) & 0xFF;
+    // auth_key (8 bytes, network order)
+    for (int i = 0; i < 8; i++) buf[n++] = (auth_key >> (56 - i * 8)) & 0xFF;
+    
+    // remote_peer_id (32 bytes)
+    memset(buf + n, 0, 32);
+    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
+    n += 32;
     
     if (candidate_count > 255) candidate_count = 255;
     buf[n++] = (uint8_t)candidate_count;
@@ -284,29 +284,20 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t session_id,
     return n;
 }
 
-// 构造 UNREGISTER 包
-static int build_unregister(uint8_t *buf, int buf_size,
-                            const char *local_peer_id,
-                            const char *remote_peer_id) {
-    if (buf_size < 4 + 32 + 32) return -1;
+// 构造 OFFLINE 包
+static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
+    if (buf_size < 4 + 8) return -1;
     
     int n = 0;
     
     // 包头 [type=0x82][flags=0][seq=0]
-    buf[n++] = SIG_PKT_UNREGISTER;
+    buf[n++] = SIG_PKT_OFFLINE;
     buf[n++] = 0;
     buf[n++] = 0;
     buf[n++] = 0;
     
-    // local_peer_id (32 bytes)
-    memset(buf + n, 0, 32);
-    if (local_peer_id) strncpy((char*)(buf + n), local_peer_id, 31);
-    n += 32;
-    
-    // remote_peer_id (32 bytes)
-    memset(buf + n, 0, 32);
-    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
-    n += 32;
+    // auth_key (8 bytes, network order)
+    for (int i = 0; i < 8; i++) buf[n++] = (uint8_t)((auth_key >> (56 - i * 8)) & 0xFF);
     
     return n;
 }
@@ -314,7 +305,6 @@ static int build_unregister(uint8_t *buf, int buf_size,
 // 发送并接收 ONLINE_ACK
 typedef struct {
     int received;           // 是否收到响应
-    uint8_t status;         // 0=offline, 1=online, 2=error
     uint64_t session_id;
     uint32_t instance_id;
     uint8_t max_candidates;
@@ -366,25 +356,24 @@ static int send_online_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_t 
     ack->received = 1;
     
     ack->flags = recv_buf[1];
-    ack->status = recv_buf[4];
-    
-    // session_id (8 bytes)
-    ack->session_id = 0;
-    for (int i = 0; i < 8; i++) {
-        ack->session_id = (ack->session_id << 8) | recv_buf[5 + i];
-    }
-    
+
     // instance_id (4 bytes)
     ack->instance_id = 0;
     for (int i = 0; i < 4; i++) {
-        ack->instance_id = (ack->instance_id << 8) | recv_buf[13 + i];
+        ack->instance_id = (ack->instance_id << 8) | recv_buf[4 + i];
+    }
+
+    // session_id / auth_key (8 bytes)
+    ack->session_id = 0;
+    for (int i = 0; i < 8; i++) {
+        ack->session_id = (ack->session_id << 8) | recv_buf[8 + i];
     }
     
-    ack->max_candidates = recv_buf[17];
-    memcpy(&ack->public_ip, recv_buf + 18, 4);
-    memcpy(&ack->public_port, recv_buf + 22, 2);
+    ack->max_candidates = recv_buf[16];
+    memcpy(&ack->public_ip, recv_buf + 17, 4);
+    memcpy(&ack->public_port, recv_buf + 21, 2);
     ack->public_port = ntohs(ack->public_port);
-    memcpy(&ack->probe_port, recv_buf + 24, 2);
+    memcpy(&ack->probe_port, recv_buf + 23, 2);
     ack->probe_port = ntohs(ack->probe_port);
     
     return 1;
@@ -442,10 +431,8 @@ static void test_register_peer_offline(void) {
         TEST_FAIL(TEST_NAME, "no REGISTER_ACK received");
         return;
     }
-    if (ack.status != SIG_ONACK_PEER_OFFLINE) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "expected status=0 (offline), got %d", ack.status);
-        TEST_FAIL(TEST_NAME, msg);
+    if (ack.session_id == 0) {
+        TEST_FAIL(TEST_NAME, "ONLINE_ACK rejected (auth_key=0)");
         return;
     }
     if (ack.session_id == 0) {
@@ -469,43 +456,85 @@ static void test_register_peer_offline(void) {
 }
 
 // 测试 2: 正常注册，peer 在线（双方互相注册）
+// 新协议: ONLINE 仅登录（获取 auth_key），SYNC0 携带 remote_peer_id 完成配对
 static void test_register_peer_online(void) {
     const char *TEST_NAME = "register_peer_online";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
-    uint8_t pkt[256];
+    uint8_t pkt[512];
     register_ack_t ack_alice = {0}, ack_bob = {0};
     uint32_t inst_alice = (uint32_t)P_tick_us();
     uint32_t inst_bob = inst_alice + 1000;
     
-    // Alice 注册，等待 Bob
-    int len = build_register(pkt, sizeof(pkt), PEER_ALICE, PEER_BOB, inst_alice, 0, NULL);
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(g_server_port);
+    inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
+    
+    // Step 1: Alice ONLINE → 获取 auth_key
+    int len = build_online(pkt, sizeof(pkt), PEER_ALICE, inst_alice);
     send_register_recv_ack(pkt, len, &ack_alice, RECV_TIMEOUT_MS);
     
-    if (!ack_alice.received || ack_alice.status != SIG_ONACK_PEER_OFFLINE) {
-        TEST_FAIL(TEST_NAME, "Alice should get status=offline initially");
+    if (!ack_alice.received || ack_alice.session_id == 0) {
+        TEST_FAIL(TEST_NAME, "Alice should get valid ONLINE_ACK (auth_key != 0)");
         return;
     }
-    printf("    Alice registered, session_id=0x%016llx, waiting for Bob\n", 
-           (unsigned long long)ack_alice.session_id);
+    printf("    Alice ONLINE: auth_key=0x%016llx\n", (unsigned long long)ack_alice.session_id);
     
-    // Bob 注册，应该匹配 Alice
-    len = build_register(pkt, sizeof(pkt), PEER_BOB, PEER_ALICE, inst_bob, 0, NULL);
+    // Step 2: Bob ONLINE → 获取 auth_key
+    len = build_online(pkt, sizeof(pkt), PEER_BOB, inst_bob);
     send_register_recv_ack(pkt, len, &ack_bob, RECV_TIMEOUT_MS);
     
-    if (!ack_bob.received || ack_bob.status != SIG_ONACK_PEER_ONLINE) {
-        TEST_FAIL(TEST_NAME, "Bob should get status=online (peer matched)");
+    if (!ack_bob.received || ack_bob.session_id == 0) {
+        TEST_FAIL(TEST_NAME, "Bob should get valid ONLINE_ACK (auth_key != 0)");
         return;
     }
-    printf("    Bob registered, session_id=0x%016llx, peer online!\n", 
-           (unsigned long long)ack_bob.session_id);
+    printf("    Bob ONLINE: auth_key=0x%016llx\n", (unsigned long long)ack_bob.session_id);
+    
+    // Step 3: Alice 发 SYNC0（携带 auth_key + remote=Bob）
+    len = build_sync0(pkt, sizeof(pkt), ack_alice.session_id, PEER_BOB, 0, NULL);
+    sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
+    
+    // 接收 Alice 的 SYNC0_ACK
+    uint8_t recv_buf[256];
+    uint8_t alice_sync0_status = 0;
+    P_sock_rcvtimeo(g_sock, RECV_TIMEOUT_MS);
+    {
+        struct sockaddr_in from; socklen_t from_len = sizeof(from);
+        ssize_t n = recvfrom(g_sock, (char*)recv_buf, sizeof(recv_buf), 0,
+                              (struct sockaddr*)&from, &from_len);
+        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
+            alice_sync0_status = recv_buf[12];  // online byte
+            printf("    Alice SYNC0_ACK: peer_online=%d\n", alice_sync0_status);
+        }
+    }
+    
+    // Step 4: Bob 发 SYNC0（携带 auth_key + remote=Alice）
+    len = build_sync0(pkt, sizeof(pkt), ack_bob.session_id, PEER_ALICE, 0, NULL);
+    sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
+    
+    // 接收 Bob 的 SYNC0_ACK（应该 peer_online=1）
+    P_sock_rcvtimeo(g_sock, RECV_TIMEOUT_MS);
+    {
+        struct sockaddr_in from; socklen_t from_len = sizeof(from);
+        ssize_t n = recvfrom(g_sock, (char*)recv_buf, sizeof(recv_buf), 0,
+                              (struct sockaddr*)&from, &from_len);
+        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
+            uint8_t online = recv_buf[12];
+            printf("    Bob SYNC0_ACK: peer_online=%d\n", online);
+            if (online == 1) {
+                TEST_PASS(TEST_NAME);
+                return;
+            }
+        }
+    }
     
     // 等待 SYNC 包
     P_usleep(200 * 1000);
     
     // 检查是否收到 SYNC（同时清空缓冲区中的其他包）
-    uint8_t recv_buf[256];
     int got_sync = 0;
     for (int i = 0; i < 10; i++) {
         int n = recv_packet(recv_buf, sizeof(recv_buf), 100);
@@ -520,13 +549,12 @@ static void test_register_peer_online(void) {
     P_usleep(100 * 1000);
     
     if (got_sync) {
-        // 收到 SYNC 就说明配对成功
         TEST_PASS(TEST_NAME);
         return;
     }
     
-    // SYNC 可能发给 Alice 了（我们用的是 Bob 的视角），检查 server 日志
-    if (find_log("Pairing complete") >= 0) {
+    // 检查 server 日志
+    if (find_log("paired") >= 0) {
         TEST_PASS(TEST_NAME);
     } else {
         TEST_FAIL(TEST_NAME, "Pairing not detected in server logs");
@@ -747,8 +775,8 @@ static void test_register_with_candidates(void) {
     uint8_t pkt[512];
     uint32_t inst_id = (uint32_t)P_tick_us() + 5000;
 
-    // 第一步：发送 ONLINE，获取 session_id
-    int len = build_online(pkt, sizeof(pkt), "cand_client", PEER_UNKNOWN, inst_id);
+    // 第一步：发送 ONLINE，获取 auth_key
+    int len = build_online(pkt, sizeof(pkt), "cand_client", inst_id);
     register_ack_t ack = {0};
     send_online_recv_ack(pkt, len, &ack, RECV_TIMEOUT_MS);
     
@@ -764,7 +792,7 @@ static void test_register_with_candidates(void) {
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
 
-    len = build_sync0(pkt, sizeof(pkt), ack.session_id, 2, candidates);
+    len = build_sync0(pkt, sizeof(pkt), ack.session_id, PEER_UNKNOWN, 2, candidates);
     sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
     
     P_usleep(200 * 1000);
@@ -779,7 +807,7 @@ static void test_register_with_candidates(void) {
     printf("    Registered with 2 candidates via SYNC0\n");
 }
 
-// 测试 8: UNREGISTER 主动断开
+// 测试 8: OFFLINE 主动断开
 static void test_unregister(void) {
     const char *TEST_NAME = "unregister";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -807,8 +835,8 @@ static void test_unregister(void) {
     P_usleep(100 * 1000);
     clear_logs();
     
-    // 发送 UNREGISTER
-    len = build_unregister(pkt, sizeof(pkt), LOCAL_ID, REMOTE_ID);
+    // 发送 OFFLINE
+    len = build_unregister(pkt, sizeof(pkt), ack.session_id);
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -850,7 +878,7 @@ static void test_unregister(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 9: UNREGISTER 畸形包
+// 测试 9: OFFLINE 畸形包
 static void test_unregister_bad_payload(void) {
     const char *TEST_NAME = "unregister_bad_payload";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -861,13 +889,13 @@ static void test_unregister_bad_payload(void) {
     uint8_t drain_buf[256];
     while (recvfrom(g_sock, (char*)drain_buf, sizeof(drain_buf), 0, NULL, NULL) > 0);
     
-    // 构造一个太短的 UNREGISTER 包（只有包头 + 部分 payload）
-    uint8_t pkt[20];
-    pkt[0] = SIG_PKT_UNREGISTER;
+// 构造一个太短的 OFFLINE 包（包头 + 4 字节 payload，小于 auth_key 8 字节）
+    uint8_t pkt[8];
+    pkt[0] = SIG_PKT_OFFLINE;
     pkt[1] = 0;
     pkt[2] = 0;
     pkt[3] = 0;
-    memset(pkt + 4, 0, sizeof(pkt) - 4);
+    memset(pkt + 4, 0, 4);  // 只有 4 字节 payload，小于最小 8 字节
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -946,13 +974,12 @@ static void test_register_addr_change(void) {
     }
     
     // 解析第二次响应
-    uint8_t status2 = recv_buf[4];
     uint64_t session_id2 = 0;
     for (int i = 0; i < 8; i++) {
-        session_id2 = (session_id2 << 8) | recv_buf[5 + i];
+        session_id2 = (session_id2 << 8) | recv_buf[8 + i];
     }
     
-    printf("    Second session_id: %llu (status=%d)\n", (unsigned long long)session_id2, status2);
+    printf("    Second session_id: %llu\n", (unsigned long long)session_id2);
     
     // 同一 instance_id 应该返回相同的 session_id（幂等）
     if (session_id2 != first_session_id) {
@@ -991,8 +1018,8 @@ static void test_register_peer_id_max_length(void) {
         return;
     }
     
-    if (ack.status != 0) {
-        TEST_FAIL(TEST_NAME, "unexpected status (expected 0=PEER_OFFLINE)");
+    if (ack.session_id == 0) {
+        TEST_FAIL(TEST_NAME, "ONLINE_ACK rejected (auth_key=0)");
         return;
     }
     
@@ -1021,8 +1048,8 @@ static void test_register_candidates_overflow(void) {
     
     uint8_t pkt[512];
 
-    // 第一步：发送 ONLINE，获取 session_id
-    int len = build_online(pkt, sizeof(pkt), "overflow_client", PEER_UNKNOWN, inst_id);
+    // 第一步：发送 ONLINE，获取 auth_key
+    int len = build_online(pkt, sizeof(pkt), "overflow_client", inst_id);
     register_ack_t ack = {0};
     send_online_recv_ack(pkt, len, &ack, RECV_TIMEOUT_MS);
     
@@ -1038,7 +1065,7 @@ static void test_register_candidates_overflow(void) {
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
 
-    len = build_sync0(pkt, sizeof(pkt), ack.session_id, 20, candidates);
+    len = build_sync0(pkt, sizeof(pkt), ack.session_id, PEER_UNKNOWN, 20, candidates);
     sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
     
     P_usleep(200 * 1000);
@@ -1057,6 +1084,7 @@ static void test_register_candidates_overflow(void) {
 }
 
 // 测试 13: 断开后重连
+// 新协议：ONLINE → auth_key，SYNC0(auth_key + remote) → pairing，OFFLINE 与之前相同
 static void test_register_reconnect_after_disconnect(void) {
     const char *TEST_NAME = "register_reconnect_after_disconnect";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -1088,14 +1116,14 @@ static void test_register_reconnect_after_disconnect(void) {
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
     
-    uint8_t pkt[256];
+    uint8_t pkt[512];
     uint8_t recv_buf[256];
     struct sockaddr_in from;
     socklen_t from_len;
     ssize_t n;
     
-    // Alice 注册等待 Bob
-    int len = build_register(pkt, sizeof(pkt), ALICE, BOB, inst_alice, 0, NULL);
+    // --- Step 1: Alice ONLINE → auth_key ---
+    int len = build_online(pkt, sizeof(pkt), ALICE, inst_alice);
     sendto(sock_alice, (const char*)pkt, len, 0,
            (struct sockaddr*)&server_addr, sizeof(server_addr));
     
@@ -1105,16 +1133,16 @@ static void test_register_reconnect_after_disconnect(void) {
                   (struct sockaddr*)&from, &from_len);
     
     if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
-        P_sock_close(sock_alice);
-        P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Alice REGISTER_ACK not received");
+        P_sock_close(sock_alice); P_sock_close(sock_bob);
+        TEST_FAIL(TEST_NAME, "Alice ONLINE_ACK not received");
         return;
     }
+    uint64_t alice_auth_key = 0;
+    for (int i = 0; i < 8; i++) alice_auth_key = (alice_auth_key << 8) | recv_buf[8 + i];
+    printf("    Alice ONLINE: auth_key=0x%016llx\n", (unsigned long long)alice_auth_key);
     
-    printf("    Alice registered (status=%d)\n", recv_buf[4]);
-    
-    // Bob 注册等待 Alice
-    len = build_register(pkt, sizeof(pkt), BOB, ALICE, inst_bob, 0, NULL);
+    // --- Step 2: Bob ONLINE → auth_key ---
+    len = build_online(pkt, sizeof(pkt), BOB, inst_bob);
     sendto(sock_bob, (const char*)pkt, len, 0,
            (struct sockaddr*)&server_addr, sizeof(server_addr));
     
@@ -1124,43 +1152,63 @@ static void test_register_reconnect_after_disconnect(void) {
                   (struct sockaddr*)&from, &from_len);
     
     if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
-        P_sock_close(sock_alice);
-        P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob REGISTER_ACK not received");
+        P_sock_close(sock_alice); P_sock_close(sock_bob);
+        TEST_FAIL(TEST_NAME, "Bob ONLINE_ACK not received");
         return;
     }
+    uint64_t bob_auth_key = 0;
+    for (int i = 0; i < 8; i++) bob_auth_key = (bob_auth_key << 8) | recv_buf[8 + i];
+    printf("    Bob ONLINE: auth_key=0x%016llx\n", (unsigned long long)bob_auth_key);
     
-    uint8_t bob_status = recv_buf[4];
-    printf("    Bob registered (status=%d)\n", bob_status);
+    // --- Step 3: Alice SYNC0(auth_key, target=Bob) → pairing ---
+    len = build_sync0(pkt, sizeof(pkt), alice_auth_key, BOB, 0, NULL);
+    sendto(sock_alice, (const char*)pkt, len, 0,
+           (struct sockaddr*)&server_addr, sizeof(server_addr));
+    P_sock_rcvtimeo(sock_alice, RECV_TIMEOUT_MS);
+    from_len = sizeof(from); recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0, (struct sockaddr*)&from, &from_len);
     
-    if (bob_status != 1) {
-        P_sock_close(sock_alice);
-        P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob should see Alice online (status=1)");
+    // --- Step 4: Bob SYNC0(auth_key, target=Alice) → should see Alice online ---
+    len = build_sync0(pkt, sizeof(pkt), bob_auth_key, ALICE, 0, NULL);
+    sendto(sock_bob, (const char*)pkt, len, 0,
+           (struct sockaddr*)&server_addr, sizeof(server_addr));
+    
+    P_sock_rcvtimeo(sock_bob, RECV_TIMEOUT_MS);
+    from_len = sizeof(from);
+    n = recvfrom(sock_bob, (char*)recv_buf, sizeof(recv_buf), 0,
+                  (struct sockaddr*)&from, &from_len);
+    
+    uint8_t bob_sync0_online = 0;
+    if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
+        bob_sync0_online = recv_buf[12];
+    }
+    printf("    Bob SYNC0_ACK: peer_online=%d\n", bob_sync0_online);
+    
+    if (bob_sync0_online != 1) {
+        P_sock_close(sock_alice); P_sock_close(sock_bob);
+        TEST_FAIL(TEST_NAME, "Bob should see Alice online in SYNC0_ACK");
         return;
     }
     
     P_usleep(100 * 1000);
     
-    // Alice 发送 UNREGISTER
-    len = build_unregister(pkt, sizeof(pkt), ALICE, BOB);
+    // --- Step 5: Alice 发送 OFFLINE ---
+    len = build_unregister(pkt, sizeof(pkt), alice_auth_key);
     sendto(sock_alice, (const char*)pkt, len, 0,
            (struct sockaddr*)&server_addr, sizeof(server_addr));
     
     P_usleep(200 * 1000);
     printf("    Alice unregistered\n");
     
-    // 清空 Alice socket 缓冲区（可能有先前的 SYNC）
+    // 清空 Alice socket 缓冲区
     P_sock_rcvtimeo(sock_alice, 50);
     while (recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0, NULL, NULL) > 0);
     
-    // Alice 用新 instance_id 重新注册
+    // --- Step 6: Alice 用新 instance_id 重新 ONLINE ---
     inst_alice = (uint32_t)P_tick_us() + 13002;
-    len = build_register(pkt, sizeof(pkt), ALICE, BOB, inst_alice, 0, NULL);
+    len = build_online(pkt, sizeof(pkt), ALICE, inst_alice);
     sendto(sock_alice, (const char*)pkt, len, 0,
            (struct sockaddr*)&server_addr, sizeof(server_addr));
     
-    // 循环接收直到收到 REGISTER_ACK（可能先收到 SYNC）
     P_sock_rcvtimeo(sock_alice, RECV_TIMEOUT_MS);
     int retry = 0;
     while (retry < 3) {
@@ -1175,15 +1223,11 @@ static void test_register_reconnect_after_disconnect(void) {
     P_sock_close(sock_bob);
     
     if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
-        TEST_FAIL(TEST_NAME, "Alice reconnect REGISTER_ACK not received");
+        TEST_FAIL(TEST_NAME, "Alice reconnect ONLINE_ACK not received");
         return;
     }
     
-    uint8_t alice_reconnect_status = recv_buf[4];
-    printf("    Alice reconnected (status=%d)\n", alice_reconnect_status);
-    
-    // Alice 重连后应该看到 Bob 在线（status=1）或收到 status=0（如果 Bob 已收到 PEER_OFF）
-    // 两种情况都是正确的行为
+    printf("    Alice reconnected (status=%d)\n", recv_buf[4]);
     TEST_PASS(TEST_NAME);
 }
 

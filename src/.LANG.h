@@ -58,7 +58,7 @@ enum {
     LA_W18,  /* "UDP Blocked (STUN unreachable)"  [p2p_internal.h] */
     LA_W19,  /* "Undetectable (no STUN/probe configured)"  [p2p_internal.h] */
     LA_W20,  /* "Unknown"  [p2p_internal.h] */
-    LA_W21,  /* "Waiting for incoming offer from any peer"  [p2p.c] */
+    LA_W21,  /* disabled "Waiting for incoming offer from any peer" */
     LA_W22,  /* disabled "yes" */
 
     /* Strings (LA_S) */
@@ -99,14 +99,14 @@ enum {
     _LA_55,
     LA_F56,  /* "%s sent to %s:%d" (%s,%s,%d)  [p2p_nat.c] */
     LA_F57,  /* "%s sent via best path[%d] to %s:%d, echo_seq=%u" (%s,%d,%s,%d,%u)  [p2p_nat.c] */
-    LA_F58,  /* "%s sent, inst_id=%u, cands=%d\n" (%s,%u,%d)  [p2p_signal_compact.c] */
-    LA_F59,  /* "%s sent, inst_id=%u\n" (%s,%u)  [p2p_signal_compact.c] */
+    LA_F58,  /* "%s sent, auth_key=llu, remote='%.32s', cands=%d\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F59,  /* disabled "%s sent, inst_id=%u\n" */
     LA_F60,  /* "%s sent, seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F61,  /* disabled "%s sent %d candidates, next_idx=%d\n" */
     LA_F62,  /* "%s sent, total=%d (ses_id=%llu)\n" (%s,%d,%l)  [p2p_signal_compact.c] */
     LA_F63,  /* "%s seq=0: accepted cand_cnt=%d\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F64,  /* "%s seq=0: invalid(cand_cnt=%d flags=0x%02x)\n" (%s,%d)  [p2p_signal_compact.c] */
-    LA_F65,  /* "%s skipped: session_id=0\n" (%s)  [p2p_signal_compact.c] */
+    LA_F65,  /* "%s skipped: auth_key=0\n" (%s)  [p2p_signal_compact.c] */
     LA_F66,  /* "%s, retry remaining candidates and FIN to peer\n" (%s)  [p2p_signal_compact.c] */
     LA_F67,  /* "%s, sent on %s\n" (%s,%s)  [p2p_signal_compact.c] */
     LA_F68,  /* "%s: %s timeout after %d retries (sid=%u)\n" (%s,%s,%d,%u)  [p2p_signal_compact.c] */
@@ -119,7 +119,7 @@ enum {
     LA_F75,  /* "%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n" (%s,%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F76,  /* "%s: Peer addr changed -> %s:%d, retrying punch\n" (%s,%s,%d)  [p2p_signal_compact.c] */
     LA_F77,  /* "%s: RELAY → CONNECTED (direct path recovered)" (%s)  [p2p_nat.c] */
-    LA_F78,  /* "%s: RPC complete (sid=%u)\n" (%s,%u)  [p2p_signal_compact.c] */
+    LA_F78,  /* "%s: RPC complete (sid=%u)\n" (%s,%u)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F79,  /* "%s: RPC fail due to peer offline (sid=%u)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F80,  /* "%s: RPC fail due to relay timeout (sid=%u)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F81,  /* "%s: RPC finished (sid=%u)\n" (%s,%u)  [p2p_signal_compact.c] */
@@ -134,11 +134,11 @@ enum {
     LA_F90,  /* "%s: accepted for ack_seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F91,  /* "%s: recv from cand[%d]" (%s,%d)  [p2p_nat.c] */
     LA_F92,  /* "%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n" (%s,%u,%d)  [p2p_signal_compact.c] */
-    LA_F93,  /* "%s: accepted sid=%u, msg=%u\n" (%s,%u,%u)  [p2p_signal_compact.c] */
+    LA_F93,  /* "%s: accepted sid=%u, msg=%u\n" (%s,%u,%u)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F94,  /* "%s: accepted, probe_mapped=%s:%d\n" (%s,%s,%d)  [p2p_signal_compact.c] */
     LA_F95,  /* disabled "%s: accepted, forward=%s msg=%s\n" */
     LA_F96,  /* "%s: accepted, waiting for response (sid=%u)\n" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F97,  /* "%s: accepted\n" (%s)  [p2p_signal_compact.c] */
+    LA_F97,  /* "%s: accepted, ses_id=%llu, peer=%s\n" (%s,%l,%s)  [p2p_signal_compact.c] */
     LA_F98,  /* "%s: batch punch skip (state=%d, use trickle)" (%s,%d)  [p2p_nat.c] */
     LA_F99,  /* "%s: bad FIN marker=0x%02x\n" (%s)  [p2p_signal_relay.c] */
     LA_F100,  /* disabled "%s: bad payload len=%d\n" */
@@ -148,9 +148,9 @@ enum {
     LA_F104,  /* "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n" (%s,%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
     _LA_105,
     LA_F106,  /* "%s: duplicate remote cand<%s:%d> from signaling, skipped\n" (%s,%s,%d)  [p2p_signal_compact.c] */
-    LA_F107,  /* "%s: duplicate request ignored (sid=%u, already processing)\n" (%s,%u)  [p2p_signal_compact.c] */
+    LA_F107,  /* "%s: duplicate request ignored (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
     LA_F108,  /* "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n" (%s,%u,%u,%d)  [p2p_signal_compact.c] */
-    LA_F109,  /* "%s: entered, %s arrived after REGISTERED\n" (%s,%s)  [p2p_signal_compact.c] */
+    LA_F109,  /* "%s: entered, %s arrived after ONLINE\n" (%s,%s)  [p2p_signal_compact.c] */
     LA_F110,  /* "%s: exchange timeout, retry %d/%d" (%s,%d,%d)  [p2p_probe.c] */
     LA_F111,  /* "%s: exchange timeout: peer not responding" (%s)  [p2p_probe.c] */
     LA_F112,  /* "%s: ignored for duplicated seq=%u, already acked\n" (%s,%u)  [p2p_signal_compact.c] */
@@ -164,7 +164,7 @@ enum {
     LA_F120,  /* "%s: invalid for non-relay req\n" (%s)  [p2p_signal_compact.c] */
     LA_F121,  /* "%s: bad payload(%d)" (%s,%d)  [p2p_nat.c] */
     LA_F122,  /* "%s: invalid seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F123,  /* "%s: invalid session_id=0\n" (%s)  [p2p_signal_compact.c] */
+    LA_F123,  /* disabled "%s: invalid session_id=0\n" */
     LA_F124,  /* "%s: keep-alive sent (%d cands)" (%s,%d)  [p2p_nat.c] */
     LA_F125,  /* "%s: new request (sid=%u) overrides pending request (sid=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F126,  /* "%s: batch punch: no cand, wait trickle" (%s)  [p2p_nat.c] */
@@ -172,10 +172,10 @@ enum {
     _LA_128,
     LA_F129,  /* "%s: not connected, cannot send FIN" (%s)  [p2p_nat.c] */
     _LA_130,
-    LA_F131,  /* "%s: old request ignored (sid=%u <= last_sid=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
+    LA_F131,  /* "%s: old request ignored (sid=%u <= last_sid=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F132,  /* "%s: path[%d] UP (%s:%d)" (%s,%d,%s,%d)  [p2p_nat.c] */
     LA_F133,  /* "%s: path[%d] UP (recv DATA)" (%s,%d)  [p2p_nat.c] */
-    LA_F134,  /* "%s: peer online, proceeding to ICE\n" (%s)  [p2p_signal_compact.c] */
+    LA_F134,  /* disabled "%s: peer online, proceeding to ICE\n" */
     LA_F135,  /* "%s: peer reachable via signaling (RTT: %llu ms)" (%s,%l)  [p2p_probe.c] */
     LA_F136,  /* "%s: sync0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
     LA_F137,  /* "%s: punch remote cand[%d]<%s:%d> failed\n" (%s,%d,%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
@@ -207,11 +207,11 @@ enum {
     LA_F163,  /* "%s: send failed(%d)" (%s,%d)  [p2p_probe.c] */
     LA_F164,  /* "%s: sent MSG(msg=0, sid=%u)" (%s,%u)  [p2p_probe.c] */
     LA_F165,  /* "%s: sent, sid=%u, code=%u, size=%d\n" (%s,%u,%u,%d)  [p2p_signal_compact.c] */
-    LA_F166,  /* "%s: session mismatch(local=%llu ack=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
+    LA_F166,  /* "%s: auth_key mismatch(local=%llu ack=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
     LA_F167,  /* "%s: session mismatch(local=%llu pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
-    LA_F168,  /* "%s: session mismatch(local=%llu, pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
+    LA_F168,  /* "%s: invalid session_id=0\n" (%s)  [p2p_signal_compact.c] */
     LA_F169,  /* "%s: session validated, len=%d (ses_id=%llu)\n" (%s,%d,%l)  [p2p_signal_compact.c] */
-    LA_F170,  /* "%s: session_id mismatch (recv=%llu, expect=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
+    LA_F170,  /* "%s: session_id mismatch (recv=%llu, expect=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     _LA_171,
     LA_F172,  /* "%s: stale ACK(ack_inst=%u local_inst=%u), ignored\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F173,  /* "%s: batch punch start (%d cands)" (%s,%d)  [p2p_nat.c] */
@@ -221,7 +221,7 @@ enum {
     LA_F177,  /* "%s: sync complete (ses_id=%llu)\n" (%s,%l)  [p2p_signal_compact.c] */
     LA_F178,  /* "%s: sync complete (ses_id=%llu, mask=0x%04x)\n" (%s,%l)  [p2p_signal_compact.c] */
     LA_F179,  /* "%s: accepted as cand[%d], target=%s:%d" (%s,%d,%s,%d)  [p2p_nat.c] */
-    LA_F180,  /* "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F180,  /* "%s: timeout after %d ms, restarting signaling (OFFLINE + RE-REGISTER)\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F181,  /* "%s: timeout after %d retries , type unknown\n" (%s,%d)  [p2p_signal_compact.c] */
     _LA_182,
     LA_F183,  /* "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates" (%s,%l,%d)  [p2p_nat.c] */
@@ -252,7 +252,7 @@ enum {
     LA_F208,  /* "% Bind failed"  [p2p_tcp_punch.c] */
     LA_F209,  /* "Bind failed to %d, port busy, trying random port" (%d)  [p2p_tcp_punch.c] */
     LA_F210,  /* "Bound to :%d" (%d)  [p2p_tcp_punch.c] */
-    LA_F211,  /* "% COMPACT mode requires explicit remote_peer_id"  [p2p.c] */
+    LA_F211,  /* "Invalid remote_peer_id for %s mode" (%s)  [p2p.c] */
     LA_F212,  /* "COMPACT relay payload too large: %d" (%d)  [p2p_signal_compact.c] */
     LA_F213,  /* "COMPACT relay send failed: type=0x%02x, ret=%d" (%d)  [p2p_signal_compact.c] */
     LA_F214,  /* "COMPACT relay: type=0x%02x, seq=%u (session_id=%llu)" (%u,%l)  [p2p_signal_compact.c] */
@@ -261,7 +261,7 @@ enum {
     LA_F217,  /* "Connect to COMPACT signaling server failed(%d)" (%d)  [p2p.c] */
     LA_F218,  /* "Connect to RELAY signaling server failed(%d)" (%d)  [p2p.c] */
     LA_F219,  /* disabled "Connected to server %s:%d as '%s'" */
-    LA_F220,  /* "Connecting to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F220,  /* "Login to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
     LA_F221,  /* disabled "% Connection closed by server" */
     LA_F222,  /* disabled "% Connection closed while discarding" */
     LA_F223,  /* disabled "% Connection closed while reading payload" */
@@ -353,11 +353,11 @@ enum {
     LA_F309,  /* "Recv %s pkt from %s:%d, seq=%u, len=%d" (%s,%s,%d,%u,%d)  [p2p_nat.c] */
     LA_F310,  /* disabled "Recv New Remote Candidate<%s:%d> (Peer Reflexive - symmetric NAT)" */
     LA_F311,  /* disabled "Recv New Remote Candidate<%s:%d> (type=%d)" */
-    LA_F312,  /* "Register to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F312,  /* disabled "Register to COMPACT signaling server at %s:%d" */
     LA_F313,  /* "Reliable transport initialized rto=%d win=%d" (%d,%d)  [p2p_trans_reliable.c] */
     LA_F314,  /* "Requested Relay Candidate from TURN %s" (%s)  [p2p.c] */
     LA_F315,  /* disabled "Requested Relay Candidate from TURN %s" */
-    LA_F316,  /* "Requested Srflx Candidate from %s" (%s)  [p2p.c] */
+    LA_F316,  /* disabled "Requested Srflx Candidate from %s" */
     LA_F317,  /* "Resolve COMPACT signaling server address: %s:%d failed(%d)" (%s,%d,%d)  [p2p.c] */
     LA_F318,  /* "% SCTP (usrsctp) requested but library not linked"  [p2p.c] */
     LA_F319,  /* "% SIGNALING path but signaling relay not available"  [p2p_channel.c] */
@@ -369,7 +369,7 @@ enum {
     LA_F325,  /* "Sending Allocate Request to %s:%d" (%s,%d)  [p2p_turn.c] */
     LA_F326,  /* "% Sending FIN packet to peer before closing"  [p2p.c] */
     LA_F327,  /* "Sending Test I to %s:%d (len=%d)" (%s,%d,%d)  [p2p_stun.c] */
-    LA_F328,  /* "% Sending UNREGISTER packet to COMPACT signaling server"  [p2p.c] */
+    LA_F328,  /* "% Sending OFFLINE packet to COMPACT signaling server"  [p2p.c] */
     LA_F329,  /* disabled "% RELAY mode: bidirectional candidate exchange, no explicit reply needed" */
     LA_F330,  /* disabled "Sent answer to '%s' (%d bytes)" */
     LA_F331,  /* disabled "Sent connect request to '%s' (%d bytes)" */
@@ -488,13 +488,13 @@ enum {
     LA_F444,  /* disabled "best_path<0 && active_path=%d, signaling=%d, state=%d\n" */
     LA_F445,  /* disabled "s->active_path=%d, path_stats.state=%d" */
     LA_F446,  /* "%s: no rpc request\n" (%s)  [p2p_signal_compact.c] */
-    LA_F447,  /* "% MSG RPC not supported by server\n"  [p2p_signal_compact.c] */
+    LA_F447,  /* "% MSG RPC not supported by server\n"  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F448,  /* disabled "%s sent FIN\n" */
     LA_F449,  /* disabled "%s sent, name='%s' target='%s'\n" */
     LA_F450,  /* "%s sent, sid=%u, msg=%u, size=%d\n" (%s,%u,%u,%d)  [p2p_signal_compact.c] */
     LA_F451,  /* disabled "%s sent, target='%s'\n" */
     LA_F452,  /* disabled "%s sent\n" */
-    LA_F453,  /* "%s: accepted, public=%s:%d ses_id=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n" (%s,%s,%d,%l,%d,%d,%s,%s)  [p2p_signal_compact.c] */
+    LA_F453,  /* "%s: accepted, public=%s:%d auth_key=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n" (%s,%s,%d,%l,%d,%d,%s,%s)  [p2p_signal_compact.c] */
     LA_F454,  /* disabled "%s: accepted, ses_id=%llu peer=%s\n" */
     LA_F455,  /* "%s: bad payload(%d)\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F456,  /* disabled "%s: cached (peer offline)\n" */
@@ -504,7 +504,7 @@ enum {
     LA_F460,  /* disabled "%s: received FIN from peer\n" */
     LA_F461,  /* disabled "%s: remote_cands[] full, skipped %d candidates\n" */
     LA_F462,  /* disabled "%s: session mismatch(local=%llu recv=%llu)\n" */
-    LA_F463,  /* "%s: status error(%d)\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F463,  /* "%s: server rejected (no slot)\n" (%s)  [p2p_signal_compact.c] */
     LA_F464,  /* disabled "%s: storage full, stop uploading\n" */
     LA_F465,  /* disabled "%s: unknown status %d\n" */
     LA_F466,  /* disabled "Bad magic 0x%08x\n" */
@@ -516,8 +516,8 @@ enum {
     LA_F472,  /* disabled "% ONLINE: ready to start session\n" */
     LA_F473,  /* disabled "% ONLINE_ACK timeout\n" */
     LA_F474,  /* disabled "% READY: candidate exchange completed\n" */
-    LA_F475,  /* "REGISTERED: peer=%s\n" (%s)  [p2p_signal_compact.c] */
-    LA_F476,  /* disabled "% TCP connect failed (select error)\n" */
+    LA_F475,  /* "% ONLINE: auth_key acquired, auto SYNC0 sent\n"  [p2p_signal_compact.c] */
+    LA_F476,  /* "% ONLINE: auth_key acquired, waiting connect()\n"  [p2p_signal_compact.c] */
     LA_F477,  /* disabled "% TCP connect failed\n" */
     LA_F478,  /* disabled "% TCP connected, sending ONLINE\n" */
     LA_F479,  /* disabled "% TCP connection closed by peer\n" */
@@ -576,7 +576,7 @@ enum {
     LA_F532,  /* "% No shared local route addresses available, host candidates skipped"  [p2p.c] */
     LA_F533,  /* "[TCP] %s recv, len=%d\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F534,  /* "% TCP send error\n"  [p2p_signal_relay.c] */
-    LA_F535,  /* "% Waiting for RELAY server ONLINE_ACK"  [p2p.c] */
+    LA_F535,  /* "% Waiting for COMPACT server ONLINE_ACK"  [p2p.c] */
     LA_F536,  /* "% Disconnected, back to ONLINE state\n"  [p2p_signal_relay.c] */
     LA_F537,  /* disabled "disconnect: not in session (state=%d)\n" */
     LA_F538,  /* "payload size %u exceeds limit %u\n" (%u,%u)  [p2p_signal_relay.c] */
@@ -592,7 +592,7 @@ enum {
     LA_F548,  /* "%s: PUNCHING → %s (peer CONNECTING)" (%s,%s)  [p2p_nat.c] */
     LA_F549,  /* "%s: path tx UP" (%s)  [p2p_nat.c] */
     LA_F550,  /* "Recv unknown ICE-STUN msg_type=0x%04x from %s:%d" (%s,%d)  [p2p_nat.c] */
-    LA_F551,  /* "%s: peer disconnected (ses_id=%llu), reset to REGISTERED\n" (%s,%l)  [p2p_signal_compact.c] */
+    LA_F551,  /* "%s: peer disconnected (ses_id=%llu), reset to WAIT_SYNC0_ACK\n" (%s,%l)  [p2p_signal_compact.c] */
     LA_F552,  /* "Ignore %s pkt from unknown path %s:%d" (%s,%s,%d)  [p2p_nat.c] */
     LA_F553,  /* "% Sending Test II with CHANGE-REQUEST(IP+PORT)"  [p2p_stun.c] */
     LA_F554,  /* "% Sending Test III with CHANGE-REQUEST(PORT only)"  [p2p_stun.c] */
@@ -601,7 +601,7 @@ enum {
     LA_F557,  /* "% Failed to send Test I(alt), continue to Test III"  [p2p_stun.c] */
     LA_F558,  /* "% No valid CHANGED-ADDRESS provided by STUN server, skipping Test I(alt)"  [p2p_stun.c] */
     LA_F559,  /* "% Test I(alt): Timeout"  [p2p_stun.c] */
-    LA_F560,  /* "Test I: Changed address: %s:%d" (%s,%d)  [p2p_stun.c] */
+    LA_F560,  /* "% NAT detection skipped (skip_stun_test=true), Srflx gathered"  [p2p_stun.c] */
     LA_F561,  /* "%s: bad payload(len=%d cand_cnt=%d)\n" (%s,%d,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F562,  /* "%s: bad payload(len=%d)\n" (%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F563,  /* "%s: forwarded=%d, next_idx adjusted to %d\n" (%s,%d,%d)  [p2p_signal_relay.c] */
@@ -636,6 +636,30 @@ enum {
     LA_F592,  /* "% RELAY data throttled: awaiting READY\n"  [p2p_signal_relay.c] */
     LA_F593,  /* "RELAY data: unsupported type 0x%02x\n"  [p2p_signal_relay.c] */
     LA_F594,  /* "RELAY recv: unexpected inner type 0x%02x\n"  [p2p_signal_relay.c] */
+    LA_F595,  /* "%s msg=0: echo reply (sid=%u, len=%d)\n" (%s,%u,%d)  [p2p_signal_relay.c] */
+    LA_F596,  /* "%s sent, inst_id=%u\n" (%s,%u)  [p2p_signal_compact.c] */
+    LA_F597,  /* "%s: accepted\n" (%s)  [p2p_signal_compact.c] */
+    LA_F598,  /* "%s: duplicate request ignored (sid=%u, already processing)\n" (%s,%u)  [p2p_signal_compact.c] */
+    LA_F599,  /* "%s: irrelevant response (sid=%u, current sid=%u, state=%d)\n" (%s,%u,%u,%d)  [p2p_signal_relay.c] */
+    LA_F600,  /* "%s: peer offline (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
+    LA_F601,  /* "%s: promoted prflx cand[%d]<%s:%d> → %s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_F602,  /* "%s: session mismatch(local=%llu, pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
+    LA_F603,  /* "%s: session_id changed (old=%llu new=%llu), resetting peer state\n" (%s,%l,%l)  [p2p_signal_compact.c] */
+    LA_F604,  /* "%s: timeout (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
+    LA_F605,  /* "MSG_REQ sent: sid=%u, msg=%u, data_len=%d\n" (%u,%u,%d)  [p2p_signal_relay.c] */
+    LA_F606,  /* "MSG_RESP sent: sid=%u, code=%u, data_len=%d\n" (%u,%u,%d)  [p2p_signal_relay.c] */
+    LA_F607,  /* "% MSG_RESP: no pending request\n"  [p2p_signal_relay.c] */
+    LA_F608,  /* "RELAY CONN recv: seq=%u\n" (%u)  [p2p_signal_relay.c] */
+    LA_F609,  /* "RELAY CONN_ACK recv: seq=%u\n" (%u)  [p2p_signal_relay.c] */
+    LA_F610,  /* "RELAY REACH recv: seq=%u\n" (%u)  [p2p_signal_relay.c] */
+    LA_F611,  /* "SYNC0: retry, (attempt %d/%d)\n" (%d,%d)  [p2p_signal_compact.c] */
+    LA_F612,  /* "SYNC0: timeout, max(%d) attempts reached, reset to INIT\n" (%d)  [p2p_signal_compact.c] */
+    LA_F613,  /* "Test I: Changed address: %s:%d" (%s,%d)  [p2p_stun.c] */
+    LA_F614,  /* "Start COMPACT session failed(%d)" (%d)  [p2p.c] */
+    LA_F615,  /* "Starting COMPACT session with %s" (%s)  [p2p.c] */
+    LA_F616,  /* "Login to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F617,  /* "% Waiting for RELAY server ONLINE_ACK"  [p2p.c] */
+    LA_F618,  /* "%s: entered, peer online in SYNC0_ACK\n" (%s)  [p2p_signal_compact.c] */
 
     LA_NUM
 };

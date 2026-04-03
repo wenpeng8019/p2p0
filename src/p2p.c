@@ -65,7 +65,7 @@ static inline void gather_local_candidates(p2p_session_t *s) {
 
             int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
 
-            for (int i = 0; rt && i < rt->addr_count; i++) {
+            for (int i = 0; i < rt->addr_count; i++) {
                 int idx = p2p_cand_push_local(s);
                 if (idx < 0) {
                     print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S39, 39),
@@ -228,7 +228,7 @@ void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
  * 主动断开 — 通过 NAT 层和信令层双通道通知对端
  *
  * NAT FIN:  UDP 直连（不可靠，重复发送提高成功率）
- * 信令 FIN: 通过信令服务器转发（COMPACT: UNREGISTER → FIN）
+ * 信令 FIN: 通过信令服务器转发（COMPACT: OFFLINE → FIN）
  *
  * 由 p2p_close 调用；p2p_destroy 作为兜底也会调用
  */
@@ -252,15 +252,11 @@ static void disconnect(p2p_session_t *s) {
         if (s->cfg.on_state) s->cfg.on_state(s, old_state, P2P_STATE_CLOSED, s->cfg.userdata);
     }
 
-    // COMPACT 信令模式：取消与对方在服务器上的注册，UNREGISTER
-    // + COMPACT 信令的 unregister 等价于 disconnect & logout
+    // COMPACT 信令模式：取消与对方在服务器上的注册，OFFLINE
     if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
-        if (s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
-            print("I:", LA_F("Sending UNREGISTER packet to COMPACT signaling server", LA_F328, 328));
-            p2p_signal_compact_disconnect(s);
-        }
-    } 
+        p2p_signal_compact_disconnect(s);
+    }
     // RELAY 信令模式：
     else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
 
@@ -490,6 +486,62 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     }
 
     //----------------------------
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+
+        assert(s->cfg.server_host);
+
+        // 登录信令服务器（只执行一次）
+        print("I:", LA_F("Login to COMPACT signaling server at %s:%d", LA_F220, 220),
+                        s->cfg.server_host, s->cfg.server_port);
+
+        // 解析信令服务器地址
+        struct sockaddr_in server_addr;
+        if ((ret = resolve_host(s->cfg.server_host, s->cfg.server_port, &server_addr)) != E_NONE) {
+            print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F317, 317),
+                            s->cfg.server_host, s->cfg.server_port, ret);
+            s->state = P2P_STATE_ERROR;
+            UNLOCK(s);
+            return NULL;
+        }
+
+        // 登录到 COMPACT 信令服务器（UDP 连接，发送 ONLINE 注册）
+        if ((ret = p2p_signal_compact_online(s, s->local_peer_id, &server_addr)) != E_NONE) {
+            print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F217, 217), ret);
+            s->state = P2P_STATE_ERROR;
+            UNLOCK(s);
+            return NULL;
+        }
+
+        s->state = P2P_STATE_REGISTERING;
+        
+    }
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+
+        assert(s->cfg.server_host);
+
+        // 登录信令服务器（只执行一次）
+        print("I:", LA_F("Login to RELAY signaling server at %s:%d", LA_F616, 616),
+                        s->cfg.server_host, s->cfg.server_port);
+
+        // 解析信令服务器地址
+        struct sockaddr_in server_addr;
+        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(s->cfg.server_port);
+        inet_pton(AF_INET, s->cfg.server_host, &server_addr.sin_addr);
+
+        // 登录到 RELAY 信令服务器（TCP 连接，发送 ONLINE 注册）
+        if ((ret = p2p_signal_relay_online(s, s->local_peer_id, &server_addr)) != E_NONE) {
+            print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F218, 218), ret);
+            s->state = P2P_STATE_ERROR;
+            UNLOCK(s);
+            return NULL;
+        }
+
+        s->state = P2P_STATE_REGISTERING;
+    }
+
+    //----------------------------
 
     s->last_update = P_tick_ms();
 
@@ -548,12 +600,19 @@ p2p_destroy(p2p_handle_t hdl) {
         P_sock_close(s->sock);
     }
 
-    // RELAY 信令模式：关闭 TCP 长连接（断开和服务器的连接, logout）
-    if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY
-        && s->sig_relay_ctx.state != SIGNAL_RELAY_INIT) {
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
-        print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
-        p2p_signal_relay_offline(s);
+        if (s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
+            print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F328, 328));
+            p2p_signal_compact_offline(s);
+        }
+    }
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+
+        if (s->sig_relay_ctx.state != SIGNAL_RELAY_INIT) {
+            print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
+            p2p_signal_relay_offline(s);
+        }
     }
 
     free(s->local_cands);
@@ -572,22 +631,19 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     p2p_session_t *s = (p2p_session_t*)hdl;
     P_check(s->state == P2P_STATE_INIT, return -1;)
 
-    if (remote_peer_id && !*remote_peer_id) remote_peer_id = NULL;
-
-    // COMPACT 模式必须指定 remote_peer_id
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT && !remote_peer_id) {
-        print("E:", LA_F("COMPACT mode requires explicit remote_peer_id", LA_F211, 211));
-        s->state = P2P_STATE_ERROR;
-        return -1;
-    }
-
-    LOCK(s);
-
-    // 设置对方 id
+    if (!*remote_peer_id) remote_peer_id = NULL;
     if (remote_peer_id) {
         strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
         s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+    }
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT || s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+        print("E:", LA_F("Invalid remote_peer_id for %s mode", LA_F211, 211), 
+                s->signaling_mode == P2P_SIGNALING_MODE_COMPACT ? "COMPACT" : "RELAY");
+        s->state = P2P_STATE_ERROR;
+        return -1;
     } else s->remote_peer_id[0] = '\0';
+
+    LOCK(s);
 
     // 初始化 DTLS 加密层（需要 remote_peer_id 以确定自动角色）
     if (s->dtls && s->dtls->init) {
@@ -604,28 +660,16 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         // 对于 COMPACT 模式
         case P2P_SIGNALING_MODE_COMPACT: {
 
-            // 解析信令服务器地址
-            assert(s->cfg.server_host);         // p2p_create 成功会确保这个条件
-            struct sockaddr_in server_addr;
-            if ((ret = resolve_host(s->cfg.server_host, s->cfg.server_port, &server_addr)) != E_NONE) {
-                print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F317, 317),
-                             s->cfg.server_host, s->cfg.server_port, ret);
-                s->state = P2P_STATE_ERROR;
+            // 等待上线
+            if (s->sig_compact_ctx.state < SIGNAL_COMPACT_ONLINE) {
+                print("I:", LA_F("Waiting for COMPACT server ONLINE_ACK", LA_F535, 535));
                 UNLOCK(s);
-                return -1;
+                return 0;
             }
 
-            s->state = P2P_STATE_REGISTERING;   // 进入注册阶段
-
-            print("I:", LA_F("Register to COMPACT signaling server at %s:%d", LA_F312, 312),
-                         inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
-
-            // 注册（连接）到 COMPACT 信令服务器
-            if ((ret = p2p_signal_compact_connect(s, s->local_peer_id, remote_peer_id, &server_addr)) != E_NONE) {
-                print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F217, 217), ret);
-                s->state = P2P_STATE_ERROR;
-                UNLOCK(s);
-                return -1;
+            print("I:", LA_F("Starting COMPACT session with %s", LA_F615, 615), remote_peer_id);
+            if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE) {
+                print("E:", LA_F("Start COMPACT session failed(%d)", LA_F614, 614), ret);
             }
 
             break;
@@ -634,53 +678,19 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         // 对于 RELAY 模式
         case P2P_SIGNALING_MODE_RELAY: {
 
-            assert(s->cfg.server_host);         // p2p_create 成功会确保这个条件
-
-            // 首次连接：自动登录信令服务器（只执行一次）
-            if (s->sig_relay_ctx.state == SIGNAL_RELAY_INIT) {
-
-                print("I:", LA_F("Connecting to RELAY signaling server at %s:%d", LA_F220, 220),
-                             s->cfg.server_host, s->cfg.server_port);
-
-                struct sockaddr_in server_addr;
-                memset(&server_addr, 0, sizeof(server_addr));
-                server_addr.sin_family = AF_INET;
-                server_addr.sin_port = htons(s->cfg.server_port);
-                inet_pton(AF_INET, s->cfg.server_host, &server_addr.sin_addr);
-
-                if ((ret = p2p_signal_relay_online(s, s->local_peer_id, &server_addr)) != E_NONE) {
-                    print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F218, 218), ret);
-                    s->state = P2P_STATE_ERROR;
-                    UNLOCK(s);
-                    return -1;
-                }
-            }
-
             // 等待上线
             if (s->sig_relay_ctx.state < SIGNAL_RELAY_ONLINE) {
-                print("I:", LA_F("Waiting for RELAY server ONLINE_ACK", LA_F535, 535));
+                print("I:", LA_F("Waiting for RELAY server ONLINE_ACK", LA_F617, 617));
                 UNLOCK(s);
                 return 0;
             }
 
-            s->state = P2P_STATE_REGISTERING;
-
-            // 如果指定了 remote_peer_id，立即发送初始 offer
-            if (remote_peer_id && s->local_cand_cnt > 0) {
-
-                // RELAY 模式：发送 CONNECT 请求建立会话
-                print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
-                if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE) {
-                    print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
-                }
-            }
-            // 被动模式：等待任意对等方的 offer
-            else if (!remote_peer_id) {
-
-                print("I: %s", LA_W("Waiting for incoming offer from any peer", LA_W21, 21));
+            // RELAY 模式：发送 CONNECT 请求建立会话
+            print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
+            if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE) {
+                print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
             }
 
-            // 注意：后续 Srflx 候选者（STUN 响应）会在 p2p_update 中增量发送
             break;
         }
 
@@ -899,8 +909,8 @@ p2p_update(p2p_handle_t hdl) {
 
             case P2P_PKT_CRYPTO: {
 
-                // flags & P2P_DATA_FLAG_SESSION 表示携带 session_id
-                if (hdr.flags & P2P_DATA_FLAG_SESSION) {
+                // flags & P2P_RELAY_FLAG_SESSION 表示携带 session_id
+                if (hdr.flags & P2P_RELAY_FLAG_SESSION) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "CRYPTO")) break;
                 }
                 if (!s->dtls) break;
@@ -933,8 +943,8 @@ p2p_update(p2p_handle_t hdl) {
              * 说明：P2P 数据包，由 reliable 层或高级传输层处理
              */
             case P2P_PKT_DATA:
-                // flags & P2P_DATA_FLAG_SESSION 表示携带 session_id
-                if (hdr.flags & P2P_DATA_FLAG_SESSION) {
+                // flags & P2P_RELAY_FLAG_SESSION 表示携带 session_id
+                if (hdr.flags & P2P_RELAY_FLAG_SESSION) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "DATA")) break;
                 }
             handle_data:
@@ -958,8 +968,8 @@ p2p_update(p2p_handle_t hdl) {
              * 说明：ACK 仅基础 reliable 层使用，DTLS/SCTP 有自己的确认机制
              */
             case P2P_PKT_ACK:
-                /* flags & P2P_DATA_FLAG_SESSION 表示携带 session_id */
-                if (hdr.flags & P2P_DATA_FLAG_SESSION) {
+                /* flags & P2P_RELAY_FLAG_SESSION 表示携带 session_id */
+                if (hdr.flags & P2P_RELAY_FLAG_SESSION) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "ACK")) break;
                 }
             handle_ack: {
@@ -975,7 +985,7 @@ p2p_update(p2p_handle_t hdl) {
                 }
 
                 // ACK 包至少要有 ack_seq(2B) + sack(4B) 
-                if (payload_len < 6) {
+                if (payload_len < (int)P2P_PKT_ACK_PSZ) {
                     print("E:", LA_F("ACK: invalid payload length %d, expected at least 6", LA_F199, 199), payload_len);
                     break;
                 }
@@ -1006,7 +1016,7 @@ p2p_update(p2p_handle_t hdl) {
                 break;
             case P2P_PKT_REACH:
                 // 中转版本（通过信令服务器）：验证 session_id 后传给 NAT 层
-                if (hdr.flags & P2P_DATA_FLAG_SESSION) {
+                if (hdr.flags & P2P_RELAY_FLAG_SESSION) {
                     if (p2p_signal_compact_relay_validation(s, &payload, &payload_len, "REACH_RELAYED")) {
                         // session_id 验证成功，清除 RELAYED 标志后传给 NAT 层
                         hdr.flags = 0;
@@ -1080,9 +1090,10 @@ p2p_update(p2p_handle_t hdl) {
 
         // 信令层维护（注册、等待、候选同步）+ MSG 超时重传
         // 注意：MSG 机制在所有非 INIT 状态下都需要处理超时重传
-        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERING ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_ONLINE ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_ICE ||
+        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_ONLINE_ACK ||
+            s->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_SYNC0_ACK ||
+            s->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_PEER ||
+            s->sig_compact_ctx.state == SIGNAL_COMPACT_SYNCING ||
             s->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
             p2p_signal_compact_tick_recv(s);
         }
@@ -1277,7 +1288,7 @@ p2p_update(p2p_handle_t hdl) {
     if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
         // ICE 状态时发送候选，READY 状态发送新候选（如果有）
-        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_ICE ||
+        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_SYNCING ||
             s->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
             p2p_signal_compact_tick_send(s);
         }

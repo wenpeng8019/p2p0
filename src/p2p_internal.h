@@ -195,7 +195,7 @@ typedef struct p2p_session {
      *
      * 参数：
      *   type: P2P 包类型（REACH/DATA/ACK/CRYPTO 等）
-     *   flags: 原始 flags（接口内部会自动添加 P2P_DATA_FLAG_SESSION）
+     *   flags: 原始 flags（接口内部会自动添加 P2P_RELAY_FLAG_SESSION）
      *   seq: 序列号
      *   payload: 原始负载（不含 session_id）
      *   payload_len: 原始负载长度

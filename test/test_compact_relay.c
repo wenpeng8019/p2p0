@@ -5,9 +5,9 @@
  * 测试目标
  * ============================================================================
  * 验证 p2p_server 对 COMPACT 协议中继和 NAT 探测功能的处理逻辑：
- * - DATA + P2P_DATA_FLAG_SESSION: 数据中继转发（P2P 打洞失败后的降级方案）
- * - ACK + P2P_DATA_FLAG_SESSION: 中继 ACK 包转发
- * - CRYPTO + P2P_DATA_FLAG_SESSION: DTLS 加密包转发
+ * - DATA + P2P_RELAY_FLAG_SESSION: 数据中继转发（P2P 打洞失败后的降级方案）
+ * - ACK + P2P_RELAY_FLAG_SESSION: 中继 ACK 包转发
+ * - CRYPTO + P2P_RELAY_FLAG_SESSION: DTLS 加密包转发
  * - NAT_PROBE: NAT 类型探测（返回映射地址）
  *
  * ============================================================================
@@ -182,16 +182,12 @@ static int find_log(const char *pattern) {
 // 构造 ONLINE 包
 static int build_online(uint8_t *buf, int buf_size,
                         const char *local_peer_id,
-                        const char *remote_peer_id,
                         uint32_t instance_id) {
-    if (buf_size < 4 + 32 + 32 + 4) return -1;
+    if (buf_size < 4 + 32 + 4) return -1;
     int n = 0;
     buf[n++] = SIG_PKT_ONLINE; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
     memset(buf + n, 0, 32);
     if (local_peer_id) strncpy((char*)(buf + n), local_peer_id, 31);
-    n += 32;
-    memset(buf + n, 0, 32);
-    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
     n += 32;
     buf[n++] = (instance_id >> 24) & 0xFF;
     buf[n++] = (instance_id >> 16) & 0xFF;
@@ -201,15 +197,19 @@ static int build_online(uint8_t *buf, int buf_size,
 }
 
 #define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
-    build_online(buf, buf_size, local, remote, inst_id)
+    build_online(buf, buf_size, local, inst_id)
 
 // 构造 SYNC0 包
-static int build_sync0(uint8_t *buf, int buf_size, uint64_t session_id,
+static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
+                       const char *remote_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
-    if (buf_size < 4 + 8 + 1) return -1;
+    if (buf_size < 4 + 8 + 32 + 1) return -1;
     int n = 0;
     buf[n++] = SIG_PKT_SYNC0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
-    for (int i = 0; i < 8; i++) buf[n++] = (session_id >> (56 - i * 8)) & 0xFF;
+    for (int i = 0; i < 8; i++) buf[n++] = (auth_key >> (56 - i * 8)) & 0xFF;
+    memset(buf + n, 0, 32);
+    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
+    n += 32;
     if (candidate_count > 255) candidate_count = 255;
     buf[n++] = (uint8_t)candidate_count;
     for (int i = 0; i < candidate_count && candidates; i++) {
@@ -228,7 +228,7 @@ static int build_relay_data(uint8_t *buf, int buf_size,
     if (buf_size < 4 + 8 + data_len) return -1;
     
     buf[0] = P2P_PKT_DATA;
-    buf[1] = P2P_DATA_FLAG_SESSION;  // flags: 携带 session_id
+    buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -252,7 +252,7 @@ static int build_relay_ack(uint8_t *buf, int buf_size,
     if (buf_size < 4 + 8) return -1;
     
     buf[0] = P2P_PKT_ACK;
-    buf[1] = P2P_DATA_FLAG_SESSION;  // flags: 携带 session_id
+    buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -272,7 +272,7 @@ static int build_relay_crypto(uint8_t *buf, int buf_size,
     if (buf_size < 4 + 8 + data_len) return -1;
     
     buf[0] = P2P_PKT_CRYPTO;
-    buf[1] = P2P_DATA_FLAG_SESSION;  // flags: 携带 session_id
+    buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -333,7 +333,7 @@ typedef struct {
     int data_len;
 } relay_packet_t;
 
-// 解析中继包 (DATA/ACK/CRYPTO + P2P_DATA_FLAG_SESSION)
+// 解析中继包 (DATA/ACK/CRYPTO + P2P_RELAY_FLAG_SESSION)
 static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt) {
     memset(pkt, 0, sizeof(*pkt));
     
@@ -343,7 +343,7 @@ static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt)
     uint8_t type = buf[0];
     uint8_t flags = buf[1];
     if ((type != P2P_PKT_DATA && type != P2P_PKT_ACK && type != P2P_PKT_CRYPTO) ||
-        !(flags & P2P_DATA_FLAG_SESSION)) return;
+        !(flags & P2P_RELAY_FLAG_SESSION)) return;
     
     pkt->received = 1;
     pkt->type = type;
@@ -366,7 +366,7 @@ static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt)
 static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
-    int len = build_online(pkt, sizeof(pkt), local, remote, inst_id);
+    int len = build_online(pkt, sizeof(pkt), local, inst_id);
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -386,15 +386,15 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
                           (struct sockaddr*)&from, &from_len);
     
     if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) {
-        uint64_t session_id = 0;
+        uint64_t auth_key = 0;
         for (int i = 0; i < 8; i++) {
-            session_id = (session_id << 8) | recv_buf[5 + i];
+            auth_key = (auth_key << 8) | recv_buf[8 + i];
         }
-        // 发送 SYNC0
-        len = build_sync0(pkt, sizeof(pkt), session_id, cand_count, cands);
+        // 发送 SYNC0（携带 auth_key + remote_peer_id）
+        len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
-        return session_id;
+        return auth_key;
     }
     return 0;
 }
@@ -442,9 +442,9 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt_out) {
                               (struct sockaddr*)&from, &from_len);
         
         if (n >= 12 && (
-                (recv_buf[0] == P2P_PKT_DATA && (recv_buf[1] & P2P_DATA_FLAG_SESSION)) ||
-                (recv_buf[0] == P2P_PKT_ACK && (recv_buf[1] & P2P_DATA_FLAG_SESSION)) ||
-                (recv_buf[0] == P2P_PKT_CRYPTO && (recv_buf[1] & P2P_DATA_FLAG_SESSION)))) {
+                (recv_buf[0] == P2P_PKT_DATA && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)) ||
+                (recv_buf[0] == P2P_PKT_ACK && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)) ||
+                (recv_buf[0] == P2P_PKT_CRYPTO && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)))) {
             if (pkt_out) {
                 parse_relay_packet(recv_buf, (int)n, pkt_out);
             }
@@ -854,7 +854,7 @@ static void test_relay_data_bad_payload(void) {
     // 发送 payload 过短的 DATA+SESSION 包
     uint8_t bad_pkt[16];
     bad_pkt[0] = P2P_PKT_DATA;
-    bad_pkt[1] = P2P_DATA_FLAG_SESSION;
+    bad_pkt[1] = P2P_RELAY_FLAG_SESSION;
     bad_pkt[2] = 0;
     bad_pkt[3] = 0;
     // 只放 4 字节头 + 几字节（不够 session_id 的 8 字节）

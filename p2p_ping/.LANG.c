@@ -31,6 +31,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S19] = "GitHub Token for Public Signaling",  /* SID:19 */
     [LA_S20] = "Log level (0-5)",  /* SID:20 */
     [LA_S21] = "Signaling server IP[:PORT]",  /* SID:21 */
+    [LA_S54] = "Skip NAT type detection (RFC 3489 Test II/III)",  /* SID:54 */
     [LA_S44] = "STUN server address",  /* SID:44 */
     [LA_S23] = "Target Peer Name (if specified: active role)",  /* SID:23 */
     [LA_S24] = "TURN password",  /* SID:24 */

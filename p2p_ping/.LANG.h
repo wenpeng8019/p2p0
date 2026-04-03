@@ -105,6 +105,7 @@ enum {
     LA_S51,  /* "Disable Relay candidates (for testing)"  [p2p_ping.c] */
     LA_S52,  /* "Disable Srflx candidates (for testing)"  [p2p_ping.c] */
     LA_S53,  /* "Disable Prflx candidates (for testing)"  [p2p_ping.c] */
+    LA_S54,  /* "Skip NAT type detection (RFC 3489 Test II/III)"  [p2p_ping.c] */
 
     LA_NUM
 };

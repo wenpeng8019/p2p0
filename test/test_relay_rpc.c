@@ -54,7 +54,7 @@
  *   目标：验证对端离线时服务器回复错误 RESP
  *   方法：A 单独配对（B 未上线）→ 发送 REQ
  *   预期：
- *     - A 收到 RESP(code=SIG_MSG_ERR_PEER_OFFLINE)
+ *     - A 收到 RESP(code=P2P_MSG_ERR_PEER_OFFLINE)
  *
  * 测试 6: msg_req_bad_payload
  *   目标：验证畸形 MSG_REQ 包被拒绝
@@ -80,10 +80,10 @@
  *   方法：同时发送 DATA 和 REQ，验证两者都正确转发
  *
  * 测试 10: msg_rpc_timeout
- *   目标：验证 RPC 超时后服务器回复 SIG_MSG_ERR_TIMEOUT
+ *   目标：验证 RPC 超时后服务器回复 P2P_MSG_ERR_TIMEOUT
  *   方法：A 发送 REQ → B 收到但不回复 RESP → 等待超时
  *   预期：
- *     - A 收到 RESP(code=SIG_MSG_ERR_TIMEOUT)
+ *     - A 收到 RESP(code=P2P_MSG_ERR_TIMEOUT)
  *
  * ============================================================================
  * 依赖与用法
@@ -285,7 +285,7 @@ static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
 static int build_rly_req(uint8_t *buf, int buf_size,
                          uint64_t session_id, uint16_t sid,
                          uint8_t msg, const uint8_t *data, int data_len) {
-    uint16_t payload_len = P2P_RLY_SESS_ID_PSZ + 2 + 1 + data_len;
+    uint16_t payload_len = P2P_SESS_ID_PSZ + 2 + 1 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
 
     buf[0] = P2P_RLY_REQ;
@@ -315,7 +315,7 @@ static int build_rly_req(uint8_t *buf, int buf_size,
 static int build_rly_resp(uint8_t *buf, int buf_size,
                           uint64_t session_id, uint16_t sid,
                           uint8_t code, const uint8_t *data, int data_len) {
-    uint16_t payload_len = P2P_RLY_SESS_ID_PSZ + 2 + 1 + data_len;
+    uint16_t payload_len = P2P_SESS_ID_PSZ + 2 + 1 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
 
     buf[0] = P2P_RLY_RESP;
@@ -799,16 +799,16 @@ static void test_msg_req_peer_offline(void) {
     int len = build_rly_req(pkt, sizeof(pkt), ses_a, 1, 0x50, req_data, sizeof(req_data) - 1);
     tcp_send_all(sa, pkt, len);
 
-    // 应收到 RESP(code=SIG_MSG_ERR_PEER_OFFLINE)
+    // 应收到 RESP(code=P2P_MSG_ERR_PEER_OFFLINE)
     rly_rpc_pkt_t resp;
     int got = wait_rly_rpc(sa, P2P_RLY_RESP, &resp);
 
     P_sock_close(sa);
 
     if (!got) { TEST_FAIL(TEST_NAME, "no error RESP received"); return; }
-    if (resp.msg_or_code != SIG_MSG_ERR_PEER_OFFLINE) {
+    if (resp.msg_or_code != P2P_MSG_ERR_PEER_OFFLINE) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", SIG_MSG_ERR_PEER_OFFLINE, resp.msg_or_code);
+        snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", P2P_MSG_ERR_PEER_OFFLINE, resp.msg_or_code);
         TEST_FAIL(TEST_NAME, msg); return;
     }
 
@@ -1059,9 +1059,9 @@ static void test_msg_rpc_timeout(void) {
     P_sock_close(sa); P_sock_close(sb);
 
     if (!got) { TEST_FAIL(TEST_NAME, "no timeout RESP received"); return; }
-    if (resp.msg_or_code != SIG_MSG_ERR_TIMEOUT) {
+    if (resp.msg_or_code != P2P_MSG_ERR_TIMEOUT) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", SIG_MSG_ERR_TIMEOUT, resp.msg_or_code);
+        snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", P2P_MSG_ERR_TIMEOUT, resp.msg_or_code);
         TEST_FAIL(TEST_NAME, msg); return;
     }
     if (resp.sid != 1) { TEST_FAIL(TEST_NAME, "sid mismatch"); return; }

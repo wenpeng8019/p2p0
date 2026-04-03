@@ -205,10 +205,10 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F170] = "%s: session_id mismatch (recv=%llu, expect=%llu)\n",  /* SID:170 */
     [LA_F172] = "%s: stale ACK(ack_inst=%u local_inst=%u), ignored\n",  /* SID:172 */
     [LA_F175] = "%s: started, sending first probe\n",  /* SID:175 */
-    [LA_F463] = "%s: status error(%d)\n",  /* SID:463 */
+    [LA_F463] = "%s: server rejected (no slot)\n",  /* SID:463 */
     [LA_F177] = "%s: sync complete (ses_id=%llu)\n",  /* SID:177 */
     [LA_F178] = "%s: sync complete (ses_id=%llu, mask=0x%04x)\n",  /* SID:178 */
-    [LA_F180] = "%s: timeout after %d ms, restarting signaling (UNREGISTER + RE-REGISTER)\n",  /* SID:180 */
+    [LA_F180] = "%s: timeout after %d ms, restarting signaling (OFFLINE + RE-REGISTER)\n",  /* SID:180 */
     [LA_F181] = "%s: timeout after %d retries , type unknown\n",  /* SID:181 */
     [LA_F183] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:183 */
     [LA_F184] = "%s: timeout, max(%d) attempts reached, reset to INIT\n",  /* SID:184 */
@@ -375,7 +375,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F556] = "% Sending Test I(alt) to CHANGED-ADDRESS",  /* SID:556 new */
     [LA_F553] = "% Sending Test II with CHANGE-REQUEST(IP+PORT)",  /* SID:553 new */
     [LA_F554] = "% Sending Test III with CHANGE-REQUEST(PORT only)",  /* SID:554 new */
-    [LA_F328] = "% Sending UNREGISTER packet to COMPACT signaling server",  /* SID:328 */
+    [LA_F328] = "% Sending OFFLINE packet to COMPACT signaling server",  /* SID:328 */
     [LA_F333] = "% Signal payload deserialization failed",  /* SID:333 */
     [LA_F334] = "% Skipping Host Candidate gathering due to instrumentation",  /* SID:334 */
     [LA_F323] = "Send offer to RELAY signaling server failed(%d)",  /* SID:323 */

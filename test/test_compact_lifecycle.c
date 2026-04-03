@@ -6,7 +6,7 @@
  * ============================================================================
  * 验证 p2p_server 对 COMPACT 协议生命周期相关包的处理逻辑：
  * - ALIVE / ALIVE_ACK 保活机制
- * - UNREGISTER 主动注销
+ * - OFFLINE 主动注销
  * - PEER_OFF 对端离线通知
  *
  * ============================================================================
@@ -14,7 +14,7 @@
  * ============================================================================
  * 1. 启动 p2p_server 子进程，监听指定端口
  * 2. 通过 instrument 机制收集 server 的实时日志
- * 3. 发送 ALIVE/UNREGISTER 包，验证 server 正确处理
+ * 3. 发送 ALIVE/OFFLINE 包，验证 server 正确处理
  * 4. 验证 PEER_OFF 通知正确发送给对端
  *
  * ============================================================================
@@ -39,15 +39,15 @@
  *     - 槽位保持活跃状态
  *
  * 测试 3: unregister_releases_slot
- *   目标：验证 UNREGISTER 正常释放槽位
- *   方法：注册配对 → 发送 UNREGISTER → 重新注册相同配对
+ *   目标：验证 OFFLINE 正常释放槽位
+ *   方法：注册配对 → 发送 OFFLINE → 重新注册相同配对
  *   预期：
- *     - UNREGISTER 后槽位被释放
+ *     - OFFLINE 后槽位被释放
  *     - 可以重新注册相同的 peer_id 配对
  *
  * 测试 4: unregister_notifies_peer
- *   目标：验证 UNREGISTER 时对端收到 PEER_OFF
- *   方法：Alice 和 Bob 配对 → Alice 发送 UNREGISTER
+ *   目标：验证 OFFLINE 时对端收到 PEER_OFF
+ *   方法：Alice 和 Bob 配对 → Alice 发送 OFFLINE
  *   预期：
  *     - Bob 收到 PEER_OFF 包
  *     - PEER_OFF 包含正确的 session_id
@@ -63,8 +63,8 @@
  *     - 不触发异常
  *
  * 测试 6: unregister_bad_payload
- *   目标：验证 server 对畸形 UNREGISTER 包的防御
- *   方法：发送 payload 过短的 UNREGISTER 包
+ *   目标：验证 server 对畸形 OFFLINE 包的防御
+ *   方法：发送 payload 过短的 OFFLINE 包
  *   预期：
  *     - server 日志含 "bad payload"
  *     - 不影响正常的配对
@@ -177,9 +177,8 @@ static int find_log(const char *pattern) {
 // 构造 ONLINE 包
 static int build_online(uint8_t *buf, int buf_size,
                         const char *local_peer_id,
-                        const char *remote_peer_id,
                         uint32_t instance_id) {
-    if (buf_size < 4 + 32 + 32 + 4) return -1;
+    if (buf_size < 4 + 32 + 4) return -1;
     
     int n = 0;
     buf[n++] = SIG_PKT_ONLINE;
@@ -191,10 +190,6 @@ static int build_online(uint8_t *buf, int buf_size,
     if (local_peer_id) strncpy((char*)(buf + n), local_peer_id, 31);
     n += 32;
     
-    memset(buf + n, 0, 32);
-    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
-    n += 32;
-    
     buf[n++] = (instance_id >> 24) & 0xFF;
     buf[n++] = (instance_id >> 16) & 0xFF;
     buf[n++] = (instance_id >> 8) & 0xFF;
@@ -204,15 +199,19 @@ static int build_online(uint8_t *buf, int buf_size,
 }
 
 #define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
-    build_online(buf, buf_size, local, remote, inst_id)
+    build_online(buf, buf_size, local, inst_id)
 
 // 构造 SYNC0 包
-static int build_sync0(uint8_t *buf, int buf_size, uint64_t session_id,
+static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
+                       const char *remote_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
-    if (buf_size < 4 + 8 + 1) return -1;
+    if (buf_size < 4 + 8 + 32 + 1) return -1;
     int n = 0;
     buf[n++] = SIG_PKT_SYNC0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
-    for (int i = 0; i < 8; i++) buf[n++] = (session_id >> (56 - i * 8)) & 0xFF;
+    for (int i = 0; i < 8; i++) buf[n++] = (auth_key >> (56 - i * 8)) & 0xFF;
+    memset(buf + n, 0, 32);
+    if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
+    n += 32;
     if (candidate_count > 255) candidate_count = 255;
     buf[n++] = (uint8_t)candidate_count;
     for (int i = 0; i < candidate_count && candidates; i++) {
@@ -241,32 +240,26 @@ static int build_alive(uint8_t *buf, int buf_size, uint64_t session_id) {
     return 12;
 }
 
-// 构造 UNREGISTER 包
-// 协议: [hdr(4)][local_peer_id(32)][remote_peer_id(32)]
-static int build_unregister(uint8_t *buf, int buf_size,
-                            const char *local_peer_id,
-                            const char *remote_peer_id) {
-    if (buf_size < 4 + 32 + 32) return -1;
+// 构造 OFFLINE 包
+// 协议: [hdr(4)][auth_key(8)]
+static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
+    if (buf_size < 4 + 8) return -1;
     
-    buf[0] = SIG_PKT_UNREGISTER;
+    buf[0] = SIG_PKT_OFFLINE;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
     
-    memset(buf + 4, 0, 32);
-    if (local_peer_id) strncpy((char*)(buf + 4), local_peer_id, 31);
+    for (int i = 0; i < 8; i++) buf[4 + i] = (uint8_t)((auth_key >> (56 - i * 8)) & 0xFF);
     
-    memset(buf + 36, 0, 32);
-    if (remote_peer_id) strncpy((char*)(buf + 36), remote_peer_id, 31);
-    
-    return 68;
+    return 12;
 }
 
 // 发送 ONLINE 并接收 ONLINE_ACK，然后发送 SYNC0，返回 session_id
 static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
-    int len = build_online(pkt, sizeof(pkt), local, remote, inst_id);
+    int len = build_online(pkt, sizeof(pkt), local, inst_id);
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -286,17 +279,17 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
                           (struct sockaddr*)&from, &from_len);
     
     if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) {
-        uint64_t session_id = 0;
+        uint64_t auth_key = 0;
         for (int i = 0; i < 8; i++) {
-            session_id = (session_id << 8) | recv_buf[5 + i];
+            auth_key = (auth_key << 8) | recv_buf[8 + i];
         }
-        // 发送 SYNC0
+        // 发送 SYNC0（携带 auth_key + remote_peer_id）
         if (cand_count > 0 || cands == NULL) {
-            len = build_sync0(pkt, sizeof(pkt), session_id, cand_count, cands);
+            len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
             sendto(sock, (const char*)pkt, len, 0,
                    (struct sockaddr*)&server_addr, sizeof(server_addr));
         }
-        return session_id;
+        return auth_key;
     }
     return 0;
 }
@@ -329,10 +322,10 @@ static int send_alive_and_wait_ack(sock_t sock, uint64_t session_id) {
     return 0;  // 未收到 ACK
 }
 
-// 发送 UNREGISTER
-static void send_unregister(sock_t sock, const char *local, const char *remote) {
+// 发送 OFFLINE
+static void send_unregister(sock_t sock, uint64_t auth_key) {
     uint8_t pkt[128];
-    int len = build_unregister(pkt, sizeof(pkt), local, remote);
+    int len = build_unregister(pkt, sizeof(pkt), auth_key);
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -451,7 +444,7 @@ static void test_alive_updates_activity(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 3: UNREGISTER 释放槽位
+// 测试 3: OFFLINE 释放槽位
 static void test_unregister_releases_slot(void) {
     const char *TEST_NAME = "unregister_releases_slot";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -475,8 +468,8 @@ static void test_unregister_releases_slot(void) {
         return;
     }
     
-    // 发送 UNREGISTER
-    send_unregister(sock, local_id, remote_id);
+    // 发送 OFFLINE
+    send_unregister(sock, session1);
     P_usleep(100 * 1000);
     
     // 用相同 peer_id 重新注册（应该成功，因为槽位已释放）
@@ -499,7 +492,7 @@ static void test_unregister_releases_slot(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 4: UNREGISTER 时对端收到 PEER_OFF
+// 测试 4: OFFLINE 时对端收到 PEER_OFF
 static void test_unregister_notifies_peer(void) {
     const char *TEST_NAME = "unregister_notifies_peer";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -548,8 +541,8 @@ static void test_unregister_notifies_peer(void) {
         recvfrom(sock_bob, (char*)discard, sizeof(discard), 0, (struct sockaddr*)&from, &from_len);
     }
     
-    // Alice 发送 UNREGISTER
-    send_unregister(sock_alice, "notify_alice", "notify_bob");
+    // Alice 发送 OFFLINE
+    send_unregister(sock_alice, session_alice);
     
     // Bob 应该收到 PEER_OFF
     uint64_t peer_off_session = 0;
@@ -600,7 +593,7 @@ static void test_alive_bad_session(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 6: 畸形 UNREGISTER 包
+// 测试 6: 畸形 OFFLINE 包
 static void test_unregister_bad_payload(void) {
     const char *TEST_NAME = "unregister_bad_payload";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -612,13 +605,13 @@ static void test_unregister_bad_payload(void) {
         return;
     }
     
-    // 发送 payload 过短的 UNREGISTER 包
+    // 发送 payload 过短的 OFFLINE 包
     uint8_t bad_pkt[16];
-    bad_pkt[0] = SIG_PKT_UNREGISTER;
+    bad_pkt[0] = SIG_PKT_OFFLINE;
     bad_pkt[1] = 0;
     bad_pkt[2] = 0;
     bad_pkt[3] = 0;
-    // 只放 4 字节头，没有 peer_id
+    // 只放 4 字节头，没有 auth_key
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -626,7 +619,7 @@ static void test_unregister_bad_payload(void) {
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
     
-    sendto(sock, (const char*)bad_pkt, 8, 0,  // 只发 8 字节（头 + 4 字节）
+    sendto(sock, (const char*)bad_pkt, 8, 0,  // 只发 8 字节（头 + 4 字节）← 4 < 8 字节的 auth_key
            (struct sockaddr*)&server_addr, sizeof(server_addr));
     
     P_usleep(100 * 1000);
