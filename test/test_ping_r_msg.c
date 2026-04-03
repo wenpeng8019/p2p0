@@ -877,20 +877,26 @@ int main(int argc, char *argv[]) {
     
     // 解析命令行参数
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <ping_path> <server_path> [port]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <ping_path> <server_path> [port] [test_name]\n", argv[0]);
         fprintf(stderr, "\nExamples:\n");
-        fprintf(stderr, "  %s ./p2p_ping ./p2p_server        # Use port %d\n", argv[0], DEFAULT_SERVER_PORT);
-        fprintf(stderr, "  %s ./p2p_ping ./p2p_server 9555   # Use custom port\n", argv[0]);
+        fprintf(stderr, "  %s ./p2p_ping ./p2p_server              # Run all tests on port %d\n", argv[0], DEFAULT_SERVER_PORT);
+        fprintf(stderr, "  %s ./p2p_ping ./p2p_server 9555         # Use custom port\n", argv[0]);
+        fprintf(stderr, "  %s ./p2p_ping ./p2p_server 9555 msg     # Only run tests matching 'msg'\n", argv[0]);
         return 1;
     }
     g_ping_path = argv[1];
     g_server_path = argv[2];
+    const char *test_filter = NULL;
     if (argc > 3) {
-        g_server_port = atoi(argv[3]);
-        if (g_server_port <= 0 || g_server_port > 65535) {
-            fprintf(stderr, "Invalid port: %s\n", argv[3]);
-            return 1;
+        int port = atoi(argv[3]);
+        if (port > 0 && port <= 65535) {
+            g_server_port = port;
+        } else {
+            test_filter = argv[3];
         }
+    }
+    if (argc > 4) {
+        test_filter = argv[4];
     }
     
     printf("=== P2P Ping Message Tests (RELAY Mode) ===\n");
@@ -919,12 +925,19 @@ int main(int argc, char *argv[]) {
     }
     
     // 运行测试
-    printf("\n[*] Running tests...\n");
-    
-    test_message_exchange();
-    test_non_interactive_mode();
-    test_log_collection();
-    test_data_relay();
+    printf("\n[*] Running tests...%s\n", test_filter ? test_filter : " (all)");
+
+#define RUN_IF(name, fn) do { \
+    if (!test_filter || strstr(#name, test_filter)) { fn(); } \
+    else { printf("  [SKIP] %s\n", #name); } \
+} while(0)
+
+    RUN_IF(relay_message_exchange,    test_message_exchange);
+    RUN_IF(relay_non_interactive_mode, test_non_interactive_mode);
+    RUN_IF(relay_log_collection,      test_log_collection);
+    RUN_IF(data_relay,                test_data_relay);
+
+#undef RUN_IF
     
     // 清理
     printf("\n[*] Cleaning up...\n");

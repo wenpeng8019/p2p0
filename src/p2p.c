@@ -581,6 +581,21 @@ p2p_destroy(p2p_handle_t hdl) {
         disconnect(s);
     }
 
+    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+
+        if (s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
+            print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F328, 328));
+            p2p_signal_compact_offline(s);
+        }
+    }
+    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+
+        if (s->sig_relay_ctx.state != SIGNAL_RELAY_INIT) {
+            print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
+            p2p_signal_relay_offline(s);
+        }
+    }
+
     //  COMPACT 模式的 server UDP 套接口和 NAT p2p 是同一个
     if (s->sock != P_INVALID_SOCKET) {
 
@@ -600,21 +615,6 @@ p2p_destroy(p2p_handle_t hdl) {
         P_sock_close(s->sock);
     }
 
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-
-        if (s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
-            print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F328, 328));
-            p2p_signal_compact_offline(s);
-        }
-    }
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
-
-        if (s->sig_relay_ctx.state != SIGNAL_RELAY_INIT) {
-            print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
-            p2p_signal_relay_offline(s);
-        }
-    }
-
     free(s->local_cands);
     free(s->remote_cands);
     route_shared_release();
@@ -629,7 +629,15 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     P_check(hdl, return -1;)
 
     p2p_session_t *s = (p2p_session_t*)hdl;
-    P_check(s->state == P2P_STATE_INIT, return -1;)
+    // 合法调用时机（排除终态 ERROR）：
+    //   INIT:        p2p_create 后尚未登录（PUBSUB/ICE 模式）
+    //   REGISTERING: 已发起登录但 ONLINE_ACK 尚未到达（RELAY/COMPACT 模式）
+    //   ONLINE:      已登录信令服务器但尚未发起 peer 连接（晚调用场景）
+    //   CLOSED:      已 p2p_close / 对端断开后重连（信令层仍保持与服务器的连接）
+    P_check(s->state == P2P_STATE_INIT ||
+            s->state == P2P_STATE_REGISTERING ||
+            s->state == P2P_STATE_ONLINE ||
+            s->state == P2P_STATE_CLOSED, return -1;)
 
     if (!*remote_peer_id) remote_peer_id = NULL;
     if (remote_peer_id) {
@@ -660,13 +668,11 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         // 对于 COMPACT 模式
         case P2P_SIGNALING_MODE_COMPACT: {
 
-            // 等待上线
-            if (s->sig_compact_ctx.state < SIGNAL_COMPACT_ONLINE) {
-                print("I:", LA_F("Waiting for COMPACT server ONLINE_ACK", LA_F535, 535));
-                UNLOCK(s);
-                return 0;
-            }
+            // CLOSED → 重连：信令层已回到 COMPACT_ONLINE，将 session 状态也拨回 ONLINE
+            if (s->state == P2P_STATE_CLOSED) s->state = P2P_STATE_ONLINE;
 
+            // 注册连接目标；若 ONLINE_ACK 未到，signal_compact_connect 仅存储 remote_peer_id，
+            // SYNC0 会在 ONLINE_ACK 处理完后自动触发
             print("I:", LA_F("Starting COMPACT session with %s", LA_F615, 615), remote_peer_id);
             if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE) {
                 print("E:", LA_F("Start COMPACT session failed(%d)", LA_F614, 614), ret);
@@ -678,14 +684,11 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         // 对于 RELAY 模式
         case P2P_SIGNALING_MODE_RELAY: {
 
-            // 等待上线
-            if (s->sig_relay_ctx.state < SIGNAL_RELAY_ONLINE) {
-                print("I:", LA_F("Waiting for RELAY server ONLINE_ACK", LA_F617, 617));
-                UNLOCK(s);
-                return 0;
-            }
+            // CLOSED → 重连：信令层已回到 RELAY_ONLINE，将 session 状态也拨回 ONLINE
+            if (s->state == P2P_STATE_CLOSED) s->state = P2P_STATE_ONLINE;
 
-            // RELAY 模式：发送 CONNECT 请求建立会话
+            // 注册连接目标；若 ONLINE_ACK 未到，signal_relay_connect 仅存储 remote_peer_id + 置 connected=true，
+            // SYNC0 会在 ONLINE_ACK 处理完后自动触发
             print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
             if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE) {
                 print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);

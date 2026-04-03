@@ -59,7 +59,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F54] = "%s sent to %s:%d for %s, seq=%d, path=%d",  /* SID:54 */
     [LA_F57] = "%s sent via best path[%d] to %s:%d, echo_seq=%u",  /* SID:57 */
     [LA_F427] = "%s sent via signaling relay",  /* SID:427 */
-    [LA_F58] = "%s sent, auth_key=llu, remote='%.32s', cands=%d\n",  /* SID:58 */
+    [LA_F58] = "%s sent, auth_key=%llu, remote='%.32s', cands=%d\n",  /* SID:58 */
     [LA_F596] = "%s sent, inst_id=%u\n",  /* SID:596 */
     [LA_F60] = "%s sent, seq=%u\n",  /* SID:60 */
     [LA_F450] = "%s sent, sid=%u, msg=%u, size=%d\n",  /* SID:450 */
@@ -447,8 +447,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F372] = "Updating Gist field '%s'...",  /* SID:372 */
     [LA_F575] = "% WAIT_PEER: peer went offline, waiting for reconnect\n",  /* SID:575 */
     [LA_F576] = "% WAIT_PEER: session established, waiting for peer info\n",  /* SID:576 */
-    [LA_F535] = "% Waiting for COMPACT server ONLINE_ACK",  /* SID:535 */
-    [LA_F617] = "% Waiting for RELAY server ONLINE_ACK",  /* SID:617 */
     [LA_F413] = "% WebRTC candidate export buffer overflow",  /* SID:413 */
     [LA_F374] = "[MbedTLS] DTLS role: %s (mode=%s)",  /* SID:374 */
     [LA_F375] = "% [OpenSSL] DTLS handshake completed",  /* SID:375 */
@@ -488,6 +486,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
+    [LA_F535] = "% Waiting for COMPACT server ONLINE_ACK",  /* SID:535 disabled */
+    [LA_F617] = "% Waiting for RELAY server ONLINE_ACK",  /* SID:617 disabled */
     [LA_F620] = "%s: seq=0 base_index=0 should use SIG_PKT_SYNC0, ignored\n",  /* SID:620 disabled */
     [LA_W21] = "Waiting for incoming offer from any peer",  /* SID:21 disabled */
     [LA_F312] = "Register to COMPACT signaling server at %s:%d",  /* SID:312 disabled */

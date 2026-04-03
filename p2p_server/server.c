@@ -207,7 +207,9 @@ typedef struct compact_pair {
     int                     candidate_count;                    // 候选数量
 
     uint64_t                last_active;                        // 最后活跃时间（毫秒）
-    uint64_t                session_id;                         // 会话 ID（服务器分配，唯一标识一个配对，64位随机数）
+    uint64_t                auth_key;                           // client↔server 认证令牌（ONLINE_ACK 分配，OFFLINE/ALIVE/SYNC0 鉴权用）
+    uint64_t                session_id;                         // client↔peer 会话 ID（SYNC0_ACK 告知客户端，SYNC/FIN/MSG 路由用）
+                                                                // 兼容模式：auth_key == session_id（协议跑通后再拆分）
 
     // SYNC(seq=0) 可靠传输（首包 + 地址变更通知）
     int                     sync0_acked;                        // 是否已收到首包 ACK，-1 表示未收到确认但已放弃
@@ -228,8 +230,9 @@ typedef struct compact_pair {
     int                     rpc_data_len;                       // RPC 数据长度
     
     // uthash handles（支持多种索引方式）
-    UT_hash_handle          hh;                                 // 按 session_id 索引（主索引，必须命名为 hh）
-    UT_hash_handle          hh_peer;                            // 按 peer_key (local+remote) 索引（辅助索引）
+    UT_hash_handle          hh;                                 // 按 session_id 索引（peer 路由，主索引）
+    UT_hash_handle          hh_auth;                            // 按 auth_key 索引（client↔server 鉴权查找）
+    UT_hash_handle          hh_peer;                            // 按 peer_key (local+remote) 索引（配对匹配）
 } compact_pair_t;
 
 #define PEER_ONLINE(p)      ((p)->peer && (p)->peer != (compact_pair_t*)(void*)-1)  // 判断对端是否在线（peer 指针为 (void*)-1 表示已断开）
@@ -238,9 +241,10 @@ typedef struct compact_pair {
 static compact_pair_t       g_compact_pairs[MAX_PEERS];
 
 
-// uthash 哈希表（支持两种索引方式）
-static compact_pair_t*      g_pairs_by_session = NULL;         // 按 session_id 索引
-static compact_pair_t*      g_pairs_by_peer = NULL;            // 按 (local_peer_id, remote_peer_id) 索引
+// uthash 哈希表（支持三种索引方式）
+static compact_pair_t*      g_pairs_by_session = NULL;         // 按 session_id 索引（peer 路由）
+static compact_pair_t*      g_pairs_by_auth    = NULL;         // 按 auth_key 索引（client↔server 鉴权）
+static compact_pair_t*      g_pairs_by_peer    = NULL;         // 按 (local_peer_id, remote_peer_id) 索引（配对匹配）
 
 // SYNC(seq=0) 待确认链表（仅包含已发送首包但未收到 ACK 的配对）
 static compact_pair_t*      g_compact_sync0_pending_head = NULL;
@@ -2190,6 +2194,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
             // 从 session 索引移除
             if (local->session_id != 0) HASH_DELETE(hh, g_pairs_by_session, local);
+            if (local->auth_key   != 0) HASH_DELETE(hh_auth, g_pairs_by_auth, local);
 
             // 如果之前已加入 hh_peer（remote_peer_id 已设置），则从 hh_peer 移除
             if (local->remote_peer_id[0] != 0) {
@@ -2202,9 +2207,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         local->peer = NULL;
         local->candidate_count = 0;
 
-        // 分配 auth_key（= session_id，在服务端暂用同一字段存储）
+        // 分配 session_id（peer 路由）和 auth_key（兼容模式：两者相同）
         local->session_id = generate_compact_pair_id();
-        HASH_ADD(hh, g_pairs_by_session, session_id, sizeof(uint64_t), local);
+        local->auth_key   = local->session_id;  // 兼容模式：协议跑通后拆分为独立随机值
+        HASH_ADD(hh,      g_pairs_by_session, session_id, sizeof(uint64_t), local);
+        HASH_ADD(hh_auth, g_pairs_by_auth,    auth_key,   sizeof(uint64_t), local);
 
         // 重置 session 数据
         local->addr_notify_seq = 0;
@@ -2217,7 +2224,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         send_online_ack(udp_fd, from, from_str, local->session_id, instance_id);
 
         print("V:", LA_F("%s: auth_key=%" PRIu64 " assigned for '%.*s', waiting SYNC0\n", LA_F44, 44),
-               PROTO, local->session_id, P2P_PEER_ID_MAX, local_peer_id);
+               PROTO, local->auth_key, P2P_PEER_ID_MAX, local_peer_id);
     } break;
 
     // SIG_PKT_OFFLINE: [auth_key(8)]
@@ -2233,7 +2240,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             return;
         }
 
-        // 按 auth_key（= session_id）查找本端记录
+        // 按 auth_key 查找本端记录
         uint64_t auth_key = 0;
         nread_ll(&auth_key, payload);
         if (auth_key == 0) {
@@ -2242,8 +2249,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         }
 
         compact_pair_t *pair = NULL;
-        HASH_FIND(hh, g_pairs_by_session, &auth_key, sizeof(uint64_t), pair);
-        
+        HASH_FIND(hh_auth, g_pairs_by_auth, &auth_key, sizeof(uint64_t), pair);
+
         if (pair && pair->valid) {
 
             char local_peer_id[P2P_PEER_ID_MAX + 1] = {0};
@@ -2266,14 +2273,17 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             if (pair->rpc_pending_next) remove_rpc_pending(pair);
 
             // 从哈希表删除
-            HASH_DELETE(hh, g_pairs_by_session, pair);
-            HASH_DELETE(hh_peer, g_pairs_by_peer, pair);
+            HASH_DELETE(hh,      g_pairs_by_session, pair);
+            HASH_DELETE(hh_auth, g_pairs_by_auth,    pair);
+            if (pair->remote_peer_id[0] != 0) {
+                HASH_DELETE(hh_peer, g_pairs_by_peer, pair);
+            }
 
             pair->valid = false;
         }
     } break;
 
-    // SIG_PKT_ALIVE: [session_id(8)]
+    // SIG_PKT_ALIVE: [auth_key(8)]
     // 客户端定期发送以保持槽位活跃，更新 last_active 时间
     case SIG_PKT_ALIVE: { const char* PROTO = "ALIVE";
 
@@ -2285,15 +2295,15 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             return;
         }
 
-        uint64_t session_id = nget_ll(payload);
+        uint64_t auth_key = nget_ll(payload);
 
-        // 直接用 session_id hash 查找（O(1)）
+        // 直接用 auth_key hash 查找（O(1)）
         compact_pair_t *pair = NULL;
-        HASH_FIND(hh, g_pairs_by_session, &session_id, sizeof(uint64_t), pair);        
+        HASH_FIND(hh_auth, g_pairs_by_auth, &auth_key, sizeof(uint64_t), pair);
         if (pair && pair->valid) {
 
-            print("V:", LA_F("%s accepted, peer='%s', ses_id=%" PRIu64 "\n", LA_F13, 13),
-                  PROTO, pair->local_peer_id, session_id);
+            print("V:", LA_F("%s accepted, peer='%s', auth_key=%" PRIu64 "\n", LA_F13, 13),
+                  PROTO, pair->local_peer_id, auth_key);
 
             pair->last_active = P_tick_ms();
             check_addr_change(udp_fd, pair, from);
@@ -2304,8 +2314,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 uint8_t ack[4];
                 p2p_pkt_hdr_encode(ack, SIG_PKT_ALIVE_ACK, 0, 0);
 
-                print("V:", LA_F("Send %s: ses_id=%" PRIu64 ", peer='%s'\n", LA_F70, 70),
-                      ACK_PROTO, session_id, pair->local_peer_id);
+                print("V:", LA_F("Send %s: auth_key=%" PRIu64 ", peer='%s'\n", LA_F70, 70),
+                      ACK_PROTO, auth_key, pair->local_peer_id);
 
                 ssize_t n = sendto(udp_fd, (const char *)ack, sizeof(ack), 0, (struct sockaddr *)from, sizeof(*from));
                 if (n != (ssize_t)sizeof(ack))
@@ -2337,9 +2347,9 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             return;
         }
 
-        // 按 auth_key（= session_id）查找本端记录
+        // 按 auth_key 查找本端记录
         compact_pair_t *local = NULL;
-        HASH_FIND(hh, g_pairs_by_session, &auth_key, sizeof(uint64_t), local);
+        HASH_FIND(hh_auth, g_pairs_by_auth, &auth_key, sizeof(uint64_t), local);
         if (!local) {
             print("W:", LA_F("%s: unknown auth_key=%" PRIu64 " from %s\n", LA_F302, 302), PROTO, auth_key, from_str);
             return;
@@ -2403,22 +2413,20 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         // 发送 SYNC0_ACK（session_id = auth_key，两者共用同一字段）
         send_compact_sync0_ack(udp_fd, from, from_str, local->session_id, PEER_ONLINE(local));
 
-        // 若已配对且双方都有候选，触发首个 SYNC(seq=0)
+        // 若已配对，触发首个 SYNC0(seq=0)（server 始终推送至少公网地址，无需判断候选数）
         if (PEER_ONLINE(local)) {
             compact_pair_t *remote = local->peer;
-            if (remote->candidate_count > 0) {
-                if (local->sync0_pending_next == NULL && local->sync0_acked == 0) {
-                    send_sync0(udp_fd, local, 0);
-                    enqueue_sync0_pending(local, 0, local->last_active);
-                }
-                if (remote->sync0_pending_next == NULL && remote->sync0_acked == 0) {
-                    send_sync0(udp_fd, remote, 0);
-                    enqueue_sync0_pending(remote, 0, local->last_active);
-                }
-                print("I:", LA_F("SYNC0: candidates exchanged '%.*s'(%d) <-> '%.*s'(%d)\n", LA_F64, 64),
-                       P2P_PEER_ID_MAX, local->local_peer_id, local->candidate_count,
-                       P2P_PEER_ID_MAX, remote->local_peer_id, remote->candidate_count);
+            if (local->sync0_pending_next == NULL && local->sync0_acked == 0) {
+                send_sync0(udp_fd, local, 0);
+                enqueue_sync0_pending(local, 0, local->last_active);
             }
+            if (remote->sync0_pending_next == NULL && remote->sync0_acked == 0) {
+                send_sync0(udp_fd, remote, 0);
+                enqueue_sync0_pending(remote, 0, local->last_active);
+            }
+            print("I:", LA_F("SYNC0: candidates exchanged '%.*s'(%d) <-> '%.*s'(%d)\n", LA_F64, 64),
+                   P2P_PEER_ID_MAX, local->local_peer_id, local->candidate_count,
+                   P2P_PEER_ID_MAX, remote->local_peer_id, remote->candidate_count);
         }
     } break;
 
@@ -2903,12 +2911,18 @@ static void cleanup_compact_pairs(sock_t udp_fd) {
 
         // 从哈希表删除
         if (g_compact_pairs[i].session_id != 0) {
-            HASH_DELETE(hh, g_pairs_by_session, &g_compact_pairs[i]);
+            HASH_DELETE(hh,      g_pairs_by_session, &g_compact_pairs[i]);
         }
-        HASH_DELETE(hh_peer, g_pairs_by_peer, &g_compact_pairs[i]);
+        if (g_compact_pairs[i].auth_key != 0) {
+            HASH_DELETE(hh_auth, g_pairs_by_auth,    &g_compact_pairs[i]);
+        }
+        if (g_compact_pairs[i].remote_peer_id[0] != 0) {
+            HASH_DELETE(hh_peer, g_pairs_by_peer, &g_compact_pairs[i]);
+        }
 
         g_compact_pairs[i].peer = NULL;  // 清空指针
         g_compact_pairs[i].session_id = 0;
+        g_compact_pairs[i].auth_key   = 0;
         g_compact_pairs[i].addr_notify_seq = 0;
         g_compact_pairs[i].sync0_base_index = 0;
         g_compact_pairs[i].sync0_retry = 0;

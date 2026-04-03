@@ -245,12 +245,17 @@ typedef struct {
     p2p_candidate_t candidates[16];
 } sync_t;
 
-// 解析 SYNC 包
+// 判断是否为首次候选推送包（SYNC0 s2c 或 SYNC seq=0）
+static int is_sync_packet(uint8_t type) {
+    return type == SIG_PKT_SYNC || type == SIG_PKT_SYNC0;
+}
+
+// 解析 SYNC / SYNC0(s2c) 包
 static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
     memset(info, 0, sizeof(*info));
     
-    if (len < 4 + 8 + 1 + 1) return;  // header + session_id + base_index + count
-    if (buf[0] != SIG_PKT_SYNC) return;
+    if (len < 4 + 8 + 1 + 1) return;
+    if (buf[0] != SIG_PKT_SYNC && buf[0] != SIG_PKT_SYNC0) return;
     
     info->received = 1;
     
@@ -260,6 +265,8 @@ static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
         info->session_id = (info->session_id << 8) | buf[4 + i];
     }
     
+    // SYNC:  [session_id(8)][base_index(1)][count(1)][cands]
+    // SYNC0: [session_id(8)][0x00(1)     ][count(1)][cands]
     info->base_index = buf[12];
     info->candidate_count = buf[13];
     
@@ -303,9 +310,31 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
         len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
+        // 消耗 SYNC0_ACK，防止它污染后续 recvfrom
+        uint8_t drain_buf[32];
+        struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
+        P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
+        recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
+                 (struct sockaddr*)&drain_from, &drain_len);
         return auth_key;
     }
     return 0;
+}
+
+// 发送 SYNC0_ACK（client→server，确认服务器首次候选推送）
+static void send_sync0_ack(sock_t sock, uint64_t session_id) {
+    uint8_t pkt[16];
+    pkt[0] = SIG_PKT_SYNC0_ACK;
+    pkt[1] = 0; pkt[2] = 0; pkt[3] = 0;
+    for (int i = 0; i < 8; i++) pkt[4 + i] = (uint8_t)(session_id >> (56 - i * 8));
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(g_server_port);
+    inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
+    sendto(sock, (const char*)pkt, 4 + 8, 0,
+           (struct sockaddr*)&server_addr, sizeof(server_addr));
 }
 
 // 发送 SYNC_ACK
@@ -383,7 +412,7 @@ static void test_sync_on_pairing(void) {
         from_len = sizeof(from);
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+        if (n > 0 && is_sync_packet(recv_buf[0])) {
             parse_sync(recv_buf, (int)n, &info_alice);
             break;
         }
@@ -394,7 +423,7 @@ static void test_sync_on_pairing(void) {
         from_len = sizeof(from);
         ssize_t n = recvfrom(sock_bob, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+        if (n > 0 && is_sync_packet(recv_buf[0])) {
             parse_sync(recv_buf, (int)n, &info_bob);
             break;
         }
@@ -467,7 +496,7 @@ static void test_sync_ack_stops_retransmit(void) {
     for (int i = 0; i < 3; i++) {
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+        if (n > 0 && is_sync_packet(recv_buf[0])) {
             parse_sync(recv_buf, (int)n, &info);
             break;
         }
@@ -482,8 +511,8 @@ static void test_sync_ack_stops_retransmit(void) {
     
     clear_logs();
     
-    // 发送 ACK
-    send_sync_ack(sock_alice, session_alice, 0);
+    // 发送 SYNC0_ACK 停止服务器重传
+    send_sync0_ack(sock_alice, session_alice);
     
     P_usleep(200 * 1000);
     
@@ -495,7 +524,7 @@ static void test_sync_ack_stops_retransmit(void) {
     P_sock_close(sock_alice);
     P_sock_close(sock_bob);
     
-    if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+    if (n > 0 && is_sync_packet(recv_buf[0])) {
         TEST_FAIL(TEST_NAME, "should not receive SYNC after ACK");
         return;
     }
@@ -554,7 +583,7 @@ static void test_sync_with_candidates(void) {
     for (int i = 0; i < 3; i++) {
         ssize_t n = recvfrom(sock_bob, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+        if (n > 0 && is_sync_packet(recv_buf[0])) {
             parse_sync(recv_buf, (int)n, &info);
             break;
         }
@@ -674,7 +703,7 @@ static void test_sync_retransmit(void) {
     for (int i = 0; i < 3; i++) {
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) {
+        if (n > 0 && is_sync_packet(recv_buf[0])) {
             sync_count++;
             break;
         }
@@ -694,16 +723,16 @@ static void test_sync_retransmit(void) {
     ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                           (struct sockaddr*)&from, &from_len);
     
-    // 发送 ACK 停止后续重传
-    send_sync_ack(sock_alice, session_alice, 0);
-    send_sync_ack(sock_bob, session_bob, 0);
+    // 发送 SYNC0_ACK 停止待聊重传
+    send_sync0_ack(sock_alice, session_alice);
+    send_sync0_ack(sock_bob,   session_bob);
     
     P_sock_close(sock_alice);
     P_sock_close(sock_bob);
     
     P_usleep(100 * 1000);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_SYNC) {
+    if (n <= 0 || !is_sync_packet(recv_buf[0])) {
         TEST_FAIL(TEST_NAME, "retransmit SYNC not received");
         return;
     }
@@ -755,14 +784,14 @@ static void test_sync_ack_duplicate(void) {
     for (int i = 0; i < 3; i++) {
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_SYNC) break;
+        if (n > 0 && is_sync_packet(recv_buf[0])) break;
     }
     
-    // 发送两次 ACK
-    send_sync_ack(sock_alice, session_alice, 0);
+    // 发送两次 SYNC0_ACK
+    send_sync0_ack(sock_alice, session_alice);
     P_usleep(100 * 1000);
     
-    send_sync_ack(sock_alice, session_alice, 0);
+    send_sync0_ack(sock_alice, session_alice);
     P_usleep(100 * 1000);
     
     P_sock_close(sock_alice);

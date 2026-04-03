@@ -118,14 +118,14 @@ target_include_directories(test_ping_c_reconnect PRIVATE
 target_link_libraries(test_ping_c_reconnect stdc ${TEST_PLATFORM_LIBS})
 
 # P2P ICE 候选测试集合 (COMPACT 模式, 候选过滤验证)
-add_executable(test_ping_c_ice
-    test_ping_c_ice.c
+add_executable(test_ping_c_sync
+    test_ping_c_sync.c
 )
-target_include_directories(test_ping_c_ice PRIVATE
+target_include_directories(test_ping_c_sync PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_c_ice stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_c_sync stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY 协议注册/上线单元测试
 add_executable(test_relay_register
@@ -198,14 +198,14 @@ target_include_directories(test_ping_r_reconnect PRIVATE
 target_link_libraries(test_ping_r_reconnect stdc ${TEST_PLATFORM_LIBS})
 
 # P2P ICE 候选测试集合 (RELAY 模式, 候选过滤验证)
-add_executable(test_ping_r_ice
-    test_ping_r_ice.c
+add_executable(test_ping_r_sync
+    test_ping_r_sync.c
 )
-target_include_directories(test_ping_r_ice PRIVATE
+target_include_directories(test_ping_r_sync PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_r_ice stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_r_sync stdc ${TEST_PLATFORM_LIBS})
 
 # 添加测试
 enable_testing()

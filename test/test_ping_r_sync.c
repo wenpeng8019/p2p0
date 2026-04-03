@@ -1,22 +1,22 @@
 /*
- * test_ping_ice.c - ICE 候选过滤测试
+ * test_ping_r_sync.c - ICE 候选过滤测试 (RELAY 模式)
  *
  * ============================================================================
- * 测试场景
+ * 测试场景 (RELAY 模式)
  * ============================================================================
  *
- * 1. test_host_only:
+ * 1. test_relay_host_only:
  *    - 关闭 SRFLX 和 RELAY 候选收集
  *    - 验证只有 HOST 候选被使用
  *    - 验证日志中 SRFLX/RELAY 被标记为 ignored
  *
- * 2. test_no_host_punch:
+ * 2. test_relay_no_host_punch:
  *    - 关闭 HOST 打洞（但仍收集）
  *    - 验证 HOST 候选被收集但打洞被跳过
  *
- * 3. test_all_off:
- *    - 关闭所有候选收集
- *    - 验证连接超时失败
+ * 3. test_relay_log_format:
+ *    - 验证 RELAY 模式下的日志格式
+ *    - 验证连接状态转换
  *
  * ============================================================================
  * 命令行选项（p2p_ping）
@@ -27,7 +27,7 @@
  * --no-relay  - 禁用 RELAY 候选收集（不收集 TURN 中继地址）
  */
 
-#define MOD_TAG "TEST_ICE"
+#define MOD_TAG "TEST_SYNC_R"
 
 #include <stdc.h>
 #include <p2p.h>
@@ -48,7 +48,7 @@
 // 配置
 ///////////////////////////////////////////////////////////////////////////////
 
-#define DEFAULT_SERVER_PORT     9350
+#define DEFAULT_SERVER_PORT     9450
 #define DEFAULT_SERVER_HOST     "127.0.0.1"
 #define SYNC_TIMEOUT_MS         10000
 #define CONNECT_TIMEOUT_MS      30000
@@ -115,8 +115,11 @@ static void on_instrument(uint16_t rid, uint8_t chn, const char* tag, char *txt,
         }
     }
 
-    // 连接成功检测
-    if (txt && (strstr(txt, "State: → CONNECTED") || strstr(txt, "CONNECTING → CONNECTED"))) {
+    // 连接成功检测 (RELAY 模式)
+    // 日志格式: [STATE] xxx (n) -> yyy (m) 或 [EVENT] State: xxx -> yyy
+    if (txt && (strstr(txt, "-> CONNECTED") || 
+                strstr(txt, "-> RELAY (") ||
+                strstr(txt, "bidirectional confirmed"))) {
         if (rid == g_alice.rid && !g_alice.connected) {
             g_alice.connected = 1;
             printf("    [CONN] Alice connected!\n");
@@ -193,12 +196,13 @@ static int start_server(void) {
         perror("fork server");
         return -1;
     } else if (g_server_pid == 0) {
-        execl(g_server_path, g_server_path, "-p", port_str, NULL);
+        // RELAY 模式: 使用 -r 和 -m 标志
+        execl(g_server_path, g_server_path, "-p", port_str, "-r", "-m", NULL);
         perror("exec server");
         _exit(127);
     }
 
-    printf("    Server PID: %d (port=%d)\n", g_server_pid, g_server_port);
+    printf("    Server PID: %d (port=%d, RELAY mode)\n", g_server_pid, g_server_port);
     P_usleep(500 * 1000);
     return 0;
 }
@@ -240,11 +244,10 @@ static int start_client(client_t *c, const char *target, const char *extra_args)
             close(null_fd);
         }
         
-        // 构建参数列表
+        // 构建参数列表 (RELAY 模式: 默认模式，不带 --compact)
         const char *argv[32];
         int argc = 0;
         argv[argc++] = g_ping_path;
-        argv[argc++] = "--compact";
         argv[argc++] = "-s";
         argv[argc++] = server_arg;
         argv[argc++] = "-n";
@@ -291,11 +294,31 @@ static void sync_client(client_t *c) {
     }
 }
 
+// 通过 instrument_req 查询客户端状态
+static int get_client_state(client_t *c) {
+    char buffer[32] = "";
+    ret_t r = instrument_req(c->name, MESSAGE_TIMEOUT_MS, "state", buffer, sizeof(buffer));
+    if (r != E_NONE) return -1;
+    return atoi(buffer);
+}
+
 static int wait_for_connection(int timeout_ms) {
     int elapsed = 0;
     while (elapsed < timeout_ms) {
-        if (g_alice.connected && g_bob.connected)
-            return 0;
+        if (g_alice.connected && g_bob.connected) {
+            // 使用 instrument 查询实际状态
+            // P2P_STATE_CONNECTED = 7, P2P_STATE_RELAY = 8
+            int alice_state = get_client_state(&g_alice);
+            int bob_state = get_client_state(&g_bob);
+            if ((alice_state == 7 || alice_state == 8) && 
+                (bob_state == 7 || bob_state == 8)) {
+                printf("    [CONN] Both ready (alice=%d, bob=%d)\n", 
+                       alice_state, bob_state);
+                // 额外等待 RELAY 数据通道稳定
+                P_usleep(1000 * 1000);
+                return 0;
+            }
+        }
         P_usleep(100 * 1000);
         elapsed += 100;
     }
@@ -348,13 +371,13 @@ static void on_signal(int sig) {
 } while(0)
 
 ///////////////////////////////////////////////////////////////////////////////
-// 测试 1: HOST only（关闭 SRFLX 和 RELAY）
+// 测试 1: HOST only（关闭 SRFLX 和 RELAY）(RELAY 模式)
 ///////////////////////////////////////////////////////////////////////////////
 
-static void test_host_only(void) {
-    const char *TEST_NAME = "host_only";
+static void test_relay_host_only(void) {
+    const char *TEST_NAME = "relay_host_only";
     printf("\n--- Test: %s ---\n", TEST_NAME);
-    printf("    Disabling SRFLX and RELAY candidates, HOST only\n");
+    printf("    Disabling SRFLX and RELAY candidates, HOST only (RELAY mode)\n");
     clear_logs();
 
     if (restart_server() != 0) {
@@ -389,7 +412,7 @@ static void test_host_only(void) {
     sync_client(&g_bob);
 
     // 等待连接
-    printf("[1] Waiting for connection (HOST only)...\n");
+    printf("[1] Waiting for connection (HOST only, RELAY mode)...\n");
     if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
         print_log_summary();
         TEST_FAIL(TEST_NAME, "connection timeout");
@@ -425,13 +448,13 @@ static void test_host_only(void) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// 测试 2: 关闭 HOST 打洞（但仍收集）
+// 测试 2: 关闭 HOST 打洞（但仍收集）(RELAY 模式)
 ///////////////////////////////////////////////////////////////////////////////
 
-static void test_no_host_punch(void) {
-    const char *TEST_NAME = "no_host_punch";
+static void test_relay_no_host_punch(void) {
+    const char *TEST_NAME = "relay_no_host_punch";
     printf("\n--- Test: %s ---\n", TEST_NAME);
-    printf("    Disabling HOST punch, candidates should be collected but not punched\n");
+    printf("    Disabling HOST punch, candidates should be collected but not punched (RELAY mode)\n");
     clear_logs();
 
     if (restart_server() != 0) {
@@ -512,13 +535,13 @@ static void test_no_host_punch(void) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// 测试 3: 验证日志格式
+// 测试 3: 验证日志格式 (RELAY 模式)
 ///////////////////////////////////////////////////////////////////////////////
 
-static void test_log_format(void) {
-    const char *TEST_NAME = "log_format";
+static void test_relay_log_format(void) {
+    const char *TEST_NAME = "relay_log_format";
     printf("\n--- Test: %s ---\n", TEST_NAME);
-    printf("    Verifying ICE log messages format\n");
+    printf("    Verifying ICE log messages format (RELAY mode)\n");
     clear_logs();
 
     if (restart_server() != 0) {
@@ -544,7 +567,7 @@ static void test_log_format(void) {
     sync_client(&g_bob);
 
     // 等待连接
-    printf("[1] Waiting for normal connection...\n");
+    printf("[1] Waiting for normal connection (RELAY mode)...\n");
     if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
         print_log_summary();
         TEST_FAIL(TEST_NAME, "connection timeout");
@@ -557,12 +580,13 @@ static void test_log_format(void) {
     printf("[2] Verifying log format...\n");
 
     // 打印一些示例日志
-    printf("\n--- Sample ICE Logs ---\n");
+    printf("\n--- Sample ICE Logs (RELAY mode) ---\n");
     int sample_count = 0;
     for (int i = 0; i < g_log_count && sample_count < 10; i++) {
         if (strstr(g_logs[i].txt, "cand") || strstr(g_logs[i].txt, "Cand") ||
             strstr(g_logs[i].txt, "ICE") || strstr(g_logs[i].txt, "Host") ||
-            strstr(g_logs[i].txt, "srflx") || strstr(g_logs[i].txt, "relay")) {
+            strstr(g_logs[i].txt, "srflx") || strstr(g_logs[i].txt, "relay") ||
+            strstr(g_logs[i].txt, "SIGNALING")) {
             printf("  [%d] %s\n", i, g_logs[i].txt);
             sample_count++;
         }
@@ -595,10 +619,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    printf("=== P2P ICE Candidate Tests ===\n");
+    printf("=== P2P RELAY ICE Candidate Tests ===\n");
     printf("Ping:   %s\n", g_ping_path);
     printf("Server: %s\n", g_server_path);
-    printf("Port:   %d\n\n", g_server_port);
+    printf("Port:   %d (RELAY mode)\n\n", g_server_port);
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
@@ -611,24 +635,24 @@ int main(int argc, char *argv[]) {
     }
 
     // 启动 server
-    printf("[*] Starting server...\n");
+    printf("[*] Starting server (RELAY mode)...\n");
     if (start_server() != 0) {
         return 1;
     }
 
     // 运行测试
-    printf("\n[*] Running tests...\n");
+    printf("\n[*] Running RELAY ICE tests...\n");
 
-    test_host_only();
-    test_no_host_punch();
-    test_log_format();
+    test_relay_host_only();
+    test_relay_no_host_punch();
+    test_relay_log_format();
 
     // 清理
     printf("\n[*] Cleaning up...\n");
     cleanup();
 
     // 报告
-    printf("\n=== Test Results ===\n");
+    printf("\n=== RELAY ICE Test Results ===\n");
     printf("Passed: %d\n", g_tests_passed);
     printf("Failed: %d\n", g_tests_failed);
 

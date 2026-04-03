@@ -254,7 +254,7 @@ static void send_compact_sync0(p2p_session_t *s) {
         n += pack_candidate(&s->local_cands[i], payload + n);
     }
 
-    print("V:", LA_F("%s sent, auth_key=" PRIu64 ", remote='%.32s', cands=%d\n", LA_F58, 58),
+    print("V:", LA_F("%s sent, auth_key=%" PRIu64 ", remote='%.32s', cands=%d\n", LA_F58, 58),
           PROTO, ctx->auth_key, ctx->remote_peer_id, cand_cnt);
 
     ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC0, 0, 0, payload, n);

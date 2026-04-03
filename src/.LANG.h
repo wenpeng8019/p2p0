@@ -99,7 +99,7 @@ enum {
     _LA_55,
     LA_F56,  /* "%s sent to %s:%d" (%s,%s,%d)  [p2p_nat.c] */
     LA_F57,  /* "%s sent via best path[%d] to %s:%d, echo_seq=%u" (%s,%d,%s,%d,%u)  [p2p_nat.c] */
-    LA_F58,  /* "%s sent, auth_key=llu, remote='%.32s', cands=%d\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F58,  /* "%s sent, auth_key=%llu, remote='%.32s', cands=%d\n" (%s,%l,%d)  [p2p_signal_compact.c] */
     LA_F59,  /* disabled "%s sent, inst_id=%u\n" */
     LA_F60,  /* "%s sent, seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F61,  /* disabled "%s sent %d candidates, next_idx=%d\n" */
@@ -576,7 +576,7 @@ enum {
     LA_F532,  /* "% No shared local route addresses available, host candidates skipped"  [p2p.c] */
     LA_F533,  /* "[TCP] %s recv, len=%d\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F534,  /* "% TCP send error\n"  [p2p_signal_relay.c] */
-    LA_F535,  /* "% Waiting for COMPACT server ONLINE_ACK"  [p2p.c] */
+    LA_F535,  /* disabled "% Waiting for COMPACT server ONLINE_ACK" */
     LA_F536,  /* "% Disconnected, back to ONLINE state\n"  [p2p_signal_relay.c] */
     LA_F537,  /* disabled "disconnect: not in session (state=%d)\n" */
     LA_F538,  /* "payload size %u exceeds limit %u\n" (%u,%u)  [p2p_signal_relay.c] */
@@ -658,7 +658,7 @@ enum {
     LA_F614,  /* "Start COMPACT session failed(%d)" (%d)  [p2p.c] */
     LA_F615,  /* "Starting COMPACT session with %s" (%s)  [p2p.c] */
     LA_F616,  /* "Login to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
-    LA_F617,  /* "% Waiting for RELAY server ONLINE_ACK"  [p2p.c] */
+    LA_F617,  /* disabled "% Waiting for RELAY server ONLINE_ACK" */
     LA_F618,  /* "%s: entered, peer online in SYNC0_ACK\n" (%s)  [p2p_signal_compact.c] */
     LA_F619,  /* "%s: entered, %s arrived\n" (%s,%s)  [p2p_signal_compact.c] */
     LA_F620,  /* disabled "%s: seq=0 base_index=0 should use SIG_PKT_SYNC0, ignored\n" */

@@ -463,6 +463,12 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
         len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
+        // 消耗 SYNC0_ACK，防止它污染后续操作的 recvfrom
+        uint8_t drain_buf[32];
+        struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
+        P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
+        recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
+                 (struct sockaddr*)&drain_from, &drain_len);
         return auth_key;
     }
     return 0;
