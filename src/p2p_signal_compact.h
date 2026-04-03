@@ -256,8 +256,8 @@ struct p2p_session;
 /* 信令状态 */
 typedef enum {
     SIGNAL_COMPACT_INIT = 0,        /* 未启动 */
-    SIGNAL_COMPACT_REGISTERING,     /* 等待 REGISTER_ACK */
-    SIGNAL_COMPACT_REGISTERED,      /* 已注册，等待 SYNC(seq=0) */
+    SIGNAL_COMPACT_REGISTERING,     /* 等待 ONLINE_ACK */
+    SIGNAL_COMPACT_ONLINE,          /* 已上线，等待 SYNC0_ACK 和 SYNC(seq=0) */
     SIGNAL_COMPACT_ICE,             /* 向对方发送后续候选队列、和 FIN */
     SIGNAL_COMPACT_READY            /* 如果已经完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
 } p2p_signal_compact_state_t;
@@ -271,16 +271,17 @@ typedef struct {
     uint64_t            last_send_time;                     /* 上次发送时间 */
     uint64_t            last_recv_time;                     /* 上次收到时间 */
 
-    /* REGISTER 重发控制（仅 REGISTERING 状态） */
+    /* ONLINE 重发控制（仅 REGISTERING 状态） */
     uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
-    int                 register_attempts;                  /* REGISTER 总共尝试次数 */
+    int                 online_attempts;                    /* ONLINE/SYNC0 总共尝试次数 */
 
     /* 和对方的会话 */
-    uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配），在 REGISTER_ACK 中首次获得 */
-    bool                peer_online;                        /* 对端是否在线；REGISTER_ACK 和 SYNC 都会导致 online 为 true */
+    uint64_t            session_id;                         /* 会话 ID（64位，0=尚未分配），在 ONLINE_ACK 中首次获得 */
+    bool                peer_online;                        /* 对端是否在线；ONLINE_ACK 和 SYNC 都会导致 online 为 true */
+    bool                sync0_acked;                        /* SYNC0 已被服务器确认（收到 SYNC0_ACK） */
 
     /* REGISTER_ACK 返回的信息 */
-    int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量 */
+    int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量（ONLINE_ACK 中 max_candidates 限制） */
     struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器主端口探测到的）*/
     uint16_t            probe_port;                         /* NAT 探测端口（0=不支持探测）*/
     bool                feature_relay;                      /* 服务器是否支持中继 */
@@ -370,7 +371,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
 //-----------------------------------------------------------------------------
 
 /*
- * 开始信令交换（发送 REGISTER）
+ * 开始信令交换（发送 ONLINE + 自动队列 SYNC0）
  *
  * @param s             会话对象（包含候选列表）
  * @param local_peer_id 本端 ID
@@ -455,8 +456,13 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
  * 以下函数分别处理不同类型的 COMPACT 信令包，消除包类型派发层。
  */
 
-/* 处理 REGISTER_ACK（服务器注册确认） */
-void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
+/* 处理 ONLINE_ACK（服务器上线确认） */
+void compact_on_online_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
+                              const uint8_t *payload, int len,
+                              const struct sockaddr_in *from);
+
+/* 处理 SYNC0_ACK（首批候选确认） */
+void compact_on_sync0_ack(struct p2p_session *s,
                               const uint8_t *payload, int len,
                               const struct sockaddr_in *from);
 

@@ -349,14 +349,17 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  *      Alice (在线)           Server                    Bob (离线)
  *        |                       |                          |
- *        |--- REGISTER --------->|                          |
- *        |<-- REGISTER_ACK ------|  (peer_online=0, max=5)
- *        |   [进入 REGISTERED]   |                          |
- *        |                       |  (缓存 Alice 的候选)      |
+ *        |--- ONLINE ----------->|                          |
+ *        |<-- ONLINE_ACK --------|  (peer_online=0)
+ *        |--- SYNC0 ------------>|  (session_id + 首批候选)  |
+ *        |<-- SYNC0_ACK ---------|  (peer_online=0)          |
+ *        |   [进入 ONLINE]       |  (缓存 Alice 的候选)      |
  *        |    ... Bob 上线 ...                              |
- *        |                       |<-- REGISTER ------------|
- *        |                       |--- REGISTER_ACK -------->|  (peer_online=1, max=5)
- *        |<-- SYNC(seq=0) --|--- SYNC(seq=0) --->|  (包含缓存的 5 个候选 + session_id)
+ *        |                       |<-- ONLINE --------------|
+ *        |                       |--- ONLINE_ACK ---------->|  (peer_online=1)
+ *        |                       |<-- SYNC0 --------------|  (session_id + 首批候选)
+ *        |                       |--- SYNC0_ACK ----------->|  (peer_online=1)
+ *        |<-- SYNC(seq=0) --|--- SYNC(seq=0) --->|  (包含缓存的候选 + session_id)
  *        |--- SYNC_ACK ----->|<-- SYNC_ACK -------|  (携带 session_id)
  *        |                       |                          |
  *        |<=============== P2P SYNC 序列化同步 ========>|  (所有包携带 session_id)
@@ -367,26 +370,28 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        |--- SYNC(seq=3, count=0, FIN) ----------->  |  (结束标识)
  *        |<-- SYNC_ACK(seq=3) ----------------------  |
  *
- * 注：REGISTER 仅在注册阶段发送，收到 REGISTER_ACK 后停止（直到重连）
+ * 注：ONLINE 仅在上线阶段发送，收到 ONLINE_ACK 后停止（直到重连）；SYNC0 在收到 ONLINE_ACK 后发送
  */
 
 /* COMPACT 信令协议 (客户端 <-> 信令服务器) - 0x80-0x9F */
-#define SIG_PKT_REGISTER        0x80        // 注册到信令服务器（含本地候选列表与 instance_id）
-#define SIG_PKT_REGISTER_ACK    0x81        // 注册确认（告知 session_id、本端缓存能力、公网地址、探测端口、中继支持）
+#define SIG_PKT_ONLINE          0x80        // 上线（登录）到信令服务器（含 peer_id 与 instance_id，不含候选地址）
+#define SIG_PKT_ONLINE_ACK      0x81        // 上线确认（告知 session_id、本端缓存能力、公网地址、探测端口、中继支持）
 #define SIG_PKT_UNREGISTER      0x82        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
                                             // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
-#define SIG_PKT_SYNC            0x83        // 候选列表同步包（序列化传输）
-#define SIG_PKT_SYNC_ACK        0x84        // 候选列表确认（确认指定序列号）
-#define SIG_PKT_FIN             0x85        // 服务器下行通知：对端已离线/断开
+#define SIG_PKT_ALIVE           0x83        // 保活包（可选，客户端定期发送以维持注册状态）
+#define SIG_PKT_ALIVE_ACK       0x84        // 保活确认（服务器回复以确认注册状态）
 
-#define SIG_PKT_ALIVE           0x86        // 保活包（可选，客户端定期发送以维持注册状态）
-#define SIG_PKT_ALIVE_ACK       0x87        // 保活确认（服务器回复以确认注册状态）
+#define SIG_PKT_SYNC0           0x85        // 首批候选提交（client→server）：[session_id(8)][candidate_count(1)][candidates(N*23)]
+#define SIG_PKT_SYNC0_ACK       0x86        // 首批候选确认（server→client）：[session_id(8)][online(1)]
+#define SIG_PKT_SYNC            0x87        // 候选列表同步包（序列化传输）
+#define SIG_PKT_SYNC_ACK        0x88        // 候选列表确认（确认指定序列号）
+#define SIG_PKT_FIN             0x89        // 服务器下行通知：对端已离线/断开
 
 /*
  * MSG：服务器缓存+可靠中转的 RPC 机制（服务器可选实现）
  *
  * 通过服务器中转，实现对端间可信赖的一次请求-应答交互（类似 RPC）。
- * 服务器是否支持由 REGISTER_ACK.flags 中 SIG_REGACK_FLAG_MSG (0x02) 位标识。
+ * 服务器是否支持由 ONLINE_ACK.flags 中 SIG_ONACK_FLAG_MSG (0x02) 位标识。
  *
  * msg 特殊值（请求消息类型）：
  *   - msg=0: Echo 测试，B端自动回复相同数据，无需应用层介入
@@ -438,13 +443,13 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_NAT_PROBE_ACK   0x8D        // NAT 类型探测响应（返回第二次映射地址）
 
 
-/* REGISTER_ACK status 码 */
-#define SIG_REGACK_PEER_OFFLINE 0           // 成功，对端离线
-#define SIG_REGACK_PEER_ONLINE  1           // 成功，对端在线
+/* ONLINE_ACK status 码 */
+#define SIG_ONACK_PEER_OFFLINE  0           // 成功，对端离线
+#define SIG_ONACK_PEER_ONLINE   1           // 成功，对端在线
 
-/* REGISTER_ACK 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_REGACK_FLAG_RELAY   0x01        // 服务器支持数据中继功能（P2P 打洞失败降级）
-#define SIG_REGACK_FLAG_MSG     0x02        // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
+/* ONLINE_ACK 标志位（p2p_packet_hdr_t.flags） */
+#define SIG_ONACK_FLAG_RELAY    0x01        // 服务器支持数据中继功能（P2P 打洞失败降级）
+#define SIG_ONACK_FLAG_MSG      0x02        // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
 
 /* MSG 包标志位（p2p_packet_hdr_t.flags） */
 #define SIG_MSG_FLAG_RELAY      0x01        // 标识此 MSG_REQ 是 Server→B 的中转包（而非 A→Server 的原始请求）
@@ -465,40 +470,56 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  * 候选地址统一使用 p2p_candidate_t（23 字节），COMPACT 和 RELAY 模式共享同一线格式。
  *
- * REGISTER:
- *   payload: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*23)]
+ * ONLINE:
+ *   payload: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)]
  *   包头: type=0x80, flags=0, seq=0
  *   - instance_id: 本次 connect() 的实例 ID（网络字节序，32位，必须非 0）
  *   - 语义:
- *       * instance_id 相同: 视为 REGISTER 重传（例如客户端未收到 REGISTER_ACK）
+ *       * instance_id 相同: 视为 ONLINE 重传（例如客户端未收到 ONLINE_ACK）
  *       * instance_id 不同: 视为同一 peer_key 的新实例（客户端重启/重连），服务端重置旧会话状态
+ *   总大小: 4(包头) + 68(payload) = 72 字节
  *
- * REGISTER_ACK:
+ * ONLINE_ACK:
  *   payload: [status(1)][session_id(8)][instance_id(4)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
  *   包头: type=0x81, flags=见下, seq=0
  *   - status: 0=对端离线, 1=对端在线, >=2=错误码
- *   - session_id: 本端会话 ID（网络字节序，64位，注册成功后立即分配）
- *   - instance_id: 回显客户端 REGISTER 中的 instance_id（网络字节序，32位）
+ *   - session_id: 本端会话 ID（网络字节序，64位，上线成功后立即分配）
+ *   - instance_id: 回显客户端 ONLINE 中的 instance_id（网络字节序，32位）
  *     客户端收到后应比较 instance_id 与当前实例是否一致，不一致则丢弃此 ACK
  *   - max_candidates: 服务器为该对端缓存的最大候选数量（0=不支持缓存）
  *   - public_ip/port: 客户端的公网地址（服务器主端口观察到的 UDP 源地址）
  *   - probe_port: NAT 探测端口（0=不支持探测）
  *   - flags: 包头的 flags 字段可设置：
- *       SIG_REGACK_FLAG_RELAY (0x01) 表示服务器支持中继
- *       SIG_REGACK_FLAG_MSG (0x02) 表示服务器支持 MSG RPC 机制
+ *       SIG_ONACK_FLAG_RELAY (0x01) 表示服务器支持中继
+ *       SIG_ONACK_FLAG_MSG (0x02) 表示服务器支持 MSG RPC 机制
  *   总大小: 4(包头) + 22(payload) = 26 字节
+ *
+ * SYNC0:
+ *   payload: [session_id(8)][candidate_count(1)][candidates(N*23)]
+ *   包头: type=0x8E, flags=0, seq=0
+ *   - session_id: 本端会话 ID（网络字节序，64位，来自 ONLINE_ACK）
+ *   - candidate_count: 首批候选数量（最多 max_candidates 个）
+ *   - candidates: 首批候选地址列表
+ *   客户端在收到 ONLINE_ACK 后立即发送，提交首批候选供服务器缓存与转发
+ *
+ * SYNC0_ACK:
+ *   payload: [session_id(8)][online(1)]
+ *   包头: type=0x8F, flags=0, seq=0
+ *   - session_id: 会话 ID（回显，用于验证）
+ *   - online: 1=对端已上线（已有对端配对），0=对端尚未上线
+ *   服务器收到 SYNC0 后回复，通知客户端候选已缓存以及对端是否已上线
  *
  * UNREGISTER:
  *   payload: [local_peer_id(32)][remote_peer_id(32)]
- *   包头: type=0x88, flags=0, seq=0
+ *   包头: type=0x82, flags=0, seq=0
  *   客户端主动断开时发送，请求服务器立即释放配对槽位
  *   服务器收到后会向对端发送 FIN 通知
  *
  * ALIVE:
  *   payload: [session_id(8)]
  *   包头: type=0x86, flags=0, seq=0
- *   - session_id: 本端会话 ID（网络字节序，64位，来自 REGISTER_ACK）
- *   用于客户端在 REGISTERED 状态定期发送，保持服务器槽位活跃
+ *   - session_id: 本端会话 ID（网络字节序，64位，来自 ONLINE_ACK）
+ *   用于客户端在 ONLINE 状态定期发送，保持服务器槽位活跃
  *
  * ALIVE_ACK:
  *   payload: 空（仅包头）
@@ -522,7 +543,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - seq=0 且 base_index!=0: 地址变更通知（candidate_count=1）
  *       * base_index 作为 8 位循环通知序号（1..255 循环）
  *       * 接收端按循环序比较新旧，旧通知可忽略但仍需 ACK
- *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用 REGISTER_ACK 中的 session_id
+ *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用 ONLINE_ACK 中的 session_id
  *   - flags: 包头的 flags 字段可设置 SIG_SYNC_FIN (0x01) 表示候选列表发送完毕
  *   - seq 窗口: 0..16（0 为服务器首包，1..16 为后续候选批次）
  *   - 乱序处理: 允许 seq>0 先于 seq=0 到达；接收端按序号位图去重，重复包仅 ACK 不重复入表

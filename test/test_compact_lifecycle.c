@@ -174,17 +174,15 @@ static int find_log(const char *pattern) {
 // 协议构造函数
 ///////////////////////////////////////////////////////////////////////////////
 
-// 构造 REGISTER 包
-static int build_register(uint8_t *buf, int buf_size,
-                          const char *local_peer_id,
-                          const char *remote_peer_id,
-                          uint32_t instance_id,
-                          int candidate_count,
-                          p2p_candidate_t *candidates) {
-    if (buf_size < 4 + 32 + 32 + 4 + 1) return -1;
+// 构造 ONLINE 包
+static int build_online(uint8_t *buf, int buf_size,
+                        const char *local_peer_id,
+                        const char *remote_peer_id,
+                        uint32_t instance_id) {
+    if (buf_size < 4 + 32 + 32 + 4) return -1;
     
     int n = 0;
-    buf[n++] = SIG_PKT_REGISTER;
+    buf[n++] = SIG_PKT_ONLINE;
     buf[n++] = 0;
     buf[n++] = 0;
     buf[n++] = 0;
@@ -202,14 +200,26 @@ static int build_register(uint8_t *buf, int buf_size,
     buf[n++] = (instance_id >> 8) & 0xFF;
     buf[n++] = instance_id & 0xFF;
     
+    return n;
+}
+
+#define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
+    build_online(buf, buf_size, local, remote, inst_id)
+
+// 构造 SYNC0 包
+static int build_sync0(uint8_t *buf, int buf_size, uint64_t session_id,
+                       int candidate_count, p2p_candidate_t *candidates) {
+    if (buf_size < 4 + 8 + 1) return -1;
+    int n = 0;
+    buf[n++] = SIG_PKT_SYNC0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+    for (int i = 0; i < 8; i++) buf[n++] = (session_id >> (56 - i * 8)) & 0xFF;
     if (candidate_count > 255) candidate_count = 255;
     buf[n++] = (uint8_t)candidate_count;
-    
     for (int i = 0; i < candidate_count && candidates; i++) {
+        if (n + (int)sizeof(p2p_candidate_t) > buf_size) break;
         memcpy(buf + n, &candidates[i], sizeof(p2p_candidate_t));
         n += sizeof(p2p_candidate_t);
     }
-    
     return n;
 }
 
@@ -252,11 +262,11 @@ static int build_unregister(uint8_t *buf, int buf_size,
     return 68;
 }
 
-// 发送 REGISTER 并接收 REGISTER_ACK，返回 session_id
+// 发送 ONLINE 并接收 ONLINE_ACK，然后发送 SYNC0，返回 session_id
 static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
-    int len = build_register(pkt, sizeof(pkt), local, remote, inst_id, cand_count, cands);
+    int len = build_online(pkt, sizeof(pkt), local, remote, inst_id);
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -275,10 +285,16 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
     ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                           (struct sockaddr*)&from, &from_len);
     
-    if (n > 0 && recv_buf[0] == SIG_PKT_REGISTER_ACK) {
+    if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) {
         uint64_t session_id = 0;
         for (int i = 0; i < 8; i++) {
             session_id = (session_id << 8) | recv_buf[5 + i];
+        }
+        // 发送 SYNC0
+        if (cand_count > 0 || cands == NULL) {
+            len = build_sync0(pkt, sizeof(pkt), session_id, cand_count, cands);
+            sendto(sock, (const char*)pkt, len, 0,
+                   (struct sockaddr*)&server_addr, sizeof(server_addr));
         }
         return session_id;
     }

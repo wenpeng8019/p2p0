@@ -9,10 +9,10 @@
 #include "p2p_internal.h"
 #include "p2p_probe.h"
 
-#define REGISTER_INTERVAL_MS            1000    /* 注册重发间隔 */
-#define SYNC_INTERVAL_MS           500     /* SYNC 重发间隔 */
-#define MAX_REGISTER_ATTEMPTS           10      /* 最大 REGISTER 重发次数 */
-#define REGISTER_KEEPALIVE_INTERVAL_MS  20000   /* REGISTERED 状态保活重注册间隔（防服务器超时清除槽位） */
+#define ONLINE_INTERVAL_MS              1000    /* ONLINE/SYNC0 重发间隔 */
+#define SYNC_INTERVAL_MS                500     /* SYNC 重发间隔 */
+#define MAX_ONLINE_ATTEMPTS             10      /* 最大 ONLINE/SYNC0 重发次数 */
+#define REGISTER_KEEPALIVE_INTERVAL_MS  20000   /* ONLINE 状态保活重注册间隔（防服务器超时清除槽位） */
 #define TRICKLE_BATCH_MS                1000    /* TURN trickle 攒批窗口（多个 TURN 响应在此窗口内合并为一个包） */
 #define MAX_CANDS_PER_PACKET            10      /* 每个 SYNC 包最大候选数 */
 #define NAT_PROBE_MAX_RETRIES           3       /* NAT_PROBE 最大发送次数 */
@@ -24,7 +24,7 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#define TASK_REG                        "REGISTER"
+#define TASK_ONLINE                     "ONLINE"
 #define TASK_ICE                        "ICE"
 #define TASK_ICE_REMOTE                 "ICE REMOTE"
 #define TASK_NAT_PROBE                  "NAT PROBE"
@@ -67,7 +67,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 
             // 这里启动打洞需要依赖于信令服务器的 REGISTER_ACK 包中携带的 feature_relay 标志
             // + 该标志用于决定所使用的冷打洞机制，如果冷打洞不依赖服务器中转，则打洞可以不依赖 REGISTER_ACK 包
-            if (s->sig_compact_ctx.state >= SIGNAL_COMPACT_REGISTERED && nat_punch(s, 0) != E_NONE) {
+            if (s->sig_compact_ctx.state >= SIGNAL_COMPACT_ONLINE && nat_punch(s, 0) != E_NONE) {
                 print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F137, 137),
                     TASK_ICE_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             }
@@ -120,7 +120,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
         print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F153, 153),
               TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
 
-        if (s->sig_compact_ctx.state < SIGNAL_COMPACT_REGISTERED) continue;
+        if (s->sig_compact_ctx.state < SIGNAL_COMPACT_ONLINE) continue;
 
         if (nat_punch(s, idx) != E_NONE)
             print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F137, 137),
@@ -185,45 +185,73 @@ static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payloa
 }
 
 /*
- * 向信令服务器请求 REGISTER 操作
+ * 向信令服务器发送 ONLINE（上线登录）请求
  *
- * 协议：SIG_PKT_REGISTER (0x80)
+ * 协议：SIG_PKT_ONLINE (0x80)
  * 包头: [type=0x80 | flags=0 | seq=0]
- * 负载: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)][candidate_count(1)][candidates(N*7)]
+ * 负载: [local_peer_id(32)][remote_peer_id(32)][instance_id(4)]
+ *   - instance_id: 本次 connect() 的实例 ID（网络字节序，32位，必须非 0）
+ * 注：候选地址通过后续 SYNC0 包单独提交
  */
-static void send_register(p2p_session_t *s) {
-    const char* PROTO = "REGISTER";
+static void send_online(p2p_session_t *s) {
+    const char* PROTO = "ONLINE";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     assert(ctx->state == SIGNAL_COMPACT_REGISTERING);
 
-    // 默认计算 REGISTER:MTU 包中最多能承载的候选数量
-    // + 该值随后会根据 SIG_PKT_REGISTER_ACK 的 max_candidates 值进行修正
-    const int header_size = P2P_PEER_ID_MAX * 2 + 4 + 1;
-    assert(P2P_MAX_PAYLOAD >= header_size);
-    int n = P2P_MAX_PAYLOAD - header_size; if (n < 0) n = 0;
-    int cand_cnt = n / (int)sizeof(p2p_candidate_t)/* 23 */;
-    if (cand_cnt > s->local_cand_cnt) cand_cnt = s->local_cand_cnt;
-    ctx->candidates_cached = cand_cnt;
-
     // local_peer_id / remote_peer_id（各 32 字节，超过部分截断，不足部分补零）
-    uint8_t payload[P2P_MAX_PAYLOAD];
-    memset(payload, 0, n = P2P_PEER_ID_MAX * 2);
+    int n = P2P_PEER_ID_MAX * 2;
+    uint8_t payload[P2P_PEER_ID_MAX * 2 + 4];
+    memset(payload, 0, n);
     memcpy(payload, ctx->local_peer_id, strlen(ctx->local_peer_id));
     memcpy(payload + P2P_PEER_ID_MAX, ctx->remote_peer_id, strlen(ctx->remote_peer_id));
 
     // instance_id（4 字节大端序）
     nwrite_l(payload + n, ctx->instance_id); n += 4;
 
-    // candidates (每个 23 字节: type + addr + priority)
+    print("V:", LA_F("%s sent, inst_id=%u\n", LA_F58, 58), PROTO, ctx->instance_id);
+
+    ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_ONLINE, 0, 0, payload, n);
+    if (ret < 0)
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
+              PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
+    else
+        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F489, 489),
+               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), n);
+}
+
+/*
+ * 向信令服务器提交 SYNC0（首批候选）
+ *
+ * 协议：SIG_PKT_SYNC0 (0x8E)
+ * 包头: [type=0x8E | flags=0 | seq=0]
+ * 负载: [session_id(8)][candidate_count(1)][candidates(N*23)]
+ *   - session_id: 本端会话 ID（来自 ONLINE_ACK）
+ *   - candidate_count: 首批候选数量（最多 candidates_cached 个）
+ */
+static void send_compact_sync0(p2p_session_t *s) {
+    const char* PROTO = "SYNC0";
+
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    assert(ctx->state == SIGNAL_COMPACT_ONLINE);
+    assert(ctx->session_id != 0);
+
+    uint8_t payload[P2P_MAX_PAYLOAD];
+    int n = 0;
+
+    // session_id（8 字节大端序）
+    nwrite_ll(payload, ctx->session_id); n += 8;
+
+    // candidate_count + candidates
+    int cand_cnt = ctx->candidates_cached;
     payload[n++] = (uint8_t)cand_cnt;
     for (int i = 0; i < cand_cnt; i++) {
         n += pack_candidate(&s->local_cands[i], payload + n);
     }
 
-    print("V:", LA_F("%s sent, inst_id=%u, cands=%d\n", LA_F58, 58), PROTO, ctx->instance_id, cand_cnt);
+    print("V:", LA_F("%s sent, ses_id=%" PRIu64 ", cands=%d\n", LA_F58, 58), PROTO, ctx->session_id, cand_cnt);
 
-    ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_REGISTER, 0, 0, payload, n);
+    ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC0, 0, 0, payload, n);
     if (ret < 0)
         print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F488, 488), 
               PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
@@ -539,7 +567,7 @@ static void reset_peer(p2p_signal_compact_ctx_t *ctx) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * 开始信令交换（发送 REGISTER）
+ * 开始信令交换（发送 ONLINE）
  */
 ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_id, const char *remote_peer_id,
                                  const struct sockaddr_in *server) {
@@ -563,9 +591,10 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *local_peer_i
     ctx->local_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
     ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
-    // 构造并发送带候选列表的注册包
-    send_register(s);
-    ctx->register_attempts = 1;
+    // 发送 ONLINE（不含候选，候选通过后续 SYNC0 提交）
+    ctx->sync0_acked = false;
+    send_online(s);
+    ctx->online_attempts = 1;
     ctx->last_send_time = P_tick_ms();
 
     return E_NONE;
@@ -737,7 +766,7 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
 
     P_check(len == 0 || data, return E_INVALID;)
     P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
-    P_check(ctx->state >= SIGNAL_COMPACT_REGISTERED, return E_NONE_CONTEXT;)    // 未注册
+    P_check(ctx->state >= SIGNAL_COMPACT_ONLINE, return E_NONE_CONTEXT;)    // 未上线
     if (!ctx->feature_msg) {
         print("E:", LA_F("MSG RPC not supported by server\n", LA_F447, 447));
         return E_NO_SUPPORT;
@@ -793,9 +822,9 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * 处理 REGISTER_ACK，服务器注册确认
+ * 处理 ONLINE_ACK，服务器上线确认
  *
- * 协议：SIG_PKT_REGISTER_ACK (0x81)
+ * 协议：SIG_PKT_ONLINE_ACK (0x81)
  * 包头: [type=0x81 | flags=见下 | seq=0]
  * 负载: [status(1) | session_id(8) | instance_id(4) | max_candidates(1) | public_ip(4) | public_port(2) | probe_port(2)]
  *   - status: 0=对端离线, 1=对端在线, >=2=错误码
@@ -803,12 +832,12 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
  *   - max_candidates: 服务器缓存的最大候选数量（0=不支持缓存）
  *   - public_ip/port: 客户端的公网地址（服务器观察到的 UDP 源地址）
  *   - probe_port: NAT 探测端口（0=不支持探测）
- *   - flags: SIG_REGACK_FLAG_RELAY (0x01) 表示服务器支持中继
+ *   - flags: SIG_ONACK_FLAG_RELAY (0x01) 表示服务器支持中继
  */
-void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
+void compact_on_online_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
                               const uint8_t *payload, int len,
                               const struct sockaddr_in *from) {
-    const char* PROTO = "REGISTER_ACK";
+    const char* PROTO = "ONLINE_ACK";
 
     printf(LA_F("[UDP] %s recv from %s:%d, seq=%u, flags=0x%02x, len=%d\n", LA_F391, 391),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq, flags, len);
@@ -831,7 +860,7 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    // 验证 echo instance_id（确保 ACK 对应当前注册请求）
+    // 验证 echo instance_id（确保 ACK 对应当前上线请求）
     uint32_t ack_instance_id = 0;
     nread_l(&ack_instance_id, payload + 9);
     if (ack_instance_id != ctx->instance_id) {
@@ -840,13 +869,19 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    ctx->feature_relay = (flags & SIG_REGACK_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
-    ctx->feature_msg   = (flags & SIG_REGACK_FLAG_MSG) != 0;      // 服务器是否支持 MSG RPC
+    ctx->feature_relay = (flags & SIG_ONACK_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
+    ctx->feature_msg   = (flags & SIG_ONACK_FLAG_MSG) != 0;        // 服务器是否支持 MSG RPC
     uint64_t ack_session_id = nget_ll(payload + 1);
     uint8_t max_candidates = payload[13];
 
-    if (ctx->candidates_cached > max_candidates)      // 计算服务器实际缓存的候选数量，作为后续发送 SYNC 包的基准
-        ctx->candidates_cached = max_candidates;
+    // 根据服务器通告的 max_candidates 和 MTU 计算首批候选数量（SYNC0 使用）
+    // SYNC0 负载头: [session_id(8)][candidate_count(1)] = 9 字节
+    const int sync0_header = (int)sizeof(uint64_t) + 1;
+    int n = P2P_MAX_PAYLOAD - sync0_header; if (n < 0) n = 0;
+    int cand_cnt = n / (int)sizeof(p2p_candidate_t);
+    if (cand_cnt > max_candidates) cand_cnt = max_candidates;
+    if (cand_cnt > s->local_cand_cnt) cand_cnt = s->local_cand_cnt;
+    ctx->candidates_cached = cand_cnt;
 
     // 根据服务器能力设置探测状态
     if (ctx->feature_msg) {
@@ -864,14 +899,14 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     // 解析服务器提供的 NAT 探测端口，0 表示服务器不支持
     nread_s(&ctx->probe_port, payload + 20);
 
-    // REGISTER_ACK 直接下发本端 session_id
+    // ONLINE_ACK 直接下发本端 session_id
     if (!ctx->session_id) ctx->session_id = ack_session_id;
     else if (ctx->session_id != ack_session_id) {
 
         print("E:", LA_F("%s: session mismatch(local=%" PRIu64 " ack=%" PRIu64 ")\n", LA_F166, 166),
               PROTO, ctx->session_id, ack_session_id);
 
-        // 之前"提前"收到的 SYNC 包都是无效的，以 REGISTER_ACK 的 ses_id 为准
+        // 之前"提前"收到的 SYNC 包都是无效的，以 ONLINE_ACK 的 ses_id 为准
         ctx->session_id = ack_session_id;
         ctx->peer_online = false;
 
@@ -889,13 +924,12 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
           ctx->feature_msg ? "yes" : "no");
 
     // 如果对方在线
-    // + 注意，此时对方可能已经是在线状态，也就是 SIG_PKT_SYNC 可能先于 SIG_PKT_REGISTER_ACK 到达
-    if (status == SIG_REGACK_PEER_ONLINE) ctx->peer_online = true;
+    if (status == SIG_ONACK_PEER_ONLINE) ctx->peer_online = true;
 
-    // 标记进入 REGISTERED 状态（该状态将停止周期发送 REGISTER）
-    ctx->state = SIGNAL_COMPACT_REGISTERED;
-    print("I:", LA_F("REGISTERED: peer=%s\n", LA_F475, 475), ctx->peer_online ? "online" : "offline");
-    if (s->state == P2P_STATE_REGISTERING) s->state = P2P_STATE_REGISTERED;
+    // 标记进入 ONLINE 状态（该状态将停止周期发送 ONLINE，改为重试 SYNC0）
+    ctx->state = SIGNAL_COMPACT_ONLINE;
+    print("I:", LA_F("ONLINE: peer=%s\n", LA_F475, 475), ctx->peer_online ? "online" : "offline");
+    if (s->state == P2P_STATE_REGISTERING) s->state = P2P_STATE_ONLINE;
 
     // 如果服务器支持 NAT 探测端口，则启动 NAT_PROBE 探测流程
     if (ctx->probe_port > 0) {
@@ -921,26 +955,12 @@ void compact_on_register_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         print("I:", LA_F("SIGNALING path enabled (server supports relay)\n", LA_F320, 320));
     }
 
-    // 如果对方在线，直接进入 ICE 阶段，发送后续候选队列和 FIN 包
-    // + 这里可能存在两种情况：
-    //   1. SYNC 先于 REGISTER_ACK 到达，此时先到达的 SYNC 会先将 peer_online 标记为 true
-    //      注意，并发场景下，此时 REGISTER_ACK 可能并未携带 SIG_REGACK_PEER_ONLINE 标识
-    //   2. REGISTER_ACK 先到达，且携带 SIG_REGACK_PEER_ONLINE 标识，此时直接标记 peer_online 为 true
-    if (ctx->peer_online) {
-
-        print("I:", LA_F("%s: peer online, proceeding to ICE\n", LA_F134, 134), PROTO);
-        ctx->state = SIGNAL_COMPACT_ICE;
-        if (compact_wait_stun_candidates(s)) {
-            print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F570, 570), TASK_ICE);
-        } else {
-            send_rest_candidates_and_fin(s);
-            ctx->last_send_time = P_tick_ms();
-        }
-
-        // 启动 NAT 打洞
-        assert(s->nat.state < NAT_PUNCHING);
-        nat_punch(s, -1/* all candidates */);
-    }
+    // 发送 SYNC0（首批候选），服务器将缓存并在双方均提交后向双方下发 SYNC(seq=0)
+    // + ICE 阶段将在收到服务器下发的 SYNC(seq=0) 时由 compact_on_sync() 触发
+    ctx->sync0_acked = false;
+    ctx->online_attempts = 1;   // 重置计数，用于 SYNC0 重传
+    send_compact_sync0(s);
+    ctx->last_send_time = P_tick_ms();
 }
 
 /*
@@ -977,8 +997,55 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
 }
 
 /*
- * 处理 SYNC，对端发送过来的对端的候选地址信息
+ * 处理 SYNC0_ACK，首批候选提交确认
  *
+ * 协议：SIG_PKT_SYNC0_ACK (0x8F)
+ * 包头: [type=0x8F | flags=0 | seq=0]
+ * 负载: [session_id(8)][online(1)]
+ *   - session_id: 会话 ID（回显，用于验证）
+ *   - online: 1=对端已上线（已有配对），0=对端尚未上线
+ */
+void compact_on_sync0_ack(struct p2p_session *s,
+                              const uint8_t *payload, int len,
+                              const struct sockaddr_in *from) {
+    const char* PROTO = "SYNC0_ACK";
+
+    printf(LA_F("[UDP] %s recv from %s:%d, len=%d\n", LA_F390, 390),
+           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
+
+    if (len < 9) {
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
+        return;
+    }
+
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+
+    if (ctx->state < SIGNAL_COMPACT_ONLINE) {
+        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)ctx->state);
+        return;
+    }
+
+    uint64_t session_id = nget_ll(payload);
+    if (!session_id || ctx->session_id != session_id) {
+        print("W:", LA_F("%s: session mismatch(local=%" PRIu64 ", pkt=%" PRIu64 ")\n", LA_F168, 168),
+              PROTO, ctx->session_id, session_id);
+        return;
+    }
+
+    uint8_t online = payload[8];
+    print("V:", LA_F("%s: accepted, peer=%s\n", LA_F97, 97), PROTO, online ? "online" : "offline");
+
+    ctx->sync0_acked = true;
+    ctx->last_recv_time = P_tick_ms();
+
+    if (online && !ctx->peer_online) {
+        ctx->peer_online = true;
+    }
+    // ICE 将在收到服务器下发的 SYNC(seq=0) 时由 compact_on_sync() 触发
+}
+
+
+/*
  * 协议：SIG_PKT_SYNC (0x83)
  * 包头: [type=0x83 | flags=见下 | seq=序列号]
  * 负载: [session_id(8) | base_index(1) | candidate_count(1) | candidates(N*7)]
@@ -1066,8 +1133,8 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
             ctx->session_id = session_id;
 
             if (ctx->state == SIGNAL_COMPACT_REGISTERING) s->state = P2P_STATE_REGISTERING;
-            else { ctx->state = SIGNAL_COMPACT_REGISTERED;
-                s->state = P2P_STATE_REGISTERED;
+            else { ctx->state = SIGNAL_COMPACT_ONLINE;
+                s->state = P2P_STATE_ONLINE;
             }
         }
         else {
@@ -1076,12 +1143,12 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
         }
     }
 
-    // 如果之前已经收到过 REGISTER_ACK，则启动 ICE 阶段，向对方发送后续候选队列和 FIN 包
-    // + ICE 阶段依赖 SIG_PKT_REGISTER_ACK，它提供后续候选队列基准
-    if (ctx->state == SIGNAL_COMPACT_REGISTERED) {
+    // 如果之前已经收到过 ONLINE_ACK，则启动 ICE 阶段，向对方发送后续候选队列和 FIN 包
+    // + ICE 阶段依赖 SIG_PKT_ONLINE_ACK 提供后续候选队列基准（candidates_cached）
+    if (ctx->state == SIGNAL_COMPACT_ONLINE) {
 
         ctx->state = SIGNAL_COMPACT_ICE;
-        print("I:", LA_F("%s: entered, %s arrived after REGISTERED\n", LA_F109, 109), TASK_ICE, PROTO);
+        print("I:", LA_F("%s: entered, %s arrived after ONLINE\n", LA_F109, 109), TASK_ICE, PROTO);
 
         if (compact_wait_stun_candidates(s)) {
             print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F570, 570), TASK_ICE);
@@ -1186,7 +1253,7 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
             //            s->active_path);
             // }
 
-            if (ctx->state >= SIGNAL_COMPACT_REGISTERED) {
+            if (ctx->state >= SIGNAL_COMPACT_ONLINE) {
 
                 if (nat_punch(s, 0) != E_NONE) {
                     print("E:", LA_F("Failed to send punch packet for new peer addr\n", LA_F251, 251));
@@ -1345,15 +1412,15 @@ void compact_on_fin(struct p2p_session *s, const uint8_t *payload, int len,
 
     print("V:", LA_F("%s: accepted (ses_id=%" PRIu64 ")\n", LA_F88, 88), PROTO, session_id);
 
-    // 重置到 REGISTERED 状态，等待对端重新注册
+    // 重置到 ONLINE 状态，等待对端重新上线
     // ! 这里可以明确知道是对方断开了连接，所以自己和信令服务器之间的连接和数据状态都是正常的，不需要重置
-    //   同样，session_id 也不需要重置，因为它是本端的唯一标识，是信令服务器在 REGISTER 请求时分配的
-    ctx->state = SIGNAL_COMPACT_REGISTERED;
+    //   同样，session_id 也不需要重置，因为它是本端的唯一标识，是信令服务器在 ONLINE 请求时分配的
+    ctx->state = SIGNAL_COMPACT_ONLINE;
 
     // 清除双方协商信息
     reset_peer(ctx);
 
-    print("I:", LA_F("%s: peer disconnected (ses_id=%" PRIu64 "), reset to REGISTERED\n", LA_F551, 551), PROTO, session_id);
+    print("I:", LA_F("%s: peer disconnected (ses_id=%" PRIu64 "), reset to ONLINE\n", LA_F551, 551), PROTO, session_id);
 
     // 标记 NAT 为已关闭
     // + 这里将信令层的 peer close 转换为 NAT 层的 closed 状态，主循环会统一以 NAT 层的 NAT_CLOSED 状态机变更为准
@@ -1772,8 +1839,9 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
  * 信令服务周期维护（拉取阶段）— 注册重试、保活
  * 
  * 处理向服务器发送的维护包：
- * - REGISTERING：重发 REGISTER（获取配对信息）
- * - REGISTERED/READY：发送 keepalive（保持槽位）
+ * - REGISTERING：重发 ONLINE（获取配对信息）
+ * - ONLINE（sync0_acked=false）：重发 SYNC0（等待服务器缓存首批候选）
+ * - ONLINE/READY：发送 keepalive（保持槽位）
  */
 
 void p2p_signal_compact_tick_recv(struct p2p_session *s) {
@@ -1781,33 +1849,56 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     uint64_t now = P_tick_ms();
 
-    // REGISTERING 状态：定期重发 REGISTER
+    // REGISTERING 状态：定期重发 ONLINE
     if (ctx->state == SIGNAL_COMPACT_REGISTERING) {
 
-        if (tick_diff(now, ctx->last_send_time) >= REGISTER_INTERVAL_MS) {
+        if (tick_diff(now, ctx->last_send_time) >= ONLINE_INTERVAL_MS) {
 
             // 超时检查
-            if (ctx->register_attempts++ < MAX_REGISTER_ATTEMPTS) {
+            if (ctx->online_attempts++ < MAX_ONLINE_ATTEMPTS) {
 
                 print("I:", LA_F("%s: retry, (attempt %d/%d)\n", LA_F161, 161),
-                      TASK_REG, ctx->register_attempts, MAX_REGISTER_ATTEMPTS);
+                      TASK_ONLINE, ctx->online_attempts, MAX_ONLINE_ATTEMPTS);
 
-                send_register(s);
+                send_online(s);
                 ctx->last_send_time = now;
             }
             else {
 
                 print("W:", LA_F("%s: timeout, max(%d) attempts reached, reset to INIT\n", LA_F184, 184),
-                      TASK_REG, MAX_REGISTER_ATTEMPTS);
+                      TASK_ONLINE, MAX_ONLINE_ATTEMPTS);
 
                 ctx->state = SIGNAL_COMPACT_INIT;
             }
         }
     }
-    // REGISTERED/READY 状态：定期向服务器发送保活包
-    else if (ctx->state == SIGNAL_COMPACT_REGISTERED || ctx->state == SIGNAL_COMPACT_READY) {
+    // ONLINE 状态：SYNC0 重传（等待 SYNC0_ACK）或 keepalive
+    // READY 状态：只做 keepalive
+    else if (ctx->state == SIGNAL_COMPACT_ONLINE || ctx->state == SIGNAL_COMPACT_READY) {
 
-        if (tick_diff(now, ctx->last_send_time) >= REGISTER_KEEPALIVE_INTERVAL_MS) {
+        if (ctx->state == SIGNAL_COMPACT_ONLINE && !ctx->sync0_acked) {
+
+            // SYNC0 重传（等待服务器缓存首批候选）
+            if (tick_diff(now, ctx->last_send_time) >= ONLINE_INTERVAL_MS) {
+
+                if (ctx->online_attempts++ < MAX_ONLINE_ATTEMPTS) {
+
+                    print("I:", LA_F("SYNC0: retry, (attempt %d/%d)\n", LA_F161, 161),
+                          ctx->online_attempts, MAX_ONLINE_ATTEMPTS);
+
+                    send_compact_sync0(s);
+                    ctx->last_send_time = now;
+                }
+                else {
+
+                    print("W:", LA_F("SYNC0: timeout, max(%d) attempts reached, reset to INIT\n", LA_F184, 184),
+                          MAX_ONLINE_ATTEMPTS);
+
+                    ctx->state = SIGNAL_COMPACT_INIT;
+                }
+            }
+        }
+        else if (tick_diff(now, ctx->last_send_time) >= REGISTER_KEEPALIVE_INTERVAL_MS) {
 
             /*
              * 发送 ALIVE 保活包
@@ -1815,7 +1906,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
              * 协议：SIG_PKT_ALIVE (0x86)
              * 包头: [type=0x86 | flags=0 | seq=0]
              * 负载: [session_id(8)]
-             *   - session_id: 本端会话 ID（来自 REGISTER_ACK）
+             *   - session_id: 本端会话 ID（来自 ONLINE_ACK）
              * 说明: 保活包，维持服务器上的注册状态
              */
             {   const char* PROTO = "ALIVE";
@@ -1826,7 +1917,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
                     nwrite_ll(payload, ctx->session_id);
 
                     print("V:", LA_F("%s, sent on %s\n", LA_F67, 67),
-                          PROTO, ctx->state == SIGNAL_COMPACT_REGISTERED ? "REGISTERED" : "READY");
+                          PROTO, ctx->state == SIGNAL_COMPACT_ONLINE ? "ONLINE" : "READY");
 
                     ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_ALIVE, 0, 0, payload,
                                                     (int) sizeof(payload));
@@ -1865,7 +1956,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
                 send_rpc_req(s);
                 ctx->req_send_time = now;
 
-                if (ctx->state == SIGNAL_COMPACT_REGISTERED ||
+                if (ctx->state == SIGNAL_COMPACT_ONLINE ||
                     ctx->state == SIGNAL_COMPACT_READY)
                     ctx->last_send_time = now;
             }
@@ -1899,7 +1990,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
                 send_rpc_resp(s);
                 ctx->resp_send_time = now;
 
-                if (ctx->state == SIGNAL_COMPACT_REGISTERED ||
+                if (ctx->state == SIGNAL_COMPACT_ONLINE ||
                     ctx->state == SIGNAL_COMPACT_READY)
                     ctx->last_send_time = now;
             }
@@ -1960,7 +2051,7 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
             // session id 会在服务器重新注册时重新分配
             ctx->session_id = 0;
 
-            // 重新 REGISTER
+            // 重新 ONLINE
             // + 这里无需向服务器发送 UNREGISTER 包，因为协议上要求新的 rid 会确保服务器上的旧注册失效
             ctx->state = SIGNAL_COMPACT_REGISTERING;
 
@@ -1969,9 +2060,10 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
             while (rid == ctx->instance_id) rid = P_rand32();
             ctx->instance_id = rid;
 
-            // 发送注册协议包
-            send_register(s);
-            ctx->register_attempts = 1;
+            // 发送 ONLINE 包
+            ctx->sync0_acked = false;
+            send_online(s);
+            ctx->online_attempts = 1;
             ctx->last_send_time = P_tick_ms();
 
             // 重新发起 TURN Allocate（上一轮分配已随 ICE 重置失效）

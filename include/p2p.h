@@ -62,8 +62,8 @@ typedef enum {
     P2P_STATE_INIT = 0,                         // 初始状态
     P2P_STATE_CLOSED,                           // 已关闭
     P2P_STATE_ERROR,                            // 错误状态（不可恢复，等价于自动关闭）
-    P2P_STATE_REGISTERING,                      // 注册（登录）到信令服务器
-    P2P_STATE_REGISTERED,                       // 已在信令服务器注册（登录），如果对方不在线，则会挂起在该状态
+    P2P_STATE_REGISTERING,                      // 上线中（正在向信令服务器发送 ONLINE）
+    P2P_STATE_ONLINE,                           // 已在信令服务器上线，等待对端上线后开始候选同步
     P2P_STATE_PUNCHING,                         // NAT 打洞中
     P2P_STATE_LOST,                             // 信号丢失（可能恢复，也可能不会，需要由应用层来决定断开或重连；NAT 和 中继都丢失了）
     P2P_STATE_CONNECTED,                        // 已连接（NAT 肯定处于 CONNECTED 状态）
@@ -446,7 +446,7 @@ p2p_recv(p2p_handle_t hdl, void *buf, int len);
 /**
  * 通过信令服务器向对端发送 MSG 请求（A 端）。
  *
- * 仅在 COMPACT 模式、服务器支持 MSG（REGISTER_ACK flags 含 SIG_REGACK_FLAG_MSG）
+ * 仅在 COMPACT 模式、服务器支持 MSG（ONLINE_ACK flags 含 SIG_ONACK_FLAG_MSG）
  * 且当前无挂起请求时有效。发送成功后通过 on_response 回调接收应答。
  *
  * @param hdl       会话句柄

@@ -1027,11 +1027,14 @@ p2p_update(p2p_handle_t hdl) {
                 break;
 
             // --------------------
-            // COMPACT 模式的信令包（REGISTER_ACK、SYNC、SYNC_ACK 等）
+            // COMPACT 模式的信令包（ONLINE_ACK、SYNC0_ACK、SYNC、SYNC_ACK 等）
             // --------------------
 
-            case SIG_PKT_REGISTER_ACK:
-                compact_on_register_ack(s, hdr.seq, hdr.flags, payload, payload_len, &from);
+            case SIG_PKT_ONLINE_ACK:
+                compact_on_online_ack(s, hdr.seq, hdr.flags, payload, payload_len, &from);
+                break;
+            case SIG_PKT_SYNC0_ACK:
+                compact_on_sync0_ack(s, payload, payload_len, &from);
                 break;
             case SIG_PKT_ALIVE_ACK:
                 compact_on_alive_ack(s, &from);
@@ -1078,7 +1081,7 @@ p2p_update(p2p_handle_t hdl) {
         // 信令层维护（注册、等待、候选同步）+ MSG 超时重传
         // 注意：MSG 机制在所有非 INIT 状态下都需要处理超时重传
         if (s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERING ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_REGISTERED ||
+            s->sig_compact_ctx.state == SIGNAL_COMPACT_ONLINE ||
             s->sig_compact_ctx.state == SIGNAL_COMPACT_ICE ||
             s->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
             p2p_signal_compact_tick_recv(s);
@@ -1111,8 +1114,8 @@ p2p_update(p2p_handle_t hdl) {
      * 阶段 5：统一状态机（集中处理所有 P2P 连接状态转换）
      * ======================================================================== */
 
-    // 转换：REGISTERING/REGISTERED → PUNCHING（开始打洞）
-    if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
+    // 转换：REGISTERING/ONLINE → PUNCHING（开始打洞）
+    if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
         && (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
 
         print("I:", LA_F("State: → PUNCHING", LA_F345, 345));
@@ -1127,7 +1130,7 @@ p2p_update(p2p_handle_t hdl) {
     // relay 候选也需要通过 NAT 层 connect 握手，已统一处理
 
     // 转换：PUNCHING → ERROR（NAT 打洞超时且无中继服务）
-    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_REGISTERED)
+    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
         && s->nat.state == NAT_CLOSED) {
 
         print("E:", LA_F("State: → ERROR (punch timeout, no relay available)", LA_F344, 344));

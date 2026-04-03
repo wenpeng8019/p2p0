@@ -220,19 +220,17 @@ static int find_log(const char *pattern) {
     return -1;
 }
 
-// 构造 REGISTER 包
-static int build_register(uint8_t *buf, int buf_size,
-                          const char *local_peer_id,
-                          const char *remote_peer_id,
-                          uint32_t instance_id,
-                          int candidate_count,
-                          p2p_candidate_t *candidates) {
-    if (buf_size < 4 + 32 + 32 + 4 + 1) return -1;
+// 构造 ONLINE 包
+static int build_online(uint8_t *buf, int buf_size,
+                        const char *local_peer_id,
+                        const char *remote_peer_id,
+                        uint32_t instance_id) {
+    if (buf_size < 4 + 32 + 32 + 4) return -1;
     
     int n = 0;
     
-    // 包头 [type=0x80][flags=0][seq=0]
-    buf[n++] = SIG_PKT_REGISTER;
+    // 包头 [type=SIG_PKT_ONLINE][flags=0][seq=0]
+    buf[n++] = SIG_PKT_ONLINE;
     buf[n++] = 0;
     buf[n++] = 0;
     buf[n++] = 0;
@@ -253,12 +251,32 @@ static int build_register(uint8_t *buf, int buf_size,
     buf[n++] = (instance_id >> 8) & 0xFF;
     buf[n++] = instance_id & 0xFF;
     
-    // candidate_count
+    return n;
+}
+
+// 兼容别名（部分测试用例仍使用旧名）
+#define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
+    build_online(buf, buf_size, local, remote, inst_id)
+
+// 构造 SYNC0 包：[hdr(4)][session_id(8)][candidate_count(1)][candidates(N*sizeof)]
+static int build_sync0(uint8_t *buf, int buf_size, uint64_t session_id,
+                       int candidate_count, p2p_candidate_t *candidates) {
+    if (buf_size < 4 + 8 + 1) return -1;
+    
+    int n = 0;
+    buf[n++] = SIG_PKT_SYNC0;
+    buf[n++] = 0;
+    buf[n++] = 0;
+    buf[n++] = 0;
+    
+    // session_id (8 bytes, network order)
+    for (int i = 0; i < 8; i++) buf[n++] = (session_id >> (56 - i * 8)) & 0xFF;
+    
     if (candidate_count > 255) candidate_count = 255;
     buf[n++] = (uint8_t)candidate_count;
     
-    // candidates
     for (int i = 0; i < candidate_count && candidates; i++) {
+        if (n + (int)sizeof(p2p_candidate_t) > buf_size) break;
         memcpy(buf + n, &candidates[i], sizeof(p2p_candidate_t));
         n += sizeof(p2p_candidate_t);
     }
@@ -293,7 +311,7 @@ static int build_unregister(uint8_t *buf, int buf_size,
     return n;
 }
 
-// 发送并接收 REGISTER_ACK
+// 发送并接收 ONLINE_ACK
 typedef struct {
     int received;           // 是否收到响应
     uint8_t status;         // 0=offline, 1=online, 2=error
@@ -306,7 +324,7 @@ typedef struct {
     uint8_t flags;
 } register_ack_t;
 
-static int send_register_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_t *ack, int timeout_ms) {
+static int send_online_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_t *ack, int timeout_ms) {
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
@@ -321,7 +339,7 @@ static int send_register_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_
     // 设置超时
     P_sock_rcvtimeo(g_sock, timeout_ms);
     
-    // 接收（跳过非 REGISTER_ACK 的包，如 SYNC）
+    // 接收（跳过非 ONLINE_ACK 的包，如 SYNC）
     uint8_t recv_buf[256];
     struct sockaddr_in from;
     socklen_t from_len;
@@ -335,11 +353,11 @@ static int send_register_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_
             ack->received = 0;
             return 0;
         }
-        if (recv_buf[0] == SIG_PKT_REGISTER_ACK) break;
+        if (recv_buf[0] == SIG_PKT_ONLINE_ACK) break;
         // 收到其他包（如 SYNC），继续接收
     }
     
-    if (recv_buf[0] != SIG_PKT_REGISTER_ACK) {
+    if (recv_buf[0] != SIG_PKT_ONLINE_ACK) {
         ack->received = 0;
         return -2;
     }
@@ -371,6 +389,9 @@ static int send_register_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_
     
     return 1;
 }
+
+// 兼容别名（旧名称）
+#define send_register_recv_ack send_online_recv_ack
 
 // 等待并接收下一个 UDP 包
 static int recv_packet(uint8_t *buf, int buf_size, int timeout_ms) {
@@ -421,7 +442,7 @@ static void test_register_peer_offline(void) {
         TEST_FAIL(TEST_NAME, "no REGISTER_ACK received");
         return;
     }
-    if (ack.status != SIG_REGACK_PEER_OFFLINE) {
+    if (ack.status != SIG_ONACK_PEER_OFFLINE) {
         char msg[64];
         snprintf(msg, sizeof(msg), "expected status=0 (offline), got %d", ack.status);
         TEST_FAIL(TEST_NAME, msg);
@@ -462,7 +483,7 @@ static void test_register_peer_online(void) {
     int len = build_register(pkt, sizeof(pkt), PEER_ALICE, PEER_BOB, inst_alice, 0, NULL);
     send_register_recv_ack(pkt, len, &ack_alice, RECV_TIMEOUT_MS);
     
-    if (!ack_alice.received || ack_alice.status != SIG_REGACK_PEER_OFFLINE) {
+    if (!ack_alice.received || ack_alice.status != SIG_ONACK_PEER_OFFLINE) {
         TEST_FAIL(TEST_NAME, "Alice should get status=offline initially");
         return;
     }
@@ -473,7 +494,7 @@ static void test_register_peer_online(void) {
     len = build_register(pkt, sizeof(pkt), PEER_BOB, PEER_ALICE, inst_bob, 0, NULL);
     send_register_recv_ack(pkt, len, &ack_bob, RECV_TIMEOUT_MS);
     
-    if (!ack_bob.received || ack_bob.status != SIG_REGACK_PEER_ONLINE) {
+    if (!ack_bob.received || ack_bob.status != SIG_ONACK_PEER_ONLINE) {
         TEST_FAIL(TEST_NAME, "Bob should get status=online (peer matched)");
         return;
     }
@@ -619,7 +640,7 @@ static void test_register_bad_payload(void) {
     
     // 构造一个太短的 REGISTER 包（只有包头 + 部分 payload）
     uint8_t pkt[20];
-    pkt[0] = SIG_PKT_REGISTER;
+    pkt[0] = SIG_PKT_ONLINE;
     pkt[1] = 0;
     pkt[2] = 0;
     pkt[3] = 0;
@@ -705,7 +726,7 @@ static void test_register_invalid_instance_id(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 7: 带候选地址的注册
+// 测试 7: 带候选地址的注册（通过 SYNC0 提交候选）
 static void test_register_with_candidates(void) {
     const char *TEST_NAME = "register_with_candidates";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -723,19 +744,30 @@ static void test_register_with_candidates(void) {
     inet_pton(AF_INET, "1.2.3.4", &candidates[1].addr.ip[12]);
     candidates[1].addr.port = htons(54321);
     
-    uint8_t pkt[256];
+    uint8_t pkt[512];
     uint32_t inst_id = (uint32_t)P_tick_us() + 5000;
-    int len = build_register(pkt, sizeof(pkt), "cand_client", PEER_UNKNOWN, inst_id, 2, candidates);
-    
+
+    // 第一步：发送 ONLINE，获取 session_id
+    int len = build_online(pkt, sizeof(pkt), "cand_client", PEER_UNKNOWN, inst_id);
     register_ack_t ack = {0};
-    send_register_recv_ack(pkt, len, &ack, RECV_TIMEOUT_MS);
-    
-    P_usleep(100 * 1000);
+    send_online_recv_ack(pkt, len, &ack, RECV_TIMEOUT_MS);
     
     if (!ack.received) {
-        TEST_FAIL(TEST_NAME, "REGISTER_ACK not received");
+        TEST_FAIL(TEST_NAME, "ONLINE_ACK not received");
         return;
     }
+    
+    // 第二步：发送 SYNC0（携带候选）
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(g_server_port);
+    inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
+
+    len = build_sync0(pkt, sizeof(pkt), ack.session_id, 2, candidates);
+    sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
+    
+    P_usleep(200 * 1000);
     
     // 检查 server 日志是否记录了候选数量
     if (find_log("cands=2") < 0) {
@@ -744,7 +776,7 @@ static void test_register_with_candidates(void) {
     }
     
     TEST_PASS(TEST_NAME);
-    printf("    Registered with 2 candidates\n");
+    printf("    Registered with 2 candidates via SYNC0\n");
 }
 
 // 测试 8: UNREGISTER 主动断开
@@ -908,7 +940,7 @@ static void test_register_addr_change(void) {
     
     P_sock_close(sock2);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_REGISTER_ACK) {
+    if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
         TEST_FAIL(TEST_NAME, "REGISTER_ACK not received (second)");
         return;
     }
@@ -988,17 +1020,28 @@ static void test_register_candidates_overflow(void) {
     uint32_t inst_id = (uint32_t)P_tick_us() + 12000;
     
     uint8_t pkt[512];
-    int len = build_register(pkt, sizeof(pkt), "overflow_client", PEER_UNKNOWN, inst_id, 20, candidates);
-    
+
+    // 第一步：发送 ONLINE，获取 session_id
+    int len = build_online(pkt, sizeof(pkt), "overflow_client", PEER_UNKNOWN, inst_id);
     register_ack_t ack = {0};
-    send_register_recv_ack(pkt, len, &ack, RECV_TIMEOUT_MS);
+    send_online_recv_ack(pkt, len, &ack, RECV_TIMEOUT_MS);
     
     if (!ack.received) {
-        TEST_FAIL(TEST_NAME, "REGISTER_ACK not received");
+        TEST_FAIL(TEST_NAME, "ONLINE_ACK not received");
         return;
     }
     
-    P_usleep(100 * 1000);
+    // 第二步：发送 SYNC0 携带 20 个候选（超过 MAX_CANDIDATES）
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(g_server_port);
+    inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
+
+    len = build_sync0(pkt, sizeof(pkt), ack.session_id, 20, candidates);
+    sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
+    
+    P_usleep(200 * 1000);
     
     // server 应该截断到 MAX_CANDIDATES
     // 检查日志是否显示了截断后的数量
@@ -1007,9 +1050,9 @@ static void test_register_candidates_overflow(void) {
         TEST_PASS(TEST_NAME);
         printf("    Server handled %d candidates correctly\n", 20);
     } else {
-        // 如果没有候选数量日志，只要收到 ACK 就算通过
+        // 如果没有候选数量日志，只要收到 ONLINE_ACK 就算通过
         TEST_PASS(TEST_NAME);
-        printf("    Registered with %d candidates (truncation depends on server config)\n", 20);
+        printf("    Registered with %d candidates via SYNC0 (truncation depends on server config)\n", 20);
     }
 }
 
@@ -1061,7 +1104,7 @@ static void test_register_reconnect_after_disconnect(void) {
     n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                   (struct sockaddr*)&from, &from_len);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_REGISTER_ACK) {
+    if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "Alice REGISTER_ACK not received");
@@ -1080,7 +1123,7 @@ static void test_register_reconnect_after_disconnect(void) {
     n = recvfrom(sock_bob, (char*)recv_buf, sizeof(recv_buf), 0,
                   (struct sockaddr*)&from, &from_len);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_REGISTER_ACK) {
+    if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "Bob REGISTER_ACK not received");
@@ -1124,14 +1167,14 @@ static void test_register_reconnect_after_disconnect(void) {
         from_len = sizeof(from);
         n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                       (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_REGISTER_ACK) break;
+        if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) break;
         retry++;
     }
     
     P_sock_close(sock_alice);
     P_sock_close(sock_bob);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_REGISTER_ACK) {
+    if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
         TEST_FAIL(TEST_NAME, "Alice reconnect REGISTER_ACK not received");
         return;
     }
