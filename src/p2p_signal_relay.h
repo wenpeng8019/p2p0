@@ -137,25 +137,25 @@ struct p2p_session;
  * RELAY 模式参数配置
  * ============================================================================ */
 
-#define P2P_RELAY_HEARTBEAT_INTERVAL_MS     20000   /* 心跳间隔（毫秒）*/
-#define P2P_RELAY_ACK_TIMEOUT_MS            5000    /* ACK 响应超时（毫秒）*/
-#define P2P_RELAY_TRICKLE_BATCH_MS          1000    /* Trickle 攒批窗口（毫秒）*/
-#define P2P_RELAY_MAX_CANDS_PER_PACKET      10      /* 每包最大候选数 */
+#define P2P_RELAY_HEARTBEAT_INTERVAL_MS     20000       /* 心跳间隔（毫秒）*/
+#define P2P_RELAY_ACK_TIMEOUT_MS            5000        /* ACK 响应超时（毫秒）*/
+#define P2P_RELAY_TRICKLE_BATCH_MS          1000        /* Trickle 攒批窗口（毫秒）*/
+#define P2P_RELAY_MAX_CANDS_PER_PACKET      10          /* 每包最大候选数 */
 
 /* ============================================================================
  * RELAY 信令状态
  * ============================================================================ */
 
 typedef enum {
-    SIGNAL_RELAY_INIT = 0,          /* 未启动 */
-    SIGNAL_RELAY_ERROR,             /* 错误状态 */
-    SIGNAL_RELAY_CONNECTING,        /* TCP 连接建立中 */
-    SIGNAL_RELAY_WAIT_ONLINE_ACK,   /* 等待 ONLINE_ACK */
-    SIGNAL_RELAY_ONLINE,            /* 已上线 */
-    SIGNAL_RELAY_WAIT_SYNC0_ACK,    /* 等待 SYNC0_ACK */
-    SIGNAL_RELAY_WAIT_PEER,         /* 已分配会话，等待对端上线 */
-    SIGNAL_RELAY_SYNCING,           /* 候选同步中 */
-    SIGNAL_RELAY_READY              /* 交换完成，对端候选接收完成 */
+    SIGNAL_RELAY_INIT = 0,                              /* 未启动 */
+    SIGNAL_RELAY_ERROR,                                 /* 错误状态 */
+    SIGNAL_RELAY_CONNECTING,                            /* TCP 连接建立中 */
+    SIGNAL_RELAY_WAIT_ONLINE_ACK,                       /* 等待 ONLINE_ACK */
+    SIGNAL_RELAY_ONLINE,                                /* 已上线 */
+    SIGNAL_RELAY_WAIT_SYNC0_ACK,                        /* 等待 SYNC0_ACK */
+    SIGNAL_RELAY_WAIT_PEER,                             /* 已分配会话，等待对端上线 */
+    SIGNAL_RELAY_SYNCING,                               /* 候选同步中 */
+    SIGNAL_RELAY_READY                                  /* 交换完成，对端候选接收完成 */
 } relay_state_t;
 
 /* ============================================================================
@@ -163,8 +163,8 @@ typedef enum {
  * ============================================================================ */
 
 typedef enum {
-    RECV_STATE_HEADER = 0,          /* 读取包头（sizeof(p2p_relay_hdr_t) 字节）*/
-    RECV_STATE_PAYLOAD              /* 读取负载（变长）*/
+    RECV_STATE_HEADER = 0,                              /* 读取包头（sizeof(p2p_relay_hdr_t) 字节）*/
+    RECV_STATE_PAYLOAD                                  /* 读取负载（变长）*/
 } relay_recv_state_t;
 
 /* ============================================================================
@@ -173,9 +173,9 @@ typedef enum {
 
 /* 发送 chunk（固定大小的内存块）*/
 typedef struct p2p_send_chunk {
-    uint8_t data[P2P_MTU];              /* 数据缓冲区 (1200 字节) */
-    int len;                            /* 有效数据长度 */
-    struct p2p_send_chunk *next;        /* 链表指针（用于队列和回收池）*/
+    uint8_t data[P2P_MTU];                              /* 数据缓冲区 (1200 字节) */
+    int len;                                            /* 有效数据长度 */
+    struct p2p_send_chunk *next;                        /* 链表指针（用于队列和回收池）*/
 } p2p_send_chunk_t;
 
 /* ============================================================================

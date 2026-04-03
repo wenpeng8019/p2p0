@@ -158,7 +158,7 @@ typedef struct {
     bool                remote_candidates_0;                /* 是否已收到 SYNC seq=0（首批候选），该包由信令服务器维护 */
     uint16_t            remote_candidates_mask;             /* 对端候选队列 seq 窗口 mask，用于判断是否收到过某个 seq 的 SYNC 包 */
     uint16_t            remote_candidates_done;             /* 对端候选队列 seq 窗口完成 mask，表示已收到过且确认过的 seq（即对端已应用） */
-    uint8_t             remote_addr_notify_seq;             /* 最近一次已应用的地址变更通知序号（base_index，1..255） */
+    uint8_t             remote_addr_notify_seq;             /* 最近一次已应用的地址变更通知序号（1..255，0=从未收到）*/
 
     /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
     struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */
@@ -340,6 +340,11 @@ void compact_on_online_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
 /* 处理 SYNC0_ACK（首批候选确认） */
 void compact_on_sync0_ack(struct p2p_session *s,
+                              const uint8_t *payload, int len,
+                              const struct sockaddr_in *from);
+
+/* 处理服务器下发的 SYNC0（首次对端候选推送，server→client 方向） */
+void compact_on_server_sync0(struct p2p_session *s,
                               const uint8_t *payload, int len,
                               const struct sockaddr_in *from);
 

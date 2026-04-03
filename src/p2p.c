@@ -1046,6 +1046,10 @@ p2p_update(p2p_handle_t hdl) {
             case SIG_PKT_SYNC0_ACK:
                 compact_on_sync0_ack(s, payload, payload_len, &from);
                 break;
+            case SIG_PKT_SYNC0:
+                // server→client 方向：服务器下发首次对端候选推送（client→server 方向由发送路径处理，不会被路由到此）
+                compact_on_server_sync0(s, payload, payload_len, &from);
+                break;
             case SIG_PKT_ALIVE_ACK:
                 compact_on_alive_ack(s, &from);
                 break;

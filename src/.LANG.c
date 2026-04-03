@@ -64,8 +64,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F60] = "%s sent, seq=%u\n",  /* SID:60 */
     [LA_F450] = "%s sent, sid=%u, msg=%u, size=%d\n",  /* SID:450 */
     [LA_F62] = "%s sent, total=%d (ses_id=%llu)\n",  /* SID:62 */
-    [LA_F63] = "%s seq=0: accepted cand_cnt=%d\n",  /* SID:63 */
-    [LA_F64] = "%s seq=0: invalid(cand_cnt=%d flags=0x%02x)\n",  /* SID:64 */
     [LA_F65] = "%s skipped: auth_key=0\n",  /* SID:65 */
     [LA_F519] = "%s timeout\n",  /* SID:519 */
     [LA_F66] = "%s, retry remaining candidates and FIN to peer\n",  /* SID:66 */
@@ -100,6 +98,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F88] = "%s: accepted (ses_id=%llu)\n",  /* SID:88 */
     [LA_F89] = "%s: accepted (sid=%u)\n",  /* SID:89 */
     [LA_F179] = "%s: accepted as cand[%d], target=%s:%d",  /* SID:179 */
+    [LA_F63] = "%s: accepted cand_cnt=%d\n",  /* SID:63 */
     [LA_F90] = "%s: accepted for ack_seq=%u\n",  /* SID:90 */
     [LA_F92] = "%s: accepted seq=%u cand_cnt=%d flags=0x%02x\n",  /* SID:92 */
     [LA_F93] = "%s: accepted sid=%u, msg=%u\n",  /* SID:93 */
@@ -130,7 +129,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F107] = "%s: duplicate request ignored (sid=%u)\n",  /* SID:107 */
     [LA_F598] = "%s: duplicate request ignored (sid=%u, already processing)\n",  /* SID:598 */
     [LA_F108] = "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n",  /* SID:108 */
-    [LA_F109] = "%s: entered, %s arrived after ONLINE\n",  /* SID:109 */
+    [LA_F109] = "%s: entered early, %s arrived before SYNC0\n",  /* SID:109 */
+    [LA_F619] = "%s: entered, %s arrived\n",  /* SID:619 */
     [LA_F618] = "%s: entered, peer online in SYNC0_ACK\n",  /* SID:618 */
     [LA_F110] = "%s: exchange timeout, retry %d/%d",  /* SID:110 */
     [LA_F111] = "%s: exchange timeout: peer not responding",  /* SID:111 */
@@ -145,6 +145,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F437] = "%s: ignored, upsert %s:%d failed",  /* SID:437 */
     [LA_F118] = "%s: invalid ack_seq=%u\n",  /* SID:118 */
     [LA_F119] = "%s: invalid cand idx: %d (count: %d)",  /* SID:119 */
+    [LA_F64] = "%s: invalid cand_cnt=0\n",  /* SID:64 */
     [LA_F120] = "%s: invalid for non-relay req\n",  /* SID:120 */
     [LA_F508] = "%s: invalid online=%u, normalized to 0\n",  /* SID:508 */
     [LA_F419] = "%s: invalid payload len=%d (need 6)",  /* SID:419 */
@@ -189,7 +190,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F423] = "%s: remote %s cand[%d]<%s:%d> (disabled)\n",  /* SID:423 */
     [LA_F153] = "%s: remote %s cand[%d]<%s:%d> accepted\n",  /* SID:153 */
     [LA_F505] = "%s: remote_cands[] full, skipped %d candidates\n",  /* SID:505 */
-    [LA_F156] = "%s: renew session due to session_id changed by sync0 (local=%llu pkt=%llu)\n",  /* SID:156 */
+    [LA_F156] = "%s: renew session due to session_id changed (local=%llu pkt=%llu)\n",  /* SID:156 */
     [LA_F530] = "%s: req_type=%u code=%u msg=%.*s\n",  /* SID:530 */
     [LA_F565] = "%s: req_type=%u code=%u\n",  /* SID:565 */
     [LA_F157] = "%s: restarting periodic check",  /* SID:157 */
@@ -386,6 +387,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F279] = "% SYNC(trickle): seq overflow, cannot trickle more\n",  /* SID:279 */
     [LA_F611] = "SYNC0: retry, (attempt %d/%d)\n",  /* SID:611 */
     [LA_F612] = "SYNC0: timeout, max(%d) attempts reached, reset to INIT\n",  /* SID:612 */
+    [LA_F621] = "SYNC0_ACK sent (ses_id=%llu)\n",  /* SID:621 */
     [LA_F324] = "Send window full, dropping packet send_count=%d",  /* SID:324 */
     [LA_F325] = "Sending Allocate Request to %s:%d",  /* SID:325 */
     [LA_F326] = "% Sending FIN packet to peer before closing",  /* SID:326 */
@@ -473,6 +475,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F399] = "[UDP] %s_ACK send to %s:%d, seq=%u, flags=0, len=%d\n",  /* SID:399 */
     [LA_F400] = "[UDP] %s_ACK send to %s:%d, seq=0, flags=0, len=%d\n",  /* SID:400 */
     [LA_F401] = "[UDP] Resend %s to %s:%d, seq=%u, flags=0x%02x, len=%d\n",  /* SID:401 */
+    [LA_F622] = "[UDP] SYNC0_ACK send to %s:%d failed(%d)\n",  /* SID:622 */
+    [LA_F623] = "[UDP] SYNC0_ACK send to %s:%d, seq=0, flags=0, len=%d\n",  /* SID:623 */
     [LA_F402] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:402 */
     [LA_F403] = "% connection closed by peer",  /* SID:403 */
     [LA_F404] = "ctr_drbg_seed failed: -0x%x",  /* SID:404 */
@@ -484,6 +488,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F416] = "transport send_data failed, %d bytes dropped",  /* SID:416 */
     [LA_F417] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:417 */
     [LA_F418] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:418 */
+    [LA_F620] = "%s: seq=0 base_index=0 should use SIG_PKT_SYNC0, ignored\n",  /* SID:620 disabled */
     [LA_W21] = "Waiting for incoming offer from any peer",  /* SID:21 disabled */
     [LA_F312] = "Register to COMPACT signaling server at %s:%d",  /* SID:312 disabled */
     [LA_F59] = "%s sent, inst_id=%u\n",  /* SID:59 disabled */

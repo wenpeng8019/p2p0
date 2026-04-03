@@ -10,7 +10,7 @@ int LA_server;
 static const char* s_lang_en[LA_NUM] = {
     [LA_W1] = "disabled",  /* SID:1 */
     [LA_W2] = "enabled",  /* SID:2 */
-    [LA_S336] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:336 */
+    [LA_S343] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:343 */
     [LA_S5] = "Enable data relay support (COMPACT mode fallback)",  /* SID:5 */
     [LA_S6] = "Enable MSG RPC support",  /* SID:6 */
     [LA_S7] = "NAT type detection port (0=disabled)",  /* SID:7 */
@@ -40,6 +40,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F25] = "%s: accepted, ses_id=%llu, sid=%u, code=%u, len=%d\n",  /* SID:25 */
     [LA_F26] = "%s: accepted, ses_id=%llu, sid=%u, msg=%u, len=%d\n",  /* SID:26 */
     [LA_F27] = "%s: accepted, ses_id=%llu, sid=%u\n",  /* SID:27 */
+    [LA_F29] = "%s: addr-notify confirmed '%s' (ses_id=%llu)\n",  /* SID:29 */
     [LA_F44] = "%s: auth_key=%llu assigned for '%.*s', waiting SYNC0\n",  /* SID:44 */
     [LA_F33] = "%s: auth_key=%llu, cands=%d from %s\n",  /* SID:33 */
     [LA_F254] = "%s: bad FIN marker=0x%02x\n",  /* SID:254 */
@@ -49,7 +50,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F28] = "%s: bad payload(len=%zu)\n",  /* SID:28 */
     [LA_F258] = "%s: build_session failed for '%s'\n",  /* SID:258 */
     [LA_F259] = "%s: close ses_id=%llu\n",  /* SID:259 */
-    [LA_F29] = "%s: confirmed '%s', retries=%d (ses_id=%llu)\n",  /* SID:29 */
+    [LA_F340] = "%s: confirmed '%s', retries=%d (ses_id=%llu)\n",  /* SID:340 */
     [LA_F30] = "%s: data too large (len=%d)\n",  /* SID:30 */
     [LA_F260] = "%s: forwarded to peer, cands=%d\n",  /* SID:260 */
     [LA_F31] = "%s: invalid auth_key=0 from %s\n",  /* SID:31 */
@@ -111,6 +112,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F273] = "SYNC0_ACK queue busy for '%s', drop\n",  /* SID:273 */
     [LA_F274] = "SYNC_ACK queue busy for '%s', drop\n",  /* SID:274 */
     [LA_F67] = "Send %s: base_index=%u, cands=%d, ses_id=%llu, peer='%s'\n",  /* SID:67 */
+    [LA_F338] = "Send %s: cands=%d, ses_id=%llu, peer='%s'\n",  /* SID:338 */
     [LA_F68] = "Send %s: mapped=%s:%d\n",  /* SID:68 */
     [LA_F75] = "Send %s: max_cands=%d, relay=%s, msg=%s, public=%s:%d, probe=%d, ses_id=%llu, inst_id=%u\n",  /* SID:75 */
     [LA_F69] = "Send %s: peer='%s', reason=%s, ses_id=%llu\n",  /* SID:69 */
@@ -135,7 +137,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F99] = "% [TCP] Max peers reached, rejecting connection\n",  /* SID:99 */
     [LA_F101] = "[TCP] New connection from %s:%d\n",  /* SID:101 */
     [LA_F217] = "% [TCP] OOM: cannot allocate recv buffer for new client\n",  /* SID:217 */
-    [LA_F179] = "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:179 */
+    [LA_F179] = "[UDP] %s recv from %s, len=%zu\n",  /* SID:179 */
+    [LA_F341] = "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:341 */
     [LA_F117] = "[UDP] %s send to %s failed(%d)\n",  /* SID:117 */
     [LA_F180] = "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n",  /* SID:180 */
     [LA_F181] = "[UDP] %s send to %s, seq=0, flags=0, len=%d\n",  /* SID:181 */
@@ -155,6 +158,10 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F281] = "type=%u rejected: client not logged in\n",  /* SID:281 */
     [LA_F282] = "unknown ses_id=%llu (type=%u)\n",  /* SID:282 */
     [LA_F283] = "unsupported type=%u (ses_id=%llu)\n",  /* SID:283 */
+    [LA_S342] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:342 disabled */
+    [LA_S339] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:339 disabled */
+    [LA_S337] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:337 disabled */
+    [LA_S336] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:336 disabled */
     [LA_S335] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:335 disabled */
     [LA_S334] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:334 disabled */
     [LA_S333] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:333 disabled */

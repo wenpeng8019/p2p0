@@ -104,8 +104,8 @@ enum {
     LA_F60,  /* "%s sent, seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F61,  /* disabled "%s sent %d candidates, next_idx=%d\n" */
     LA_F62,  /* "%s sent, total=%d (ses_id=%llu)\n" (%s,%d,%l)  [p2p_signal_compact.c] */
-    LA_F63,  /* "%s seq=0: accepted cand_cnt=%d\n" (%s,%d)  [p2p_signal_compact.c] */
-    LA_F64,  /* "%s seq=0: invalid(cand_cnt=%d flags=0x%02x)\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F63,  /* "%s: accepted cand_cnt=%d\n" (%s,%d)  [p2p_signal_compact.c] */
+    LA_F64,  /* "%s: invalid cand_cnt=0\n" (%s)  [p2p_signal_compact.c] */
     LA_F65,  /* "%s skipped: auth_key=0\n" (%s)  [p2p_signal_compact.c] */
     LA_F66,  /* "%s, retry remaining candidates and FIN to peer\n" (%s)  [p2p_signal_compact.c] */
     LA_F67,  /* "%s, sent on %s\n" (%s,%s)  [p2p_signal_compact.c] */
@@ -150,7 +150,7 @@ enum {
     LA_F106,  /* "%s: duplicate remote cand<%s:%d> from signaling, skipped\n" (%s,%s,%d)  [p2p_signal_compact.c] */
     LA_F107,  /* "%s: duplicate request ignored (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
     LA_F108,  /* "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n" (%s,%u,%u,%d)  [p2p_signal_compact.c] */
-    LA_F109,  /* "%s: entered, %s arrived after ONLINE\n" (%s,%s)  [p2p_signal_compact.c] */
+    LA_F109,  /* "%s: entered early, %s arrived before SYNC0\n" (%s,%s)  [p2p_signal_compact.c] */
     LA_F110,  /* "%s: exchange timeout, retry %d/%d" (%s,%d,%d)  [p2p_probe.c] */
     LA_F111,  /* "%s: exchange timeout: peer not responding" (%s)  [p2p_probe.c] */
     LA_F112,  /* "%s: ignored for duplicated seq=%u, already acked\n" (%s,%u)  [p2p_signal_compact.c] */
@@ -197,7 +197,7 @@ enum {
     LA_F153,  /* "%s: remote %s cand[%d]<%s:%d> accepted\n" (%s,%s,%d,%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c, p2p_nat.c] */
     LA_F154,  /* "%s: remote %s cand<%s:%d> (disabled)\n" (%s,%s,%s,%d)  [p2p_nat.c] */
     _LA_155,
-    LA_F156,  /* "%s: renew session due to session_id changed by sync0 (local=%llu pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
+    LA_F156,  /* "%s: renew session due to session_id changed (local=%llu pkt=%llu)\n" (%s,%l,%l)  [p2p_signal_compact.c] */
     LA_F157,  /* "%s: restarting periodic check" (%s)  [p2p_probe.c] */
     LA_F158,  /* "%s: retry(%d/%d) probe\n" (%s,%d,%d)  [p2p_signal_compact.c] */
     LA_F159,  /* "%s: retry(%d/%d) req (sid=%u)\n" (%s,%d,%d,%u)  [p2p_signal_compact.c] */
@@ -660,6 +660,11 @@ enum {
     LA_F616,  /* "Login to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
     LA_F617,  /* "% Waiting for RELAY server ONLINE_ACK"  [p2p.c] */
     LA_F618,  /* "%s: entered, peer online in SYNC0_ACK\n" (%s)  [p2p_signal_compact.c] */
+    LA_F619,  /* "%s: entered, %s arrived\n" (%s,%s)  [p2p_signal_compact.c] */
+    LA_F620,  /* disabled "%s: seq=0 base_index=0 should use SIG_PKT_SYNC0, ignored\n" */
+    LA_F621,  /* "SYNC0_ACK sent (ses_id=%llu)\n" (%l)  [p2p_signal_compact.c] */
+    LA_F622,  /* "[UDP] SYNC0_ACK send to %s:%d failed(%d)\n" (%s,%d,%d)  [p2p_signal_compact.c] */
+    LA_F623,  /* "[UDP] SYNC0_ACK send to %s:%d, seq=0, flags=0, len=%d\n" (%s,%d,%d)  [p2p_signal_compact.c] */
 
     LA_NUM
 };

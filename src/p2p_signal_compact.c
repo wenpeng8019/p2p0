@@ -1086,7 +1086,7 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
-    if (ctx->state <= SIGNAL_COMPACT_WAIT_ONLINE_ACK) {
+    if (ctx->state < SIGNAL_COMPACT_ONLINE) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)ctx->state);
         return;
     }
@@ -1105,7 +1105,7 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
 }
 
 /*
- * 处理 SYNC0_ACK，首批候选提交确认
+ * 处理 SYNC0_ACK（即连接应答）, session_id 和首批候选同步提交确认
  *
  * 包头: [type=SIG_PKT_SYNC0_ACK | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_PSZ)][online(1)]
@@ -1165,7 +1165,7 @@ void compact_on_sync0_ack(struct p2p_session *s,
 
     // 进入 SYNCING 有两个入口，谁先发生谁先执行：
     // 1. 本处（SYNC0_ACK online=1）：对端已在线，直接进入 SYNCING，立即发送本端剩余候选
-    // 2. compact_on_sync 收到 SYNC(seq=0)：服务器下发对端候选，同时触发 SYNCING
+    // 2. compact_on_server_sync0 收到服务器下发的 SYNC0：服务器下发对端候选，同时触发 SYNCING
     // 两者均在 WAIT_PEER 状态下判断，状态机本身保证幂等（已 SYNCING 则跳过）
     if (online && ctx->state == SIGNAL_COMPACT_WAIT_PEER) {
 
@@ -1183,12 +1183,162 @@ void compact_on_sync0_ack(struct p2p_session *s,
 
 
 /*
+ * 处理服务器下发的 SYNC0（首次对端候选推送）
+ *
+ * 包头: [type=SIG_PKT_SYNC0 | flags=0 | seq=0]  （server→client 方向）
+ * 负载: [session_id(P2P_SESS_ID_PSZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
+ *   - session_id: 服务器分配的对端配对会话 ID（来自对端 SYNC0 触发的配对）
+ *   - 0x00: 保留字节（固定为 0，供 unpack_remote_candidates 识别为初始推送）
+ *   - candidate_count: 对端候选数量（首个为服务器观察到的公网地址 srflx，必须 >= 1）
+ *   客户端收到后以 SIG_PKT_SYNC_ACK(seq=0) 确认
+ */
+void compact_on_server_sync0(struct p2p_session *s,
+                             const uint8_t *payload, int len,
+                             const struct sockaddr_in *from) {
+    const char* PROTO = "SYNC0";
+
+    printf(LA_F("[UDP] %s recv from %s:%d, len=%d\n", LA_F390, 390),
+           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
+
+    if (len < (int)SIG_PKT_SYNC0_S2C_PSZ(0)) {
+        print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
+        return;
+    }
+
+    int cand_cnt = payload[P2P_SESS_ID_PSZ + 1];
+    if (len < (int)SIG_PKT_SYNC0_S2C_PSZ(cand_cnt)) {
+        print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F561, 561), PROTO, len, cand_cnt);
+        return;
+    }
+
+    if (!cand_cnt) {
+        print("E:", LA_F("%s: invalid cand_cnt=0\n", LA_F64, 64), PROTO);
+        return;
+    }
+
+    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+
+    if (ctx->state < SIGNAL_COMPACT_WAIT_ONLINE_ACK) {
+        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)ctx->state);
+        return;
+    }
+
+    uint64_t session_id = nget_ll(payload);
+    if (session_id == 0) {
+        print("E:", LA_F("%s: invalid session_id=0\n", LA_F168, 168), PROTO);
+        return;
+    }
+
+    // 并行网络中，SYNC0 可能先于 SYNC0_ACK 到达，此时 session_id 可能还未设置
+    if (!ctx->session_id) ctx->session_id = session_id;
+
+    // 如果 session_id 不一致，说明对端可能重新发起连接（崩溃重启）
+    // ! 根据协议，对方将自己的 session 重置，并不会影响自己和信令服务之间的连接和数据状态
+    else if (ctx->session_id != session_id) {
+
+        // 此时本端只能被迫强制重连
+        print("W:", LA_F("%s: renew session due to session_id changed (local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F156, 156),
+              PROTO, ctx->session_id, session_id);
+
+        // 如果 p2p 之前已经连接成功过，即业务层可能已经完成部分通讯
+        // ! 对于业务层来说，session 被强制重置 = 连接断开，需要重新开始
+        if (s->state >= P2P_STATE_LOST) {
+            if (s->cfg.on_state) s->cfg.on_state(s, s->state, P2P_STATE_CLOSED, s->cfg.userdata);
+        }
+
+        reset_peer(ctx);
+        p2p_session_reset(s, false);
+
+        ctx->session_id = session_id;
+
+        if (ctx->state == SIGNAL_COMPACT_WAIT_ONLINE_ACK) s->state = P2P_STATE_REGISTERING;
+        else { ctx->state = SIGNAL_COMPACT_WAIT_SYNC0_ACK;
+            s->state = P2P_STATE_ONLINE;
+        }
+    }
+
+    // 进入 SYNCING 有两个入口，谁先发生谁先执行：
+    // 1. compact_on_sync0_ack（SYNC0_ACK online=1）：对端已在线，直接进入 SYNCING
+    // 2. 本处（收到服务器下发的 SYNC0）：服务器下发对端候选，同时触发 SYNCING
+    // 两者均在 WAIT_PEER 状态下判断，状态机本身保证幂等（已 SYNCING 则跳过）
+    if (ctx->state == SIGNAL_COMPACT_WAIT_SYNC0_ACK || ctx->state == SIGNAL_COMPACT_WAIT_PEER) {
+
+        ctx->state = SIGNAL_COMPACT_SYNCING;
+        print("I:", LA_F("%s: entered, %s arrived\n", LA_F619, 619), TASK_SYNCING, PROTO);
+
+        if (compact_wait_stun_candidates(s)) {
+            print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F570, 570), TASK_SYNCING);
+        } else {
+            send_rest_candidates_and_fin(s);
+            ctx->last_send_time = P_tick_ms();
+        }
+    }
+
+    bool new_seq = false;
+
+    // 排重
+    if (!ctx->remote_candidates_0) {
+
+        if (p2p_remote_cands_reserve(s, cand_cnt) != E_NONE) {
+            print("E:", LA_F("Failed to reserve remote candidates (cnt=%d)\n", LA_F245, 245), cand_cnt);
+            return;
+        }
+
+        unpack_remote_candidates(s, payload, cand_cnt);
+
+        ctx->remote_candidates_0 = new_seq = true;
+
+        print("V:", LA_F("%s: accepted cand_cnt=%d\n", LA_F63, 63), PROTO, cand_cnt);
+    }
+
+    // 收到该消息说明对方肯定已上线
+    if (!ctx->peer_online) { ctx->peer_online = true;
+
+        if (s->nat.state < NAT_PUNCHING) {
+            print("I:", LA_F("%s: peer online, starting NAT punch\n", LA_F424, 424), PROTO);
+            nat_punch(s, -1/* all candidates */);
+        }
+    }
+
+    if (new_seq) {
+
+        // 如果对方所有的候选队列都已经接收完成
+        if (ctx->remote_candidates_0 && ctx->remote_candidates_mask &&
+            (ctx->remote_candidates_done & ctx->remote_candidates_mask) == ctx->remote_candidates_mask) {
+
+            s->remote_cand_done = true;
+
+            print("I:", LA_F("%s: sync complete (ses_id=%" PRIu64 ", mask=0x%04x)\n", LA_F178, 178),
+                  TASK_SYNC_REMOTE, ctx->session_id, (unsigned)ctx->remote_candidates_mask);
+        }
+    }
+
+    // 发送 SYNC0_ACK（client→server 方向）确认收到服务器 SYNC0
+    {
+        uint8_t ack_payload[SIG_PKT_SYNC0_ACK_C2S_PSZ];
+        nwrite_ll(ack_payload, ctx->session_id);
+
+        print("V:", LA_F("SYNC0_ACK sent (ses_id=%" PRIu64 ")\n", LA_F621, 621), ctx->session_id);
+
+        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC0_ACK, 0, 0, ack_payload, sizeof(ack_payload));
+        if (ret < 0)
+            print("E:", LA_F("[UDP] SYNC0_ACK send to %s:%d failed(%d)\n", LA_F622, 622),
+                  inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));
+        else
+            printf(LA_F("[UDP] SYNC0_ACK send to %s:%d, seq=0, flags=0, len=%d\n", LA_F623, 623),
+                   inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port),
+                   (int)sizeof(ack_payload));
+    }
+}
+
+
+/*
  * 包头: [type=SIG_PKT_SYNC | flags=见下 | seq=序列号]
  * 负载: [session_id(P2P_SESS_ID_PSZ) | base_index(1) | candidate_count(1) | candidates(N*7)]
  *   - session_id: 会话 ID（网络字节序，64位）
  *   - base_index: 本批候选的起始索引（0-based）
  *   - candidate_count: 本批候选数量，0 表示结束标识
- *   - seq=0: 服务器发送，包含缓存的对端候选，首次分配 session_id
+ *   - seq=0: 服务器发送，base_index!=0，对端公网地址变更通知（首次推送已改用 SIG_PKT_SYNC0）
  *   - seq>0: 客户端发送，继续同步剩余候选
  *   - flags: SIG_SYNC_FLAG_FIN (0x01) 表示候选列表发送完毕
  */
@@ -1216,12 +1366,6 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    // 服务器发送的第一个 SYNC，至少有一个对方公网的候选地址，且肯定不带 FIN 标识
-    if (seq == 0 && (!cand_cnt || (flags & SIG_SYNC_FLAG_FIN))) {
-        print("E:", LA_F("%s seq=0: invalid(cand_cnt=%d flags=0x%02x)\n", LA_F64, 64), PROTO, cand_cnt, flags);
-        return;
-    }
-
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
     if (ctx->state < SIGNAL_COMPACT_WAIT_ONLINE_ACK) {
@@ -1237,54 +1381,23 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
     }
 
     uint8_t base_index = payload[P2P_SESS_ID_PSZ];
+    // seq>0 时 base_index 为候选起始索引；seq=0 时 base_index 为循环通知序号（1..255）
 
-    // 并行网络中，SYNC(seq=0) 可能先于 SYNC0_ACK 到达，此时 session_id 可能还未设置
+    // 并行网络中，乱序包（SYNC seq>0 或地址变更通知 seq=0）可能先于 SYNC0_ACK/SYNC0 到达，此时 session_id 可能还未设置
     if (!ctx->session_id) ctx->session_id = session_id;
 
-    // 如果 session_id 不一致
+    // 如果 session_id 不一致（session 重置逻辑在 compact_on_server_sync0，此处不处理）
     else if (ctx->session_id != session_id) {
-
-        // 对于 sync0 包，意味着对方可能重新发起连接了（例如对端崩溃重启）
-        // ! 根据协议，对方将自己的 session 重置，并不会影响自己和信令服务之间的连接和数据状态
-        if (seq == 0 && base_index == 0) {
-
-            // 此时本端只能被迫强制重连
-            print("W:", LA_F("%s: renew session due to session_id changed by sync0 (local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F156, 156),
-                  PROTO, ctx->session_id, session_id);
-
-            // 如果 p2p 之前已经连接成功过，即业务层可能已经完成部分通讯
-            // + 此时需要通知业务层，确保业务层的数据一致性
-            // ! 对于业务层来说，session 被强制重置 = 连接断开，需要重新开始
-            if (s->state >= P2P_STATE_LOST) {
-                // 通知业务层连接断开（session 被对方重置）
-                if (s->cfg.on_state) s->cfg.on_state(s, s->state, P2P_STATE_CLOSED, s->cfg.userdata);
-            }
-
-            // 清除双方协商信息
-            reset_peer(ctx);
-
-            // 重置 p2p 会话
-            p2p_session_reset(s, false);
-
-            ctx->session_id = session_id;
-
-            if (ctx->state == SIGNAL_COMPACT_WAIT_ONLINE_ACK) s->state = P2P_STATE_REGISTERING;
-            else { ctx->state = SIGNAL_COMPACT_WAIT_SYNC0_ACK;
-                s->state = P2P_STATE_ONLINE;
-            }
-        }
-        else {
-            print("E:", LA_F("%s: session mismatch(local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F167, 167), PROTO, ctx->session_id, session_id);
-            return;
-        }
+        print("E:", LA_F("%s: session mismatch(local=%" PRIu64 " pkt=%" PRIu64 ")\n", LA_F167, 167), PROTO, ctx->session_id, session_id);
+        return;
     }
 
-    // 如果之前已经收到过 ONLINE_ACK，则进入 SYNCING 阶段，向对方发送后续候选队列和 FIN 包
-    // + SYNCING 阶段依赖 SIG_PKT_ONLINE_ACK 提供后续候选队列基准（candidates_cached）
+    // SYNCING 通常由 compact_on_sync0_ack 或 compact_on_server_sync0 触发；
+    // 此处为兜底，处理乱序先到（SYNC seq>0 或 seq=0 地址变更通知先于 SYNC0_ACK/SYNC0 到达）
     if (ctx->state == SIGNAL_COMPACT_WAIT_SYNC0_ACK || ctx->state == SIGNAL_COMPACT_WAIT_PEER) {
 
         ctx->state = SIGNAL_COMPACT_SYNCING;
-        print("I:", LA_F("%s: entered, %s arrived after ONLINE\n", LA_F109, 109), TASK_SYNCING, PROTO);
+        print("I:", LA_F("%s: entered early, %s arrived before SYNC0\n", LA_F109, 109), TASK_SYNCING, PROTO);
 
         if (compact_wait_stun_candidates(s)) {
             print("I:", LA_F("%s: waiting for initial STUN candidates before sending local queue\n", LA_F570, 570), TASK_SYNCING);
@@ -1323,29 +1436,8 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
             ctx->remote_candidates_done |= 1u << (seq - 1);
         }
     }
-    // seq=0 则是服务器维护的 SYNC 包（可能是首个 sync0，也可能是对端的公网地址变更通知）
-    // base_index = 0 意味着首个 sync0
-    else if (base_index == 0) {
-
-        print("V:", LA_F("%s seq=0: accepted cand_cnt=%d\n", LA_F63, 63), PROTO, cand_cnt);
-
-        // 排重
-        if (!ctx->remote_candidates_0) {
-
-            // 维护分配远端候选列表的空间（作为首个 SYNC 包，候选队列基准 base_index 肯定是 0）
-            // + 注意，seq=0 的 SYNC 包的 base_index 字段值可以不为 0（协议上 base_index !=0 说明是对方公网地址发生变更的通知）
-            if (p2p_remote_cands_reserve(s, cand_cnt) != E_NONE) {
-                print("E:", LA_F("Failed to reserve remote candidates (cnt=%d)\n", LA_F245, 245), cand_cnt);
-                return;
-            }
-
-            assert(cand_cnt);
-            unpack_remote_candidates(s, payload, cand_cnt);
-
-            ctx->remote_candidates_0 = new_seq = true;
-        }
-    }
-    // base_index!=0 说明是对方公网地址变更通知。此时 pkt 必须只携带一个候选地址（即变更后的公网地址），且不带 FIN 标识
+    // seq=0: 对端公网地址变更通知，必须只携带一个候选地址（变更后的公网地址），且不带 FIN 标识
+    // base_index（循环通知序号 1..255，服务器侧保证跳过 0）用于接收端排重，确保只处理最新通知
     else if (cand_cnt != 1 || (flags & SIG_SYNC_FLAG_FIN)) {
 
         print("E:", LA_F("%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n", LA_F48, 48),
@@ -1446,8 +1538,7 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
         print("V:", LA_F("%s_ACK sent, seq=%u (ses_id=%" PRIu64 ")\n", LA_F196, 196), PROTO, seq, ctx->session_id);
 
-        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC_ACK, 0, seq, ack_payload,
-                                        sizeof(ack_payload));
+        ret_t ret = p2p_udp_send_packet(s, &ctx->server_addr, SIG_PKT_SYNC_ACK, 0, seq, ack_payload, sizeof(ack_payload));
         if (ret < 0)
             print("E:", LA_F("[UDP] %s_ACK send to %s:%d failed(%d)\n", LA_F398, 398), 
                   PROTO, inet_ntoa(ctx->server_addr.sin_addr), ntohs(ctx->server_addr.sin_port), E_EXT_CODE(ret));

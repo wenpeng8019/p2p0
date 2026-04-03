@@ -377,7 +377,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_ALIVE           0x83        // 保活包（可选，客户端定期发送以维持注册状态）
 #define SIG_PKT_ALIVE_ACK       0x84        // 保活确认（服务器回复以确认注册状态）
 
-#define SIG_PKT_SYNC0           0x85        // 指定对端 + 首批候选提交（client→server）：[auth_key(8)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
+#define SIG_PKT_SYNC0           0x85        // 首次候选同步（双向）：client→server 提交首批候选；server→client 下发对端候选（详见 COMPACT 模式协议详细说明）
 #define SIG_PKT_SYNC0_ACK       0x86        // 首批候选确认（server→client）：[session_id(P2P_SESS_ID_PSZ)][online(1)]，session_id = 对端配对会话 ID
 #define SIG_PKT_SYNC            0x87        // 候选列表同步包（序列化传输）
 #define SIG_PKT_SYNC_ACK        0x88        // 候选列表确认（确认指定序列号）
@@ -423,7 +423,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *       * instance_id 不同: 视为同一 local_peer_id 的新实例（客户端重启/重连），服务端重置旧状态
  *   总大小: 4(包头) + 36(payload) = 40 字节
  */
- #define SIG_PKT_ONLINE_PSZ          (P2P_PEER_ID_MAX + sizeof(uint32_t))                                // peer_id(32) + instance_id(4)
+ #define SIG_PKT_ONLINE_PSZ          (P2P_PEER_ID_MAX + sizeof(uint32_t))                               // peer_id(32) + instance_id(4)
 /* ONLINE_ACK:
  *   payload: [instance_id(4)][auth_key(8)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
  *   包头: type=0x81, flags=见下, seq=0
@@ -448,64 +448,85 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   客户端主动断开时发送，请求服务器立即释放配对槽位
  *   服务器收到后会向对端发送 FIN 通知
  */
- #define SIG_PKT_OFFLINE_PSZ         SIG_AUTH_KEY_PSZ                                                    // auth_key(8)
+ #define SIG_PKT_OFFLINE_PSZ         SIG_AUTH_KEY_PSZ                                                   // auth_key(8)
 /* ALIVE:
  *   payload: [auth_key(8)]
  *   包头: type=0x83, flags=0, seq=0
  *   - auth_key: 客户端-服务器认证令牌（来自 ONLINE_ACK），用于服务器识别并更新槽位活跃时间
  *   用于客户端在 ONLINE/READY 状态定期发送，保持服务器槽位活跃
  */
- #define SIG_PKT_ALIVE_PSZ           (P2P_SESS_ID_PSZ)                                                  // auth_key(8)
+ #define SIG_PKT_ALIVE_PSZ           (SIG_AUTH_KEY_PSZ)                                                 // auth_key(8)
 /* ALIVE_ACK:
  *   payload: 空（仅包头）
  *   包头: type=0x84, flags=0, seq=0
  *   服务器回复确认，表示槽位仍然有效
  */
  #define SIG_PKT_ALIVE_ACK_PSZ       0u                                                                 // 无 payload
-/* SYNC0:
- *   payload: [auth_key(8)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
- *   包头: type=0x85, flags=0, seq=0
- *   - auth_key: 来自 ONLINE_ACK 的客户端-服务器认证令牌（network byte order），服务器用于识别客户端身份
+/* SYNC0（双向首次 sync，两方向 payload 格式不同，由各端角色区分处理）:
+ *
+ * 方向 1: client → server（建立和对端连接，并提交首批同步候选）
+ *   payload: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(P2P_PEER_ID_MAX)][candidate_count(1)][candidates(N*23)]
+ *   - auth_key: 来自 ONLINE_ACK 的客户端-服务器认证令牌（network byte order）
  *   - remote_peer_id: 目标对端 ID（32字节，不足补零）
  *   - candidate_count: 首批候选数量（最多 max_candidates 个）
  *   - candidates: 首批候选地址列表（每 23 字节，p2p_candidate_t 格式）
  *   客户端在收到 ONLINE_ACK 后立即发送，同时完成：
  *     1. 提交首批候选供服务器缓存
  *     2. 指定 remote_peer_id，建立与对端的配对关系
+ *
+ * 方向 2: server → client（对端已配对后触发，下发对端候选地址）
+ *   payload: [session_id(P2P_SESS_ID_PSZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
+ *   - session_id: 对端配对会话 ID（network byte order，由服务器在配对成功时分配）
+ *   - 0x00: 保留字节（固定为 0，供 unpack_remote_candidates 识别为初始推送）
+ *   - candidate_count: 对端候选数量（首个必须是服务器观察到的对端公网地址 srflx）
+ *   - candidates: 对端候选地址列表
+ *   客户端收到后以 SIG_PKT_SYNC0_ACK（client→server 方向）确认
  */
-#define SIG_PKT_SYNC0_PSZ(n)        (sizeof(uint64_t) + P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t))  // auth_key(8) + peer_id(32) + count(1) + cands(n*23)
-/* SYNC0_ACK:
+#define SIG_PKT_SYNC0_PSZ(n)        (SIG_AUTH_KEY_PSZ + P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t)) // client→server: auth_key(SIG_AUTH_KEY_PSZ) + peer_id(32) + count(1) + cands(n*23)
+#define SIG_PKT_SYNC0_S2C_PSZ(n)    (P2P_SESS_ID_PSZ + 2u + (n)*sizeof(p2p_candidate_t))                    // server→client: session_id(P2P_SESS_ID_PSZ) + reserved(1) + count(1) + cands(n*23)
+/* SYNC0_ACK（双向，两端 payload 格式不同）:
+ *
+ * 方向 1: server → client（对 client SYNC0 的回复）
  *   payload: [session_id(P2P_SESS_ID_PSZ)][online(1)]
- *   包头: type=0x86, flags=0, seq=0
  *   - session_id: 对端配对会话 ID（network byte order, 64-bit），标识 client↔peer 会话
  *     · 语义不同于 auth_key（auth_key 标识 client↔server）
  *     · 用于后续所有 SYNC/SYNC_ACK/FIN/DATA relay/MSG 包的身份验证
  *   - online: 1=对端已上线（已有对端配对），0=对端尚未上线
- *   服务器收到 SYNC0 后回复，通知客户端候选已缓存以及对端是否已上线
+ *   服务器收到 client SYNC0 后回复，通知客户端候选已缓存以及对端是否已上线
+ *
+ * 方向 2: client → server（对 server SYNC0 的回复）
+ *   payload: [session_id(P2P_SESS_ID_PSZ)]
+ *   - session_id: 来自 server SYNC0 中的会话 ID，用于服务器确认对应配对
+ *   客户端收到 server SYNC0（首次对端候选推送）后立即回复
  */
-#define SIG_PKT_SYNC0_ACK_PSZ       (P2P_SESS_ID_PSZ + 1u)                                              // session_id(P2P_SESS_ID_PSZ) + online(1)
+#define SIG_PKT_SYNC0_ACK_PSZ       (P2P_SESS_ID_PSZ + 1u)                                              // server→client: session_id(P2P_SESS_ID_PSZ) + online(1)
+#define SIG_PKT_SYNC0_ACK_C2S_PSZ   (P2P_SESS_ID_PSZ)                                                   // client→server: session_id(P2P_SESS_ID_PSZ)
 /* SYNC:
- *   payload: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
+ *   payload: [session_id(P2P_SESS_ID_PSZ)][notify_seq_or_base(1)][candidate_count(1)][candidates(N*23)]
  *   包头: type=0x87, flags=见下, seq=序列号
  *   - session_id: 会话 ID（网络字节序，64位，来自 SYNC0_ACK）
- *   - base_index: 本批候选的起始索引（0-based）
+ *   - 字段[P2P_SESS_ID_PSZ]: 语义随 seq 分两种（内容不同，位置相同）
+ *       seq=0: 循环通知序号 notify_seq（1..255 循环），接收端据此排重
+ *       seq>0: 候选起始索引 base_index（0-based）
  *   - candidate_count: 本批候选数量，0 表示结束标识（配合 FIN 标志）
- *   - seq=0: 服务器发送，base_index=0，包含缓存的对端候选
- *   - seq=0 且 base_index!=0: 地址变更通知（candidate_count=1）
- *       * base_index 作为 8 位循环通知序号（1..255 循环）
- *       * 接收端按循环序比较新旧，旧通知可忽略但仍需 ACK
- *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选，使用 ONLINE_ACK 中的 session_id
+ *   - seq=0: 服务器发送，对端公网地址变更通知（candidate_count 必须为 1）
+ *       * 客户端收到后以 SYNC_ACK(seq=0) 确认
+ *       * 接收端按 notify_seq 循环序比较新旧，旧通知可忽略但仍需 ACK
+ *       * 服务器首次对端候选推送使用独立 opcode SIG_PKT_SYNC0（server→client 方向）
+ *   - seq>0: 客户端发送，base_index 递增，继续同步剩余候选
  *   - flags: 包头的 flags 字段可设置 SIG_SYNC_FLAG_FIN (0x01) 表示候选列表发送完毕
- *   - seq 窗口: 0..16（0 为服务器首包，1..16 为后续候选批次）
- *   - 乱序处理: 允许 seq>0 先于 seq=0 到达；接收端按序号位图去重，重复包仅 ACK 不重复入表
+ *   - seq 窗口: 0..16（1..16 为客户端候选批次，0 为地址变更通知）
+ *   - 乱序处理: 允许 seq>0 先于 SYNC0 到达；接收端按序号位图去重，重复包仅 ACK 不重复入表
  */
 #define SIG_PKT_SYNC_PSZ(n)         (P2P_SESS_ID_PSZ + 2u + (n)*sizeof(p2p_candidate_t))                // session_id(P2P_SESS_ID_PSZ) + base(1) + count(1) + cands(n*23)
 /* SYNC_ACK:
  *   payload: [session_id(P2P_SESS_ID_PSZ)]
- *   包头: type=0x88, flags=0, seq=确认的 SYNC 序列号
+ *   包头: type=0x88, flags=0, seq=确认的序列号
  *   - session_id: 会话 ID（网络字节序，64位）
- *   - seq: 确认的 SYNC 序列号（0 表示确认服务器下发的 SYNC(seq=0)）
- *   - seq 窗口: 0..16（客户端接收端仅接受 1..16）
+ *   - seq=0: 客户端→服务器，确认地址变更通知（SYNC seq=0）
+ *       注：服务器 SYNC0（server→client 首次候逳推送）由 SIG_PKT_SYNC0_ACK 确认，不使用此类型
+ *   - seq>0: 服务器→客户端，确认客户端发送的 SYNC(seq>0) 候选批次；或客户端→服务器 relay 转发
+ *   - seq 窗口: 0..16
  */
 #define SIG_PKT_SYNC_ACK_PSZ        (P2P_SESS_ID_PSZ)                                                   // session_id(P2P_SESS_ID_PSZ)
 /* FIN:
