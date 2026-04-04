@@ -1125,7 +1125,7 @@ static void handle_relay_data_recv(p2p_session_t *s, const uint8_t *payload, int
 static void handle_relay_req_recv(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "MSG_REQ";
 
-    if (len < P2P_RLY_REQ_MIN_PSZ) {
+    if (len < (int)P2P_RLY_REQ_MIN_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }
@@ -1181,7 +1181,7 @@ static void handle_relay_req_recv(p2p_session_t *s, const uint8_t *payload, int 
 static void handle_relay_resp_recv(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "MSG_RESP";
 
-    if (len < P2P_RLY_RESP_MIN_PSZ) {
+    if (len < (int)P2P_RLY_RESP_MIN_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
         return;
     }

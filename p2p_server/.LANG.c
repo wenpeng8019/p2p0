@@ -14,6 +14,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S4] = "Enable data relay support (COMPACT mode fallback)",  /* SID:4 */
     [LA_S5] = "Enable MSG RPC support",  /* SID:5 */
     [LA_S6] = "NAT type detection port (0=disabled)",  /* SID:6 */
+    [LA_S7] = "Received shutdown signal, exiting gracefully...",  /* SID:7 */
+    [LA_S8] = "Shutting down...\n",  /* SID:8 */
     [LA_S9] = "Signaling server listen port (TCP+UDP)",  /* SID:9 */
     [LA_S10] = "Use Chinese language",  /* SID:10 */
     [LA_F11] = "% Client closed connection (EOF on recv)\n",  /* SID:11 */
@@ -159,8 +161,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F151] = "type=%u rejected: client not logged in\n",  /* SID:151 */
     [LA_F152] = "unknown ses_id=%u (type=%u)\n",  /* SID:152 */
     [LA_F153] = "unsupported type=%u (ses_id=%u)\n",  /* SID:153 */
-    [LA_S8] = "Shutting down...\n",  /* SID:8 disabled */
-    [LA_S7] = "Received shutdown signal, exiting gracefully...",  /* SID:7 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

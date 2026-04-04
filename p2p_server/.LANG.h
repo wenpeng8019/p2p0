@@ -46,8 +46,8 @@ enum {
     LA_S4,  /* "Enable data relay support (COMPACT mode fallback)"  [server.c] */
     LA_S5,  /* "Enable MSG RPC support"  [server.c] */
     LA_S6,  /* "NAT type detection port (0=disabled)"  [server.c] */
-    LA_S7,  /* disabled "Received shutdown signal, exiting gracefully..." */
-    LA_S8,  /* disabled "Shutting down...\n" */
+    LA_S7,  /* "Received shutdown signal, exiting gracefully..."  [server.c] */
+    LA_S8,  /* "Shutting down...\n"  [server.c] */
     LA_S9,  /* "Signaling server listen port (TCP+UDP)"  [server.c] */
     LA_S10,  /* "Use Chinese language"  [server.c] */
 
