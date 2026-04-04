@@ -973,6 +973,12 @@ static void handle_relay_fin(p2p_session_t *s, const uint8_t *payload, int len) 
 
     print("I:", LA_F("%s: peer closed session %" PRIu32 "\n", LA_F504, 504), PROTO, session_id);
 
+    // 触发 NAT 层断开，让 p2p_update 走正常的 peer_disconnect 路径
+    // RELAY FIN 经 TCP 可靠传输，等同于 NAT FIN；即使 NAT FIN（UDP）丢失也能正确触发断开
+    if (s->nat.state > NAT_CLOSED) {
+        s->nat.state = NAT_CLOSED;
+    }
+
     // 清理会话状态，回到 ONLINE 状态
     ctx->session_id = 0;
     ctx->peer_online = false;

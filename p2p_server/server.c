@@ -556,6 +556,20 @@ static void relay_free_session(relay_session_t *s) {
     if (s->peer) {
         relay_session_t *peer = s->peer; s->peer = NULL;
         peer->peer = NULL;
+
+        // 通知对端会话结束（对应 COMPACT 的 compact_free_session 行为）
+        // 直接写入 TCP socket 而非入 send queue：入队后立刻被 relay_free_session(peer) 清掉会导致 FIN 丢失
+        relay_client_t *peer_client = (relay_client_t *)peer->base.client;
+        if (peer_client && peer_client->fd != P_INVALID_SOCKET) {
+            uint8_t fin_buf[sizeof(p2p_relay_hdr_t) + P2P_RLY_FIN_PSZ];
+            p2p_relay_hdr_t *fhdr = (p2p_relay_hdr_t *)fin_buf;
+            fhdr->type = P2P_RLY_FIN;
+            fhdr->size = htons(P2P_RLY_FIN_PSZ);
+            nwrite_l(fin_buf + sizeof(*fhdr), peer->base.session_id);
+            size_t flen = sizeof(fin_buf);
+            tcp_send(peer_client, fin_buf, &flen, "FIN");  /* best-effort，尽力发送 */
+        }
+
         relay_free_session(peer);
     }
 
@@ -1027,7 +1041,13 @@ static void handle_relay_fin(relay_session_t *s, uint8_t *payload, uint16_t len)
 
     print("I:", LA_F("%s: close ses_id=%" PRIu32 "\n", LA_F259, 259), PROTO, s->base.session_id);
 
-    if (s->peer) {
+    // 先断开 peer 引用，防止 relay_free_session(s) 递归释放 peer session
+    // peer session 保持存活，FIN 通过其发送队列可靠送达对端
+    relay_session_t *peer = s->peer;
+    s->peer = NULL;
+    if (peer) peer->peer = NULL;
+
+    if (peer) {
 
         buffer_item_t *buf_item = relay_buf_alloc(RELAY_SMALL_FRAME_SIZE);
         if (!buf_item) {
@@ -1038,7 +1058,7 @@ static void handle_relay_fin(relay_session_t *s, uint8_t *payload, uint16_t len)
 
         // 如果对端还有待转发的数据，先发送对端的数据，再发送 FIN，确保数据完整性
         if (s->peer_pending && s->peer_pending != ((buffer_item_t *)-1)) {
-            relay_session_send(s->peer, s->peer_pending);
+            relay_session_send(peer, s->peer_pending);
         }
         s->peer_pending = NULL;
 
@@ -1046,12 +1066,12 @@ static void handle_relay_fin(relay_session_t *s, uint8_t *payload, uint16_t len)
         hdr->type = P2P_RLY_FIN;
         hdr->size = htons(P2P_RLY_FIN_PSZ);
         payload = (uint8_t*)(hdr+1);
-        nwrite_l(payload, s->peer->base.session_id);
+        nwrite_l(payload, peer->base.session_id);
 
-        relay_session_send(s->peer, buf_item);
+        relay_session_send(peer, buf_item);
     }
 
-    relay_free_session(s);
+    relay_free_session(s);  // s->peer == NULL，不会递归释放 peer session
 }
 
 // 处理 DATA 消息（零拷贝转发）
@@ -2308,7 +2328,36 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 查找或创建会话
         compact_session_t *local = compact_find_session(local_client, remote_peer_id);
-        if (!local) {
+        if (local) {
+            // 已有会话（同一 instance_id 的重传或自动重连）
+            // + 若上一个伙伴已死亡（peer==-1），清除标记，并重置 SYNC0 确认状态（让服务器可重新推送 SYNC0）
+            if (local->peer == (compact_session_t*)(void*)-1) {
+                local->peer = NULL;
+                local->sync0_acked = 0;         // 重置：允许服务器重新推送 SYNC0（含新对端候选地址）
+                local->addr_notify_seq = 0;     // 重置地址变更序列号
+                print("I:", LA_F("%s: '%.*s' cleared stale peer marker, ready for re-pair\n", LA_F298, 298),
+                       PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id);
+
+                // Case B：新对端已经发过 SYNC0 但被 skip（pair 里有等待中的 session）
+                // 先更新候选再配对，让对端拿到最新地址
+                local->candidate_count = candidate_count;
+                if (candidate_count) memcpy(local->candidates, candidates, sizeof(p2p_candidate_t) * candidate_count);
+
+                session_pair_t *pair = local->base.pair;
+                if (pair) {
+                    for (int _i = 0; _i < 2; _i++) {
+                        compact_session_t *waiting = (compact_session_t*)pair->sessions[_i];
+                        if (waiting && waiting != local && waiting->peer == NULL) {
+                            local->peer = waiting; waiting->peer = local;
+                            print("I:", LA_F("%s: late-paired '%.*s' <-> '%.*s' (waiting session found)\n", LA_F298, 298),
+                                  PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id,
+                                  P2P_PEER_ID_MAX, remote_peer_id);
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
 
             session_t *local_s = NULL, *remote_s = NULL;
             int side = build_session(&local_client->base, remote_peer_id,
@@ -2321,12 +2370,20 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             local = (compact_session_t*)local_s;
 
             // 对端已经创建了会话，双向配对
+            // + peer==-1 表示对端会话的上一个伙伴已崩溃（e.g. SIGKILL），且对端从未重发 SYNC0 刷新候选
+            // + 此时不立即配对，等对端用新 instance_id 重新注册（或重发 SYNC0 清除标记）后再配对
             if (remote_s) {
                 compact_session_t *remote_cs = (compact_session_t*)remote_s;
-                local->peer = remote_cs; remote_cs->peer = local;
-                print("I:", LA_F("%s: paired '%.*s' <-> '%.*s'\n", LA_F298, 298),
-                       PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id,
-                       P2P_PEER_ID_MAX, remote_peer_id);
+                if (remote_cs->peer != (compact_session_t*)(void*)-1) {
+                    local->peer = remote_cs; remote_cs->peer = local;
+                    print("I:", LA_F("%s: paired '%.*s' <-> '%.*s'\n", LA_F298, 298),
+                           PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id,
+                           P2P_PEER_ID_MAX, remote_peer_id);
+                } else {
+                    print("I:", LA_F("%s: skip pairing '%.*s' with stale '%.*s' (peer_died, awaiting re-register)\n", LA_F298, 298),
+                           PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id,
+                           P2P_PEER_ID_MAX, remote_peer_id);
+                }
             }
         }
 
@@ -2936,6 +2993,7 @@ int main(int argc, char *argv[]) {
 #else
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+    signal(SIGPIPE, SIG_IGN);  /* 屏蔽 SIGPIPE：对端 socket 关闭时 send() 返回 EPIPE 而不是 kill 进程 */
 #endif
 
     // 创建 TCP 监听套接字（用于 Relay 信令模式）

@@ -243,14 +243,25 @@ static void sync_client(client_t *c) {
     }
 }
 
+static int query_state(client_t *c);
+
 static int wait_for_connection(int timeout_ms) {
     int elapsed = 0;
+    int alice_state = -999;
+    int bob_state = -999;
     while (elapsed < timeout_ms) {
+        alice_state = query_state(&g_alice);
+        bob_state = query_state(&g_bob);
+
+        g_alice.connected = (alice_state == P2P_STATE_CONNECTED || alice_state == P2P_STATE_RELAY);
+        g_bob.connected = (bob_state == P2P_STATE_CONNECTED || bob_state == P2P_STATE_RELAY);
+
         if (g_alice.connected && g_bob.connected)
             return 0;
         P_usleep(100 * 1000);
         elapsed += 100;
     }
+    printf("    [CONN] Timeout: alice_state=%d bob_state=%d\n", alice_state, bob_state);
     return -1;
 }
 
@@ -280,6 +291,15 @@ static void stop_client(client_t *c) {
         printf("    %s stopped (exit=%d)\n", c->name, WEXITSTATUS(status));
         c->pid = 0;
     }
+}
+
+static int query_state(client_t *c) {
+    char buffer[32] = "";
+    ret_t r = instrument_req(c->name, 1000, "state", buffer, sizeof(buffer));
+    if (r != E_NONE) {
+        return -999;
+    }
+    return atoi(buffer);
 }
 
 // 通过 instrument_req 让客户端发送消息

@@ -578,15 +578,36 @@ int main(int argc, char *argv[]) {
 
         p2p_update(hdl);
 
-        // RELAY 模式下，首次 p2p_connect 可能在 ONLINE_ACK 前返回，需延后重试一次启动会话。
-        if (connect_pending && p2p_state(hdl) == P2P_STATE_INIT && P_tick_ms() >= connect_retry_at) {
+        p2p_state_t st = p2p_state(hdl);
+
+        // 首次连接或对端断开后的重连都走这里统一调度。
+        if (target_name && !connect_pending && st == P2P_STATE_CLOSED) {
+            connect_pending = true;
+            connect_retry_at = P_tick_ms() + 200;
+            print("I:", "[Chat] Peer disconnected, scheduling reconnect...");
+        }
+
+        // 兜底：ONLINE 空闲态也持续尝试 connect。
+        // 某些时序下 CLOSED 窗口很短，可能错过触发；p2p_connect 在 ONLINE 为幂等调用。
+        if (target_name && !connect_pending && st == P2P_STATE_ONLINE && !p2p_is_ready(hdl)) {
+            connect_pending = true;
+            connect_retry_at = P_tick_ms() + 200;
+        }
+
+        // RELAY/COMPACT 模式下，INIT/CLOSED/ONLINE 都允许延后重试启动会话。
+        if (connect_pending
+            && (st == P2P_STATE_INIT || st == P2P_STATE_CLOSED || st == P2P_STATE_ONLINE)
+            && P_tick_ms() >= connect_retry_at) {
             if (p2p_connect(hdl, target_name) < 0) {
                 print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
                 break;
             }
             connect_retry_at = P_tick_ms() + 500;
         }
-        if (p2p_state(hdl) != P2P_STATE_INIT) {
+
+        // 一旦进入打洞/连通阶段，停止重试调度。
+        st = p2p_state(hdl);
+        if (st == P2P_STATE_PUNCHING || st >= P2P_STATE_LOST) {
             connect_pending = false;
         }
 

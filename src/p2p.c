@@ -269,7 +269,9 @@ static void disconnect(p2p_session_t *s) {
  */
 static void peer_disconnect(p2p_session_t *s) {
 
-    // 信令信令层的 FIN 信号会统一转换为 NAT 层的 FIN 信号
+    // RELAY FIN 通过 TCP 可靠送达后，handle_relay_fin 已设置 nat.state = NAT_CLOSED
+    // COMPACT FIN 通过 NAT FIN（UDP）触发，nat_on_fin 设置 NAT_CLOSED
+    // 两条路径最终都在此处汇合
     assert(s->nat.state == NAT_CLOSED);
 
     assert(s->state >= P2P_STATE_LOST);
@@ -669,7 +671,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         case P2P_SIGNALING_MODE_COMPACT: {
 
             // CLOSED → 重连：信令层已回到 COMPACT_ONLINE，将 session 状态也拨回 ONLINE
-            if (s->state == P2P_STATE_CLOSED) s->state = P2P_STATE_ONLINE;
+            if (s->state == P2P_STATE_CLOSED) { s->state = P2P_STATE_ONLINE; nat_reset(&s->nat); }
 
             // 注册连接目标；若 ONLINE_ACK 未到，signal_compact_connect 仅存储 remote_peer_id，
             // SYNC0 会在 ONLINE_ACK 处理完后自动触发
@@ -685,7 +687,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         case P2P_SIGNALING_MODE_RELAY: {
 
             // CLOSED → 重连：信令层已回到 RELAY_ONLINE，将 session 状态也拨回 ONLINE
-            if (s->state == P2P_STATE_CLOSED) s->state = P2P_STATE_ONLINE;
+            if (s->state == P2P_STATE_CLOSED) { s->state = P2P_STATE_ONLINE; nat_reset(&s->nat); }
 
             // 注册连接目标；若 ONLINE_ACK 未到，signal_relay_connect 仅存储 remote_peer_id + 置 connected=true，
             // SYNC0 会在 ONLINE_ACK 处理完后自动触发

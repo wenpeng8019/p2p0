@@ -87,15 +87,15 @@ target_include_directories(test_ping_c_template PRIVATE
 )
 target_link_libraries(test_ping_c_template stdc ${TEST_PLATFORM_LIBS})
 
-# P2P Ping 双客户端连接测试模板 (COMPACT 模式, Alice <-> Bob)
-add_executable(test_ping2_c_template
-    test_ping2_c_template.c
+# P2P Ping 双客户端连接测试 (COMPACT 模式, Alice <-> Bob)
+add_executable(test_ping_c_connect
+    test_ping_c_connect.c
 )
-target_include_directories(test_ping2_c_template PRIVATE
+target_include_directories(test_ping_c_connect PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping2_c_template stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_c_connect stdc ${TEST_PLATFORM_LIBS})
 
 # P2P Ping 消息互发测试 (COMPACT 模式, 基于 instrument req/resp)
 add_executable(test_ping_c_msg

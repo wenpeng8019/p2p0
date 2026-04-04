@@ -897,11 +897,13 @@ void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
     if (n->peer_connecting) {
 
         n->peer_connecting = false;
-        nat_send_conn_ack(s, now);
 
         // 对于首个打通的路径，直接（硬切）作为 p2p 活跃路径
         // 注意：使用 target_path 而不是 cand_idx，因为 target_path 才是被确认可写的路径
         p2p_set_active_path(s, target_path);
+
+        // active_path 就绪后再发送 CONN_ACK，避免发往 0.0.0.0:0
+        nat_send_conn_ack(s, now);
 
         n->state = NAT_CONNECTED;
         n->last_keepalive_send_ms = now;
@@ -1116,6 +1118,14 @@ void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
  */
 void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
     const char* PROTO = "FIN";
+
+    // 仅在曾经建立过数据通道后接受 FIN。
+    // 重连打洞阶段可能收到旧会话残留 FIN，直接接受会误关新会话。
+    if (s->nat.state < NAT_LOST) {
+        print("W:", LA_F("Ignore %s pkt from %s:%d, state=%d (not connected yet)", LA_F420, 420),
+              PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), s->nat.state);
+        return;
+    }
 
     printf(LA_F("Recv %s pkt from %s:%d", LA_F305, 305),
           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
