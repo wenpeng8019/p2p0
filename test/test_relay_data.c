@@ -281,96 +281,96 @@ static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
 }
 
 // 构造 DATA 包
-// payload: [session_id(8)][P2P_hdr(4)][data(N)]
-static int build_relay_data(uint8_t *buf, int buf_size, uint64_t session_id,
+// payload: [session_id(4)][P2P_hdr(4)][data(N)]
+static int build_relay_data(uint8_t *buf, int buf_size, uint32_t session_id,
                             uint8_t pkt_type, uint8_t flags, uint16_t seq,
                             const uint8_t *data, int data_len) {
-    uint16_t payload_len = 8 + 4 + data_len;
+    uint16_t payload_len = 4 + 4 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
     
     buf[0] = P2P_RLY_DATA;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[3 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[3 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     // P2P header (4 bytes)
-    buf[11] = pkt_type;
-    buf[12] = flags;
-    buf[13] = (seq >> 8) & 0xFF;
-    buf[14] = seq & 0xFF;
+    buf[7] = pkt_type;
+    buf[8] = flags;
+    buf[9] = (seq >> 8) & 0xFF;
+    buf[10] = seq & 0xFF;
     
     // data
     if (data_len > 0 && data) {
-        memcpy(buf + 15, data, data_len);
+        memcpy(buf + 11, data, data_len);
     }
     
     return 3 + payload_len;
 }
 
 // 构造 ACK 包
-// payload: [session_id(8)][P2P_hdr(4)][ack_seq(2)][sack(4)]
-static int build_relay_ack(uint8_t *buf, int buf_size, uint64_t session_id,
+// payload: [session_id(4)][P2P_hdr(4)][ack_seq(2)][sack(4)]
+static int build_relay_ack(uint8_t *buf, int buf_size, uint32_t session_id,
                            uint16_t ack_seq, uint32_t sack) {
-    uint16_t payload_len = 8 + 4 + 2 + 4;  // session_id + P2P_hdr + ack_seq + sack
+    uint16_t payload_len = 4 + 4 + 2 + 4;  // session_id + P2P_hdr + ack_seq + sack
     if (buf_size < 3 + (int)payload_len) return -1;
     
     buf[0] = P2P_RLY_DATA;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[3 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[3 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     // P2P header (4 bytes)
-    buf[11] = P2P_PKT_ACK;
-    buf[12] = 0;
-    buf[13] = 0;
-    buf[14] = 0;
+    buf[7] = P2P_PKT_ACK;
+    buf[8] = 0;
+    buf[9] = 0;
+    buf[10] = 0;
     
     // ack_seq (2 bytes, network order)
-    buf[15] = (ack_seq >> 8) & 0xFF;
-    buf[16] = ack_seq & 0xFF;
+    buf[11] = (ack_seq >> 8) & 0xFF;
+    buf[12] = ack_seq & 0xFF;
     
     // sack (4 bytes, network order)
-    buf[17] = (sack >> 24) & 0xFF;
-    buf[18] = (sack >> 16) & 0xFF;
-    buf[19] = (sack >> 8) & 0xFF;
-    buf[20] = sack & 0xFF;
+    buf[13] = (sack >> 24) & 0xFF;
+    buf[14] = (sack >> 16) & 0xFF;
+    buf[15] = (sack >> 8) & 0xFF;
+    buf[16] = sack & 0xFF;
     
     return 3 + payload_len;
 }
 
 // 构造 CRYPTO 包
-// payload: [session_id(8)][P2P_hdr(4)][crypto_data(N)]
-static int build_relay_crypto(uint8_t *buf, int buf_size, uint64_t session_id,
+// payload: [session_id(4)][P2P_hdr(4)][crypto_data(N)]
+static int build_relay_crypto(uint8_t *buf, int buf_size, uint32_t session_id,
                               const uint8_t *crypto_data, int crypto_len) {
-    uint16_t payload_len = 8 + 4 + crypto_len;
+    uint16_t payload_len = 4 + 4 + crypto_len;
     if (buf_size < 3 + (int)payload_len) return -1;
     
     buf[0] = P2P_RLY_DATA;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[3 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[3 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     // P2P header (4 bytes) - CRYPTO 不使用 flags/seq
-    buf[11] = P2P_PKT_CRYPTO;
-    buf[12] = 0;
-    buf[13] = 0;
-    buf[14] = 0;
+    buf[7] = P2P_PKT_CRYPTO;
+    buf[8] = 0;
+    buf[9] = 0;
+    buf[10] = 0;
     
     // crypto data
     if (crypto_len > 0 && crypto_data) {
-        memcpy(buf + 15, crypto_data, crypto_len);
+        memcpy(buf + 11, crypto_data, crypto_len);
     }
     
     return 3 + payload_len;
@@ -385,7 +385,7 @@ typedef struct {
 
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint8_t online;
 } sync0_ack_t;
 
@@ -398,7 +398,7 @@ typedef struct {
 typedef struct {
     int received;
     uint8_t type;           // P2P_RLY_DATA (all relay data uses this)
-    uint64_t session_id;
+    uint32_t session_id;
     // For DATA/CRYPTO:
     uint8_t data[1024];
     int data_len;
@@ -501,30 +501,30 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt) {
             return 0;
         }
         
-        if (type == P2P_RLY_DATA && payload_len >= 12) {
-            // All relay data: [session_id(8)][P2P_hdr(4)][data(N)]
+        if (type == P2P_RLY_DATA && payload_len >= 8) {
+            // All relay data: [session_id(4)][P2P_hdr(4)][data(N)]
             pkt->received = 1;
             pkt->type = type;
             
-            // session_id (8 bytes)
+            // session_id (4 bytes)
             pkt->session_id = 0;
-            for (int j = 0; j < 8; j++) {
+            for (int j = 0; j < 4; j++) {
                 pkt->session_id = (pkt->session_id << 8) | recv_buf[3 + j];
             }
             
             // Check inner P2P hdr type
-            uint8_t inner_type = recv_buf[3 + 8];  // P2P hdr type byte
-            if (inner_type == P2P_PKT_ACK && payload_len >= 18) {
-                // ACK: [session_id(8)][P2P_hdr(4)][ack_seq(2)][sack(4)]
-                pkt->ack_seq = ((uint16_t)recv_buf[15] << 8) | recv_buf[16];
-                pkt->sack = ((uint32_t)recv_buf[17] << 24) | ((uint32_t)recv_buf[18] << 16) |
-                            ((uint32_t)recv_buf[19] << 8) | recv_buf[20];
+            uint8_t inner_type = recv_buf[3 + 4];  // P2P hdr type byte
+            if (inner_type == P2P_PKT_ACK && payload_len >= 14) {
+                // ACK: [session_id(4)][P2P_hdr(4)][ack_seq(2)][sack(4)]
+                pkt->ack_seq = ((uint16_t)recv_buf[11] << 8) | recv_buf[12];
+                pkt->sack = ((uint32_t)recv_buf[13] << 24) | ((uint32_t)recv_buf[14] << 16) |
+                            ((uint32_t)recv_buf[15] << 8) | recv_buf[16];
                 pkt->data_len = 0;
             } else {
                 // DATA/CRYPTO/etc: copy payload after P2P hdr
-                pkt->data_len = payload_len - 12;  // subtract session_id(8) + P2P_hdr(4)
+                pkt->data_len = payload_len - 8;  // subtract session_id(4) + P2P_hdr(4)
                 if (pkt->data_len > 0 && pkt->data_len <= (int)sizeof(pkt->data)) {
-                    memcpy(pkt->data, recv_buf + 3 + 8 + 4, pkt->data_len);  // start at 15
+                    memcpy(pkt->data, recv_buf + 3 + 4 + 4, pkt->data_len);  // start at 11
                 }
             }
             return 1;

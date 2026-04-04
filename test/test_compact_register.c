@@ -305,7 +305,7 @@ static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
 // 发送并接收 ONLINE_ACK
 typedef struct {
     int received;           // 是否收到响应
-    uint64_t session_id;
+    uint32_t session_id;
     uint32_t instance_id;
     uint8_t max_candidates;
     uint32_t public_ip;
@@ -974,7 +974,7 @@ static void test_register_addr_change(void) {
     }
     
     // 解析第二次响应
-    uint64_t session_id2 = 0;
+    uint32_t session_id2 = 0;
     for (int i = 0; i < 8; i++) {
         session_id2 = (session_id2 << 8) | recv_buf[8 + i];
     }

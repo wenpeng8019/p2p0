@@ -223,21 +223,21 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
 }
 
 // 构造 ALIVE 包
-// 协议: [hdr(4)][session_id(8)]
-static int build_alive(uint8_t *buf, int buf_size, uint64_t session_id) {
-    if (buf_size < 4 + 8) return -1;
+// 协议: [hdr(4)][session_id(4)]
+static int build_alive(uint8_t *buf, int buf_size, uint32_t session_id) {
+    if (buf_size < 4 + 4) return -1;
     
     buf[0] = SIG_PKT_ALIVE;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
-    return 12;
+    return 8;
 }
 
 // 构造 OFFLINE 包
@@ -301,7 +301,7 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
 }
 
 // 发送 ALIVE 并等待 ALIVE_ACK
-static int send_alive_and_wait_ack(sock_t sock, uint64_t session_id) {
+static int send_alive_and_wait_ack(sock_t sock, uint32_t session_id) {
     uint8_t pkt[16];
     int len = build_alive(pkt, sizeof(pkt), session_id);
     
@@ -344,7 +344,7 @@ static void send_unregister(sock_t sock, uint64_t auth_key) {
 }
 
 // 等待 PEER_OFF 包
-static int wait_peer_off(sock_t sock, uint64_t *session_id_out) {
+static int wait_peer_off(sock_t sock, uint32_t *session_id_out) {
     P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
     uint8_t recv_buf[64];
     struct sockaddr_in from;
@@ -355,10 +355,10 @@ static int wait_peer_off(sock_t sock, uint64_t *session_id_out) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         
-        if (n >= 12 && recv_buf[0] == SIG_PKT_FIN) {
+        if (n >= 8 && recv_buf[0] == SIG_PKT_FIN) {
             if (session_id_out) {
                 *session_id_out = 0;
-                for (int j = 0; j < 8; j++) {
+                for (int j = 0; j < 4; j++) {
                     *session_id_out = (*session_id_out << 8) | recv_buf[4 + j];
                 }
             }
@@ -387,7 +387,7 @@ static void test_alive_keepalive(void) {
     uint32_t inst_id = (uint32_t)P_tick_us() + 3000;
     
     // 注册获取 session_id
-    uint64_t session_id = register_peer(sock, "alive_alice", "alive_bob", inst_id, 0, NULL);
+    uint32_t session_id = register_peer(sock, "alive_alice", "alive_bob", inst_id, 0, NULL);
     if (session_id == 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "registration failed");
@@ -424,7 +424,7 @@ static void test_alive_updates_activity(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 3100;
     
-    uint64_t session_id = register_peer(sock, "activity_alice", "activity_bob", inst_id, 0, NULL);
+    uint32_t session_id = register_peer(sock, "activity_alice", "activity_bob", inst_id, 0, NULL);
     if (session_id == 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "registration failed");

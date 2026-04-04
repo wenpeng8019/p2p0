@@ -324,7 +324,7 @@ typedef struct {
 // SYNC0_ACK 解析结果
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint8_t online;
 } sync0_ack_t;
 

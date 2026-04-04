@@ -280,18 +280,18 @@ static int build_alive(uint8_t *buf, int buf_size) {
 }
 
 // 构造 FIN 包
-// payload: [session_id(8)]
-static int build_fin(uint8_t *buf, int buf_size, uint64_t session_id) {
-    const uint16_t payload_len = 8;
+// payload: [session_id(4)]
+static int build_fin(uint8_t *buf, int buf_size, uint32_t session_id) {
+    const uint16_t payload_len = 4;
     if (buf_size < 3 + (int)payload_len) return -1;
     
     buf[0] = P2P_RLY_FIN;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[3 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[3 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     return 3 + payload_len;
@@ -307,7 +307,7 @@ typedef struct {
 // SYNC0_ACK 解析结果
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint8_t online;
 } sync0_ack_t;
 
@@ -380,7 +380,7 @@ static int send_alive(sock_t sock) {
 }
 
 // 发送 FIN
-static int send_fin(sock_t sock, uint64_t session_id) {
+static int send_fin(sock_t sock, uint32_t session_id) {
     uint8_t pkt[16];
     int pkt_len = build_fin(pkt, sizeof(pkt), session_id);
     return tcp_send_all(sock, pkt, pkt_len) == pkt_len ? 1 : 0;

@@ -221,72 +221,72 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
 }
 
 // 构造 DATA+SESSION 包
-// 协议: [hdr(4)][session_id(8)][data(N)]
+// 协议: [hdr(4)][session_id(4)][data(N)]
 static int build_relay_data(uint8_t *buf, int buf_size, 
-                            uint64_t session_id, uint16_t seq,
+                            uint32_t session_id, uint16_t seq,
                             const uint8_t *data, int data_len) {
-    if (buf_size < 4 + 8 + data_len) return -1;
+    if (buf_size < 4 + 4 + data_len) return -1;
     
     buf[0] = P2P_PKT_DATA;
     buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     // data
     if (data_len > 0 && data) {
-        memcpy(buf + 12, data, data_len);
+        memcpy(buf + 8, data, data_len);
     }
     
-    return 12 + data_len;
+    return 8 + data_len;
 }
 
 // 构造 ACK+SESSION 包
-// 协议: [hdr(4)][session_id(8)]
+// 协议: [hdr(4)][session_id(4)]
 static int build_relay_ack(uint8_t *buf, int buf_size, 
-                           uint64_t session_id, uint16_t seq) {
-    if (buf_size < 4 + 8) return -1;
+                           uint32_t session_id, uint16_t seq) {
+    if (buf_size < 4 + 4) return -1;
     
     buf[0] = P2P_PKT_ACK;
     buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
-    return 12;
+    return 8;
 }
 
 // 构造 CRYPTO+SESSION 包
-// 协议: [hdr(4)][session_id(8)][crypto_data(N)]
+// 协议: [hdr(4)][session_id(4)][crypto_data(N)]
 static int build_relay_crypto(uint8_t *buf, int buf_size, 
-                              uint64_t session_id, uint16_t seq,
+                              uint32_t session_id, uint16_t seq,
                               const uint8_t *data, int data_len) {
-    if (buf_size < 4 + 8 + data_len) return -1;
+    if (buf_size < 4 + 4 + data_len) return -1;
     
     buf[0] = P2P_PKT_CRYPTO;
     buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     // crypto data
     if (data_len > 0 && data) {
-        memcpy(buf + 12, data, data_len);
+        memcpy(buf + 8, data, data_len);
     }
     
-    return 12 + data_len;
+    return 8 + data_len;
 }
 
 // 构造 NAT_PROBE 包
@@ -328,7 +328,7 @@ typedef struct {
     int received;
     uint8_t type;
     uint16_t seq;
-    uint64_t session_id;
+    uint32_t session_id;
     uint8_t data[512];
     int data_len;
 } relay_packet_t;
@@ -349,16 +349,16 @@ static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt)
     pkt->type = type;
     pkt->seq = ((uint16_t)buf[2] << 8) | buf[3];
     
-    // session_id (8 bytes)
+    // session_id (4 bytes)
     pkt->session_id = 0;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 4; i++) {
         pkt->session_id = (pkt->session_id << 8) | buf[4 + i];
     }
     
     // data (for RELAY_DATA and RELAY_CRYPTO)
-    pkt->data_len = len - 12;
+    pkt->data_len = len - 8;
     if (pkt->data_len > 0 && pkt->data_len <= (int)sizeof(pkt->data)) {
-        memcpy(pkt->data, buf + 12, pkt->data_len);
+        memcpy(pkt->data, buf + 8, pkt->data_len);
     }
 }
 
@@ -406,21 +406,21 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
 }
 
 // 构造 SYNC_ACK 包
-// 协议: [hdr(4)][session_id(8)]
-static int build_sync_ack(uint8_t *buf, int buf_size, uint64_t session_id, uint16_t seq) {
-    if (buf_size < 4 + 8) return -1;
+// 协议: [hdr(4)][session_id(4)]
+static int build_sync_ack(uint8_t *buf, int buf_size, uint32_t session_id, uint16_t seq) {
+    if (buf_size < 4 + 4) return -1;
     
     buf[0] = SIG_PKT_SYNC_ACK;
     buf[1] = 0;  // flags
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
-    return 12;
+    return 8;
 }
 
 // 发送 RELAY 包
@@ -479,10 +479,10 @@ static void drain_pending_packets(sock_t sock) {
         if (n <= 0) break;
         
         // 如果是 SYNC，发送 ACK
-        if (n >= 14 && recv_buf[0] == SIG_PKT_SYNC) {
+        if (n >= 10 && recv_buf[0] == SIG_PKT_SYNC) {
             uint16_t seq = ((uint16_t)recv_buf[2] << 8) | recv_buf[3];
-            uint64_t session_id = 0;
-            for (int j = 0; j < 8; j++) {
+            uint32_t session_id = 0;
+            for (int j = 0; j < 4; j++) {
                 session_id = (session_id << 8) | recv_buf[4 + j];
             }
             
@@ -819,7 +819,7 @@ static void test_relay_data_peer_unavailable(void) {
     uint32_t inst_id = (uint32_t)P_tick_us() + 6300;
     
     // 单独注册（无配对）
-    uint64_t session_id = register_peer(sock, "lonely_alice", "lonely_bob", inst_id, 0, NULL);
+    uint32_t session_id = register_peer(sock, "lonely_alice", "lonely_bob", inst_id, 0, NULL);
     if (session_id == 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "registration failed");

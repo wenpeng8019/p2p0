@@ -281,9 +281,9 @@ static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
 }
 
 // 构造 RLY_REQ 包
-// relay 帧: [type(1)][size(2)][session_id(8)][sid(2)][msg(1)][data(N)]
+// relay 帧: [type(1)][size(2)][session_id(4)][sid(2)][msg(1)][data(N)]
 static int build_rly_req(uint8_t *buf, int buf_size,
-                         uint64_t session_id, uint16_t sid,
+                         uint32_t session_id, uint16_t sid,
                          uint8_t msg, const uint8_t *data, int data_len) {
     uint16_t payload_len = P2P_SESS_ID_PSZ + 2 + 1 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
@@ -292,28 +292,28 @@ static int build_rly_req(uint8_t *buf, int buf_size,
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
 
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++)
-        buf[3 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++)
+        buf[3 + i] = (session_id >> (24 - i * 8)) & 0xFF;
 
     // sid (2 bytes, network order)
-    buf[11] = (sid >> 8) & 0xFF;
-    buf[12] = sid & 0xFF;
+    buf[7] = (sid >> 8) & 0xFF;
+    buf[8] = sid & 0xFF;
 
     // msg (1 byte)
-    buf[13] = msg;
+    buf[9] = msg;
 
     // data
     if (data_len > 0 && data)
-        memcpy(buf + 14, data, data_len);
+        memcpy(buf + 10, data, data_len);
 
     return 3 + payload_len;
 }
 
 // 构造 RLY_RESP 包
-// relay 帧: [type(1)][size(2)][session_id(8)][sid(2)][code(1)][data(N)]
+// relay 帧: [type(1)][size(2)][session_id(4)][sid(2)][code(1)][data(N)]
 static int build_rly_resp(uint8_t *buf, int buf_size,
-                          uint64_t session_id, uint16_t sid,
+                          uint32_t session_id, uint16_t sid,
                           uint8_t code, const uint8_t *data, int data_len) {
     uint16_t payload_len = P2P_SESS_ID_PSZ + 2 + 1 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
@@ -322,46 +322,46 @@ static int build_rly_resp(uint8_t *buf, int buf_size,
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
 
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++)
-        buf[3 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++)
+        buf[3 + i] = (session_id >> (24 - i * 8)) & 0xFF;
 
     // sid (2 bytes, network order)
-    buf[11] = (sid >> 8) & 0xFF;
-    buf[12] = sid & 0xFF;
+    buf[7] = (sid >> 8) & 0xFF;
+    buf[8] = sid & 0xFF;
 
     // code (1 byte)
-    buf[13] = code;
+    buf[9] = code;
 
     // data
     if (data_len > 0 && data)
-        memcpy(buf + 14, data, data_len);
+        memcpy(buf + 10, data, data_len);
 
     return 3 + payload_len;
 }
 
 // 构造 DATA 包（用于并行测试）
-// relay 帧: [type(1)][size(2)][session_id(8)][P2P_hdr(4)][data(N)]
-static int build_relay_data(uint8_t *buf, int buf_size, uint64_t session_id,
+// relay 帧: [type(1)][size(2)][session_id(4)][P2P_hdr(4)][data(N)]
+static int build_relay_data(uint8_t *buf, int buf_size, uint32_t session_id,
                             uint8_t pkt_type, uint8_t flags, uint16_t seq,
                             const uint8_t *data, int data_len) {
-    uint16_t payload_len = 8 + 4 + data_len;
+    uint16_t payload_len = 4 + 4 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
 
     buf[0] = P2P_RLY_DATA;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
 
-    for (int i = 0; i < 8; i++)
-        buf[3 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    for (int i = 0; i < 4; i++)
+        buf[3 + i] = (session_id >> (24 - i * 8)) & 0xFF;
 
-    buf[11] = pkt_type;
-    buf[12] = flags;
-    buf[13] = (seq >> 8) & 0xFF;
-    buf[14] = seq & 0xFF;
+    buf[7] = pkt_type;
+    buf[8] = flags;
+    buf[9] = (seq >> 8) & 0xFF;
+    buf[10] = seq & 0xFF;
 
     if (data_len > 0 && data)
-        memcpy(buf + 15, data, data_len);
+        memcpy(buf + 11, data, data_len);
 
     return 3 + payload_len;
 }
@@ -378,13 +378,13 @@ typedef struct {
 
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint8_t online;
 } sync0_ack_t;
 
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint16_t sid;
     uint8_t msg_or_code;
     uint8_t data[1024];

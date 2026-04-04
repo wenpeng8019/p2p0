@@ -235,96 +235,96 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
 }
 
 // 构造 MSG_REQ 包
-// 协议: [hdr(4)][session_id(8)][sid(2)][msg(1)][data(N)]
+// 协议: [hdr(4)][session_id(4)][sid(2)][msg(1)][data(N)]
 static int build_msg_req(uint8_t *buf, int buf_size, 
-                         uint64_t session_id, uint16_t sid, 
+                         uint32_t session_id, uint16_t sid, 
                          uint8_t msg, const uint8_t *data, int data_len) {
-    if (buf_size < 4 + 8 + 2 + 1 + data_len) return -1;
+    if (buf_size < 4 + 4 + 2 + 1 + data_len) return -1;
     
     buf[0] = SIG_PKT_MSG_REQ;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     // sid (2 bytes, network order)
-    buf[12] = (sid >> 8) & 0xFF;
-    buf[13] = sid & 0xFF;
+    buf[8] = (sid >> 8) & 0xFF;
+    buf[9] = sid & 0xFF;
     
     // msg (1 byte)
-    buf[14] = msg;
+    buf[10] = msg;
     
     // data
     if (data_len > 0 && data) {
-        memcpy(buf + 15, data, data_len);
+        memcpy(buf + 11, data, data_len);
     }
     
-    return 15 + data_len;
+    return 11 + data_len;
 }
 
 // 构造 MSG_RESP 包
-// 协议: [hdr(4)][session_id(8)][sid(2)][code(1)][data(N)]
+// 协议: [hdr(4)][session_id(4)][sid(2)][code(1)][data(N)]
 static int build_msg_resp(uint8_t *buf, int buf_size,
-                          uint64_t session_id, uint16_t sid,
+                          uint32_t session_id, uint16_t sid,
                           uint8_t code, const uint8_t *data, int data_len) {
-    if (buf_size < 4 + 8 + 2 + 1 + data_len) return -1;
+    if (buf_size < 4 + 4 + 2 + 1 + data_len) return -1;
     
     buf[0] = SIG_PKT_MSG_RESP;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     // sid (2 bytes, network order)
-    buf[12] = (sid >> 8) & 0xFF;
-    buf[13] = sid & 0xFF;
+    buf[8] = (sid >> 8) & 0xFF;
+    buf[9] = sid & 0xFF;
     
     // code (1 byte)
-    buf[14] = code;
+    buf[10] = code;
     
     // data
     if (data_len > 0 && data) {
-        memcpy(buf + 15, data, data_len);
+        memcpy(buf + 11, data, data_len);
     }
     
-    return 15 + data_len;
+    return 11 + data_len;
 }
 
 // 构造 MSG_RESP_ACK 包
-// 协议: [hdr(4)][session_id(8)][sid(2)]
+// 协议: [hdr(4)][session_id(4)][sid(2)]
 static int build_msg_resp_ack(uint8_t *buf, int buf_size,
-                               uint64_t session_id, uint16_t sid) {
-    if (buf_size < 4 + 8 + 2) return -1;
+                               uint32_t session_id, uint16_t sid) {
+    if (buf_size < 4 + 4 + 2) return -1;
     
     buf[0] = SIG_PKT_MSG_RESP_ACK;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
     // sid (2 bytes, network order)
-    buf[12] = (sid >> 8) & 0xFF;
-    buf[13] = sid & 0xFF;
+    buf[8] = (sid >> 8) & 0xFF;
+    buf[9] = sid & 0xFF;
     
-    return 14;
+    return 10;
 }
 
 // MSG_REQ_ACK 解析结果
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint16_t sid;
     uint8_t status;
 } msg_req_ack_t;
@@ -354,7 +354,7 @@ static void parse_msg_req_ack(const uint8_t *buf, int len, msg_req_ack_t *ack) {
 // MSG_REQ 解析结果 (B 端收到的 relay 包)
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint16_t sid;
     uint8_t msg;
     uint8_t flags;
@@ -394,7 +394,7 @@ static void parse_msg_req_relay(const uint8_t *buf, int len, msg_req_relay_t *re
 // MSG_RESP 解析结果 (A 端收到的转发包)
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint16_t sid;
     uint8_t code;
     uint8_t flags;
@@ -475,7 +475,7 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
 }
 
 // 发送 MSG_REQ 并等待 MSG_REQ_ACK
-static int send_msg_req_and_wait_ack(sock_t sock, uint64_t session_id, uint16_t sid,
+static int send_msg_req_and_wait_ack(sock_t sock, uint32_t session_id, uint16_t sid,
                                       uint8_t msg, const uint8_t *data, int data_len,
                                       msg_req_ack_t *ack_out) {
     uint8_t pkt[512];
@@ -507,7 +507,7 @@ static int send_msg_req_and_wait_ack(sock_t sock, uint64_t session_id, uint16_t 
 }
 
 // 发送 MSG_RESP
-static void send_msg_resp(sock_t sock, uint64_t session_id, uint16_t sid,
+static void send_msg_resp(sock_t sock, uint32_t session_id, uint16_t sid,
                           uint8_t code, const uint8_t *data, int data_len) {
     uint8_t pkt[512];
     int len = build_msg_resp(pkt, sizeof(pkt), session_id, sid, code, data, data_len);
@@ -523,7 +523,7 @@ static void send_msg_resp(sock_t sock, uint64_t session_id, uint16_t sid,
 }
 
 // 发送 MSG_RESP_ACK
-static void send_msg_resp_ack(sock_t sock, uint64_t session_id, uint16_t sid) {
+static void send_msg_resp_ack(sock_t sock, uint32_t session_id, uint16_t sid) {
     uint8_t pkt[32];
     int len = build_msg_resp_ack(pkt, sizeof(pkt), session_id, sid);
     

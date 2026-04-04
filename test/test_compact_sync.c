@@ -219,27 +219,27 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
 }
 
 // 构造 SYNC_ACK 包
-// 协议: [hdr(4)][session_id(8)]
-static int build_sync_ack(uint8_t *buf, int buf_size, uint64_t session_id, uint16_t seq) {
-    if (buf_size < 4 + 8) return -1;
+// 协议: [hdr(4)][session_id(4)]
+static int build_sync_ack(uint8_t *buf, int buf_size, uint32_t session_id, uint16_t seq) {
+    if (buf_size < 4 + 4) return -1;
     
     buf[0] = SIG_PKT_SYNC_ACK;
     buf[1] = 0;  // flags
     buf[2] = (seq >> 8) & 0xFF;   // seq high (network order)
     buf[3] = seq & 0xFF;          // seq low
     
-    // session_id (8 bytes, network order)
-    for (int i = 0; i < 8; i++) {
-        buf[4 + i] = (session_id >> (56 - i * 8)) & 0xFF;
+    // session_id (4 bytes, network order)
+    for (int i = 0; i < 4; i++) {
+        buf[4 + i] = (session_id >> (24 - i * 8)) & 0xFF;
     }
     
-    return 12;
+    return 8;
 }
 
 // SYNC 解析结果
 typedef struct {
     int received;
-    uint64_t session_id;
+    uint32_t session_id;
     uint8_t base_index;
     uint8_t candidate_count;
     p2p_candidate_t candidates[16];
@@ -265,8 +265,8 @@ static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
         info->session_id = (info->session_id << 8) | buf[4 + i];
     }
     
-    // SYNC:  [session_id(8)][base_index(1)][count(1)][cands]
-    // SYNC0: [session_id(8)][0x00(1)     ][count(1)][cands]
+    // SYNC:  [session_id(4)][base_index(1)][count(1)][cands]
+    // SYNC0: [session_id(4)][0x00(1)     ][count(1)][cands]
     info->base_index = buf[12];
     info->candidate_count = buf[13];
     
@@ -322,11 +322,11 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
 }
 
 // 发送 SYNC0_ACK（client→server，确认服务器首次候选推送）
-static void send_sync0_ack(sock_t sock, uint64_t session_id) {
+static void send_sync0_ack(sock_t sock, uint32_t session_id) {
     uint8_t pkt[16];
     pkt[0] = SIG_PKT_SYNC0_ACK;
     pkt[1] = 0; pkt[2] = 0; pkt[3] = 0;
-    for (int i = 0; i < 8; i++) pkt[4 + i] = (uint8_t)(session_id >> (56 - i * 8));
+    for (int i = 0; i < 4; i++) pkt[4 + i] = (uint8_t)(session_id >> (24 - i * 8));
 
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -338,7 +338,7 @@ static void send_sync0_ack(sock_t sock, uint64_t session_id) {
 }
 
 // 发送 SYNC_ACK
-static void send_sync_ack(sock_t sock, uint64_t session_id, uint16_t seq) {
+static void send_sync_ack(sock_t sock, uint32_t session_id, uint16_t seq) {
     uint8_t pkt[16];
     int len = build_sync_ack(pkt, sizeof(pkt), session_id, seq);
     
