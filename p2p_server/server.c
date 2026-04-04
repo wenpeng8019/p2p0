@@ -2349,7 +2349,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                         compact_session_t *waiting = (compact_session_t*)pair->sessions[_i];
                         if (waiting && waiting != local && waiting->peer == NULL) {
                             local->peer = waiting; waiting->peer = local;
-                            print("I:", LA_F("%s: late-paired '%.*s' <-> '%.*s' (waiting session found)\n", LA_F298, 298),
+                            print("I:", LA_F("%s: late-paired '%.*s' <-> '%.*s' (waiting session found)\n", LA_F351, 351),
                                   PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id,
                                   P2P_PEER_ID_MAX, remote_peer_id);
                             break;
@@ -2363,7 +2363,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             int side = build_session(&local_client->base, remote_peer_id,
                                      &local_s, &remote_s, sizeof(compact_session_t));
             if (side < 0 || !local_s) {
-                print("E:", LA_F("%s: build_session failed for '%.*s'\n", LA_F28, 28), PROTO, P2P_PEER_ID_MAX,
+                print("E:", LA_F("%s: build_session failed for '%.*s'\n", LA_F350, 350), PROTO, P2P_PEER_ID_MAX,
                       local_client->base.local_peer_id);
                 return;
             }
@@ -2376,11 +2376,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 compact_session_t *remote_cs = (compact_session_t*)remote_s;
                 if (remote_cs->peer != (compact_session_t*)(void*)-1) {
                     local->peer = remote_cs; remote_cs->peer = local;
-                    print("I:", LA_F("%s: paired '%.*s' <-> '%.*s'\n", LA_F298, 298),
+                    print("I:", LA_F("%s: paired '%.*s' <-> '%.*s'\n", LA_F352, 352),
                            PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id,
                            P2P_PEER_ID_MAX, remote_peer_id);
                 } else {
-                    print("I:", LA_F("%s: skip pairing '%.*s' with stale '%.*s' (peer_died, awaiting re-register)\n", LA_F298, 298),
+                    print("I:", LA_F("%s: skip pairing '%.*s' with stale '%.*s' (peer_died, awaiting re-register)\n", LA_F353, 353),
                            PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id,
                            P2P_PEER_ID_MAX, remote_peer_id);
                 }
@@ -2913,7 +2913,7 @@ BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
 #else
 void signal_handler(int signum) {
     if (signum == SIGINT || signum == SIGTERM) {
-        print("I: \n%s\n", LA_S("Received shutdown signal, exiting gracefully...", LA_S8, 8));
+        print("I: \n%s\n", LA_S8, 8("Received shutdown signal, exiting gracefully...", LA_S8, 8));
         g_running = 0;
     }
 }
@@ -2941,7 +2941,7 @@ int main(int argc, char *argv[]) {
                     "  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n"
                     "  $0 --cn -p 8888                 # Chinese language\n"
                     "\n"
-                    "Note: Run without arguments to use default configuration (port 9333)", 0, 0));
+                    "Note: Run without arguments to use default configuration (port 9333)", LA_S359, 359));
 
     // 解析命令行参数（如果无参数，使用默认配置不显示帮助）
     if (argc > 1) {

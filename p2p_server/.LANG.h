@@ -40,128 +40,128 @@ enum {
     /* Words (LA_W) */
     LA_W1,  /* "disabled"  [server.c] */
     LA_W2,  /* "enabled"  [server.c] */
+    _LA_3,
+    _LA_4,
 
     /* Strings (LA_S) */
-    LA_S3,  /* disabled "[TCP] User list truncated (too many users)\n" */
-    _LA_4,
     LA_S5,  /* "Enable data relay support (COMPACT mode fallback)"  [server.c] */
     LA_S6,  /* "Enable MSG RPC support"  [server.c] */
     LA_S7,  /* "NAT type detection port (0=disabled)"  [server.c] */
-    LA_S8,  /* "Received shutdown signal, exiting gracefully..."  [server.c] */
+    LA_S8,  /* disabled "Received shutdown signal, exiting gracefully..." */
     LA_S9,  /* "Shutting down...\n"  [server.c] */
     LA_S10,  /* "Signaling server listen port (TCP+UDP)"  [server.c] */
     LA_S11,  /* "Use Chinese language"  [server.c] */
 
     /* Formats (LA_F) */
-    LA_F12,  /* "%s accepted, '%s' -> '%s', ses_id=%llu\n" (%s,%s,%s,%l)  [server.c] */
+    LA_F12,  /* "%s accepted, '%s' -> '%s', ses_id=%u\n" (%s,%s,%s,%u)  [server.c] */
     LA_F13,  /* "%s accepted, peer='%s', auth_key=%llu\n" (%s,%s,%l)  [server.c] */
-    LA_F14,  /* "%s accepted, seq=%u, ses_id=%llu\n" (%s,%u,%l)  [server.c] */
-    LA_F15,  /* "%s for unknown ses_id=%llu\n" (%s,%l)  [server.c] */
-    LA_F16,  /* "%s forwarded: '%s' -> '%s', sid=%u (ses_id=%llu)\n" (%s,%s,%s,%u,%l)  [server.c] */
-    LA_F17,  /* "%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%llu)\n" (%s,%s,%s,%u,%u,%l)  [server.c] */
-    LA_F18,  /* "%s from '%.*s': new instance(old=%u new=%u), resetting session\n" (%s,%u,%u)  [server.c] */
-    LA_F19,  /* "%s new sid=%u > pending sid=%u (responding=%d), canceling old RPC (ses_id=%llu)\n" (%s,%u,%u,%d,%l)  [server.c] */
-    LA_F20,  /* "%s retransmit during RESP phase, ignoring, sid=%u (ses_id=%llu)\n" (%s,%u,%l)  [server.c] */
-    LA_F21,  /* "%s retransmit, resend ACK, sid=%u (ses_id=%llu)\n" (%s,%u,%l)  [server.c] */
-    LA_F22,  /* "%s: RPC complete for '%s', sid=%u (ses_id=%llu)\n" (%s,%s,%u,%l)  [server.c] */
+    LA_F14,  /* "%s accepted, seq=%u, ses_id=%u\n" (%s,%u,%u)  [server.c] */
+    LA_F15,  /* "%s for unknown ses_id=%u\n" (%s,%u)  [server.c] */
+    LA_F16,  /* "%s forwarded: '%s' -> '%s', sid=%u (ses_id=%u)\n" (%s,%s,%s,%u,%u)  [server.c] */
+    LA_F17,  /* "%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%u)\n" (%s,%s,%s,%u,%u,%u)  [server.c] */
+    LA_F18,  /* "%s from '%.*s': new instance(old=%u new=%u), resetting\n" (%s,%u,%u)  [server.c] */
+    LA_F19,  /* "%s new sid=%u > pending sid=%u (responding=%d), canceling old RPC (ses_id=%u)\n" (%s,%u,%u,%d,%u)  [server.c] */
+    LA_F20,  /* "%s retransmit during RESP phase, ignoring, sid=%u (ses_id=%u)\n" (%s,%u,%u)  [server.c] */
+    LA_F21,  /* "%s retransmit, resend ACK, sid=%u (ses_id=%u)\n" (%s,%u,%u)  [server.c] */
+    LA_F22,  /* "%s: RPC complete for '%s', sid=%u (ses_id=%u)\n" (%s,%s,%u,%u)  [server.c] */
     LA_F23,  /* "%s: accepted, local='%.*s', inst_id=%u\n" (%s,%u)  [server.c] */
-    LA_F24,  /* "%s: accepted, releasing slot for '%s' -> '%s'\n" (%s,%s,%s)  [server.c] */
-    LA_F25,  /* "%s: accepted, ses_id=%llu, sid=%u, code=%u, len=%d\n" (%s,%l,%u,%u,%d)  [server.c] */
-    LA_F26,  /* "%s: accepted, ses_id=%llu, sid=%u, msg=%u, len=%d\n" (%s,%l,%u,%u,%d)  [server.c] */
-    LA_F27,  /* "%s: accepted, ses_id=%llu, sid=%u\n" (%s,%l,%u)  [server.c] */
+    LA_F24,  /* "%s: accepted, releasing slot for '%s'\n" (%s,%s)  [server.c] */
+    LA_F25,  /* "%s: accepted, ses_id=%u, sid=%u, code=%u, len=%d\n" (%s,%u,%u,%u,%d)  [server.c] */
+    LA_F26,  /* "%s: accepted, ses_id=%u, sid=%u, msg=%u, len=%d\n" (%s,%u,%u,%u,%d)  [server.c] */
+    LA_F27,  /* "%s: accepted, ses_id=%u, sid=%u\n" (%s,%u,%u)  [server.c] */
     LA_F28,  /* "%s: bad payload(len=%zu)\n" (%s)  [server.c] */
-    LA_F29,  /* "%s: addr-notify confirmed '%s' (ses_id=%llu)\n" (%s,%s,%l)  [server.c] */
+    LA_F29,  /* "%s: addr-notify confirmed '%s' (ses_id=%u)\n" (%s,%s,%u)  [server.c] */
     LA_F30,  /* "%s: data too large (len=%d)\n" (%s,%d)  [server.c] */
     LA_F31,  /* "%s: invalid auth_key=0 from %s\n" (%s,%s)  [server.c] */
     LA_F32,  /* "%s: invalid relay flag from client\n" (%s)  [server.c] */
     LA_F33,  /* "%s: auth_key=%llu, cands=%d from %s\n" (%s,%l,%d,%s)  [server.c] */
-    LA_F34,  /* "%s: invalid session_id=%llu or sid=%u\n" (%s,%l,%u)  [server.c] */
+    LA_F34,  /* "%s: invalid session_id=%u or sid=%u\n" (%s,%u,%u)  [server.c] */
     LA_F35,  /* "%s: no matching pending msg (sid=%u)\n" (%s,%u)  [server.c] */
     LA_F36,  /* "%s: no matching pending msg (sid=%u, expected=%u)\n" (%s,%u,%u)  [server.c] */
     LA_F37,  /* "%s: obsolete sid=%u (current=%u), ignoring\n" (%s,%u,%u)  [server.c] */
     LA_F38,  /* "%s: obsolete sid=%u (last=%u) in IDLE state, ignoring\n" (%s,%u,%u)  [server.c] */
-    LA_F39,  /* "%s: peer '%s' not online for session_id=%llu\n" (%s,%s,%l)  [server.c] */
+    LA_F39,  /* "%s: peer '%s' not online for session_id=%u\n" (%s,%s,%u)  [server.c] */
     LA_F40,  /* "%s: peer '%s' not online, rejecting sid=%u\n" (%s,%s,%u)  [server.c] */
-    LA_F41,  /* "%s: requester not found for ses_id=%llu\n" (%s,%l)  [server.c] */
-    LA_F42,  /* disabled "%s: reset '%.*s'(disconnected) session for re-pairing\n" */
-    LA_F43,  /* "%s: unknown session_id=%llu\n" (%s,%l)  [server.c] */
-    LA_F44,  /* "%s: auth_key=%llu assigned for '%.*s', waiting SYNC0\n" (%s,%l)  [server.c] */
-    LA_F45,  /* "Addr changed for '%s', but first info packet was abandoned (ses_id=%llu)\n" (%s,%l)  [server.c] */
-    LA_F46,  /* "Addr changed for '%s', defer notification until first ACK (ses_id=%llu)\n" (%s,%l)  [server.c] */
-    LA_F47,  /* "Addr changed for '%s', deferred notifying '%s' (ses_id=%llu)\n" (%s,%s,%l)  [server.c] */
-    LA_F48,  /* "Addr changed for '%s', notifying '%s' (ses_id=%llu)\n" (%s,%s,%l)  [server.c] */
-    LA_F49,  /* "Cannot relay %s: ses_id=%llu (peer unavailable)\n" (%s,%l)  [server.c] */
+    LA_F41,  /* "%s: requester not found for ses_id=%u\n" (%s,%u)  [server.c] */
+    _LA_42,
+    LA_F43,  /* "%s: unknown session_id=%u\n" (%s,%u)  [server.c] */
+    LA_F44,  /* "%s: auth_key=%llu assigned for '%.*s'\n" (%s,%l)  [server.c] */
+    LA_F45,  /* "Addr changed for '%s', but first info packet was abandoned (ses_id=%u)\n" (%s,%u)  [server.c] */
+    LA_F46,  /* "Addr changed for '%s', defer notification until first ACK (ses_id=%u)\n" (%s,%u)  [server.c] */
+    LA_F47,  /* "Addr changed for '%s', deferred notifying '%s' (ses_id=%u)\n" (%s,%s,%u)  [server.c] */
+    LA_F48,  /* "Addr changed for '%s', notifying '%s' (ses_id=%u)\n" (%s,%s,%u)  [server.c] */
+    LA_F49,  /* "Cannot relay %s: ses_id=%u (peer unavailable)\n" (%s,%u)  [server.c] */
     LA_F50,  /* "% Goodbye!\n"  [server.c] */
     LA_F51,  /* "Invalid port number %d (range: 1-65535)\n" (%d)  [server.c] */
     LA_F52,  /* "Invalid probe port %d (range: 0-65535)\n" (%d)  [server.c] */
-    LA_F53,  /* "MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%llu)\n" (%d,%s,%u,%l)  [server.c] */
-    LA_F54,  /* "MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%llu)\n" (%s,%u,%l)  [server.c] */
-    LA_F55,  /* "MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%llu)\n" (%s,%s,%u,%d,%d,%l)  [server.c] */
-    LA_F56,  /* "MSG_RESP gave up after %d retries, sid=%u (ses_id=%llu)\n" (%d,%u,%l)  [server.c] */
-    LA_F57,  /* "MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%llu)\n" (%s,%u,%d,%d,%l)  [server.c] */
+    LA_F53,  /* "MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n" (%d,%s,%u,%u)  [server.c] */
+    LA_F54,  /* "MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n" (%s,%u,%u)  [server.c] */
+    LA_F55,  /* "MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n" (%s,%s,%u,%d,%d,%u)  [server.c] */
+    LA_F56,  /* "MSG_RESP gave up after %d retries, sid=%u (ses_id=%u)\n" (%d,%u,%u)  [server.c] */
+    LA_F57,  /* "MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n" (%s,%u,%d,%d,%u)  [server.c] */
     LA_F58,  /* "% NAT probe disabled (bind failed)\n"  [server.c] */
     LA_F59,  /* "NAT probe socket listening on port %d\n" (%d)  [server.c] */
     LA_F60,  /* "NAT probe: %s (port %d)\n" (%s,%d)  [server.c] */
     LA_F61,  /* "P2P Signaling Server listening on port %d (TCP + UDP)...\n" (%d)  [server.c] */
-    LA_F62,  /* "SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%llu)\n" (%s,%s,%d,%d,%l)  [server.c] */
+    LA_F62,  /* "SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%u)\n" (%s,%s,%d,%d,%u)  [server.c] */
     LA_F63,  /* "SYNC retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [server.c] */
     LA_F64,  /* "SYNC0: candidates exchanged '%.*s'(%d) <-> '%.*s'(%d)\n" (%d,%d)  [server.c] */
-    LA_F65,  /* "Relay %s seq=%u: '%s' -> '%s' (ses_id=%llu)\n" (%s,%u,%s,%s,%l)  [server.c] */
+    LA_F65,  /* "Relay %s seq=%u: '%s' -> '%s' (ses_id=%u)\n" (%s,%u,%s,%s,%u)  [server.c] */
     LA_F66,  /* "Relay support: %s\n" (%s)  [server.c] */
-    LA_F67,  /* "Send %s: base_index=%u, cands=%d, ses_id=%llu, peer='%s'\n" (%s,%u,%d,%l,%s)  [server.c] */
+    LA_F67,  /* "Send %s: base_index=%u, cands=%d, ses_id=%u, peer='%s'\n" (%s,%u,%d,%u,%s)  [server.c] */
     LA_F68,  /* "Send %s: mapped=%s:%d\n" (%s,%s,%d)  [server.c] */
-    LA_F69,  /* "Send %s: peer='%s', reason=%s, ses_id=%llu\n" (%s,%s,%s,%l)  [server.c] */
+    LA_F69,  /* "Send %s: peer='%s', reason=%s, ses_id=%u\n" (%s,%s,%s,%u)  [server.c] */
     LA_F70,  /* "Send %s: auth_key=%llu, peer='%s'\n" (%s,%l,%s)  [server.c] */
-    LA_F71,  /* "Send %s: ses_id=%llu, sid=%u, msg=%u, data_len=%d, peer='%s'\n" (%s,%l,%u,%u,%d,%s)  [server.c] */
-    LA_F72,  /* "Send %s: ses_id=%llu, sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d\n" (%s,%l,%u,%s,%u,%d)  [server.c] */
-    LA_F73,  /* "Send %s: ses_id=%llu, sid=%u, peer='%s'\n" (%s,%l,%u,%s)  [server.c] */
-    LA_F74,  /* "Send %s: ses_id=%llu, peer=%s\n" (%s,%l,%s)  [server.c] */
-    LA_F75,  /* "Send %s: max_cands=%d, relay=%s, msg=%s, public=%s:%d, probe=%d, ses_id=%llu, inst_id=%u\n" (%s,%d,%s,%s,%s,%d,%d,%l,%u)  [server.c] */
+    LA_F71,  /* "Send %s: ses_id=%u, sid=%u, msg=%u, data_len=%d, peer='%s'\n" (%s,%u,%u,%u,%d,%s)  [server.c] */
+    LA_F72,  /* "Send %s: ses_id=%u, sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d\n" (%s,%u,%u,%s,%u,%d)  [server.c] */
+    LA_F73,  /* "Send %s: ses_id=%u, sid=%u, peer='%s'\n" (%s,%u,%u,%s)  [server.c] */
+    LA_F74,  /* "Send %s: ses_id=%u, peer=%s\n" (%s,%u,%s)  [server.c] */
+    LA_F75,  /* "Send %s: max_cands=%d, relay=%s, msg=%s, public=%s:%d, probe=%d, auth_key=%llu, inst_id=%u\n" (%s,%d,%s,%s,%s,%d,%d,%l,%u)  [server.c] */
     LA_F76,  /* "Send %s: rejected (no slot available)\n" (%s)  [server.c] */
     LA_F77,  /* "Starting P2P signal server on port %d\n" (%d)  [server.c] */
-    LA_F78,  /* "Timeout & cleanup for pair '%s' -> '%s' (inactive for %.1f seconds)\n" (%s,%s)  [server.c] */
+    LA_F78,  /* "Timeout & cleanup for client '%s' (inactive for %.1f seconds)\n" (%s)  [server.c] */
     LA_F79,  /* "Unknown packet type 0x%02x from %s\n" (%s)  [server.c] */
-    LA_F80,  /* "[Relay] %s for ses_id=%llu: peer unavailable (dropped)\n" (%s,%l)  [server.c] */
-    LA_F81,  /* "[Relay] %s for unknown ses_id=%llu (dropped)\n" (%s,%l)  [server.c] */
-    LA_F82,  /* "[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%llu)\n" (%s,%u,%s,%s,%l)  [server.c] */
+    LA_F80,  /* "[Relay] %s for ses_id=%u: peer unavailable (dropped)\n" (%s,%u)  [server.c] */
+    LA_F81,  /* "[Relay] %s for unknown ses_id=%u (dropped)\n" (%s,%u)  [server.c] */
+    LA_F82,  /* "[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%u)\n" (%s,%u,%s,%s,%u)  [server.c] */
     LA_F83,  /* "[Relay] %s seq=0 from client %s (server-only, dropped)\n" (%s,%s)  [server.c] */
-    LA_F84,  /* "[Relay] %s: '%s' -> '%s' (ses_id=%llu)\n" (%s,%s,%s,%l)  [server.c] */
+    LA_F84,  /* "[Relay] %s: '%s' -> '%s' (ses_id=%u)\n" (%s,%s,%s,%u)  [server.c] */
     LA_F85,  /* "[Relay] %s: bad payload(len=%zu)\n" (%s)  [server.c] */
     LA_F86,  /* "[Relay] %s: missing SESSION flag, dropped\n" (%s)  [server.c] */
-    LA_F87,  /* disabled "[TCP]   → Forwarded OFFER from '%s' (%d candidates, %d bytes)\n" */
-    LA_F88,  /* disabled "[TCP]   → Sent empty OFFER from '%s' (storage full, reverse connect)\n" */
-    LA_F89,  /* disabled "[TCP] All pending candidates flushed to '%s'\n" */
-    LA_F90,  /* disabled "[TCP] Cached %d candidates for offline user '%s' (total=%d/%d)\n" */
-    LA_F91,  /* disabled "[TCP] Cached %d candidates for offline user '%s', storage now FULL (%d/%d)\n" */
-    LA_F92,  /* disabled "[TCP] Cannot allocate slot for offline user '%s'\n" */
-    LA_F93,  /* disabled "[TCP] E: Invalid magic from peer '%s'\n" */
-    LA_F94,  /* disabled "[TCP] Failed to receive payload from %s\n" */
-    LA_F95,  /* disabled "[TCP] Failed to receive target name from %s\n" */
-    LA_F96,  /* disabled "[TCP] Failed to send CONNECT_ACK to %s (sent_hdr=%d, sent_payload=%d)\n" */
-    LA_F97,  /* disabled "[TCP] Flushing %d pending candidates from '%s' to '%s'...\n" */
-    LA_F98,  /* disabled "[TCP] I: Peer '%s' came online\n" */
+    _LA_87,
+    _LA_88,
+    _LA_89,
+    _LA_90,
+    _LA_91,
+    _LA_92,
+    _LA_93,
+    _LA_94,
+    _LA_95,
+    _LA_96,
+    _LA_97,
+    _LA_98,
     LA_F99,  /* "% [TCP] Max peers reached, rejecting connection\n"  [server.c] */
-    LA_F100,  /* disabled "[TCP] Merged %d pending candidates from offline slot (sender='%s') into online slot for '%s'\n" */
+    _LA_100,
     LA_F101,  /* "[TCP] New connection from %s:%d\n" (%s,%d)  [server.c] */
-    LA_F102,  /* disabled "[TCP] New sender '%s' replaces old sender '%s' (discarding %d old candidates)\n" */
-    LA_F103,  /* disabled "[TCP] E: Packet too large (%u bytes) from peer '%s'\n" */
-    LA_F104,  /* disabled "[TCP] Relaying %s from %s to %s (%u bytes)\n" */
-    LA_F105,  /* disabled "[TCP] Sent %s with %d candidates to '%s' (from '%s')\n" */
-    LA_F106,  /* disabled "[TCP] Sent CONNECT_ACK to %s (status=%d, candidates_acked=%d)\n" */
-    LA_F107,  /* disabled "[TCP] Storage full for '%s' (cached=%d, dropped=%d)\n" */
-    LA_F108,  /* disabled "[TCP] Storage full indication flushed to '%s'\n" */
-    LA_F109,  /* disabled "[TCP] Storage full, connection intent from '%s' to '%s' noted\n" */
-    LA_F110,  /* disabled "[TCP] Storage full, flushing connection intent from '%s' to '%s' (sending empty OFFER)...\n" */
-    LA_F111,  /* disabled "[TCP] Target %s offline, caching candidates...\n" */
-    LA_F112,  /* disabled "[TCP] Unknown message type %d from %s\n" */
-    LA_F113,  /* disabled "[TCP] V: %s sent to '%s'\n" */
-    LA_F114,  /* disabled "[TCP] V: Peer '%s' disconnected\n" */
-    LA_F115,  /* disabled "W: [TCP] Client '%s' timeout (inactive for %.1f seconds)\n" */
-    LA_F116,  /* disabled "[TCP] recv ALIVE from %s\n" */
+    _LA_102,
+    _LA_103,
+    _LA_104,
+    _LA_105,
+    _LA_106,
+    _LA_107,
+    _LA_108,
+    _LA_109,
+    _LA_110,
+    _LA_111,
+    _LA_112,
+    _LA_113,
+    _LA_114,
+    _LA_115,
+    _LA_116,
     LA_F117,  /* "[UDP] %s send to %s failed(%d)\n" (%s,%s,%d)  [server.c] */
-    LA_F118,  /* disabled "[TCP] E: Packet too short (%u bytes)\n" */
-    LA_F119,  /* disabled "[TCP] E: Invalid ONLINE payload length (%u, expected %zu)\n" */
-    LA_F120,  /* disabled "[TCP] E: Payload too short for CONNECT/ANSWER (%u < %d)\n" */
+    _LA_118,
+    _LA_119,
+    _LA_120,
     LA_F121,  /* "[UDP] %s send to %s:%d failed(%d)\n" (%s,%s,%d,%d)  [server.c] */
     LA_F122,  /* "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n" (%s,%s,%d,%d)  [server.c] */
     LA_F123,  /* "[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n" (%s,%s,%d,%d,%d)  [server.c] */
@@ -172,140 +172,124 @@ enum {
     _LA_128,
     _LA_129,
     _LA_130,
-
-    /* Strings (LA_S) */
-    LA_S131,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S132,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S133,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S134,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S135,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S136,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S137,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S138,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S139,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S140,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S141,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S142,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S143,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S144,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S145,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S146,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S147,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S148,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S149,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S150,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S151,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S152,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S153,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S154,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S155,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S156,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S157,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S158,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S159,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S160,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S161,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S162,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S163,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S164,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S165,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S166,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S167,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S168,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S169,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S170,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S171,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S172,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S173,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S174,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S175,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S176,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S177,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-
-    /* Formats (LA_F) */
-    LA_F178,  /* disabled "[TCP] E: Receive buffer full for peer '%s' (possible protocol error)\n" */
+    _LA_131,
+    _LA_132,
+    _LA_133,
+    _LA_134,
+    _LA_135,
+    _LA_136,
+    _LA_137,
+    _LA_138,
+    _LA_139,
+    _LA_140,
+    _LA_141,
+    _LA_142,
+    _LA_143,
+    _LA_144,
+    _LA_145,
+    _LA_146,
+    _LA_147,
+    _LA_148,
+    _LA_149,
+    _LA_150,
+    _LA_151,
+    _LA_152,
+    _LA_153,
+    _LA_154,
+    _LA_155,
+    _LA_156,
+    _LA_157,
+    _LA_158,
+    _LA_159,
+    _LA_160,
+    _LA_161,
+    _LA_162,
+    _LA_163,
+    _LA_164,
+    _LA_165,
+    _LA_166,
+    _LA_167,
+    _LA_168,
+    _LA_169,
+    _LA_170,
+    _LA_171,
+    _LA_172,
+    _LA_173,
+    _LA_174,
+    _LA_175,
+    _LA_176,
+    _LA_177,
+    _LA_178,
     LA_F179,  /* "[UDP] %s recv from %s, len=%zu\n" (%s,%s)  [server.c] */
     LA_F180,  /* "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n" (%s,%s,%u,%d)  [server.c] */
     LA_F181,  /* "[UDP] %s send to %s, seq=0, flags=0, len=%d\n" (%s,%s,%d)  [server.c] */
     LA_F182,  /* "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n" (%s,%s,%d)  [server.c] */
-
-    /* Strings (LA_S) */
-    LA_S183,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S184,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S185,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S186,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S187,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-
-    /* Formats (LA_F) */
-    LA_F188,  /* disabled "W: [TCP] Client '%s' timeout (inactive for %.1f sec)\n" */
-    LA_F189,  /* disabled "% [TCP] Client disconnected (not yet logged in)\n" */
-    LA_F190,  /* disabled "% [TCP] E: Client sent data before ONLINE_ACK completed\n" */
-    LA_F191,  /* disabled "[TCP] E: Duplicate session create blocked: '%s' -> '%s'\n" */
-    LA_F192,  /* disabled "[TCP] E: Failed to build session for '%s'\n" */
-    LA_F193,  /* disabled "[TCP] E: Invalid DATA length: %u\n" */
-    LA_F194,  /* disabled "[TCP] E: Invalid FIN length: %u\n" */
-    LA_F195,  /* disabled "[TCP] E: Invalid ONLINE payload length: %u (expected %u)\n" */
-    LA_F196,  /* disabled "[TCP] E: Invalid RELAY length: %u\n" */
-    LA_F197,  /* disabled "[TCP] E: Invalid SYNC FIN marker: 0x%02x\n" */
-    LA_F198,  /* disabled "[TCP] E: Invalid SYNC length: %u\n" */
-    LA_F199,  /* disabled "[TCP] E: Invalid SYNC payload: cnt=%u exceeds max=%u\n" */
-    LA_F200,  /* disabled "[TCP] E: Invalid SYNC payload: cnt=%u, len=%u, expected=%u(+1 fin)\n" */
-    LA_F201,  /* disabled "[TCP] E: Invalid SYNC0 length: %u\n" */
-    LA_F202,  /* disabled "[TCP] E: Invalid SYNC0 payload: cnt=%d, len=%u, expected=%u\n" */
-    LA_F203,  /* disabled "[TCP] E: Invalid payload len %u\n" */
-    LA_F204,  /* disabled "% [TCP] E: OOM for FIN relay buffer\n" */
-    LA_F205,  /* disabled "% [TCP] E: OOM for SYNC0_ACK frame\n" */
-    LA_F206,  /* disabled "% [TCP] E: OOM for SYNC_ACK frame\n" */
-    LA_F207,  /* disabled "[TCP] E: SYNC payload session mismatch: parsed=%llu, head=%llu\n" */
-    LA_F208,  /* disabled "% [TCP] E: SYNC0 rejected before ONLINE_ACK/login completion\n" */
-    LA_F209,  /* disabled "[TCP] E: Unsupported RELAY type=%u (session=%llu)\n" */
-    LA_F210,  /* disabled "[TCP] E: recv() failed: errno=%d\n" */
-    LA_F211,  /* disabled "[TCP] E: send() failed while sending %s: errno=%d\n" */
-    LA_F212,  /* disabled "[TCP] FIN: close session %llu\n" */
+    _LA_183,
+    _LA_184,
+    _LA_185,
+    _LA_186,
+    _LA_187,
+    _LA_188,
+    _LA_189,
+    _LA_190,
+    _LA_191,
+    _LA_192,
+    _LA_193,
+    _LA_194,
+    _LA_195,
+    _LA_196,
+    _LA_197,
+    _LA_198,
+    _LA_199,
+    _LA_200,
+    _LA_201,
+    _LA_202,
+    _LA_203,
+    _LA_204,
+    _LA_205,
+    _LA_206,
+    _LA_207,
+    _LA_208,
+    _LA_209,
+    _LA_210,
+    _LA_211,
+    _LA_212,
     LA_F213,  /* "% [TCP] Failed to set client socket to non-blocking mode\n"  [server.c] */
-    LA_F214,  /* disabled "% [TCP] I: Client closed connection (EOF on recv)\n" */
-    LA_F215,  /* disabled "[TCP] I: Client closed connection (EOF on send, reason=%s)\n" */
-    LA_F216,  /* disabled "[TCP] I: SYNC0 forwarded to peer, candidates=%d\n" */
+    _LA_214,
+    _LA_215,
+    _LA_216,
     LA_F217,  /* "% [TCP] OOM: cannot allocate recv buffer for new client\n"  [server.c] */
-    LA_F218,  /* disabled "[TCP] I: Peer '%s' new instance (old=%u, new=%u), destroying old\n" */
-    LA_F219,  /* disabled "[TCP] Peer '%s' disconnected\n" */
-    LA_F220,  /* disabled "[TCP] SYNC0: local='%s' remote='%s' side=%d peer_online=%d candidates=%d\n" */
-    LA_F221,  /* disabled "[TCP] V: ONLINE_ACK sent to '%s'\n" */
-    LA_F222,  /* disabled "[TCP] W: Peer '%s' offline, cached SYNC0 candidates=%d\n" */
-    LA_F223,  /* disabled "[TCP] W: SYNC dropped, session %llu not paired\n" */
-    LA_F224,  /* disabled "[TCP] W: SYNC0_ACK queue busy for '%s', drop\n" */
-    LA_F225,  /* disabled "[TCP] W: SYNC_ACK queue busy for '%s', drop\n" */
-    LA_F226,  /* disabled "[TCP] W: Session %llu not found or not paired\n" */
-    LA_F227,  /* disabled "[TCP] W: Session %llu not found\n" */
-    LA_F228,  /* disabled "[TCP] W: Session %llu peer offline\n" */
-
-    /* Strings (LA_S) */
-    LA_S229,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S230,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S231,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S232,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S233,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S234,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S235,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S236,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-
-    /* Formats (LA_F) */
-    LA_F237,  /* disabled "[TCP] E: Duplicate ONLINE from '%s'\n" */
-    LA_F238,  /* disabled "[TCP] E: Message type=%u rejected: client not logged in\n" */
-    LA_F239,  /* disabled "% [TCP] E: OOM for SYNC0 zero-copy recv buffer\n" */
-    LA_F240,  /* disabled "[TCP] I: Peer '%s' reconnected (inst=%u), migrating fd\n" */
-    LA_F241,  /* disabled "[TCP] Peer '%s' came online (inst=%u)\n" */
-    LA_F242,  /* disabled "[TCP] W: Session %llu busy (pending sync)\n" */
-    LA_F243,  /* disabled "[TCP] W: Session %llu peer not connected (type=%u)\n" */
-    LA_F244,  /* disabled "[TCP] W: Unknown session %llu (type=%u)\n" */
-
-    /* Strings (LA_S) */
-    LA_S245,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S246,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S247,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S248,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-
-    /* Formats (LA_F) */
+    _LA_218,
+    _LA_219,
+    _LA_220,
+    _LA_221,
+    _LA_222,
+    _LA_223,
+    _LA_224,
+    _LA_225,
+    _LA_226,
+    _LA_227,
+    _LA_228,
+    _LA_229,
+    _LA_230,
+    _LA_231,
+    _LA_232,
+    _LA_233,
+    _LA_234,
+    _LA_235,
+    _LA_236,
+    _LA_237,
+    _LA_238,
+    _LA_239,
+    _LA_240,
+    _LA_241,
+    _LA_242,
+    _LA_243,
+    _LA_244,
+    _LA_245,
+    _LA_246,
+    _LA_247,
+    _LA_248,
     LA_F249,  /* "% Client closed connection (EOF on recv)\n"  [server.c] */
     LA_F250,  /* "% Client disconnected (not yet logged in)\n"  [server.c] */
     LA_F251,  /* "% Client sent data before ONLINE_ACK completed\n"  [server.c] */
@@ -316,7 +300,7 @@ enum {
     LA_F256,  /* "%s: bad payload(cnt=%u, len=%u, expected=%u+1fin)\n" (%s,%u,%u,%u)  [server.c] */
     LA_F257,  /* "%s: '%s' sid=%u code=%u data_len=%d\n" (%s,%s,%u,%u,%d)  [server.c] */
     LA_F258,  /* "%s: build_session failed for '%s'\n" (%s,%s)  [server.c] */
-    LA_F259,  /* "%s: close ses_id=%llu\n" (%s,%l)  [server.c] */
+    LA_F259,  /* "%s: close ses_id=%u\n" (%s,%u)  [server.c] */
     LA_F260,  /* "%s: forwarded to peer, cands=%d\n" (%s,%d)  [server.c] */
     LA_F261,  /* "%s: local='%s', remote='%s', side=%d, peer_online=%d, cands=%d\n" (%s,%s,%s,%d,%d,%d)  [server.c] */
     LA_F262,  /* "%s: peer '%s' offline, cached cands=%d\n" (%s,%s,%d)  [server.c] */
@@ -336,94 +320,89 @@ enum {
     LA_F276,  /* "bad payload len %u\n" (%u)  [server.c] */
     LA_F277,  /* "recv() failed: errno=%d\n" (%d)  [server.c] */
     LA_F278,  /* "send(%s) failed: errno=%d\n" (%s,%d)  [server.c] */
-    LA_F279,  /* disabled "ses_id=%llu busy (pending sync)\n" */
+    _LA_279,
     LA_F280,  /* "%s: peer offline, sending error resp\n" (%s)  [server.c] */
     LA_F281,  /* "type=%u rejected: client not logged in\n" (%u)  [server.c] */
-    LA_F282,  /* "unknown ses_id=%llu (type=%u)\n" (%l,%u)  [server.c] */
-    LA_F283,  /* "unsupported type=%u (ses_id=%llu)\n" (%u,%l)  [server.c] */
-
-    /* Strings (LA_S) */
-    LA_S284,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S285,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S286,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S287,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-
-    /* Formats (LA_F) */
+    LA_F282,  /* "unknown ses_id=%u (type=%u)\n" (%u,%u)  [server.c] */
+    LA_F283,  /* "unsupported type=%u (ses_id=%u)\n" (%u,%u)  [server.c] */
+    _LA_284,
+    _LA_285,
+    _LA_286,
+    _LA_287,
     LA_F288,  /* "%s: rpc busy (pending sid=%u)\n" (%s,%u)  [server.c] */
-
-    /* Strings (LA_S) */
-    LA_S289,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S290,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S291,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S292,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S293,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-
-    /* Formats (LA_F) */
+    _LA_289,
+    _LA_290,
+    _LA_291,
+    _LA_292,
+    _LA_293,
     LA_F294,  /* "%s: '%s' sid=%u msg=%u data_len=%d\n" (%s,%s,%u,%u,%d)  [server.c] */
     LA_F295,  /* "%s: bad payload(len=%u)\n" (%s,%u)  [server.c] */
     LA_F296,  /* "%s: invalid instance_id=0 from %s\n" (%s,%s)  [server.c] */
     LA_F297,  /* "%s: invalid seq=%u\n" (%s,%u)  [server.c] */
-    LA_F298,  /* "%s: paired '%.*s' <-> '%.*s'\n" (%s)  [server.c] */
-    LA_F299,  /* "%s: remote_peer_id mismatch for auth_key=%llu from %s\n" (%s,%l,%s)  [server.c] */
+    LA_F298,  /* "%s: '%.*s' cleared stale peer marker, ready for re-pair\n" (%s)  [server.c] */
+    _LA_299,
     LA_F300,  /* "%s: requester offline, discarding\n" (%s)  [server.c] */
     LA_F301,  /* "%s: sid mismatch (got=%u, pending=%u), discarding\n" (%s,%u,%u)  [server.c] */
     LA_F302,  /* "%s: unknown auth_key=%llu from %s\n" (%s,%l,%s)  [server.c] */
     LA_F303,  /* "% RPC_ERR: OOM\n"  [server.c] */
-    LA_F304,  /* "Send %s: ses_id=%llu, sid=%u, status=%u\n" (%s,%l,%u,%u)  [server.c] */
-    LA_F305,  /* "ses_id=%llu busy (pending relay)\n" (%l)  [server.c] */
-    LA_F306,  /* "ses_id=%llu peer not connected (type=%u)\n" (%l,%u)  [server.c] */
-
-    /* Strings (LA_S) */
-    LA_S307,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S308,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S309,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S310,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S311,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S312,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S313,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S314,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S315,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S316,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S317,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S318,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S319,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S320,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S321,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S322,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S323,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S324,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S325,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S326,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S327,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S328,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S329,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S330,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S331,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S332,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S333,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S334,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S335,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S336,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S337,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-
-    /* Formats (LA_F) */
-    LA_F338,  /* "Send %s: cands=%d, ses_id=%llu, peer='%s'\n" (%s,%d,%l,%s)  [server.c] */
-
-    /* Strings (LA_S) */
-    LA_S339,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-
-    /* Formats (LA_F) */
-    LA_F340,  /* "%s: confirmed '%s', retries=%d (ses_id=%llu)\n" (%s,%s,%d,%l)  [server.c] */
+    LA_F304,  /* "Send %s: ses_id=%u, sid=%u, status=%u\n" (%s,%u,%u,%u)  [server.c] */
+    LA_F305,  /* "ses_id=%u busy (pending relay)\n" (%u)  [server.c] */
+    LA_F306,  /* "ses_id=%u peer not connected (type=%u)\n" (%u,%u)  [server.c] */
+    _LA_307,
+    _LA_308,
+    _LA_309,
+    _LA_310,
+    _LA_311,
+    _LA_312,
+    _LA_313,
+    _LA_314,
+    _LA_315,
+    _LA_316,
+    _LA_317,
+    _LA_318,
+    _LA_319,
+    _LA_320,
+    _LA_321,
+    _LA_322,
+    _LA_323,
+    _LA_324,
+    _LA_325,
+    _LA_326,
+    _LA_327,
+    _LA_328,
+    _LA_329,
+    _LA_330,
+    _LA_331,
+    _LA_332,
+    _LA_333,
+    _LA_334,
+    _LA_335,
+    _LA_336,
+    _LA_337,
+    LA_F338,  /* "Send %s: cands=%d, ses_id=%u, peer='%s'\n" (%s,%d,%u,%s)  [server.c] */
+    _LA_339,
+    LA_F340,  /* "%s: confirmed '%s', retries=%d (ses_id=%u)\n" (%s,%s,%d,%u)  [server.c] */
     LA_F341,  /* "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n" (%s,%s,%u)  [server.c] */
+    _LA_342,
+    _LA_343,
+    _LA_344,
+    _LA_345,
+    _LA_346,
+    _LA_347,
+    _LA_348,
+    _LA_349,
+    LA_F350,  /* "%s: build_session failed for '%.*s'\n" (%s)  [server.c] */
+    LA_F351,  /* "%s: late-paired '%.*s' <-> '%.*s' (waiting session found)\n" (%s)  [server.c] */
+    LA_F352,  /* "%s: paired '%.*s' <-> '%.*s'\n" (%s)  [server.c] */
+    LA_F353,  /* "%s: skip pairing '%.*s' with stale '%.*s' (peer_died, awaiting re-register)\n" (%s)  [server.c] */
+    _LA_354,
+    _LA_355,
+    _LA_356,
+    _LA_357,
+    _LA_358,
 
     /* Strings (LA_S) */
-    LA_S342,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S343,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S344,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S345,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S346,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S347,  /* disabled "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)" */
-    LA_S348,  /* "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)"  [server.c] */
+    LA_S359,  /* "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)"  [server.c] */
 
     LA_NUM
 };
