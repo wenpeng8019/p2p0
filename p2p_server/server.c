@@ -45,7 +45,23 @@
 
 #ifdef WITH_WSLAY
 #  include "ws_server.h"
+#  include <stdlib.h>   /* malloc / free */
 static ws_server_t *g_ws_srv = NULL;
+
+/* 将收到的文本消息广播给所有已连接的 WS 客户端 */
+static void ws_on_msg_broadcast(ws_server_t *srv, ws_client_id_t cid,
+                                ws_srv_msg_type_t type,
+                                const uint8_t *data, size_t len,
+                                void *user_data) {
+    (void)cid; (void)user_data;
+    if (type != WS_SRV_MSG_TEXT || len == 0) return;
+    char *tmp = (char *)malloc(len + 1);
+    if (!tmp) return;
+    memcpy(tmp, data, len);
+    tmp[len] = '\0';
+    ws_server_broadcast_text(srv, tmp);
+    free(tmp);
+}
 #endif
 
 // 命令行参数定义
@@ -3086,6 +3102,7 @@ int main(int argc, char *argv[]) {
 #ifdef WITH_WSLAY
     if (ARGS_ws.i64) {
         ws_server_cfg_t ws_cfg = {0};
+        ws_cfg.on_message = ws_on_msg_broadcast; /* 广播收到的消息给所有客户端 */
         /* ws_port>0: 独立端口，ws_server 自建监听；否则嵌入同端口（port=0）*/
         uint16_t ws_listen_port = (uint16_t)(ARGS_ws_port.i64 > 0 ? ARGS_ws_port.i64 : 0);
         g_ws_srv = ws_server_create(&ws_cfg, ws_listen_port);

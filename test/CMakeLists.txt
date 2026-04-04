@@ -245,6 +245,24 @@ if(WITH_WSLAY)
     target_compile_options(test_ws_server_integration PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
     )
+
+    # WebSocket 浏览器端对端手动演示（非自动化测试，不加入 CTest）
+    # 用法：./test/test_ws_browser
+    add_executable(test_ws_browser
+        test_ws_browser.c
+    )
+    target_include_directories(test_ws_browser PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/p2p_server
+        ${CMAKE_SOURCE_DIR}/stdc
+        ${WSLAY_INCLUDE_DIRS}
+    )
+    target_link_libraries(test_ws_browser
+        p2p_static
+        ${TEST_PLATFORM_LIBS}
+    )
+    target_compile_definitions(test_ws_browser PRIVATE WITH_WSLAY)
 endif()
 
 # 添加测试
