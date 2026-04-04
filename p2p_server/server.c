@@ -54,6 +54,7 @@ ARGS_I(false, probe_port, 'P', "probe-port", LA_CS("NAT type detection port (0=d
 ARGS_B(false, relay,      'r', "relay",      LA_CS("Enable data relay support (COMPACT mode fallback)", LA_S4, 4));
 ARGS_B(false, msg,        'm', "msg",        LA_CS("Enable MSG RPC support", LA_S5, 5));
 ARGS_B(false, ws,         'S', "ws",         "Enable WebSocket service on same TCP port");
+ARGS_I(false, ws_port,    0,   "ws-port",   "WebSocket dedicated port (also enables --ws)");
 
 static void cb_cn(const char* argv) { (void)argv;  lang_cn(); }
 ARGS_PRE(cb_cn, cn,         0,   "cn",       LA_CS("Use Chinese language", LA_S10, 10));
@@ -2957,9 +2958,13 @@ int main(int argc, char *argv[]) {
             &ARGS_DEF_relay,
             &ARGS_DEF_msg,
             &ARGS_DEF_ws,
+            &ARGS_DEF_ws_port,
             &ARGS_DEF_cn,
             NULL);
     }
+
+    // --ws-port 隐含开启 --ws
+    if (ARGS_ws_port.i64 > 0) ARGS_ws.i64 = 1;
 
     // 获取参数值（设置默认值）
     int port = ARGS_port.i64 ? (int)ARGS_port.i64 : DEFAULT_PORT;
@@ -2992,8 +2997,13 @@ int main(int argc, char *argv[]) {
     print("I:", LA_F("Relay support: %s\n", LA_F101, 101), 
           ARGS_relay.i64 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
 #ifdef WITH_WSLAY
-    print("I:", "WebSocket service: %s\n",
-          ARGS_ws.i64 ? "enabled (same port)" : "disabled");
+    if (!ARGS_ws.i64) {
+        print("I:", "WebSocket service: disabled\n");
+    } else if (ARGS_ws_port.i64 > 0) {
+        print("I:", "WebSocket service: enabled (dedicated port %d)\n", (int)ARGS_ws_port.i64);
+    } else {
+        print("I:", "WebSocket service: enabled (same port %d)\n", port);
+    }
 #endif
 
     // 注册信号处理
@@ -3076,9 +3086,13 @@ int main(int argc, char *argv[]) {
 #ifdef WITH_WSLAY
     if (ARGS_ws.i64) {
         ws_server_cfg_t ws_cfg = {0};
-        g_ws_srv = ws_server_create(&ws_cfg, 0);  /* port=0: 嵌入模式，不自建监听 */
+        /* ws_port>0: 独立端口，ws_server 自建监听；否则嵌入同端口（port=0）*/
+        uint16_t ws_listen_port = (uint16_t)(ARGS_ws_port.i64 > 0 ? ARGS_ws_port.i64 : 0);
+        g_ws_srv = ws_server_create(&ws_cfg, ws_listen_port);
         if (!g_ws_srv) {
             print("W:", "WebSocket server init failed, WS disabled\n");
+        } else if (ws_listen_port > 0) {
+            print("I:", "WebSocket service listening on port %d\n", (int)ws_listen_port);
         } else {
             print("I:", "WebSocket service ready on port %d\n", port);
         }
@@ -3162,10 +3176,10 @@ int main(int argc, char *argv[]) {
             }
 
 #ifdef WITH_WSLAY
-            /* 同端口 WS 检测：peek 首字节，HTTP 请求以 'G'(GET) 开头。
+            /* 同端口 WS 检测：仅在嵌入模式（无独立端口）时执行。
              * 需要先用 select() 等数据到达，因为 socket 已设为非阻塞，
              * 直接 recv+MSG_PEEK 会立刻返回 EAGAIN（数据尚未到达）。 */
-            if (g_ws_srv) {
+            if (g_ws_srv && ARGS_ws_port.i64 == 0) {
                 fd_set _ps; FD_ZERO(&_ps); FD_SET(client_fd, &_ps);
                 struct timeval _pt = {0, 200000}; /* 最多等 200ms */
                 char peek_byte = 0;
