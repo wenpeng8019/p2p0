@@ -133,14 +133,6 @@ struct ws_server {
 };
 
 /* =========================================================================
- * socket 辅助
- * ====================================================================== */
-
-static int ws_srv_nonblock(sock_t fd) {
-    return P_sock_nonblock(fd, true) == E_NONE ? 0 : -1;
-}
-
-/* =========================================================================
  * wslay 服务端回调（每个槽位共用，通过 user_data 区分）
  * ====================================================================== */
 
@@ -390,7 +382,7 @@ ws_server_t *ws_server_create(const ws_server_cfg_t *cfg, uint16_t port) {
     if (!VALID_SOCK(srv->listen_fd)) { free(srv); return NULL; }
 
     P_sock_reuseaddr(srv->listen_fd, true);
-    ws_srv_nonblock(srv->listen_fd);
+    P_sock_nonblock(srv->listen_fd, true);
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -441,7 +433,7 @@ void ws_server_update(ws_server_t *srv) {
             break;
         }
 
-        ws_srv_nonblock(fd);
+        P_sock_nonblock(fd, true);
         slot->fd    = fd;
         slot->state = WS_SLOT_HANDSHAKING;
         slot->http_buf_len = 0;
@@ -554,7 +546,7 @@ int ws_server_inject_fd(ws_server_t *srv, ws_srv_fd_t fd) {
     }
     if (!slot) return -1;
 
-    ws_srv_nonblock((sock_t)fd);
+    P_sock_nonblock((sock_t)fd, true);
     slot->fd           = (sock_t)fd;
     slot->state        = WS_SLOT_HANDSHAKING;
     slot->http_buf_len = 0;

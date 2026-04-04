@@ -176,14 +176,6 @@ struct ws_client {
 };
 
 /* =========================================================================
- * socket 辅助
- * ====================================================================== */
-
-static int set_nonblock(sock_t fd) {
-    return P_sock_nonblock(fd, true) == E_NONE ? 0 : -1;
-}
-
-/* =========================================================================
  * wslay 回调（客户端侧）
  * ====================================================================== */
 
@@ -333,7 +325,7 @@ int ws_client_connect(ws_client_t *c,
     c->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (c->fd == P_INVALID_SOCKET) return -1;
 
-    if (set_nonblock(c->fd) != 0) {
+    if (P_sock_nonblock(c->fd, true) != E_NONE) {
         P_sock_close(c->fd); c->fd = P_INVALID_SOCKET; return -1;
     }
 
