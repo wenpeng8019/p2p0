@@ -675,7 +675,9 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
             // 注册连接目标；若 ONLINE_ACK 未到，signal_compact_connect 仅存储 remote_peer_id，
             // SYNC0 会在 ONLINE_ACK 处理完后自动触发
-            print("I:", LA_F("Starting COMPACT session with %s", LA_F615, 615), remote_peer_id);
+            // 仅在首次发起时打印日志（remote_peer_id 未设置），重入幂等调用不重复打印
+            if (!s->sig_compact_ctx.remote_peer_id[0])
+                print("I:", LA_F("Starting COMPACT session with %s", LA_F615, 615), remote_peer_id);
             if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE) {
                 print("E:", LA_F("Start COMPACT session failed(%d)", LA_F614, 614), ret);
             }
@@ -691,7 +693,9 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
             // 注册连接目标；若 ONLINE_ACK 未到，signal_relay_connect 仅存储 remote_peer_id + 置 connected=true，
             // SYNC0 会在 ONLINE_ACK 处理完后自动触发
-            print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
+            // 仅在首次发起时打印日志（connected 未设置），重入幂等调用不重复打印
+            if (!s->sig_relay_ctx.connected)
+                print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
             if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE) {
                 print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
             }

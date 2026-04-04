@@ -602,7 +602,7 @@ int main(int argc, char *argv[]) {
                 print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
                 break;
             }
-            connect_retry_at = P_tick_ms() + 500;
+            connect_pending = false;  // 已触发，等状态机推进；CLOSED 时再重置
         }
 
         // 一旦进入打洞/连通阶段，停止重试调度。
