@@ -4,13 +4,13 @@
 
 #include "LANG.h"
 
-int LA_server;
+int LA_p2p_server;
 
 /* 字符串表 */
 static const char* s_lang_en[LA_NUM] = {
     [LA_W1] = "disabled",  /* SID:1 */
     [LA_W2] = "enabled",  /* SID:2 */
-    [LA_S359] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:359 */
+    [LA_S354] = "Description:\n  P2P signaling server supporting both COMPACT (UDP) and RELAY (TCP) modes.\n  - COMPACT: Stateless UDP signaling with integrated candidate exchange\n  - RELAY:   Stateful TCP signaling for ICE/STUN/TURN architecture\n\nExamples:\n  $0                              # Default: port 9333, no probe, no relay\n  $0 -p 8888                      # Listen on port 8888\n  $0 -p 8888 -P 8889              # Port 8888, probe port 8889\n  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n  $0 --cn -p 8888                 # Chinese language\n\nNote: Run without arguments to use default configuration (port 9333)",  /* SID:354 */
     [LA_S5] = "Enable data relay support (COMPACT mode fallback)",  /* SID:5 */
     [LA_S6] = "Enable MSG RPC support",  /* SID:6 */
     [LA_S7] = "NAT type detection port (0=disabled)",  /* SID:7 */
@@ -57,7 +57,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F31] = "%s: invalid auth_key=0 from %s\n",  /* SID:31 */
     [LA_F296] = "%s: invalid instance_id=0 from %s\n",  /* SID:296 */
     [LA_F32] = "%s: invalid relay flag from client\n",  /* SID:32 */
-    [LA_F297] = "%s: invalid seq=%u\n",  /* SID:297 */
+    [LA_F118] = "%s: invalid seq=%u\n",  /* SID:118 */
     [LA_F34] = "%s: invalid session_id=%u or sid=%u\n",  /* SID:34 */
     [LA_F351] = "%s: late-paired '%.*s' <-> '%.*s' (waiting session found)\n",  /* SID:351 */
     [LA_F261] = "%s: local='%s', remote='%s', side=%d, peer_online=%d, cands=%d\n",  /* SID:261 */
@@ -145,8 +145,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F180] = "[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n",  /* SID:180 */
     [LA_F181] = "[UDP] %s send to %s, seq=0, flags=0, len=%d\n",  /* SID:181 */
     [LA_F182] = "[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n",  /* SID:182 */
-    [LA_F121] = "[UDP] %s send to %s:%d failed(%d)\n",  /* SID:121 */
-    [LA_F122] = "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n",  /* SID:122 */
+    [LA_F355] = "[UDP] %s send to %s:%d failed(%d)\n",  /* SID:355 */
+    [LA_F358] = "[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n",  /* SID:358 */
     [LA_F123] = "[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n",  /* SID:123 */
     [LA_F275] = "bad payload len %u (type=%u)\n",  /* SID:275 */
     [LA_F276] = "bad payload len %u\n",  /* SID:276 */
@@ -160,10 +160,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F281] = "type=%u rejected: client not logged in\n",  /* SID:281 */
     [LA_F282] = "unknown ses_id=%u (type=%u)\n",  /* SID:282 */
     [LA_F283] = "unsupported type=%u (ses_id=%u)\n",  /* SID:283 */
-    [LA_S8] = "Received shutdown signal, exiting gracefully...",  /* SID:8 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/
-void LA_server_init(void) {
+void LA_p2p_server_init(void) {
     LA_RID = lang_def(s_lang_en, sizeof(s_lang_en) / sizeof(s_lang_en[0]), LA_FMT_START);
 }

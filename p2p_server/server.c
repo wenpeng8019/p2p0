@@ -2913,7 +2913,7 @@ BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
 #else
 void signal_handler(int signum) {
     if (signum == SIGINT || signum == SIGTERM) {
-        print("I: \n%s\n", LA_S8, 8("Received shutdown signal, exiting gracefully...", LA_S8, 8));
+        print("I: \n%s\n", LA_S("Received shutdown signal, exiting gracefully...", LA_S8, 8));
         g_running = 0;
     }
 }
@@ -2941,7 +2941,7 @@ int main(int argc, char *argv[]) {
                     "  $0 -p 8888 -P 8889 --relay      # Full config with relay support\n"
                     "  $0 --cn -p 8888                 # Chinese language\n"
                     "\n"
-                    "Note: Run without arguments to use default configuration (port 9333)", LA_S359, 359));
+                    "Note: Run without arguments to use default configuration (port 9333)", 0, 0));
 
     // 解析命令行参数（如果无参数，使用默认配置不显示帮助）
     if (argc > 1) {
