@@ -64,3 +64,19 @@ target_link_libraries(p2p_server PRIVATE stdc ${PLATFORM_LIBS})
 if(WIN32)
     target_link_libraries(p2p_server PRIVATE ws2_32)
 endif()
+
+# --- ws_server 可选组件 ---
+if(WITH_WSLAY)
+    add_library(ws_server STATIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/ws_server.c
+    )
+    target_include_directories(ws_server PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${WSLAY_INCLUDE_DIRS}
+    )
+    target_compile_options(ws_server PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wno-unknown-pragmas>
+    )
+    target_link_libraries(ws_server PRIVATE ${WSLAY_LIBRARIES})
+    message(STATUS "p2p_server: ws_server WebSocket 服务器已启用")
+endif()

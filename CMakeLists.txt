@@ -5,6 +5,7 @@ project(p2p VERSION 0.1.0 LANGUAGES C)
 option(WITH_DTLS    "启用 MbedTLS DTLS 支持" OFF)
 option(WITH_OPENSSL "启用 OpenSSL DTLS 支持" OFF)
 option(WITH_SCTP    "启用 usrsctp 支持" OFF)
+option(WITH_WSLAY   "启用 wslay WebSocket 支持" ON)
 option(THREADED     "启用内部线程" ON)
 option(I18N_ENABLED "启用 i18n 多语言支持" OFF)
 option(I18N_CN      "生成中文翻译头文件 (LANG.cn.h)" OFF)
@@ -202,6 +203,59 @@ if(WITH_SCTP)
     endif()
 endif()
 
+# --- wslay 集成 ---
+# 直接嵌入 wslay 源文件，避免 wslay 自身 CMakeLists 的 -Werror 影响
+if(WITH_WSLAY)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/wslay/lib/wslay_event.c")
+        message(FATAL_ERROR
+            "wslay submodule not found. Please run:\n"
+            "  git submodule update --init third_party/wslay")
+    endif()
+    add_definitions(-DWITH_WSLAY)
+    set(WSLAY_SRCS
+        third_party/wslay/lib/wslay_event.c
+        third_party/wslay/lib/wslay_frame.c
+        third_party/wslay/lib/wslay_net.c
+        third_party/wslay/lib/wslay_queue.c
+        third_party/wslay/lib/wslay_stack.c
+    )
+    # 生成 config.h（wslay 内部需要）
+    include(CheckIncludeFile)
+    include(TestBigEndian)
+    check_include_file("arpa/inet.h"  HAVE_ARPA_INET_H)
+    check_include_file("netinet/in.h" HAVE_NETINET_IN_H)
+    check_include_file("winsock2.h"   HAVE_WINSOCK2_H)
+    test_big_endian(WORDS_BIGENDIAN)
+    set(PACKAGE_VERSION "1.0.1")
+    configure_file(
+        third_party/wslay/lib/config.h.in
+        ${CMAKE_BINARY_DIR}/wslay_config/config.h @ONLY
+    )
+    configure_file(
+        third_party/wslay/lib/includes/wslay/wslayver.h.in
+        ${CMAKE_BINARY_DIR}/wslay_config/wslay/wslayver.h @ONLY
+    )
+    # wslay 静态库（关闭 -Werror，使用宽松编译选项）
+    add_library(wslay STATIC ${WSLAY_SRCS})
+    target_include_directories(wslay PRIVATE
+        third_party/wslay/lib
+        third_party/wslay/lib/includes
+        ${CMAKE_BINARY_DIR}/wslay_config
+    )
+    target_compile_options(wslay PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-w>
+    )
+    # 对外暴露头文件路径
+    set(WSLAY_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/third_party/wslay/lib/includes
+        ${CMAKE_BINARY_DIR}/wslay_config
+    )
+    set(WSLAY_LIBRARIES wslay)
+    # ws_client 加入 p2p 核心库
+    list(APPEND LIB_SRCS src/ws_client.c)
+    message(STATUS "wslay WebSocket 支持已启用")
+endif()
+
 # --- 目标定义 ---
 
 # i18n 扫描辅助目标：确保条件编译的源文件也进入 compile_commands.json
@@ -230,6 +284,10 @@ target_include_directories(p2p_static PRIVATE src)
 target_link_libraries(p2p_static stdc ${PLATFORM_LIBS})
 if(WITH_SCTP)
     target_link_libraries(p2p_static ${SCTP_LIBRARIES})
+endif()
+if(WITH_WSLAY)
+    target_include_directories(p2p_static PRIVATE ${WSLAY_INCLUDE_DIRS})
+    target_link_libraries(p2p_static ${WSLAY_LIBRARIES})
 endif()
 if(I18N_ENABLED)
     target_compile_definitions(p2p_static PRIVATE I18N_ENABLED)

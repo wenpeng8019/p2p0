@@ -207,6 +207,28 @@ target_include_directories(test_ping_r_sync PRIVATE
 )
 target_link_libraries(test_ping_r_sync stdc ${TEST_PLATFORM_LIBS})
 
+# WebSocket server + client 集成测试
+if(WITH_WSLAY)
+    add_executable(test_ws
+        test_ws.c
+    )
+    target_include_directories(test_ws PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/p2p_server
+        ${WSLAY_INCLUDE_DIRS}
+    )
+    target_link_libraries(test_ws
+        ws_server
+        p2p_static
+        ${TEST_PLATFORM_LIBS}
+    )
+    target_compile_definitions(test_ws PRIVATE WITH_WSLAY)
+endif()
+
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)
+if(WITH_WSLAY)
+    add_test(NAME test_ws        COMMAND test_ws)
+endif()
