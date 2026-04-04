@@ -235,12 +235,15 @@ static ssize_t wslay_recv_cb(wslay_event_context_ptr ctx,
         return (ssize_t)copy;
     }
 
-    /* 直接从 socket 读 */
+    /* 直接从 socket 读，循环处理 EINTR */
+    ssize_t n;
+    do {
 #ifdef _WIN32
-    int n = recv(c->fd, (char*)buf, (int)len, 0);
+        n = (ssize_t)recv(c->fd, (char*)buf, (int)len, 0);
 #else
-    ssize_t n = recv(c->fd, buf, len, 0);
+        n = recv(c->fd, buf, len, 0);
 #endif
+    } while (n < 0 && SOCK_ERRNO == EINTR);
     if (n < 0) {
         int e = SOCK_ERRNO;
         if (e == EWOULDBLOCK_VAL) {
@@ -254,7 +257,7 @@ static ssize_t wslay_recv_cb(wslay_event_context_ptr ctx,
         wslay_event_set_error(ctx, WSLAY_ERR_CALLBACK_FAILURE);
         return -1;
     }
-    return (ssize_t)n;
+    return n;
 }
 
 static ssize_t wslay_send_cb(wslay_event_context_ptr ctx,
@@ -262,11 +265,14 @@ static ssize_t wslay_send_cb(wslay_event_context_ptr ctx,
                               int flags, void *user_data) {
     (void)ctx; (void)flags;
     ws_client_t *c = (ws_client_t *)user_data;
+    ssize_t n;
+    do {
 #ifdef _WIN32
-    int n = send(c->fd, (const char*)data, (int)len, 0);
+        n = (ssize_t)send(c->fd, (const char*)data, (int)len, 0);
 #else
-    ssize_t n = send(c->fd, data, len, 0);
+        n = send(c->fd, data, len, 0);
 #endif
+    } while (n < 0 && SOCK_ERRNO == EINTR);
     if (n < 0) {
         int e = SOCK_ERRNO;
         if (e == EWOULDBLOCK_VAL) {
@@ -276,7 +282,7 @@ static ssize_t wslay_send_cb(wslay_event_context_ptr ctx,
         }
         return -1;
     }
-    return (ssize_t)n;
+    return n;
 }
 
 static int wslay_genmask_cb(wslay_event_context_ptr ctx,

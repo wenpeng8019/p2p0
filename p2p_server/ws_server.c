@@ -190,11 +190,14 @@ static ssize_t sslot_recv_cb(wslay_event_context_ptr ctx,
         slot->recv_buf_pos += cp; slot->recv_buf_len -= cp;
         return (ssize_t)cp;
     }
+    ssize_t n;
+    do {
 #ifdef _WIN32
-    int n = recv(slot->fd, (char*)buf, (int)len, 0);
+        n = (ssize_t)recv(slot->fd, (char*)buf, (int)len, 0);
 #else
-    ssize_t n = recv(slot->fd, buf, len, 0);
+        n = recv(slot->fd, buf, len, 0);
 #endif
+    } while (n < 0 && SOCK_ERRNO == EINTR);
     if (n < 0) {
         int e = SOCK_ERRNO;
         wslay_event_set_error(ctx, e == EWOULDBLOCK_V ? WSLAY_ERR_WOULDBLOCK
@@ -211,18 +214,21 @@ static ssize_t sslot_send_cb(wslay_event_context_ptr ctx,
     (void)flags;
     ws_srv_cbdata_t *d = (ws_srv_cbdata_t *)ud;
     ws_slot_t *slot = d->slot;
+    ssize_t n;
+    do {
 #ifdef _WIN32
-    int n = send(slot->fd, (const char*)data, (int)len, 0);
+        n = (ssize_t)send(slot->fd, (const char*)data, (int)len, 0);
 #else
-    ssize_t n = send(slot->fd, data, len, 0);
+        n = send(slot->fd, data, len, 0);
 #endif
+    } while (n < 0 && SOCK_ERRNO == EINTR);
     if (n < 0) {
         int e = SOCK_ERRNO;
         wslay_event_set_error(ctx, e == EWOULDBLOCK_V ? WSLAY_ERR_WOULDBLOCK
                                                        : WSLAY_ERR_CALLBACK_FAILURE);
         return -1;
     }
-    return (ssize_t)n;
+    return n;
 }
 
 static void sslot_on_msg_cb(wslay_event_context_ptr ctx,
@@ -312,17 +318,36 @@ static int ws_srv_do_handshake(ws_server_t *srv, ws_slot_t *slot) {
         srv->cfg.sub_protocol ? srv->cfg.sub_protocol       : "",
         srv->cfg.sub_protocol ? "\r\n"                      : "");
 
-    /* 发送响应（阻塞式，握手帧通常很小，一次发完） */
-    int sent = 0;
-    while (sent < rlen) {
-#ifdef _WIN32
-        int n = send(slot->fd, resp + sent, rlen - sent, 0);
-#else
-        ssize_t n = send(slot->fd, resp + sent, (size_t)(rlen - sent), 0);
-#endif
-        if (n <= 0) return -1;
-        sent += (int)n;
+    /* 发送 101 响应：临时切回阻塞模式（响应仅 ~150 字节，不卡主循环）
+     * 非阻塞 socket 上直接 send 可能返回 EWOULDBLOCK（虽然极少），
+     * 阻塞一次性发完是最简洁的正确做法。 */
+#ifndef _WIN32
+    {
+        int _fl = fcntl(slot->fd, F_GETFL, 0);
+        if (_fl >= 0) fcntl(slot->fd, F_SETFL, _fl & ~O_NONBLOCK);
+        int sent = 0;
+        while (sent < rlen) {
+            ssize_t n;
+            do { n = send(slot->fd, resp + sent, (size_t)(rlen - sent), 0); }
+            while (n < 0 && errno == EINTR);
+            if (n <= 0) {
+                if (_fl >= 0) fcntl(slot->fd, F_SETFL, _fl);
+                return -1;
+            }
+            sent += (int)n;
+        }
+        if (_fl >= 0) fcntl(slot->fd, F_SETFL, _fl);  /* 恢复非阻塞 */
     }
+#else
+    {
+        int sent = 0;
+        while (sent < rlen) {
+            int n = send(slot->fd, resp + sent, rlen - sent, 0);
+            if (n <= 0) return -1;
+            sent += n;
+        }
+    }
+#endif
 
     /* 检查 HTTP 请求头之后是否有残余（WS frame 数据） */
     const char *body = strstr(slot->http_buf, "\r\n\r\n");
