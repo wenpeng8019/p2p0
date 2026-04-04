@@ -72,6 +72,7 @@ if(WITH_WSLAY)
     )
     target_include_directories(ws_server PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/stdc
         ${WSLAY_INCLUDE_DIRS}
     )
     target_compile_options(ws_server PRIVATE

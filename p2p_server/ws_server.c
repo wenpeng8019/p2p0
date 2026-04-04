@@ -6,46 +6,20 @@
  */
 
 #include "ws_server.h"
+#include <stdc.h>          /* sock_t / P_INVALID_SOCKET / P_sock_close / P_sock_nonblock /
+                            P_sock_is_wouldblock / P_sock_is_interrupted 等跟平台操作 */
 
 #ifndef WITH_WSLAY
 void ws_server_dummy(void) {}
 #else
 
-#ifdef _WIN32
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
-#  define SOCK_ERRNO    WSAGetLastError()
-#  define EWOULDBLOCK_V WSAEWOULDBLOCK
-#  define sock_close(s) closesocket(s)
-typedef SOCKET sock_t;
-#  define INVALID_SOCK  INVALID_SOCKET
-#  define VALID_SOCK(s) ((s) != INVALID_SOCKET)
-#else
-#  include <sys/socket.h>
-#  include <netinet/in.h>
-#  include <arpa/inet.h>
-#  include <fcntl.h>
-#  include <unistd.h>
-#  include <errno.h>
-#  define SOCK_ERRNO    errno
-#  define EWOULDBLOCK_V EWOULDBLOCK
-#  define sock_close(s) close(s)
-typedef int sock_t;
-#  define INVALID_SOCK  (-1)
-#  define VALID_SOCK(s) ((s) >= 0)
-#endif
-
 #include <wslay/wslay.h>
 
 #include <string.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <time.h>
 
-/* =========================================================================
- * SHA-1（与 ws_client 版本相同，自包含）
- * ====================================================================== */
+#define VALID_SOCK(s) ((s) != P_INVALID_SOCKET)
 
 #define WS_SHA1_LEN 20
 
@@ -163,12 +137,7 @@ struct ws_server {
  * ====================================================================== */
 
 static int ws_srv_nonblock(sock_t fd) {
-#ifdef _WIN32
-    unsigned long m=1; return ioctlsocket(fd,FIONBIO,&m)==0?0:-1;
-#else
-    int fl=fcntl(fd,F_GETFL,0); if(fl<0)return -1;
-    return fcntl(fd,F_SETFL,fl|O_NONBLOCK)==0?0:-1;
-#endif
+    return P_sock_nonblock(fd, true) == E_NONE ? 0 : -1;
 }
 
 /* =========================================================================
@@ -192,20 +161,16 @@ static ssize_t sslot_recv_cb(wslay_event_context_ptr ctx,
     }
     ssize_t n;
     do {
-#ifdef _WIN32
-        n = (ssize_t)recv(slot->fd, (char*)buf, (int)len, 0);
-#else
-        n = recv(slot->fd, buf, len, 0);
-#endif
-    } while (n < 0 && SOCK_ERRNO == EINTR);
+        n = recv(slot->fd, (char*)buf, (int)len, 0);
+    } while (n < 0 && P_sock_is_interrupted());
     if (n < 0) {
-        int e = SOCK_ERRNO;
-        wslay_event_set_error(ctx, e == EWOULDBLOCK_V ? WSLAY_ERR_WOULDBLOCK
-                                                       : WSLAY_ERR_CALLBACK_FAILURE);
+        wslay_event_set_error(ctx, P_sock_is_wouldblock()
+                                   ? WSLAY_ERR_WOULDBLOCK
+                                   : WSLAY_ERR_CALLBACK_FAILURE);
         return -1;
     }
     if (n == 0) { wslay_event_set_error(ctx, WSLAY_ERR_CALLBACK_FAILURE); return -1; }
-    return (ssize_t)n;
+    return n;
 }
 
 static ssize_t sslot_send_cb(wslay_event_context_ptr ctx,
@@ -216,16 +181,12 @@ static ssize_t sslot_send_cb(wslay_event_context_ptr ctx,
     ws_slot_t *slot = d->slot;
     ssize_t n;
     do {
-#ifdef _WIN32
-        n = (ssize_t)send(slot->fd, (const char*)data, (int)len, 0);
-#else
-        n = send(slot->fd, data, len, 0);
-#endif
-    } while (n < 0 && SOCK_ERRNO == EINTR);
+        n = send(slot->fd, (const char*)data, (int)len, 0);
+    } while (n < 0 && P_sock_is_interrupted());
     if (n < 0) {
-        int e = SOCK_ERRNO;
-        wslay_event_set_error(ctx, e == EWOULDBLOCK_V ? WSLAY_ERR_WOULDBLOCK
-                                                       : WSLAY_ERR_CALLBACK_FAILURE);
+        wslay_event_set_error(ctx, P_sock_is_wouldblock()
+                                   ? WSLAY_ERR_WOULDBLOCK
+                                   : WSLAY_ERR_CALLBACK_FAILURE);
         return -1;
     }
     return n;
@@ -264,16 +225,10 @@ static void sslot_on_msg_cb(wslay_event_context_ptr ctx,
 static int ws_srv_do_handshake(ws_server_t *srv, ws_slot_t *slot) {
     /* 继续接收 HTTP 请求 */
     while (slot->http_buf_len < sizeof(slot->http_buf) - 1) {
-#ifdef _WIN32
-        int n = recv(slot->fd, slot->http_buf + slot->http_buf_len,
-                     (int)(sizeof(slot->http_buf)-1-slot->http_buf_len), 0);
-#else
         ssize_t n = recv(slot->fd, slot->http_buf + slot->http_buf_len,
-                          sizeof(slot->http_buf)-1-slot->http_buf_len, 0);
-#endif
+                         (int)(sizeof(slot->http_buf)-1-slot->http_buf_len), 0);
         if (n <= 0) {
-            int e = SOCK_ERRNO;
-            if (n < 0 && e == EWOULDBLOCK_V) break;  /* 下次继续 */
+            if (n < 0 && P_sock_is_wouldblock()) break;  /* 下次继续 */
             return -1;  /* 断开 */
         }
         slot->http_buf_len += (size_t)n;
@@ -321,33 +276,18 @@ static int ws_srv_do_handshake(ws_server_t *srv, ws_slot_t *slot) {
     /* 发送 101 响应：临时切回阻塞模式（响应仅 ~150 字节，不卡主循环）
      * 非阻塞 socket 上直接 send 可能返回 EWOULDBLOCK（虽然极少），
      * 阻塞一次性发完是最简洁的正确做法。 */
-#ifndef _WIN32
+    P_sock_nonblock(slot->fd, false);
     {
-        int _fl = fcntl(slot->fd, F_GETFL, 0);
-        if (_fl >= 0) fcntl(slot->fd, F_SETFL, _fl & ~O_NONBLOCK);
         int sent = 0;
         while (sent < rlen) {
             ssize_t n;
-            do { n = send(slot->fd, resp + sent, (size_t)(rlen - sent), 0); }
-            while (n < 0 && errno == EINTR);
-            if (n <= 0) {
-                if (_fl >= 0) fcntl(slot->fd, F_SETFL, _fl);
-                return -1;
-            }
+            do { n = send(slot->fd, resp + sent, (int)(rlen - sent), 0); }
+            while (n < 0 && P_sock_is_interrupted());
+            if (n <= 0) { P_sock_nonblock(slot->fd, true); return -1; }
             sent += (int)n;
         }
-        if (_fl >= 0) fcntl(slot->fd, F_SETFL, _fl);  /* 恢复非阻塞 */
     }
-#else
-    {
-        int sent = 0;
-        while (sent < rlen) {
-            int n = send(slot->fd, resp + sent, rlen - sent, 0);
-            if (n <= 0) return -1;
-            sent += n;
-        }
-    }
-#endif
+    P_sock_nonblock(slot->fd, true);  /* 恢复非阻塞 */
 
     /* 检查 HTTP 请求头之后是否有残余（WS frame 数据） */
     const char *body = strstr(slot->http_buf, "\r\n\r\n");
@@ -413,8 +353,8 @@ static void ws_slot_close(ws_server_t *srv, ws_slot_t *slot) {
     }
 
     if (VALID_SOCK(slot->fd)) {
-        sock_close(slot->fd);
-        slot->fd = INVALID_SOCK;
+        P_sock_close(slot->fd);
+        slot->fd = P_INVALID_SOCKET;
     }
 
     slot->state       = WS_SLOT_FREE;
@@ -435,13 +375,13 @@ ws_server_t *ws_server_create(const ws_server_cfg_t *cfg, uint16_t port) {
 
     /* 初始化所有槽位 */
     for (int i = 0; i < WS_SERVER_MAX_CLIENTS; i++) {
-        srv->slots[i].fd = INVALID_SOCK;
+        srv->slots[i].fd = P_INVALID_SOCKET;
         srv->slots[i].id = i + 1;  /* 1-based */
     }
 
     /* port == 0：嵌入模式，不创建监听 socket，由外部注入已 accept 的 fd */
     if (port == 0) {
-        srv->listen_fd = INVALID_SOCK;
+        srv->listen_fd = P_INVALID_SOCKET;
         return srv;
     }
 
@@ -449,8 +389,7 @@ ws_server_t *ws_server_create(const ws_server_cfg_t *cfg, uint16_t port) {
     srv->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (!VALID_SOCK(srv->listen_fd)) { free(srv); return NULL; }
 
-    int val = 1;
-    setsockopt(srv->listen_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&val, sizeof(val));
+    P_sock_reuseaddr(srv->listen_fd, true);
     ws_srv_nonblock(srv->listen_fd);
 
     struct sockaddr_in addr;
@@ -461,7 +400,7 @@ ws_server_t *ws_server_create(const ws_server_cfg_t *cfg, uint16_t port) {
 
     if (bind(srv->listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0 ||
         listen(srv->listen_fd, 16) < 0) {
-        sock_close(srv->listen_fd);
+        P_sock_close(srv->listen_fd);
         free(srv);
         return NULL;
     }
@@ -473,7 +412,7 @@ void ws_server_destroy(ws_server_t *srv) {
     if (!srv) return;
     for (int i = 0; i < WS_SERVER_MAX_CLIENTS; i++)
         ws_slot_close(srv, &srv->slots[i]);
-    if (VALID_SOCK(srv->listen_fd)) sock_close(srv->listen_fd);
+    if (VALID_SOCK(srv->listen_fd)) P_sock_close(srv->listen_fd);
     free(srv);
 }
 
@@ -484,7 +423,7 @@ void ws_server_destroy(ws_server_t *srv) {
 void ws_server_update(ws_server_t *srv) {
     if (!srv) return;
 
-    /* 接受新连接（嵌入模式 listen_fd==INVALID_SOCK 时跳过）*/
+    /* 接受新连接（嵌入模式 listen_fd==P_INVALID_SOCKET 时跳过）*/
     if (VALID_SOCK(srv->listen_fd)) {
     for (;;) {
         struct sockaddr_in peer_addr;
@@ -498,7 +437,7 @@ void ws_server_update(ws_server_t *srv) {
             if (srv->slots[i].state == WS_SLOT_FREE) { slot = &srv->slots[i]; break; }
         }
         if (!slot) {
-            sock_close(fd);  /* 满了，拒绝 */
+            P_sock_close(fd);  /* 满了，拒绝 */
             break;
         }
 
@@ -527,11 +466,7 @@ void ws_server_update(ws_server_t *srv) {
             /* 读取新到达的 socket 数据 */
             if (slot->recv_buf_len == 0) {
                 slot->recv_buf_pos = 0;
-#ifdef _WIN32
-                int n = recv(slot->fd, (char*)slot->recv_buf, WS_SRV_RECV_BUF, 0);
-#else
-                ssize_t n = recv(slot->fd, slot->recv_buf, WS_SRV_RECV_BUF, 0);
-#endif
+                ssize_t n = recv(slot->fd, (char*)slot->recv_buf, WS_SRV_RECV_BUF, 0);
                 if (n == 0) {
                     ws_slot_close(srv, slot);
                     continue;

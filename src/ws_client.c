@@ -6,7 +6,8 @@
  */
 
 #include "ws_client.h"
-#include "predefine.h"
+#include "predefine.h"   /* stdc.h 已通过 predefine.h 引入，提供 sock_t / P_INVALID_SOCKET /
+                        P_sock_close / P_sock_nonblock / P_sock_is_wouldblock 等 */
 
 #ifndef WITH_WSLAY
 void ws_client_dummy(void) {}
@@ -14,36 +15,9 @@ void ws_client_dummy(void) {}
 
 #include <wslay/wslay.h>
 
-#ifdef _WIN32
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
-#  define SOCK_ERRNO  WSAGetLastError()
-#  define EWOULDBLOCK_VAL WSAEWOULDBLOCK
-#  define EINPROGRESS_VAL WSAEWOULDBLOCK
-#  define sock_close(s) closesocket(s)
-typedef SOCKET sock_t;
-#  define INVALID_SOCK INVALID_SOCKET
-#else
-#  include <sys/socket.h>
-#  include <netinet/in.h>
-#  include <arpa/inet.h>
-#  include <netdb.h>
-#  include <fcntl.h>
-#  include <unistd.h>
-#  include <errno.h>
-#  define SOCK_ERRNO  errno
-#  define EWOULDBLOCK_VAL EWOULDBLOCK
-#  define EINPROGRESS_VAL EINPROGRESS
-#  define sock_close(s) close(s)
-typedef int sock_t;
-#  define INVALID_SOCK (-1)
-#endif
-
 #include <string.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <time.h>
 
 /* =========================================================================
  * SHA-1（RFC 3174）— 仅用于 WS 握手 Sec-WebSocket-Accept
@@ -206,14 +180,7 @@ struct ws_client {
  * ====================================================================== */
 
 static int set_nonblock(sock_t fd) {
-#ifdef _WIN32
-    unsigned long mode = 1;
-    return ioctlsocket(fd, FIONBIO, &mode) == 0 ? 0 : -1;
-#else
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) return -1;
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 ? 0 : -1;
-#endif
+    return P_sock_nonblock(fd, true) == E_NONE ? 0 : -1;
 }
 
 /* =========================================================================
@@ -238,19 +205,12 @@ static ssize_t wslay_recv_cb(wslay_event_context_ptr ctx,
     /* 直接从 socket 读，循环处理 EINTR */
     ssize_t n;
     do {
-#ifdef _WIN32
-        n = (ssize_t)recv(c->fd, (char*)buf, (int)len, 0);
-#else
-        n = recv(c->fd, buf, len, 0);
-#endif
-    } while (n < 0 && SOCK_ERRNO == EINTR);
+        n = recv(c->fd, (char*)buf, (int)len, 0);
+    } while (n < 0 && P_sock_is_interrupted());
     if (n < 0) {
-        int e = SOCK_ERRNO;
-        if (e == EWOULDBLOCK_VAL) {
-            wslay_event_set_error(ctx, WSLAY_ERR_WOULDBLOCK);
-        } else {
-            wslay_event_set_error(ctx, WSLAY_ERR_CALLBACK_FAILURE);
-        }
+        wslay_event_set_error(ctx, P_sock_is_wouldblock()
+                                   ? WSLAY_ERR_WOULDBLOCK
+                                   : WSLAY_ERR_CALLBACK_FAILURE);
         return -1;
     }
     if (n == 0) {
@@ -267,19 +227,12 @@ static ssize_t wslay_send_cb(wslay_event_context_ptr ctx,
     ws_client_t *c = (ws_client_t *)user_data;
     ssize_t n;
     do {
-#ifdef _WIN32
-        n = (ssize_t)send(c->fd, (const char*)data, (int)len, 0);
-#else
-        n = send(c->fd, data, len, 0);
-#endif
-    } while (n < 0 && SOCK_ERRNO == EINTR);
+        n = send(c->fd, (const char*)data, (int)len, 0);
+    } while (n < 0 && P_sock_is_interrupted());
     if (n < 0) {
-        int e = SOCK_ERRNO;
-        if (e == EWOULDBLOCK_VAL) {
-            wslay_event_set_error(ctx, WSLAY_ERR_WOULDBLOCK);
-        } else {
-            wslay_event_set_error(ctx, WSLAY_ERR_CALLBACK_FAILURE);
-        }
+        wslay_event_set_error(ctx, P_sock_is_wouldblock()
+                                   ? WSLAY_ERR_WOULDBLOCK
+                                   : WSLAY_ERR_CALLBACK_FAILURE);
         return -1;
     }
     return n;
@@ -289,10 +242,8 @@ static int wslay_genmask_cb(wslay_event_context_ptr ctx,
                              uint8_t *buf, size_t len,
                              void *user_data) {
     (void)ctx; (void)user_data;
-    /* 客户端必须发送 masked 帧，生成随机掩码 */
-    for (size_t i = 0; i < len; i++) {
-        buf[i] = (uint8_t)(rand() & 0xFF);
-    }
+    /* 客户端必须发送 masked 帧，使用加密安全的随机数 */
+    P_rand_bytes(buf, len);
     return 0;
 }
 
@@ -331,16 +282,15 @@ ws_client_t *ws_client_create(const ws_client_cfg_t *cfg) {
     ws_client_t *c = (ws_client_t *)calloc(1, sizeof(*c));
     if (!c) return NULL;
     c->state = WS_CLIENT_CLOSED;
-    c->fd    = INVALID_SOCK;
+    c->fd    = P_INVALID_SOCKET;
     if (cfg) c->cfg = *cfg;
-    srand((unsigned)time(NULL));
     return c;
 }
 
 void ws_client_destroy(ws_client_t *c) {
     if (!c) return;
     if (c->ws_ctx) { wslay_event_context_free(c->ws_ctx); c->ws_ctx = NULL; }
-    if (c->fd != INVALID_SOCK) { sock_close(c->fd); c->fd = INVALID_SOCK; }
+    if (c->fd != P_INVALID_SOCKET) { P_sock_close(c->fd); c->fd = P_INVALID_SOCKET; }
     free(c);
 }
 
@@ -381,10 +331,10 @@ int ws_client_connect(ws_client_t *c,
     }
 
     c->fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (c->fd == INVALID_SOCK) return -1;
+    if (c->fd == P_INVALID_SOCKET) return -1;
 
     if (set_nonblock(c->fd) != 0) {
-        sock_close(c->fd); c->fd = INVALID_SOCK; return -1;
+        P_sock_close(c->fd); c->fd = P_INVALID_SOCKET; return -1;
     }
 
     int r = connect(c->fd, (struct sockaddr *)&addr, sizeof(addr));
@@ -392,18 +342,17 @@ int ws_client_connect(ws_client_t *c,
         /* 立即连通（本地环回等） */
         c->state = WS_CLIENT_HANDSHAKING;
     } else {
-        int e = SOCK_ERRNO;
-        if (e == EINPROGRESS_VAL) {
+        if (P_sock_is_inprogress()) {
             c->state = WS_CLIENT_CONNECTING;
         } else {
-            sock_close(c->fd); c->fd = INVALID_SOCK; return -1;
+            P_sock_close(c->fd); c->fd = P_INVALID_SOCKET; return -1;
         }
     }
 
     /* 准备 HTTP Upgrade 请求 */
     /* 生成随机 16 字节 Sec-WebSocket-Key（base64 = 24 字节） */
     uint8_t ws_key_raw[16];
-    for (int i = 0; i < 16; i++) ws_key_raw[i] = (uint8_t)(rand() & 0xFF);
+    P_rand_bytes(ws_key_raw, sizeof(ws_key_raw));
     char ws_key_b64[25];
     /* 对 16 字节进行 base64 编码 */
     {
@@ -479,7 +428,7 @@ static void ws_client_finish_connect(ws_client_t *c) {
     socklen_t errlen = sizeof(err);
     if (getsockopt(c->fd, SOL_SOCKET, SO_ERROR, (char*)&err, &errlen) < 0 || err != 0) {
         c->state = WS_CLIENT_ERROR;
-        sock_close(c->fd); c->fd = INVALID_SOCK;
+        P_sock_close(c->fd); c->fd = P_INVALID_SOCKET;
         if (c->cfg.on_close) c->cfg.on_close(c, 0, "tcp connect failed", c->cfg.user_data);
         return;
     }
@@ -490,16 +439,10 @@ static void ws_client_do_handshake(ws_client_t *c) {
     /* 发送 HTTP 请求 */
     if (!c->http_sent) {
         while (c->http_send_pos < c->http_send_len) {
-#ifdef _WIN32
-            int n = send(c->fd, c->http_buf + c->http_send_pos,
-                         (int)(c->http_send_len - c->http_send_pos), 0);
-#else
             ssize_t n = send(c->fd, c->http_buf + c->http_send_pos,
-                              c->http_send_len - c->http_send_pos, 0);
-#endif
+                             (int)(c->http_send_len - c->http_send_pos), 0);
             if (n <= 0) {
-                int e = SOCK_ERRNO;
-                if (e == EWOULDBLOCK_VAL) return;  /* 下次继续 */
+                if (P_sock_is_wouldblock()) return;  /* 下次继续 */
                 c->state = WS_CLIENT_ERROR;
                 return;
             }
@@ -512,16 +455,10 @@ static void ws_client_do_handshake(ws_client_t *c) {
 
     /* 接收 HTTP 响应 */
     while (c->http_buf_len < sizeof(c->http_buf) - 1) {
-#ifdef _WIN32
-        int n = recv(c->fd, c->http_buf + c->http_buf_len,
-                     (int)(sizeof(c->http_buf) - 1 - c->http_buf_len), 0);
-#else
         ssize_t n = recv(c->fd, c->http_buf + c->http_buf_len,
-                          sizeof(c->http_buf) - 1 - c->http_buf_len, 0);
-#endif
+                         (int)(sizeof(c->http_buf) - 1 - c->http_buf_len), 0);
         if (n <= 0) {
-            int e = SOCK_ERRNO;
-            if (e == EWOULDBLOCK_VAL) break;   /* 下次继续 */
+            if (n < 0 && P_sock_is_wouldblock()) break;  /* 下次继续 */
             c->state = WS_CLIENT_ERROR;
             return;
         }
@@ -538,7 +475,7 @@ static void ws_client_do_handshake(ws_client_t *c) {
     /* 验证 101 Switching Protocols */
     if (!strstr(c->http_buf, "101") || !strstr(c->http_buf, "Upgrade")) {
         c->state = WS_CLIENT_ERROR;
-        sock_close(c->fd); c->fd = INVALID_SOCK;
+        P_sock_close(c->fd); c->fd = P_INVALID_SOCKET;
         if (c->cfg.on_close) c->cfg.on_close(c, 0, "handshake rejected", c->cfg.user_data);
         return;
     }
@@ -551,7 +488,7 @@ static void ws_client_do_handshake(ws_client_t *c) {
         /* 比较 28 字节 base64 */
         if (strncmp(accept_str, c->accept_key, 28) != 0) {
             c->state = WS_CLIENT_ERROR;
-            sock_close(c->fd); c->fd = INVALID_SOCK;
+            P_sock_close(c->fd); c->fd = P_INVALID_SOCKET;
             if (c->cfg.on_close) c->cfg.on_close(c, 0, "accept key mismatch", c->cfg.user_data);
             return;
         }
@@ -594,11 +531,7 @@ static void ws_client_do_ws(ws_client_t *c) {
     /* 读取新到达的 socket 数据到 recv_buf */
     if (c->recv_buf_len == 0) {
         c->recv_buf_pos = 0;
-#ifdef _WIN32
-        int n = recv(c->fd, (char*)c->recv_buf, WS_RECV_BUF_SIZE, 0);
-#else
-        ssize_t n = recv(c->fd, c->recv_buf, WS_RECV_BUF_SIZE, 0);
-#endif
+        ssize_t n = recv(c->fd, (char*)c->recv_buf, WS_RECV_BUF_SIZE, 0);
         if (n > 0) {
             c->recv_buf_len = (size_t)n;
         } else if (n == 0) {
@@ -607,7 +540,7 @@ static void ws_client_do_ws(ws_client_t *c) {
             if (c->cfg.on_close) c->cfg.on_close(c, 1001, "eof", c->cfg.user_data);
             return;
         }
-        /* n < 0 且 EWOULDBLOCK：无新数据，忽略 */
+        /* n < 0 且 wouldblock：无新数据，忽略 */
     }
 
     if (wslay_event_want_read(c->ws_ctx)) {
@@ -621,7 +554,7 @@ static void ws_client_do_ws(ws_client_t *c) {
     if (!wslay_event_want_read(c->ws_ctx) && !wslay_event_want_write(c->ws_ctx)) {
         if (c->state == WS_CLIENT_CLOSING || c->state == WS_CLIENT_OPEN) {
             c->state = WS_CLIENT_CLOSED;
-            sock_close(c->fd); c->fd = INVALID_SOCK;
+            P_sock_close(c->fd); c->fd = P_INVALID_SOCKET;
             wslay_event_context_free(c->ws_ctx); c->ws_ctx = NULL;
         }
     }
