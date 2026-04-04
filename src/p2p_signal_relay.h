@@ -198,7 +198,7 @@ typedef struct {
     bool                connected;                      /* 是否存在 connect 意图/会话（用于幂等和异步触发） */
 
     /* 会话管理 */
-    uint64_t            session_id;                     /* 会话 ID（0=未分配）*/
+    uint32_t            session_id;                     /* 会话 ID（0=未分配）*/
     bool                peer_online;                    /* 对端是否在线 */
 
     /* 服务器能力（ONLINE_ACK 返回）*/

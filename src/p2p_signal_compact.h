@@ -137,7 +137,7 @@ typedef struct {
     uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 ONLINE_ACK 中获得，用于 SYNC0/ALIVE */
 
     /* 和对方的会话 */
-    uint64_t            session_id;                         /* 对端配对会话 ID（64位，0=尚未分配），在 SYNC0_ACK 中首次获得，用于 SYNC/FIN/DATA relay/MSG */
+    uint32_t            session_id;                         /* 对端配对会话 ID（32位，0=尚未分配），在 SYNC0_ACK 中首次获得，用于 SYNC/FIN/DATA relay/MSG */
     bool                peer_online;                        /* 对端是否在线；SYNC0_ACK 和 SYNC 都会导致 online 为 true */
 
     /* REGISTER_ACK 返回的信息 */

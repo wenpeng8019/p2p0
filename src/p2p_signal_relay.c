@@ -289,7 +289,7 @@ static void send_sync0(p2p_session_t *s) {
  *
  * 协议：P2P_RLY_SYNC (0x06)
  * 包头: [type(1) | size(2)]
- * 负载: [session_id(8)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ * 负载: [session_id(4)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *
  * FIN 语义（非独立协议）：
  *   - 仍使用 P2P_RLY_SYNC
@@ -314,7 +314,7 @@ static void send_sync(p2p_session_t *s) {
     int payload_len = (int)P2P_RLY_SYNC_PSZ(0, false);
 
     // session_id 位于 payload 首部
-    nwrite_ll(payload, ctx->session_id);
+    nwrite_l(payload, ctx->session_id);
 
     // 发送 FIN（追加 fin_marker = 0xFF）
     if (send_fin) {
@@ -344,7 +344,7 @@ static void send_sync(p2p_session_t *s) {
         // next_candidate_index 在 enqueue 成功后才推进，避免 enqueue 失败导致候选丢失
     }
 
-    printf(LA_F("[TCP] %s enqueue, ses_id=%" PRIu64 " cand_cnt=%d fin=%d\n", LA_F578, 578),
+    printf(LA_F("[TCP] %s enqueue, ses_id=%" PRIu32 " cand_cnt=%d fin=%d\n", LA_F578, 578),
            PROTO, ctx->session_id, cand_cnt, send_fin ? 1 : 0);
 
     if (enqueue_message(ctx, P2P_RLY_SYNC, payload, payload_len) != 0) {
@@ -376,7 +376,7 @@ static void send_sync(p2p_session_t *s) {
  *
  * 协议：P2P_RLY_FIN (0x08)
  * 包头: [type(1) | size(2)]
- * 负载: [session_id(8)]
+ * 负载: [session_id(4)]
  */
 static void send_fin(p2p_session_t *s) {
     const char *PROTO = "FIN";
@@ -384,9 +384,9 @@ static void send_fin(p2p_session_t *s) {
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
     uint8_t payload[P2P_RLY_FIN_PSZ];
-    nwrite_ll(payload, ctx->session_id);
+    nwrite_l(payload, ctx->session_id);
 
-    printf(LA_F("[TCP] %s enqueue, ses_id=%" PRIu64 "\n", LA_F539, 539),
+    printf(LA_F("[TCP] %s enqueue, ses_id=%" PRIu32 "\n", LA_F539, 539),
            PROTO, ctx->session_id);
 
     if (enqueue_message(ctx, P2P_RLY_FIN, payload, sizeof(payload)) != 0) {
@@ -394,7 +394,7 @@ static void send_fin(p2p_session_t *s) {
         return;
     }
 
-    print("V:", LA_F("%s enqueued, ses_id=%" PRIu64 "\n", LA_F490, 490),
+    print("V:", LA_F("%s enqueued, ses_id=%" PRIu32 "\n", LA_F490, 490),
           PROTO, ctx->session_id);
 }
 
@@ -419,7 +419,7 @@ static bool relay_wait_stun_candidates(p2p_session_t *s) {
  *
  * 协议：P2P_RLY_DATA
  * 包头: [type(1)][size(2)]
- * 负载: [session_id(8)][P2P packet header(4)][payload(N)]
+ * 负载: [session_id(4)][P2P packet header(4)][payload(N)]
  * 内层 P2P hdr.type 区分实际包类型。
  *
  * 流控：发送后设置 awaiting_data_ready，收到 STATUS(READY) 后清除。
@@ -453,7 +453,7 @@ ret_t p2p_signal_relay_data(p2p_session_t *s,
             return E_INVALID;
     }
 
-    // 构造负载: [session_id(8)][P2P hdr(4)][payload]
+    // 构造负载: [session_id(4)][P2P hdr(4)][payload]
     uint8_t relay_payload[P2P_MAX_PAYLOAD];
     int total_len = P2P_SESS_ID_PSZ + P2P_HDR_SIZE + payload_len;
     if (total_len > P2P_MAX_PAYLOAD) {
@@ -462,7 +462,7 @@ ret_t p2p_signal_relay_data(p2p_session_t *s,
     }
 
     // session_id
-    nwrite_ll(relay_payload, ctx->session_id);
+    nwrite_l(relay_payload, ctx->session_id);
 
     // P2P packet header
     p2p_pkt_hdr_encode(relay_payload + P2P_SESS_ID_PSZ, type, flags, seq);
@@ -478,7 +478,7 @@ ret_t p2p_signal_relay_data(p2p_session_t *s,
 
     ctx->awaiting_data_ready = true;
 
-    print("V:", LA_F("RELAY %s enqueued: ses_id=%" PRIu64 " seq=%u len=%d\n", LA_F583, 583),
+    print("V:", LA_F("RELAY %s enqueued: ses_id=%" PRIu32 " seq=%u len=%d\n", LA_F583, 583),
           proto, ctx->session_id, seq, payload_len);
 
     return E_NONE;
@@ -513,9 +513,9 @@ ret_t p2p_signal_relay_request(p2p_session_t *s,
 
     ctx->rpc_req_state = 1;
 
-    // 构造 payload: [session_id(8)][sid(2)][msg(1)][data(N)]
+    // 构造 payload: [session_id(4)][sid(2)][msg(1)][data(N)]
     uint8_t payload[P2P_MAX_PAYLOAD]; int n = 0;
-    nwrite_ll(payload + n, ctx->session_id); n += P2P_SESS_ID_PSZ;
+    nwrite_l(payload + n, ctx->session_id); n += P2P_SESS_ID_PSZ;
     nwrite_s(payload + n, sid); n += 2;
     payload[n++] = msg;
     if (len > 0 && data) {
@@ -550,9 +550,9 @@ ret_t p2p_signal_relay_response(p2p_session_t *s,
 
     uint16_t sid = ctx->rpc_resp_sid;
 
-    // 构造 payload: [session_id(8)][sid(2)][code(1)][data(N)]
+    // 构造 payload: [session_id(4)][sid(2)][code(1)][data(N)]
     uint8_t payload[P2P_MAX_PAYLOAD]; int n = 0;
-    nwrite_ll(payload + n, ctx->session_id); n += P2P_SESS_ID_PSZ;
+    nwrite_l(payload + n, ctx->session_id); n += P2P_SESS_ID_PSZ;
     nwrite_s(payload + n, sid); n += 2;
     payload[n++] = code;
     if (len > 0 && data) {
@@ -704,7 +704,7 @@ static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len)
  * 处理 SYNC0_ACK
  *
  * 协议：P2P_RLY_SYNC0_ACK (0x05)
- * 负载: [session_id(8)][online(1)]
+ * 负载: [session_id(4)][online(1)]
  */
 static void handle_sync0_ack(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "SYNC0_ACK";
@@ -723,7 +723,7 @@ static void handle_sync0_ack(p2p_session_t *s, const uint8_t *payload, int len) 
         return;
     }
 
-    uint64_t session_id = nget_ll(payload);
+    uint32_t session_id = nget_l(payload);
     uint8_t online = payload[P2P_SESS_ID_PSZ];
 
     if (online > 1) {
@@ -740,7 +740,7 @@ static void handle_sync0_ack(p2p_session_t *s, const uint8_t *payload, int len) 
     ctx->local_delivery_confirmed = false;
     ctx->last_sent_cand_count = 0;
 
-    print("V:", LA_F("%s: accepted, ses_id=%" PRIu64 " peer=%s\n", LA_F497, 497),
+    print("V:", LA_F("%s: accepted, ses_id=%" PRIu32 " peer=%s\n", LA_F497, 497),
           PROTO, ctx->session_id, ctx->peer_online ? "online" : "offline");
 
     // 重置攒批计数器
@@ -774,7 +774,7 @@ static void handle_sync0_ack(p2p_session_t *s, const uint8_t *payload, int len) 
  * 处理 SYNC_ACK（服务器流控确认，包含本批次实际转发数量）
  *
  * 协议：P2P_RLY_SYNC_ACK (0x07)
- * 负载: [session_id(8)][confirmed_count(1)]
+ * 负载: [session_id(4)][confirmed_count(1)]
  *
  * 流程：
  *   - confirmed_count > 0: 服务器接受了 N 个候选（可能少于上传数）；
@@ -801,9 +801,9 @@ static void handle_sync_ack(p2p_session_t *s, const uint8_t *payload, int len) {
         return;
     }
 
-    uint64_t session_id = nget_ll(payload);
+    uint32_t session_id = nget_l(payload);
     if (session_id != ctx->session_id) {
-        print("W:", LA_F("%s: session mismatch(local=%" PRIu64 " recv=%" PRIu64 ")\n", LA_F567, 567),
+        print("W:", LA_F("%s: session mismatch(local=%" PRIu32 " recv=%" PRIu32 ")\n", LA_F567, 567),
               PROTO, ctx->session_id, session_id);
         return;
     }
@@ -849,7 +849,7 @@ static void handle_sync_ack(p2p_session_t *s, const uint8_t *payload, int len) {
  * 处理 SYNC（服务器下发对端候选）
  *
  * 协议：P2P_RLY_SYNC (0x06)
- * 负载: [session_id(8)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ * 负载: [session_id(4)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  */
 static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool is_sync0) {
     const char *PROTO = is_sync0 ? "SYNC0" : "SYNC";
@@ -886,12 +886,12 @@ static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool 
     }
 
     // session_id 位于 payload 首部
-    uint64_t session_id = nget_ll(payload);
+    uint32_t session_id = nget_l(payload);
     if (session_id != ctx->session_id) {
 
         // SYNC0：对端重新发起连接，强制重置会话（类似 compact 的 sync0 session 重置）
         if (is_sync0) {
-            print("W:", LA_F("%s: session renewed by peer SYNC0 (local=%" PRIu64 " recv=%" PRIu64 ")\n", LA_F580, 580),
+            print("W:", LA_F("%s: session renewed by peer SYNC0 (local=%" PRIu32 " recv=%" PRIu32 ")\n", LA_F580, 580),
                   PROTO, ctx->session_id, session_id);
 
             // 通知业务层连接断开（session 被对方重置）
@@ -920,7 +920,7 @@ static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool 
                 send_sync(s);
             }
         } else {
-            print("W:", LA_F("%s: session mismatch(local=%" PRIu64 " recv=%" PRIu64 ")\n", LA_F567, 567),
+            print("W:", LA_F("%s: session mismatch(local=%" PRIu32 " recv=%" PRIu32 ")\n", LA_F567, 567),
                   PROTO, ctx->session_id, session_id);
             return;
         }
@@ -956,7 +956,7 @@ static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool 
  * 处理 FIN（服务器转发的对端会话结束通知）
  *
  * 协议：P2P_RLY_FIN (0x08)
- * 负载: [session_id(8)]
+ * 负载: [session_id(4)]
  */
 static void handle_relay_fin(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "FIN";
@@ -970,14 +970,14 @@ static void handle_relay_fin(p2p_session_t *s, const uint8_t *payload, int len) 
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
-    uint64_t session_id = nget_ll(payload);
+    uint32_t session_id = nget_l(payload);
     if (session_id != ctx->session_id) {
-        print("W:", LA_F("%s: session mismatch(local=%" PRIu64 " recv=%" PRIu64 ")\n", LA_F567, 567),
+        print("W:", LA_F("%s: session mismatch(local=%" PRIu32 " recv=%" PRIu32 ")\n", LA_F567, 567),
               PROTO, ctx->session_id, session_id);
         return;
     }
 
-    print("I:", LA_F("%s: peer closed session %" PRIu64 "\n", LA_F504, 504), PROTO, session_id);
+    print("I:", LA_F("%s: peer closed session %" PRIu32 "\n", LA_F504, 504), PROTO, session_id);
 
     // 清理会话状态，回到 ONLINE 状态
     ctx->session_id = 0;
@@ -998,7 +998,7 @@ static void handle_relay_fin(p2p_session_t *s, const uint8_t *payload, int len) 
 /*
  * 处理服务器转发的 DATA/ACK/CRYPTO 包
  *
- * 负载格式: [session_id(8)][P2P hdr(4)][payload(N)]
+ * 负载格式: [session_id(4)][P2P hdr(4)][payload(N)]
  *
  * 处理流程：
  *   1. 验证 session_id
@@ -1010,16 +1010,16 @@ static void handle_relay_data_recv(p2p_session_t *s, const uint8_t *payload, int
 
     const char *PROTO = "DATA";
 
-    // 最小长度: session_id(8) + P2P hdr(4)
+    // 最小长度: session_id(4) + P2P hdr(4)
     if (len < (int)(P2P_SESS_ID_PSZ + P2P_HDR_SIZE)) {
         print("E:", LA_F("RELAY %s recv: bad payload(len=%d)\n", LA_F584, 584), PROTO, len);
         return;
     }
 
     // 1. 验证 session_id
-    uint64_t session_id = nget_ll(payload);
+    uint32_t session_id = nget_l(payload);
     if (session_id != ctx->session_id) {
-        print("W:", LA_F("RELAY %s recv: session mismatch(local=%" PRIu64 " recv=%" PRIu64 ")\n", LA_F585, 585),
+        print("W:", LA_F("RELAY %s recv: session mismatch(local=%" PRIu32 " recv=%" PRIu32 ")\n", LA_F585, 585),
               PROTO, ctx->session_id, session_id);
         return;
     }
@@ -1120,7 +1120,7 @@ static void handle_relay_data_recv(p2p_session_t *s, const uint8_t *payload, int
 /*
  * 处理服务器转发的 RPC 请求（B端接收）
  *
- * 负载格式: [session_id(8)][sid(2)][msg(1)][data(N)]
+ * 负载格式: [session_id(4)][sid(2)][msg(1)][data(N)]
  */
 static void handle_relay_req_recv(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "MSG_REQ";
@@ -1132,7 +1132,7 @@ static void handle_relay_req_recv(p2p_session_t *s, const uint8_t *payload, int 
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
-    uint64_t session_id = nget_ll(payload);
+    uint32_t session_id = nget_l(payload);
     uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
     uint8_t  msg = payload[P2P_SESS_ID_PSZ + 2];
     const uint8_t *req_data = payload + P2P_RLY_REQ_MIN_PSZ;
@@ -1140,7 +1140,7 @@ static void handle_relay_req_recv(p2p_session_t *s, const uint8_t *payload, int 
 
     // 验证 session_id
     if (session_id != ctx->session_id) {
-        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")\n", LA_F170, 170),
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu32 ", expect=%" PRIu32 ")\n", LA_F170, 170),
               PROTO, session_id, ctx->session_id);
         return;
     }
@@ -1176,7 +1176,7 @@ static void handle_relay_req_recv(p2p_session_t *s, const uint8_t *payload, int 
 /*
  * 处理服务器转发的 RPC 响应（A端接收）
  *
- * 负载格式: [session_id(8)][sid(2)][code(1)][data(N)]
+ * 负载格式: [session_id(4)][sid(2)][code(1)][data(N)]
  */
 static void handle_relay_resp_recv(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "MSG_RESP";
@@ -1188,7 +1188,7 @@ static void handle_relay_resp_recv(p2p_session_t *s, const uint8_t *payload, int
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
 
-    uint64_t session_id = nget_ll(payload);
+    uint32_t session_id = nget_l(payload);
     uint16_t sid  = nget_s(payload + P2P_SESS_ID_PSZ);
     uint8_t  code = payload[P2P_SESS_ID_PSZ + 2];
     const uint8_t *res_data = payload + P2P_RLY_RESP_MIN_PSZ;
@@ -1196,7 +1196,7 @@ static void handle_relay_resp_recv(p2p_session_t *s, const uint8_t *payload, int
 
     // 验证 session_id
     if (session_id != ctx->session_id) {
-        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu64 ", expect=%" PRIu64 ")\n", LA_F170, 170),
+        print("W:", LA_F("%s: session_id mismatch (recv=%" PRIu32 ", expect=%" PRIu32 ")\n", LA_F170, 170),
               PROTO, session_id, ctx->session_id);
         return;
     }

@@ -23,7 +23,7 @@
 #define P2P_PEER_ID_MAX     32
 
 /* Session ID 字节长度 */
-#define P2P_SESS_ID_PSZ     (sizeof(uint64_t))
+#define P2P_SESS_ID_PSZ     (sizeof(uint32_t))
 
 /* ============================================================================
  * 可交换的候选地址定义

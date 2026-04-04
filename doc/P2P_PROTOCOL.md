@@ -377,7 +377,7 @@ on_peer_info(new_pub_addr, new_priv_addr) {
 取代废弃的 `RELAY_DATA/ACK/CRYPTO` (0xA0-0xA2)。
 
 - **方向**: 客户端 → 服务器 → 客户端
-- **Payload**: `[ session_id: 8 | original_data: N ]`
+- **Payload**: `[ session_id: 4 | original_data: N ]`
 - **说明**:
   - 服务器通过 `session_id` 快速查找目标对端（O(1)哈希查找）
   - `session_id` 还用于会话隔离，过滤旧会话重传的包（解决重连污染问题）
