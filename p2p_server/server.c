@@ -2913,7 +2913,7 @@ BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
 #else
 void signal_handler(int signum) {
     if (signum == SIGINT || signum == SIGTERM) {
-        print("I: \n%s\n", LA_S7, 7("Received shutdown signal, exiting gracefully...", LA_S8, 8));
+        print("I: \n%s\n", LA_S("Received shutdown signal, exiting gracefully...", LA_S7, 7));
         g_running = 0;
     }
 }
@@ -3292,7 +3292,7 @@ int main(int argc, char *argv[]) {
     } // while (g_running)
 
     // 清理资源
-    print("I: \n%s", LA_S8, 8("Shutting down...\n", LA_S9, 9));
+    print("I: \n%s", LA_S("Shutting down...\n", LA_S8, 8));
     
     // 关闭所有客户端连接
     for (int i = 0; i < MAX_PEERS; i++) {
