@@ -506,7 +506,7 @@ static void test_register_peer_online(void) {
         ssize_t n = recvfrom(g_sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
-            alice_sync0_status = recv_buf[12];  // online byte
+            alice_sync0_status = recv_buf[8];  // online byte
             printf("    Alice SYNC0_ACK: peer_online=%d\n", alice_sync0_status);
         }
     }
@@ -522,7 +522,7 @@ static void test_register_peer_online(void) {
         ssize_t n = recvfrom(g_sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
-            uint8_t online = recv_buf[12];
+            uint8_t online = recv_buf[8];
             printf("    Bob SYNC0_ACK: peer_online=%d\n", online);
             if (online == 1) {
                 TEST_PASS(TEST_NAME);
@@ -973,8 +973,8 @@ static void test_register_addr_change(void) {
         return;
     }
     
-    // 解析第二次响应
-    uint32_t session_id2 = 0;
+    // 解析第二次响应（auth_key 在 ONLINE_ACK payload 偏移 4～11 处）
+    uint64_t session_id2 = 0;
     for (int i = 0; i < 8; i++) {
         session_id2 = (session_id2 << 8) | recv_buf[8 + i];
     }
@@ -1179,7 +1179,7 @@ static void test_register_reconnect_after_disconnect(void) {
     
     uint8_t bob_sync0_online = 0;
     if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
-        bob_sync0_online = recv_buf[12];
+        bob_sync0_online = recv_buf[8];
     }
     printf("    Bob SYNC0_ACK: peer_online=%d\n", bob_sync0_online);
     

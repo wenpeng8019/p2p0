@@ -257,7 +257,9 @@ static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
 
 // 发送 ONLINE 并接收 ONLINE_ACK，然后发送 SYNC0，返回 session_id
 static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
-                               uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
+                               uint32_t inst_id, int cand_count, p2p_candidate_t *cands,
+                               uint32_t *session_id_out) {
+    if (session_id_out) *session_id_out = 0;
     uint8_t pkt[512];
     int len = build_online(pkt, sizeof(pkt), local, inst_id);
     
@@ -292,8 +294,13 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
             uint8_t drain_buf[32];
             struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
             P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
-            recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
+            ssize_t drain_n = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
                      (struct sockaddr*)&drain_from, &drain_len);
+            // 从 SYNC0_ACK 提取 session_id: [hdr(4)][session_id(4)][online(1)]
+            if (drain_n >= 9 && drain_buf[0] == SIG_PKT_SYNC0_ACK && session_id_out) {
+                *session_id_out = ((uint32_t)drain_buf[4] << 24) | ((uint32_t)drain_buf[5] << 16) |
+                                  ((uint32_t)drain_buf[6] << 8)  | (uint32_t)drain_buf[7];
+            }
         }
         return auth_key;
     }
@@ -311,8 +318,9 @@ static int send_alive_and_wait_ack(sock_t sock, uint64_t auth_key) {
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
     
-    sendto(sock, (const char*)pkt, len, 0,
+    ssize_t sent = sendto(sock, (const char*)pkt, len, 0,
            (struct sockaddr*)&server_addr, sizeof(server_addr));
+    (void)sent;
     
     P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
     uint8_t recv_buf[64];
@@ -387,14 +395,14 @@ static void test_alive_keepalive(void) {
     uint32_t inst_id = (uint32_t)P_tick_us() + 3000;
     
     // 注册获取 auth_key
-    uint64_t auth_key = register_peer(sock, "alive_alice", "alive_bob", inst_id, 0, NULL);
+    uint64_t auth_key = register_peer(sock, "alive_alice", "alive_bob", inst_id, 0, NULL, NULL);
     if (auth_key == 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "registration failed");
         return;
     }
     
-    P_usleep(100 * 1000);  // 等待 server 处理
+    P_usleep(500 * 1000);  // 增加等待时间到 500ms，确保服务器完成处理
     clear_logs();
     
     // 发送 ALIVE 并等待 ACK
@@ -424,7 +432,7 @@ static void test_alive_updates_activity(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 3100;
     
-    uint64_t auth_key = register_peer(sock, "activity_alice", "activity_bob", inst_id, 0, NULL);
+    uint64_t auth_key = register_peer(sock, "activity_alice", "activity_bob", inst_id, 0, NULL, NULL);
     if (auth_key == 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "registration failed");
@@ -467,7 +475,7 @@ static void test_unregister_releases_slot(void) {
     uint32_t inst_id = (uint32_t)P_tick_us() + 3200;
     
     // 第一次注册
-    uint64_t session1 = register_peer(sock, local_id, remote_id, inst_id, 0, NULL);
+    uint64_t session1 = register_peer(sock, local_id, remote_id, inst_id, 0, NULL, NULL);
     if (session1 == 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "first registration failed");
@@ -480,7 +488,7 @@ static void test_unregister_releases_slot(void) {
     
     // 用相同 peer_id 重新注册（应该成功，因为槽位已释放）
     uint32_t inst_id2 = inst_id + 100;
-    uint64_t session2 = register_peer(sock, local_id, remote_id, inst_id2, 0, NULL);
+    uint64_t session2 = register_peer(sock, local_id, remote_id, inst_id2, 0, NULL, NULL);
     
     P_sock_close(sock);
     
@@ -518,7 +526,7 @@ static void test_unregister_notifies_peer(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 3301;
     
     // Alice 注册等待 Bob
-    uint64_t session_alice = register_peer(sock_alice, "notify_alice", "notify_bob", inst_alice, 0, NULL);
+    uint64_t session_alice = register_peer(sock_alice, "notify_alice", "notify_bob", inst_alice, 0, NULL, NULL);
     if (session_alice == 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
@@ -526,8 +534,9 @@ static void test_unregister_notifies_peer(void) {
         return;
     }
     
-    // Bob 注册等待 Alice（触发配对）
-    uint64_t session_bob = register_peer(sock_bob, "notify_bob", "notify_alice", inst_bob, 0, NULL);
+    // Bob 注册等待 Alice（触发配对），获取 session_id 供后续比较
+    uint32_t bob_session_id = 0;
+    uint64_t session_bob = register_peer(sock_bob, "notify_bob", "notify_alice", inst_bob, 0, NULL, &bob_session_id);
     if (session_bob == 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
@@ -551,7 +560,7 @@ static void test_unregister_notifies_peer(void) {
     send_unregister(sock_alice, session_alice);
     
     // Bob 应该收到 PEER_OFF
-    uint64_t peer_off_session = 0;
+    uint32_t peer_off_session = 0;
     int got_peer_off = wait_peer_off(sock_bob, &peer_off_session);
     
     P_sock_close(sock_alice);
@@ -562,8 +571,8 @@ static void test_unregister_notifies_peer(void) {
         return;
     }
     
-    // PEER_OFF 的 session_id 应该是 Bob 的 session_id
-    if (peer_off_session != session_bob) {
+    // PEER_OFF 的 session_id 应该是 Bob 的 session_id（来自 SYNC0_ACK）
+    if (bob_session_id == 0 || peer_off_session != bob_session_id) {
         TEST_FAIL(TEST_NAME, "PEER_OFF session_id mismatch");
         return;
     }
@@ -667,7 +676,7 @@ static void test_peer_off_on_reregister(void) {
     uint32_t inst_alice2 = inst_alice1 + 1000;  // 新的 instance_id
     
     // Alice 第一次注册
-    uint64_t session_alice1 = register_peer(sock_alice, "rereg_alice", "rereg_bob", inst_alice1, 0, NULL);
+    uint64_t session_alice1 = register_peer(sock_alice, "rereg_alice", "rereg_bob", inst_alice1, 0, NULL, NULL);
     if (session_alice1 == 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_alice2);
@@ -677,7 +686,7 @@ static void test_peer_off_on_reregister(void) {
     }
     
     // Bob 注册（触发配对）
-    uint64_t session_bob = register_peer(sock_bob, "rereg_bob", "rereg_alice", inst_bob, 0, NULL);
+    uint64_t session_bob = register_peer(sock_bob, "rereg_bob", "rereg_alice", inst_bob, 0, NULL, NULL);
     if (session_bob == 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_alice2);
@@ -699,7 +708,7 @@ static void test_peer_off_on_reregister(void) {
     }
     
     // Alice 用新的 socket 和 instance_id 重新注册
-    uint64_t session_alice2 = register_peer(sock_alice2, "rereg_alice", "rereg_bob", inst_alice2, 0, NULL);
+    uint64_t session_alice2 = register_peer(sock_alice2, "rereg_alice", "rereg_bob", inst_alice2, 0, NULL, NULL);
     if (session_alice2 == 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_alice2);
@@ -709,7 +718,7 @@ static void test_peer_off_on_reregister(void) {
     }
     
     // Bob 应该收到 PEER_OFF
-    uint64_t peer_off_session = 0;
+    uint32_t peer_off_session = 0;
     int got_peer_off = wait_peer_off(sock_bob, &peer_off_session);
     
     P_sock_close(sock_alice);

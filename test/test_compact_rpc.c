@@ -333,22 +333,20 @@ typedef struct {
 static void parse_msg_req_ack(const uint8_t *buf, int len, msg_req_ack_t *ack) {
     memset(ack, 0, sizeof(*ack));
     
-    if (len < 15) return;  // header + session_id + sid + status
+    if (len < 11) return;  // header(4) + session_id(4) + sid(2) + status(1)
     if (buf[0] != SIG_PKT_MSG_REQ_ACK) return;
     
     ack->received = 1;
     
-    // session_id (8 bytes)
-    ack->session_id = 0;
-    for (int i = 0; i < 8; i++) {
-        ack->session_id = (ack->session_id << 8) | buf[4 + i];
-    }
+    // session_id (4 bytes)
+    ack->session_id = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
+                      ((uint32_t)buf[6] << 8)  | (uint32_t)buf[7];
     
     // sid (2 bytes)
-    ack->sid = (buf[12] << 8) | buf[13];
+    ack->sid = ((uint16_t)buf[8] << 8) | buf[9];
     
     // status (1 byte)
-    ack->status = buf[14];
+    ack->status = buf[10];
 }
 
 // MSG_REQ 解析结果 (B 端收到的 relay 包)
@@ -366,28 +364,26 @@ typedef struct {
 static void parse_msg_req_relay(const uint8_t *buf, int len, msg_req_relay_t *req) {
     memset(req, 0, sizeof(*req));
     
-    if (len < 15) return;  // header + session_id + sid + msg
+    if (len < 11) return;  // header(4) + session_id(4) + sid(2) + msg(1)
     if (buf[0] != SIG_PKT_MSG_REQ) return;
     
     req->received = 1;
     req->flags = buf[1];
     
-    // session_id (8 bytes)
-    req->session_id = 0;
-    for (int i = 0; i < 8; i++) {
-        req->session_id = (req->session_id << 8) | buf[4 + i];
-    }
+    // session_id (4 bytes)
+    req->session_id = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
+                      ((uint32_t)buf[6] << 8)  | (uint32_t)buf[7];
     
     // sid (2 bytes)
-    req->sid = (buf[12] << 8) | buf[13];
+    req->sid = ((uint16_t)buf[8] << 8) | buf[9];
     
     // msg (1 byte)
-    req->msg = buf[14];
+    req->msg = buf[10];
     
     // data
-    req->data_len = len - 15;
+    req->data_len = len - 11;
     if (req->data_len > 0 && req->data_len <= (int)sizeof(req->data)) {
-        memcpy(req->data, buf + 15, req->data_len);
+        memcpy(req->data, buf + 11, req->data_len);
     }
 }
 
@@ -406,33 +402,31 @@ typedef struct {
 static void parse_msg_resp(const uint8_t *buf, int len, msg_resp_t *resp) {
     memset(resp, 0, sizeof(*resp));
     
-    if (len < 15) return;  // header + session_id + sid + code
+    if (len < 11) return;  // header(4) + session_id(4) + sid(2) + code(1)
     if (buf[0] != SIG_PKT_MSG_RESP) return;
     
     resp->received = 1;
     resp->flags = buf[1];
     
-    // session_id (8 bytes)
-    resp->session_id = 0;
-    for (int i = 0; i < 8; i++) {
-        resp->session_id = (resp->session_id << 8) | buf[4 + i];
-    }
+    // session_id (4 bytes)
+    resp->session_id = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
+                       ((uint32_t)buf[6] << 8)  | (uint32_t)buf[7];
     
     // sid (2 bytes)
-    resp->sid = (buf[12] << 8) | buf[13];
+    resp->sid = ((uint16_t)buf[8] << 8) | buf[9];
     
     // code (1 byte)
-    resp->code = buf[14];
+    resp->code = buf[10];
     
     // data
-    resp->data_len = len - 15;
+    resp->data_len = len - 11;
     if (resp->data_len > 0 && resp->data_len <= (int)sizeof(resp->data)) {
-        memcpy(resp->data, buf + 15, resp->data_len);
+        memcpy(resp->data, buf + 11, resp->data_len);
     }
 }
 
 // 发送 ONLINE 并接收 ONLINE_ACK，然后发送 SYNC0，返回 session_id
-static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
+static uint32_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
     int len = build_online(pkt, sizeof(pkt), local, inst_id);
@@ -463,13 +457,17 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
         len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
-        // 消耗 SYNC0_ACK，防止它污染后续操作的 recvfrom
+        // 接收 SYNC0_ACK，提取 session_id
         uint8_t drain_buf[32];
         struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
         P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
-        recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
+        ssize_t dn = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
                  (struct sockaddr*)&drain_from, &drain_len);
-        return auth_key;
+        if (dn >= 9 && drain_buf[0] == SIG_PKT_SYNC0_ACK) {
+            return ((uint32_t)drain_buf[4] << 24) | ((uint32_t)drain_buf[5] << 16) |
+                   ((uint32_t)drain_buf[6] << 8)  | (uint32_t)drain_buf[7];
+        }
+        return 0;
     }
     return 0;
 }
@@ -503,7 +501,7 @@ static int send_msg_req_and_wait_ack(sock_t sock, uint32_t session_id, uint16_t 
         return ack_out->received;
     }
     
-    return (n >= 15 && recv_buf[0] == SIG_PKT_MSG_REQ_ACK);
+    return (n >= 11 && recv_buf[0] == SIG_PKT_MSG_REQ_ACK);
 }
 
 // 发送 MSG_RESP
@@ -619,8 +617,8 @@ static void test_msg_req_ack(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 5001;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "msg_alice", "msg_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "msg_bob", "msg_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "msg_alice", "msg_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "msg_bob", "msg_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);
@@ -680,8 +678,8 @@ static void test_msg_req_forwarded(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 5101;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "fwd_alice", "fwd_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "fwd_bob", "fwd_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "fwd_alice", "fwd_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "fwd_bob", "fwd_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);
@@ -758,8 +756,8 @@ static void test_msg_resp_forwarded(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 5201;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "resp_alice", "resp_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "resp_bob", "resp_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "resp_alice", "resp_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "resp_bob", "resp_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);
@@ -838,8 +836,8 @@ static void test_msg_rpc_complete(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 5301;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "rpc_alice", "rpc_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "rpc_bob", "rpc_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "rpc_alice", "rpc_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "rpc_bob", "rpc_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);
@@ -919,7 +917,7 @@ static void test_msg_req_peer_offline(void) {
     uint32_t inst_alice = (uint32_t)P_tick_us() + 5400;
     
     // Alice 单独注册（无 Bob 配对）
-    uint64_t session_alice = register_peer(sock_alice, "offline_alice", "offline_bob", inst_alice, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "offline_alice", "offline_bob", inst_alice, 0, NULL);
     
     if (session_alice == 0) {
         P_sock_close(sock_alice);
@@ -1041,8 +1039,8 @@ static void test_msg_req_retransmit(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 5501;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "retr_alice", "retr_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "retr_bob", "retr_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "retr_alice", "retr_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "retr_bob", "retr_alice", inst_bob, 0, NULL);
     (void)session_bob;
     
     if (session_alice == 0) {
@@ -1103,8 +1101,8 @@ static void test_msg_new_sid_cancels_old(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 5601;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "cancel_alice", "cancel_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "cancel_bob", "cancel_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "cancel_alice", "cancel_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "cancel_bob", "cancel_alice", inst_bob, 0, NULL);
     (void)session_bob;
     
     if (session_alice == 0) {
@@ -1172,8 +1170,8 @@ static void test_msg_obsolete_sid_ignored(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 5701;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "obs_alice", "obs_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "obs_bob", "obs_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "obs_alice", "obs_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "obs_bob", "obs_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);

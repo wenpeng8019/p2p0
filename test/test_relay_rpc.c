@@ -439,11 +439,9 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
 
         if (type == P2P_RLY_SYNC0_ACK && payload_len >= P2P_RLY_SYNC0_ACK_PSZ) {
             ack->received = 1;
-            ack->session_id = 0;
-            for (int j = 0; j < 8; j++) {
-                ack->session_id = (ack->session_id << 8) | recv_buf[3 + j];
-            }
-            ack->online = recv_buf[3 + 8];
+            ack->session_id = ((uint32_t)recv_buf[3] << 24) | ((uint32_t)recv_buf[4] << 16) |
+                              ((uint32_t)recv_buf[5] << 8)  | (uint32_t)recv_buf[6];
+            ack->online = recv_buf[7];
             return 1;
         }
     }
@@ -505,21 +503,20 @@ static int wait_rly_rpc(sock_t sock, uint8_t expect_type, rly_rpc_pkt_t *out) {
         if (type == expect_type && payload_len >= P2P_RLY_REQ_MIN_PSZ) {
             out->received = 1;
 
-            // session_id (8 bytes)
-            out->session_id = 0;
-            for (int j = 0; j < 8; j++)
-                out->session_id = (out->session_id << 8) | recv_buf[3 + j];
+            // session_id (4 bytes)
+            out->session_id = ((uint32_t)recv_buf[3] << 24) | ((uint32_t)recv_buf[4] << 16) |
+                              ((uint32_t)recv_buf[5] << 8)  | (uint32_t)recv_buf[6];
 
             // sid (2 bytes)
-            out->sid = ((uint16_t)recv_buf[11] << 8) | recv_buf[12];
+            out->sid = ((uint16_t)recv_buf[7] << 8) | recv_buf[8];
 
             // msg or code (1 byte)
-            out->msg_or_code = recv_buf[13];
+            out->msg_or_code = recv_buf[9];
 
             // data
             out->data_len = (int)payload_len - P2P_RLY_REQ_MIN_PSZ;
             if (out->data_len > 0 && out->data_len <= (int)sizeof(out->data))
-                memcpy(out->data, recv_buf + 14, out->data_len);
+                memcpy(out->data, recv_buf + 10, out->data_len);
 
             return 1;
         }

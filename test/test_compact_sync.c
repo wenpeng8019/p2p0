@@ -254,24 +254,22 @@ static int is_sync_packet(uint8_t type) {
 static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
     memset(info, 0, sizeof(*info));
     
-    if (len < 4 + 8 + 1 + 1) return;
+    if (len < 4 + 4 + 1 + 1) return;
     if (buf[0] != SIG_PKT_SYNC && buf[0] != SIG_PKT_SYNC0) return;
     
     info->received = 1;
     
-    // session_id (8 bytes)
-    info->session_id = 0;
-    for (int i = 0; i < 8; i++) {
-        info->session_id = (info->session_id << 8) | buf[4 + i];
-    }
+    // session_id (4 bytes)
+    info->session_id = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
+                       ((uint32_t)buf[6] << 8)  | (uint32_t)buf[7];
     
     // SYNC:  [session_id(4)][base_index(1)][count(1)][cands]
     // SYNC0: [session_id(4)][0x00(1)     ][count(1)][cands]
-    info->base_index = buf[12];
-    info->candidate_count = buf[13];
+    info->base_index = buf[8];
+    info->candidate_count = buf[9];
     
     // 解析候选列表
-    int offset = 14;
+    int offset = 10;
     for (int i = 0; i < info->candidate_count && i < 16 && offset + (int)sizeof(p2p_candidate_t) <= len; i++) {
         memcpy(&info->candidates[i], buf + offset, sizeof(p2p_candidate_t));
         offset += sizeof(p2p_candidate_t);
@@ -279,7 +277,7 @@ static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
 }
 
 // 发送 ONLINE 并接收 ONLINE_ACK，然后发送 SYNC0，返回 session_id
-static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
+static uint32_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
     int len = build_online(pkt, sizeof(pkt), local, inst_id);
@@ -310,13 +308,16 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
         len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
-        // 消耗 SYNC0_ACK，防止它污染后续 recvfrom
+        // 消耗 SYNC0_ACK，从中提取 session_id
         uint8_t drain_buf[32];
         struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
         P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
-        recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
+        ssize_t drain_n = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
                  (struct sockaddr*)&drain_from, &drain_len);
-        return auth_key;
+        if (drain_n >= 9 && drain_buf[0] == SIG_PKT_SYNC0_ACK) {
+            return ((uint32_t)drain_buf[4] << 24) | ((uint32_t)drain_buf[5] << 16) |
+                   ((uint32_t)drain_buf[6] << 8)  | (uint32_t)drain_buf[7];
+        }
     }
     return 0;
 }
@@ -333,7 +334,7 @@ static void send_sync0_ack(sock_t sock, uint32_t session_id) {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
-    sendto(sock, (const char*)pkt, 4 + 8, 0,
+    sendto(sock, (const char*)pkt, 4 + 4, 0,
            (struct sockaddr*)&server_addr, sizeof(server_addr));
 }
 
@@ -377,7 +378,7 @@ static void test_sync_on_pairing(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 1001;
     
     // Alice 注册等待 Bob
-    uint64_t session_alice = register_peer(sock_alice, PEER_ALICE, PEER_BOB, inst_alice, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, PEER_ALICE, PEER_BOB, inst_alice, 0, NULL);
     if (session_alice == 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
@@ -387,7 +388,7 @@ static void test_sync_on_pairing(void) {
     printf("    Alice session_id: 0x%llx\n", (unsigned long long)session_alice);
     
     // Bob 注册等待 Alice
-    uint64_t session_bob = register_peer(sock_bob, PEER_BOB, PEER_ALICE, inst_bob, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, PEER_BOB, PEER_ALICE, inst_bob, 0, NULL);
     if (session_bob == 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
@@ -476,8 +477,8 @@ static void test_sync_ack_stops_retransmit(void) {
     uint32_t inst_alice = (uint32_t)P_tick_us() + 2000;
     uint32_t inst_bob = (uint32_t)P_tick_us() + 2001;
     
-    uint64_t session_alice = register_peer(sock_alice, "ack_alice", "ack_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "ack_bob", "ack_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "ack_alice", "ack_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "ack_bob", "ack_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);
@@ -563,8 +564,8 @@ static void test_sync_with_candidates(void) {
     uint32_t inst_alice = (uint32_t)P_tick_us() + 3000;
     uint32_t inst_bob = (uint32_t)P_tick_us() + 3001;
     
-    uint64_t session_alice = register_peer(sock_alice, "cand_alice", "cand_bob", inst_alice, 2, alice_cands);
-    uint64_t session_bob = register_peer(sock_bob, "cand_bob", "cand_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "cand_alice", "cand_bob", inst_alice, 2, alice_cands);
+    uint32_t session_bob = register_peer(sock_bob, "cand_bob", "cand_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);
@@ -620,13 +621,13 @@ static void test_sync_ack_bad_payload(void) {
     uint8_t drain_buf[256];
     while (recvfrom(g_sock, (char*)drain_buf, sizeof(drain_buf), 0, NULL, NULL) > 0);
     
-    // 构造太短的 SYNC_ACK 包
-    uint8_t pkt[8];
+    // 构造太短的 SYNC_ACK 包（payload < SIG_PKT_SYNC_ACK_PSZ=4）
+    uint8_t pkt[7];
     pkt[0] = SIG_PKT_SYNC_ACK;
     pkt[1] = 0;
     pkt[2] = 0;
     pkt[3] = 0;
-    memset(pkt + 4, 0, 4);  // 只有 4 字节 payload，不够 8 字节
+    memset(pkt + 4, 0, 3);  // 只有 3 字节 payload，不够 4 字节
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -683,8 +684,8 @@ static void test_sync_retransmit(void) {
     uint32_t inst_alice = (uint32_t)P_tick_us() + 6000;
     uint32_t inst_bob = (uint32_t)P_tick_us() + 6001;
     
-    uint64_t session_alice = register_peer(sock_alice, "retry_alice", "retry_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "retry_bob", "retry_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "retry_alice", "retry_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "retry_bob", "retry_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);
@@ -765,8 +766,8 @@ static void test_sync_ack_duplicate(void) {
     uint32_t inst_alice = (uint32_t)P_tick_us() + 7000;
     uint32_t inst_bob = (uint32_t)P_tick_us() + 7001;
     
-    uint64_t session_alice = register_peer(sock_alice, "dup_ack_alice", "dup_ack_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "dup_ack_bob", "dup_ack_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "dup_ack_alice", "dup_ack_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "dup_ack_bob", "dup_ack_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);

@@ -337,7 +337,7 @@ typedef struct {
 static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt) {
     memset(pkt, 0, sizeof(*pkt));
     
-    if (len < 12) return;  // header + session_id
+    if (len < 8) return;  // header(4) + session_id(4)
     
     // 检查是否是 DATA/ACK/CRYPTO 且携带 SESSION 标志
     uint8_t type = buf[0];
@@ -454,7 +454,7 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt_out) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         
-        if (n >= 12 && (
+        if (n >= 8 && (
                 (recv_buf[0] == P2P_PKT_DATA && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)) ||
                 (recv_buf[0] == P2P_PKT_ACK && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)) ||
                 (recv_buf[0] == P2P_PKT_CRYPTO && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)))) {
@@ -555,8 +555,8 @@ static void test_relay_data_forwarded(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 6001;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "relay_alice", "relay_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "relay_bob", "relay_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "relay_alice", "relay_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "relay_bob", "relay_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);
@@ -628,8 +628,8 @@ static void test_relay_ack_forwarded(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 6101;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "ack_alice", "ack_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "ack_bob", "ack_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "ack_alice", "ack_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "ack_bob", "ack_alice", inst_bob, 0, NULL);
     (void)session_bob;
     
     if (session_alice == 0) {
@@ -693,8 +693,8 @@ static void test_relay_crypto_forwarded(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 6201;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "crypto_alice", "crypto_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "crypto_bob", "crypto_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "crypto_alice", "crypto_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "crypto_bob", "crypto_alice", inst_bob, 0, NULL);
     (void)session_bob;
     
     if (session_alice == 0) {
@@ -909,8 +909,8 @@ static void test_relay_bidirectional(void) {
     uint32_t inst_bob = (uint32_t)P_tick_us() + 6401;
     
     // 配对
-    uint64_t session_alice = register_peer(sock_alice, "bidir_alice", "bidir_bob", inst_alice, 0, NULL);
-    uint64_t session_bob = register_peer(sock_bob, "bidir_bob", "bidir_alice", inst_bob, 0, NULL);
+    uint32_t session_alice = register_peer(sock_alice, "bidir_alice", "bidir_bob", inst_alice, 0, NULL);
+    uint32_t session_bob = register_peer(sock_bob, "bidir_bob", "bidir_alice", inst_bob, 0, NULL);
     
     if (session_alice == 0 || session_bob == 0) {
         P_sock_close(sock_alice);

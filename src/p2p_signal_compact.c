@@ -187,8 +187,7 @@ static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payloa
 /*
  * 向信令服务器发送 ONLINE（上线登录）请求
  *
- * 协议：SIG_PKT_ONLINE (0x80)
- * 包头: [type=0x80 | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_ONLINE | flags=0 | seq=0]
  * 负载: [local_peer_id(32)][instance_id(4)]
  *   - instance_id: 本次 connect() 的实例 ID（网络字节序，32位，必须非 0）
  * 注：候选地址通过后续 SYNC0 包单独提交
@@ -222,8 +221,7 @@ static void send_online(p2p_session_t *s) {
 /*
  * 向信令服务器提交 SYNC0（首批候选 + 指定对端）
  *
- * 协议：SIG_PKT_SYNC0 (0x85)
- * 包头: [type=0x85 | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_SYNC0 | flags=0 | seq=0]
  * 负载: [auth_key(8)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
  *   - auth_key: 坥自 ONLINE_ACK 的客户端-服务器认证令牌
  *   - remote_peer_id: 目标对端 ID
@@ -271,8 +269,7 @@ static void send_compact_sync0(p2p_session_t *s) {
  * 注意：首次收到的 SYNC 包，可能是服务器下发的 seq=0 的 SYNC 包；
  *       也可能是对方发送的 seq!=1 的 SYNC 包（在并发网络状况下，对方的 SYNC 包可能先到达）
  *
- * 协议：SIG_PKT_SYNC (0x03)
- * 包头: [type=0x03 | flags=见下 | seq=1-16]
+ * 包头: [type=SIG_PKT_SYNC | flags=见下 | seq=1-16]
  * 负载: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*7)]
  *   - session_id: 会话 ID（网络字节序）
  *   - base_index: 本批候选的起始索引
@@ -392,8 +389,7 @@ static bool compact_wait_stun_candidates(p2p_session_t *s) {
 /*
  * 周期将未确认的 SYNC 包重发给对方
  *
- * 协议：SIG_PKT_SYNC (0x03) - 重传机制
- * 包头: [type=0x03 | flags=见下 | seq=1-16]
+ * 包头: [type=SIG_PKT_SYNC | flags=见下 | seq=1-16]
  * 负载: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*7)]
  * 说明: 重发所有未收到 ACK 的 SYNC 包
  */
@@ -434,8 +430,7 @@ static void resend_rest_candidates_and_fin(p2p_session_t *s) {
 /*
  * 通过服务器向对端发送 RPC 消息请求
  *
- * 协议：SIG_PKT_MSG_REQ (0x20)
- * 包头: [type=0x20 | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_MSG_REQ | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: 本端会话 ID（来自 REGISTER_ACK）
  *   - sid: 序列号（2字节，网络字节序），用于匹配响应
@@ -471,8 +466,7 @@ static void send_rpc_req(struct p2p_session *s) {
 /*
  * （对端）通过服务器向源端回复 RPC 消息响应
  *
- * 协议：SIG_PKT_MSG_RESP (0x22)
- * 包头: [type=0x22 | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_MSG_RESP | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)][code(1)][data(N)]
  *   - session_id: A端的会话 ID（网络字节序）
  *   - sid: 序列号，必顾与 MSG_REQ 中的 sid 一致
@@ -509,8 +503,7 @@ static void send_rpc_resp(struct p2p_session *s) {
  * 发送 NAT_PROBE 探测包
  * 即向服务器探测端口发送空包，服务器观察源地址来判断 NAT 类型
  *
- * 协议：SIG_PKT_NAT_PROBE (0x07)
- * 包头: [type=0x07 | flags=0 | seq=探测重试次数]
+ * 包头: [type=SIG_PKT_NAT_PROBE | flags=0 | seq=探测重试次数]
  * 负载: 空
  */
 static void send_nat_probe(struct p2p_session *s) {
@@ -1292,12 +1285,13 @@ void compact_on_server_sync0(struct p2p_session *s,
     }
 
     // 收到该消息说明对方肯定已上线
-    if (!ctx->peer_online) { ctx->peer_online = true;
+    if (!ctx->peer_online) ctx->peer_online = true;
 
-        if (s->nat.state < NAT_PUNCHING) {
-            print("I:", LA_F("%s: peer online, starting NAT punch\n", LA_F424, 424), PROTO);
-            nat_punch(s, -1/* all candidates */);
-        }
+    // 无论 peer_online 之前是否已设置，只要 NAT 打洞还未启动就启动
+    // 注：Bob 在 SYNC0_ACK(online=1) 时已设置 peer_online，但 punch 尚未启动，需在此触发
+    if (s->nat.state < NAT_PUNCHING) {
+        print("I:", LA_F("%s: peer online, starting NAT punch\n", LA_F424, 424), PROTO);
+        nat_punch(s, -1/* all candidates */);
     }
 
     if (new_seq) {
@@ -1499,12 +1493,12 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
                PROTO, base_index, ctx->remote_addr_notify_seq);
 
     // 收到该消息说明对方肯定已上线
-    if (!ctx->peer_online) { ctx->peer_online = true;
+    if (!ctx->peer_online) ctx->peer_online = true;
 
-        if (s->nat.state < NAT_PUNCHING) {
-            print("I:", LA_F("%s: peer online, starting NAT punch\n", LA_F424, 424), PROTO);
-            nat_punch(s, -1/* all candidates */);
-        }
+    // 无论 peer_online 之前是否已设置，只要 NAT 打洞还未启动就启动
+    if (s->nat.state < NAT_PUNCHING) {
+        print("I:", LA_F("%s: peer online, starting NAT punch\n", LA_F424, 424), PROTO);
+        nat_punch(s, -1/* all candidates */);
     }
 
     if (new_seq) {
@@ -1526,8 +1520,7 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
      * 发送 SYNC_ACK 确认包
      * 说明: 确认收到对方的候选地址包
      *
-     * 协议：SIG_PKT_SYNC_ACK (0x04)
-     * 包头: [type=0x04 | flags=0 | seq=被确认的SYNC包序号]
+     * 包头: [type=SIG_PKT_SYNC_ACK | flags=0 | seq=被确认的SYNC包序号]
      * 负载: [session_id(P2P_SESS_ID_PSZ)]
      *   - session_id: 会话 ID（网络字节序）
      *   - seq: 被确认的 SYNC 包的序列号
@@ -1910,8 +1903,8 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
             print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
             return;
         }
-        res_code = payload[10];
-        res_data = payload + 11;
+        res_code = payload[P2P_SESS_ID_PSZ + 2];
+        res_data = payload + P2P_SESS_ID_PSZ + 3;
         res_size = len - (int)SIG_PKT_MSG_RESP_MIN_PSZ;
     }
 
@@ -2127,8 +2120,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
             /*
              * 发送 ALIVE 保活包
              *
-             * 协议：SIG_PKT_ALIVE (0x83)
-             * 包头: [type=0x83 | flags=0 | seq=0]
+             * 包头: [type=SIG_PKT_ALIVE | flags=0 | seq=0]
              * 负载: [auth_key(8)]
              *   - auth_key: 客户端-服务器认证令牌（来自 ONLINE_ACK）
              * 说明: 保活包，维持服务器上的注册状态

@@ -204,8 +204,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
 /*
  * 发送 ONLINE 消息
  *
- * 协议：P2P_RLY_ONLINE (0x01)
- * 包头: [type(1) | size(2)]
+ * 包头: [type(P2P_RLY_ONLINE) | size(2)]
  * 负载: [name(32)][instance_id(4)]
  */
 static void send_online(p2p_session_t *s) {
@@ -236,8 +235,7 @@ static void send_online(p2p_session_t *s) {
 /*
  * 发送 ALIVE 心跳
  *
- * 协议：P2P_RLY_ALIVE (0x03)
- * 包头: [type(1) | size(2)]
+ * 包头: [type(P2P_RLY_ALIVE) | size(2)]
  * 负载: 无
  */
 static void send_alive(p2p_session_t *s) {
@@ -258,11 +256,10 @@ static void send_alive(p2p_session_t *s) {
 /*
  * 发送 SYNC0 请求建立会话
  *
- * 协议：P2P_RLY_SYNC0 (0x04)
- * 包头: [type(1) | size(2)]
+ * 包头: [type(P2P_RLY_SYNC0) | size(2)]
  * 负载: [target_name(32)][candidate_count(1)][candidates(N*23)]
  */
-static void send_sync0(p2p_session_t *s) {
+static void compact_send_sync0(p2p_session_t *s) {
     const char *PROTO = "SYNC0";
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
@@ -287,8 +284,7 @@ static void send_sync0(p2p_session_t *s) {
 /*
  * 发送 SYNC 上传候选
  *
- * 协议：P2P_RLY_SYNC (0x06)
- * 包头: [type(1) | size(2)]
+ * 包头: [type(P2P_RLY_SYNC) | size(2)]
  * 负载: [session_id(4)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *
  * FIN 语义（非独立协议）：
@@ -374,11 +370,10 @@ static void send_sync(p2p_session_t *s) {
 /*
  * 发送 FIN 结束会话
  *
- * 协议：P2P_RLY_FIN (0x08)
- * 包头: [type(1) | size(2)]
+ * 包头: [type(P2P_RLY_FIN) | size(2)]
  * 负载: [session_id(4)]
  */
-static void send_fin(p2p_session_t *s) {
+static void compact_send_fin(p2p_session_t *s) {
     const char *PROTO = "FIN";
 
     p2p_signal_relay_ctx_t *ctx = &s->sig_relay_ctx;
@@ -417,8 +412,7 @@ static bool relay_wait_stun_candidates(p2p_session_t *s) {
 /*
  * 通过 RELAY 服务器转发数据包（DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK）
  *
- * 协议：P2P_RLY_DATA
- * 包头: [type(1)][size(2)]
+ * 包头: [type(P2P_RLY_DATA) | size(2)]
  * 负载: [session_id(4)][P2P packet header(4)][payload(N)]
  * 内层 P2P hdr.type 区分实际包类型。
  *
@@ -581,8 +575,8 @@ ret_t p2p_signal_relay_response(p2p_session_t *s,
 /*
  * 处理 STATUS（服务器主动返回状态）
  *
- * 协议：P2P_RLY_STATUS (0x00)
- * 负载: [type(1)][status_code(1)][status_msg(N)]
+ * 包头: [type(P2P_RLY_STATUS) | size(2)]
+ * 负载: [status_code(1)][status_msg(N)]
  */
 static void handle_relay_status(p2p_session_t *s, const uint8_t *payload, int len) {
     const char *PROTO = "STATUS";
@@ -647,7 +641,7 @@ static void handle_relay_status(p2p_session_t *s, const uint8_t *payload, int le
 /*
  * 处理 ONLINE_ACK
  *
- * 协议：P2P_RLY_ONLINE_ACK (0x02)
+ * 包头: [type(P2P_RLY_ONLINE_ACK) | size(2)]
  * 负载: [features(1)][candidate_sync_max(1)]
  */
 static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len) {
@@ -696,14 +690,14 @@ static void handle_online_ack(p2p_session_t *s, const uint8_t *payload, int len)
     // 触发排队的 sync0 请求
     if (ctx->connected) {
         ctx->state = SIGNAL_RELAY_WAIT_SYNC0_ACK;
-        send_sync0(s);
+        compact_send_sync0(s);
     }
 }
 
 /*
  * 处理 SYNC0_ACK
  *
- * 协议：P2P_RLY_SYNC0_ACK (0x05)
+ * 包头: [type(P2P_RLY_SYNC0_ACK) | size(2)]
  * 负载: [session_id(4)][online(1)]
  */
 static void handle_sync0_ack(p2p_session_t *s, const uint8_t *payload, int len) {
@@ -773,7 +767,7 @@ static void handle_sync0_ack(p2p_session_t *s, const uint8_t *payload, int len) 
 /*
  * 处理 SYNC_ACK（服务器流控确认，包含本批次实际转发数量）
  *
- * 协议：P2P_RLY_SYNC_ACK (0x07)
+ * 包头: [type(P2P_RLY_SYNC_ACK) | size(2)]
  * 负载: [session_id(4)][confirmed_count(1)]
  *
  * 流程：
@@ -848,7 +842,7 @@ static void handle_sync_ack(p2p_session_t *s, const uint8_t *payload, int len) {
 /*
  * 处理 SYNC（服务器下发对端候选）
  *
- * 协议：P2P_RLY_SYNC (0x06)
+ * 包头: [type(P2P_RLY_SYNC) | size(2)]
  * 负载: [session_id(4)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  */
 static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool is_sync0) {
@@ -955,7 +949,7 @@ static void handle_sync(p2p_session_t *s, const uint8_t *payload, int len, bool 
 /*
  * 处理 FIN（服务器转发的对端会话结束通知）
  *
- * 协议：P2P_RLY_FIN (0x08)
+ * 包头: [type(P2P_RLY_FIN) | size(2)]
  * 负载: [session_id(4)]
  */
 static void handle_relay_fin(p2p_session_t *s, const uint8_t *payload, int len) {
@@ -1417,7 +1411,7 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
     // 已上线：立即发送 SYNC0；否则等待 ONLINE_ACK 后自动触发
     if (ctx->state == SIGNAL_RELAY_ONLINE) {
         ctx->state = SIGNAL_RELAY_WAIT_SYNC0_ACK;
-        send_sync0(s);
+        compact_send_sync0(s);
     }
 
     return E_NONE;
@@ -1444,7 +1438,7 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
     }
 
     // 发送 FIN 消息
-    send_fin(s);
+    compact_send_fin(s);
 
     memset(ctx->remote_peer_id, 0, sizeof(ctx->remote_peer_id));
     ctx->connected = false;

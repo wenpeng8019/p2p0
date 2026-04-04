@@ -359,11 +359,9 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
         
         if (type == P2P_RLY_SYNC0_ACK && payload_len >= P2P_RLY_SYNC0_ACK_PSZ) {
             ack->received = 1;
-            ack->session_id = 0;
-            for (int j = 0; j < 8; j++) {
-                ack->session_id = (ack->session_id << 8) | recv_buf[3 + j];
-            }
-            ack->online = recv_buf[3 + 8];
+            ack->session_id = ((uint32_t)recv_buf[3] << 24) | ((uint32_t)recv_buf[4] << 16) |
+                              ((uint32_t)recv_buf[5] << 8)  | (uint32_t)recv_buf[6];
+            ack->online = recv_buf[7];
             return 1;
         }
     }
@@ -380,7 +378,7 @@ static int send_alive(sock_t sock) {
 }
 
 // 发送 FIN
-static int send_fin(sock_t sock, uint32_t session_id) {
+static int compact_send_fin(sock_t sock, uint32_t session_id) {
     uint8_t pkt[16];
     int pkt_len = build_fin(pkt, sizeof(pkt), session_id);
     return tcp_send_all(sock, pkt, pkt_len) == pkt_len ? 1 : 0;
@@ -396,12 +394,10 @@ static int wait_fin(sock_t sock, uint64_t *session_id_out) {
             return 0;
         }
         
-        if (type == P2P_RLY_FIN && payload_len >= 8) {
+        if (type == P2P_RLY_FIN && payload_len >= (uint16_t)P2P_RLY_FIN_PSZ) {
             if (session_id_out) {
-                *session_id_out = 0;
-                for (int j = 0; j < 8; j++) {
-                    *session_id_out = (*session_id_out << 8) | recv_buf[3 + j];
-                }
+                *session_id_out = ((uint32_t)recv_buf[3] << 24) | ((uint32_t)recv_buf[4] << 16) |
+                                  ((uint32_t)recv_buf[5] << 8)  | (uint32_t)recv_buf[6];
             }
             return 1;
         }
@@ -483,7 +479,7 @@ static void test_fin_closes_session(void) {
     }
     
     // 发送 FIN
-    if (!send_fin(sock, sync_ack.session_id)) {
+    if (!compact_send_fin(sock, sync_ack.session_id)) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "FIN send failed");
         return;
@@ -567,7 +563,7 @@ static void test_fin_notifies_peer(void) {
     
     // Alice 发送 FIN
     P_sock_rcvtimeo(sock_bob, RECV_TIMEOUT_MS);
-    send_fin(sock_alice, alice_sync_ack.session_id);
+    compact_send_fin(sock_alice, alice_sync_ack.session_id);
     
     // Bob 应该收到 FIN (如果服务器实现了 FIN 转发)
     uint64_t fin_session_id = 0;
@@ -615,7 +611,7 @@ static void test_fin_bad_session(void) {
     
     // 发送无效 session_id 的 FIN
     uint64_t fake_session_id = 0xDEADBEEF12345678ULL;
-    send_fin(sock, fake_session_id);
+    compact_send_fin(sock, fake_session_id);
     
     P_usleep(100 * 1000);
     
@@ -662,7 +658,7 @@ static void test_fin_peer_offline(void) {
     }
     
     // 发送 FIN
-    send_fin(sock, sync_ack.session_id);
+    compact_send_fin(sock, sync_ack.session_id);
     
     P_usleep(100 * 1000);
     P_sock_close(sock);
@@ -701,9 +697,9 @@ static void test_fin_idempotent(void) {
     }
     
     // 发送两次 FIN
-    send_fin(sock, sync_ack.session_id);
+    compact_send_fin(sock, sync_ack.session_id);
     P_usleep(50 * 1000);
-    send_fin(sock, sync_ack.session_id);
+    compact_send_fin(sock, sync_ack.session_id);
     
     P_usleep(100 * 1000);
     P_sock_close(sock);
@@ -742,7 +738,7 @@ static void test_reconnect_after_fin(void) {
     }
     
     // FIN
-    send_fin(sock, sync_ack1.session_id);
+    compact_send_fin(sock, sync_ack1.session_id);
     P_usleep(100 * 1000);
     
     // 重新 SYNC0
