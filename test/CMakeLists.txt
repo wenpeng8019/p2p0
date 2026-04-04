@@ -224,11 +224,33 @@ if(WITH_WSLAY)
         ${TEST_PLATFORM_LIBS}
     )
     target_compile_definitions(test_ws PRIVATE WITH_WSLAY)
+
+    # p2p_server --ws 集成测试（启动真实 server 子进程）
+    add_executable(test_ws_server_integration
+        test_ws_server_integration.c
+    )
+    target_include_directories(test_ws_server_integration PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/p2p_server
+        ${CMAKE_SOURCE_DIR}/stdc
+        ${WSLAY_INCLUDE_DIRS}
+    )
+    target_link_libraries(test_ws_server_integration
+        p2p_static
+        ${TEST_PLATFORM_LIBS}
+    )
+    target_compile_definitions(test_ws_server_integration PRIVATE WITH_WSLAY)
+    # register_* 是测试框架的占位函数，从不被调用，抑制 -Wunused-function 警告
+    target_compile_options(test_ws_server_integration PRIVATE
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
+    )
 endif()
 
 # 添加测试
 enable_testing()
 add_test(NAME test_transport     COMMAND test_transport)
 if(WITH_WSLAY)
-    add_test(NAME test_ws        COMMAND test_ws)
+    add_test(NAME test_ws                    COMMAND test_ws)
+    add_test(NAME test_ws_server_integration COMMAND test_ws_server_integration)
 endif()

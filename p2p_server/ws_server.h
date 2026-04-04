@@ -93,10 +93,23 @@ typedef struct {
 } ws_server_cfg_t;
 
 /* -------------------------------------------------------------------------
+ * 平台 socket fd 类型（方便外部传入已 accept 的 fd）
+ * ---------------------------------------------------------------------- */
+#ifdef _WIN32
+#  include <winsock2.h>
+typedef SOCKET ws_srv_fd_t;
+#else
+typedef int    ws_srv_fd_t;
+#endif
+
+/* -------------------------------------------------------------------------
  * 生命周期
  * ---------------------------------------------------------------------- */
 
-/* 创建服务器，绑定并监听 port */
+/* 创建服务器，绑定并监听 port。
+ * port == 0：嵌入模式，不创建监听 socket，由外部通过
+ * ws_server_inject_fd() 注入已 accept 的连接。
+ */
 ws_server_t *ws_server_create(const ws_server_cfg_t *cfg, uint16_t port);
 
 /* 销毁服务器，关闭所有连接和监听 socket */
@@ -132,6 +145,12 @@ void ws_server_disconnect(ws_server_t *srv, ws_client_id_t cid, uint16_t code);
 
 /* 返回当前在线客户端数量 */
 int ws_server_client_count(const ws_server_t *srv);
+
+/* 将外部已 accept 的 fd 注入（同端口共享场景）
+ * fd 应已设置为非阻塞，或由此函数内部设置。
+ * 返回 0 成功，-1 失败（满槽）
+ */
+int ws_server_inject_fd(ws_server_t *srv, ws_srv_fd_t fd);
 
 #ifdef __cplusplus
 }

@@ -414,6 +414,12 @@ ws_server_t *ws_server_create(const ws_server_cfg_t *cfg, uint16_t port) {
         srv->slots[i].id = i + 1;  /* 1-based */
     }
 
+    /* port == 0：嵌入模式，不创建监听 socket，由外部注入已 accept 的 fd */
+    if (port == 0) {
+        srv->listen_fd = INVALID_SOCK;
+        return srv;
+    }
+
     /* 创建监听 socket */
     srv->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (!VALID_SOCK(srv->listen_fd)) { free(srv); return NULL; }
@@ -453,7 +459,8 @@ void ws_server_destroy(ws_server_t *srv) {
 void ws_server_update(ws_server_t *srv) {
     if (!srv) return;
 
-    /* 接受新连接 */
+    /* 接受新连接（嵌入模式 listen_fd==INVALID_SOCK 时跳过）*/
+    if (VALID_SOCK(srv->listen_fd)) {
     for (;;) {
         struct sockaddr_in peer_addr;
         socklen_t peer_len = sizeof(peer_addr);
@@ -477,6 +484,7 @@ void ws_server_update(ws_server_t *srv) {
         slot->recv_buf_len = 0;
         slot->recv_buf_pos = 0;
     }
+    } /* if VALID_SOCK(listen_fd) */
 
     /* 处理每个活跃槽位 */
     for (int i = 0; i < WS_SERVER_MAX_CLIENTS; i++) {
@@ -576,6 +584,23 @@ void ws_server_disconnect(ws_server_t *srv, ws_client_id_t cid, uint16_t code) {
 
 int ws_server_client_count(const ws_server_t *srv) {
     return srv ? srv->client_count : 0;
+}
+
+int ws_server_inject_fd(ws_server_t *srv, ws_srv_fd_t fd) {
+    if (!srv) return -1;
+    ws_slot_t *slot = NULL;
+    for (int i = 0; i < WS_SERVER_MAX_CLIENTS; i++) {
+        if (srv->slots[i].state == WS_SLOT_FREE) { slot = &srv->slots[i]; break; }
+    }
+    if (!slot) return -1;
+
+    ws_srv_nonblock((sock_t)fd);
+    slot->fd           = (sock_t)fd;
+    slot->state        = WS_SLOT_HANDSHAKING;
+    slot->http_buf_len = 0;
+    slot->recv_buf_len = 0;
+    slot->recv_buf_pos = 0;
+    return 0;
 }
 
 #endif /* WITH_WSLAY */

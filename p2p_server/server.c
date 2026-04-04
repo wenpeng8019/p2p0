@@ -43,11 +43,17 @@
 #include <signal.h>    /* signal() */
 #include "uthash.h"
 
+#ifdef WITH_WSLAY
+#  include "ws_server.h"
+static ws_server_t *g_ws_srv = NULL;
+#endif
+
 // 命令行参数定义
 ARGS_I(false, port,       'p', "port",       LA_CS("Signaling server listen port (TCP+UDP)", LA_S9, 9));
 ARGS_I(false, probe_port, 'P', "probe-port", LA_CS("NAT type detection port (0=disabled)", LA_S6, 6));
 ARGS_B(false, relay,      'r', "relay",      LA_CS("Enable data relay support (COMPACT mode fallback)", LA_S4, 4));
 ARGS_B(false, msg,        'm', "msg",        LA_CS("Enable MSG RPC support", LA_S5, 5));
+ARGS_B(false, ws,         'S', "ws",         "Enable WebSocket service on same TCP port");
 
 static void cb_cn(const char* argv) { (void)argv;  lang_cn(); }
 ARGS_PRE(cb_cn, cn,         0,   "cn",       LA_CS("Use Chinese language", LA_S10, 10));
@@ -2950,6 +2956,7 @@ int main(int argc, char *argv[]) {
             &ARGS_DEF_probe_port,
             &ARGS_DEF_relay,
             &ARGS_DEF_msg,
+            &ARGS_DEF_ws,
             &ARGS_DEF_cn,
             NULL);
     }
@@ -2984,6 +2991,10 @@ int main(int argc, char *argv[]) {
           (int)ARGS_probe_port.i64);
     print("I:", LA_F("Relay support: %s\n", LA_F101, 101), 
           ARGS_relay.i64 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
+#ifdef WITH_WSLAY
+    print("I:", "WebSocket service: %s\n",
+          ARGS_ws.i64 ? "enabled (same port)" : "disabled");
+#endif
 
     // 注册信号处理
 #if P_WIN
@@ -3062,6 +3073,18 @@ int main(int argc, char *argv[]) {
     listen(listen_fd, 10);
     print("I:", LA_F("P2P Signaling Server listening on port %d (TCP + UDP)...\n", LA_F98, 98), port);
 
+#ifdef WITH_WSLAY
+    if (ARGS_ws.i64) {
+        ws_server_cfg_t ws_cfg = {0};
+        g_ws_srv = ws_server_create(&ws_cfg, 0);  /* port=0: 嵌入模式，不自建监听 */
+        if (!g_ws_srv) {
+            print("W:", "WebSocket server init failed, WS disabled\n");
+        } else {
+            print("I:", "WebSocket service ready on port %d\n", port);
+        }
+    }
+#endif
+
     // 主循环
     fd_set read_fds;
     uint64_t last_cleanup = P_tick_ms(), last_compact_retry_check = last_cleanup;
@@ -3112,7 +3135,12 @@ int main(int argc, char *argv[]) {
         }
 
         // 等待套接口数据（超时1秒，用于周期性清理）
+        // WS 启用时缩短至 50ms，以减少 WebSocket 消息延迟
+#ifdef WITH_WSLAY
+        struct timeval tv = g_ws_srv ? (struct timeval){0, 50000} : (struct timeval){1, 0};
+#else
         struct timeval tv = {1, 0};
+#endif
         int sel_ret = select(max_fd + 1, &read_fds, &write_fds, NULL, &tv);
         if (sel_ret < 0) {
             if (P_sock_is_interrupted()) continue;  // 被信号打断，继续循环
@@ -3132,6 +3160,28 @@ int main(int argc, char *argv[]) {
             if (P_sock_nonblock(client_fd, true) != E_NONE) {
                 print("W:", LA_F("[TCP] Failed to set client socket to non-blocking mode\n", LA_F129, 129));
             }
+
+#ifdef WITH_WSLAY
+            /* 同端口 WS 检测：peek 首字节，HTTP 请求以 'G'(GET) 开头。
+             * 需要先用 select() 等数据到达，因为 socket 已设为非阻塞，
+             * 直接 recv+MSG_PEEK 会立刻返回 EAGAIN（数据尚未到达）。 */
+            if (g_ws_srv) {
+                fd_set _ps; FD_ZERO(&_ps); FD_SET(client_fd, &_ps);
+                struct timeval _pt = {0, 200000}; /* 最多等 200ms */
+                char peek_byte = 0;
+                if (select((int)client_fd + 1, &_ps, NULL, NULL, &_pt) > 0) {
+                    recv(client_fd, &peek_byte, 1, MSG_PEEK);
+                }
+                if (peek_byte == 'G') {
+                    if (ws_server_inject_fd(g_ws_srv, client_fd) != 0) {
+                        print("W:", "[WS] inject_fd failed (slots full), closing\n");
+                        P_sock_close(client_fd);
+                    }
+                    /* 不进入 relay 槽位分配 */
+                    continue;
+                }
+            }
+#endif
             
             int i = 0;
             for (i = 0; i < MAX_PEERS; i++) {
@@ -3289,6 +3339,11 @@ int main(int argc, char *argv[]) {
             }
         }
 
+#ifdef WITH_WSLAY
+        /* 驱动 WebSocket 客户端收发（非阻塞，每轮主循环调用一次）*/
+        if (g_ws_srv) ws_server_update(g_ws_srv);
+#endif
+
     } // while (g_running)
 
     // 清理资源
@@ -3310,7 +3365,11 @@ int main(int argc, char *argv[]) {
     P_sock_close(listen_fd);
     P_sock_close(udp_fd);
     if (probe_fd != P_INVALID_SOCKET) P_sock_close(probe_fd);
-    
+
+#ifdef WITH_WSLAY
+    if (g_ws_srv) { ws_server_destroy(g_ws_srv); g_ws_srv = NULL; }
+#endif
+
     P_net_cleanup();
 
     print("I:", LA_F("Goodbye!\n", LA_F81, 81));
