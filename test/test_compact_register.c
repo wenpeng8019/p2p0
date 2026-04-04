@@ -305,7 +305,7 @@ static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
 // 发送并接收 ONLINE_ACK
 typedef struct {
     int received;           // 是否收到响应
-    uint32_t session_id;
+    uint64_t auth_key;      // ONLINE_ACK 返回的认证密钥
     uint32_t instance_id;
     uint8_t max_candidates;
     uint32_t public_ip;
@@ -363,10 +363,10 @@ static int send_online_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_t 
         ack->instance_id = (ack->instance_id << 8) | recv_buf[4 + i];
     }
 
-    // session_id / auth_key (8 bytes)
-    ack->session_id = 0;
+    // auth_key (8 bytes)
+    ack->auth_key = 0;
     for (int i = 0; i < 8; i++) {
-        ack->session_id = (ack->session_id << 8) | recv_buf[8 + i];
+        ack->auth_key = (ack->auth_key << 8) | recv_buf[8 + i];
     }
     
     ack->max_candidates = recv_buf[16];
@@ -431,11 +431,11 @@ static void test_register_peer_offline(void) {
         TEST_FAIL(TEST_NAME, "no REGISTER_ACK received");
         return;
     }
-    if (ack.session_id == 0) {
+    if (ack.auth_key == 0) {
         TEST_FAIL(TEST_NAME, "ONLINE_ACK rejected (auth_key=0)");
         return;
     }
-    if (ack.session_id == 0) {
+    if (ack.auth_key == 0) {
         TEST_FAIL(TEST_NAME, "session_id should not be 0");
         return;
     }
@@ -452,7 +452,7 @@ static void test_register_peer_offline(void) {
     
     TEST_PASS(TEST_NAME);
     printf("    session_id=0x%016llx, max_cands=%d\n", 
-           (unsigned long long)ack.session_id, ack.max_candidates);
+           (unsigned long long)ack.auth_key, ack.max_candidates);
 }
 
 // 测试 2: 正常注册，peer 在线（双方互相注册）
@@ -477,24 +477,24 @@ static void test_register_peer_online(void) {
     int len = build_online(pkt, sizeof(pkt), PEER_ALICE, inst_alice);
     send_register_recv_ack(pkt, len, &ack_alice, RECV_TIMEOUT_MS);
     
-    if (!ack_alice.received || ack_alice.session_id == 0) {
+    if (!ack_alice.received || ack_alice.auth_key == 0) {
         TEST_FAIL(TEST_NAME, "Alice should get valid ONLINE_ACK (auth_key != 0)");
         return;
     }
-    printf("    Alice ONLINE: auth_key=0x%016llx\n", (unsigned long long)ack_alice.session_id);
+    printf("    Alice ONLINE: auth_key=0x%016llx\n", (unsigned long long)ack_alice.auth_key);
     
     // Step 2: Bob ONLINE → 获取 auth_key
     len = build_online(pkt, sizeof(pkt), PEER_BOB, inst_bob);
     send_register_recv_ack(pkt, len, &ack_bob, RECV_TIMEOUT_MS);
     
-    if (!ack_bob.received || ack_bob.session_id == 0) {
+    if (!ack_bob.received || ack_bob.auth_key == 0) {
         TEST_FAIL(TEST_NAME, "Bob should get valid ONLINE_ACK (auth_key != 0)");
         return;
     }
-    printf("    Bob ONLINE: auth_key=0x%016llx\n", (unsigned long long)ack_bob.session_id);
+    printf("    Bob ONLINE: auth_key=0x%016llx\n", (unsigned long long)ack_bob.auth_key);
     
     // Step 3: Alice 发 SYNC0（携带 auth_key + remote=Bob）
-    len = build_sync0(pkt, sizeof(pkt), ack_alice.session_id, PEER_BOB, 0, NULL);
+    len = build_sync0(pkt, sizeof(pkt), ack_alice.auth_key, PEER_BOB, 0, NULL);
     sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
     
     // 接收 Alice 的 SYNC0_ACK
@@ -512,7 +512,7 @@ static void test_register_peer_online(void) {
     }
     
     // Step 4: Bob 发 SYNC0（携带 auth_key + remote=Alice）
-    len = build_sync0(pkt, sizeof(pkt), ack_bob.session_id, PEER_ALICE, 0, NULL);
+    len = build_sync0(pkt, sizeof(pkt), ack_bob.auth_key, PEER_ALICE, 0, NULL);
     sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
     
     // 接收 Bob 的 SYNC0_ACK（应该 peer_online=1）
@@ -591,16 +591,16 @@ static void test_register_duplicate(void) {
     }
     
     // session_id 应该相同
-    if (ack1.session_id != ack2.session_id) {
+    if (ack1.auth_key != ack2.auth_key) {
         char msg[128];
         snprintf(msg, sizeof(msg), "session_id changed: 0x%llx -> 0x%llx",
-                 (unsigned long long)ack1.session_id, (unsigned long long)ack2.session_id);
+                 (unsigned long long)ack1.auth_key, (unsigned long long)ack2.auth_key);
         TEST_FAIL(TEST_NAME, msg);
         return;
     }
     
     TEST_PASS(TEST_NAME);
-    printf("    session_id remained: 0x%016llx\n", (unsigned long long)ack1.session_id);
+    printf("    session_id remained: 0x%016llx\n", (unsigned long long)ack1.auth_key);
 }
 
 // 测试 4: instance_id 变更（客户端重启）
@@ -623,7 +623,7 @@ static void test_register_instance_change(void) {
         return;
     }
     printf("    First registration: session_id=0x%016llx, inst=%u\n", 
-           (unsigned long long)ack1.session_id, inst_old);
+           (unsigned long long)ack1.auth_key, inst_old);
     
     P_usleep(100 * 1000);
     clear_logs();
@@ -637,10 +637,10 @@ static void test_register_instance_change(void) {
         return;
     }
     printf("    Second registration: session_id=0x%016llx, inst=%u\n", 
-           (unsigned long long)ack2.session_id, inst_new);
+           (unsigned long long)ack2.auth_key, inst_new);
     
     // session_id 应该不同
-    if (ack1.session_id == ack2.session_id) {
+    if (ack1.auth_key == ack2.auth_key) {
         TEST_FAIL(TEST_NAME, "session_id should change after instance_id change");
         return;
     }
@@ -792,7 +792,7 @@ static void test_register_with_candidates(void) {
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
 
-    len = build_sync0(pkt, sizeof(pkt), ack.session_id, PEER_UNKNOWN, 2, candidates);
+    len = build_sync0(pkt, sizeof(pkt), ack.auth_key, PEER_UNKNOWN, 2, candidates);
     sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
     
     P_usleep(200 * 1000);
@@ -829,14 +829,14 @@ static void test_unregister(void) {
         return;
     }
     
-    uint64_t first_session_id = ack.session_id;
+    uint64_t first_session_id = ack.auth_key;
     printf("    First session_id: %llu\n", (unsigned long long)first_session_id);
     
     P_usleep(100 * 1000);
     clear_logs();
     
     // 发送 OFFLINE
-    len = build_unregister(pkt, sizeof(pkt), ack.session_id);
+    len = build_unregister(pkt, sizeof(pkt), ack.auth_key);
     
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
@@ -868,9 +868,9 @@ static void test_unregister(void) {
         return;
     }
     
-    printf("    Second session_id: %llu\n", (unsigned long long)ack2.session_id);
+    printf("    Second session_id: %llu\n", (unsigned long long)ack2.auth_key);
     
-    if (ack2.session_id == first_session_id) {
+    if (ack2.auth_key == first_session_id) {
         TEST_FAIL(TEST_NAME, "session_id should be different after unregister");
         return;
     }
@@ -938,7 +938,7 @@ static void test_register_addr_change(void) {
         return;
     }
     
-    uint64_t first_session_id = ack1.session_id;
+    uint64_t first_session_id = ack1.auth_key;
     printf("    First session_id: %llu\n", (unsigned long long)first_session_id);
     
     // 创建第二个 socket（不同的本地端口）
@@ -1018,7 +1018,7 @@ static void test_register_peer_id_max_length(void) {
         return;
     }
     
-    if (ack.session_id == 0) {
+    if (ack.auth_key == 0) {
         TEST_FAIL(TEST_NAME, "ONLINE_ACK rejected (auth_key=0)");
         return;
     }
@@ -1065,7 +1065,7 @@ static void test_register_candidates_overflow(void) {
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
 
-    len = build_sync0(pkt, sizeof(pkt), ack.session_id, PEER_UNKNOWN, 20, candidates);
+    len = build_sync0(pkt, sizeof(pkt), ack.auth_key, PEER_UNKNOWN, 20, candidates);
     sendto(g_sock, (const char*)pkt, len, 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
     
     P_usleep(200 * 1000);

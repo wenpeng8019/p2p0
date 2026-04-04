@@ -363,7 +363,7 @@ static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt)
 }
 
 // 发送 ONLINE 并接收 ONLINE_ACK，然后发送 SYNC0，返回 session_id
-static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
+static uint32_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
     int len = build_online(pkt, sizeof(pkt), local, inst_id);
@@ -394,13 +394,20 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
         len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
-        // 消耗 SYNC0_ACK，防止它污染后续操作的 recvfrom
-        uint8_t drain_buf[32];
-        struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
+        // 接收 SYNC0_ACK 获取 session_id
+        uint8_t sync_ack[32];
+        struct sockaddr_in sync_from; socklen_t sync_len = sizeof(sync_from);
         P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
-        recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
-                 (struct sockaddr*)&drain_from, &drain_len);
-        return auth_key;
+        n = recvfrom(sock, (char*)sync_ack, sizeof(sync_ack), 0,
+                     (struct sockaddr*)&sync_from, &sync_len);
+        if (n >= 8 && sync_ack[0] == SIG_PKT_SYNC0_ACK) {
+            uint32_t session_id = 0;
+            for (int i = 0; i < 4; i++) {
+                session_id = (session_id << 8) | sync_ack[4 + i];
+            }
+            return session_id;
+        }
+        return 0;
     }
     return 0;
 }
