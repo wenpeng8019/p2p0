@@ -4,7 +4,7 @@
 #include "p2p_internal.h"
 
 static int32_t p2p_thread_func(void *arg) {
-    p2p_session_t *s = (p2p_session_t *)arg;
+    struct p2p_session *s = (struct p2p_session *)arg;
 
     while (!s->quit) {
         P_mutex_lock(&s->mtx);
@@ -19,7 +19,7 @@ static int32_t p2p_thread_func(void *arg) {
     return 0;
 }
 
-ret_t p2p_thread_start(p2p_session_t *s) {
+ret_t p2p_thread_start(struct p2p_session *s) {
     s->quit = 0;
     if (P_mutex_init(&s->mtx) != 0)
         return -1;
@@ -32,7 +32,7 @@ ret_t p2p_thread_start(p2p_session_t *s) {
     return E_NONE;
 }
 
-void p2p_thread_stop(p2p_session_t *s) {
+void p2p_thread_stop(struct p2p_session *s) {
     if (!s->thread_running) return;
 
     s->quit = 1;

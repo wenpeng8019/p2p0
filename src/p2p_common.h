@@ -1,7 +1,7 @@
 /*
  * 共享序列化工具（供库内部及 p2p_server 使用）
  *
- * 包含不依赖 LANG/i18n 宏和 p2p_session_t 的轻量工具：
+ * 包含不依赖 LANG/i18n 宏和 struct p2p_session 的轻量工具：
  *   - ICE 候选地址基础结构体 p2p_local_candidate_entry_t
  *   - 序列号差值 seq_diff
  *   - sockaddr ↔ wire 格式转换

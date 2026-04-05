@@ -58,7 +58,7 @@
  *
  *   【候选数据结构】项目通用格式
  *     - p2p_local_candidate_entry_t / p2p_remote_candidate_entry_t
- *     - 存储在 p2p_session_t.local_cands[] / remote_cands[]
+ *     - 存储在 struct p2p_session.local_cands[] / remote_cands[]
  *     - 与 ICE 无关的其他模块也使用相同结构
  *
  *   【连通性检查】NAT 模块负责

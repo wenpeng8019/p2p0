@@ -18,7 +18,7 @@ typedef struct {
 static unsigned int psk_client_cb(SSL *ssl, const char *hint, char *identity,
                                 unsigned int max_identity_len, unsigned char *psk,
                                 unsigned int max_psk_len) {
-    p2p_session_t *s = SSL_get_ex_data(ssl, 0);
+    struct p2p_session *s = SSL_get_ex_data(ssl, 0);
     if (!s || !s->cfg.auth_key) return 0;
     
     strncpy(identity, "p2p_id", max_identity_len);
@@ -30,7 +30,7 @@ static unsigned int psk_client_cb(SSL *ssl, const char *hint, char *identity,
 
 static unsigned int psk_server_cb(SSL *ssl, const char *identity, unsigned char *psk,
                                 unsigned int max_psk_len) {
-    p2p_session_t *s = SSL_get_ex_data(ssl, 0);
+    struct p2p_session *s = SSL_get_ex_data(ssl, 0);
     if (!s || !s->cfg.auth_key) return 0;
     
     unsigned int len = strlen(s->cfg.auth_key);
@@ -40,7 +40,7 @@ static unsigned int psk_server_cb(SSL *ssl, const char *identity, unsigned char 
 }
 
 /* 刷新 write_bio: 通过 p2p_send_dtls_record 发送 DTLS 记录 */
-static void openssl_flush_bio(p2p_session_t *s, BIO *write_bio) {
+static void openssl_flush_bio(struct p2p_session *s, BIO *write_bio) {
     char enc_buf[P2P_MTU + 64];
     int enc_len;
     while ((enc_len = BIO_read(write_bio, enc_buf, sizeof(enc_buf))) > 0) {
@@ -48,7 +48,7 @@ static void openssl_flush_bio(p2p_session_t *s, BIO *write_bio) {
     }
 }
 
-static int openssl_init(p2p_session_t *s) {
+static int openssl_init(struct p2p_session *s) {
     p2p_openssl_ctx_t *os = calloc(1, sizeof(p2p_openssl_ctx_t));
     if (!os) {
         print("E:", LA_F("Failed to allocate OpenSSL context", LA_F238, 238));
@@ -113,7 +113,7 @@ static int openssl_init(p2p_session_t *s) {
     return 0;
 }
 
-static void openssl_tick(p2p_session_t *s) {
+static void openssl_tick(struct p2p_session *s) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->dtls_data;
     if (!os || !os->ssl) return;
 
@@ -127,7 +127,7 @@ static void openssl_tick(p2p_session_t *s) {
     openssl_flush_bio(s, os->write_bio);
 }
 
-static int openssl_is_ready(p2p_session_t *s) {
+static int openssl_is_ready(struct p2p_session *s) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->dtls_data;
     return os && os->handshake_done;
 }
@@ -135,7 +135,7 @@ static int openssl_is_ready(p2p_session_t *s) {
 /*
  * 加密并发送: 打包内层 [type|flags|seq|payload] → SSL_write → flush
  */
-static ret_t openssl_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr,
+static ret_t openssl_encrypt_send(struct p2p_session *s, const struct sockaddr_in *addr,
                                 const void *plain, int plain_len) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->dtls_data;
     if (!os || !os->handshake_done) return 0;
@@ -155,7 +155,7 @@ static ret_t openssl_encrypt_send(p2p_session_t *s, const struct sockaddr_in *ad
 /*
  * 解密: 注入 DTLS 记录 → SSL_read / 握手推进
  */
-static int openssl_decrypt_recv(p2p_session_t *s, const uint8_t *in, int in_len,
+static int openssl_decrypt_recv(struct p2p_session *s, const uint8_t *in, int in_len,
                                 uint8_t *out, int out_cap) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->dtls_data;
     if (!os) return -1;
@@ -176,7 +176,7 @@ static int openssl_decrypt_recv(p2p_session_t *s, const uint8_t *in, int in_len,
     return (ret > 0) ? ret : 0;
 }
 
-static void openssl_close(p2p_session_t *s) {
+static void openssl_close(struct p2p_session *s) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->dtls_data;
     if (!os) return;
     if (os->ssl) SSL_free(os->ssl);

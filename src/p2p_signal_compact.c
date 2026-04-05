@@ -36,7 +36,7 @@
  *
  * 格式: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
  */
-static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, int cand_cnt) {
+static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *payload, int cand_cnt) {
 
     assert(cand_cnt && s->remote_cand_cnt + cand_cnt <= s->remote_cand_cap);
 
@@ -142,7 +142,7 @@ static void unpack_remote_candidates(p2p_session_t *s, const uint8_t *payload, i
  *
  * 格式: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
  */
-static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payload, uint8_t *r_flags) {
+static int pack_local_candidates(struct p2p_session *s, uint16_t seq, uint8_t *payload, uint8_t *r_flags) {
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
 
@@ -192,7 +192,7 @@ static int pack_local_candidates(p2p_session_t *s, uint16_t seq, uint8_t *payloa
  *   - instance_id: 本次 connect() 的实例 ID（网络字节序，32位，必须非 0）
  * 注：候选地址通过后续 SYNC0 包单独提交
  */
-static void send_online(p2p_session_t *s) {
+static void send_online(struct p2p_session *s) {
     const char* PROTO = "ONLINE";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -227,7 +227,7 @@ static void send_online(p2p_session_t *s) {
  *   - remote_peer_id: 目标对端 ID
  *   - candidate_count: 首批候选数量（最多 candidates_cached 个）
  */
-static void send_compact_sync0(p2p_session_t *s) {
+static void send_compact_sync0(struct p2p_session *s) {
     const char* PROTO = "SYNC0";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -278,7 +278,7 @@ static void send_compact_sync0(p2p_session_t *s) {
  *   - flags: SIG_PKT_FLAG_MORE_CAND (0x02) 表示后续还有包
  *           SIG_PKT_FLAG_FIN (0x01) 表示发送完毕
  */
-static void send_rest_candidates_and_fin(p2p_session_t *s) {
+static void send_rest_candidates_and_fin(struct p2p_session *s) {
     const char* PROTO = "SYNC";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -345,7 +345,7 @@ static void send_rest_candidates_and_fin(p2p_session_t *s) {
  */
 
 /* 将攒批累积的 trickle 候选打包发送（trickle_turn 和 tick flush 共用） */
-static void send_trickle_candidates(p2p_session_t *s) {
+static void send_trickle_candidates(struct p2p_session *s) {
     const char* PROTO = "SYNC(trickle)";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -381,7 +381,7 @@ static void send_trickle_candidates(p2p_session_t *s) {
     ctx->trickle_last_pack_time = s->turn_pending > 0 ? ctx->last_send_time : 0;
 }
 
-static bool compact_wait_stun_candidates(p2p_session_t *s) {
+static bool compact_wait_stun_candidates(struct p2p_session *s) {
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     return ctx->state == SIGNAL_COMPACT_SYNCING && ctx->candidates_mask == 0 && s->stun_pending > 0;
 }
@@ -393,7 +393,7 @@ static bool compact_wait_stun_candidates(p2p_session_t *s) {
  * 负载: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*7)]
  * 说明: 重发所有未收到 ACK 的 SYNC 包
  */
-static void resend_rest_candidates_and_fin(p2p_session_t *s) {
+static void resend_rest_candidates_and_fin(struct p2p_session *s) {
     const char* PROTO = "SYNC";
 
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
@@ -730,7 +730,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
  *   - FIN flag:     末包置位，通知对端本端候选列表已全部发送完毕
  * 注：支持 TRICKLE_BATCH_MS 窗口攒批，多个 STUN/TURN 响应合并为一个包后发送
  */
-void p2p_signal_compact_trickle_candidate(p2p_session_t *s) {
+void p2p_signal_compact_trickle_candidate(struct p2p_session *s) {
     
     p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
     if (ctx->state != SIGNAL_COMPACT_SYNCING && ctx->state != SIGNAL_COMPACT_READY) return;

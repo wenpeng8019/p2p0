@@ -161,7 +161,7 @@ typedef struct {
  * 出站回调：usrsctp → UDP
  * ============================================================================ */
 static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df) {
-    p2p_session_t *s = (p2p_session_t *)addr;
+    struct p2p_session *s = (struct p2p_session *)addr;
     (void)tos; (void)set_df;
 
     if (!s || length > P2P_MTU) return -1;
@@ -175,7 +175,7 @@ static int p2p_sctp_out(void *addr, void *buffer, size_t length, uint8_t tos, ui
  * Upcall 回调：usrsctp 有数据可读时调用
  * ============================================================================ */
 static void sctp_upcall(struct socket *sock, void *arg, int flags) {
-    p2p_session_t *s = (p2p_session_t *)arg;
+    struct p2p_session *s = (struct p2p_session *)arg;
     (void)flags;
     if (!s) return;
     p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
@@ -256,7 +256,7 @@ static void sctp_subscribe_events(struct socket *sock) {
 /* ============================================================================
  * 初始化 SCTP 传输层
  * ============================================================================ */
-static int sctp_init(p2p_session_t *s) {
+static int sctp_init(struct p2p_session *s) {
     p2p_sctp_ctx_t *ctx = calloc(1, sizeof(p2p_sctp_ctx_t));
     if (!ctx) return -1;
     s->trans_data = ctx;
@@ -375,7 +375,7 @@ fail:
 /* ============================================================================
  * 发送数据
  * ============================================================================ */
-static int sctp_send(p2p_session_t *s, const void *buf, int len) {
+static int sctp_send(struct p2p_session *s, const void *buf, int len) {
     p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx || !ctx->sock || ctx->state != 2) return -1;
 
@@ -401,7 +401,7 @@ static int sctp_send(p2p_session_t *s, const void *buf, int len) {
 /* ============================================================================
  * 周期性处理
  * ============================================================================ */
-static void sctp_tick(p2p_session_t *s) {
+static void sctp_tick(struct p2p_session *s) {
     p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx) return;
 
@@ -450,7 +450,7 @@ static int sctp_get_stats(struct p2p_session *s, uint32_t *rtt_ms, float *loss_r
 /* ============================================================================
  * 关闭
  * ============================================================================ */
-static void sctp_close(p2p_session_t *s) {
+static void sctp_close(struct p2p_session *s) {
     p2p_sctp_ctx_t *ctx = (p2p_sctp_ctx_t *)s->trans_data;
     if (!ctx) return;
 

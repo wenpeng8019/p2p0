@@ -206,13 +206,13 @@ typedef struct {
  * 数据流向：
  *   MbedTLS 加密数据 → p2p_dtls_send() → UDP 发送
  *
- * @param ctx  会话上下文 (p2p_session_t*)
+ * @param ctx  会话上下文 (struct p2p_session*)
  * @param buf  要发送的 DTLS 记录
  * @param len  数据长度
  * @return     发送的字节数，或 MBEDTLS_ERR_SSL_xxx 错误码
  */
 static int p2p_dtls_send(void *ctx, const unsigned char *buf, size_t len) {
-    p2p_session_t *s = (p2p_session_t *)ctx;
+    struct p2p_session *s = (struct p2p_session *)ctx;
     p2p_send_dtls_record(s, &s->active_addr, buf, (int)len);
     return (int)len;
 }
@@ -228,13 +228,13 @@ static int p2p_dtls_send(void *ctx, const unsigned char *buf, size_t len) {
  * 数据流向：
  *   UDP 接收 → dtls_on_packet() → recv_buf → p2p_dtls_recv() → MbedTLS 解密
  *
- * @param ctx  会话上下文 (p2p_session_t*)
+ * @param ctx  会话上下文 (struct p2p_session*)
  * @param buf  输出缓冲区
  * @param len  缓冲区大小
  * @return     读取的字节数，或 MBEDTLS_ERR_SSL_WANT_READ
  */
 static int p2p_dtls_recv(void *ctx, unsigned char *buf, size_t len) {
-    p2p_session_t *s = (p2p_session_t *)ctx;
+    struct p2p_session *s = (struct p2p_session *)ctx;
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     if (!dtls || dtls->recv_len <= 0) return MBEDTLS_ERR_SSL_WANT_READ;
 
@@ -260,7 +260,7 @@ static int p2p_dtls_recv(void *ctx, unsigned char *buf, size_t len) {
  * @param s  P2P 会话
  * @return   0=成功，-1=失败
  */
-static int dtls_init(p2p_session_t *s) {
+static int dtls_init(struct p2p_session *s) {
     p2p_dtls_ctx_t *dtls = calloc(1, sizeof(p2p_dtls_ctx_t));
     if (!dtls) {
         print("E:", LA_F("Failed to allocate DTLS context", LA_F237, 237));
@@ -394,7 +394,7 @@ fail_cleanup:
  * 构造内部明文 [type|flags|seq|payload]，通过 DTLS 加密后发送。
  * BIO 回调 p2p_dtls_send 会自动调用 p2p_send_dtls_record 输出密文。
  */
-static ret_t mbedtls_encrypt_send(p2p_session_t *s, const struct sockaddr_in *addr,
+static ret_t mbedtls_encrypt_send(struct p2p_session *s, const struct sockaddr_in *addr,
                                 const void *plain, int plain_len) {
     (void)addr;  /* BIO 回调使用 s->active_addr */
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
@@ -419,7 +419,7 @@ static ret_t mbedtls_encrypt_send(p2p_session_t *s, const struct sockaddr_in *ad
  *   - 返回 WANT_READ/WANT_WRITE: 等待更多数据
  *   - 其他: 错误
  */
-static void dtls_tick(p2p_session_t *s) {
+static void dtls_tick(struct p2p_session *s) {
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     if (!dtls) return;
 
@@ -446,7 +446,7 @@ static void dtls_tick(p2p_session_t *s) {
  *
  * @return  >0: 解密后的字节数（含内部 P2P 头），0: 握手包，-1: 错误
  */
-static int mbedtls_decrypt_recv(p2p_session_t *s, const uint8_t *in, int in_len,
+static int mbedtls_decrypt_recv(struct p2p_session *s, const uint8_t *in, int in_len,
                                 uint8_t *out, int out_cap) {
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     if (!dtls) return -1;
@@ -488,7 +488,7 @@ static int mbedtls_decrypt_recv(p2p_session_t *s, const uint8_t *in, int in_len,
  *   4. 释放熵源
  *   5. 释放内存
  */
-static void dtls_close(p2p_session_t *s) {
+static void dtls_close(struct p2p_session *s) {
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     if (!dtls) return;
     
@@ -510,7 +510,7 @@ static void dtls_close(p2p_session_t *s) {
  * @param s  P2P 会话
  * @return   1=就绪，0=未就绪
  */
-static int dtls_is_ready(p2p_session_t *s) {
+static int dtls_is_ready(struct p2p_session *s) {
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;
     return dtls && dtls->handshake_done;
 }

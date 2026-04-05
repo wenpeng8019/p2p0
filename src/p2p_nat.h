@@ -25,7 +25,7 @@ enum {
     NAT_CLOSED,                                 // 收到 FIN 包主动断开（连接彻底终止）
     NAT_PUNCHING,                               // 打洞中（已回取候选列表，正在尝试建立双向路径）
     NAT_CONNECTING,                             // 双向连通：rx + tx 同时已确认，正在发送 CONN 握手
-                                                //   （rx/tx_confirmed 现已移至 p2p_session_t，所有传输路径共享）
+                                                //   （rx/tx_confirmed 现已移至 struct p2p_session，所有传输路径共享）
     NAT_LOST,                                   // 连接丢失：曾经连通，现超时无响应（可能恢复）
     NAT_CONNECTED,                              // 数据层已连接：收到 CONN_ACK 或 CONN，可以传输数据
     NAT_RELAY                                   // 中继模式：打洞超时失败。此时仍周期发送 PUNCH 尝试重连

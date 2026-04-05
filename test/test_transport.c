@@ -86,8 +86,8 @@ void mock_transfer_packets(void) {
  * ============================================================================ */
 
 /* 创建虚拟 session */
-p2p_session_t *create_mock_session(void) {
-    p2p_session_t *s = calloc(1, sizeof(p2p_session_t));
+struct p2p_session *create_mock_session(void) {
+    struct p2p_session *s = calloc(1, sizeof(struct p2p_session));
     s->sock = mock_sock;
     s->state = P2P_STATE_CONNECTED;
     
@@ -100,7 +100,7 @@ p2p_session_t *create_mock_session(void) {
     return s;
 }
 
-void destroy_mock_session(p2p_session_t *s) {
+void destroy_mock_session(struct p2p_session *s) {
     free(s);
 }
 
@@ -110,7 +110,7 @@ void destroy_mock_session(p2p_session_t *s) {
 
 TEST(reliable_send_recv) {
     mock_reset();
-    p2p_session_t *s = create_mock_session();
+    struct p2p_session *s = create_mock_session();
     
     // 发送数据
     const char *test_data = "Hello, Reliable!";
@@ -148,7 +148,7 @@ TEST(reliable_send_recv) {
 
 TEST(reliable_window_full) {
     mock_reset();
-    p2p_session_t *s = create_mock_session();
+    struct p2p_session *s = create_mock_session();
     
     // 填满发送窗口
     uint8_t data[100];
@@ -170,7 +170,7 @@ TEST(reliable_window_full) {
 
 TEST(reliable_recv_order) {
     mock_reset();
-    p2p_session_t *s = create_mock_session();
+    struct p2p_session *s = create_mock_session();
     
     // 模拟接收乱序的包
     uint8_t pkt1[20], pkt2[20], pkt3[20];
@@ -257,7 +257,7 @@ TEST(stream_ring_buffer_wrap) {
 
 TEST(stream_flush_fragmentation) {
     mock_reset();
-    p2p_session_t *s = create_mock_session();
+    struct p2p_session *s = create_mock_session();
     
     // 写入大于一个包的数据
     char large_data[P2P_STREAM_PAYLOAD * 2 + 100];
@@ -310,7 +310,7 @@ TEST(stream_single_byte) {
 /* 边界测试：正好一个包大小 */
 TEST(stream_exact_packet_size) {
     mock_reset();
-    p2p_session_t *s = create_mock_session();
+    struct p2p_session *s = create_mock_session();
     
     // 写入正好 P2P_STREAM_PAYLOAD 字节
     char data[P2P_STREAM_PAYLOAD];
@@ -355,7 +355,7 @@ TEST(ring_buffer_full) {
 /* 边界测试：超大数据（多个窗口） */
 TEST(reliable_large_data) {
     mock_reset();
-    p2p_session_t *s = create_mock_session();
+    struct p2p_session *s = create_mock_session();
     
     // 写入超过窗口大小的数据
     // RELIABLE_WINDOW = 32, P2P_STREAM_PAYLOAD ≈ 1191
@@ -380,7 +380,7 @@ TEST(reliable_large_data) {
 /* 边界测试：最大包大小 */
 TEST(reliable_max_payload) {
     mock_reset();
-    p2p_session_t *s = create_mock_session();
+    struct p2p_session *s = create_mock_session();
     
     // 发送最大允许的包
     uint8_t data[P2P_MAX_PAYLOAD];
@@ -436,7 +436,7 @@ TEST(ring_buffer_boundary_cross) {
 
 TEST(pseudotcp_congestion_window) {
     mock_reset();
-    p2p_session_t *s = create_mock_session();
+    struct p2p_session *s = create_mock_session();
     
     // 初始化 PseudoTCP
     s->cfg.use_pseudotcp = 1;

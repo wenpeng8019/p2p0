@@ -44,7 +44,7 @@ uint16_t             p2p_instrument_base = 0;
 #define UNLOCK(s) ((void)0)
 #endif
 
-static inline void gather_local_candidates(p2p_session_t *s) {
+static inline void gather_local_candidates(struct p2p_session *s) {
 
     s->local_cand_cnt = 0;
     s->turn_base = -1;  // 重新收集候选，当前尚无 TURN 候选
@@ -161,7 +161,7 @@ static inline void gather_local_candidates(p2p_session_t *s) {
  *
  * 返回：true = 状态已变化，false = 状态未变（old == new）
  */
-static inline bool p2p_set_state(p2p_session_t *s, p2p_state_t new_state) {
+static inline bool p2p_set_state(struct p2p_session *s, p2p_state_t new_state) {
     
     p2p_state_t old_state = s->state;
     if (old_state == new_state) return false;
@@ -194,7 +194,7 @@ static inline bool p2p_set_state(p2p_session_t *s, p2p_state_t new_state) {
  *   - NAT 模块收到 CONN/CONN_ACK/DATA 后进入 NAT_CONNECTED 状态
  *   - NAT 握手完成（双向 REACH 确认后收到 CONN_ACK）
  */
-void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
+void p2p_connected(struct p2p_session *s, uint64_t now_ms) {
     
     // 仅在 PUNCHING/REGISTERING/REGISTERED 状态下转换
     // NAT 可能从 LOST → CONNECTED，但 p2p 状态可能是 RELAY，不在此处理
@@ -232,7 +232,7 @@ void p2p_connected(p2p_session_t *s, uint64_t now_ms) {
  *
  * 由 p2p_close 调用；p2p_destroy 作为兜底也会调用
  */
-static void disconnect(p2p_session_t *s) {
+static void disconnect(struct p2p_session *s) {
 
     assert(s->state != P2P_STATE_CLOSED);
 
@@ -267,7 +267,7 @@ static void disconnect(p2p_session_t *s) {
 /*
  * 被动关闭 — 对端断开时的状态转换和回调
  */
-static void peer_disconnect(p2p_session_t *s) {
+static void peer_disconnect(struct p2p_session *s) {
 
     // RELAY FIN 通过 TCP 可靠送达后，handle_relay_fin 已设置 nat.state = NAT_CLOSED
     // COMPACT FIN 通过 NAT FIN（UDP）触发，nat_on_fin 设置 NAT_CLOSED
@@ -337,7 +337,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         return NULL;
     }
 
-    p2p_session_t *s = (p2p_session_t*)calloc(1, sizeof(*s));
+    struct p2p_session *s = (struct p2p_session*)calloc(1, sizeof(*s));
     if (!s) {
         print("E:", LA_F("Failed to allocate memory for session", LA_F241, 241));
         return NULL;
@@ -566,7 +566,7 @@ void
 p2p_destroy(p2p_handle_t hdl) {
     if (!hdl) return;
 
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
 #ifdef P2P_THREADED
     if (s->cfg.threaded) {
@@ -630,7 +630,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
     P_check(hdl, return -1;)
 
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
     // 合法调用时机（排除终态 ERROR）：
     //   INIT:        p2p_create 后尚未登录（PUBSUB/ICE 模式）
     //   REGISTERING: 已发起登录但 ONLINE_ACK 尚未到达（RELAY/COMPACT 模式）
@@ -759,7 +759,7 @@ p2p_close(p2p_handle_t hdl) {
 
     if (!hdl) return;
 
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     LOCK(s);
 
@@ -843,7 +843,7 @@ p2p_update(p2p_handle_t hdl) {
 
     if (!hdl) return -1;
 
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; uint8_t* pkt; int n;
 
@@ -1375,18 +1375,18 @@ p2p_update(p2p_handle_t hdl) {
 
 p2p_state_t
 p2p_state(const p2p_handle_t hdl) {
-    return hdl ? ((p2p_session_t*)hdl)->state : P2P_STATE_ERROR;
+    return hdl ? ((struct p2p_session*)hdl)->state : P2P_STATE_ERROR;
 }
 
 int
 p2p_nat_type(const p2p_handle_t hdl) {
-    return hdl ? ((p2p_session_t*)hdl)->nat_type : P2P_NAT_UNKNOWN;
+    return hdl ? ((struct p2p_session*)hdl)->nat_type : P2P_NAT_UNKNOWN;
 }
 
 p2p_probe_state_t
 p2p_probe(p2p_handle_t hdl) {
     if (!hdl) return P2P_PROBE_STATE_OFFLINE;
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     // 已关闭：信令通道已断，返回 OFFLINE
     if (s->state == P2P_STATE_CLOSED) return P2P_PROBE_STATE_OFFLINE;
@@ -1402,14 +1402,14 @@ p2p_probe(p2p_handle_t hdl) {
 
 int
 p2p_path(const p2p_handle_t hdl) {
-    return hdl ? ((p2p_session_t*)hdl)->path_type : P2P_PATH_NONE;
+    return hdl ? ((struct p2p_session*)hdl)->path_type : P2P_PATH_NONE;
 }
 
 bool
 p2p_is_ready(p2p_handle_t hdl) {
     if (!hdl) return false;
 
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
     if (s->state < P2P_STATE_LOST) return false;
     if (s->trans && s->trans->is_ready) {
         return s->trans->is_ready(s);
@@ -1422,7 +1422,7 @@ p2p_send(p2p_handle_t hdl, const void *buf, int len) {
 
     if (!hdl || !buf || len <= 0) return -1;
 
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
     if (s->state != P2P_STATE_CONNECTED && s->state != P2P_STATE_RELAY) return -1;
 
     LOCK(s);
@@ -1436,7 +1436,7 @@ p2p_recv(p2p_handle_t hdl, void *buf, int len) {
 
     if (!hdl || !buf || len <= 0) return -1;
 
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     LOCK(s);
     int ret = stream_read(&s->stream, buf, len);
@@ -1448,7 +1448,7 @@ int
 p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len) {
 
     if (!hdl) return -1;
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     LOCK(s);
     int ret;
@@ -1466,7 +1466,7 @@ int
 p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len) {
 
     if (!hdl) return -1;
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     LOCK(s);
     int ret;
@@ -1491,7 +1491,7 @@ p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len) {
 int
 p2p_local_candidate_count(p2p_handle_t hdl) {
     if (!hdl) return -1;
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     LOCK(s);
     int cnt = s->local_cand_cnt;
@@ -1503,7 +1503,7 @@ p2p_local_candidate_count(p2p_handle_t hdl) {
 int
 p2p_remote_candidate_count(p2p_handle_t hdl) {
     if (!hdl) return -1;
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     LOCK(s);
     int cnt = s->remote_cand_cnt;
@@ -1523,7 +1523,7 @@ p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
                    const char *ice_pwd,
                    const char *dtls_fingerprint) {
     if (!hdl || !sdp_buf || buf_size <= 0) return -1;
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     LOCK(s);
     int cnt = s->local_cand_cnt;
@@ -1540,7 +1540,7 @@ p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
 int
 p2p_import_ice_sdp(p2p_handle_t hdl, const char *sdp_text) {
     if (!hdl || !sdp_text) return -1;
-    p2p_session_t *s = (p2p_session_t*)hdl;
+    struct p2p_session *s = (struct p2p_session*)hdl;
 
     /* 临时缓冲区：最多解析 64 个候选 */
     p2p_remote_candidate_entry_t tmp[64];

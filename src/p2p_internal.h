@@ -107,7 +107,7 @@
  *
  * 生命周期：p2p_init() → p2p_connect() → p2p_send/recv() → p2p_close()
  */
-typedef struct p2p_session {
+struct p2p_session {
     /* ======================== 配置与状态 ======================== */
     p2p_config_t                    cfg;                // 用户配置（STUN 服务器、模式等）
     p2p_state_t                     state;              // 连接状态 P2P_STATE_*
@@ -245,7 +245,7 @@ typedef struct p2p_session {
     int                             thread_running;     // 线程是否运行中
     int                             quit;               // 退出标志
 #endif
-} p2p_session_t;
+};
 
 /*
  * NAT 类型转可读字符串
@@ -327,7 +327,7 @@ struct p2p_local_candidate_entry {
  *   - 活跃路径
  *   - SIGNALING 统计（保留 active 和 addr）
  */
-static inline void p2p_session_reset(p2p_session_t *s, bool closing) {
+static inline void p2p_session_reset(struct p2p_session *s, bool closing) {
     
     // 清除远端候选
     s->remote_cand_cnt = 0;
@@ -463,7 +463,7 @@ static inline int unpack_candidate(p2p_remote_candidate_entry_t *c, const uint8_
  * 返回新候选槽位索引，或负值错误码（E_OUT_OF_MEMORY）
  * ============================================================================ */
 
-static inline ret_t p2p_cand_push_local(p2p_session_t *s) {
+static inline ret_t p2p_cand_push_local(struct p2p_session *s) {
     if (s->local_cand_cnt >= s->local_cand_cap) {
         int nc = s->local_cand_cap > 0 ? s->local_cand_cap * 2 : 8;
         p2p_local_candidate_entry_t *p = (p2p_local_candidate_entry_t *)realloc(s->local_cands, nc * sizeof(p2p_local_candidate_entry_t));
@@ -474,7 +474,7 @@ static inline ret_t p2p_cand_push_local(p2p_session_t *s) {
     return s->local_cand_cnt++;
 }
 
-static inline ret_t p2p_cand_push_remote(p2p_session_t *s) {
+static inline ret_t p2p_cand_push_remote(struct p2p_session *s) {
     if (s->remote_cand_cnt >= s->remote_cand_cap) {
         int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap * 2 : 8;
         p2p_remote_candidate_entry_t *p = (p2p_remote_candidate_entry_t *)realloc(s->remote_cands, nc * sizeof(p2p_remote_candidate_entry_t));
@@ -488,7 +488,7 @@ static inline ret_t p2p_cand_push_remote(p2p_session_t *s) {
     return s->remote_cand_cnt++;
 }
 
-static inline int p2p_find_remote_candidate_by_addr(const p2p_session_t *s, const struct sockaddr_in *addr) {
+static inline int p2p_find_remote_candidate_by_addr(const struct p2p_session *s, const struct sockaddr_in *addr) {
     if (!s || !addr) return -1;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         if (sockaddr_equal(&s->remote_cands[i].addr, addr)) return i;
@@ -500,7 +500,7 @@ static inline int p2p_find_remote_candidate_by_addr(const p2p_session_t *s, cons
  * 为 remote_cands 保留目标（need）个槽位。新分配空间会被置 NULL
  * 返回 E_NONE，分配失败返回 E_OUT_OF_MEMORY
 */
-static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
+static inline ret_t p2p_remote_cands_reserve(struct p2p_session *s, int need) {
     if (need <= s->remote_cand_cap) return E_NONE;
     int nc = s->remote_cand_cap > 0 ? s->remote_cand_cap : 8;
     while (nc < need) nc *= 2;
@@ -524,7 +524,7 @@ static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
  * 注意：这些函数需要 p2p_remote_candidate_entry 完整定义，故必须放在结构体之后
  * ============================================================================ */
 
- static inline void p2p_set_active_path(p2p_session_t *s, int path_idx) {
+ static inline void p2p_set_active_path(struct p2p_session *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING) {
         if (!s->signaling.active) return;
         s->active_path = path_idx;
@@ -547,7 +547,7 @@ static inline ret_t p2p_remote_cands_reserve(p2p_session_t *s, int need) {
 
 //-----------------------------------------------------------------------------
 
-static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
+static inline ret_t p2p_reset_path(struct p2p_session *s, int path_idx) {
 
     if (path_idx == PATH_IDX_SIGNALING) {
         if (!s->signaling.active) return E_INVALID;
@@ -565,7 +565,7 @@ static inline ret_t p2p_reset_path(p2p_session_t *s, int path_idx) {
     return E_NONE;
 }
 
-static inline p2p_path_type_t p2p_get_path_type(p2p_session_t *s, int path_idx) {
+static inline p2p_path_type_t p2p_get_path_type(struct p2p_session *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
         return P2P_PATH_SIGNALING;
     if (path_idx < 0 || path_idx >= s->remote_cand_cnt)
@@ -578,7 +578,7 @@ static inline p2p_path_type_t p2p_get_path_type(p2p_session_t *s, int path_idx) 
     return P2P_PATH_PUNCH;
 }
 
-static inline path_stats_t* p2p_get_path_stats(p2p_session_t *s, int path_idx) {
+static inline path_stats_t* p2p_get_path_stats(struct p2p_session *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
         return s->signaling.active ? &s->signaling.stats : NULL;
     if (path_idx >= 0 && path_idx < s->remote_cand_cnt)
@@ -586,7 +586,7 @@ static inline path_stats_t* p2p_get_path_stats(p2p_session_t *s, int path_idx) {
     return NULL;
 }
 
-static inline const struct sockaddr_in* p2p_get_path_addr(p2p_session_t *s, int path_idx) {
+static inline const struct sockaddr_in* p2p_get_path_addr(struct p2p_session *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
         return s->signaling.active ? &s->signaling.addr : NULL;
     if (path_idx >= 0 && path_idx < s->remote_cand_cnt)
@@ -594,7 +594,7 @@ static inline const struct sockaddr_in* p2p_get_path_addr(p2p_session_t *s, int 
     return NULL;
 }
 
-static inline int p2p_find_path_by_addr(p2p_session_t *s, const struct sockaddr_in *addr) {
+static inline int p2p_find_path_by_addr(struct p2p_session *s, const struct sockaddr_in *addr) {
     if (s->signaling.active && sockaddr_equal(&s->signaling.addr, addr))
         return PATH_IDX_SIGNALING;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
@@ -626,11 +626,11 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
  * 实际链路发送接口（UDP 传输层直接调用）
  * ============================================================================ */
 
-ret_t p2p_udp_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
+ret_t p2p_udp_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
                           uint8_t type, uint8_t flags, uint16_t seq,
                           const void *payload, int payload_len);
 
-ret_t p2p_turn_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
+ret_t p2p_turn_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
                            uint8_t type, uint8_t flags, uint16_t seq,
                            const void *payload, int payload_len);
 

@@ -5,7 +5,7 @@
 #include "p2p_internal.h"
 #include "p2p_dtls.h"
 
-ret_t p2p_udp_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
+ret_t p2p_udp_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
                           uint8_t type, uint8_t flags, uint16_t seq,
                           const void *payload, int payload_len) {
 
@@ -21,7 +21,7 @@ ret_t p2p_udp_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
     return P_msg_send_to(s->sock, msgs, n, addr);
 }
 
-ret_t p2p_turn_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
+ret_t p2p_turn_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
                            uint8_t type, uint8_t flags, uint16_t seq,
                            const void *payload, int payload_len) {
 
@@ -52,7 +52,7 @@ ret_t p2p_turn_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
  *   3. Compact 信令转发（P2P_PATH_SIGNALING）→ session_id 封装
  *   4. 直连 → p2p_udp_send_packet
  */
-int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
+int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
                        uint8_t type, uint8_t flags, uint16_t seq,
                        const void *payload, int payload_len, uint64_t now_ms) {
 
@@ -101,7 +101,7 @@ int p2p_send_packet(p2p_session_t *s, const struct sockaddr_in *addr,
  * 对于 signaling relay 中转添加 session_id 的情况，
  * 信令中转接口（signaling_relay_fn）会自动处理封装，无需本函数关心
  */
-void p2p_send_dtls_record(p2p_session_t *s, const struct sockaddr_in *addr,
+void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
                        const void *dtls_record, int record_len) {
 
     /* TURN 中继: CRYPTO 包通过 Send Indication 发送 */

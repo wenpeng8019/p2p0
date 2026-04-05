@@ -28,7 +28,7 @@
  * 从已知 PUNCH/PUNCH_ACK 来源地址查找候选，若不存在则作为 PRFLX 添加。
  * 返回候选索引，或负值表示 OOM。
  */
-static int upsert_prflx(p2p_session_t *s, const struct sockaddr_in *from) {
+static int upsert_prflx(struct p2p_session *s, const struct sockaddr_in *from) {
 
     int idx = p2p_find_remote_candidate_by_addr(s, from);
     if (idx >= 0) return idx;
@@ -99,7 +99,7 @@ static void clear_reaching_queue(nat_ctx_t *n) {
  * @param now_ms      当前时间（毫秒）
  * @param rt_track    是否需要 RoundTrip 追踪
  */
-static void cand_send_packet(p2p_session_t *s, int cand_idx, uint8_t type, uint16_t seq,
+static void cand_send_packet(struct p2p_session *s, int cand_idx, uint8_t type, uint16_t seq,
                              const uint8_t *payload, int payload_len, uint64_t now_ms, bool rt_track) {
 
     assert(cand_idx >= 0 && cand_idx < s->remote_cand_cnt);
@@ -130,7 +130,7 @@ static void cand_send_packet(p2p_session_t *s, int cand_idx, uint8_t type, uint1
  * @param writable_path  可写路径索引（必须 >= 0）
  * @param now_ms         当前时间（毫秒）
  */
-static void flush_reaching_queue(p2p_session_t *s, int writable_path, uint64_t now_ms) {
+static void flush_reaching_queue(struct p2p_session *s, int writable_path, uint64_t now_ms) {
     nat_ctx_t *n = &s->nat;
 
     punch_reaching_t *node;
@@ -181,8 +181,8 @@ static void flush_reaching_queue(p2p_session_t *s, int writable_path, uint64_t n
  * PUNCH 携带目标地址，接收方在 PUNCH_ACK 中回显。
  * 发送方通过 PUNCH_ACK 确认特定出口路径是 writable。
  */
-static void nat_send_punch(p2p_session_t *s, const char *reason,
-                           p2p_remote_candidate_entry_t *entry, uint64_t now) {
+static void nat_send_punch(struct p2p_session *s, const char *reason,
+                           struct p2p_remote_candidate_entry *entry, uint64_t now) {
     const char* PROTO = "PUNCH";
     nat_ctx_t *n = &s->nat;
 
@@ -221,7 +221,7 @@ static void nat_send_punch(p2p_session_t *s, const char *reason,
  * 在双向连通确认后（rx_confirmed && tx_confirmed）发送，
  * 通知对端可以开始数据传输。
  */
-static void nat_send_conn(p2p_session_t *s, uint64_t now) {
+static void nat_send_conn(struct p2p_session *s, uint64_t now) {
     const char* PROTO = "CONN";
     nat_ctx_t *n = &s->nat;
 
@@ -238,7 +238,7 @@ static void nat_send_conn(p2p_session_t *s, uint64_t now) {
     n->last_conn_send_ms = now;
 }
 
-static void nat_send_conn_ack(p2p_session_t *s, uint64_t now) {
+static void nat_send_conn_ack(struct p2p_session *s, uint64_t now) {
     const char* PROTO = "CONN_ACK";
     
     if (instrument_option(P2P_INST_OPT_NAT_CONN_ACK_OFF)) return;
@@ -288,7 +288,7 @@ void nat_reset(nat_ctx_t *n) {
  * @param now        当前时间戳
  * @param reason     日志原因（如 "batch relay", "trickle relay", "relay+punch"）
  */
-static void bidirectional_confirmed(p2p_session_t *s, int cand_path, uint64_t now, const char *reason) {
+static void bidirectional_confirmed(struct p2p_session *s, int cand_path, uint64_t now, const char *reason) {
     nat_ctx_t *n = &s->nat;
     
     // 设置活跃路径（用于 nat_send_conn）
@@ -314,7 +314,7 @@ static void bidirectional_confirmed(p2p_session_t *s, int cand_path, uint64_t no
  * @param now       当前时间戳
  * @param reason    日志原因（如 "batch relay", "trickle relay"）
  */
-static void relay_confirmed(p2p_session_t *s, int cand_idx, uint64_t now, const char *reason) {
+static void relay_confirmed(struct p2p_session *s, int cand_idx, uint64_t now, const char *reason) {
 
     nat_ctx_t *n = &s->nat;
     
@@ -357,7 +357,7 @@ static void relay_confirmed(p2p_session_t *s, int cand_idx, uint64_t now, const 
  *   - nat_punch(s, -1)      批量启动所有 remote_cands 的打洞
  *   - nat_punch(s, idx)     向单个候选追加打洞（Trickle ICE）
  */
-ret_t nat_punch(p2p_session_t *s, int idx) {
+ret_t nat_punch(struct p2p_session *s, int idx) {
 
     P_check(s != NULL, return E_INVALID;)
     
@@ -448,7 +448,7 @@ ret_t nat_punch(p2p_session_t *s, int idx) {
  * 包头: [type=0x30 | flags=0 | seq=0]
  * 负载: 无
  */
-void nat_send_fin(p2p_session_t *s) {
+void nat_send_fin(struct p2p_session *s) {
     const char* PROTO = "FIN";
 
     if (s->nat.state < NAT_LOST) {
@@ -604,7 +604,7 @@ void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
  *      此时设置 rx_confirmed=true，等待本端调用 nat_punch() 启动时保留此状态
  *
  */
-void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
+void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
                   const uint8_t *payload, int payload_len,
                   const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "PUNCH";
@@ -777,7 +777,7 @@ void nat_on_punch(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
  *   target_addr 是我方发送 PUNCH 时携带的目标地址，被对方回显。
  *   通过匹配 target_addr 可以确认特定出口路径是 writable。
  */
-void nat_on_reach(p2p_session_t *s, const p2p_packet_hdr_t *hdr,
+void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
                   const uint8_t *payload, int payload_len,
                   const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "REACH";
@@ -1116,7 +1116,7 @@ void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
  * 
  * 处理 FIN 包（连接断开）
  */
-void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
+void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from) {
     const char* PROTO = "FIN";
 
     // 仅在曾经建立过数据通道后接受 FIN。
@@ -1148,7 +1148,7 @@ void nat_on_fin(p2p_session_t *s, const struct sockaddr_in *from) {
 /*
  * 周期调用，发送打洞包和心跳
  */
-void nat_tick(p2p_session_t *s, uint64_t now_ms) {
+void nat_tick(struct p2p_session *s, uint64_t now_ms) {
 
     nat_ctx_t *n = &s->nat;
 

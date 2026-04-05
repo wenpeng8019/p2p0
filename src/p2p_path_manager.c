@@ -8,7 +8,7 @@
  *   路径信息不由本模块存储，而是绑定在 session 的候选地址上：
  *     - s->remote_cands[i].stats  — 候选路径（索引 >=0）
  *     - s->signaling.stats — 信令转发/SIGNALING（索引 -1）
- *   path_manager 仅做决策与状态驱动，所有 API 第一个参数为 p2p_session_t *s。
+ *   path_manager 仅做决策与状态驱动，所有 API 第一个参数为 struct p2p_session *s。
  *
  *   路径类型识别：基于候选的 type 字段（P2P_CAND_HOST/SRFLX/RELAY/PRFLX）。
  *   路径优先级：直连（LAN/PUNCH）> 中继候选 > TURN > 信令转发（SIGNALING，兜底）。
@@ -133,7 +133,7 @@ static void update_quality(path_stats_t *p);
 /*
  * 初始化路径管理器（方案 A）
  */
-int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy) {
+int path_manager_init(struct p2p_session *s, p2p_path_strategy_t strategy) {
     path_manager_t *pm = &s->path_mgr;
     memset(pm, 0, sizeof(*pm));
     
@@ -177,7 +177,7 @@ int path_manager_init(p2p_session_t *s, p2p_path_strategy_t strategy) {
  * 注意：仅重置 path_manager 自身状态，不涉及 session 层
  *       （active_path、signaling 等由 p2p_session_reset 处理）
  */
-void path_manager_reset(p2p_session_t *s) {
+void path_manager_reset(struct p2p_session *s) {
     path_manager_t *pm = &s->path_mgr;
     
     /* 重置切换状态 */
@@ -240,7 +240,7 @@ void path_stats_init(path_stats_t *st, int cost_score) {
 /*
  * 设置信令转发(SIGNALING)路径
  */
-int path_manager_enable_signaling(p2p_session_t *s, struct sockaddr_in *addr) {
+int path_manager_enable_signaling(struct p2p_session *s, struct sockaddr_in *addr) {
     s->signaling.active = true;
     s->signaling.addr = *addr;
     path_stats_init(&s->signaling.stats, 5);       /* SIGNALING cost=5 */
@@ -252,7 +252,7 @@ int path_manager_enable_signaling(p2p_session_t *s, struct sockaddr_in *addr) {
 /*
  * TURN配置
  */
-int path_manager_configure_turn(p2p_session_t *s,
+int path_manager_configure_turn(struct p2p_session *s,
                                  bool enabled,
                                  bool last_resort_only) {
     path_manager_t *pm = &s->path_mgr;
@@ -270,7 +270,7 @@ int path_manager_configure_turn(p2p_session_t *s,
  *   遍历候选列表，检查是否所有直连/中继路径都失效
  *   SIGNALING 不阻止 TURN 启用，因为 SIGNALING 优先级低于 TURN
  */
-static bool should_use_turn(p2p_session_t *s) {
+static bool should_use_turn(struct p2p_session *s) {
     path_manager_t *pm = &s->path_mgr;
     if (!pm->turn_config.enabled) return false;
     
@@ -294,7 +294,7 @@ static bool should_use_turn(p2p_session_t *s) {
  * 策略 1: CONNECTION_FIRST（P2P 直连优先）
  *   优先级：直连 > 中继候选 > TURN > 信令转发(SIGNALING)
  */
-static int select_path_connection_first(p2p_session_t *s) {
+static int select_path_connection_first(struct p2p_session *s) {
     path_manager_t *pm = &s->path_mgr;
     int best_direct = -2;       /* 最佳直连候选 */
     int best_relay_cand = -2;   /* 最佳中继类候选（非 TURN） */
@@ -366,7 +366,7 @@ static int select_path_connection_first(p2p_session_t *s) {
  * 策略 2: PERFORMANCE_FIRST（传输效率优先）
  *   综合评分：0.5×RTT + 0.3×丢包 + 0.2×抖动，中继成本打折
  */
-static int select_path_performance_first(p2p_session_t *s) {
+static int select_path_performance_first(struct p2p_session *s) {
     path_manager_t *pm = &s->path_mgr;
     int best_path = -2;
     float best_score = -1.0f;
@@ -410,7 +410,7 @@ static int select_path_performance_first(p2p_session_t *s) {
  * 策略 3: HYBRID（混合模式）
  *   平衡延迟和成本：直连良好用直连，中继显著更优时才切换
  */
-static int select_path_hybrid(p2p_session_t *s) {
+static int select_path_hybrid(struct p2p_session *s) {
     path_manager_t *pm = &s->path_mgr;
     int best_direct = -2;
     int best_relay = -2;    /* 非 TURN 中继候选（不含 SIGNALING） */
@@ -494,7 +494,7 @@ static int select_path_hybrid(p2p_session_t *s) {
 /*
  * 选择最佳路径（根据策略分发）
  */
-int path_manager_select_best_path(p2p_session_t *s) {
+int path_manager_select_best_path(struct p2p_session *s) {
     switch (s->path_mgr.strategy) {
         default:
         case P2P_PATH_STRATEGY_CONNECTION_FIRST:
@@ -510,7 +510,7 @@ int path_manager_select_best_path(p2p_session_t *s) {
  * 检查是否应该防抖（避免频繁切换）
  *   三级检查：冷却期 → 频率检测 → 稳定窗口
  */
-static bool should_debounce_switch(p2p_session_t *s, int target_path, uint64_t now_ms) {
+static bool should_debounce_switch(struct p2p_session *s, int target_path, uint64_t now_ms) {
 
     path_manager_t *pm = &s->path_mgr;
     
@@ -557,7 +557,7 @@ static bool should_debounce_switch(p2p_session_t *s, int target_path, uint64_t n
 /*
  * 记录切换历史到环形缓冲区（共享逻辑，正常切换和故障转移都用）
  */
-static void record_switch(p2p_session_t *s, int from_path, int to_path,
+static void record_switch(struct p2p_session *s, int from_path, int to_path,
                           const char *reason, uint64_t now_ms) {
     path_manager_t *pm = &s->path_mgr;
     int idx = pm->switch_history_idx;
@@ -618,7 +618,7 @@ void path_manager_switch_reset(struct p2p_session *s, uint64_t now_ms) {
  * 执行路径切换（带防抖和历史记录）
  *   返回: 0=成功, -1=参数错误, 1=防抖中暂不切换
  */
-int path_manager_switch_path(p2p_session_t *s,  int target_path, const char *reason, uint64_t now_ms) {
+int path_manager_switch_path(struct p2p_session *s,  int target_path, const char *reason, uint64_t now_ms) {
 
     if (target_path < -1) return -1; /* -1=SIGNALING, >=0=候选 */
     if (target_path == s->active_path) return 0; /* 已是目标路径 */
@@ -645,7 +645,7 @@ int path_manager_switch_path(p2p_session_t *s,  int target_path, const char *rea
 /*
  * 检查是否有可用路径
  */
-bool path_manager_has_active_path(p2p_session_t *s) {
+bool path_manager_has_active_path(struct p2p_session *s) {
 
     // 检查 SIGNALING 转发路径是否可用
     if (s->signaling.active &&
@@ -663,7 +663,7 @@ bool path_manager_has_active_path(p2p_session_t *s) {
     return false;
 }
 
-int path_manager_set_path_state(p2p_session_t *s, int path_idx, path_state_t state) {
+int path_manager_set_path_state(struct p2p_session *s, int path_idx, path_state_t state) {
     
     path_stats_t *stats = p2p_get_path_stats(s, path_idx);
     if (!stats) return -1;
@@ -685,7 +685,7 @@ int path_manager_set_path_state(p2p_session_t *s, int path_idx, path_state_t sta
 /*
  * 设置路径阈值 - 按路径类型独立配置切换参数
  */
-int path_manager_set_threshold(p2p_session_t *s, int path_type,
+int path_manager_set_threshold(struct p2p_session *s, int path_type,
                                 uint32_t rtt_ms, float loss_rate,
                                 uint64_t cooldown_ms, uint32_t stability_ms) {
     path_manager_t *pm = &s->path_mgr;
@@ -701,7 +701,7 @@ int path_manager_set_threshold(p2p_session_t *s, int path_type,
     return 0;
 }
 
-path_quality_t path_manager_get_quality(p2p_session_t *s, int path_idx) {
+path_quality_t path_manager_get_quality(struct p2p_session *s, int path_idx) {
     path_stats_t *stats = p2p_get_path_stats(s, path_idx);
     if (!stats) return PATH_QUALITY_BAD;
     
@@ -711,7 +711,7 @@ path_quality_t path_manager_get_quality(p2p_session_t *s, int path_idx) {
     return stats->quality;
 }
 
-float path_manager_get_quality_score(p2p_session_t *s, int path_idx) {
+float path_manager_get_quality_score(struct p2p_session *s, int path_idx) {
     path_stats_t *stats = p2p_get_path_stats(s, path_idx);
     if (!stats) return -1.0f;
     
@@ -721,7 +721,7 @@ float path_manager_get_quality_score(p2p_session_t *s, int path_idx) {
     return stats->quality_score;
 }
 
-float path_manager_get_quality_trend(p2p_session_t *s, int path_idx) {
+float path_manager_get_quality_trend(struct p2p_session *s, int path_idx) {
     path_stats_t *stats = p2p_get_path_stats(s, path_idx);
     if (!stats) return NAN;
     
@@ -734,7 +734,7 @@ float path_manager_get_quality_trend(p2p_session_t *s, int path_idx) {
 /*
  * 获取路径切换历史（按时间倒序返回，最新的在前）
  */
-int path_manager_get_switch_history(p2p_session_t *s, 
+int path_manager_get_switch_history(struct p2p_session *s, 
                                      path_switch_record_t *records,
                                      int max_count) {
 
@@ -755,7 +755,7 @@ int path_manager_get_switch_history(p2p_session_t *s,
 /*
  * 分析路径切换频率（指定时间窗口内的切换次数）
  */
-int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms) {
+int path_manager_get_switch_frequency(struct p2p_session *s, uint64_t window_ms) {
     
     if (window_ms == 0) return 0;
     path_manager_t *pm = &s->path_mgr;
@@ -780,7 +780,7 @@ int path_manager_get_switch_frequency(p2p_session_t *s, uint64_t window_ms) {
 /*
  * 获取TURN统计：遍历候选找到 RELAY 类型路径，汇总统计
  */
-int path_manager_get_turn_stats(p2p_session_t *s,
+int path_manager_get_turn_stats(struct p2p_session *s,
                                  uint64_t *total_bytes_sent,
                                  uint64_t *total_bytes_recv,
                                  uint32_t *avg_rtt_ms) {
@@ -841,7 +841,7 @@ const char* path_quality_str(path_quality_t quality) {
  *                                    状态驱动
  * ========================================================================== */
 
- int path_manager_on_packet_send(p2p_session_t *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size, bool rt_track) {
+ int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size, bool rt_track) {
     path_stats_t *stats = p2p_get_path_stats(s, path_idx);
     if (!stats) return -1;
     
@@ -885,7 +885,7 @@ const char* path_quality_str(path_quality_t quality) {
     return 0;
 }
 
-int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms, uint32_t size, bool rt_ack, uint32_t seq) {
+int path_manager_on_packet_recv(struct p2p_session *s, int path_idx, uint64_t now_ms, uint32_t size, bool rt_ack, uint32_t seq) {
     path_stats_t *p = p2p_get_path_stats(s, path_idx);
     if (!p) return -1;
 
@@ -999,7 +999,7 @@ int path_manager_on_packet_recv(p2p_session_t *s, int path_idx, uint64_t now_ms,
     return -1; /* 未找到对应发送记录 */
 }
 
-int path_manager_on_data_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms) {
+int path_manager_on_data_rtt(struct p2p_session *s, int path_idx, uint32_t rtt_ms) {
     path_stats_t *p = p2p_get_path_stats(s, path_idx);
     if (!p) return -1;
 
@@ -1015,7 +1015,7 @@ int path_manager_on_data_rtt(p2p_session_t *s, int path_idx, uint32_t rtt_ms) {
     return 0;
 }
 
-int path_manager_on_data_loss_rate(p2p_session_t *s, int path_idx, float loss_rate) {
+int path_manager_on_data_loss_rate(struct p2p_session *s, int path_idx, float loss_rate) {
     path_stats_t *p = p2p_get_path_stats(s, path_idx);
     if (!p) return -1;
 
@@ -1147,7 +1147,7 @@ static void update_quality(path_stats_t *p) {
 /*
  * 对单条路径执行健康检查（共享逻辑，SIGNALING 和候选都用）
  */
-static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
+static void health_check_one_path(struct p2p_session *s, path_stats_t *p,
                                    int path_idx, uint64_t now_ms) {
     path_manager_t *pm = &s->path_mgr;
 
@@ -1223,7 +1223,7 @@ static void health_check_one_path(p2p_session_t *s, path_stats_t *p,
     }
 }
 
-void path_manager_tick(p2p_session_t *s, uint64_t now_ms) {
+void path_manager_tick(struct p2p_session *s, uint64_t now_ms) {
     path_manager_t *pm = &s->path_mgr;
     
     // 周期 health check

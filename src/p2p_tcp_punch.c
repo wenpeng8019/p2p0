@@ -7,7 +7,7 @@
  * 尝试 TCP 同时发起 (Simultaneous Open)
  * 这是一个复杂的流程，通常需要两端在几乎同一时间发起 connect()。
  */
-int p2p_tcp_punch_connect(p2p_session_t *s, const struct sockaddr_in *remote) {
+int p2p_tcp_punch_connect(struct p2p_session *s, const struct sockaddr_in *remote) {
     if (!s->cfg.enable_tcp) return -1;
 
     sock_t sock = socket(AF_INET, SOCK_STREAM, 0);

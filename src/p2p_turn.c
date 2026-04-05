@@ -251,7 +251,7 @@ static bool has_permission(const turn_ctx_t *t, const struct sockaddr_in *addr) 
  *   [MESSAGE-INTEGRITY (24)]
  *   [FINGERPRINT (8)]
  * ============================================================================ */
-static int turn_refresh(p2p_session_t *s) {
+static int turn_refresh(struct p2p_session *s) {
     turn_ctx_t *t = &s->turn;
     if (t->state != TURN_ALLOCATED || !t->has_key) return -1;
     if (!s->cfg.turn_user) return -1;
@@ -282,7 +282,7 @@ static int turn_refresh(p2p_session_t *s) {
  *   [MESSAGE-INTEGRITY (24)]
  *   [FINGERPRINT (8)]
  * ============================================================================ */
-static int allocate_auth(p2p_session_t *s) {
+static int allocate_auth(struct p2p_session *s) {
     turn_ctx_t *t = &s->turn;
 
     if (!t->has_key) {
@@ -327,7 +327,7 @@ void p2p_turn_init(turn_ctx_t *t) {
     t->state = TURN_IDLE;
 }
 
-void p2p_turn_reset(p2p_session_t *s) {
+void p2p_turn_reset(struct p2p_session *s) {
     turn_ctx_t *t = &s->turn;
 
     /* 主动释放 TURN 分配（Refresh lifetime=0，RFC 5766 Section 5） */
@@ -361,7 +361,7 @@ void p2p_turn_reset(p2p_session_t *s) {
  *
  * 大多数 TURN 服务器会回复 401 Unauthorized，要求认证
  * ============================================================================ */
-int p2p_turn_allocate(p2p_session_t *s) {
+int p2p_turn_allocate(struct p2p_session *s) {
     if (!s->cfg.turn_server) return -1;
 
     turn_ctx_t *t = &s->turn;
@@ -402,7 +402,7 @@ int p2p_turn_allocate(p2p_session_t *s) {
  *   [XOR-PEER-ADDRESS (12)]
  *   [DATA-HDR (2+2)]
  * ============================================================================ */
-ret_t p2p_turn_send_indication(p2p_session_t *s, const struct sockaddr_in *peer_addr,
+ret_t p2p_turn_send_indication(struct p2p_session *s, const struct sockaddr_in *peer_addr,
                                const sock_msg_t msg[4], int num) {
     if (num > 4) return E_INVALID;
     turn_ctx_t *t = &s->turn;
@@ -447,7 +447,7 @@ ret_t p2p_turn_send_indication(p2p_session_t *s, const struct sockaddr_in *peer_
  *   1 = Data Indication（out_data/out_len/out_peer 已填充）
  *  -1 = 非 TURN 消息
  * ============================================================================ */
-int p2p_turn_handle_packet(p2p_session_t *s, const struct sockaddr_in *from,
+int p2p_turn_handle_packet(struct p2p_session *s, const struct sockaddr_in *from,
                            uint16_t type, const uint8_t *buf, int len,
                            const uint8_t **out_data, int *out_len,
                            struct sockaddr_in *out_peer) {
@@ -725,7 +725,7 @@ int p2p_turn_handle_packet(p2p_session_t *s, const struct sockaddr_in *from,
  *   [MESSAGE-INTEGRITY (24)]
  *   [FINGERPRINT (8)]
  * ============================================================================ */
-static int turn_create_permission(p2p_session_t *s, const struct sockaddr_in *peer_addr) {
+static int turn_create_permission(struct p2p_session *s, const struct sockaddr_in *peer_addr) {
 
     turn_ctx_t *t = &s->turn;
     if (t->state != TURN_ALLOCATED || !t->has_key) return -1;
@@ -764,7 +764,7 @@ static int turn_create_permission(p2p_session_t *s, const struct sockaddr_in *pe
  *   1. Refresh 续期（在 lifetime 到期前 60s 触发）
  *   2. 权限同步（为新到达的远端候选创建 CreatePermission）
  * ============================================================================ */
-void p2p_turn_tick(p2p_session_t *s, uint64_t now_ms) {
+void p2p_turn_tick(struct p2p_session *s, uint64_t now_ms) {
 
     turn_ctx_t *t = &s->turn;
     if (t->state != TURN_ALLOCATED) return;

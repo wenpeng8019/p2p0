@@ -138,6 +138,7 @@ typedef enum {
 /* ---------- p2p 句柄定义 ---------- */
 
 typedef const void* p2p_handle_t;
+typedef const void* p2p_session_t;
 
 /* ---------- 事件回调类型 ---------- */
 
