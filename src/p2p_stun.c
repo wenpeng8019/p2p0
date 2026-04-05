@@ -78,44 +78,6 @@
 #define STUN_MAX_RETRIES       3        /* 每个测试最多重试 3 次 */
 
 /*
- * NAT 检测状态机
- */
-typedef enum {
-    NAT_TEST_IDLE = 0,                  /* 空闲：尚未开始检测 */
-    NAT_TEST_I_SENT,                    /* Test I: 已发送请求，等待响应 */
-    NAT_TEST_I_DONE,                    /* Test I: 已收到响应 */
-    NAT_TEST_II_SENT,                   /* Test II: 已发送 CHANGE-REQUEST */
-    NAT_TEST_II_DONE,                   /* Test II: 完成（成功或超时） */
-    NAT_TEST_I2_SENT,                   /* Test I(alt): 向 CHANGED-ADDRESS 发送普通 Binding */
-    NAT_TEST_I2_DONE,                   /* Test I(alt): 完成（成功或超时） */
-    NAT_TEST_III_SENT,                  /* Test III: 已发送 CHANGE-PORT */
-    NAT_TEST_III_DONE,                  /* Test III: 完成 */
-    NAT_TEST_COMPLETED                  /* 所有测试完成 */
-} nat_test_state_t;
-
-/*
- * NAT 检测上下文
- */
-typedef struct {
-    nat_test_state_t state;             /* 当前状态 */
-    uint64_t last_send_time;            /* 上次发送时间戳 */
-    int retry_count;                    /* 当前测试的重试次数 */
-
-    struct sockaddr_in mapped_addr;     /* Test I 获取的映射地址 (Srflx) */
-    struct sockaddr_in alt_addr;        /* CHANGED-ADDRESS（备用服务器地址） */
-    struct sockaddr_in mapped_addr_alt; /* Test I(alt) 获取的映射地址 */
-    bool test_ii_success;               /* Test II 是否收到响应 */
-    bool test_i2_success;               /* Test I(alt) 是否收到响应 */
-    bool symmetric_mapping;             /* 主/备服务器映射是否不同（对称映射） */
-    bool test_iii_success;              /* Test III 是否收到响应 */
-    bool as_candidate;                  /* Test I 映射地址是否作为 Srflx 候选 */
-
-    uint8_t tsx_id[12];                 /* 当前 Transaction ID */
-} nat_detect_ctx_t;
-
-static nat_detect_ctx_t g_nat_detect_ctx = {0};
-
-/*
  * ============================================================================
  * 解析 STUN Binding 响应（内部静态函数）
  * ============================================================================
@@ -182,7 +144,7 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len,
      * +------+------+------+------+
      */
     if (username) {
-        int ulen = strlen(username);
+        int ulen = (int)strlen(username);
         if (offset + 4 + ulen > max_len) return -1;
         buf[offset++] = (uint8_t)(STUN_ATTR_USERNAME >> 8);      /* 0x00 */
         buf[offset++] = (uint8_t)(STUN_ATTR_USERNAME & 0xFF);    /* 0x06 */
@@ -221,7 +183,7 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len,
 
         /* 计算 HMAC-SHA1 */
         uint8_t digest[20];
-        p2p_hmac_sha1((const uint8_t*)password, strlen(password), buf, offset, digest);
+        p2p_hmac_sha1((const uint8_t*)password, (int)strlen(password), buf, offset, digest);
         
         buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY >> 8);  /* 0x00 */
         buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY & 0xFF); /* 0x08 */
@@ -375,7 +337,7 @@ int p2p_stun_build_binding_response(uint8_t *buf, int max_len, const uint8_t tsx
         int mi_payload = (offset - 20) + 24;
         nwrite_s(buf + 2, (uint16_t)mi_payload);
         uint8_t digest[20];
-        p2p_hmac_sha1((const uint8_t*)password, strlen(password), buf, offset, digest);
+        p2p_hmac_sha1((const uint8_t*)password, (int)strlen(password), buf, offset, digest);
         buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY >> 8);
         buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY & 0xFF);
         buf[offset++] = 0; buf[offset++] = 20;
@@ -398,7 +360,7 @@ int p2p_stun_build_binding_response(uint8_t *buf, int max_len, const uint8_t tsx
 static int stun_parse_binding_response(const uint8_t *buf, int len,
                                        struct sockaddr_in *mapped_addr,
                                        const char *password,
-                                       bool allow_changed_addr) {
+                                       stun_detect_ctx_t *nat_ctx) {
     
     /* 验证消息类型 Binding Response 0x0101 */
     assert(nget_s(buf) == STUN_BINDING_RESPONSE);
@@ -520,12 +482,11 @@ static int stun_parse_binding_response(const uint8_t *buf, int len,
             }
         }
         /* CHANGED-ADDRESS (0x0005): NAT 检测使用的备用服务器地址 */
-        else if (allow_changed_addr && attr_type == STUN_ATTR_CHANGED_ADDR) {
+        else if (nat_ctx && attr_type == STUN_ATTR_CHANGED_ADDR) {
             if (attr_len >= 8 && (attr_val[1] == 0x01)) { /* IPv4 */
-                nat_detect_ctx_t *ctx = &g_nat_detect_ctx;
-                ctx->alt_addr.sin_family = AF_INET;
-                memcpy(&ctx->alt_addr.sin_port, attr_val + 2, 2);
-                memcpy(&ctx->alt_addr.sin_addr, attr_val + 4, 4);
+                nat_ctx->alt_addr.sin_family = AF_INET;
+                memcpy(&nat_ctx->alt_addr.sin_port, attr_val + 2, 2);
+                memcpy(&nat_ctx->alt_addr.sin_addr, attr_val + 4, 4);
                 /* CHANGED-ADDRESS 通常不使用 XOR 加密（RFC 3489）*/
             }
         }
@@ -590,7 +551,7 @@ int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
 
     /* 1. USERNAME 属性 (0x0006) */
     if (username) {
-        int ulen = strlen(username);
+        int ulen = (int)strlen(username);
         if (offset + 4 + ulen > max_len) return -1;
         buf[offset++] = (uint8_t)(STUN_ATTR_USERNAME >> 8);
         buf[offset++] = (uint8_t)(STUN_ATTR_USERNAME & 0xFF);
@@ -654,7 +615,7 @@ int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
 
         /* 计算 HMAC-SHA1 */
         uint8_t digest[20];
-        p2p_hmac_sha1((const uint8_t*)password, strlen(password), buf, offset, digest);
+        p2p_hmac_sha1((const uint8_t*)password, (int)strlen(password), buf, offset, digest);
         
         buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY >> 8);
         buf[offset++] = (uint8_t)(STUN_ATTR_MESSAGE_INTEGRITY & 0xFF);
@@ -752,84 +713,88 @@ bool p2p_stun_has_ice_attrs(const uint8_t *buf, int len) {
  *   3. 推进 NAT 类型检测流程（Test I, II, III）
  *
  * NAT 检测状态对应处理：
- *   - NAT_TEST_I_SENT:   提取 mapped_addr，判断是否为公网 IP
- *   - NAT_TEST_II_SENT:  测试是否为完全锥形 NAT
- *   - NAT_TEST_III_SENT: 区分受限锥形 vs 端口受限锥形
+ *   - STUN_TEST_I_SENT:   提取 mapped_addr，判断是否为公网 IP
+ *   - STUN_TEST_II_SENT:  测试是否为完全锥形 NAT
+ *   - STUN_TEST_III_SENT: 区分受限锥形 vs 端口受限锥形
  */
 
 /* 将 mapped 地址作为本地 Srflx 候选写入，并在 ICE 模式下触发 Trickle 回调 */
-static inline void stun_add_srflx_candidate(struct p2p_session *s, const struct sockaddr_in *mapped) {
+static inline void stun_add_srflx_candidate(struct p2p_instance *inst, const struct sockaddr_in *mapped) {
 
-    int idx = p2p_cand_push_local(s);
-    if (idx < 0) {
-        print("W:", LA_F("✗ Add Srflx candidate failed(OOM)", LA_F418, 418));
-        return;
-    }
+    for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
 
-    p2p_local_candidate_entry_t *c = &s->local_cands[idx];
-    c->type = P2P_CAND_SRFLX;
-    c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
-    c->addr = *mapped;
+        int idx = p2p_cand_push_local(s);
+        if (idx < 0) {
+            print("W:", LA_F("✗ Add Srflx candidate failed(OOM)", LA_F418, 418));
+            return;
+        }
 
-    print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F417, 417),
-          inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+        p2p_local_candidate_entry_t *c = &s->local_cands[idx];
+        c->type = P2P_CAND_SRFLX;
+        c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
+        c->addr = *mapped;
 
-    /* 一次性 Srflx 候选收集完成 */
-    if (s->stun_pending > 0) s->stun_pending--;
+        print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F417, 417),
+              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
 
-    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
-        p2p_signal_compact_trickle_candidate(s);
-    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY)
-        p2p_signal_relay_trickle_candidate(s);
-    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.on_ice_candidate) {
-        char sdp_a[256];
-        if (p2p_ice_export_candidate(c, sdp_a, sizeof(sdp_a)) > 0)
-            s->inst->cfg.on_ice_candidate((p2p_session_t)s, sdp_a, s->inst->cfg.userdata);
+        /* 一次性 Srflx 候选收集完成 */
+        if (s->stun_pending > 0) s->stun_pending--;
+
+        if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
+            p2p_signal_compact_trickle_candidate(s);
+        else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
+            p2p_signal_relay_trickle_candidate(s);
+        else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.on_ice_candidate) {
+            char sdp_a[256];
+            if (p2p_ice_export_candidate(c, sdp_a, sizeof(sdp_a)) > 0)
+                s->inst->cfg.on_ice_candidate((p2p_session_t)s, sdp_a, s->inst->cfg.userdata);
+        }
     }
 }
 
-void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *from,
+void p2p_stun_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *from,
                             uint16_t type, const uint8_t *buf, int len) {
     (void)from; /* from 用于验证响应来源，暂未使用 */
-    nat_detect_ctx_t *ctx = &g_nat_detect_ctx;
+    stun_detect_ctx_t *ctx = &inst->stun_ctx;
 
     assert(p2p_stun_is_binding_response(type, buf, len));
 
-    bool is_nat_detect_resp = (memcmp(buf + 8, g_nat_detect_ctx.tsx_id, 12) == 0);
+    bool is_nat_detect_resp = (memcmp(buf + 8, ctx->tsx_id, 12) == 0);
 
     struct sockaddr_in mapped;
-    if (stun_parse_binding_response(buf, len, &mapped, NULL, is_nat_detect_resp) < 0) {
+    stun_detect_ctx_t *parse_ctx = is_nat_detect_resp ? ctx : NULL;
+    if (stun_parse_binding_response(buf, len, &mapped, NULL, parse_ctx) < 0) {
         return;
     }
 
     // 如果不是 Test 任务的响应
     // + 默认为 Srflx 候选探测，需要添加 Srflx 候选到本地候选列表
     if (!is_nat_detect_resp) {
-        stun_add_srflx_candidate(s, &mapped);
+        stun_add_srflx_candidate(inst, &mapped);
         return;
     }
 
     switch (ctx->state) {
 
     /* Test I 响应：获得映射地址 */
-    case NAT_TEST_I_SENT: {
+    case STUN_TEST_I_SENT: {
 
-        ctx->state = NAT_TEST_I_DONE;
+        ctx->state = STUN_TEST_I_DONE;
         ctx->retry_count = 0;
         ctx->mapped_addr = mapped;
 
         if (ctx->as_candidate) {
-            stun_add_srflx_candidate(s, &mapped);
+            stun_add_srflx_candidate(inst, &mapped);
         }
 
         // 检查本地地址是否与公网映射地址相同（如果是，则为开放网络，非 NAT）
         // + 此时该地址无需作为 Srflx 候选
         struct sockaddr_in local;
         socklen_t local_len = sizeof(local);
-        if (getsockname(s->inst->sock, (struct sockaddr *)&local, &local_len) == 0) {
+        if (getsockname(inst->sock, (struct sockaddr *)&local, &local_len) == 0) {
             if (sockaddr_equal(&mapped, &local)) {
-                ctx->state = NAT_TEST_COMPLETED;
-                s->inst->nat_type = P2P_NAT_OPEN;
+                ctx->state = STUN_TEST_COMPLETED;
+                inst->nat_type = P2P_NAT_OPEN;
                 print("I:", LA_F("Detection completed %s", LA_F231, 231), p2p_nat_type_str(P2P_NAT_OPEN));
                 return;
             }
@@ -848,8 +813,8 @@ void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *fro
     }
 
     /* Test II 响应：从不同 IP/Port 收到响应 */
-    case NAT_TEST_II_SENT: {
-        ctx->state = NAT_TEST_II_DONE;
+    case STUN_TEST_II_SENT: {
+        ctx->state = STUN_TEST_II_DONE;
         ctx->retry_count = 0;
         ctx->test_ii_success = true;
         print("I:", LA_F("Test II: Success! Detection completed %s", LA_F363, 363), p2p_nat_type_str(P2P_NAT_FULL_CONE));
@@ -857,11 +822,11 @@ void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *fro
     }
 
     /* Test I(alt) 响应：比较主/备服务器映射是否一致 */
-    case NAT_TEST_I2_SENT: {
+    case STUN_TEST_I2_SENT: {
         ctx->mapped_addr_alt = mapped;
         ctx->test_i2_success = true;
         ctx->retry_count = 0;
-        ctx->state = NAT_TEST_I2_DONE;
+        ctx->state = STUN_TEST_I2_DONE;
         ctx->symmetric_mapping = !sockaddr_equal(&ctx->mapped_addr, &ctx->mapped_addr_alt);
 
         print("I:", LA_F("Test I(alt): Mapped address: %s:%d", LA_F555, 555),
@@ -870,10 +835,10 @@ void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *fro
     }
 
     /* Test III 响应：从不同 Port 收到响应 */
-    case NAT_TEST_III_SENT: {
+    case STUN_TEST_III_SENT: {
         ctx->test_iii_success = true;
         ctx->retry_count = 0;
-        ctx->state = NAT_TEST_III_DONE;
+        ctx->state = STUN_TEST_III_DONE;
         print("I:", LA_F("Test III: Success! Detection completed %s", LA_F365, 365), p2p_nat_type_str(P2P_NAT_RESTRICTED));
         break;
     }
@@ -885,18 +850,18 @@ void p2p_stun_handle_packet(struct p2p_session *s, const struct sockaddr_in *fro
 
 ///////////////////////////////////////////////////////////////////////////////
 
-ret_t p2p_stun_nat_detect_start(struct p2p_session *s, bool as_candidate) {
+ret_t p2p_stun_nat_detect_start(struct p2p_instance *inst, bool as_candidate) {
 
-    if (!s || !s->inst->cfg.stun_server) {
+    if (!inst || !inst->cfg.stun_server) {
         return E_INVALID;
     }
 
-    if (s->inst->nat_type == P2P_NAT_DETECTING) return E_NONE_CONTEXT;
+    if (inst->nat_type == P2P_NAT_DETECTING) return E_NONE_CONTEXT;
 
-    s->inst->nat_type = P2P_NAT_DETECTING;
+    inst->nat_type = P2P_NAT_DETECTING;
 
-    nat_detect_ctx_t *ctx = &g_nat_detect_ctx;
-    ctx->state = NAT_TEST_IDLE;
+    stun_detect_ctx_t *ctx = &inst->stun_ctx;
+    ctx->state = STUN_TEST_IDLE;
     ctx->retry_count = 0;
     ctx->last_send_time = P_tick_ms();
     ctx->as_candidate = as_candidate;
@@ -904,20 +869,20 @@ ret_t p2p_stun_nat_detect_start(struct p2p_session *s, bool as_candidate) {
     return E_NONE;
 }
 
-void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
+void p2p_stun_nat_detect_tick(struct p2p_instance *inst, uint64_t now_ms) {
 
-    assert(s->inst->cfg.stun_server);
+    assert(inst && inst->cfg.stun_server);
 
-    nat_detect_ctx_t *ctx = &g_nat_detect_ctx;
+    stun_detect_ctx_t *ctx = &inst->stun_ctx;
 
     // 如果已完成检测
-    if (ctx->state == NAT_TEST_COMPLETED) return;
+    if (ctx->state == STUN_TEST_COMPLETED) return;
 
     // 初始化检测
-    if (ctx->state == NAT_TEST_IDLE) {
+    if (ctx->state == STUN_TEST_IDLE) {
 
         // 未启动检测
-        if (s->inst->nat_type != P2P_NAT_DETECTING) return;
+        if (inst->nat_type != P2P_NAT_DETECTING) return;
 
         memset(&ctx->alt_addr, 0, sizeof(ctx->alt_addr));
         memset(&ctx->mapped_addr, 0, sizeof(ctx->mapped_addr));
@@ -929,13 +894,13 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
 
         /* 启动 Test I */
         // printf("[NAT_DEBUG] Starting NAT detection, resolving %s:%d\n",
-        //        s->inst->cfg.stun_server, s->inst->cfg.stun_port);
+        //        inst->cfg.stun_server, inst->cfg.stun_port);
 
         struct sockaddr_in stun_addr;
-        if (resolve_host(s->inst->cfg.stun_server, s->inst->cfg.stun_port, &stun_addr) < 0) {
-            print("E:", LA_F("Failed to resolve STUN server %s", LA_F247, 247), s->inst->cfg.stun_server);
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_ERROR;
+        if (resolve_host(inst->cfg.stun_server, inst->cfg.stun_port, &stun_addr) < 0) {
+            print("E:", LA_F("Failed to resolve STUN server %s", LA_F247, 247), inst->cfg.stun_server);
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_ERROR;
             return;
         }
 
@@ -965,17 +930,17 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
             printf("\n");
             */
 
-            p2p_udp_send_to(s, &stun_addr, req, len);
+            p2p_udp_send_to(inst, &stun_addr, req, len);
             ctx->last_send_time = now_ms;
 
-            print("I:", LA_F("Sending Test I to %s:%d (len=%d)", LA_F327, 327), s->inst->cfg.stun_server, s->inst->cfg.stun_port, len);
+            print("I:", LA_F("Sending Test I to %s:%d (len=%d)", LA_F327, 327), inst->cfg.stun_server, inst->cfg.stun_port, len);
 
-            ctx->state = NAT_TEST_I_SENT;
+            ctx->state = STUN_TEST_I_SENT;
         }
         else {
             print("E:", LA_F("Failed to build STUN request", LA_F242, 242));
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_ERROR;
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_ERROR;
         }
 
         return;
@@ -988,41 +953,41 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
         if (ctx->retry_count < STUN_MAX_RETRIES) {
             ctx->retry_count++;
             switch (ctx->state) {
-            case NAT_TEST_I_SENT: ctx->state = NAT_TEST_IDLE; break;
-            case NAT_TEST_II_SENT: ctx->state = NAT_TEST_I_DONE; break;
-            case NAT_TEST_I2_SENT: ctx->state = NAT_TEST_II_DONE; break;
-            case NAT_TEST_III_SENT: ctx->state = NAT_TEST_I2_DONE; break;
+            case STUN_TEST_I_SENT: ctx->state = STUN_TEST_IDLE; break;
+            case STUN_TEST_II_SENT: ctx->state = STUN_TEST_I_DONE; break;
+            case STUN_TEST_I2_SENT: ctx->state = STUN_TEST_II_DONE; break;
+            case STUN_TEST_III_SENT: ctx->state = STUN_TEST_I2_DONE; break;
             default: break;
             }
         } 
         /* 超时失败，进入下一个测试 */
         else {
             switch (ctx->state) {
-            case NAT_TEST_I_SENT:
+            case STUN_TEST_I_SENT:
                 print("W:", LA_F("Test I: Timeout", LA_F362, 362));
-                ctx->state = NAT_TEST_COMPLETED;
-                s->inst->nat_type = P2P_NAT_BLOCKED;      // 无法联系 STUN 服务器
+                ctx->state = STUN_TEST_COMPLETED;
+                inst->nat_type = P2P_NAT_BLOCKED;      // 无法联系 STUN 服务器
                 return;
 
-            case NAT_TEST_II_SENT:
+            case STUN_TEST_II_SENT:
                 /* RFC 3489 CHANGE-REQUEST 通常不被现代 STUN 服务器支持，超时是预期行为 */
                 print("I:", LA_F("Test II: Timeout (need Test III)", LA_F364, 364));
                 ctx->test_ii_success = false;
-                ctx->state = NAT_TEST_II_DONE;
+                ctx->state = STUN_TEST_II_DONE;
                 break;
 
-            case NAT_TEST_I2_SENT:
+            case STUN_TEST_I2_SENT:
                 /* RFC 3489 CHANGE-REQUEST 通常不被现代 STUN 服务器支持，超时是预期行为 */
                 print("I:", LA_F("Test I(alt): Timeout", LA_F559, 559));
                 ctx->test_i2_success = false;
-                ctx->state = NAT_TEST_I2_DONE;
+                ctx->state = STUN_TEST_I2_DONE;
                 break;
 
-            case NAT_TEST_III_SENT:
+            case STUN_TEST_III_SENT:
                 /* RFC 3489 CHANGE-REQUEST 通常不被现代 STUN 服务器支持，超时是预期行为 */
                 print("I:", LA_F("Test III: Timeout", LA_F366, 366));
                 ctx->test_iii_success = false;
-                ctx->state = NAT_TEST_III_DONE;
+                ctx->state = STUN_TEST_III_DONE;
                 break;
 
             default:
@@ -1038,12 +1003,12 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
     switch (ctx->state) {
 
     /* Test I 完成，启动 Test II */
-    case NAT_TEST_I_DONE: {
+    case STUN_TEST_I_DONE: {
 
         /* 如果配置了 skip_stun_test，跳过 Test II/III（因为大多数公共 STUN 服务器不支持） */
-        if (s->inst->cfg.skip_stun_test) {
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_UNKNOWN;
+        if (inst->cfg.skip_stun_test) {
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_UNKNOWN;
             print("I:", LA_F("NAT detection skipped (skip_stun_test=true), Srflx gathered", LA_F560, 560));
             return;
         }
@@ -1055,10 +1020,10 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
          */
         
         struct sockaddr_in stun_addr;
-        if (resolve_host(s->inst->cfg.stun_server, s->inst->cfg.stun_port, &stun_addr) < 0) {
-            print("E:", LA_F("Failed to resolve STUN server %s", LA_F247, 247), s->inst->cfg.stun_server);
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_ERROR;
+        if (resolve_host(inst->cfg.stun_server, inst->cfg.stun_port, &stun_addr) < 0) {
+            print("E:", LA_F("Failed to resolve STUN server %s", LA_F247, 247), inst->cfg.stun_server);
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_ERROR;
             return;
         }
 
@@ -1069,25 +1034,25 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
         int len = p2p_stun_build_binding_request_ex(req, sizeof(req), ctx->tsx_id,
                                                      STUN_FLAG_CHANGE_IP | STUN_FLAG_CHANGE_PORT);
         if (len > 0) {
-            p2p_udp_send_to(s, &stun_addr, req, len);
+            p2p_udp_send_to(inst, &stun_addr, req, len);
             ctx->last_send_time = now_ms;
-            ctx->state = NAT_TEST_II_SENT;
+            ctx->state = STUN_TEST_II_SENT;
             print("I:", LA_F("Sending Test II with CHANGE-REQUEST(IP+PORT)", LA_F553, 553));
         } else {
             print("E:", LA_F("Failed to build STUN request", LA_F242, 242));
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_ERROR;
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_ERROR;
         }
         break;
     }
     
     /* Test II 完成，启动 Test I(alt) / Test III */
-    case NAT_TEST_II_DONE: {
+    case STUN_TEST_II_DONE: {
 
         /* Test II 测试成功: Full Cone NAT */
         if (ctx->test_ii_success) {
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_FULL_CONE;
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_FULL_CONE;
             print("I:", LA_F("Detection completed %s", LA_F231, 231), p2p_nat_type_str(P2P_NAT_FULL_CONE));
             return;
         }
@@ -1108,9 +1073,9 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
             uint8_t req[512];
             int len = p2p_stun_build_binding_request(req, sizeof(req), ctx->tsx_id, NULL, NULL);
             if (len > 0) {
-                p2p_udp_send_to(s, &ctx->alt_addr, req, len);
+                p2p_udp_send_to(inst, &ctx->alt_addr, req, len);
                 ctx->last_send_time = now_ms;
-                ctx->state = NAT_TEST_I2_SENT;
+                ctx->state = STUN_TEST_I2_SENT;
                 print("I:", LA_F("Sending Test I(alt) to CHANGED-ADDRESS", LA_F556, 556));
                 break;
             }
@@ -1128,12 +1093,12 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
     }
 
     /* Test I(alt) 完成: 启动 Test III */    
-    case NAT_TEST_I2_DONE: {
+    case STUN_TEST_I2_DONE: {
 
         // 如果 Test I(alt) 成功且已证实访问不同 IP 的公网映射地址不同：Symmetric NAT
         if (ctx->test_i2_success && ctx->symmetric_mapping) {
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_SYMMETRIC;
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_SYMMETRIC;
             print("I:", LA_F("Detection completed %s", LA_F231, 231), p2p_nat_type_str(P2P_NAT_SYMMETRIC));
             return;
         }
@@ -1141,10 +1106,10 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
         /* Test III: 退而求其次，让 stun 服务器使用相同的 IP，只换个端口来进行响应 */
         
         struct sockaddr_in stun_addr;
-        if (resolve_host(s->inst->cfg.stun_server, s->inst->cfg.stun_port, &stun_addr) < 0) {
-            print("E:", LA_F("Failed to resolve STUN server %s", LA_F247, 247), s->inst->cfg.stun_server);
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_ERROR;
+        if (resolve_host(inst->cfg.stun_server, inst->cfg.stun_port, &stun_addr) < 0) {
+            print("E:", LA_F("Failed to resolve STUN server %s", LA_F247, 247), inst->cfg.stun_server);
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_ERROR;
             return;
         }
 
@@ -1154,30 +1119,30 @@ void p2p_stun_nat_detect_tick(struct p2p_session *s, uint64_t now_ms) {
         int len = p2p_stun_build_binding_request_ex(req, sizeof(req), ctx->tsx_id,
                                                      STUN_FLAG_CHANGE_PORT);
         if (len > 0) {
-            p2p_udp_send_to(s, &stun_addr, req, len);
+            p2p_udp_send_to(inst, &stun_addr, req, len);
             ctx->last_send_time = now_ms;
-            ctx->state = NAT_TEST_III_SENT;
+            ctx->state = STUN_TEST_III_SENT;
             print("I:", LA_F("Sending Test III with CHANGE-REQUEST(PORT only)", LA_F554, 554));
         } else {
             print("E:", LA_F("Failed to build STUN request", LA_F242, 242));
-            ctx->state = NAT_TEST_COMPLETED;
-            s->inst->nat_type = P2P_NAT_ERROR;
+            ctx->state = STUN_TEST_COMPLETED;
+            inst->nat_type = P2P_NAT_ERROR;
         }
         break;
     }
     
     /* Test III 完成: COMPLETED */    
-    case NAT_TEST_III_DONE: {
+    case STUN_TEST_III_DONE: {
 
-        ctx->state = NAT_TEST_COMPLETED;
+        ctx->state = STUN_TEST_COMPLETED;
 
         /* 
          * 如果失败: port restricted cone NAT（受限锥形 NAT）
          * + 说明限制非常严格，远程即使是同一个 IP，换个端口也无法访问该主机
          */
 
-        s->inst->nat_type = ctx->test_iii_success ? P2P_NAT_RESTRICTED : P2P_NAT_PORT_RESTRICTED;
-        print("I:", LA_F("Detection completed %s", LA_F231, 231), p2p_nat_type_str(s->inst->nat_type));
+        inst->nat_type = ctx->test_iii_success ? P2P_NAT_RESTRICTED : P2P_NAT_PORT_RESTRICTED;
+        print("I:", LA_F("Detection completed %s", LA_F231, 231), p2p_nat_type_str(inst->nat_type));
 
         /* TODO: Symmetric NAT 检测需要向不同服务器发送请求，比较映射地址是否变化 */
         break;
