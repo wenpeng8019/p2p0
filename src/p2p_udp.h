@@ -14,10 +14,10 @@ struct p2p_session;
 ret_t p2p_udp_open(struct p2p_instance *inst, uint16_t port);
 void p2p_udp_close(struct p2p_instance *inst);
 
-ret_t p2p_udp_send_to(struct p2p_session *s, const struct sockaddr_in *addr,
+ret_t p2p_udp_send_to(struct p2p_instance *inst, const struct sockaddr_in *addr,
                       const void *data, int len);
 
-ret_t p2p_udp_recv_from(struct p2p_session *s, struct sockaddr_in *from,
+ret_t p2p_udp_recv_from(struct p2p_instance *inst, struct sockaddr_in *from,
                         void *buf, int buf_size);
 
 #endif /* P2P_UDP_H */

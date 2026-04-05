@@ -38,10 +38,10 @@ void p2p_udp_close(struct p2p_instance *inst) {
     }
 }
 
-ret_t p2p_udp_send_to(struct p2p_session *s, const struct sockaddr_in *addr,
+ret_t p2p_udp_send_to(struct p2p_instance *inst, const struct sockaddr_in *addr,
                       const void *data, int len) {
 
-    ssize_t n = sendto(s->inst->sock, (const char *)data, len, 0,
+    ssize_t n = sendto(inst->sock, (const char *)data, len, 0,
                        (const struct sockaddr *)addr, sizeof(*addr));
     if (n != len) {
         int e = P_sock_errno();
@@ -50,12 +50,12 @@ ret_t p2p_udp_send_to(struct p2p_session *s, const struct sockaddr_in *addr,
     return (int)n;
 }
 
-ret_t p2p_udp_recv_from(struct p2p_session *s, struct sockaddr_in *from,
+ret_t p2p_udp_recv_from(struct p2p_instance *inst, struct sockaddr_in *from,
                         void *buf, int buf_size) {
 
     socklen_t sock_len = sizeof(*from);
 
-    ssize_t n = recvfrom(s->inst->sock, (char *)buf, buf_size, 0, (struct sockaddr *)from, &sock_len);
+    ssize_t n = recvfrom(inst->sock, (char *)buf, buf_size, 0, (struct sockaddr *)from, &sock_len);
     if (n < 0) {
         if (P_sock_is_wouldblock()) return E_BUSY;
         int e = P_sock_errno();
