@@ -5,7 +5,7 @@
 #include "p2p_internal.h"
 #include "p2p_dtls.h"
 
-ret_t p2p_udp_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
+ret_t p2p_udp_send_packet(struct p2p_instance *inst, const struct sockaddr_in *addr,
                           uint8_t type, uint8_t flags, uint16_t seq,
                           const void *payload, int payload_len) {
 
@@ -18,10 +18,10 @@ ret_t p2p_udp_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
     if (payload_len > 0 && payload)
         P_msg_set(&msgs[n++], payload, payload_len);
 
-    return P_msg_send_to(s->inst->sock, msgs, n, addr);
+    return P_msg_send_to(inst->sock, msgs, n, addr);
 }
 
-ret_t p2p_turn_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
+ret_t p2p_turn_send_packet(struct p2p_instance *inst, const struct sockaddr_in *addr,
                            uint8_t type, uint8_t flags, uint16_t seq,
                            const void *payload, int payload_len) {
 
@@ -35,7 +35,7 @@ ret_t p2p_turn_send_packet(struct p2p_session *s, const struct sockaddr_in *addr
     if (payload_len > 0 && payload)
         P_msg_set(&msgs[n++], payload, payload_len);
 
-    return p2p_turn_send_indication(s, addr, msgs, n);
+    return p2p_turn_send_indication(inst, addr, msgs, n);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -72,11 +72,11 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
 
     /* TURN 中继路径: 将原始 P2P 包通过 Send Indication 发送 */
     if (s->path_type == P2P_PATH_RELAY) {
-        if (s->turn.state != TURN_ALLOCATED) {
+        if (s->inst->turn.state != TURN_ALLOCATED) {
             print("E:", LA_F("RELAY path but TURN not allocated", LA_F429, 429));
             return -1;
         }
-        return p2p_turn_send_packet(s, addr, type, flags, seq, payload, payload_len);
+        return p2p_turn_send_packet(s->inst, addr, type, flags, seq, payload, payload_len);
     }
 
     /* 信令转发路径: 调用信令模式特定的中转接口 */
@@ -88,7 +88,7 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
         return s->inst->signaling_relay_fn(s, type, flags, seq, payload, payload_len);
     }
 
-    return p2p_udp_send_packet(s, addr, type, flags, seq, payload, payload_len);
+    return p2p_udp_send_packet(s->inst, addr, type, flags, seq, payload, payload_len);
 }
 
 /*
@@ -106,11 +106,11 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
 
     /* TURN 中继: CRYPTO 包通过 Send Indication 发送 */
     if (s->path_type == P2P_PATH_RELAY) {
-        if (s->turn.state != TURN_ALLOCATED) {
+        if (s->inst->turn.state != TURN_ALLOCATED) {
             print("W:", LA_F("RELAY path but TURN not allocated (dtls)", LA_F434, 434));
             return;
         }
-        p2p_turn_send_packet(s, addr, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
+        p2p_turn_send_packet(s->inst, addr, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
         return;
     }
 
@@ -124,5 +124,5 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
         return;
     }
 
-    p2p_udp_send_packet(s, addr, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
+    p2p_udp_send_packet(s->inst, addr, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
 }
