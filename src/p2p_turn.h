@@ -123,7 +123,7 @@
 
 #include "predefine.h"
 
-struct p2p_session;
+struct p2p_instance;
 
 /* ============================================================================
  * TURN 状态机
@@ -166,7 +166,6 @@ typedef struct {
 
     struct sockaddr_in  perms[TURN_MAX_PERMISSIONS];    // 已授权的对端地址（仅 IP 部分有意义）
     int                 perm_count;                     // 已授权数量
-    int                 perm_cand_synced;               // 已同步 CreatePermission 的远端候选数
     uint64_t            last_perm_ms;                   // 上次 Permission 创建/刷新时间
 } turn_ctx_t;
 
@@ -177,19 +176,19 @@ typedef struct {
 /* 初始化 TURN 上下文 */
 void p2p_turn_init(turn_ctx_t *t);
 
-/* 释放 TURN 分配（发送 Refresh lifetime=0）并清零上下文 */
-void p2p_turn_reset(struct p2p_session *s);
+/* 释放 TURN 分配（发送 Refresh lifetime=0）并清零上下文（实例级别） */
+void p2p_turn_reset(struct p2p_instance *inst);
 
-/* 定时维护（权限同步、Refresh 续期） */
-void p2p_turn_tick(struct p2p_session *s, uint64_t now_ms);
+/* 定时维护（权限同步、Refresh 续期）（实例级别） */
+void p2p_turn_tick(struct p2p_instance *inst, uint64_t now_ms);
 
 //-----------------------------------------------------------------------------
 
-/* 发起 TURN Allocate 请求（首次无认证） */
-int p2p_turn_allocate(struct p2p_session *s);
+/* 发起 TURN Allocate 请求（实例级别，首次无认证；已在分配中/已分配则跳过） */
+int p2p_turn_allocate(struct p2p_instance *inst);
 
 /* 通过 TURN 中继发送数据（Send Indication，无需认证） */
-ret_t p2p_turn_send_indication(struct p2p_session *s, const struct sockaddr_in *peer_addr,
+ret_t p2p_turn_send_indication(struct p2p_instance *inst, const struct sockaddr_in *peer_addr,
                                const sock_msg_t msg[4], int num);
 
 //-----------------------------------------------------------------------------
@@ -202,7 +201,7 @@ ret_t p2p_turn_send_indication(struct p2p_session *s, const struct sockaddr_in *
  *   1 = Data Indication: 中继数据已提取到 out_data/out_len, 对端地址在 out_peer
  *  -1 = 非 TURN 消息（未处理）
  */
-int  p2p_turn_handle_packet(struct p2p_session *s, const struct sockaddr_in *from,
+int  p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *from,
                             uint16_t type, const uint8_t *buf, int len,                            
                             const uint8_t **out_data, int *out_len,
                             struct sockaddr_in *out_peer);
