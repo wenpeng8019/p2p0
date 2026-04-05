@@ -254,7 +254,7 @@ static bool has_permission(const turn_ctx_t *t, const struct sockaddr_in *addr) 
 static int turn_refresh(struct p2p_session *s) {
     turn_ctx_t *t = &s->turn;
     if (t->state != TURN_ALLOCATED || !t->has_key) return -1;
-    if (!s->cfg.turn_user) return -1;
+    if (!s->inst->cfg.turn_user) return -1;
 
     print("V: %s", "TURN sending Refresh");
 
@@ -264,7 +264,7 @@ static int turn_refresh(struct p2p_session *s) {
     int off = 20;
 
     /* 认证 */
-    off = append_auth_attrs(buf, off, t, s->cfg.turn_user);
+    off = append_auth_attrs(buf, off, t, s->inst->cfg.turn_user);
     off = append_integrity(buf, off, t->key);
 
     return p2p_udp_send_to(s, &t->server_addr, buf, off);
@@ -286,13 +286,13 @@ static int allocate_auth(struct p2p_session *s) {
     turn_ctx_t *t = &s->turn;
 
     if (!t->has_key) {
-        if (!s->cfg.turn_user || !s->cfg.turn_pass) {
+        if (!s->inst->cfg.turn_user || !s->inst->cfg.turn_pass) {
             print("E:", LA_F("TURN auth required but no credentials configured", LA_F360, 360));
             t->state = TURN_FAILED;
             if (s->turn_pending > 0) s->turn_pending--;
             return -1;
         }
-        compute_key(t, s->cfg.turn_user, s->cfg.turn_pass);
+        compute_key(t, s->inst->cfg.turn_user, s->inst->cfg.turn_pass);
     }
 
     print("I: %s", "Retrying Allocate with long-term credentials");
@@ -308,7 +308,7 @@ static int allocate_auth(struct p2p_session *s) {
     off += 4;
 
     /* USERNAME + REALM + NONCE */
-    off = append_auth_attrs(buf, off, t, s->cfg.turn_user);
+    off = append_auth_attrs(buf, off, t, s->inst->cfg.turn_user);
 
     /* MESSAGE-INTEGRITY + FINGERPRINT */
     off = append_integrity(buf, off, t->key);
@@ -331,7 +331,7 @@ void p2p_turn_reset(struct p2p_session *s) {
     turn_ctx_t *t = &s->turn;
 
     /* 主动释放 TURN 分配（Refresh lifetime=0，RFC 5766 Section 5） */
-    if (t->state == TURN_ALLOCATED && t->has_key && s->cfg.turn_user) {
+    if (t->state == TURN_ALLOCATED && t->has_key && s->inst->cfg.turn_user) {
         uint8_t buf[768];
         write_stun_hdr(buf, TURN_REFRESH_REQUEST, 0);
 
@@ -340,7 +340,7 @@ void p2p_turn_reset(struct p2p_session *s) {
         buf[off] = 0; buf[off+1] = 0; buf[off+2] = 0; buf[off+3] = 0;
         off += 4;
 
-        off = append_auth_attrs(buf, off, t, s->cfg.turn_user);
+        off = append_auth_attrs(buf, off, t, s->inst->cfg.turn_user);
         off = append_integrity(buf, off, t->key);
 
         p2p_udp_send_to(s, &t->server_addr, buf, off);
@@ -362,18 +362,18 @@ void p2p_turn_reset(struct p2p_session *s) {
  * 大多数 TURN 服务器会回复 401 Unauthorized，要求认证
  * ============================================================================ */
 int p2p_turn_allocate(struct p2p_session *s) {
-    if (!s->cfg.turn_server) return -1;
+    if (!s->inst->cfg.turn_server) return -1;
 
     turn_ctx_t *t = &s->turn;
 
-    if (!resolve_server(t, s->cfg.turn_server, s->cfg.turn_port)) {
-        print("E:", LA_F("Failed to resolve TURN server: %s", LA_F248, 248), s->cfg.turn_server);
+    if (!resolve_server(t, s->inst->cfg.turn_server, s->inst->cfg.turn_port)) {
+        print("E:", LA_F("Failed to resolve TURN server: %s", LA_F248, 248), s->inst->cfg.turn_server);
         t->state = TURN_FAILED;
         return -1;
     }
 
     print("I:", LA_F("Sending Allocate Request to %s:%d", LA_F325, 325),
-                 s->cfg.turn_server, s->cfg.turn_port ? s->cfg.turn_port : 3478);
+                 s->inst->cfg.turn_server, s->inst->cfg.turn_port ? s->inst->cfg.turn_port : 3478);
 
     uint8_t buf[64];
     write_stun_hdr(buf, TURN_ALLOCATE_REQUEST, 8);
@@ -436,7 +436,7 @@ ret_t p2p_turn_send_indication(struct p2p_session *s, const struct sockaddr_in *
     // 更新消息体长度
     update_body_len(buf, off);
 
-    return P_msg_send_to(s->sock, msgs, num+1, &t->server_addr);
+    return P_msg_send_to(s->inst->sock, msgs, num+1, &t->server_addr);
 }
 
 /* ============================================================================
@@ -519,15 +519,15 @@ int p2p_turn_handle_packet(struct p2p_session *s, const struct sockaddr_in *from
         /* 当前连接的 Relay 候选收集完成 */
         if (s->turn_pending > 0) s->turn_pending--;
 
-        if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+        if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
             p2p_signal_compact_trickle_candidate(s);
-        else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+        else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY)
             p2p_signal_relay_trickle_candidate(s);
         // ICE 模式通过应用层回调接口来协商发送候选
-        else if (s->signaling_mode == P2P_SIGNALING_MODE_ICE && s->cfg.on_ice_candidate) {
+        else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.on_ice_candidate) {
             char cand_str[256];
             if (p2p_ice_export_candidate(c, cand_str, sizeof(cand_str)) > 0)
-                s->cfg.on_ice_candidate((p2p_handle_t)s, cand_str, s->cfg.userdata);
+                s->inst->cfg.on_ice_candidate((p2p_session_t)s, cand_str, s->inst->cfg.userdata);
         }
 
         return 0;
@@ -729,7 +729,7 @@ static int turn_create_permission(struct p2p_session *s, const struct sockaddr_i
 
     turn_ctx_t *t = &s->turn;
     if (t->state != TURN_ALLOCATED || !t->has_key) return -1;
-    if (!s->cfg.turn_user) return -1;
+    if (!s->inst->cfg.turn_user) return -1;
 
     /* 去重：同一 IP 不重复发送（端口无关，RFC 5766 Section 9.1） */
     if (has_permission(t, peer_addr)) return 0;
@@ -746,7 +746,7 @@ static int turn_create_permission(struct p2p_session *s, const struct sockaddr_i
     off = append_xor_addr(buf, off, STUN_ATTR_XOR_PEER_ADDRESS, peer_addr);
 
     /* 认证 */
-    off = append_auth_attrs(buf, off, t, s->cfg.turn_user);
+    off = append_auth_attrs(buf, off, t, s->inst->cfg.turn_user);
     off = append_integrity(buf, off, t->key);
 
     int ret = p2p_udp_send_to(s, &t->server_addr, buf, off);

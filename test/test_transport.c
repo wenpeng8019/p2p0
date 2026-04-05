@@ -87,8 +87,11 @@ void mock_transfer_packets(void) {
 
 /* 创建虚拟 session */
 struct p2p_session *create_mock_session(void) {
+    struct p2p_instance *inst = calloc(1, sizeof(struct p2p_instance));
+    inst->sock = mock_sock;
+
     struct p2p_session *s = calloc(1, sizeof(struct p2p_session));
-    s->sock = mock_sock;
+    s->inst = inst;
     s->state = P2P_STATE_CONNECTED;
     
     // 初始化 stream (nagle=0)
@@ -101,6 +104,7 @@ struct p2p_session *create_mock_session(void) {
 }
 
 void destroy_mock_session(struct p2p_session *s) {
+    free(s->inst);
     free(s);
 }
 
@@ -439,7 +443,7 @@ TEST(pseudotcp_congestion_window) {
     struct p2p_session *s = create_mock_session();
     
     // 初始化 PseudoTCP
-    s->cfg.use_pseudotcp = 1;
+    s->inst->cfg.use_pseudotcp = 1;
     s->trans = &p2p_trans_pseudotcp;
     s->trans->init(s);
     

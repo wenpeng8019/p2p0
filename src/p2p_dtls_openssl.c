@@ -19,23 +19,23 @@ static unsigned int psk_client_cb(SSL *ssl, const char *hint, char *identity,
                                 unsigned int max_identity_len, unsigned char *psk,
                                 unsigned int max_psk_len) {
     struct p2p_session *s = SSL_get_ex_data(ssl, 0);
-    if (!s || !s->cfg.auth_key) return 0;
+    if (!s || !s->inst->cfg.auth_key) return 0;
     
     strncpy(identity, "p2p_id", max_identity_len);
-    unsigned int len = strlen(s->cfg.auth_key);
+    unsigned int len = strlen(s->inst->cfg.auth_key);
     if (len > max_psk_len) len = max_psk_len;
-    memcpy(psk, s->cfg.auth_key, len);
+    memcpy(psk, s->inst->cfg.auth_key, len);
     return len;
 }
 
 static unsigned int psk_server_cb(SSL *ssl, const char *identity, unsigned char *psk,
                                 unsigned int max_psk_len) {
     struct p2p_session *s = SSL_get_ex_data(ssl, 0);
-    if (!s || !s->cfg.auth_key) return 0;
+    if (!s || !s->inst->cfg.auth_key) return 0;
     
-    unsigned int len = strlen(s->cfg.auth_key);
+    unsigned int len = strlen(s->inst->cfg.auth_key);
     if (len > max_psk_len) len = max_psk_len;
-    memcpy(psk, s->cfg.auth_key, len);
+    memcpy(psk, s->inst->cfg.auth_key, len);
     return len;
 }
 
@@ -64,7 +64,7 @@ static int openssl_init(struct p2p_session *s) {
     }
     SSL_CTX_set_verify(os->ctx, SSL_VERIFY_NONE, NULL);
 
-    if (s->cfg.auth_key) {
+    if (s->inst->cfg.auth_key) {
         SSL_CTX_set_psk_client_callback(os->ctx, psk_client_cb);
         SSL_CTX_set_psk_server_callback(os->ctx, psk_server_cb);
     }
@@ -96,13 +96,13 @@ static int openssl_init(struct p2p_session *s) {
      * 自动模式下按 peer_id 字典序：ID 较大者为 server，较小者为 client
      * 被动监听方（remote_peer_id 为空）始终为 server */
     int is_server;
-    if (s->cfg.dtls_role == 1)      is_server = 1;
-    else if (s->cfg.dtls_role == 2) is_server = 0;
+    if (s->inst->cfg.dtls_role == 1)      is_server = 1;
+    else if (s->inst->cfg.dtls_role == 2) is_server = 0;
     else /* auto */                 is_server = (s->remote_peer_id[0] == '\0')
-                                              || strcmp(s->local_peer_id, s->remote_peer_id) > 0;
+                                              || strcmp(s->inst->local_peer_id, s->remote_peer_id) > 0;
     print("I:", LA_F("[OpenSSL] DTLS role: %s (mode=%s)", LA_F376, 376),
           is_server ? "server" : "client",
-          s->cfg.dtls_role == 0 ? "auto" : "forced");
+          s->inst->cfg.dtls_role == 0 ? "auto" : "forced");
 
     if (is_server) {
         SSL_set_accept_state(os->ssl);

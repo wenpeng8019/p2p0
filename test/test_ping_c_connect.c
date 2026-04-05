@@ -148,11 +148,12 @@ static void on_instrument_log(uint16_t rid, uint8_t chn, const char* tag, char *
     }
     
     // 检测连接成功
-    // COMPACT 模式: "NAT_CONNECTED"
-    // ICE 模式: "P2P connection established" 或 "Nomination successful"
-    if (txt && (strstr(txt, "P2P connection established") || 
+    // 兼容旧日志和新版状态机日志（CONNECTED 状态）
+    if (txt && (strstr(txt, "P2P connection established") ||
                 strstr(txt, "Nomination successful") ||
-                strstr(txt, "NAT_CONNECTED"))) {
+                strstr(txt, "NAT_CONNECTED") ||
+                strstr(txt, "-> CONNECTED") ||
+                strstr(txt, "State: PUNCHING -> CONNECTED"))) {
         if (rid == g_alice.rid) {
             g_alice.connected = 1;
             printf("    [CONN] Alice connected!\n");

@@ -185,7 +185,7 @@ static void tui_cleanup(void) {
 }
 
 /* 处理 stdin 按键，维护输入缓冲，回车时发送 */
-static void tui_process_input(p2p_handle_t hdl) {
+static void tui_process_input(p2p_session_t session) {
 
     if (!g_term_height) return;  /* 非交互模式（重定向/后台）跳过 stdin 读取 */
 
@@ -211,7 +211,7 @@ static void tui_process_input(p2p_handle_t hdl) {
                     snprintf(line, sizeof(line), "[RPC] Sending request: %s", content);
                     tui_println(P2P_LOG_LEVEL_INFO, line);
                     
-                    int ret = p2p_request(hdl, 1, content, content_len);
+                    int ret = p2p_request(session, 1, content, content_len);
                     if (ret < 0) {
                         tui_println(P2P_LOG_LEVEL_WARN, "[RPC] Failed to send request (not supported or busy)");
                     }
@@ -225,7 +225,7 @@ static void tui_process_input(p2p_handle_t hdl) {
                     snprintf(line, sizeof(line), "[RPC] Sending response: %s", content);
                     tui_println(P2P_LOG_LEVEL_INFO, line);
                     
-                    int ret = p2p_response(hdl, 0, content, content_len);
+                    int ret = p2p_response(session, 0, content, content_len);
                     if (ret < 0) {
                         tui_println(P2P_LOG_LEVEL_WARN, "[RPC] Failed to send response (no pending request)");
                     }
@@ -237,7 +237,7 @@ static void tui_process_input(p2p_handle_t hdl) {
                     tui_println(P2P_LOG_LEVEL_INFO, line);
 
                     /* 发送 */
-                    p2p_send(hdl, g_buf_in, g_len_in);
+                    p2p_send(session, g_buf_in, g_len_in);
                 }
 
                 /* 清空输入行 */
@@ -276,6 +276,7 @@ static const char* state_name(p2p_state_t state) {
     switch (state) {
         case P2P_STATE_INIT:        return LA_W("INIT", LA_W5, 5);
         case P2P_STATE_REGISTERING: return LA_W("REGISTERING", LA_W7, 7);
+        case P2P_STATE_ONLINE:      return LA_W("ONLINE", LA_W10, 10);
         case P2P_STATE_PUNCHING:    return LA_W("PUNCHING", LA_W6, 6);
         case P2P_STATE_CONNECTED:   return LA_W("CONNECTED", LA_W3, 3);
         case P2P_STATE_RELAY:       return LA_W("RELAY", LA_W8, 8);
@@ -285,7 +286,7 @@ static const char* state_name(p2p_state_t state) {
     }
 }
 
-static void log_state_change(p2p_handle_t s) {
+static void log_state_change(p2p_session_t s) {
     static int last_state = -1;
     int state = p2p_state(s);
     if (state != last_state) {
@@ -344,7 +345,8 @@ static void on_response(p2p_handle_t hdl, uint16_t sid, uint8_t msg, const void 
 
 static bool             g_running;
 static bool             g_connected_once = false;
-static p2p_handle_t     g_hdl = NULL;           /* 全局句柄，供 instrument 回调使用 */
+static p2p_handle_t     g_hdl     = NULL;   /* 全局实例句柄 */
+static p2p_session_t    g_session = NULL;   /* 当前活跃会话 */
 
 /* SIGINT / SIGTERM：优雅退出（跨平台） */
 static void on_signal(int sig) { (void)sig;
@@ -369,15 +371,15 @@ static void on_instrument(uint16_t rid, uint8_t chn, const char* msg, char *cont
 
     /* send:<message> - 发送消息给对端 */
     if (strcmp(msg, "send") == 0) {
-        if (g_hdl && p2p_is_ready(g_hdl) && content && len > 0) {
-            p2p_send(g_hdl, content, len);
+        if (g_session && p2p_is_ready(g_session) && content && len > 0) {
+            p2p_send(g_session, content, len);
             char line[576];
             snprintf(line, sizeof(line), "%s: %s", g_my_name, content);
             tui_println(P2P_LOG_LEVEL_INFO, line);
             instrument_resp(rid, "ok");
         } else {
-            print("W:", "[CTRL] send failed: hdl=%p ready=%d content=%p len=%d",
-                  (void*)g_hdl, g_hdl ? p2p_is_ready(g_hdl) : -1, (void*)content, len);
+            print("W:", "[CTRL] send failed: sess=%p ready=%d content=%p len=%d",
+                  (void*)g_session, g_session ? (int)p2p_is_ready(g_session) : -1, (void*)content, len);
             instrument_resp(rid, "not_ready");
         }
         return;
@@ -385,7 +387,7 @@ static void on_instrument(uint16_t rid, uint8_t chn, const char* msg, char *cont
 
     /* state - 返回连接状态 */
     if (strcmp(msg, "state") == 0) {
-        int st = g_hdl ? p2p_state(g_hdl) : -1;
+        int st = g_session ? p2p_state(g_session) : -1;
         char buf[32];
         snprintf(buf, sizeof(buf), "%d", st);
         instrument_resp(rid, buf);
@@ -556,11 +558,12 @@ int main(int argc, char *argv[]) {
     bool connect_pending = false;
     uint64_t connect_retry_at = 0;
 
-    if (p2p_connect(hdl, target_name) < 0) {
+    g_session = p2p_connect(hdl, target_name);
+    if (!g_session) {
         print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
         return 1;
     }
-    if (p2p_state(hdl) == P2P_STATE_INIT) {
+    if (p2p_state(g_session) == P2P_STATE_INIT) {
         connect_pending = true;
         connect_retry_at = P_tick_ms() + 500;
     }
@@ -578,7 +581,7 @@ int main(int argc, char *argv[]) {
 
         p2p_update(hdl);
 
-        p2p_state_t st = p2p_state(hdl);
+        p2p_state_t st = p2p_state(g_session);
 
         // 首次连接或对端断开后的重连都走这里统一调度。
         if (target_name && !connect_pending && st == P2P_STATE_CLOSED) {
@@ -589,16 +592,20 @@ int main(int argc, char *argv[]) {
 
         // 兜底：ONLINE 空闲态也持续尝试 connect。
         // 某些时序下 CLOSED 窗口很短，可能错过触发；p2p_connect 在 ONLINE 为幂等调用。
-        if (target_name && !connect_pending && st == P2P_STATE_ONLINE && !p2p_is_ready(hdl)) {
-            connect_pending = true;
-            connect_retry_at = P_tick_ms() + 200;
-        }
+        // 注意：在新架构中 p2p_connect 不再幂等， ONLINE 是正常等待状态，不触发重连。
+        // if (target_name && !connect_pending && st == P2P_STATE_ONLINE && !p2p_is_ready(g_session)) {
+        //     connect_pending = true;
+        //     connect_retry_at = P_tick_ms() + 200;
+        // }
 
-        // RELAY/COMPACT 模式下，INIT/CLOSED/ONLINE 都允许延后重试启动会话。
+        // RELAY/COMPACT 模式下，INIT/CLOSED 允许延后重试启动会话。
+        // ONLINE/REGISTERING/PUNCHING 是正常等待状态，不要间断或重建会话。
         if (connect_pending
-            && (st == P2P_STATE_INIT || st == P2P_STATE_CLOSED || st == P2P_STATE_ONLINE)
+            && (st == P2P_STATE_INIT || st == P2P_STATE_CLOSED)
             && P_tick_ms() >= connect_retry_at) {
-            if (p2p_connect(hdl, target_name) < 0) {
+            if (g_session) { p2p_close(g_session); g_session = NULL; }
+            g_session = p2p_connect(hdl, target_name);
+            if (!g_session) {
                 print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
                 break;
             }
@@ -606,14 +613,14 @@ int main(int argc, char *argv[]) {
         }
 
         // 一旦进入打洞/连通阶段，停止重试调度。
-        st = p2p_state(hdl);
+        st = p2p_state(g_session);
         if (st == P2P_STATE_PUNCHING || st >= P2P_STATE_LOST) {
             connect_pending = false;
         }
 
-        log_state_change(hdl);
+        log_state_change(g_session);
 
-        if (p2p_is_ready(hdl)) {
+        if (p2p_is_ready(g_session)) {
 
             /* 首次连接成功：初始化 TUI，降低日志等级 */
             if (!g_connected_once) { g_connected_once = true;
@@ -627,7 +634,7 @@ int main(int argc, char *argv[]) {
 
             /* 接收对端消息 */
             char data[512] = {0};
-            int r = p2p_recv(hdl, data, (int)sizeof(data) - 1);
+            int r = p2p_recv(g_session, data, (int)sizeof(data) - 1);
             if (r > 0) {
 
                 data[r] = '\0';
@@ -640,12 +647,12 @@ int main(int argc, char *argv[]) {
                 if (ARGS_echo.i64 && strncmp(data, "[echo] ", 7) != 0) {
                     char echo_msg[520];
                     snprintf(echo_msg, sizeof(echo_msg), "[echo] %s", data);
-                    p2p_send(hdl, echo_msg, (int)strlen(echo_msg));
+                    p2p_send(g_session, echo_msg, (int)strlen(echo_msg));
                 }
             }
 
             /* 处理键盘输入 */
-            tui_process_input(hdl);
+            tui_process_input(g_session);
         }
         else if (g_connected_once) { g_connected_once = false;
             tui_println(P2P_LOG_LEVEL_WARN, LA_S("--- Disconnected ---", LA_S11, 11));

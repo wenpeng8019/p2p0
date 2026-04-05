@@ -8,10 +8,11 @@
 #include "predefine.h"
 #include <p2pp.h>               /* p2p_packet_hdr_t 定义 */
 
+struct p2p_instance;
 struct p2p_session;
 
-ret_t p2p_udp_open(struct p2p_session *s, uint16_t port);
-void p2p_udp_close(struct p2p_session *s);
+ret_t p2p_udp_open(struct p2p_instance *inst, uint16_t port);
+void p2p_udp_close(struct p2p_instance *inst);
 
 ret_t p2p_udp_send_to(struct p2p_session *s, const struct sockaddr_in *addr,
                       const void *data, int len);

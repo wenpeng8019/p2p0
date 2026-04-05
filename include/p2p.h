@@ -152,32 +152,32 @@ typedef const void* p2p_session_t;
  *   - CLOSED: 连接关闭
  *
  * 参数：
- *   hdl: 会话对象
+ *   session: 会话对象
  *   old_state: 前一状态
  *   new_state: 当前状态
  *   userdata: 用户自定义数据
  */
-typedef void (*p2p_on_state_fn)(p2p_handle_t hdl, p2p_state_t old_state, p2p_state_t new_state, void *userdata);
+typedef void (*p2p_on_state_fn)(p2p_session_t session, p2p_state_t old_state, p2p_state_t new_state, void *userdata);
 
 /*
  * 数据到达回调（可选，如果未设置则需要主动调用 p2p_recv）
  * 参数：
- *   hdl: 会话对象
+ *   session: 会话对象
  *   data: 数据缓冲区
  *   len: 数据长度
  *   userdata: 用户自定义数据
  */
-typedef void (*p2p_on_data_fn)(p2p_handle_t hdl, const void *data, int len, void *userdata);
+typedef void (*p2p_on_data_fn)(p2p_session_t session, const void *data, int len, void *userdata);
 
 /*
  * MSG RPC 请求到达回调（B 端，服务器把 A 的 MSG_REQ 中转给 B 时触发）
- * - sid   : 序列号，B 调用 p2p_response(hdl, sid, ...) 时传回
+ * - sid   : 序列号，B 调用 p2p_response(session, sid, ...) 时传回
  * - msg   : 消息类型（1 字节，由 A 端指定）
  *           msg=0: Echo 请求，已由底层自动回复，不会触发此回调
  *           msg>0: 应用层自定义消息类型，需调用 p2p_response() 回复
  * - data/len : 请求数据
  */
-typedef void (*p2p_on_request_fn)(p2p_handle_t hdl, uint16_t sid,
+typedef void (*p2p_on_request_fn)(p2p_session_t session, uint16_t sid,
                                   uint8_t msg, const void *data, int len,
                                   void *userdata);
 
@@ -191,7 +191,7 @@ typedef void (*p2p_on_request_fn)(p2p_handle_t hdl, uint16_t sid,
  *              msg=P2P_MSG_ERR_PEER_OFFLINE (0xFF): B 在等待响应期间离线
  *              msg=P2P_MSG_ERR_TIMEOUT (0xFE): 服务器向 B 转发请求超时
  */
-typedef void (*p2p_on_response_fn)(p2p_handle_t hdl, uint16_t sid,
+typedef void (*p2p_on_response_fn)(p2p_session_t session, uint16_t sid,
                                    uint8_t msg, const void *data, int len,
                                    void *userdata);
 #define P2P_MSG_ERR_TIMEOUT         0xFE    // 服务器转发请求超时
@@ -204,14 +204,14 @@ typedef void (*p2p_on_response_fn)(p2p_handle_t hdl, uint16_t sid,
  * 应用层通过自定义信令通道（如 WebSocket）将候选发送给对端。
  *
  * 参数：
- *   hdl: 会话对象
+ *   session: 会话对象
  *   candidate: 候选字符串（WebRTC 格式，无 "a=" 前缀和 "\r\n" 后缀）
  *              格式示例: "candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host"
  *              如果 candidate == NULL，表示候选收集完成（对应 WebRTC 的 event.candidate == null）
  *   userdata: 用户自定义数据
  *
  * 典型用法：
- *   void on_ice_candidate(p2p_handle_t hdl, const char *candidate, void *userdata) {
+ *   void on_ice_candidate(p2p_session_t session, const char *candidate, void *userdata) {
  *       if (candidate) {
  *           // 通过 WebSocket 发送给对端
  *           websocket_send_candidate(candidate);
@@ -221,7 +221,7 @@ typedef void (*p2p_on_response_fn)(p2p_handle_t hdl, uint16_t sid,
  *       }
  *   }
  */
-typedef void (*p2p_on_ice_candidate_fn)(p2p_handle_t hdl, const char *candidate, void *userdata);
+typedef void (*p2p_on_ice_candidate_fn)(p2p_session_t session, const char *candidate, void *userdata);
 
 /* ---------- 配置结构 ---------- */
 
@@ -320,6 +320,37 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg);
 void
 p2p_destroy(p2p_handle_t hdl);
 
+/**
+ * 驱动会话状态机 (单线程模式)
+ * 必须周期性调用（例如每 10 毫秒一次）从应用程序事件循环
+ * 在线程模式下，这将被内部调用
+ * 如果成功则返回 0，失败则返回 -1。
+ */
+int
+p2p_update(p2p_handle_t hdl);
+
+/**
+ * 获取本地 NAT 类型（由 STUN 检测得出，仅在 use_ice=true 时自动检测）。
+ *
+ * 返回值含义：
+ *
+ *   负值（检测瞬态，尚未完成）：
+ *     P2P_NAT_DETECTING  (-1)  检测进行中，已发送请求，等待响应
+ *     P2P_NAT_TIMEOUT    (-2)  检测超时，注册或探测无服务器响应
+ *
+ *   >= 0（检测已结束，可强转为 p2p_nat_type_t）：
+ *     P2P_NAT_UNKNOWN        (0)  检测未启动
+ *     P2P_NAT_OPEN           (1)  无 NAT / 公网直连
+ *     P2P_NAT_FULL_CONE      (2)  完全锥形NAT
+ *     P2P_NAT_RESTRICTED     (3)  受限锥形NAT
+ *     P2P_NAT_PORT_RESTRICTED(4)  端口受限锥形NAT
+ *     P2P_NAT_SYMMETRIC      (5)  对称型NAT（仅COMPACT+probe_port可检测）
+ *     P2P_NAT_BLOCKED        (6)  UDP 不可达（STUN 服务器无响应）
+ *     P2P_NAT_UNDETECTABLE   (7)  不支持检测（无STUN配置 / 信令模式不支持）
+ */
+int
+p2p_nat_type(p2p_handle_t hdl);
+
 //-----------------------------------------------------------------------------
 
 /**
@@ -359,51 +390,20 @@ p2p_destroy(p2p_handle_t hdl);
  * 
  * 返回：0 = 成功，-1 = 失败
  */
-int
+p2p_session_t
 p2p_connect(p2p_handle_t hdl, const char *remote_peer_id);
 
 /**
  * 发起优雅关闭。
  */
 void
-p2p_close(p2p_handle_t hdl);
-
-/**
- * 驱动会话状态机 (单线程模式)
- * 必须周期性调用（例如每 10 毫秒一次）从应用程序事件循环
- * 在线程模式下，这将被内部调用
- * 如果成功则返回 0，失败则返回 -1。
- */
-int
-p2p_update(p2p_handle_t hdl);
+p2p_close(p2p_session_t session);
 
 /**
  * 获取当前连接状态
  */
 p2p_state_t
-p2p_state(p2p_handle_t hdl);
-
-/**
- * 获取本地 NAT 类型（由 STUN 检测得出，仅在 use_ice=true 时自动检测）。
- *
- * 返回值含义：
- *
- *   负值（检测瞬态，尚未完成）：
- *     P2P_NAT_DETECTING  (-1)  检测进行中，已发送请求，等待响应
- *     P2P_NAT_TIMEOUT    (-2)  检测超时，注册或探测无服务器响应
- *
- *   >= 0（检测已结束，可强转为 p2p_nat_type_t）：
- *     P2P_NAT_UNKNOWN        (0)  检测未启动
- *     P2P_NAT_OPEN           (1)  无 NAT / 公网直连
- *     P2P_NAT_FULL_CONE      (2)  完全锥形NAT
- *     P2P_NAT_RESTRICTED     (3)  受限锥形NAT
- *     P2P_NAT_PORT_RESTRICTED(4)  端口受限锥形NAT
- *     P2P_NAT_SYMMETRIC      (5)  对称型NAT（仅COMPACT+probe_port可检测）
- *     P2P_NAT_BLOCKED        (6)  UDP 不可达（STUN 服务器无响应）
- *     P2P_NAT_UNDETECTABLE   (7)  不支持检测（无STUN配置 / 信令模式不支持）
- */
-int
-p2p_nat_type(p2p_handle_t hdl);
+p2p_state(p2p_session_t session);
 
 /**
  * 获取信道外可达性探测状态。
@@ -413,7 +413,7 @@ p2p_nat_type(p2p_handle_t hdl);
  * - 探测由库自动驱动，无需手动触发。
  */
 p2p_probe_state_t
-p2p_probe(p2p_handle_t hdl);
+p2p_probe(p2p_session_t session);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -421,13 +421,13 @@ p2p_probe(p2p_handle_t hdl);
  * 判断会话是否已经建立，即确定建立连接，允许进行 I/O 操作
  */
 bool
-p2p_is_ready(p2p_handle_t hdl);
-
+p2p_is_ready(p2p_session_t session);
+ 
 /*
  * 获取当前连接路径 (P2P_PATH_* 枚举)。
  */
 int
-p2p_path(p2p_handle_t hdl);
+p2p_path(p2p_session_t session);
 
 /*
  * 发送数据 (字节流语义，类似于 TCP send)。
@@ -435,14 +435,14 @@ p2p_path(p2p_handle_t hdl);
  * 返回接受的字节数（可能小于 len），或 -1 表示错误。
  */
 int
-p2p_send(p2p_handle_t hdl, const void *buf, int len);
+p2p_send(p2p_session_t session, const void *buf, int len);
 
 /*
  * 接收数据 (字节流语义，类似于 TCP recv)。
  * 返回读取的字节数（如果无数据则为 0），或 -1 表示错误。
  */
 int
-p2p_recv(p2p_handle_t hdl, void *buf, int len);
+p2p_recv(p2p_session_t session, void *buf, int len);
 
 //-----------------------------------------------------------------------------
 
@@ -452,46 +452,46 @@ p2p_recv(p2p_handle_t hdl, void *buf, int len);
  * 仅在 COMPACT 模式、服务器支持 MSG（ONLINE_ACK flags 含 SIG_ONACK_FLAG_MSG）
  * 且当前无挂起请求时有效。发送成功后通过 on_response 回调接收应答。
  *
- * @param hdl       会话句柄
+ * @param session   会话对象
  * @param msg       消息ID（1 字节，应用自定义）
  * @param data      请求数据（最多 P2P_MSG_DATA_MAX 字节）
  * @param len       数据长度
  * @return 0=已加入发送队列，-1=失败（不支持/已有挂起/参数错误/未注册）
  */
 int
-p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len);
+p2p_request(p2p_session_t session, uint8_t msg, const void *data, int len);
 
 /**
  * 回复对端的 MSG 请求（B 端，在 on_request 回调中或异步调用）。
  *
- * @param hdl       会话句柄
+ * @param session   会话对象
  * @param code      应答码（1 字节）
  * @param data      应答数据
  * @param len       数据长度
  * @return 0=成功，-1=失败（无挂起请求/参数错误）
  */
 int
-p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len);
+p2p_response(p2p_session_t session, uint8_t code, const void *data, int len);
 
 ///////////////////////////////////////////////////////////////////////////////
 
 /**
  * 获取本地候选数量
  *
- * @param hdl           会话句柄
+ * @param session       会话对象
  * @return              本地候选数量
  */
 int
-p2p_local_candidate_count(p2p_handle_t hdl);
+p2p_local_candidate_count(p2p_session_t session);
 
 /**
  * 获取远程候选数量
  *
- * @param hdl           会话句柄
+ * @param session       会话对象
  * @return              本地候选数量
  */
 int
-p2p_remote_candidate_count(p2p_handle_t hdl);
+p2p_remote_candidate_count(p2p_session_t session);
 
 //-----------------------------------------------------------------------------
 // ICE / SDP 接口（用于 P2P_SIGNALING_MODE_ICE 模式）
@@ -502,7 +502,7 @@ p2p_remote_candidate_count(p2p_handle_t hdl);
  *
  * 用于 Trickle ICE 场景，每收集一个候选立即发送给对端。
  *
- * @param hdl           会话句柄
+ * @param session       会话对象
  * @param cand_index    候选索引（0 ~ local_cand_cnt-1）
  * @param buf           输出缓冲区（建议至少 256 字节）
  * @param buf_size      缓冲区大小
@@ -511,7 +511,7 @@ p2p_remote_candidate_count(p2p_handle_t hdl);
  * 输出示例："candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host"
  */
 int
-p2p_export_ice_candidate(p2p_handle_t hdl, int cand_index, char *buf, int buf_size);
+p2p_export_ice_candidate(p2p_session_t session, int cand_index, char *buf, int buf_size);
 
 /**
  * 导出多个 ICE 候选为 SDP 格式（带 "a=" 前缀和 "\r\n" 后缀）
@@ -520,7 +520,7 @@ p2p_export_ice_candidate(p2p_handle_t hdl, int cand_index, char *buf, int buf_si
  * 1. 仅生成候选行（candidates_only=true）：嵌入已有 SDP
  * 2. 生成完整 SDP（candidates_only=false）：包含 v=, o=, s=, t=, m=, ice-ufrag, ice-pwd, fingerprint, candidates
  * 
- * @param hdl               会话句柄
+ * @param session           会话对象
  * @param sdp_buf           输出缓冲区
  *                          - 仅候选：建议 2048 字节
  *                          - 完整 SDP：建议 4096 字节
@@ -541,7 +541,7 @@ p2p_export_ice_candidate(p2p_handle_t hdl, int cand_index, char *buf, int buf_si
  *                                        "sha-256 AB:CD:EF:...");
  */
 int
-p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
+p2p_export_ice_sdp(p2p_session_t session, char *sdp_buf, int buf_size,
                    bool candidates_only,
                    const char *ice_ufrag,
                    const char *ice_pwd,
@@ -550,7 +550,7 @@ p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
 /**
  * 从 SDP 文本解析远端 ICE 候选（支持 "a=candidate:" 行）
  * 
- * @param hdl           会话句柄
+ * @param session       会话对象
  * @param sdp_text      SDP 文本（多行，每行一个候选）
  * @return              解析并添加的候选数量，失败返回 -1
  * 
@@ -558,14 +558,16 @@ p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
  *   "a=candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host\r\n"
  *   "a=candidate:2 1 UDP 1694498815 203.0.113.77 54320 typ srflx raddr 192.168.1.10 rport 54320\r\n"
  */
+// int
+// p2p_import_ice_sdp(p2p_handle_t hdl, const char *sdp_text);
 int
-p2p_import_ice_sdp(p2p_handle_t hdl, const char *sdp_text);
+p2p_import_ice_sdp(p2p_session_t session, const char *sdp_text);
 
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void
-p2p_print(p2p_handle_t hdl);
+p2p_print(p2p_session_t session);
 
 ///////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus

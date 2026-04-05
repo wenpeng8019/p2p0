@@ -122,7 +122,7 @@ int reliable_on_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack_bits,
             r->send_count--;
 
             // PseudoTCP：在 ACK 时更新窗口（仅当启用拥塞控制时，避免 cwnd=0 除零崩溃）
-            if (s->cfg.use_pseudotcp)
+            if (s->inst->cfg.use_pseudotcp)
                 p2p_pseudotcp_on_ack(s, ack_seq);
 
             // 更新 RTT 估算（仅针对非重传数据包）

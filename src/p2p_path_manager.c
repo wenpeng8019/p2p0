@@ -7,7 +7,7 @@
  *
  *   路径信息不由本模块存储，而是绑定在 session 的候选地址上：
  *     - s->remote_cands[i].stats  — 候选路径（索引 >=0）
- *     - s->signaling.stats — 信令转发/SIGNALING（索引 -1）
+ *     - s->inst->signaling.stats — 信令转发/SIGNALING（索引 -1）
  *   path_manager 仅做决策与状态驱动，所有 API 第一个参数为 struct p2p_session *s。
  *
  *   路径类型识别：基于候选的 type 字段（P2P_CAND_HOST/SRFLX/RELAY/PRFLX）。
@@ -144,10 +144,10 @@ int path_manager_init(struct p2p_session *s, p2p_path_strategy_t strategy) {
     s->active_path = -2;  // -2 表示无活跃路径
     
     /* SIGNALING 初始化为未启用 */
-    s->signaling.active = false;
-    memset(&s->signaling.addr, 0, sizeof(s->signaling.addr));
-    memset(&s->signaling.stats, 0, sizeof(s->signaling.stats));
-    s->signaling.stats.state = PATH_STATE_INIT;
+    s->inst->signaling.active = false;
+    memset(&s->inst->signaling.addr, 0, sizeof(s->inst->signaling.addr));
+    memset(&s->inst->signaling.stats, 0, sizeof(s->inst->signaling.stats));
+    s->inst->signaling.stats.state = PATH_STATE_INIT;
     
     /* 设置默认参数 */
     pm->probe_interval_ms = DEFAULT_PROBE_INTERVAL_MS;
@@ -241,10 +241,10 @@ void path_stats_init(path_stats_t *st, int cost_score) {
  * 设置信令转发(SIGNALING)路径
  */
 int path_manager_enable_signaling(struct p2p_session *s, struct sockaddr_in *addr) {
-    s->signaling.active = true;
-    s->signaling.addr = *addr;
-    path_stats_init(&s->signaling.stats, 5);       /* SIGNALING cost=5 */
-    s->signaling.stats.state = PATH_STATE_ACTIVE;   /* SIGNALING 一设置就可用 */
+    s->inst->signaling.active = true;
+    s->inst->signaling.addr = *addr;
+    path_stats_init(&s->inst->signaling.stats, 5);       /* SIGNALING cost=5 */
+    s->inst->signaling.stats.state = PATH_STATE_ACTIVE;   /* SIGNALING 一设置就可用 */
     
     return 0;
 }
@@ -354,7 +354,7 @@ static int select_path_connection_first(struct p2p_session *s) {
     }
 
     /* 检查信令转发(SIGNALING) */
-    bool signaling_ok = s->signaling.active && path_is_selectable(s->signaling.stats.state);
+    bool signaling_ok = s->inst->signaling.active && path_is_selectable(s->inst->signaling.stats.state);
 
     /* 信令转发(SIGNALING)：最终兜底 */
     if (signaling_ok) return PATH_IDX_SIGNALING;
@@ -400,7 +400,7 @@ static int select_path_performance_first(struct p2p_session *s) {
     if (best_path >= 0) return best_path;
 
     /* 信令转发(SIGNALING)：最终兜底（只在无其他可用路径时使用） */
-    if (s->signaling.active && path_is_selectable(s->signaling.stats.state))
+    if (s->inst->signaling.active && path_is_selectable(s->inst->signaling.stats.state))
         return PATH_IDX_SIGNALING;
 
     return -2;
@@ -485,7 +485,7 @@ static int select_path_hybrid(struct p2p_session *s) {
         return best_turn;
 
     /* 信令转发(SIGNALING)：最终兜底 */
-    if (s->signaling.active && path_is_selectable(s->signaling.stats.state))
+    if (s->inst->signaling.active && path_is_selectable(s->inst->signaling.stats.state))
         return PATH_IDX_SIGNALING;
 
     return -2; /* 无可用路径 */
@@ -648,8 +648,8 @@ int path_manager_switch_path(struct p2p_session *s,  int target_path, const char
 bool path_manager_has_active_path(struct p2p_session *s) {
 
     // 检查 SIGNALING 转发路径是否可用
-    if (s->signaling.active &&
-        path_is_selectable(s->signaling.stats.state)) {
+    if (s->inst->signaling.active &&
+        path_is_selectable(s->inst->signaling.stats.state)) {
         return true;
     }
     
@@ -1255,8 +1255,8 @@ void path_manager_tick(struct p2p_session *s, uint64_t now_ms) {
     }
 
     // 检查信令中转路径（如果路径有效）
-    if (s->signaling.active) {
-        health_check_one_path(s, &s->signaling.stats, PATH_IDX_SIGNALING, now_ms);
+    if (s->inst->signaling.active) {
+        health_check_one_path(s, &s->inst->signaling.stats, PATH_IDX_SIGNALING, now_ms);
     }
     // 检查所有候选路径
     for (int i = 0; i < s->remote_cand_cnt; i++) {

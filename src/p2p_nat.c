@@ -33,7 +33,7 @@ static int upsert_prflx(struct p2p_session *s, const struct sockaddr_in *from) {
     int idx = p2p_find_remote_candidate_by_addr(s, from);
     if (idx >= 0) return idx;
 
-    if (s->cfg.test_ice_prflx_off) {
+    if (s->inst->cfg.test_ice_prflx_off) {
         print("I:", LA_F("%s: remote %s cand<%s:%d> (disabled)\n", LA_F154, 154),
               TASK_ICE_REMOTE, "prflx", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return -1;
@@ -145,9 +145,9 @@ static void flush_reaching_queue(struct p2p_session *s, int writable_path, uint6
         memcpy(ack_payload, &node->target.sin_addr.s_addr, 4);
         memcpy(ack_payload + 4, &node->target.sin_port, 2);
 
-        if (writable_path == PATH_IDX_SIGNALING) { assert(s->signaling_relay_fn);
+        if (writable_path == PATH_IDX_SIGNALING) { assert(s->inst->signaling_relay_fn);
 
-            s->signaling_relay_fn(s, P2P_PKT_REACH, 0, node->seq, ack_payload, sizeof(ack_payload));
+            s->inst->signaling_relay_fn(s, P2P_PKT_REACH, 0, node->seq, ack_payload, sizeof(ack_payload));
 
             print("V:", LA_F("%s: reaching cand[%d] via signaling relay, seq=%u", LA_F428, 428),
                   TASK_NAT, node->cand_idx, node->seq);
@@ -503,7 +503,7 @@ void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
                path_idx, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
         // 如果使用 ICE 协议打洞
-        if (s->cfg.use_ice) {
+        if (s->inst->cfg.use_ice) {
 
             // 原路回复 Binding Response（RFC 8445 Section 7.3.1.4）
             // + 事务 ID 从请求包 buf[8..19] 复制，XOR-MAPPED-ADDRESS 填写对端观测地址
@@ -624,7 +624,7 @@ void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     n->last_recv_time = now;
 
     // punch 包肯定不会来自信令服务器
-    assert(!sockaddr_equal(from, &s->signaling.addr));
+    assert(!sockaddr_equal(from, &s->inst->signaling.addr));
     int cand_idx = upsert_prflx(s, from);
     if (cand_idx < 0) return;
 
@@ -800,7 +800,7 @@ void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     // 检查是否是信令服务器转发的 REACH（from 是信令服务器地址）
     // + 信令服务器不应作为 PRFLX 候选添加
     int path_idx = -1;
-    if (!sockaddr_equal(from, &s->signaling.addr)) {
+    if (!sockaddr_equal(from, &s->inst->signaling.addr)) {
         path_idx = upsert_prflx(s, from);
         if (path_idx < 0) {
             print("W:", LA_F("%s: ignored, upsert %s:%d failed", LA_F437, 437),
@@ -939,7 +939,7 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     // 检查是否是信令服务器转发的 CONN，即通过信令服务中转连接（from 是信令服务器地址）
     // + 信令服务器不应作为 PRFLX 候选添加
     int path_idx = -1;
-    if (!sockaddr_equal(from, &s->signaling.addr)) {
+    if (!sockaddr_equal(from, &s->inst->signaling.addr)) {
         path_idx = upsert_prflx(s, from);
         if (path_idx < 0) {
             print("W:", LA_F("%s: CONN ignored, upsert %s:%d failed", LA_F435, 435), 
@@ -1003,7 +1003,7 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     // 检查是否是信令服务器转发的 CONN，即通过信令服务中转连接（from 是信令服务器地址）
     // + 信令服务器不应作为 PRFLX 候选添加
     int path_idx = -1;
-    if (!sockaddr_equal(from, &s->signaling.addr)) {
+    if (!sockaddr_equal(from, &s->inst->signaling.addr)) {
         path_idx = upsert_prflx(s, from);
         if (path_idx < 0) {
             print("W:", LA_F("%s: CONN_ACK ignored, upsert %s:%d failed", LA_F436, 436), 
@@ -1036,7 +1036,7 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
     if (n->state < NAT_CONNECTING) {
 
         // ICE 机制没有 CONN 握手，也就是此时 NAT_PUNCHING 相当于 CONNECTING 状态
-        if (n->state < NAT_PUNCHING || !s->cfg.use_ice) {
+        if (n->state < NAT_PUNCHING || !s->inst->cfg.use_ice) {
             print("E:", LA_F("Ignore %s pkt from %s:%d, valid state(%d)", LA_F439, 439), PROTO,
                   inet_ntoa(from->sin_addr), ntohs(from->sin_port), n->state);
         }
@@ -1059,7 +1059,7 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
 
     // 如果使用 ICE 机制打洞，PUNCHING 状态下收到对端数据包则可将当前来源路径直接激活
     // + 因为 ICE 机制要求有效路径必须是可双向通讯的，收到数据包，说明对端已经确认了该路径的可用性（双向打通）
-    if (n->state == NAT_PUNCHING) { assert(s->cfg.use_ice);
+    if (n->state == NAT_PUNCHING) { assert(s->inst->cfg.use_ice);
         path_manager_set_path_state(s, path_idx, PATH_STATE_ACTIVE);
         print("I:", LA_F("%s: path[%d] UP (recv DATA)", LA_F133, 133),
               TASK_PATH, path_idx);
@@ -1205,7 +1205,7 @@ void nat_tick(struct p2p_session *s, uint64_t now_ms) {
 
                         // 设置活跃路径（用于 nat_send_conn_ack）
                         s->active_path = PATH_IDX_SIGNALING;
-                        s->active_addr = s->signaling.addr;
+                        s->active_addr = s->inst->signaling.addr;
                         s->path_type = P2P_PATH_SIGNALING;
 
                         n->state = NAT_RELAY;
@@ -1222,7 +1222,7 @@ void nat_tick(struct p2p_session *s, uint64_t now_ms) {
                      && tick_diff(now_ms, n->punch_start) >= PUNCH_TIMEOUT_MS) {
 
                 print("V:", LA_F("%s: timeout but ICE exchange not done yet (%" PRIu64 " ms elapsed, mode=%d), waiting for more candidates", LA_F183, 183),
-                        TASK_NAT, tick_diff(now_ms, n->punch_start), s->signaling_mode);
+                        TASK_NAT, tick_diff(now_ms, n->punch_start), s->inst->signaling_mode);
             }
 
             // 周期性向所有候选发送打洞包（包括 relay）
@@ -1410,9 +1410,9 @@ void nat_tick(struct p2p_session *s, uint64_t now_ms) {
         memcpy(reach_payload + 4, &n->reaching_head->target.sin_port, 2);
         
         // 策略 1：信令中转模式（如果服务器支持）
-        if (s->signaling_relay_fn) {
+        if (s->inst->signaling_relay_fn) {
 
-            ret_t ret = s->signaling_relay_fn(s, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, P2P_PKT_REACH_PSZ);
+            ret_t ret = s->inst->signaling_relay_fn(s, P2P_PKT_REACH, 0, n->reaching_head->seq, reach_payload, P2P_PKT_REACH_PSZ);
             if (ret == E_NONE) {
 
                 // 发送成功，将节点出队并释放

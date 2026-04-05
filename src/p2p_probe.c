@@ -67,7 +67,7 @@ void probe_trigger(struct p2p_session *s) {
     assert(ctx->state >= P2P_PROBE_STATE_READY);
     ctx->state = P2P_PROBE_STATE_RUNNING;
 
-    switch (s->signaling_mode) {
+    switch (s->inst->signaling_mode) {
 
         // 启动 COMPACT 探测
         case P2P_SIGNALING_MODE_COMPACT:
@@ -206,7 +206,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
             ret_t ret = p2p_signal_compact_request(s, 0, NULL, 0);
             if (ret != E_NONE) {
                 ctx->mode.compact.phase = PROBE_COMPACT_PHASE_WAIT_ECHO;
-                ctx->mode.compact.sid   = s->sig_compact_ctx.req_sid;
+                ctx->mode.compact.sid   = s->inst->sig_compact_ctx.req_sid;
                 ctx->start_ms           = now_ms;
             } else { print("W:", LA_F("%s: send failed(%d)", LA_F163, 163), TASK_RELAY_PROBE, ret);
                 ctx->state = P2P_PROBE_STATE_READY;
@@ -317,7 +317,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
 }
 
 void probe_tick(struct p2p_session *s, uint64_t now_ms) {
-    switch (s->signaling_mode) {
+    switch (s->inst->signaling_mode) {
         case P2P_SIGNALING_MODE_COMPACT: probe_compact_tick(s, now_ms); break;
         case P2P_SIGNALING_MODE_RELAY:   probe_relay_tick(s, now_ms);   break;
         default: break;

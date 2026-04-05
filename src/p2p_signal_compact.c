@@ -60,14 +60,14 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
 
         print("I:", LA_F("%s: sync0 srflx cand[%d]<%s:%d>%s\n", LA_F136, 136),
                         TASK_SYNC_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
-                        s->cfg.test_ice_srflx_off ? " (disabled)" : "");
+                        s->inst->cfg.test_ice_srflx_off ? " (disabled)" : "");
 
-        if (s->cfg.test_ice_srflx_off) --s->remote_cand_cnt;
+        if (s->inst->cfg.test_ice_srflx_off) --s->remote_cand_cnt;
         else { s->remote_srflx_cnt++;
 
             // 这里启动打洞需要依赖于信令服务器的 REGISTER_ACK 包中携带的 feature_relay 标志
             // + 该标志用于决定所使用的冷打洞机制，如果冷打洞不依赖服务器中转，则打洞可以不依赖 REGISTER_ACK 包
-            if (s->sig_compact_ctx.state >= SIGNAL_COMPACT_WAIT_SYNC0_ACK && nat_punch(s, 0) != E_NONE) {
+            if (s->inst->sig_compact_ctx.state >= SIGNAL_COMPACT_WAIT_SYNC0_ACK && nat_punch(s, 0) != E_NONE) {
                 print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F137, 137),
                     TASK_SYNC_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             }
@@ -76,7 +76,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
         --cand_cnt; offset += (int)sizeof(p2p_candidate_t);
     }
     // 如果 sync0 以外的其他 info 包先到达，则需要保留 cand[0] 给对方（在 sync0 中的）的公网地址
-    else if (s->remote_cand_cnt == 0 && !s->cfg.test_ice_srflx_off) {
+    else if (s->remote_cand_cnt == 0 && !s->inst->cfg.test_ice_srflx_off) {
         memset(&s->remote_cands[0], 0, sizeof(p2p_remote_candidate_entry_t));
         s->remote_cand_cnt = 1;
     }
@@ -100,9 +100,9 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
         }
 
         const char* type_str; uint16_t* cand_cnt_ptr; bool opt_off = false;
-        if (c->type == P2P_CAND_HOST) { type_str = "host"; cand_cnt_ptr = &s->remote_host_cnt; opt_off = s->cfg.test_ice_host_off; }
-        else if (c->type == P2P_CAND_SRFLX) { type_str = "srflx"; cand_cnt_ptr = &s->remote_srflx_cnt; opt_off = s->cfg.test_ice_srflx_off; }
-        else if (c->type == P2P_CAND_RELAY) { type_str = "relay"; cand_cnt_ptr = &s->remote_relay_cnt; opt_off = s->cfg.test_ice_relay_off; }
+        if (c->type == P2P_CAND_HOST) { type_str = "host"; cand_cnt_ptr = &s->remote_host_cnt; opt_off = s->inst->cfg.test_ice_host_off; }
+        else if (c->type == P2P_CAND_SRFLX) { type_str = "srflx"; cand_cnt_ptr = &s->remote_srflx_cnt; opt_off = s->inst->cfg.test_ice_srflx_off; }
+        else if (c->type == P2P_CAND_RELAY) { type_str = "relay"; cand_cnt_ptr = &s->remote_relay_cnt; opt_off = s->inst->cfg.test_ice_relay_off; }
         else { --s->remote_cand_cnt;
             print("E:", LA_F("%s: unexpected remote cand type %d, skipped\n", LA_F193, 193),
                   TASK_SYNC_REMOTE, c->type);
@@ -120,7 +120,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
         print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F153, 153),
               TASK_SYNC_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
 
-        if (s->sig_compact_ctx.state < SIGNAL_COMPACT_WAIT_SYNC0_ACK) continue;
+        if (s->inst->sig_compact_ctx.state < SIGNAL_COMPACT_WAIT_SYNC0_ACK) continue;
 
         if (nat_punch(s, idx) != E_NONE)
             print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F137, 137),
@@ -144,7 +144,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
  */
 static int pack_local_candidates(struct p2p_session *s, uint16_t seq, uint8_t *payload, uint8_t *r_flags) {
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     int base_index, cnt;
 
@@ -195,7 +195,7 @@ static int pack_local_candidates(struct p2p_session *s, uint16_t seq, uint8_t *p
 static void send_online(struct p2p_session *s) {
     const char* PROTO = "ONLINE";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     assert(ctx->state == SIGNAL_COMPACT_WAIT_ONLINE_ACK);
 
     // local_peer_id（32 字节，超过部分截断，不足部分补零）
@@ -230,7 +230,7 @@ static void send_online(struct p2p_session *s) {
 static void send_compact_sync0(struct p2p_session *s) {
     const char* PROTO = "SYNC0";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     assert(ctx->state == SIGNAL_COMPACT_WAIT_SYNC0_ACK);
     assert(ctx->auth_key != 0);
 
@@ -281,7 +281,7 @@ static void send_compact_sync0(struct p2p_session *s) {
 static void send_rest_candidates_and_fin(struct p2p_session *s) {
     const char* PROTO = "SYNC";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     assert(ctx->state == SIGNAL_COMPACT_SYNCING && ctx->session_id);
 
     // 计算剩余候选数量
@@ -348,7 +348,7 @@ static void send_rest_candidates_and_fin(struct p2p_session *s) {
 static void send_trickle_candidates(struct p2p_session *s) {
     const char* PROTO = "SYNC(trickle)";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     uint16_t seq = ctx->trickle_seq_next;
     assert(seq <= 16 && ctx->trickle_queue[seq] > 0);
 
@@ -382,7 +382,7 @@ static void send_trickle_candidates(struct p2p_session *s) {
 }
 
 static bool compact_wait_stun_candidates(struct p2p_session *s) {
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     return ctx->state == SIGNAL_COMPACT_SYNCING && ctx->candidates_mask == 0 && s->stun_pending > 0;
 }
 
@@ -396,7 +396,7 @@ static bool compact_wait_stun_candidates(struct p2p_session *s) {
 static void resend_rest_candidates_and_fin(struct p2p_session *s) {
     const char* PROTO = "SYNC";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     assert(ctx->state == SIGNAL_COMPACT_SYNCING && ctx->session_id);
     assert((ctx->candidates_acked & ctx->candidates_mask) != ctx->candidates_mask);
 
@@ -440,7 +440,7 @@ static void resend_rest_candidates_and_fin(struct p2p_session *s) {
 static void send_rpc_req(struct p2p_session *s) {
     const char* PROTO = "MSG_REQ";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     uint8_t payload[P2P_SESS_ID_PSZ + 3 + P2P_MSG_DATA_MAX]; int n = 0;
     nwrite_l(payload + n, ctx->session_id); n += P2P_SESS_ID_PSZ;
@@ -476,7 +476,7 @@ static void send_rpc_req(struct p2p_session *s) {
 static void send_rpc_resp(struct p2p_session *s) {
     const char* PROTO = "MSG_RESP";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     uint8_t payload[P2P_SESS_ID_PSZ + 2 + 1 + P2P_MSG_DATA_MAX]; int n = 0;
     nwrite_l(payload, ctx->resp_session_id); n = P2P_SESS_ID_PSZ;
@@ -509,7 +509,7 @@ static void send_rpc_resp(struct p2p_session *s) {
 static void send_nat_probe(struct p2p_session *s) {
     const char* PROTO = "NAT_PROBE";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     struct sockaddr_in probe_addr = ctx->server_addr;
     probe_addr.sin_port = htons(ctx->probe_port);
@@ -576,7 +576,7 @@ static void reset_peer(p2p_signal_compact_ctx_t *ctx) {
 ret_t p2p_signal_compact_online(struct p2p_session *s, const char *local_peer_id,
                                 const struct sockaddr_in *server) {
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     P_check(ctx->state == SIGNAL_COMPACT_INIT, return E_NONE_CONTEXT;)
 
     ctx->server_addr = *server;
@@ -607,7 +607,7 @@ ret_t p2p_signal_compact_online(struct p2p_session *s, const char *local_peer_id
 ret_t p2p_signal_compact_offline(struct p2p_session *s) {
     const char* PROTO = "OFFLINE";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     if (ctx->state == SIGNAL_COMPACT_INIT) return E_NONE;
 
     uint8_t payload[SIG_PKT_OFFLINE_PSZ];
@@ -648,7 +648,7 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_
 
     P_check(remote_peer_id && remote_peer_id[0], return E_INVALID;)
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     if (ctx->state == SIGNAL_COMPACT_INIT) {
         return E_NONE_CONTEXT;  // 还没调用 online()
     }
@@ -683,7 +683,7 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_
 ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     const char* PROTO = "OFFLINE";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     if (!ctx->remote_peer_id[0]) return E_NONE;  // 没有建立过配对
 
@@ -732,7 +732,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
  */
 void p2p_signal_compact_trickle_candidate(struct p2p_session *s) {
     
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     if (ctx->state != SIGNAL_COMPACT_SYNCING && ctx->state != SIGNAL_COMPACT_READY) return;
     if (!ctx->session_id) return;
 
@@ -778,7 +778,7 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
                                uint8_t type, uint8_t flags, uint16_t seq,
                                const void *payload, uint16_t payload_len) {
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     P_check(!payload_len || payload, return E_INVALID;)
     P_check(ctx->feature_relay, return E_NO_SUPPORT;)
     P_check(ctx->session_id, return E_NONE_CONTEXT;)
@@ -822,7 +822,7 @@ bool p2p_signal_compact_relay_validation(struct p2p_session *s,
         return false;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     uint32_t session_id = nget_l(*payload);
 
     // 验证 session_id 匹配
@@ -854,7 +854,7 @@ bool p2p_signal_compact_relay_validation(struct p2p_session *s,
 ret_t p2p_signal_compact_request(struct p2p_session *s,
                                  uint8_t msg, const void *data, int len) {
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     P_check(len == 0 || data, return E_INVALID;)
     P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
@@ -897,7 +897,7 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
                                   uint8_t code, const void *data, int len) {
     const char* PROTO = "MSG_RESP";
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
     P_check(len == 0 || data, return E_INVALID;)
@@ -954,7 +954,7 @@ void compact_on_online_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     if (ctx->state != SIGNAL_COMPACT_WAIT_ONLINE_ACK) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)ctx->state);
@@ -1044,20 +1044,20 @@ void compact_on_online_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     if (ctx->probe_port > 0) {
 
         // 标记进入 NAT_PROBE 探测中状态，发送第一轮探测包
-        s->nat_type = P2P_NAT_DETECTING;
+        s->inst->nat_type = P2P_NAT_DETECTING;
         print("I:", LA_F("%s: started, sending first probe\n", LA_F175, 175), TASK_NAT_PROBE);
         ctx->nat_probe_retries = 0/* 初始化启动探测 */;
         send_nat_probe(s);
         ctx->nat_probe_send_time = P_tick_ms();
     }
-    else s->nat_type = P2P_NAT_UNDETECTABLE;
+    else s->inst->nat_type = P2P_NAT_UNDETECTABLE;
 
     // 如果服务器支持数据中继
     if (ctx->feature_relay) {
 
         // 启动数据中继功能
-        assert(!s->signaling_relay_fn);
-        s->signaling_relay_fn = p2p_signal_compact_relay;
+        assert(!s->inst->signaling_relay_fn);
+        s->inst->signaling_relay_fn = p2p_signal_compact_relay;
 
         // 将 SIGNALING 路径添加到路径管理器（作为 fallback）
         path_manager_enable_signaling(s, &ctx->server_addr);
@@ -1077,7 +1077,7 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
     printf(LA_F("[UDP] %s recv from %s:%d\n", LA_F487, 487),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     if (ctx->state < SIGNAL_COMPACT_ONLINE) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)ctx->state);
@@ -1092,7 +1092,7 @@ void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from)
     
     // 通知路径管理器：ALIVE_ACK 确认（seq=0），完成 RoundTrip 测量
     // 仅当 SIGNALING 作为 relay 路径被启用时才统计 RTT
-    if (s->signaling.active) {
+    if (s->inst->signaling.active) {
         path_manager_on_packet_recv(s, PATH_IDX_SIGNALING, now, 0, true, 0);
     }
 }
@@ -1118,7 +1118,7 @@ void compact_on_sync0_ack(struct p2p_session *s,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     if (ctx->state < SIGNAL_COMPACT_WAIT_SYNC0_ACK) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)ctx->state);
         return;
@@ -1209,7 +1209,7 @@ void compact_on_server_sync0(struct p2p_session *s,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     if (ctx->state < SIGNAL_COMPACT_WAIT_ONLINE_ACK) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)ctx->state);
@@ -1236,7 +1236,7 @@ void compact_on_server_sync0(struct p2p_session *s,
         // 如果 p2p 之前已经连接成功过，即业务层可能已经完成部分通讯
         // ! 对于业务层来说，session 被强制重置 = 连接断开，需要重新开始
         if (s->state >= P2P_STATE_LOST) {
-            if (s->cfg.on_state) s->cfg.on_state(s, s->state, P2P_STATE_CLOSED, s->cfg.userdata);
+            if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, s->state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
         }
 
         reset_peer(ctx);
@@ -1360,7 +1360,7 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     if (ctx->state < SIGNAL_COMPACT_WAIT_ONLINE_ACK) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)ctx->state);
@@ -1448,7 +1448,7 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
             return;
         }
 
-        if (s->cfg.test_ice_srflx_off) {
+        if (s->inst->cfg.test_ice_srflx_off) {
             print("I:", LA_F("%s NOTIFY: srflx addr update (disabled)\n", LA_F47, 47), PROTO);
             return;
         }
@@ -1568,7 +1568,7 @@ void compact_on_sync_ack(struct p2p_session *s, uint16_t seq,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     uint32_t session_id = nget_l(payload);
     if (session_id != ctx->session_id) {
@@ -1615,7 +1615,7 @@ void compact_on_fin(struct p2p_session *s, const uint8_t *payload, int len,
     printf(LA_F("[UDP] %s recv from %s:%d, len=%d\n", LA_F390, 390),
            PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), len);
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     if (len < (int)SIG_PKT_FIN_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F562, 562), PROTO, len);
@@ -1680,7 +1680,7 @@ void compact_on_request(struct p2p_session *s, uint8_t flags,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     uint32_t session_id = nget_l(payload);
     uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
@@ -1723,8 +1723,8 @@ void compact_on_request(struct p2p_session *s, uint8_t flags,
     print("V:", LA_F("%s: accepted sid=%u, msg=%u\n", LA_F93, 93), PROTO, sid, msg);
 
     // 触发用户回调
-    if (s->cfg.on_request)
-        s->cfg.on_request((p2p_handle_t)s, sid, msg, req_data, req_len, s->cfg.userdata);
+    if (s->inst->cfg.on_request)
+        s->inst->cfg.on_request((p2p_session_t)s, sid, msg, req_data, req_len, s->inst->cfg.userdata);
 }
 
 /*
@@ -1751,7 +1751,7 @@ void compact_on_request_ack(struct p2p_session *s,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     uint32_t session_id = nget_l(payload);
     uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
@@ -1800,8 +1800,8 @@ void compact_on_request_ack(struct p2p_session *s,
 
         print("W:", LA_F("%s: RPC fail due to peer offline (sid=%u)\n", LA_F79, 79), PROTO, saved_id);
 
-        if (s->cfg.on_response)
-            s->cfg.on_response((p2p_handle_t)s, saved_id, saved_msg, NULL, -1, s->cfg.userdata);
+        if (s->inst->cfg.on_response)
+            s->inst->cfg.on_response((p2p_session_t)s, saved_id, saved_msg, NULL, -1, s->inst->cfg.userdata);
     }
 }
 
@@ -1834,7 +1834,7 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     uint32_t session_id = nget_l(payload);
     uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
@@ -1924,8 +1924,8 @@ void compact_on_response(struct p2p_session *s, uint8_t flags,
         print("I:", LA_F("%s: RPC complete (sid=%u)\n", LA_F78, 78), PROTO, sid);
     }
 
-    if (s->cfg.on_response)
-        s->cfg.on_response((p2p_handle_t)s, sid, res_code, res_data, res_size, s->cfg.userdata);
+    if (s->inst->cfg.on_response)
+        s->inst->cfg.on_response((p2p_session_t)s, sid, res_code, res_data, res_size, s->inst->cfg.userdata);
 }
 
 /*
@@ -1950,7 +1950,7 @@ void compact_on_response_ack(struct p2p_session *s,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     uint32_t session_id = nget_l(payload);
     uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
@@ -2004,7 +2004,7 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
         return;
     }
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     if (seq != ctx->nat_probe_retries) {
         print("V:", LA_F("%s: ignored for seq=%u (expect=%d)\n", LA_F113, 113),
@@ -2034,17 +2034,17 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
         }
     }
 
-    if (is_open) s->nat_type = P2P_NAT_OPEN;
+    if (is_open) s->inst->nat_type = P2P_NAT_OPEN;
     else if (ctx->nat_is_port_consistent)
-        s->nat_type = P2P_NAT_FULL_CONE; // 满足端口一致性 → Cone NAT（无法区分 Full/Restricted/Port-Restricted，取最乐观估计）
-    else s->nat_type = P2P_NAT_SYMMETRIC;
+        s->inst->nat_type = P2P_NAT_FULL_CONE; // 满足端口一致性 → Cone NAT（无法区分 Full/Restricted/Port-Restricted，取最乐观估计）
+    else s->inst->nat_type = P2P_NAT_SYMMETRIC;
     ctx->nat_probe_retries = -1/* 探测完成 */;
 
     print("I:", LA_F("%s: completed, mapped=%s:%d probe=%s:%d -> %s\n", LA_F104, 104),
           TASK_NAT_PROBE,
           inet_ntoa(ctx->public_addr.sin_addr), ntohs(ctx->public_addr.sin_port),
           inet_ntoa(probe_mapped.sin_addr),     ntohs(probe_mapped.sin_port),
-          p2p_nat_type_str(s->nat_type));
+          p2p_nat_type_str(s->inst->nat_type));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2060,7 +2060,7 @@ void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
 
 void p2p_signal_compact_tick_recv(struct p2p_session *s) {
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     uint64_t now = P_tick_ms();
 
     // REGISTERING 状态：定期重发 ONLINE
@@ -2148,7 +2148,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
                         
                         // 通知路径管理器：ALIVE 是唯一需要 per-packet RTT 的信令包，rt_track=true
                         // 仅当 SIGNALING 作为 relay 路径被启用时才统计 RTT
-                        if (s->signaling.active) {
+                        if (s->inst->signaling.active) {
                             path_manager_on_packet_send(s, PATH_IDX_SIGNALING, 0, now, 0, true);
                         }
                     }
@@ -2187,8 +2187,8 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
                 print("W:", LA_F("%s: %s timeout after %d retries (sid=%u)\n", LA_F68, 68),
                       TASK_RPC, "req", MSG_REQ_MAX_RETRIES, sid);
 
-                if (s->cfg.on_response)
-                    s->cfg.on_response((p2p_handle_t)s, sid, msg, NULL, -1, s->cfg.userdata);
+                if (s->inst->cfg.on_response)
+                    s->inst->cfg.on_response((p2p_session_t)s, sid, msg, NULL, -1, s->inst->cfg.userdata);
             }
         }
     }
@@ -2235,7 +2235,7 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s) {
  */
 void p2p_signal_compact_tick_send(struct p2p_session *s) {
 
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
     uint64_t now = P_tick_ms();
 
     // SYNCING 阶段：定期重发剩余候选和 FIN，直到收到对端确认（进入 READY）
@@ -2287,9 +2287,9 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
             // 重新发起 TURN Allocate（上一轮分配已随 SYNCING 重置失效）
             // todo ? turn 为啥 SYNCING 重置会失效，另外 turn 的生命周期管理设计？
             // turn 的公网地址应该会添加到本地候选队列，不应该失效呀
-//            if (!instrument_option(P2P_INST_OPT_RELAY_OFF) && s->cfg.turn_server) {
+//            if (!instrument_option(P2P_INST_OPT_RELAY_OFF) && s->inst->cfg.turn_server) {
 //                if (p2p_turn_allocate(s) == 0) {
-//                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F286, 286), s->cfg.turn_server);
+//                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F286, 286), s->inst->cfg.turn_server);
 //                }
 //            }
 
@@ -2325,13 +2325,13 @@ void p2p_signal_compact_tick_send(struct p2p_session *s) {
 }
 
 /*
- * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果到 s->nat_type。
+ * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果到 s->inst->nat_type。
  * 由 p2p.c 在每次 update tick 中调用。
  */
 void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
 
-    assert(s->signaling_mode == P2P_SIGNALING_MODE_COMPACT);
-    p2p_signal_compact_ctx_t *ctx = &s->sig_compact_ctx;
+    assert(s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT);
+    p2p_signal_compact_ctx_t *ctx = &s->inst->sig_compact_ctx;
 
     // 探测端口未知
     if (ctx->state == SIGNAL_COMPACT_INIT || ctx->state == SIGNAL_COMPACT_WAIT_ONLINE_ACK) {
@@ -2340,8 +2340,8 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
     // 不支持探测
     if (!ctx->probe_port) {
         // 服务器不支持 NAT probe，设置为 UNDETECTABLE
-        if (s->nat_type != P2P_NAT_UNDETECTABLE) {
-            s->nat_type = P2P_NAT_UNDETECTABLE;
+        if (s->inst->nat_type != P2P_NAT_UNDETECTABLE) {
+            s->inst->nat_type = P2P_NAT_UNDETECTABLE;
         }
         return;
     }
@@ -2363,7 +2363,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s) {
     }
     else {
 
-        s->nat_type = P2P_NAT_TIMEOUT;
+        s->inst->nat_type = P2P_NAT_TIMEOUT;
         ctx->nat_probe_retries = -2/* 探测超时 */;
 
         print("W:", LA_F("%s: timeout after %d retries , type unknown\n", LA_F181, 181), 

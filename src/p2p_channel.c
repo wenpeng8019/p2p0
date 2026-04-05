@@ -18,7 +18,7 @@ ret_t p2p_udp_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
     if (payload_len > 0 && payload)
         P_msg_set(&msgs[n++], payload, payload_len);
 
-    return P_msg_send_to(s->sock, msgs, n, addr);
+    return P_msg_send_to(s->inst->sock, msgs, n, addr);
 }
 
 ret_t p2p_turn_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
@@ -81,11 +81,11 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
 
     /* 信令转发路径: 调用信令模式特定的中转接口 */
     if (s->path_type == P2P_PATH_SIGNALING) {
-        if (!s->signaling_relay_fn) {
+        if (!s->inst->signaling_relay_fn) {
             print("E:", LA_F("SIGNALING path but signaling relay not available", LA_F319, 319));
             return -1;
         }
-        return s->signaling_relay_fn(s, type, flags, seq, payload, payload_len);
+        return s->inst->signaling_relay_fn(s, type, flags, seq, payload, payload_len);
     }
 
     return p2p_udp_send_packet(s, addr, type, flags, seq, payload, payload_len);
@@ -116,11 +116,11 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
 
     /* 信令转发: CRYPTO 包通过信令中转接口发送 */
     if (s->path_type == P2P_PATH_SIGNALING) {
-        if (!s->signaling_relay_fn) {
+        if (!s->inst->signaling_relay_fn) {
             print("E:", LA_F("SIGNALING path but signaling relay not available", LA_F319, 319));
             return;
         }
-        s->signaling_relay_fn(s, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
+        s->inst->signaling_relay_fn(s, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
         return;
     }
 

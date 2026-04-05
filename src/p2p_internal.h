@@ -91,6 +91,75 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/* inst_state_t 与 p2p_state_t 共用相同的状态常量，直接多顿即可 */
+typedef p2p_state_t inst_state_t;
+
+struct p2p_instance {
+    /* ======================== 配置与状态 ======================== */
+    p2p_config_t                    cfg;                // 用户配置（STUN 服务器、模式等）
+    inst_state_t                    state;              // 连接状态 inst_state_t
+
+    /* ======================== Socket 资源 ======================== */
+    sock_t                          sock;               // UDP 套接字描述符
+    sock_t                          tcp_sock;           // TCP 套接字（打洞/回退用）
+
+    /* ======================== 信令转发路径 ======================== */
+    /*
+     * SIGNALING 转发（索引 -1）：通过信令服务器转发数据，非标准降级方案。
+     * 与 remote_cands[i] 平级，stats 作为统一的路径统计基本对象。
+     */
+    struct {
+        bool                    active;                 // 是否启用
+        struct sockaddr_in      addr;                   // 信令服务器地址
+        path_stats_t            stats;                  // 统计信息
+    } signaling;
+
+    p2p_signaling_t                 signaling_mode;     // 信令模式
+    p2p_signal_compact_ctx_t        sig_compact_ctx;    // COMPACT 模式信令上下文
+    p2p_signal_relay_ctx_t          sig_relay_ctx;      // RELAY 模式信令上下文
+    p2p_signal_pubsub_ctx_t         sig_pubsub_ctx;     // PUB/SUB 模式信令上下文
+
+    /* ======================== NAT 检测 ======================== */
+    int                             nat_type;           // NAT 类型，即 p2p_nat_type() 返回值，也就是支持负值状态
+
+    /*
+     * 通过信令服务器中转发送数据包（通用接口）
+     *
+     * 各信令模式（compact/relay/pubsub）在 p2p_create 时赋值具体实现。
+     * 自动处理 session_id 封装和服务器路由。
+     *
+     * 参数：
+     *   type: P2P 包类型（REACH/DATA/ACK/CRYPTO 等）
+     *   flags: 原始 flags（接口内部会自动添加 P2P_RELAY_FLAG_SESSION）
+     *   seq: 序列号
+     *   payload: 原始负载（不含 session_id）
+     *   payload_len: 原始负载长度
+     *
+     * 返回：E_NONE=成功，负值=错误码
+     */
+    ret_t (*signaling_relay_fn)(struct p2p_session *s,
+                                uint8_t type, uint8_t flags, uint16_t seq,
+                                const void *payload, uint16_t payload_len);
+
+    char                            local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识
+
+    struct p2p_session*             sessions_head;
+    struct p2p_session*             sessions_rear;
+
+#ifdef P2P_THREADED
+    /* ======================== 多线程支持 ======================== */
+    /*
+     * 启用 P2P_THREADED 时，会话在独立线程中运行。
+     * 需要互斥锁保护共享状态。
+     * 类型由 stdc 模块定义（pthread_t / HANDLE）。
+     */
+    thd_t                           thread;             // 工作线程
+    P_mutex_t                       mtx;                // 互斥锁
+    int                             thread_running;     // 线程是否运行中
+    int                             quit;               // 退出标志
+#endif
+};
+
 /* ============================================================================
  * p2p_session: P2P 会话主结构体
  * ============================================================================
@@ -108,29 +177,18 @@
  * 生命周期：p2p_init() → p2p_connect() → p2p_send/recv() → p2p_close()
  */
 struct p2p_session {
-    /* ======================== 配置与状态 ======================== */
-    p2p_config_t                    cfg;                // 用户配置（STUN 服务器、模式等）
-    p2p_state_t                     state;              // 连接状态 P2P_STATE_*
+    struct p2p_instance*            inst;               // 所属实例（指向全局或上下文实例）
+    struct p2p_session*             next;               // 实例会话链表（next 指针）
 
-    /* ======================== Socket 资源 ======================== */
-    sock_t                          sock;               // UDP 套接字描述符
-    sock_t                          tcp_sock;           // TCP 套接字（打洞/回退用）
+    char                            remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
+
+    /* ======================== 配置与状态 ======================== */
+    p2p_state_t                     state;              // 连接状态 P2P_STATE_*
 
     /* ======================== 活跃路径 ======================== */
     int                             active_path;        // 当前活跃路径索引 (-2=无, -1=SIGNALING, >=0=候选)
     struct sockaddr_in              active_addr;        // 当前通信目标地址（与 active_path 一致）
     p2p_path_type_t                 path_type;          // 连接路径 P2P_PATH_*
-
-    /* ======================== 信令转发路径 ======================== */
-    /*
-     * SIGNALING 转发（索引 -1）：通过信令服务器转发数据，非标准降级方案。
-     * 与 remote_cands[i] 平级，stats 作为统一的路径统计基本对象。
-     */
-    struct {
-        bool                    active;                 // 是否启用
-        struct sockaddr_in      addr;                   // 信令服务器地址
-        path_stats_t            stats;                  // 统计信息
-    } signaling;
 
     /* ======================== p2p 链路 ======================== */
 
@@ -169,48 +227,8 @@ struct p2p_session {
     int                             turn_pending;       // TURN Allocate 待响应计数（本轮连接中的动态 Relay 候选）
     int                             turn_base;          // local_cands 中首个 TURN 候选索引（-1 表示当前无 TURN 候选）
 
-    /* ===== 信令上下文/ICE（Interactive Connectivity Establishment）交换 ===== */
-    /*
-     * 信令模块负责在两个对等体之间交换连接信息（候选地址、密钥等）。
-     * 支持三种模式：
-     *   - sig_compact_ctx: COMPACT模式，UDP 无状态信令
-     *   - sig_relay_ctx:  ICE模式，TCP 中继信令
-     *   - sig_pubsub_ctx: PUBSUB模式，通过 GitHub Gist
-     */
-    char                            local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识
-    char                            remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
-    p2p_signaling_t                 signaling_mode;     // 信令模式
-    p2p_signal_compact_ctx_t        sig_compact_ctx;    // COMPACT 模式信令上下文
-    p2p_signal_relay_ctx_t          sig_relay_ctx;      // RELAY 模式信令上下文
-    p2p_signal_pubsub_ctx_t         sig_pubsub_ctx;     // PUB/SUB 模式信令上下文
-
     /* ======================== 中继服务 ======================== */
     turn_ctx_t                      turn;               // TURN 中继上下文
-
-    /*
-     * 通过信令服务器中转发送数据包（通用接口）
-     *
-     * 各信令模式（compact/relay/pubsub）在 p2p_create 时赋值具体实现。
-     * 自动处理 session_id 封装和服务器路由。
-     *
-     * 参数：
-     *   type: P2P 包类型（REACH/DATA/ACK/CRYPTO 等）
-     *   flags: 原始 flags（接口内部会自动添加 P2P_RELAY_FLAG_SESSION）
-     *   seq: 序列号
-     *   payload: 原始负载（不含 session_id）
-     *   payload_len: 原始负载长度
-     *
-     * 返回：E_NONE=成功，负值=错误码
-     */
-    ret_t (*signaling_relay_fn)(struct p2p_session *s,
-                                uint8_t type, uint8_t flags, uint16_t seq,
-                                const void *payload, uint16_t payload_len);
-
-    /* ======================== NAT 检测 ======================== */
-    int                             nat_type;           // NAT 类型，即 p2p_nat_type() 返回值，也就是支持负值状态
-    int                             det_step;           // 当前检测步骤 det_step_t
-    uint64_t                        det_last_send;      // 上次发送检测包时间
-    int                             det_retries;        // 当前步骤重试次数
 
     /* ======================== PseudoTCP 拥塞控制 ======================== */
     /*
@@ -228,23 +246,10 @@ struct p2p_session {
         uint64_t                last_ack;               // 上次收到 ACK 的时间戳
         int                     cc_state;               // 拥塞控制状态 TCP_STATE_*
         float                   loss_rate;              // EWMA 丢包率估计（0.0-1.0）
-    } tcp;
+    }                               tcp;
 
     /* ======================== 定时器 ======================== */
     uint64_t                        last_update;        // 上次调用 p2p_update() 的时间
-
-#ifdef P2P_THREADED
-    /* ======================== 多线程支持 ======================== */
-    /*
-     * 启用 P2P_THREADED 时，会话在独立线程中运行。
-     * 需要互斥锁保护共享状态。
-     * 类型由 stdc 模块定义（pthread_t / HANDLE）。
-     */
-    thd_t                           thread;             // 工作线程
-    P_mutex_t                       mtx;                // 互斥锁
-    int                             thread_running;     // 线程是否运行中
-    int                             quit;               // 退出标志
-#endif
 };
 
 /*
@@ -342,8 +347,8 @@ static inline void p2p_session_reset(struct p2p_session *s, bool closing) {
     memset(&s->active_addr, 0, sizeof(s->active_addr));
     
     // 重置 SIGNALING 中转地址的统计
-    if (s->signaling.active)
-        path_stats_init(&s->signaling.stats, 5);
+    if (s->inst->signaling.active)
+        path_stats_init(&s->inst->signaling.stats, 5);
     
     // 重置路径管理器
     path_manager_reset(s);
@@ -526,9 +531,9 @@ static inline ret_t p2p_remote_cands_reserve(struct p2p_session *s, int need) {
 
  static inline void p2p_set_active_path(struct p2p_session *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING) {
-        if (!s->signaling.active) return;
+        if (!s->inst->signaling.active) return;
         s->active_path = path_idx;
-        s->active_addr = s->signaling.addr;
+        s->active_addr = s->inst->signaling.addr;
         s->path_type = P2P_PATH_SIGNALING;
     } else if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
         p2p_remote_candidate_entry_t *e = &s->remote_cands[path_idx];
@@ -550,8 +555,8 @@ static inline ret_t p2p_remote_cands_reserve(struct p2p_session *s, int need) {
 static inline ret_t p2p_reset_path(struct p2p_session *s, int path_idx) {
 
     if (path_idx == PATH_IDX_SIGNALING) {
-        if (!s->signaling.active) return E_INVALID;
-        path_stats_init(&s->signaling.stats, 5);  /* cost_score=5 */
+        if (!s->inst->signaling.active) return E_INVALID;
+        path_stats_init(&s->inst->signaling.stats, 5);  /* cost_score=5 */
     } else if (path_idx >= 0 && path_idx < s->remote_cand_cnt) {
         p2p_remote_candidate_entry_t *c = &s->remote_cands[path_idx];
         c->last_punch_send_ms = 0;
@@ -580,7 +585,7 @@ static inline p2p_path_type_t p2p_get_path_type(struct p2p_session *s, int path_
 
 static inline path_stats_t* p2p_get_path_stats(struct p2p_session *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
-        return s->signaling.active ? &s->signaling.stats : NULL;
+        return s->inst->signaling.active ? &s->inst->signaling.stats : NULL;
     if (path_idx >= 0 && path_idx < s->remote_cand_cnt)
         return &s->remote_cands[path_idx].stats;
     return NULL;
@@ -588,14 +593,14 @@ static inline path_stats_t* p2p_get_path_stats(struct p2p_session *s, int path_i
 
 static inline const struct sockaddr_in* p2p_get_path_addr(struct p2p_session *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
-        return s->signaling.active ? &s->signaling.addr : NULL;
+        return s->inst->signaling.active ? &s->inst->signaling.addr : NULL;
     if (path_idx >= 0 && path_idx < s->remote_cand_cnt)
         return &s->remote_cands[path_idx].addr;
     return NULL;
 }
 
 static inline int p2p_find_path_by_addr(struct p2p_session *s, const struct sockaddr_in *addr) {
-    if (s->signaling.active && sockaddr_equal(&s->signaling.addr, addr))
+    if (s->inst->signaling.active && sockaddr_equal(&s->inst->signaling.addr, addr))
         return PATH_IDX_SIGNALING;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         if (sockaddr_equal(&s->remote_cands[i].addr, addr)) return i;

@@ -257,7 +257,7 @@ static void process_payload(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s,
             /* 构建并发送 answer */
             uint8_t buf[2048];
             int n = pack_signaling_payload_hdr(
-                s->local_peer_id,
+                s->inst->local_peer_id,
                 payload.sender,
                 0,  /* timestamp */
                 0,  /* delay_trigger */
@@ -719,7 +719,7 @@ void p2p_signal_pubsub_tick_send(p2p_signal_pubsub_ctx_t *ctx, struct p2p_sessio
 //
 //        uint8_t pkt[2048];
 //        int n = pack_signaling_payload_hdr(
-//            s->local_peer_id,
+//            s->inst->local_peer_id,
 //            s->remote_peer_id,
 //            0,  /* timestamp */
 //            0,  /* delay_trigger */

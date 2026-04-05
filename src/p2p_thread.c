@@ -4,14 +4,14 @@
 #include "p2p_internal.h"
 
 static int32_t p2p_thread_func(void *arg) {
-    struct p2p_session *s = (struct p2p_session *)arg;
+    struct p2p_instance *inst = (struct p2p_instance *)arg;
 
-    while (!s->quit) {
-        P_mutex_lock(&s->mtx);
-        p2p_update(s);
-        P_mutex_unlock(&s->mtx);
+    while (!inst->quit) {
+        P_mutex_lock(&inst->mtx);
+        p2p_update((p2p_handle_t)inst);
+        P_mutex_unlock(&inst->mtx);
 
-        int ms = s->cfg.update_interval_ms;
+        int ms = inst->cfg.update_interval_ms;
         if (ms <= 0) ms = 10;
         P_usleep((unsigned int)ms * 1000);
     }
@@ -19,26 +19,26 @@ static int32_t p2p_thread_func(void *arg) {
     return 0;
 }
 
-ret_t p2p_thread_start(struct p2p_session *s) {
-    s->quit = 0;
-    if (P_mutex_init(&s->mtx) != 0)
+ret_t p2p_thread_start(struct p2p_instance *inst) {
+    inst->quit = 0;
+    if (P_mutex_init(&inst->mtx) != 0)
         return -1;
-    ret_t ret = P_thread(&s->thread, p2p_thread_func, s, P_THD_NORMAL, 0);
+    ret_t ret = P_thread(&inst->thread, p2p_thread_func, inst, P_THD_NORMAL, 0);
     if (ret != E_NONE) {
-        P_mutex_final(&s->mtx);
+        P_mutex_final(&inst->mtx);
         return ret;
     }
-    s->thread_running = 1;
+    inst->thread_running = 1;
     return E_NONE;
 }
 
-void p2p_thread_stop(struct p2p_session *s) {
-    if (!s->thread_running) return;
+void p2p_thread_stop(struct p2p_instance *inst) {
+    if (!inst->thread_running) return;
 
-    s->quit = 1;
-    P_join(s->thread, NULL);
-    P_mutex_final(&s->mtx);
-    s->thread_running = 0;
+    inst->quit = 1;
+    P_join(inst->thread, NULL);
+    P_mutex_final(&inst->mtx);
+    inst->thread_running = 0;
 }
 
 #endif /* P2P_THREADED */

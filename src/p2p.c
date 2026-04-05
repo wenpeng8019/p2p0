@@ -37,11 +37,15 @@ uint16_t             p2p_instrument_base = 0;
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifdef P2P_THREADED
-#define LOCK(s)   do { if ((s)->cfg.threaded) P_mutex_lock(&(s)->mtx); } while(0)
-#define UNLOCK(s) do { if ((s)->cfg.threaded) P_mutex_unlock(&(s)->mtx); } while(0)
+#define LOCK(s)        do { if ((s)->inst->cfg.threaded) P_mutex_lock(&(s)->inst->mtx); } while(0)
+#define UNLOCK(s)      do { if ((s)->inst->cfg.threaded) P_mutex_unlock(&(s)->inst->mtx); } while(0)
+#define LOCK_INST(i)   do { if ((i)->cfg.threaded) P_mutex_lock(&(i)->mtx); } while(0)
+#define UNLOCK_INST(i) do { if ((i)->cfg.threaded) P_mutex_unlock(&(i)->mtx); } while(0)
 #else
-#define LOCK(s)   ((void)0)
-#define UNLOCK(s) ((void)0)
+#define LOCK(s)        ((void)0)
+#define UNLOCK(s)      ((void)0)
+#define LOCK_INST(i)   ((void)0)
+#define UNLOCK_INST(i) ((void)0)
 #endif
 
 static inline void gather_local_candidates(struct p2p_session *s) {
@@ -54,14 +58,14 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      * Host Candidate 是本地网卡的 IP 地址。
      * 在同一局域网内的对端可以直接使用此地址通信。
      */
-    if (!s->cfg.test_ice_host_off) {
+    if (!s->inst->cfg.test_ice_host_off) {
 
         const route_ctx_t *rt = route_shared_get();
         if (rt && rt->addr_count > 0) {
             
             /* 获取本地端口 */
             struct sockaddr_in loc; socklen_t len = sizeof(loc);
-            getsockname(s->sock, (struct sockaddr *)&loc, &len);
+            getsockname(s->inst->sock, (struct sockaddr *)&loc, &len);
 
             int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
 
@@ -100,8 +104,8 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      */
 #if 0 /* 当前由 NAT 检测 Test I 阶段（as_candidate=true）统一获取 srflx，
        * 避免重复请求。未来计划：为每个本地网络接口分别获取 srflx 地址 */
-    if (s->signaling_mode != P2P_SIGNALING_MODE_COMPACT
-        && !s->cfg.test_ice_srflx_off && s->cfg.stun_server) {
+    if (s->inst->signaling_mode != P2P_SIGNALING_MODE_COMPACT
+        && !s->inst->cfg.test_ice_srflx_off && s->inst->cfg.stun_server) {
 
         uint8_t stun_buf[256];
         int slen = p2p_stun_build_binding_request(stun_buf, sizeof(stun_buf), NULL, NULL, NULL);
@@ -111,13 +115,13 @@ static inline void gather_local_candidates(struct p2p_session *s) {
             struct sockaddr_in stun_addr;
             memset(&stun_addr, 0, sizeof(stun_addr));
             stun_addr.sin_family = AF_INET;
-            stun_addr.sin_port = htons(s->cfg.stun_port ? s->cfg.stun_port : 3478);
-            struct hostent *he = gethostbyname(s->cfg.stun_server);
+            stun_addr.sin_port = htons(s->inst->cfg.stun_port ? s->inst->cfg.stun_port : 3478);
+            struct hostent *he = gethostbyname(s->inst->cfg.stun_server);
             if (he) {
                 memcpy(&stun_addr.sin_addr, he->h_addr_list[0], he->h_length);
                 p2p_udp_send_to(s, &stun_addr, stun_buf, slen);
                 s->stun_pending++;      /* 一次性 Srflx 候选待响应 */
-                print("I:", LA_F("Requested Srflx Candidate from %s", LA_F316, 316), s->cfg.stun_server);
+                print("I:", LA_F("Requested Srflx Candidate from %s", LA_F316, 316), s->inst->cfg.stun_server);
             }
         }
     }
@@ -132,9 +136,9 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      *   1. p2p_turn_allocate() 发送请求时递增 turn_pending
      *   2. 接收 Allocate Success 时，在 turn_handle_packet 中递减 turn_pending
      */
-    if (!s->cfg.test_ice_relay_off && s->cfg.turn_server) {
+    if (!s->inst->cfg.test_ice_relay_off && s->inst->cfg.turn_server) {
         if (p2p_turn_allocate(s) == 0) {
-            print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F314, 314), s->cfg.turn_server);
+            print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F314, 314), s->inst->cfg.turn_server);
         }
     }
 
@@ -143,7 +147,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      * RFC 6544 扩展了 ICE 以支持 TCP 候选。
      * 目前仅预留接口，未完全实现。
      */
-    if (s->cfg.enable_tcp) {
+    if (s->inst->cfg.enable_tcp) {
         for (int i = 0; i < s->local_cand_cnt; i++) {
             if (s->local_cands[i].type == P2P_CAND_HOST) {
                 /* TODO: 建立 TCP 监听端口 */
@@ -169,8 +173,8 @@ static inline bool p2p_set_state(struct p2p_session *s, p2p_state_t new_state) {
     s->state = new_state;
     
     // 触发状态回调
-    if (s->cfg.on_state) {
-        s->cfg.on_state(s, old_state, new_state, s->cfg.userdata);
+    if (s->inst->cfg.on_state) {
+        s->inst->cfg.on_state((p2p_session_t)s, old_state, new_state, s->inst->cfg.userdata);
     }
     
     return true;
@@ -249,16 +253,16 @@ static void disconnect(struct p2p_session *s) {
 
     // 触发回调
     if (old_state >= P2P_STATE_LOST) {
-        if (s->cfg.on_state) s->cfg.on_state(s, old_state, P2P_STATE_CLOSED, s->cfg.userdata);
+        if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, old_state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
     }
 
     // COMPACT 信令模式：取消与对方在服务器上的注册，OFFLINE
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
         p2p_signal_compact_disconnect(s);
     }
     // RELAY 信令模式：
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
 
         p2p_signal_relay_disconnect(s);
     }
@@ -290,7 +294,7 @@ static void peer_disconnect(struct p2p_session *s) {
     }
 
     // 触发状态回调
-    if (s->cfg.on_state) s->cfg.on_state(s, old_state, P2P_STATE_CLOSED, s->cfg.userdata);
+    if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, old_state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -332,52 +336,175 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
             print("E:", LA_F("RELAY/COMPACT mode requires server_host", LA_F297, 297));
             return NULL;
         }
-    } else {
+    } else if (cfg->signaling_mode != P2P_SIGNALING_MODE_ICE) {
         print("E:", LA_F("Invalid signaling mode in configuration", LA_F266, 266));
         return NULL;
     }
 
+    // 分配实例结构
+    struct p2p_instance *inst = (struct p2p_instance*)calloc(1, sizeof(*inst));
+    if (!inst) {
+        print("E:", LA_F("Failed to allocate memory for instance", LA_F241, 241));
+        return NULL;
+    }
+
+    // 创建 UDP 套接字
+    print("I:", LA_F("Open P2P UDP socket on port %d", LA_F273, 273), cfg->bind_port);
+    if ((ret = p2p_udp_open(inst, cfg->bind_port)) != E_NONE) {
+        print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F274, 274), cfg->bind_port, ret);
+        free(inst);
+        return NULL;
+    }
+
+    // 初始化信令上下文（实例级别，只初始化不注册）
+    print("I:", LA_F("Initialize signaling mode: %d", LA_F262, 262), (int)cfg->signaling_mode);
+    if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+        p2p_signal_compact_init(&inst->sig_compact_ctx);
+    else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+        p2p_signal_relay_init(&inst->sig_relay_ctx);
+    else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
+        if ((ret = p2p_signal_pubsub_init(&inst->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id)) != E_NONE) {
+            print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F260, 260), ret);
+            p2p_udp_close(inst); free(inst);
+            return NULL;
+        }
+        if (cfg->auth_key)
+            strncpy(inst->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(inst->sig_pubsub_ctx.auth_key) - 1);
+    }
+
+    // NAT 类型初始化
+    inst->nat_type = P2P_NAT_UNKNOWN;
+    if (!cfg->stun_server && cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT)
+        inst->nat_type = P2P_NAT_UNDETECTABLE;
+
+    // 初始化共享路由层
+    if ((ret = route_shared_acquire()) < 0) {
+        print("E:", LA_F("Detect local network interfaces failed(%d)", LA_F230, 230), ret);
+        p2p_udp_close(inst); free(inst);
+        return NULL;
+    }
+
+    // 配置
+    inst->cfg = *cfg;
+    if (inst->cfg.update_interval_ms <= 0) inst->cfg.update_interval_ms = 10;
+    if (inst->cfg.signaling_mode == P2P_SIGNALING_MODE_ICE) inst->cfg.use_ice = true;
+
+    // 本端身份标识
+    strncpy(inst->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
+
+    inst->tcp_sock = P_INVALID_SOCKET;
+    inst->signaling_mode = cfg->signaling_mode;
+    inst->state = P2P_STATE_INIT;
+
+#ifdef P2P_THREADED
+    if (cfg->threaded) {
+        print("I:", LA_F("Starting internal thread", LA_F337, 337));
+        if ((ret = p2p_thread_start(inst)) != E_NONE) {
+            print("E:", LA_F("Start internal thread failed(%d)", LA_F336, 336), ret);
+            p2p_udp_close(inst); route_shared_release(); free(inst);
+            return NULL;
+        }
+    }
+#endif
+
+    return (p2p_handle_t)inst;
+}
+
+void
+p2p_destroy(p2p_handle_t hdl) {
+    if (!hdl) return;
+
+    struct p2p_instance *inst = (struct p2p_instance*)hdl;
+
+#ifdef P2P_THREADED
+    if (inst->cfg.threaded) {
+        print("I:", LA_F("Stopping internal thread", LA_F349, 349));
+        p2p_thread_stop(inst);
+    }
+#endif
+
+    // 先告知信令服务器下线（信令函数需要 session 指针，必须在释放会话前调用）
+    struct p2p_session *first_s = inst->sessions_head;
+    if (first_s) {
+        if (inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT &&
+            inst->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
+            print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F328, 328));
+            p2p_signal_compact_offline(first_s);
+        }
+        else if (inst->signaling_mode == P2P_SIGNALING_MODE_RELAY &&
+                 inst->sig_relay_ctx.state != SIGNAL_RELAY_INIT) {
+            print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
+            p2p_signal_relay_offline(first_s);
+        }
+    }
+
+    // 释放所有会话
+    struct p2p_session *s = inst->sessions_head;
+    while (s) {
+        struct p2p_session *next = s->next;
+
+        probe_reset(s);
+        if (s->state != P2P_STATE_CLOSED) disconnect(s);
+
+        if (s->dtls && s->dtls->close) { s->dtls->close(s); s->dtls = NULL; }
+        if (s->trans && s->trans->close) { s->trans->close(s); s->trans = NULL; }
+
+        free(s->local_cands);
+        free(s->remote_cands);
+        free(s);
+        s = next;
+    }
+    inst->sessions_head = inst->sessions_rear = NULL;
+
+    // 关闭 socket
+    print("I:", LA_F("Close P2P UDP socket", LA_F215, 215));
+    p2p_udp_close(inst);
+
+    route_shared_release();
+    free(inst);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+p2p_session_t
+p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
+
+    P_check(hdl, return NULL;)
+
+    struct p2p_instance *inst = (struct p2p_instance*)hdl;
+
+    // 实例出错时不允许继续连接
+    P_check(inst->state != P2P_STATE_ERROR, return NULL;)
+
+    if (remote_peer_id && !*remote_peer_id) remote_peer_id = NULL;
+
+    // 检查 remote_peer_id 必须性
+    if (!remote_peer_id &&
+        (inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT ||
+         inst->signaling_mode == P2P_SIGNALING_MODE_RELAY)) {
+        print("E:", LA_F("Invalid remote_peer_id for %s mode", LA_F211, 211),
+              inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT ? "COMPACT" : "RELAY");
+        return NULL;
+    }
+
+    // 分配会话结构
     struct p2p_session *s = (struct p2p_session*)calloc(1, sizeof(*s));
     if (!s) {
         print("E:", LA_F("Failed to allocate memory for session", LA_F241, 241));
         return NULL;
     }
+    s->inst = inst;
+    s->next = NULL;
 
-    // 创建 UDP 套接字，port 0 为有效值，表示由操作系统分配随机端口
-    print("I:", LA_F("Open P2P UDP socket on port %d", LA_F273, 273), cfg->bind_port);
-    if ((ret = p2p_udp_open(s, cfg->bind_port)) != E_NONE) {
-        print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F274, 274), cfg->bind_port, ret);
-        free(s);
-        return NULL;
+    // 初始化对端 ID
+    if (remote_peer_id) {
+        strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
+        s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+    } else {
+        s->remote_peer_id[0] = '\0';
     }
 
-    // 初始化信令服务模式
-    print("I:", LA_F("Initialize signaling mode: %d", LA_F262, 262), (int)cfg->signaling_mode);
-    if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_init(&s->sig_compact_ctx);
-    else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_init(&s->sig_relay_ctx);
-    else if (s->cfg.signaling_mode == P2P_SIGNALING_MODE_ICE) s->cfg.use_ice = true;    /* ICE 模式隐含 use_ice=true */
-    else if ((ret = p2p_signal_pubsub_init(&s->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id)) != E_NONE) {
-        print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F260, 260), ret);
-        p2p_udp_close(s); free(s);
-        return NULL;
-    } else if (cfg->auth_key) {
-        strncpy(s->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(s->sig_pubsub_ctx.auth_key) - 1);
-    }
-
-    // 如果没有配置 STUN 服务器，并且未使用 COMPACT 模式，则无法进行 NAT 类型检测
-    s->nat_type = P2P_NAT_UNKNOWN;
-    if (!s->cfg.stun_server && cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
-        s->nat_type = P2P_NAT_UNDETECTABLE;
-    }
-
-    // 初始化共享路由层（用于检测是否处于同一子网）
-    if ((ret = route_shared_acquire()) < 0) {
-        print("E:", LA_F("Detect local network interfaces failed(%d)", LA_F230, 230), ret);
-        p2p_udp_close(s); free(s);
-        return NULL;
-    }
-
-    // 初始化候选地址数组（动态分配，初始容量 8）
+    // 分配候选地址列表
     const int initial_cand_cap = 8;
     s->local_cands  = (p2p_local_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_local_candidate_entry_t));
     s->remote_cands = (p2p_remote_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_remote_candidate_entry_t));
@@ -385,38 +512,25 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("E:", LA_F("Failed to allocate memory for candidate lists", LA_F240, 240));
         if (s->local_cands) free(s->local_cands);
         if (s->remote_cands) free(s->remote_cands);
-        p2p_udp_close(s); route_shared_release(); free(s);
+        free(s);
         return NULL;
     }
     s->local_cand_cap = s->remote_cand_cap = initial_cand_cap;
 
-    s->cfg = *cfg;
-    if (s->cfg.update_interval_ms <= 0) s->cfg.update_interval_ms = 10;
-    
-    // 初始化本端身份标识
-    memset(s->local_peer_id, 0, sizeof(s->local_peer_id));
-    strncpy(s->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
-
-    s->tcp_sock = P_INVALID_SOCKET;
-
-    // 初始化虚拟链路层（基于 NAT 穿透的 P2P）
+    // 会话级状态初始化
     nat_init(&s->nat);
 
-    // 初始化路径管理器（多路径并行支持）
-    p2p_path_strategy_t strategy = (p2p_path_strategy_t)(cfg->path_strategy);
-    if (strategy < P2P_PATH_STRATEGY_CONNECTION_FIRST || strategy > P2P_PATH_STRATEGY_HYBRID) {
-        strategy = P2P_PATH_STRATEGY_CONNECTION_FIRST; // 默认：直连优先
-    }
+    p2p_path_strategy_t strategy = (p2p_path_strategy_t)(inst->cfg.path_strategy);
+    if (strategy < P2P_PATH_STRATEGY_CONNECTION_FIRST || strategy > P2P_PATH_STRATEGY_HYBRID)
+        strategy = P2P_PATH_STRATEGY_CONNECTION_FIRST;
     path_manager_init(s, strategy);
     print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F286, 286), strategy);
 
-    // 初始化基础传输层（reliable ARQ）
     reliable_init(s);
 
-    // 初始化传输层（可靠性模块，与加密层正交）
+    // 传输层选择
     s->trans = NULL;
-    
-    if (cfg->use_sctp) {
+    if (inst->cfg.use_sctp) {
 #ifdef WITH_SCTP
         print("I:", LA_F("SCTP (usrsctp) enabled as transport layer", LA_F289, 289));
         s->trans = &p2p_trans_sctp;
@@ -424,13 +538,12 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("W:", LA_F("SCTP (usrsctp) requested but library not linked", LA_F318, 318));
 #endif
     }
-    else if (cfg->use_pseudotcp) {
+    else if (inst->cfg.use_pseudotcp) {
         print("I:", LA_F("PseudoTCP enabled as transport layer", LA_F293, 293));
         s->trans = &p2p_trans_pseudotcp;
     }
     else print("I:", LA_F("No advanced transport layer enabled, using simple reliable layer", LA_F270, 270));
 
-    // 执行传输模块的初始化处理
     if (s->trans && s->trans->init) {
         if (s->trans->init(s) != 0) {
             print("E:", LA_F("Transport layer '%s' init failed, falling back to simple reliable", LA_F367, 367), s->trans->name);
@@ -439,11 +552,10 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         }
     }
 
-    // 初始化加密层（与传输层正交，DTLS 后端选择）
+    // 加密层选择
     s->dtls = NULL;
     s->dtls_data = NULL;
-    
-    if (cfg->dtls_backend == 1) {
+    if (inst->cfg.dtls_backend == 1) {
 #ifdef WITH_DTLS
         print("I:", LA_F("DTLS (MbedTLS) enabled as encryption layer", LA_F196, 196));
         s->dtls = &p2p_dtls_mbedtls;
@@ -451,7 +563,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("W:", LA_F("DTLS (MbedTLS) requested but library not linked", LA_F227, 227));
 #endif
     }
-    else if (cfg->dtls_backend == 2) {
+    else if (inst->cfg.dtls_backend == 2) {
 #ifdef WITH_OPENSSL
         print("I:", LA_F("OpenSSL DTLS enabled as encryption layer", LA_F243, 243));
         s->dtls = &p2p_dtls_openssl;
@@ -460,202 +572,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 #endif
     }
 
-    // 注：DTLS init 延迟到 p2p_connect()，因为自动角色需要知道 remote_peer_id
-
-    // 初始化数据流层
-    stream_init(&s->stream, cfg->nagle);
-
-    // 初始化探测上下文（初始状态为 OFFLINE）
-    probe_init(&s->probe_ctx);
-
-    //----------------------------
-
-    p2p_turn_init(&s->turn);
-
-    s->signaling_mode = cfg->signaling_mode;
-    s->state = P2P_STATE_INIT;
-    s->path_type = P2P_PATH_NONE;
-    s->active_path = PATH_IDX_NONE;
-
-    // 收集本地候选地址（Host/TURN）
-    gather_local_candidates(s);
-
-    // 启动 STUN NAT 类型检测
-    // + 对于 COMPACT 以外的其他模式，检测到的公网反射地址会作为（srflx）本地候选地址
-    // + 如果 skip_stun_test=true，仅执行 Test I 获取公网地址，跳过 Test II/III
-    if (cfg->stun_server) {
-        p2p_stun_nat_detect_start(s, cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT);
-    }
-
-    //----------------------------
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-
-        assert(s->cfg.server_host);
-
-        // 登录信令服务器（只执行一次）
-        print("I:", LA_F("Login to COMPACT signaling server at %s:%d", LA_F220, 220),
-                        s->cfg.server_host, s->cfg.server_port);
-
-        // 解析信令服务器地址
-        struct sockaddr_in server_addr;
-        if ((ret = resolve_host(s->cfg.server_host, s->cfg.server_port, &server_addr)) != E_NONE) {
-            print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F317, 317),
-                            s->cfg.server_host, s->cfg.server_port, ret);
-            s->state = P2P_STATE_ERROR;
-            UNLOCK(s);
-            return NULL;
-        }
-
-        // 登录到 COMPACT 信令服务器（UDP 连接，发送 ONLINE 注册）
-        if ((ret = p2p_signal_compact_online(s, s->local_peer_id, &server_addr)) != E_NONE) {
-            print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F217, 217), ret);
-            s->state = P2P_STATE_ERROR;
-            UNLOCK(s);
-            return NULL;
-        }
-
-        s->state = P2P_STATE_REGISTERING;
-        
-    }
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
-
-        assert(s->cfg.server_host);
-
-        // 登录信令服务器（只执行一次）
-        print("I:", LA_F("Login to RELAY signaling server at %s:%d", LA_F616, 616),
-                        s->cfg.server_host, s->cfg.server_port);
-
-        // 解析信令服务器地址
-        struct sockaddr_in server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(s->cfg.server_port);
-        inet_pton(AF_INET, s->cfg.server_host, &server_addr.sin_addr);
-
-        // 登录到 RELAY 信令服务器（TCP 连接，发送 ONLINE 注册）
-        if ((ret = p2p_signal_relay_online(s, s->local_peer_id, &server_addr)) != E_NONE) {
-            print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F218, 218), ret);
-            s->state = P2P_STATE_ERROR;
-            UNLOCK(s);
-            return NULL;
-        }
-
-        s->state = P2P_STATE_REGISTERING;
-    }
-
-    //----------------------------
-
-    s->last_update = P_tick_ms();
-
-#ifdef P2P_THREADED
-    if (cfg->threaded) {
-        print("I:", LA_F("Starting internal thread", LA_F337, 337));
-        if ((ret = p2p_thread_start(s)) != E_NONE) {
-            print("E:", LA_F("Start internal thread failed(%d)", LA_F336, 336), ret);
-            P_sock_close(s->sock);
-            free(s->local_cands); free(s->remote_cands); route_shared_release(); free(s);
-            return NULL;
-        }
-    }
-#endif
-
-    return (p2p_handle_t)s;
-}
-
-void
-p2p_destroy(p2p_handle_t hdl) {
-    if (!hdl) return;
-
-    struct p2p_session *s = (struct p2p_session*)hdl;
-
-#ifdef P2P_THREADED
-    if (s->cfg.threaded) {
-        print("I:", LA_F("Stopping internal thread", LA_F349, 349));
-        p2p_thread_stop(s);
-    }
-#endif
-
-    // 重置信道外 NAT 探测
-    probe_reset(s);
-
-    // 兜底：如果没有调用过 p2p_close，执行 disconnect
-    if (s->state != P2P_STATE_CLOSED) {
-        disconnect(s);
-    }
-
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
-
-        if (s->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
-            print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F328, 328));
-            p2p_signal_compact_offline(s);
-        }
-    }
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
-
-        if (s->sig_relay_ctx.state != SIGNAL_RELAY_INIT) {
-            print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
-            p2p_signal_relay_offline(s);
-        }
-    }
-
-    //  COMPACT 模式的 server UDP 套接口和 NAT p2p 是同一个
-    if (s->sock != P_INVALID_SOCKET) {
-
-        // 关闭加密层
-        if (s->dtls && s->dtls->close) {
-            s->dtls->close(s);
-            s->dtls = NULL;
-        }
-
-        // 关闭高级传输层（在 socket 关闭前，以便发送 close_notify 等协议包）
-        if (s->trans && s->trans->close) {
-            s->trans->close(s);
-            s->trans = NULL;
-        }
-
-        print("I:", LA_F("Close P2P UDP socket", LA_F215, 215));
-        P_sock_close(s->sock);
-    }
-
-    free(s->local_cands);
-    free(s->remote_cands);
-    route_shared_release();
-    free(s);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-int
-p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
-
-    P_check(hdl, return -1;)
-
-    struct p2p_session *s = (struct p2p_session*)hdl;
-    // 合法调用时机（排除终态 ERROR）：
-    //   INIT:        p2p_create 后尚未登录（PUBSUB/ICE 模式）
-    //   REGISTERING: 已发起登录但 ONLINE_ACK 尚未到达（RELAY/COMPACT 模式）
-    //   ONLINE:      已登录信令服务器但尚未发起 peer 连接（晚调用场景）
-    //   CLOSED:      已 p2p_close / 对端断开后重连（信令层仍保持与服务器的连接）
-    P_check(s->state == P2P_STATE_INIT ||
-            s->state == P2P_STATE_REGISTERING ||
-            s->state == P2P_STATE_ONLINE ||
-            s->state == P2P_STATE_CLOSED, return -1;)
-
-    if (!*remote_peer_id) remote_peer_id = NULL;
-    if (remote_peer_id) {
-        strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
-        s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
-    }
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT || s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
-        print("E:", LA_F("Invalid remote_peer_id for %s mode", LA_F211, 211), 
-                s->signaling_mode == P2P_SIGNALING_MODE_COMPACT ? "COMPACT" : "RELAY");
-        s->state = P2P_STATE_ERROR;
-        return -1;
-    } else s->remote_peer_id[0] = '\0';
-
-    LOCK(s);
-
-    // 初始化 DTLS 加密层（需要 remote_peer_id 以确定自动角色）
+    // DTLS 初始化（需要 remote_peer_id 以确定自动角色）
     if (s->dtls && s->dtls->init) {
         if (s->dtls->init(s) != 0) {
             print("E:", LA_F("Crypto layer '%s' init failed, continuing without encryption", LA_F226, 226), s->dtls->name);
@@ -664,114 +581,183 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         }
     }
 
-    ret_t ret;
-    switch (s->signaling_mode) {
+    stream_init(&s->stream, inst->cfg.nagle);
+    probe_init(&s->probe_ctx);
+    p2p_turn_init(&s->turn);
 
-        // 对于 COMPACT 模式
+    s->state = P2P_STATE_INIT;
+    s->path_type = P2P_PATH_NONE;
+    s->active_path = PATH_IDX_NONE;
+
+    // 收集本地候选地址（Host/TURN）
+    gather_local_candidates(s);
+
+    // 启动 STUN NAT 类型检测
+    if (inst->cfg.stun_server)
+        p2p_stun_nat_detect_start(s, inst->signaling_mode != P2P_SIGNALING_MODE_COMPACT);
+
+    LOCK_INST(inst);
+
+    ret_t ret;
+    switch (inst->signaling_mode) {
+
+        // COMPACT 模式
         case P2P_SIGNALING_MODE_COMPACT: {
 
-            // CLOSED → 重连：信令层已回到 COMPACT_ONLINE，将 session 状态也拨回 ONLINE
-            if (s->state == P2P_STATE_CLOSED) { s->state = P2P_STATE_ONLINE; nat_reset(&s->nat); }
+            // 首次连接：向信令服务器注册
+            if (inst->sig_compact_ctx.state == SIGNAL_COMPACT_INIT) {
+                assert(inst->cfg.server_host);
+                print("I:", LA_F("Login to COMPACT signaling server at %s:%d", LA_F220, 220),
+                              inst->cfg.server_host, inst->cfg.server_port);
+                struct sockaddr_in server_addr;
+                if ((ret = resolve_host(inst->cfg.server_host, inst->cfg.server_port, &server_addr)) != E_NONE) {
+                    print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F317, 317),
+                                  inst->cfg.server_host, inst->cfg.server_port, ret);
+                    s->state = P2P_STATE_ERROR;
+                    UNLOCK_INST(inst);
+                    goto fail;
+                }
+                if ((ret = p2p_signal_compact_online(s, inst->local_peer_id, &server_addr)) != E_NONE) {
+                    print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F217, 217), ret);
+                    s->state = P2P_STATE_ERROR;
+                    UNLOCK_INST(inst);
+                    goto fail;
+                }
+                inst->state = P2P_STATE_REGISTERING;
+            }
 
-            // 注册连接目标；若 ONLINE_ACK 未到，signal_compact_connect 仅存储 remote_peer_id，
-            // SYNC0 会在 ONLINE_ACK 处理完后自动触发
-            // 仅在首次发起时打印日志（remote_peer_id 未设置），重入幂等调用不重复打印
-            if (!s->sig_compact_ctx.remote_peer_id[0])
+            if (!inst->sig_compact_ctx.remote_peer_id[0])
                 print("I:", LA_F("Starting COMPACT session with %s", LA_F615, 615), remote_peer_id);
-            if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE) {
+            if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE)
                 print("E:", LA_F("Start COMPACT session failed(%d)", LA_F614, 614), ret);
-            }
-
-            break;
-        }
-
-        // 对于 RELAY 模式
-        case P2P_SIGNALING_MODE_RELAY: {
-
-            // CLOSED → 重连：信令层已回到 RELAY_ONLINE，将 session 状态也拨回 ONLINE
-            if (s->state == P2P_STATE_CLOSED) { s->state = P2P_STATE_ONLINE; nat_reset(&s->nat); }
-
-            // 注册连接目标；若 ONLINE_ACK 未到，signal_relay_connect 仅存储 remote_peer_id + 置 connected=true，
-            // SYNC0 会在 ONLINE_ACK 处理完后自动触发
-            // 仅在首次发起时打印日志（connected 未设置），重入幂等调用不重复打印
-            if (!s->sig_relay_ctx.connected)
-                print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
-            if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE) {
-                print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
-            }
-
-            break;
-        }
-
-        // 对于 PUBSUB 模式
-        case P2P_SIGNALING_MODE_PUBSUB: {
-
-            assert(s->cfg.gh_token && s->cfg.gist_id);
 
             s->state = P2P_STATE_REGISTERING;
+            break;
+        }
 
-            // 如果指定了 remote_peer_id
-            if (remote_peer_id) {
+        // RELAY 模式
+        case P2P_SIGNALING_MODE_RELAY: {
 
-                // 说明是 PUB 角色（发布者），主动发起连接
-                p2p_signal_pubsub_set_role(&s->sig_pubsub_ctx, P2P_SIGNAL_ROLE_PUB);
-
-                // PUB 模式必须等待 STUN 响应（获取公网地址）后才能发布 offer
-                // + PUB/SUB 不支持 Trickle ICE 模式，所以必须等候选收集完成后一次性发送
-                print("I:", LA_F("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_F280, 280));
+            // 首次连接：向信令服务器注册
+            if (inst->sig_relay_ctx.state == SIGNAL_RELAY_INIT) {
+                assert(inst->cfg.server_host);
+                print("I:", LA_F("Login to RELAY signaling server at %s:%d", LA_F616, 616),
+                              inst->cfg.server_host, inst->cfg.server_port);
+                struct sockaddr_in server_addr;
+                memset(&server_addr, 0, sizeof(server_addr));
+                server_addr.sin_family = AF_INET;
+                server_addr.sin_port = htons(inst->cfg.server_port);
+                inet_pton(AF_INET, inst->cfg.server_host, &server_addr.sin_addr);
+                if ((ret = p2p_signal_relay_online(s, inst->local_peer_id, &server_addr)) != E_NONE) {
+                    print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F218, 218), ret);
+                    s->state = P2P_STATE_ERROR;
+                    UNLOCK_INST(inst);
+                    goto fail;
+                }
+                inst->state = P2P_STATE_REGISTERING;
             }
-            else {
 
-                // SUB 角色（订阅者）：被动等待连接
-                p2p_signal_pubsub_set_role(&s->sig_pubsub_ctx, P2P_SIGNAL_ROLE_SUB);
+            if (!inst->sig_relay_ctx.connected)
+                print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
+            if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE)
+                print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
 
-                // SUB 模式：被动等待 offer，收到后自动回复
+            s->state = P2P_STATE_REGISTERING;
+            break;
+        }
+
+        // PUBSUB 模式
+        case P2P_SIGNALING_MODE_PUBSUB: {
+
+            assert(inst->cfg.gh_token && inst->cfg.gist_id);
+            inst->state = P2P_STATE_REGISTERING;
+            s->state = P2P_STATE_REGISTERING;
+
+            if (remote_peer_id) {
+                p2p_signal_pubsub_set_role(&inst->sig_pubsub_ctx, P2P_SIGNAL_ROLE_PUB);
+                print("I:", LA_F("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_F280, 280));
+            } else {
+                p2p_signal_pubsub_set_role(&inst->sig_pubsub_ctx, P2P_SIGNAL_ROLE_SUB);
                 print("I:", LA_F("PUBSUB (SUB): waiting for offer from any peer", LA_F281, 281));
             }
             break;
         }
 
-        // 对于 ICE 模式（应用层自定义信令 + ICE 标准协议）
+        // ICE 模式（应用层自定义信令）
         case P2P_SIGNALING_MODE_ICE: {
-
             s->state = P2P_STATE_PUNCHING;
-
             nat_punch(s, -1);
-
-            // 应用层自行负责信令通道：将收集到的候选发给对端，并通过 p2p_import_ice_sdp() 导入对端候选
             print("I: %s", "ICE mode: starting NAT punching, waiting for application to exchange candidates and SDP via custom signaling");
             break;
         }
 
         default:
-            print("E:", LA_F("Unknown signaling mode: %d", LA_F371, 371), s->signaling_mode);
+            print("E:", LA_F("Unknown signaling mode: %d", LA_F371, 371), inst->signaling_mode);
             s->state = P2P_STATE_ERROR;
-            UNLOCK(s);
-            return -1;
+            UNLOCK_INST(inst);
+            goto fail;
     }
 
-    UNLOCK(s);
-    return 0;
+    s->last_update = P_tick_ms();
+
+    UNLOCK_INST(inst);
+
+    // 加入实例会话链表
+    if (!inst->sessions_head) {
+        inst->sessions_head = s;
+        inst->sessions_rear = s;
+    } else {
+        inst->sessions_rear->next = s;
+        inst->sessions_rear = s;
+    }
+
+    return (p2p_session_t)s;
+
+fail:
+    if (s->trans && s->trans->close) s->trans->close(s);
+    if (s->dtls && s->dtls->close) s->dtls->close(s);
+    free(s->local_cands);
+    free(s->remote_cands);
+    free(s);
+    return NULL;
 }
 
 void
-p2p_close(p2p_handle_t hdl) {
+p2p_close(p2p_session_t session) {
 
-    if (!hdl) return;
+    if (!session) return;
 
-    struct p2p_session *s = (struct p2p_session*)hdl;
+    struct p2p_session *s = (struct p2p_session*)session;
+    struct p2p_instance *inst = s->inst;
 
-    LOCK(s);
+    LOCK_INST(inst);
 
-    if (s->state == P2P_STATE_INIT || s->state == P2P_STATE_CLOSED) {
-        UNLOCK(s);
-        return;
+    if (s->state != P2P_STATE_INIT && s->state != P2P_STATE_CLOSED) {
+        // 主动断开（NAT FIN + 信令层 disconnect）
+        disconnect(s);
     }
 
-    // 主动断开（NAT FIN + 信令层 disconnect）
-    disconnect(s);
-    
-    UNLOCK(s);
+    UNLOCK_INST(inst);
+
+    // 从实例的会话链表中移除
+    if (inst->sessions_head == s) {
+        inst->sessions_head = s->next;
+        if (inst->sessions_rear == s) inst->sessions_rear = NULL;
+    } else {
+        struct p2p_session *prev = inst->sessions_head;
+        while (prev && prev->next != s) prev = prev->next;
+        if (prev) {
+            prev->next = s->next;
+            if (inst->sessions_rear == s) inst->sessions_rear = prev;
+        }
+    }
+
+    // 释放会话资源
+    if (s->dtls && s->dtls->close) { s->dtls->close(s); s->dtls = NULL; }
+    if (s->trans && s->trans->close) { s->trans->close(s); s->trans = NULL; }
+    free(s->local_cands);
+    free(s->remote_cands);
+    free(s);
 }
 
 /*
@@ -843,7 +829,9 @@ p2p_update(p2p_handle_t hdl) {
 
     if (!hdl) return -1;
 
-    struct p2p_session *s = (struct p2p_session*)hdl;
+    struct p2p_instance *inst = (struct p2p_instance*)hdl;
+    struct p2p_session *s = inst->sessions_head;
+    if (!s) return 0;  /* 尚无活跃会话 */
 
     uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; uint8_t* pkt; int n;
 
@@ -868,7 +856,7 @@ p2p_update(p2p_handle_t hdl) {
                        inet_ntoa(from.sin_addr), ntohs(from.sin_port), type, n);
                 
                 // 如果使用 ICE 机制进行打洞
-                if (s->cfg.use_ice && p2p_stun_has_ice_attrs(pkt, n)) {
+                if (s->inst->cfg.use_ice && p2p_stun_has_ice_attrs(pkt, n)) {
                     nat_on_stun_packet(s, &from, now_ms, type, pkt, n);
                     continue;
                 }
@@ -1099,25 +1087,25 @@ p2p_update(p2p_handle_t hdl) {
      * 阶段 2：信令服务维护（主动拉取远端候选地址）
      * ======================================================================== */
 
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
         // 信令层维护（注册、等待、候选同步）+ MSG 超时重传
         // 注意：MSG 机制在所有非 INIT 状态下都需要处理超时重传
-        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_ONLINE_ACK ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_SYNC0_ACK ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_PEER ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_SYNCING ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
+        if (s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_ONLINE_ACK ||
+            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_SYNC0_ACK ||
+            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_PEER ||
+            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_SYNCING ||
+            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
             p2p_signal_compact_tick_recv(s);
         }
     }
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
 
         p2p_signal_relay_tick_recv(s);
     }
-    else { assert(s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
+    else { assert(s->inst->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
         
-        p2p_signal_pubsub_tick_recv(&s->sig_pubsub_ctx, s);
+        p2p_signal_pubsub_tick_recv(&s->inst->sig_pubsub_ctx, s);
     }
 
     /* ========================================================================
@@ -1298,23 +1286,23 @@ p2p_update(p2p_handle_t hdl) {
      * 阶段 7：信令输出（主动推送本地候选地址）
      * ======================================================================== */
 
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
 
         // ICE 状态时发送候选，READY 状态发送新候选（如果有）
-        if (s->sig_compact_ctx.state == SIGNAL_COMPACT_SYNCING ||
-            s->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
+        if (s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_SYNCING ||
+            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
             p2p_signal_compact_tick_send(s);
         }
     }
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
 
         // Trickle ICE 增量发送候选（含断点续传）
         p2p_signal_relay_tick_send(s);
     }
-    else { assert(s->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
+    else { assert(s->inst->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
 
         // 发布 offer（PUB 角色）
-        p2p_signal_pubsub_tick_send(&s->sig_pubsub_ctx, s);
+        p2p_signal_pubsub_tick_send(&s->inst->sig_pubsub_ctx, s);
     }
 
     /* ========================================================================
@@ -1365,8 +1353,8 @@ p2p_update(p2p_handle_t hdl) {
      * 阶段 9：NAT 类型检测（后台定期运行 STUN 探测）
      * ======================================================================== */
 
-    if (s->cfg.stun_server) p2p_stun_nat_detect_tick(s, now_ms);
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+    if (s->inst->cfg.stun_server) p2p_stun_nat_detect_tick(s, now_ms);
+    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
         p2p_signal_compact_nat_detect_tick(s);
 
     s->last_update = now_ms;
@@ -1374,19 +1362,19 @@ p2p_update(p2p_handle_t hdl) {
 }
 
 p2p_state_t
-p2p_state(const p2p_handle_t hdl) {
-    return hdl ? ((struct p2p_session*)hdl)->state : P2P_STATE_ERROR;
+p2p_state(p2p_session_t session) {
+    return session ? ((struct p2p_session*)session)->state : P2P_STATE_ERROR;
 }
 
 int
-p2p_nat_type(const p2p_handle_t hdl) {
-    return hdl ? ((struct p2p_session*)hdl)->nat_type : P2P_NAT_UNKNOWN;
+p2p_nat_type(p2p_handle_t hdl) {
+    return hdl ? ((struct p2p_instance*)hdl)->nat_type : P2P_NAT_UNKNOWN;
 }
 
 p2p_probe_state_t
-p2p_probe(p2p_handle_t hdl) {
-    if (!hdl) return P2P_PROBE_STATE_OFFLINE;
-    struct p2p_session *s = (struct p2p_session*)hdl;
+p2p_probe(p2p_session_t session) {
+    if (!session) return P2P_PROBE_STATE_OFFLINE;
+    struct p2p_session *s = (struct p2p_session*)session;
 
     // 已关闭：信令通道已断，返回 OFFLINE
     if (s->state == P2P_STATE_CLOSED) return P2P_PROBE_STATE_OFFLINE;
@@ -1401,15 +1389,15 @@ p2p_probe(p2p_handle_t hdl) {
 ///////////////////////////////////////////////////////////////////////////////
 
 int
-p2p_path(const p2p_handle_t hdl) {
-    return hdl ? ((struct p2p_session*)hdl)->path_type : P2P_PATH_NONE;
+p2p_path(p2p_session_t session) {
+    return session ? ((struct p2p_session*)session)->path_type : P2P_PATH_NONE;
 }
 
 bool
-p2p_is_ready(p2p_handle_t hdl) {
-    if (!hdl) return false;
+p2p_is_ready(p2p_session_t session) {
+    if (!session) return false;
 
-    struct p2p_session *s = (struct p2p_session*)hdl;
+    struct p2p_session *s = (struct p2p_session*)session;
     if (s->state < P2P_STATE_LOST) return false;
     if (s->trans && s->trans->is_ready) {
         return s->trans->is_ready(s);
@@ -1418,11 +1406,11 @@ p2p_is_ready(p2p_handle_t hdl) {
 }
 
 int
-p2p_send(p2p_handle_t hdl, const void *buf, int len) {
+p2p_send(p2p_session_t session, const void *buf, int len) {
 
-    if (!hdl || !buf || len <= 0) return -1;
+    if (!session || !buf || len <= 0) return -1;
 
-    struct p2p_session *s = (struct p2p_session*)hdl;
+    struct p2p_session *s = (struct p2p_session*)session;
     if (s->state != P2P_STATE_CONNECTED && s->state != P2P_STATE_RELAY) return -1;
 
     LOCK(s);
@@ -1432,11 +1420,11 @@ p2p_send(p2p_handle_t hdl, const void *buf, int len) {
 }
 
 int
-p2p_recv(p2p_handle_t hdl, void *buf, int len) {
+p2p_recv(p2p_session_t session, void *buf, int len) {
 
-    if (!hdl || !buf || len <= 0) return -1;
+    if (!session || !buf || len <= 0) return -1;
 
-    struct p2p_session *s = (struct p2p_session*)hdl;
+    struct p2p_session *s = (struct p2p_session*)session;
 
     LOCK(s);
     int ret = stream_read(&s->stream, buf, len);
@@ -1445,16 +1433,16 @@ p2p_recv(p2p_handle_t hdl, void *buf, int len) {
 }
 
 int
-p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len) {
+p2p_request(p2p_session_t session, uint8_t msg, const void *data, int len) {
 
-    if (!hdl) return -1;
-    struct p2p_session *s = (struct p2p_session*)hdl;
+    if (!session) return -1;
+    struct p2p_session *s = (struct p2p_session*)session;
 
     LOCK(s);
     int ret;
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
         ret = p2p_signal_compact_request(s, msg, data, len);
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY)
         ret = p2p_signal_relay_request(s, msg, data, len);
     else
         ret = -1;
@@ -1463,16 +1451,16 @@ p2p_request(p2p_handle_t hdl, uint8_t msg, const void *data, int len) {
 }
 
 int
-p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len) {
+p2p_response(p2p_session_t session, uint8_t code, const void *data, int len) {
 
-    if (!hdl) return -1;
-    struct p2p_session *s = (struct p2p_session*)hdl;
+    if (!session) return -1;
+    struct p2p_session *s = (struct p2p_session*)session;
 
     LOCK(s);
     int ret;
-    if (s->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
         ret = p2p_signal_compact_response(s, code, data, len);
-    else if (s->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY)
         ret = p2p_signal_relay_response(s, code, data, len);
     else
         ret = -1;
@@ -1489,9 +1477,9 @@ p2p_response(p2p_handle_t hdl, uint8_t code, const void *data, int len) {
  * 获取本地候选数量
  */
 int
-p2p_local_candidate_count(p2p_handle_t hdl) {
-    if (!hdl) return -1;
-    struct p2p_session *s = (struct p2p_session*)hdl;
+p2p_local_candidate_count(p2p_session_t session) {
+    if (!session) return -1;
+    struct p2p_session *s = (struct p2p_session*)session;
 
     LOCK(s);
     int cnt = s->local_cand_cnt;
@@ -1501,9 +1489,9 @@ p2p_local_candidate_count(p2p_handle_t hdl) {
 }
 
 int
-p2p_remote_candidate_count(p2p_handle_t hdl) {
-    if (!hdl) return -1;
-    struct p2p_session *s = (struct p2p_session*)hdl;
+p2p_remote_candidate_count(p2p_session_t session) {
+    if (!session) return -1;
+    struct p2p_session *s = (struct p2p_session*)session;
 
     LOCK(s);
     int cnt = s->remote_cand_cnt;
@@ -1517,13 +1505,13 @@ p2p_remote_candidate_count(p2p_handle_t hdl) {
  * 包装 p2p_export_ice_sdp()，直接对外暴露
  */
 int
-p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
+p2p_export_ice_sdp(p2p_session_t session, char *sdp_buf, int buf_size,
                    bool candidates_only,
                    const char *ice_ufrag,
                    const char *ice_pwd,
                    const char *dtls_fingerprint) {
-    if (!hdl || !sdp_buf || buf_size <= 0) return -1;
-    struct p2p_session *s = (struct p2p_session*)hdl;
+    if (!session || !sdp_buf || buf_size <= 0) return -1;
+    struct p2p_session *s = (struct p2p_session*)session;
 
     LOCK(s);
     int cnt = s->local_cand_cnt;
@@ -1538,9 +1526,9 @@ p2p_export_ice_sdp(p2p_handle_t hdl, char *sdp_buf, int buf_size,
  * 从 SDP 文本解析远端候选并添加到会话
  */
 int
-p2p_import_ice_sdp(p2p_handle_t hdl, const char *sdp_text) {
-    if (!hdl || !sdp_text) return -1;
-    struct p2p_session *s = (struct p2p_session*)hdl;
+p2p_import_ice_sdp(p2p_session_t session, const char *sdp_text) {
+    if (!session || !sdp_text) return -1;
+    struct p2p_session *s = (struct p2p_session*)session;
 
     /* 临时缓冲区：最多解析 64 个候选 */
     p2p_remote_candidate_entry_t tmp[64];

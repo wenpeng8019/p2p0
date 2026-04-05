@@ -301,13 +301,13 @@ static int dtls_init(struct p2p_session *s) {
      *   - 预设：默认（包含常用密码套件）
      */
     int is_server;
-    if (s->cfg.dtls_role == 1)      is_server = 1;
-    else if (s->cfg.dtls_role == 2) is_server = 0;
+    if (s->inst->cfg.dtls_role == 1)      is_server = 1;
+    else if (s->inst->cfg.dtls_role == 2) is_server = 0;
     else /* auto */                 is_server = (s->remote_peer_id[0] == '\0')
-                                              || strcmp(s->local_peer_id, s->remote_peer_id) > 0;
+                                              || strcmp(s->inst->local_peer_id, s->remote_peer_id) > 0;
     print("I:", LA_F("[MbedTLS] DTLS role: %s (mode=%s)", LA_F374, 374),
           is_server ? "server" : "client",
-          s->cfg.dtls_role == 0 ? "auto" : "forced");
+          s->inst->cfg.dtls_role == 0 ? "auto" : "forced");
 
     ret = mbedtls_ssl_config_defaults(&dtls->conf,
                                 is_server ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT,
@@ -335,10 +335,10 @@ static int dtls_init(struct p2p_session *s) {
      *
      * PSK 优势：无需 PKI 基础设施，适合设备间直连
      */
-    if (s->cfg.auth_key) {
+    if (s->inst->cfg.auth_key) {
         mbedtls_ssl_conf_psk(&dtls->conf, 
-                             (const unsigned char *)s->cfg.auth_key, 
-                             strlen(s->cfg.auth_key),
+                             (const unsigned char *)s->inst->cfg.auth_key, 
+                             strlen(s->inst->cfg.auth_key),
                              (const unsigned char *)"p2p_id",  /* PSK Identity */
                              6);
     }

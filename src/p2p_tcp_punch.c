@@ -8,7 +8,7 @@
  * 这是一个复杂的流程，通常需要两端在几乎同一时间发起 connect()。
  */
 int p2p_tcp_punch_connect(struct p2p_session *s, const struct sockaddr_in *remote) {
-    if (!s->cfg.enable_tcp) return -1;
+    if (!s->inst->cfg.enable_tcp) return -1;
 
     sock_t sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == P_INVALID_SOCKET) return -1;
@@ -25,11 +25,11 @@ int p2p_tcp_punch_connect(struct p2p_session *s, const struct sockaddr_in *remot
     memset(&loc, 0, sizeof(loc));
     loc.sin_family = AF_INET;
     loc.sin_addr.s_addr = INADDR_ANY;
-    loc.sin_port = htons(s->cfg.tcp_port);
+    loc.sin_port = htons(s->inst->cfg.tcp_port);
     if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
         /* 如果端口被占用，尝试随机端口并更新配置 */
         printf(LA_F("Bind failed to %d, port busy, trying random port", LA_F209, 209), 
-                      s->cfg.tcp_port);
+                      s->inst->cfg.tcp_port);
         loc.sin_port = 0;
         if (bind(sock, (struct sockaddr *)&loc, sizeof(loc)) < 0) {
             print("E:", LA_F("Bind failed", LA_F208, 208));
@@ -57,6 +57,6 @@ int p2p_tcp_punch_connect(struct p2p_session *s, const struct sockaddr_in *remot
         return -1;
     }
 
-    s->tcp_sock = sock;
+    s->inst->tcp_sock = sock;
     return 0;
 }
