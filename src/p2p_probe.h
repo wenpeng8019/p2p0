@@ -101,7 +101,7 @@ typedef struct {
             probe_relay_step_t step;      // 内部流程步骤
         } relay;
     } mode;
-} p2p_probe_ctx_t;
+} probe_ctx_t;
 
 /* ============================================================================
  * 上下文管理
@@ -110,7 +110,7 @@ typedef struct {
 /*
  * 初始化探测上下文
  */
-void probe_init(p2p_probe_ctx_t *ctx);
+void probe_init(probe_ctx_t *ctx);
 
 /*
  * 重置探测状态到 IDLE

@@ -21,7 +21,7 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void probe_init(p2p_probe_ctx_t *ctx) {
+void probe_init(probe_ctx_t *ctx) {
     memset(ctx, 0, sizeof(*ctx));
     ctx->state = P2P_PROBE_STATE_OFFLINE;
     ctx->mode.compact.phase = PROBE_COMPACT_PHASE_INIT;
@@ -29,7 +29,7 @@ void probe_init(p2p_probe_ctx_t *ctx) {
 }
 
 void probe_reset(struct p2p_session *s) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
     
     // 重置统一上下文
     ctx->state = P2P_PROBE_STATE_OFFLINE;
@@ -44,7 +44,7 @@ void probe_reset(struct p2p_session *s) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void probe_trigger(struct p2p_session *s) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
 
     // NO_SUPPORT 和 OFFLINE 状态在信令握手时已确定，直接返回
     if (ctx->state == P2P_PROBE_STATE_NO_SUPPORT || 
@@ -67,7 +67,7 @@ void probe_trigger(struct p2p_session *s) {
     assert(ctx->state >= P2P_PROBE_STATE_READY);
     ctx->state = P2P_PROBE_STATE_RUNNING;
 
-    switch (s->inst->signaling_mode) {
+    switch (s->inst->sig_mode) {
 
         // 启动 COMPACT 探测
         case P2P_SIGNALING_MODE_COMPACT:
@@ -92,7 +92,7 @@ void probe_trigger(struct p2p_session *s) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void probe_compact_on_req_ack(struct p2p_session *s, uint16_t sid, uint8_t status) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.compact.phase != PROBE_COMPACT_PHASE_WAIT_ECHO) return;
@@ -109,7 +109,7 @@ void probe_compact_on_req_ack(struct p2p_session *s, uint16_t sid, uint8_t statu
 }
 
 void probe_compact_on_response(struct p2p_session *s, uint16_t sid) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.compact.phase != PROBE_COMPACT_PHASE_WAIT_ECHO) return;
@@ -127,7 +127,7 @@ void probe_compact_on_response(struct p2p_session *s, uint16_t sid) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void probe_relay_on_turn_success(struct p2p_session *s) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.relay.step != PROBE_RELAY_STEP_TURN_ALLOC) return;
@@ -138,7 +138,7 @@ void probe_relay_on_turn_success(struct p2p_session *s) {
 }
 
 void probe_relay_on_exchange_done(struct p2p_session *s, bool success) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.relay.step != PROBE_RELAY_STEP_ADDR_EXCHANGE) return;
@@ -155,7 +155,7 @@ void probe_relay_on_exchange_done(struct p2p_session *s, bool success) {
 }
 
 void probe_relay_on_udp_response(struct p2p_session *s) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.relay.step != PROBE_RELAY_STEP_UDP_PROBE) return;
@@ -172,7 +172,7 @@ void probe_relay_on_udp_response(struct p2p_session *s) {
 ///////////////////////////////////////////////////////////////////////////////
 
 static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) {
 
@@ -206,7 +206,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
             ret_t ret = p2p_signal_compact_request(s, 0, NULL, 0);
             if (ret != E_NONE) {
                 ctx->mode.compact.phase = PROBE_COMPACT_PHASE_WAIT_ECHO;
-                ctx->mode.compact.sid   = s->inst->sig_compact_ctx.req_sid;
+                ctx->mode.compact.sid   = s->sig_sess.compact.req_sid;
                 ctx->start_ms           = now_ms;
             } else { print("W:", LA_F("%s: send failed(%d)", LA_F163, 163), TASK_RELAY_PROBE, ret);
                 ctx->state = P2P_PROBE_STATE_READY;
@@ -236,7 +236,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
 }
 
 static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
-    p2p_probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe_ctx;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) {
         // 完成状态：等待间隔后自动重启
@@ -266,7 +266,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
         case PROBE_RELAY_STEP_TURN_ALLOC:
             // 步骤1：重新分配 TURN 地址
             {
-                ret_t ret = p2p_turn_allocate(s);
+                ret_t ret = p2p_turn_allocate(s->inst);
                 if (ret == E_NONE) {
                     ctx->start_ms = now_ms;
                     print("I:", LA_F("%s: TURN allocation request sent", LA_F84, 84), TASK_RELAY_PROBE);
@@ -317,7 +317,7 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
 }
 
 void probe_tick(struct p2p_session *s, uint64_t now_ms) {
-    switch (s->inst->signaling_mode) {
+    switch (s->inst->sig_mode) {
         case P2P_SIGNALING_MODE_COMPACT: probe_compact_tick(s, now_ms); break;
         case P2P_SIGNALING_MODE_RELAY:   probe_relay_tick(s, now_ms);   break;
         default: break;
