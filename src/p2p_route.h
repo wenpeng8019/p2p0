@@ -23,9 +23,6 @@ ret_t route_shared_acquire(void);
 void route_shared_release(void);
 const route_ctx_t *route_shared_get(void);
 
-void route_init(route_ctx_t *rt);
-void route_final(route_ctx_t *rt);
-
 //-----------------------------------------------------------------------------
 
 /*
