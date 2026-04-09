@@ -176,6 +176,9 @@ static void stun_xor_addr(struct sockaddr_in *addr) {
 int p2p_stun_build_binding_request(uint8_t *buf, int max_len, uint8_t tsx_id[12],
                                    const char *username, const char *password);
 
+
+bool p2p_stun_collect(struct p2p_instance *inst);
+
 /*
  * 构建 STUN Binding Response（用于回复对端的 ICE connectivity check）
  *
@@ -278,6 +281,8 @@ typedef struct {
     int retry_count;                    /* 当前测试的重试次数 */
 
     struct sockaddr_in mapped_addr;     /* Test I 获取的映射地址 (Srflx) */
+    bool mapped_addr_active;
+
     struct sockaddr_in alt_addr;        /* CHANGED-ADDRESS（备用服务器地址） */
     struct sockaddr_in mapped_addr_alt; /* Test I(alt) 获取的映射地址 */
     bool test_ii_success;               /* Test II 是否收到响应 */

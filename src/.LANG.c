@@ -121,6 +121,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F98] = "%s: batch punch skip (state=%d, use trickle)",  /* SID:98 */
     [LA_F173] = "%s: batch punch start (%d cands)",  /* SID:173 */
     [LA_F126] = "%s: batch punch: no cand, wait trickle",  /* SID:126 */
+    [LA_F132] = "%s: cand[%d] payload too large for multi_session (%d)",  /* SID:132 */
     [LA_F426] = "%s: cand[%d]<%s:%d> send packet failed(%d)",  /* SID:426 */
     [LA_F104] = "%s: completed, mapped=%s:%d probe=%s:%d -> %s\n",  /* SID:104 */
     [LA_F582] = "%s: data relay ready, flow control released\n",  /* SID:582 */
@@ -160,7 +161,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F162] = "%s: path rx UP (%s:%d)",  /* SID:162 */
     [LA_F549] = "%s: path tx UP",  /* SID:549 */
     [LA_F190] = "%s: path tx UP (echo seq=%u)",  /* SID:190 */
-    [LA_F132] = "%s: path[%d] UP (%s:%d)",  /* SID:132 */
+    [LA_F624] = "%s: path[%d] UP (%s:%d)",  /* SID:624 */
     [LA_F133] = "%s: path[%d] UP (recv DATA)",  /* SID:133 */
     [LA_F152] = "%s: path[%d] relay UP",  /* SID:152 */
     [LA_F504] = "%s: peer closed session %u\n",  /* SID:504 */
@@ -233,7 +234,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F192] = "%s: unexpected non-srflx cand in sync0, treating as srflx\n",  /* SID:192 */
     [LA_F193] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:193 */
     [LA_F443] = "%s: unknown target cand %s:%d",  /* SID:443 */
-    [LA_F569] = "%s: waiting for STUN candidates, stun_pending=%d\n",  /* SID:569 */
+    [LA_F569] = "%s: waiting for STUN candidates, cand_pending=%d\n",  /* SID:569 */
     [LA_F570] = "%s: waiting for initial STUN candidates before sending local queue\n",  /* SID:570 */
     [LA_F150] = "%s: → CLOSED (recv FIN)",  /* SID:150 */
     [LA_F194] = "%s:%04d: %s",  /* SID:194 */
@@ -276,7 +277,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F237] = "% Failed to allocate DTLS context",  /* SID:237 */
     [LA_F238] = "% Failed to allocate OpenSSL context",  /* SID:238 */
     [LA_F240] = "% Failed to allocate memory for candidate lists",  /* SID:240 */
-    [LA_F241] = "% Failed to allocate memory for session",  /* SID:241 */
+    [LA_F241] = "% Failed to allocate memory for instance",  /* SID:241 */
+    [LA_F625] = "% Failed to allocate memory for session",  /* SID:625 */
     [LA_F242] = "% Failed to build STUN request",  /* SID:242 */
     [LA_F516] = "% Failed to create TCP socket\n",  /* SID:516 */
     [LA_F411] = "Failed to parse SDP candidate line: %s",  /* SID:411 */
@@ -297,6 +299,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F259] = "Handshake failed: %s (-0x%04x)",  /* SID:259 */
     [LA_F420] = "Ignore %s pkt from %s:%d, not connected",  /* SID:420 */
     [LA_F421] = "Ignore %s pkt from %s:%d, not connecting",  /* SID:421 */
+    [LA_F626] = "Ignore %s pkt from %s:%d, state=%d (not connected yet)",  /* SID:626 */
     [LA_F439] = "Ignore %s pkt from %s:%d, valid state(%d)",  /* SID:439 */
     [LA_F552] = "Ignore %s pkt from unknown path %s:%d",  /* SID:552 */
     [LA_F406] = "Imported %d candidates from SDP",  /* SID:406 */
@@ -377,6 +380,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F313] = "Reliable transport initialized rto=%d win=%d",  /* SID:313 */
     [LA_F314] = "Requested Relay Candidate from TURN %s",  /* SID:314 */
     [LA_F317] = "Resolve COMPACT signaling server address: %s:%d failed(%d)",  /* SID:317 */
+    [LA_F627] = "Reuse Relay Candidate %s:%u (priority=%u)",  /* SID:627 */
     [LA_F318] = "% SCTP (usrsctp) requested but library not linked",  /* SID:318 */
     [LA_F412] = "% SDP export buffer overflow",  /* SID:412 */
     [LA_F319] = "% SIGNALING path but signaling relay not available",  /* SID:319 */
@@ -478,6 +482,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F402] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:402 */
     [LA_F403] = "% connection closed by peer",  /* SID:403 */
     [LA_F404] = "ctr_drbg_seed failed: -0x%x",  /* SID:404 */
+    [LA_F628] = "multi_session: drop pkt, unknown session_id=0x%08x",  /* SID:628 */
     [LA_F538] = "payload size %u exceeds limit %u\n",  /* SID:538 */
     [LA_F540] = "retry seq=%u retx=%d rto=%d",  /* SID:540 */
     [LA_F541] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:541 */

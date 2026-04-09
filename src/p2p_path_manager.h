@@ -299,7 +299,7 @@ void path_stats_init(path_stats_t *st, int cost_score);
  * @param addr      信令服务器地址
  * @return          0=成功，-1=失败
  */
-int path_manager_enable_signaling(struct p2p_session *s, struct sockaddr_in *addr);
+int path_manager_enable_signaling(struct p2p_instance *inst, struct sockaddr_in *addr);
 
 /*
  * 配置 TURN 支持
@@ -346,6 +346,7 @@ int path_manager_configure_turn(struct p2p_session *s,
  * @return           0=成功，-1=失败
  */
 int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size, bool rt_track);
+int path_manager_on_sig_alive_send(struct p2p_instance *inst, uint64_t now_ms);
 
  /*
   * 对接收到的数据包进行统计（更新路径活跃时间和流量统计 + 可选 RoundTrip 确认）
@@ -365,6 +366,7 @@ int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t se
   * @return          成功时返回 0（普通包）或测量的 RTT 毫秒数（RoundTrip 确认），失败返回 -1
   */
 int path_manager_on_packet_recv(struct p2p_session *s, int path_idx, uint64_t now_ms, uint32_t size, bool rt_ack, uint32_t seq);
+int path_manager_on_sig_alive_recv(struct p2p_instance *inst, uint64_t now_ms);
 
 /* ---- Group 2: 数据层统计（活跃路径 DATA 包） ---- */
 
@@ -439,6 +441,7 @@ static inline uint32_t get_effective_rtt(const path_stats_t *p) {
  * @param now_ms    当前时间（毫秒）
  */
 void path_manager_tick(struct p2p_session *s, uint64_t now_ms);
+void path_manager_signaling_tick(struct p2p_instance *inst, uint64_t now_ms);
 
 /* ============================================================================
  * 操作执行

@@ -223,7 +223,7 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
 }
 
 // 构造 ALIVE 包
-// 协议: [hdr(4)][auth_key(8)]
+// 协议: [hdr(4)][auth_key(SIG_AUTH_KEY_PSZ)]
 static int build_alive(uint8_t *buf, int buf_size, uint64_t auth_key) {
     if (buf_size < 4 + 8) return -1;
     
@@ -241,7 +241,7 @@ static int build_alive(uint8_t *buf, int buf_size, uint64_t auth_key) {
 }
 
 // 构造 OFFLINE 包
-// 协议: [hdr(4)][auth_key(8)]
+// 协议: [hdr(4)][auth_key(SIG_AUTH_KEY_PSZ)]
 static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
     if (buf_size < 4 + 8) return -1;
     

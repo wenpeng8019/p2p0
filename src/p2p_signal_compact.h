@@ -99,6 +99,7 @@
 
 /* 前向声明 */
 struct p2p_session;
+struct p2p_instance;
 
 /* SYNC flags */
 #define SIG_SYNC_FLAG_FIN  0x01     /* 候选列表发送完毕 */
@@ -111,43 +112,61 @@ struct p2p_session;
 
 /* 信令状态 */
 typedef enum {
-    SIGNAL_COMPACT_INIT = 0,                                /* 未启动 */
-    SIGNAL_COMPACT_WAIT_ONLINE_ACK,                         /* 已发送 ONLINE，等待 ONLINE_ACK */
-    SIGNAL_COMPACT_ONLINE,                                  /* 已上线, 收到 ONLINE_ACK */
-    SIGNAL_COMPACT_WAIT_SYNC0_ACK,                          /* 发送 SYNC0，等待 SYNC0_ACK */
-    SIGNAL_COMPACT_WAIT_PEER,                               /* 已收到 SYNC0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
-    SIGNAL_COMPACT_SYNCING,                                 /* 收到 PEER SYNC0 或 SYNC0_ACK online=1，向对方同步后续候选队列和 FIN */
-    SIGNAL_COMPACT_READY                                    /* 已完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
-} p2p_signal_compact_state_t;
+    SIG_COMPACT_INIT = 0,                                   /* 未启动 */
+    SIG_COMPACT_ERROR,                                      /* 错误状态，需重启 */
+    SIG_COMPACT_WAIT_ONLINE_ACK,                            /* 已发送 ONLINE，等待 ONLINE_ACK */
+    SIG_COMPACT_ONLINE,                                     /* 已上线, 收到 ONLINE_ACK */
+} p2p_compact_st;
+
+typedef struct {
+
+    p2p_compact_st      state;                              /* 信令状态 */
+    struct sockaddr_in  server_addr;                        /* 信令服务器地址 */
+    uint64_t            last_send_time;                     /* 上次发送时间 */
+    uint64_t            last_recv_time;                     /* 上次收到时间 */
+    int                 sig_attempts;                       /* ONLINE 总共尝试次数 */
+    int                 sig_sessions;                       /* 正在使用信令服务器的会话（sync0/sync），该值不为 0 则无需 keep-alive */
+
+    /* 和服务器的会话 */
+    char                local_peer_id[P2P_PEER_ID_MAX];     /* 本端 ID */
+    uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
+    uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 ONLINE_ACK 中获得，用于 SYNC0/ALIVE */
+
+    /* REGISTER_ACK 返回的信息 */
+    uint8_t             max_candidates;                     /* 服务器允许缓存的最大候选数量 */
+    bool                feature_relay;                      /* 服务器是否支持中继 */
+    bool                feature_msg;                        /* 服务器是否支持 RPC */
+    struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器主端口探测到的）*/
+    uint16_t            probe_port;                         /* NAT 探测端口（0=不支持探测）*/
+
+    /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
+    struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */
+    uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 SYNC 重传定时器）*/
+    int16_t             nat_probe_retries;                  /* 失败重试次数（不包括首次执行）*/
+    uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
+
+} p2p_compact_ctx_t;
+
+typedef enum {
+    SIG_COMPACT_SESS_SUSPENDED = 0,                         /* 挂起的 session，连接过程超时挂起。报错逻辑统一在 p2p_compact_ctx_t 中处理 */
+    SIG_COMPACT_SESS_WAIT_SYNCABLE,                         /* 执行 connect() 创建了 session，但信令服务还未完成在线登录；或等待 stun 完成候选地址收集 */
+    SIG_COMPACT_SESS_WAIT_SYNC0_ACK,                        /* 已发送 SYNC0，等待 SYNC0_ACK */
+    SIG_COMPACT_SESS_WAIT_PEER,                             /* 已收到 SYNC0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
+    SIG_COMPACT_SESS_SYNCING,                               /* 收到 PEER SYNC0 或 SYNC0_ACK online=1，向对方同步后续候选队列和 FIN */
+    SIG_COMPACT_SESS_READY                                  /* 已完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
+} p2p_compact_sess_st;
 
 /* COMPACT 信令上下文 */
 typedef struct {
-    p2p_signal_compact_state_t state;                       /* 信令状态 */
-    struct sockaddr_in  server_addr;                        /* 信令服务器地址 */
-    char                local_peer_id[P2P_PEER_ID_MAX];     /* 本端 ID */
+
+    p2p_compact_sess_st state;                              /* 会话状态 */
+    uint64_t            sync_send_time;                     /* 上次 SYNC0/SYNC 发送时间（用于重传控制）*/
+    int                 sync_attempts;                      /* SYNC0/SYNC 总共尝试次数 */
+
     char                remote_peer_id[P2P_PEER_ID_MAX];    /* 对端 ID */
-    uint64_t            last_send_time;                     /* 上次发送时间 */
-    uint64_t            last_recv_time;                     /* 上次收到时间 */
 
-    /* ONLINE 重发控制（仅 REGISTERING 状态） */
-    uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
-    int                 sig_attempts;                    /* ONLINE/SYNC0 总共尝试次数 */
-
-    /* 和服务器的会话 */
-    uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 ONLINE_ACK 中获得，用于 SYNC0/ALIVE */
-
-    /* 和对方的会话 */
-    uint32_t            session_id;                         /* 对端配对会话 ID（32位，0=尚未分配），在 SYNC0_ACK 中首次获得，用于 SYNC/FIN/DATA relay/MSG */
-    bool                peer_online;                        /* 对端是否在线；SYNC0_ACK 和 SYNC 都会导致 online 为 true */
-
-    /* REGISTER_ACK 返回的信息 */
-    int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量（ONLINE_ACK 中 max_candidates 限制） */
-    struct sockaddr_in  public_addr;                        /* 本端的公网地址（服务器主端口探测到的）*/
-    uint16_t            probe_port;                         /* NAT 探测端口（0=不支持探测）*/
-    bool                feature_relay;                      /* 服务器是否支持中继 */
-    bool                feature_msg;                        /* 服务器是否支持 RPC */
-
-    /* SYNC 序列化同步控制 */
+    /* 候选同步管理 */
+    int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量（ONLINE_ACK 中 max_candidates 限制）*/
     uint16_t            candidates_mask;                    /* 后续候选队列 seq 窗口 mask，用于全部完成确认，同时意味着最多发 16 个包 */
     uint16_t            candidates_acked;                   /* 后续候选队列对方确认的窗口 */
     uint16_t            trickle_idx_base;                   /* trickle 候选队列在 local_cands 中的起始索引 */
@@ -160,11 +179,8 @@ typedef struct {
     uint16_t            remote_candidates_done;             /* 对端候选队列 seq 窗口完成 mask，表示已收到过且确认过的 seq（即对端已应用） */
     uint8_t             remote_addr_notify_seq;             /* 最近一次已应用的地址变更通知序号（1..255，0=从未收到）*/
 
-    /* NAT 类型探测（可选功能，仅当 probe_port > 0 时启用）*/
-    struct sockaddr_in  probe_addr;                         /* 服务器探测端口观察到的映射地址 */
-    uint64_t            nat_probe_send_time;                /* NAT_PROBE 最后发送时间（独立于 SYNC 重传定时器）*/
-    int16_t             nat_probe_retries;                  /* 失败重试次数（不包括首次执行）*/
-    uint8_t             nat_is_port_consistent;             /* NAT 是否端口一致性（1=是，0=否）*/
+    /* MSG RPC 上下文管理 */
+    uint16_t            rpc_last_sid;                       /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
 
     /* MSG RPC（A 端：发送请求） */
     uint8_t             req_state;                          /* 0=空闲 1=等待 REQ_ACK 2=等待 RESP */
@@ -185,14 +201,17 @@ typedef struct {
     uint64_t            resp_send_time;                     /* MSG_RESP 最后发送时间 */
     int                 resp_retries;                       /* 失败重试次数（不包括首次执行）*/
 
-    uint16_t            rpc_last_sid;                       /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
-
-} p2p_signal_compact_ctx_t;
+} p2p_compact_session_t;
 
 /*
  * 初始化信令上下文
  */
-void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx);
+void p2p_signal_compact_init(p2p_compact_ctx_t *ctx);
+
+/*
+ * 信令（首次）变为可 sync 状态
+ */
+void p2p_signal_compact_syncable(struct p2p_instance *inst, p2p_compact_ctx_t *ctx);
 
 /*
  * 信令服务周期维护（拉取阶段）— 注册重试、保活
@@ -206,7 +225,7 @@ void p2p_signal_compact_init(p2p_signal_compact_ctx_t *ctx);
  * 
  * @param s   P2P 会话
  */
-void p2p_signal_compact_tick_recv(struct p2p_session *s);
+void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now);
 
 /*
  * 信令输出（推送阶段）— 向对端发送候选地址
@@ -219,13 +238,13 @@ void p2p_signal_compact_tick_recv(struct p2p_session *s);
  * 
  * @param s   P2P 会话
  */
-void p2p_signal_compact_tick_send(struct p2p_session *s);
+void p2p_signal_compact_tick_send(struct p2p_instance *inst, uint64_t now);
 
 /*
  * 根据 COMPACT 信令/探测状态推导并写入当前 NAT 检测结果
  * 每次 p2p_update() tick 时调用，用于同步 s->nat_type
  */
-void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
+void p2p_signal_compact_nat_detect_tick(struct p2p_instance *inst, uint64_t now);
 
 //-----------------------------------------------------------------------------
 
@@ -237,7 +256,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_session *s);
  * @param server        服务器地址
  * @return              E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_compact_online(struct p2p_session *s, const char *local_peer_id,
+ret_t p2p_signal_compact_online(struct p2p_instance *inst, const char *local_peer_id,
                                 const struct sockaddr_in *server);
 
 /*
@@ -246,7 +265,9 @@ ret_t p2p_signal_compact_online(struct p2p_session *s, const char *local_peer_id
  * @param s 会话对象
  * @return  E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_compact_offline(struct p2p_session *s);
+ret_t p2p_signal_compact_offline(struct p2p_instance *inst);
+
+//-----------------------------------------------------------------------------
 
 /*
  * 阶段2：建立与对端的会话（发送 SYNC0，建立 client↔peer 关系，获取 session_id）
@@ -271,8 +292,8 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s);
 /*
  * 本地候选异步补发入口（支持 STUN/TURN）
  *
- * 若首批候选尚未发送，则在 stun_pending 清零后启动首批候选交换；
- * 若首批已发送，则将新增本地候选按 trickle 方式补发给对端。
+ * 若首批候选已发送，则将新增本地候选按 trickle 方式补发给对端
+ * 若首批候选还未发送，则不做任何处理，此时新增候选会默认作为首批候选发送
  */
 void p2p_signal_compact_trickle_candidate(struct p2p_session *s);
 
@@ -281,7 +302,7 @@ void p2p_signal_compact_trickle_candidate(struct p2p_session *s);
  *
  * @param s       会话对象
  * @param type    P2P 包类型
- * @param flags   flags 标志（接口内部会添加 P2P_RELAY_FLAG_SESSION）
+ * @param flags   flags 标志（接口内部会添加 P2P_FLAG_SESSION）
  * @param seq     序列号
  * @param payload 原始负载
  * @param payload_len 负载长度
@@ -333,61 +354,62 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
  * 以下函数分别处理不同类型的 COMPACT 信令包，消除包类型派发层。
  */
 
-/* 处理 ONLINE_ACK（服务器上线确认） */
-void compact_on_online_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
+// 处理 ONLINE_ACK（服务器上线确认）
+void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flags,
+                           const uint8_t *payload, int len,
+                           const struct sockaddr_in *from);
+                             
+// 处理 ALIVE_ACK（保活确认）
+void compact_on_alive_ack(struct p2p_instance *inst, const struct sockaddr_in *from);
+
+// 处理 NAT_PROBE_ACK（服务器返回的 NAT 探测结果）
+void compact_on_nat_probe_ack(struct p2p_instance *inst, uint16_t seq,
                               const uint8_t *payload, int len,
                               const struct sockaddr_in *from);
 
-/* 处理 SYNC0_ACK（首批候选确认） */
+// 处理 SYNC0_ACK（本端向对端首次同步确认）
 void compact_on_sync0_ack(struct p2p_session *s,
                               const uint8_t *payload, int len,
                               const struct sockaddr_in *from);
 
-/* 处理服务器下发的 SYNC0（首次对端候选推送，server→client 方向） */
+// 处理服务器下发的 SYNC0（对端向本端首次同步） */
 void compact_on_server_sync0(struct p2p_session *s,
                               const uint8_t *payload, int len,
                               const struct sockaddr_in *from);
 
-/* 处理 ALIVE_ACK（保活确认） */
-void compact_on_alive_ack(struct p2p_session *s, const struct sockaddr_in *from);
-
-/* 处理 SYNC（对端候选信息） */
+// 处理 SYNC（对端候选信息）
 void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
                           const uint8_t *payload, int len,
                           const struct sockaddr_in *from);
 
-/* 处理 SYNC_ACK（对端候选确认） */
+// 处理 SYNC_ACK（对端候选确认）
 void compact_on_sync_ack(struct p2p_session *s, uint16_t seq,
                                const uint8_t *payload, int len,
                                const struct sockaddr_in *from);
 
-/* 处理 FIN（对端离线通知） */
+// 处理 FIN（对端离线通知）
 void compact_on_fin(struct p2p_session *s, const uint8_t *payload, int len,
                     const struct sockaddr_in *from);
 
-/* 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）*/
+// 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）
 void compact_on_request(struct p2p_session *s, uint8_t flags,
                         const uint8_t *payload, int len,
                         const struct sockaddr_in *from);
 
-/* 处理 MSG_REQ_ACK（Server→A，确认已缓存并开始中转）*/
+// 处理 MSG_REQ_ACK（Server→A，确认已缓存并开始中转）
 void compact_on_request_ack(struct p2p_session *s,
                             const uint8_t *payload, int len,
                             const struct sockaddr_in *from);
 
-/* 处理 MSG_RESP（Server→A relay B 的应答）*/
+// 处理 MSG_RESP（Server→A relay B 的应答）
 void compact_on_response(struct p2p_session *s, uint8_t flags,
                          const uint8_t *payload, int len,
                          const struct sockaddr_in *from);
 
-/* 处理 MSG_RESP_ACK（Server 对 B 端响应的确认） */
+// 处理 MSG_RESP_ACK（Server 对 B 端响应的确认）
 void compact_on_response_ack(struct p2p_session *s,
                              const uint8_t *payload, int len,
                              const struct sockaddr_in *from);
-
-void compact_on_nat_probe_ack(struct p2p_session *s, uint16_t seq,
-                              const uint8_t *payload, int len,
-                              const struct sockaddr_in *from);
 
 ///////////////////////////////////////////////////////////////////////////////
 

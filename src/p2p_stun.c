@@ -225,6 +225,33 @@ int p2p_stun_build_binding_request(uint8_t *buf, int max_len,
     return offset;
 }
 
+bool p2p_stun_collect(struct p2p_instance *inst) {
+
+    struct sockaddr_in stun_addr;
+    if (resolve_host(inst->cfg.stun_server, inst->cfg.stun_port, &stun_addr) < 0) {
+        print("E:", LA_F("Failed to resolve STUN server %s", LA_F247, 247), inst->cfg.stun_server);
+        return false;
+    }
+
+    uint8_t req[512];
+    int len = p2p_stun_build_binding_request(req, sizeof(req), NULL, NULL, NULL);
+    if (len <= 0) {
+        print("E:", LA_F("Failed to build STUN request", LA_F242, 242));
+        return false;
+    }
+
+    print("I:", LA_F("STUN collecting to %s:%d (len=%d)", 0, 0), inst->cfg.stun_server, inst->cfg.stun_port, len);
+
+    ret_t ret = p2p_udp_send_to(inst, &stun_addr, req, len);
+    if (ret <= 0) {
+        print("E:", LA_F("Failed to send STUN request: %d", 0, 0), ret);
+        return false;
+    }
+
+    ++inst->stun_pending;
+    return true;
+}
+
 /*
  * 构建带 CHANGE-REQUEST 属性的 Binding Request（NAT 检测专用）
  *
@@ -721,7 +748,47 @@ bool p2p_stun_has_ice_attrs(const uint8_t *buf, int len) {
 /* 将 mapped 地址作为本地 Srflx 候选写入，并在 ICE 模式下触发 Trickle 回调 */
 static inline void stun_add_srflx_candidate(struct p2p_instance *inst, const struct sockaddr_in *mapped) {
 
-    for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
+    assert(inst->stun_pending);
+    --inst->stun_pending;
+
+    bool sig_ready = false;
+    if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
+        sig_ready = inst->sig_ctx.compact.state == SIG_COMPACT_ONLINE;
+    }
+
+    // 如果之前还未进入可同步状态
+    // todo stun_pending 超时问题
+    if (!sig_ready || inst->cfg.skip_stun_pending) {
+
+        // 是否首次变为可同步状态
+        bool syncable = sig_ready && !inst->stun_pending;
+
+        for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
+
+            int idx = p2p_cand_push_local(s);
+            if (idx < 0) {
+                print("W:", LA_F("✗ Add Srflx candidate failed(OOM)", LA_F418, 418));
+                return;
+            }
+
+            p2p_local_candidate_entry_t *c = &s->local_cands[idx];
+            c->type = P2P_CAND_SRFLX;
+            c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
+            c->addr = *mapped;
+
+            print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F417, 417),
+                  inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+
+            if (syncable) {
+                if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
+                    p2p_signal_compact_syncable(inst, &inst->sig_ctx.compact);
+                else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
+                    ;
+            }
+        }
+    }
+    // trickle 增加模式
+    else for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
 
         int idx = p2p_cand_push_local(s);
         if (idx < 0) {
@@ -737,11 +804,10 @@ static inline void stun_add_srflx_candidate(struct p2p_instance *inst, const str
         print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F417, 417),
               inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
 
-        /* 一次性 Srflx 候选收集完成 */
-        if (s->stun_pending > 0) s->stun_pending--;
-
-        if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
-            p2p_signal_compact_trickle_candidate(s);
+        if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
+            if (s->sig_sess.compact.state >= SIG_COMPACT_SESS_SYNCING)
+                p2p_signal_compact_trickle_candidate(s);
+        }
         else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
             p2p_signal_relay_trickle_candidate(s);
         else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.on_ice_candidate) {
@@ -865,6 +931,7 @@ ret_t p2p_stun_nat_detect_start(struct p2p_instance *inst, bool as_candidate) {
     ctx->retry_count = 0;
     ctx->last_send_time = P_tick_ms();
     ctx->as_candidate = as_candidate;
+    if (as_candidate) ++inst->stun_pending;
 
     return E_NONE;
 }
@@ -892,10 +959,6 @@ void p2p_stun_nat_detect_tick(struct p2p_instance *inst, uint64_t now_ms) {
         ctx->symmetric_mapping = false;
         ctx->test_iii_success = false;
 
-        /* 启动 Test I */
-        // printf("[NAT_DEBUG] Starting NAT detection, resolving %s:%d\n",
-        //        inst->cfg.stun_server, inst->cfg.stun_port);
-
         struct sockaddr_in stun_addr;
         if (resolve_host(inst->cfg.stun_server, inst->cfg.stun_port, &stun_addr) < 0) {
             print("E:", LA_F("Failed to resolve STUN server %s", LA_F247, 247), inst->cfg.stun_server);
@@ -909,26 +972,9 @@ void p2p_stun_nat_detect_tick(struct p2p_instance *inst, uint64_t now_ms) {
             P_rand_bytes(ctx->tsx_id, 12);
         }
 
-        /* DEBUG: Print Transaction ID
-        printf("[NAT_DEBUG] Transaction ID: ");
-        for (int i = 0; i < 12; i++) {
-            printf("%02x", ctx->tsx_id[i]);
-        }
-        printf("\n");
-        */
-
         uint8_t req[512];
         int len = p2p_stun_build_binding_request(req, sizeof(req), ctx->tsx_id, NULL, NULL);
         if (len > 0) {
-
-            /* DEBUG: Print request
-            printf("[NAT_DEBUG] Built STUN request, length=%d\n", len);
-            printf("[NAT_DEBUG] Request bytes[8-19]: ");
-            for (int i = 8; i < 20; i++) {
-                printf("%02x", req[i]);
-            }
-            printf("\n");
-            */
 
             p2p_udp_send_to(inst, &stun_addr, req, len);
             ctx->last_send_time = now_ms;

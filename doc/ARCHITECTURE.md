@@ -234,9 +234,9 @@ graph TD
 ### 5.1 当前实现（基于索引追踪）
 
 **设计**：
-- 使用全局索引 `next_candidate_index` 追踪发送进度
+- 使用全局索引 `candidate_syncing_base` 追踪发送进度
 - 服务器返回 `candidates_acked` 表示"前 N 个候选成功"
-- 客户端通过 `next_candidate_index += candidates_acked` 更新
+- 客户端通过 `candidate_syncing_base += candidates_acked` 更新
 
 **隐式假设**：
 - 服务器**按顺序**缓存候选（从 `i=0` 开始循环）
@@ -248,7 +248,7 @@ graph TD
 发送候选 [0-7] (8个)
 服务器只缓存 [0-4] (5个)，返回 acked=5
 
-客户端：next_candidate_index = 0 + 5 = 5
+客户端：candidate_syncing_base = 0 + 5 = 5
 下次发送：候选 [5-12]
 
 候选 5, 6, 7 在第一批中未被确认，下次会重发 ✅ 正确

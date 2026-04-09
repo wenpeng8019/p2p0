@@ -382,8 +382,14 @@ int p2p_turn_allocate(struct p2p_instance *inst) {
     off += 4;
 
     int ret = p2p_udp_send_to(inst, &t->server_addr, buf, off);
-    if (ret <= 0) return -1;
+    if (ret <= 0) {
+        print("E:", LA_F("Failed to send Allocate Request: %d", 0, 0), ret);
+        return -1;
+    }
+
     t->state = TURN_ALLOCATING;
+    ++inst->turn_pending;
+
     return 0;
 }
 
@@ -496,9 +502,11 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
         print("I:", LA_F("TURN Allocated relay %s:%u (lifetime=%us)", LA_F354, 354),
               inet_ntoa(relay.sin_addr), ntohs(relay.sin_port), lifetime);
 
+        assert(inst->turn_pending);
+        --inst->turn_pending;
+
         /* 将中继地址分发给所有等待 TURN 候选的会话 */
         for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
-            if (s->turn_pending <= 0) continue;
 
             int idx = p2p_cand_push_local(s);
             if (idx < 0) { print("E: %s", "Push TURN relay candidate failed(OOM)"); continue; }
@@ -507,15 +515,15 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
             c->type = P2P_CAND_RELAY;
             c->addr = relay;
             c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
-            if (s->turn_base < 0) s->turn_base = idx;
+            if (s->public_base < 0) s->public_base = idx;
 
             print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F256, 256),
                     inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
 
-            if (s->turn_pending > 0) s->turn_pending--;
-
-            if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
-                p2p_signal_compact_trickle_candidate(s);
+            if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
+                if (s->sig_sess.compact.state >= SIG_COMPACT_SESS_SYNCING)
+                    p2p_signal_compact_trickle_candidate(s);
+            }
             else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
                 p2p_signal_relay_trickle_candidate(s);
             else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.on_ice_candidate) {
@@ -583,9 +591,10 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
 
         print("E:", LA_F("TURN Allocate failed with error %d", LA_F353, 353), error_code);
         t->state = TURN_FAILED;
+
         /* 通知所有等待 TURN 的会话放弃等待 */
-        for (struct p2p_session *s = inst->sessions_head; s; s = s->next)
-            if (s->turn_pending > 0) s->turn_pending--;
+        assert(inst->turn_pending);
+        --inst->turn_pending;
         return 0;
     }
 

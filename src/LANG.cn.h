@@ -223,7 +223,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F192] = "%s: unexpected non-srflx cand in sync0, treating as srflx\n",  /* SID:192 */
     [LA_F193] = "%s: unexpected remote cand type %d, skipped\n",  /* SID:193 */
     [LA_F443] = "%s: unknown target cand %s:%d",  /* SID:443 */
-    [LA_F569] = "%s: waiting for STUN candidates, stun_pending=%d\n",  /* SID:569 new */
+    [LA_F569] = "%s: waiting for STUN candidates, cand_pending=%d\n",  /* SID:569 new */
     [LA_F570] = "%s: waiting for initial STUN candidates before sending local queue\n",  /* SID:570 new */
     [LA_F150] = "%s: → CLOSED (recv FIN)",  /* SID:150 */
     [LA_F194] = "%s:%04d: %s",  /* SID:194 */

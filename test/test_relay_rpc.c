@@ -348,7 +348,7 @@ static int build_relay_data(uint8_t *buf, int buf_size, uint32_t session_id,
     uint16_t payload_len = 4 + 4 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
 
-    buf[0] = P2P_RLY_DATA;
+    buf[0] = P2P_RLY_PACKET;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
 
@@ -994,7 +994,7 @@ static void test_msg_rpc_and_data_parallel(void) {
         uint16_t payload_len;
         if (tcp_recv_relay_packet(sb, recv_buf, sizeof(recv_buf), &type, &payload_len) < 0) break;
 
-        if (type == P2P_RLY_DATA) {
+        if (type == P2P_RLY_PACKET) {
             got_data = 1;
         } else if (type == P2P_RLY_REQ) {
             got_req = 1;

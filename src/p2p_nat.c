@@ -105,10 +105,27 @@ static void cand_send_packet(struct p2p_session *s, int cand_idx, uint8_t type, 
     assert(cand_idx >= 0 && cand_idx < s->remote_cand_cnt);
     const struct sockaddr_in *addr = &s->remote_cands[cand_idx].addr;
 
+    /* 多会话模式：在所有 P2P 包前添加 local_id 头部 */
+    uint8_t flags = 0;
+    uint8_t ms_buf[P2P_SESS_ID_PSZ + P2P_MAX_PAYLOAD];
+    if (s->inst->cfg.multi_session) {
+        if (P2P_SESS_ID_PSZ + payload_len > P2P_MAX_PAYLOAD) {
+            print("E:", LA_F("%s: cand[%d] payload too large for multi_session (%d)", LA_F132, 132),
+                  TASK_NAT, cand_idx, payload_len);
+            return;
+        }
+        nwrite_l(ms_buf, s->id);
+        if (payload_len > 0 && payload)
+            memcpy(ms_buf + P2P_SESS_ID_PSZ, payload, payload_len);
+        payload     = ms_buf;
+        payload_len += (int)P2P_SESS_ID_PSZ;
+        flags       = P2P_FLAG_SESSION;
+    }
+
     ret_t ret;
     if (s->remote_cands[cand_idx].type == P2P_CAND_RELAY)
-        ret = p2p_turn_send_packet(s, addr, type, 0, seq, payload, payload_len);
-    else ret = p2p_udp_send_packet(s, addr, type, 0, seq, payload, payload_len);
+        ret = p2p_turn_send_packet(s->inst, addr, type, flags, seq, payload, payload_len);
+    else ret = p2p_udp_send_packet(s->inst, addr, type, flags, seq, payload, payload_len);
 
     if (ret < 0) {
         print("E:", LA_F("%s: cand[%d]<%s:%d> send packet failed(%d)", LA_F426, 426),
@@ -225,8 +242,15 @@ static void nat_send_conn(struct p2p_session *s, uint64_t now) {
     const char* PROTO = "CONN";
     nat_ctx_t *n = &s->nat;
 
-    // 使用统一发送接口（自动处理 TURN/信令中转/直连）
-    p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, 0, 0, NULL, 0, now);
+    /* 多会话模式且非信令中转路径：携带 local_id */
+    if (s->inst->cfg.multi_session && s->path_type != P2P_PATH_SIGNALING) {
+        uint8_t sid_buf[P2P_SESS_ID_PSZ];
+        nwrite_l(sid_buf, s->id);
+        p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, P2P_FLAG_SESSION, 0,
+                        sid_buf, (int)P2P_SESS_ID_PSZ, now);
+    } else {
+        p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, 0, 0, NULL, 0, now);
+    }
 
     if (s->path_type == P2P_PATH_SIGNALING) {
         print("V:", LA_F("%s sent via signaling relay", LA_F427, 427), PROTO);
@@ -243,8 +267,15 @@ static void nat_send_conn_ack(struct p2p_session *s, uint64_t now) {
     
     if (instrument_option(P2P_INST_OPT_NAT_CONN_ACK_OFF)) return;
 
-    // 使用统一发送接口（自动处理 TURN/信令中转/直连）
-    p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, 0, 0, NULL, 0, now);
+    /* 多会话模式且非信令中转路径：携带 local_id */
+    if (s->inst->cfg.multi_session && s->path_type != P2P_PATH_SIGNALING) {
+        uint8_t sid_buf[P2P_SESS_ID_PSZ];
+        nwrite_l(sid_buf, s->id);
+        p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, P2P_FLAG_SESSION, 0,
+                        sid_buf, (int)P2P_SESS_ID_PSZ, now);
+    } else {
+        p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, 0, 0, NULL, 0, now);
+    }
 
     if (s->path_type == P2P_PATH_SIGNALING) {
         print("V:", LA_F("%s sent via signaling relay", LA_F427, 427), PROTO);
@@ -510,7 +541,7 @@ void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
             uint8_t resp[128];
             int resp_len = p2p_stun_build_binding_response(resp, sizeof(resp), buf + 8, from, NULL);
             if (resp_len > 0) {
-                p2p_udp_send_to(s, from, resp, resp_len);
+                p2p_udp_send_to(s->inst, from, resp, resp_len);
                 path_manager_on_packet_send(s, path_idx, 0, now, 0, false);
             }
         }
@@ -539,7 +570,7 @@ void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
         // 首次激活路径（INIT/PROBING/FAILED → ACTIVE），收到 REACH 证明路径可写
         path_manager_set_path_state(s, path_idx, PATH_STATE_ACTIVE);
 
-        print("I:", LA_F("%s: path[%d] UP (%s:%d)", LA_F132, 132),
+        print("I:", LA_F("%s: path[%d] UP (%s:%d)", LA_F624, 624),
             TASK_PATH, path_idx, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
          // NAT_RELAY 状态下 retry 打洞成功：直接升级到 CONNECTED（保持数据层一致性）
@@ -854,7 +885,7 @@ void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     // 首次激活路径（INIT/PROBING/FAILED → ACTIVE），收到 REACH 证明路径可写
     path_manager_set_path_state(s, target_path, PATH_STATE_ACTIVE);
 
-    print("I:", LA_F("%s: path[%d] UP (%s:%d)", LA_F132, 132),
+    print("I:", LA_F("%s: path[%d] UP (%s:%d)", LA_F624, 624),
           TASK_PATH, target_path, inet_ntoa(target_addr.sin_addr), ntohs(target_addr.sin_port));
 
     // NAT_RELAY 状态下 retry 打洞成功：直接升级到 CONNECTED（保持数据层一致性）
@@ -1122,7 +1153,7 @@ void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from) {
     // 仅在曾经建立过数据通道后接受 FIN。
     // 重连打洞阶段可能收到旧会话残留 FIN，直接接受会误关新会话。
     if (s->nat.state < NAT_LOST) {
-        print("W:", LA_F("Ignore %s pkt from %s:%d, state=%d (not connected yet)", LA_F420, 420),
+        print("W:", LA_F("Ignore %s pkt from %s:%d, state=%d (not connected yet)", LA_F626, 626),
               PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), s->nat.state);
         return;
     }
@@ -1222,7 +1253,7 @@ void nat_tick(struct p2p_session *s, uint64_t now_ms) {
                      && tick_diff(now_ms, n->punch_start) >= PUNCH_TIMEOUT_MS) {
 
                 print("V:", LA_F("%s: timeout but ICE exchange not done yet (%" PRIu64 " ms elapsed, mode=%d), waiting for more candidates", LA_F183, 183),
-                        TASK_NAT, tick_diff(now_ms, n->punch_start), s->inst->signaling_mode);
+                        TASK_NAT, tick_diff(now_ms, n->punch_start), s->inst->sig_mode);
             }
 
             // 周期性向所有候选发送打洞包（包括 relay）
@@ -1379,7 +1410,7 @@ void nat_tick(struct p2p_session *s, uint64_t now_ms) {
 
             // 首次进入时若为 READY 则自动触发
             if (!instrument_option(P2P_INST_OPT_AUTO_PROBE_OFF) 
-                && s->probe_ctx.state == P2P_PROBE_STATE_READY)
+                && s->probe.state == P2P_PROBE_STATE_READY)
                 probe_trigger(s);
             
             break;

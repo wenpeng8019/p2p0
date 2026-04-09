@@ -29,7 +29,7 @@ void probe_init(probe_ctx_t *ctx) {
 }
 
 void probe_reset(struct p2p_session *s) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
     
     // 重置统一上下文
     ctx->state = P2P_PROBE_STATE_OFFLINE;
@@ -44,7 +44,7 @@ void probe_reset(struct p2p_session *s) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void probe_trigger(struct p2p_session *s) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
 
     // NO_SUPPORT 和 OFFLINE 状态在信令握手时已确定，直接返回
     if (ctx->state == P2P_PROBE_STATE_NO_SUPPORT || 
@@ -92,7 +92,7 @@ void probe_trigger(struct p2p_session *s) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void probe_compact_on_req_ack(struct p2p_session *s, uint16_t sid, uint8_t status) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.compact.phase != PROBE_COMPACT_PHASE_WAIT_ECHO) return;
@@ -109,7 +109,7 @@ void probe_compact_on_req_ack(struct p2p_session *s, uint16_t sid, uint8_t statu
 }
 
 void probe_compact_on_response(struct p2p_session *s, uint16_t sid) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.compact.phase != PROBE_COMPACT_PHASE_WAIT_ECHO) return;
@@ -127,7 +127,7 @@ void probe_compact_on_response(struct p2p_session *s, uint16_t sid) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void probe_relay_on_turn_success(struct p2p_session *s) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.relay.step != PROBE_RELAY_STEP_TURN_ALLOC) return;
@@ -138,7 +138,7 @@ void probe_relay_on_turn_success(struct p2p_session *s) {
 }
 
 void probe_relay_on_exchange_done(struct p2p_session *s, bool success) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.relay.step != PROBE_RELAY_STEP_ADDR_EXCHANGE) return;
@@ -155,7 +155,7 @@ void probe_relay_on_exchange_done(struct p2p_session *s, bool success) {
 }
 
 void probe_relay_on_udp_response(struct p2p_session *s) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) return;
     if (ctx->mode.relay.step != PROBE_RELAY_STEP_UDP_PROBE) return;
@@ -172,7 +172,7 @@ void probe_relay_on_udp_response(struct p2p_session *s) {
 ///////////////////////////////////////////////////////////////////////////////
 
 static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) {
 
@@ -236,7 +236,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
 }
 
 static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
-    probe_ctx_t *ctx = &s->probe_ctx;
+    probe_ctx_t *ctx = &s->probe;
 
     if (ctx->state != P2P_PROBE_STATE_RUNNING) {
         // 完成状态：等待间隔后自动重启

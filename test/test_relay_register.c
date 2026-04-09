@@ -409,7 +409,7 @@ static int recv_status(sock_t sock, status_t *status) {
         return 0;
     }
     
-    if (type == P2P_RLY_STATUS && payload_len >= P2P_RLY_STATUS_PSZ) {
+    if (type == P2P_RLY_STATUS && payload_len >= P2P_RLY_STATUS_PSZ(0, 0)) {
         status->received = 1;
         status->req_type = recv_buf[3];
         status->status_code = recv_buf[4];

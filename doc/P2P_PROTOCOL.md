@@ -621,7 +621,7 @@ typedef struct {
 **关键设计**：
 - `status=1` vs `status=2` 的区分：服务器在缓存候选后检查 `pending_count >= MAX_CANDIDATES`
 - `candidates_acked` 支持**部分缓存**：发送 8 个，缓存 5 个（剩余 3 个等对端上线）
-- 客户端根据 `candidates_acked` 更新 `next_candidate_index`，确保未确认的候选会重传
+- 客户端根据 `candidates_acked` 更新 `candidate_syncing_base`，确保未确认的候选会重传
 
 #### 边界条件验证
 
@@ -672,17 +672,17 @@ send_connect_ack(ack_status, candidates_acked);
 switch (ack.status) {
     case 0:  // 在线转发
         waiting_for_peer = false;
-        next_candidate_index += ack.candidates_acked;
+        candidate_syncing_base += ack.candidates_acked;
         return ack.candidates_acked;  // 继续 Trickle ICE
         
     case 1:  // 离线有空间
         waiting_for_peer = false;
-        next_candidate_index += ack.candidates_acked;
+        candidate_syncing_base += ack.candidates_acked;
         return 0;  // 继续发送剩余候选
         
     case 2:  // 缓存已满
         waiting_for_peer = true;  // 停止发送
-        next_candidate_index += ack.candidates_acked;  // 可能为 0
+        candidate_syncing_base += ack.candidates_acked;  // 可能为 0
         return -2;  // 等待对端上线推送 FORWARD
 }
 ```
@@ -913,14 +913,14 @@ Alice                  Server                Bob (离线)
 
 **当前实现假设**：
 - 服务器**按顺序缓存前 N 个候选**
-- 客户端通过 `next_candidate_index += candidates_acked` 更新索引
+- 客户端通过 `candidate_syncing_base += candidates_acked` 更新索引
 
 **隐患**：
 ```
 发送候选 [0-7] (8个)
 服务器只缓存 [0-4] (5个)，返回 acked=5
 
-客户端：next_candidate_index = 0 + 5 = 5
+客户端：candidate_syncing_base = 0 + 5 = 5
 下次发送：候选 [5-12]
 
 问题：候选 5, 6, 7 在第一批中发送了但未被确认
@@ -930,7 +930,7 @@ Alice                  Server                Bob (离线)
 **验证**：当前实现**正确**，因为：
 1. 服务器确实按顺序缓存（循环从 `i=0` 开始）
 2. `candidates_acked` 表示"前 N 个候选成功"
-3. 未确认的候选（索引 ≥ next_candidate_index）会在下次重发
+3. 未确认的候选（索引 ≥ candidate_syncing_base）会在下次重发
 
 **脆弱性**：
 - 依赖服务器"按顺序缓存"的隐式假设

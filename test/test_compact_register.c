@@ -252,7 +252,7 @@ static int build_online(uint8_t *buf, int buf_size,
 #define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
     build_online(buf, buf_size, local, inst_id)
 
-// 构造 SYNC0 包：[hdr(4)][auth_key(8)][remote_peer_id(32)][candidate_count(1)][candidates(N*sizeof)]
+// 构造 SYNC0 包：[hdr(4)][auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*sizeof)]
 static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
                        const char *remote_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {

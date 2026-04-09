@@ -51,21 +51,23 @@ uint16_t             p2p_instrument_base = 0;
 static inline void gather_local_candidates(struct p2p_session *s) {
 
     s->local_cand_cnt = 0;
-    s->turn_base = -1;  // 重新收集候选，当前尚无 TURN 候选
+    s->public_base = -1;  // 重新收集候选，当前尚无 TURN 候选
+
+    struct p2p_instance *inst = s->inst;
 
     /* ======================== 1. 收集 Host 候选 ======================== */
     /*
      * Host Candidate 是本地网卡的 IP 地址。
      * 在同一局域网内的对端可以直接使用此地址通信。
      */
-    if (!s->inst->cfg.test_ice_host_off) {
+    if (!inst->cfg.test_ice_host_off) {
 
         const route_ctx_t *rt = route_shared_get();
         if (rt && rt->addr_count > 0) {
             
             /* 获取本地端口 */
             struct sockaddr_in loc; socklen_t len = sizeof(loc);
-            getsockname(s->inst->sock, (struct sockaddr *)&loc, &len);
+            getsockname(inst->sock, (struct sockaddr *)&loc, &len);
 
             int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
 
@@ -99,33 +101,25 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      * 用于穿透 NAT，让位于不同 NAT 后的对端能够通信。
      *
      * 异步流程：
-         *   1. 发送 STUN Binding Request 时递增 stun_pending
-         *   2. 接收 STUN Binding Response 时，stun_add_srflx_candidate 递减 stun_pending
+         *   1. 发送 STUN Binding Request 时递增 cand_pending
+         *   2. 接收 STUN Binding Response 时，stun_add_srflx_candidate 递减 cand_pending
      */
-#if 0 /* 当前由 NAT 检测 Test I 阶段（as_candidate=true）统一获取 srflx，
-       * 避免重复请求。未来计划：为每个本地网络接口分别获取 srflx 地址 */
-    if (s->inst->signaling_mode != P2P_SIGNALING_MODE_COMPACT
-        && !s->inst->cfg.test_ice_srflx_off && s->inst->cfg.stun_server) {
+    if (inst->sig_mode != P2P_SIGNALING_MODE_COMPACT
+        && !inst->cfg.test_ice_srflx_off && inst->cfg.stun_server) {
+        if (inst->stun_ctx.mapped_addr_active) {
 
-        uint8_t stun_buf[256];
-        int slen = p2p_stun_build_binding_request(stun_buf, sizeof(stun_buf), NULL, NULL, NULL);
-        if (slen > 0) {
-
-            /* 解析 STUN 服务器地址并发送请求 */
-            struct sockaddr_in stun_addr;
-            memset(&stun_addr, 0, sizeof(stun_addr));
-            stun_addr.sin_family = AF_INET;
-            stun_addr.sin_port = htons(s->inst->cfg.stun_port ? s->inst->cfg.stun_port : 3478);
-            struct hostent *he = gethostbyname(s->inst->cfg.stun_server);
-            if (he) {
-                memcpy(&stun_addr.sin_addr, he->h_addr_list[0], he->h_length);
-                p2p_udp_send_to(s, &stun_addr, stun_buf, slen);
-                s->stun_pending++;      /* 一次性 Srflx 候选待响应 */
-                print("I:", LA_F("Requested Srflx Candidate from %s", LA_F316, 316), s->inst->cfg.stun_server);
+            int idx = p2p_cand_push_local(s);
+            if (idx >= 0) {
+                p2p_local_candidate_entry_t *c = &s->local_cands[idx];
+                c->type = P2P_CAND_SRFLX;
+                c->addr = inst->turn.relay_addr;
+                c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
+                if (s->public_base < 0) s->public_base = idx;
+                print("I:", LA_F("Reuse STUN Candidate %s:%u (priority=%u)", 0, 0),
+                      inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
             }
         }
     }
-#endif
 
     /* ======================== 3. 收集 Relay 候选 ======================== */
     /*
@@ -136,9 +130,19 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      *   1. p2p_turn_allocate() 发送请求时递增 turn_pending
      *   2. 接收 Allocate Success 时，在 turn_handle_packet 中递减 turn_pending
      */
-    if (!s->inst->cfg.test_ice_relay_off && s->inst->cfg.turn_server) {
-        if (p2p_turn_allocate(s) == 0) {
-            print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F314, 314), s->inst->cfg.turn_server);
+    if (!inst->cfg.test_ice_relay_off && inst->cfg.turn_server) {
+        if (inst->turn.state == TURN_ALLOCATED) {
+
+            int idx = p2p_cand_push_local(s);
+            if (idx >= 0) {
+                p2p_local_candidate_entry_t *c = &s->local_cands[idx];
+                c->type = P2P_CAND_RELAY;
+                c->addr = inst->turn.relay_addr;
+                c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
+                if (s->public_base < 0) s->public_base = idx;
+                print("I:", LA_F("Reuse Relay Candidate %s:%u (priority=%u)", LA_F627, 627),
+                      inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+            }
         }
     }
 
@@ -147,7 +151,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      * RFC 6544 扩展了 ICE 以支持 TCP 候选。
      * 目前仅预留接口，未完全实现。
      */
-    if (s->inst->cfg.enable_tcp) {
+    if (inst->cfg.enable_tcp) {
         for (int i = 0; i < s->local_cand_cnt; i++) {
             if (s->local_cands[i].type == P2P_CAND_HOST) {
                 /* TODO: 建立 TCP 监听端口 */
@@ -257,12 +261,12 @@ static void disconnect(struct p2p_session *s) {
     }
 
     // COMPACT 信令模式：取消与对方在服务器上的注册，OFFLINE
-    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+    if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
 
         p2p_signal_compact_disconnect(s);
     }
     // RELAY 信令模式：
-    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+    else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
 
         p2p_signal_relay_disconnect(s);
     }
@@ -283,12 +287,12 @@ static void peer_disconnect(struct p2p_session *s) {
     print("I:", LA_F("connection closed by peer", LA_F403, 403));
 
     p2p_state_t old_state = s->state;
-    p2p_probe_state_t prev_probe_state = s->probe_ctx.state;
+    p2p_probe_state_t prev_probe_state = s->probe.state;
     p2p_session_reset(s, true);  // 这会设置 s->state = P2P_STATE_CLOSED
 
     // 信道外探测基于信令服务器 RPC 转发，而对方断开连接，不影响自己和服务器的注册状态
     if (prev_probe_state != P2P_PROBE_STATE_OFFLINE) {
-        s->probe_ctx.state = prev_probe_state == P2P_PROBE_STATE_NO_SUPPORT
+        s->probe.state = prev_probe_state == P2P_PROBE_STATE_NO_SUPPORT
                 ? P2P_PROBE_STATE_NO_SUPPORT
                 : P2P_PROBE_STATE_READY;
     }
@@ -359,23 +363,18 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 初始化信令上下文（实例级别，只初始化不注册）
     print("I:", LA_F("Initialize signaling mode: %d", LA_F262, 262), (int)cfg->signaling_mode);
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
-        p2p_signal_compact_init(&inst->sig_compact_ctx);
+        p2p_signal_compact_init(&inst->sig_ctx.compact);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY)
-        p2p_signal_relay_init(&inst->sig_relay_ctx);
+        p2p_signal_relay_init(&inst->sig_ctx.relay);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
-        if ((ret = p2p_signal_pubsub_init(&inst->sig_pubsub_ctx, cfg->gh_token, cfg->gist_id)) != E_NONE) {
+        if ((ret = p2p_signal_pubsub_init(&inst->sig_ctx.pubsub, cfg->gh_token, cfg->gist_id)) != E_NONE) {
             print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F260, 260), ret);
             p2p_udp_close(inst); free(inst);
             return NULL;
         }
         if (cfg->auth_key)
-            strncpy(inst->sig_pubsub_ctx.auth_key, cfg->auth_key, sizeof(inst->sig_pubsub_ctx.auth_key) - 1);
+            strncpy(inst->sig_ctx.pubsub.auth_key, cfg->auth_key, sizeof(inst->sig_ctx.pubsub.auth_key) - 1);
     }
-
-    // NAT 类型初始化
-    inst->nat_type = P2P_NAT_UNKNOWN;
-    if (!cfg->stun_server && cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT)
-        inst->nat_type = P2P_NAT_UNDETECTABLE;
 
     // 初始化共享路由层
     if ((ret = route_shared_acquire()) < 0) {
@@ -393,8 +392,21 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     strncpy(inst->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
 
     inst->tcp_sock = P_INVALID_SOCKET;
-    inst->signaling_mode = cfg->signaling_mode;
+    inst->sig_mode = cfg->signaling_mode;
     inst->state = P2P_STATE_INIT;
+
+    p2p_turn_init(&inst->turn);
+
+    // NAT 类型初始化
+    inst->nat_type = P2P_NAT_UNKNOWN;
+    if (cfg->stun_server) {
+
+        // 启动 STUN NAT 类型检测（并默认作为 Srflx 候选收集）
+        p2p_stun_nat_detect_start(inst, inst->sig_mode != P2P_SIGNALING_MODE_COMPACT && !cfg->test_ice_srflx_off);
+
+    } else if (cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
+        inst->nat_type = P2P_NAT_UNDETECTABLE;
+    }
 
 #ifdef P2P_THREADED
     if (cfg->threaded) {
@@ -424,18 +436,15 @@ p2p_destroy(p2p_handle_t hdl) {
 #endif
 
     // 先告知信令服务器下线（信令函数需要 session 指针，必须在释放会话前调用）
-    struct p2p_session *first_s = inst->sessions_head;
-    if (first_s) {
-        if (inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT &&
-            inst->sig_compact_ctx.state != SIGNAL_COMPACT_INIT) {
-            print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F328, 328));
-            p2p_signal_compact_offline(first_s);
-        }
-        else if (inst->signaling_mode == P2P_SIGNALING_MODE_RELAY &&
-                 inst->sig_relay_ctx.state != SIGNAL_RELAY_INIT) {
-            print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
-            p2p_signal_relay_offline(first_s);
-        }
+    if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT &&
+        inst->sig_ctx.compact.state != SIG_COMPACT_INIT) {
+        print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F328, 328));
+        p2p_signal_compact_offline(inst);
+    }
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY &&
+             inst->sig_ctx.relay.state != SIG_RELAY_INIT) {
+        print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
+        p2p_signal_relay_offline(inst);
     }
 
     // 释放所有会话
@@ -444,7 +453,7 @@ p2p_destroy(p2p_handle_t hdl) {
         struct p2p_session *next = s->next;
 
         probe_reset(s);
-        if (s->state != P2P_STATE_CLOSED) disconnect(s);
+        if (s->state > P2P_STATE_ERROR) disconnect(s);
 
         if (s->dtls && s->dtls->close) { s->dtls->close(s); s->dtls = NULL; }
         if (s->trans && s->trans->close) { s->trans->close(s); s->trans = NULL; }
@@ -455,6 +464,11 @@ p2p_destroy(p2p_handle_t hdl) {
         s = next;
     }
     inst->sessions_head = inst->sessions_rear = NULL;
+
+    // 释放 TURN 分配
+    p2p_turn_reset(inst);
+
+    // todo stun 不需要？sock ？
 
     // 关闭 socket
     print("I:", LA_F("Close P2P UDP socket", LA_F215, 215));
@@ -480,28 +494,18 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
     // 检查 remote_peer_id 必须性
     if (!remote_peer_id &&
-        (inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT ||
-         inst->signaling_mode == P2P_SIGNALING_MODE_RELAY)) {
+        (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT ||
+         inst->sig_mode == P2P_SIGNALING_MODE_RELAY)) {
         print("E:", LA_F("Invalid remote_peer_id for %s mode", LA_F211, 211),
-              inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT ? "COMPACT" : "RELAY");
+              inst->sig_mode == P2P_SIGNALING_MODE_COMPACT ? "COMPACT" : "RELAY");
         return NULL;
     }
 
     // 分配会话结构
     struct p2p_session *s = (struct p2p_session*)calloc(1, sizeof(*s));
     if (!s) {
-        print("E:", LA_F("Failed to allocate memory for session", LA_F241, 241));
+        print("E:", LA_F("Failed to allocate memory for session", LA_F625, 625));
         return NULL;
-    }
-    s->inst = inst;
-    s->next = NULL;
-
-    // 初始化对端 ID
-    if (remote_peer_id) {
-        strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
-        s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
-    } else {
-        s->remote_peer_id[0] = '\0';
     }
 
     // 分配候选地址列表
@@ -516,6 +520,42 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         return NULL;
     }
     s->local_cand_cap = s->remote_cand_cap = initial_cand_cap;
+
+    s->inst = inst;
+    s->next = NULL;
+
+    // 如果创建首个可用连接
+    if (inst->connections++ == 0) {
+
+        // 启动收集 Srflx 候选
+        if (s->inst->sig_mode != P2P_SIGNALING_MODE_COMPACT
+            && !s->inst->cfg.test_ice_srflx_off && s->inst->cfg.stun_server) {
+
+            if (inst->nat_type != P2P_NAT_DETECTING && !inst->stun_ctx.mapped_addr_active) {
+                p2p_stun_collect(inst);
+            }
+        }
+
+        //
+        if (!s->inst->cfg.test_ice_relay_off && s->inst->cfg.turn_server) {
+            if (inst->turn.state == TURN_IDLE || inst->turn.state == TURN_FAILED) {
+                if (p2p_turn_allocate(inst) == 0) {
+                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F314, 314), inst->cfg.turn_server);
+                }
+                else {
+                    print("E:", LA_F("Failed to start TURN allocation", LA_F315, 315));
+                }
+            }
+        }
+    }
+
+    // 初始化对端 ID
+    if (remote_peer_id) {
+        strncpy(s->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
+        s->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+    } else {
+        s->remote_peer_id[0] = '\0';
+    }
 
     // 会话级状态初始化
     nat_init(&s->nat);
@@ -582,8 +622,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     }
 
     stream_init(&s->stream, inst->cfg.nagle);
-    probe_init(&s->probe_ctx);
-    p2p_turn_init(&s->turn);
+    probe_init(&s->probe);
 
     s->state = P2P_STATE_INIT;
     s->path_type = P2P_PATH_NONE;
@@ -592,20 +631,19 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     // 收集本地候选地址（Host/TURN）
     gather_local_candidates(s);
 
-    // 启动 STUN NAT 类型检测
-    if (inst->cfg.stun_server)
-        p2p_stun_nat_detect_start(s, inst->signaling_mode != P2P_SIGNALING_MODE_COMPACT);
-
     LOCK_INST(inst);
 
     ret_t ret;
-    switch (inst->signaling_mode) {
+    switch (inst->sig_mode) {
 
         // COMPACT 模式
         case P2P_SIGNALING_MODE_COMPACT: {
 
             // 首次连接：向信令服务器注册
-            if (inst->sig_compact_ctx.state == SIGNAL_COMPACT_INIT) {
+            if (inst->sig_ctx.compact.state == SIG_COMPACT_INIT) {
+
+                // fixme: online 放到 create 中
+
                 assert(inst->cfg.server_host);
                 print("I:", LA_F("Login to COMPACT signaling server at %s:%d", LA_F220, 220),
                               inst->cfg.server_host, inst->cfg.server_port);
@@ -617,7 +655,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                     UNLOCK_INST(inst);
                     goto fail;
                 }
-                if ((ret = p2p_signal_compact_online(s, inst->local_peer_id, &server_addr)) != E_NONE) {
+                if ((ret = p2p_signal_compact_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
                     print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F217, 217), ret);
                     s->state = P2P_STATE_ERROR;
                     UNLOCK_INST(inst);
@@ -626,7 +664,10 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 inst->state = P2P_STATE_REGISTERING;
             }
 
-            if (!inst->sig_compact_ctx.remote_peer_id[0])
+            // 多会话标识：本端随机提案，SYNC0_ACK 中服务器确认后覆盖
+            do { s->id = P_rand32(); } while (!s->id);
+
+            if (!s->sig_sess.compact.remote_peer_id[0])
                 print("I:", LA_F("Starting COMPACT session with %s", LA_F615, 615), remote_peer_id);
             if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE)
                 print("E:", LA_F("Start COMPACT session failed(%d)", LA_F614, 614), ret);
@@ -639,7 +680,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         case P2P_SIGNALING_MODE_RELAY: {
 
             // 首次连接：向信令服务器注册
-            if (inst->sig_relay_ctx.state == SIGNAL_RELAY_INIT) {
+            if (inst->sig_ctx.relay.state == SIG_RELAY_INIT) {
                 assert(inst->cfg.server_host);
                 print("I:", LA_F("Login to RELAY signaling server at %s:%d", LA_F616, 616),
                               inst->cfg.server_host, inst->cfg.server_port);
@@ -648,7 +689,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 server_addr.sin_family = AF_INET;
                 server_addr.sin_port = htons(inst->cfg.server_port);
                 inet_pton(AF_INET, inst->cfg.server_host, &server_addr.sin_addr);
-                if ((ret = p2p_signal_relay_online(s, inst->local_peer_id, &server_addr)) != E_NONE) {
+                if ((ret = p2p_signal_relay_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
                     print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F218, 218), ret);
                     s->state = P2P_STATE_ERROR;
                     UNLOCK_INST(inst);
@@ -657,7 +698,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 inst->state = P2P_STATE_REGISTERING;
             }
 
-            if (!inst->sig_relay_ctx.connected)
+            if (s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_SYNCABLE)
                 print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
             if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE)
                 print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
@@ -674,10 +715,10 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             s->state = P2P_STATE_REGISTERING;
 
             if (remote_peer_id) {
-                p2p_signal_pubsub_set_role(&inst->sig_pubsub_ctx, P2P_SIGNAL_ROLE_PUB);
+                p2p_signal_pubsub_set_role(&inst->sig_ctx.pubsub, P2P_SIGNAL_ROLE_PUB);
                 print("I:", LA_F("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_F280, 280));
             } else {
-                p2p_signal_pubsub_set_role(&inst->sig_pubsub_ctx, P2P_SIGNAL_ROLE_SUB);
+                p2p_signal_pubsub_set_role(&inst->sig_ctx.pubsub, P2P_SIGNAL_ROLE_SUB);
                 print("I:", LA_F("PUBSUB (SUB): waiting for offer from any peer", LA_F281, 281));
             }
             break;
@@ -692,7 +733,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         }
 
         default:
-            print("E:", LA_F("Unknown signaling mode: %d", LA_F371, 371), inst->signaling_mode);
+            print("E:", LA_F("Unknown signaling mode: %d", LA_F371, 371), inst->sig_mode);
             s->state = P2P_STATE_ERROR;
             UNLOCK_INST(inst);
             goto fail;
@@ -824,6 +865,30 @@ p2p_close(p2p_session_t session) {
  * 3. **状态机集中化**：所有 P2P 连接状态转换集中在阶段 5，便于维护
  * 4. **数据传输独立**：仅在已连接状态下执行，与信令/NAT 解耦
  */
+
+/* 多会话派发：按 session_id 查找 session（发包方将自己的 session_id 写入包头） */
+static struct p2p_session *find_session_by_session_id(struct p2p_instance *inst, uint32_t id) {
+    for (struct p2p_session *s = inst->sessions_head; s; s = s->next)
+        if (s->id == id) return s;
+    return NULL;
+}
+
+/* 多会话派发：按来源地址匹配已知远端候选（无 session_id 时的 fallback） */
+static struct p2p_session *find_session_by_from(struct p2p_instance *inst,
+                                                 const struct sockaddr_in *from) {
+    for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
+        if (s->active_path >= 0 &&
+            s->active_addr.sin_addr.s_addr == from->sin_addr.s_addr &&
+            s->active_addr.sin_port        == from->sin_port)
+            return s;
+        for (int i = 0; i < s->remote_cand_cnt; i++) {
+            if (s->remote_cands[i].addr.sin_addr.s_addr == from->sin_addr.s_addr &&
+                s->remote_cands[i].addr.sin_port        == from->sin_port)
+                return s;
+        }
+    }
+    return NULL;
+}
 int
 p2p_update(p2p_handle_t hdl) {
 
@@ -840,7 +905,7 @@ p2p_update(p2p_handle_t hdl) {
     /* ========================================================================
      * 阶段 1：远程数据输入（被动接收所有网络数据包）
      * ======================================================================== */
-    while ((n = p2p_udp_recv_from(s, &from, buf, sizeof(buf))) > 0) { pkt = buf;
+    while ((n = p2p_udp_recv_from(inst, &from, buf, sizeof(buf))) > 0) { pkt = buf;
 
         // --------------------
         // STUN/TURN 协议包
@@ -863,13 +928,13 @@ p2p_update(p2p_handle_t hdl) {
                 
                 // STUN 模块处理（NAT 检测 / Srflx 地址探测）
                 if (p2p_stun_is_binding_response(type, pkt, n)) {
-                    p2p_stun_handle_packet(s, &from, type, pkt, n);
+                    p2p_stun_handle_packet(inst, &from, type, pkt, n);
                     continue;
                 }
 
                 // TURN 响应处理（Allocate/Refresh/CreatePermission/Data Indication）
                 const uint8_t *inner_data = NULL; int inner_len = 0; struct sockaddr_in inner_peer = {0};
-                int turn_ret = p2p_turn_handle_packet(s, &from, type, pkt, n,
+                int turn_ret = p2p_turn_handle_packet(inst, &from, type, pkt, n,
                                                       &inner_data, &inner_len, &inner_peer);
                 if (turn_ret == 1 && inner_data && inner_len >= P2P_HDR_SIZE) {
 
@@ -898,6 +963,32 @@ p2p_update(p2p_handle_t hdl) {
         int payload_len = n - P2P_HDR_SIZE;
         uint8_t crypto_dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];  /* 解密输出缓冲区 */
 
+        /* ================================================================
+         * 多会话派发：根据 session_id 或来源地址将包路由到正确会话
+         * 单会话模式直接使用 sessions_head，无附加开销
+         * ================================================================ */
+        bool sid_stripped = false; /* multi_session 派发时已剪去 session_id 前缀 */
+        if (inst->cfg.multi_session) {
+            if (hdr.flags & P2P_FLAG_SESSION) {
+                /* 包含 session_id：根据 session_id 匹配 session */
+                if (payload_len < (int)P2P_SESS_ID_PSZ) continue;
+                uint32_t sess_id = nget_l(payload);
+                s = find_session_by_session_id(inst, sess_id);
+                if (!s) {
+                    print("W:", LA_F("multi_session: drop pkt, unknown session_id=0x%08x", LA_F628, 628), sess_id);
+                    continue;
+                }
+                payload     += P2P_SESS_ID_PSZ;
+                payload_len -= (int)P2P_SESS_ID_PSZ;
+                sid_stripped = true;
+            } else {
+                /* 没有 session_id：按来源地址匹配 */
+                struct p2p_session *fs = find_session_by_from(inst, &from);
+                s = fs ? fs : inst->sessions_head;
+                if (!s) continue;
+            }
+        }
+
         switch (hdr.type) {
 
             // --------------------
@@ -906,8 +997,8 @@ p2p_update(p2p_handle_t hdl) {
 
             case P2P_PKT_CRYPTO: {
 
-                // flags & P2P_RELAY_FLAG_SESSION 表示携带 session_id
-                if (hdr.flags & P2P_RELAY_FLAG_SESSION) {
+                // 信令中转路径（单会话）：包含 session_id，验证并剪去
+                if (!sid_stripped && (hdr.flags & P2P_FLAG_SESSION)) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "CRYPTO")) break;
                 }
                 if (!s->dtls) break;
@@ -940,8 +1031,8 @@ p2p_update(p2p_handle_t hdl) {
              * 说明：P2P 数据包，由 reliable 层或高级传输层处理
              */
             case P2P_PKT_DATA:
-                // flags & P2P_RELAY_FLAG_SESSION 表示携带 session_id
-                if (hdr.flags & P2P_RELAY_FLAG_SESSION) {
+                // 信令中转路径（单会话）：包含 session_id，验证并剪去
+                if (!sid_stripped && (hdr.flags & P2P_FLAG_SESSION)) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "DATA")) break;
                 }
             handle_data:
@@ -965,8 +1056,8 @@ p2p_update(p2p_handle_t hdl) {
              * 说明：ACK 仅基础 reliable 层使用，DTLS/SCTP 有自己的确认机制
              */
             case P2P_PKT_ACK:
-                /* flags & P2P_RELAY_FLAG_SESSION 表示携带 session_id */
-                if (hdr.flags & P2P_RELAY_FLAG_SESSION) {
+                /* 信令中转路径（单会话）：包含 session_id，验证并剪去 */
+                if (!sid_stripped && (hdr.flags & P2P_FLAG_SESSION)) {
                     if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "ACK")) break;
                 }
             handle_ack: {
@@ -1012,15 +1103,16 @@ p2p_update(p2p_handle_t hdl) {
                 nat_on_punch(s, &hdr, payload, payload_len, &from, now_ms);
                 break;
             case P2P_PKT_REACH:
-                // 中转版本（通过信令服务器）：验证 session_id 后传给 NAT 层
-                if (hdr.flags & P2P_RELAY_FLAG_SESSION) {
-                    if (p2p_signal_compact_relay_validation(s, &payload, &payload_len, "REACH_RELAYED")) {
-                        // session_id 验证成功，清除 RELAYED 标志后传给 NAT 层
-                        hdr.flags = 0;
-                        nat_on_reach(s, &hdr, payload, payload_len, &from, now_ms);
+                // 信令中转版本（SIG_FLAG_RELAY 标识）：验证并清除中转标志后传给 NAT 层
+                if (hdr.flags & SIG_FLAG_RELAY) {
+                    if (!sid_stripped && (hdr.flags & P2P_FLAG_SESSION)) {
+                        if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "REACH_RELAYED")) break;
                     }
+                    // 清除中转标志，再传给 NAT 层
+                    hdr.flags &= (uint8_t)~(SIG_FLAG_RELAY | P2P_FLAG_SESSION);
+                    nat_on_reach(s, &hdr, payload, payload_len, &from, now_ms);
                 }
-                // 直连版本（P2P 路径）：直接传给 NAT 层
+                // 直连版本（P2P 路径 或 multi_session 已剪净 session_id）
                 else nat_on_reach(s, &hdr, payload, payload_len, &from, now_ms);
                 break;
             case P2P_PKT_CONN:
@@ -1038,7 +1130,7 @@ p2p_update(p2p_handle_t hdl) {
             // --------------------
 
             case SIG_PKT_ONLINE_ACK:
-                compact_on_online_ack(s, hdr.seq, hdr.flags, payload, payload_len, &from);
+                compact_on_online_ack(inst, hdr.seq, hdr.flags, payload, payload_len, &from);
                 break;
             case SIG_PKT_SYNC0_ACK:
                 compact_on_sync0_ack(s, payload, payload_len, &from);
@@ -1048,7 +1140,7 @@ p2p_update(p2p_handle_t hdl) {
                 compact_on_server_sync0(s, payload, payload_len, &from);
                 break;
             case SIG_PKT_ALIVE_ACK:
-                compact_on_alive_ack(s, &from);
+                compact_on_alive_ack(inst, &from);
                 break;
             case SIG_PKT_SYNC:
                 compact_on_sync(s, hdr.seq, hdr.flags, payload, payload_len, &from);
@@ -1060,7 +1152,7 @@ p2p_update(p2p_handle_t hdl) {
                 compact_on_fin(s, payload, payload_len, &from);
                 break;
             case SIG_PKT_NAT_PROBE_ACK:
-                compact_on_nat_probe_ack(s, hdr.seq, payload, payload_len, &from);
+                compact_on_nat_probe_ack(inst, hdr.seq, payload, payload_len, &from);
                 break;
             case SIG_PKT_MSG_REQ:
                 compact_on_request(s, hdr.flags, payload, payload_len, &from);
@@ -1087,277 +1179,290 @@ p2p_update(p2p_handle_t hdl) {
      * 阶段 2：信令服务维护（主动拉取远端候选地址）
      * ======================================================================== */
 
-    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+    if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
 
         // 信令层维护（注册、等待、候选同步）+ MSG 超时重传
         // 注意：MSG 机制在所有非 INIT 状态下都需要处理超时重传
-        if (s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_ONLINE_ACK ||
-            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_SYNC0_ACK ||
-            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_WAIT_PEER ||
-            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_SYNCING ||
-            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
-            p2p_signal_compact_tick_recv(s);
+        if (inst->sig_ctx.compact.state == SIG_COMPACT_WAIT_ONLINE_ACK ||
+            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_WAIT_SYNC0_ACK ||
+            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_WAIT_PEER ||
+            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_SYNCING ||
+            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_READY) {
+            p2p_signal_compact_tick_recv(inst, now_ms);
         }
     }
-    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
 
-        p2p_signal_relay_tick_recv(s);
+        p2p_signal_relay_tick_recv(inst, now_ms);
     }
-    else { assert(s->inst->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
+    else { assert(inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB);
         
-        p2p_signal_pubsub_tick_recv(&s->inst->sig_pubsub_ctx, s);
+        p2p_signal_pubsub_tick_recv(&inst->sig_ctx.pubsub, s);
     }
 
     /* ========================================================================
-     * 阶段 3：TURN 定时维护（Refresh 续期、权限同步）
+     * 阶段 3：TURN 定时维护（Refresh 续期、权限同步）—实例级，不内于会话循环
      * ======================================================================== */
-
-    p2p_turn_tick(s, now_ms);
+    p2p_turn_tick(inst, now_ms);
 
     /* ========================================================================
-     * 阶段 4：NAT 层维护（打洞、保活）
+     * 阶段 3-9：遍历所有会话，逐个执行会话级 tick
      * ======================================================================== */
+    for (s = inst->sessions_head; s; s = s->next) {
 
-    if (s->nat.state != NAT_INIT) {
-        nat_tick(s, now_ms);
-    }
+        /* ========================================================================
+        * 阶段 4：NAT 层维护（打洞、保活）
+        * ======================================================================== */
 
-    /* ========================================================================
-     * 阶段 5：统一状态机（集中处理所有 P2P 连接状态转换）
-     * ======================================================================== */
-
-    // 转换：REGISTERING/ONLINE → PUNCHING（开始打洞）
-    if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
-        && (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
-
-        print("I:", LA_F("State: → PUNCHING", LA_F345, 345));
-        p2p_set_state(s, P2P_STATE_PUNCHING);
-    }
-
-    // NAT_CONNECTED 状态转换已由 nat 模块通过 p2p_connected() 同步触发
-    // + 同步转换保证了数据包处理总是在 on_connected 事件之后发生（数据层会话一致性契约）
-    // + 此处不再需要异步协同（NAT_CONNECTED → P2P_STATE_CONNECTED）
-
-    // NAT_RELAY 状态转换已由 nat 模块通过 p2p_connected() 同步触发
-    // relay 候选也需要通过 NAT 层 connect 握手，已统一处理
-
-    // 转换：PUNCHING → ERROR（NAT 打洞超时且无中继服务）
-    if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
-        && s->nat.state == NAT_CLOSED) {
-
-        print("E:", LA_F("State: → ERROR (punch timeout, no relay available)", LA_F344, 344));
-        p2p_set_state(s, P2P_STATE_ERROR);
-        // NAT_CLOSED 表示打洞失败且无信令中转服务，连接已不可恢复
-    }
-
-    // NAT 重新连接后恢复路径（NAT_RELAY → NAT_CONNECTED）
-    if (s->state == P2P_STATE_RELAY
-        && s->nat.state == NAT_CONNECTED) {
-        
-        // 标记中继路径为降级（但不移除，保留作为备份）
-        path_manager_set_path_state(s, PATH_IDX_SIGNALING, PATH_STATE_DEGRADED);
-        
-        // 重新选择最佳路径（PUNCH 应当优先）
-        int best_path = path_manager_select_best_path(s);
-        if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
-            p2p_set_active_path(s, best_path);
-            path_manager_switch_reset(s, now_ms);
-            print("I:", LA_F("State: RELAY → CONNECTED, path=PUNCH[%d]", LA_F342, 342), best_path);
-            p2p_set_state(s, P2P_STATE_CONNECTED);
-        } else {
-            print("W:", LA_F("RELAY recovery: NAT connected but no path available", LA_F441, 441));
+        if (s->nat.state != NAT_INIT) {
+            nat_tick(s, now_ms);
         }
-    }
 
-    // 转换：CONNECTED/RELAY → LOST（NAT 连接丢失）
-    // NAT_LOST 表示所有数据通道都断了（PUNCH/TURN/SIGNALING），等待恢复
-    if ((s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)
-        && s->nat.state == NAT_LOST) {
-        
-        // 标记当前活跃路径为失效
-        path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
-        
-        // 清除活跃路径
-        p2p_set_active_path(s, PATH_IDX_NONE);
-        
-        print("W:", LA_F("State: → LOST (all paths failed)", LA_F338, 338));
-        p2p_set_state(s, P2P_STATE_LOST);
-    }
+        /* ========================================================================
+        * 阶段 5：统一状态机（集中处理所有 P2P 连接状态转换）
+        * ======================================================================== */
 
-    // 转换：LOST → CONNECTED（NAT 连接恢复）
-    if (s->state == P2P_STATE_LOST
-        && (s->nat.state == NAT_CONNECTED || s->nat.state == NAT_RELAY)) {
-        
-        int best_path = path_manager_select_best_path(s);
-        if (best_path >= -1) {
-            // 状态机立即切换（不走防抖）
-            p2p_set_active_path(s, best_path);
-            path_manager_switch_reset(s, now_ms);
-            print("I:", LA_F("State: LOST → CONNECTED, path=PUNCH[%d]", LA_F341, 341), best_path);
-            p2p_set_state(s, P2P_STATE_CONNECTED);
-        } else {
-            // 无可用路径，保持 LOST 状态
-            print("W:", LA_F("LOST recovery: NAT connected but no path available", LA_F430, 430));
+        // 转换：REGISTERING/ONLINE → PUNCHING（开始打洞）
+        if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
+            && (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
+
+            print("I:", LA_F("State: → PUNCHING", LA_F345, 345));
+            p2p_set_state(s, P2P_STATE_PUNCHING);
         }
-    }
 
-    // 转换：CONNECTED/RELAY/LOST → CLOSED
-    // + NAT FIN 和信令 FIN 都归一化为 NAT_CLOSED，统一在此处理
-    if (s->state >= P2P_STATE_LOST
-        && s->nat.state == NAT_CLOSED) {
-        peer_disconnect(s);
-    }
+        // NAT_CONNECTED 状态转换已由 nat 模块通过 p2p_connected() 同步触发
+        // + 同步转换保证了数据包处理总是在 on_connected 事件之后发生（数据层会话一致性契约）
+        // + 此处不再需要异步协同（NAT_CONNECTED → P2P_STATE_CONNECTED）
 
-    /* ========================================================================
-     * 阶段 6：数据传输（应用层数据收发）
-     * ======================================================================== */
+        // NAT_RELAY 状态转换已由 nat 模块通过 p2p_connected() 同步触发
+        // relay 候选也需要通过 NAT 层 connect 握手，已统一处理
 
-    // 发送数据：数据流层 → 传输层 flush 写入
-    if (s->state > P2P_STATE_LOST) {
-        
-        // 如果使用高级传输层（DTLS、SCTP、PseudoTCP）
-        if (s->trans && s->trans->send_data) {
+        // 转换：PUNCHING → ERROR（NAT 打洞超时且无中继服务）
+        if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
+            && s->nat.state == NAT_CLOSED) {
 
-            // 传输层就绪检查：DTLS 握手完成前不 drain 数据，避免丢失
-            int ready = !s->trans->is_ready || s->trans->is_ready(s);
-            if (ready) {
-                // 由高级传输模块自行处理流的数据
-                n = ring_read(&s->stream.send_ring, buf, sizeof(buf));
-                if (n > 0) {
-                    int sent = s->trans->send_data(s, buf, n);
-                    if (sent > 0) {
-                        s->stream.pending_bytes -= n;
-                        s->stream.send_offset += n;
-                    } else {
-                        // send_data 失败，数据已从 ring 消费，记录丢失
-                        print("W:", LA_F("transport send_data failed, %d bytes dropped", LA_F416, 416), n);
+            print("E:", LA_F("State: → ERROR (punch timeout, no relay available)", LA_F344, 344));
+            p2p_set_state(s, P2P_STATE_ERROR);
+            // NAT_CLOSED 表示打洞失败且无信令中转服务，连接已不可恢复
+        }
+
+        // NAT 重新连接后恢复路径（NAT_RELAY → NAT_CONNECTED）
+        if (s->state == P2P_STATE_RELAY
+            && s->nat.state == NAT_CONNECTED) {
+            
+            // 标记中继路径为降级（但不移除，保留作为备份）
+            path_manager_set_path_state(s, PATH_IDX_SIGNALING, PATH_STATE_DEGRADED);
+            
+            // 重新选择最佳路径（PUNCH 应当优先）
+            int best_path = path_manager_select_best_path(s);
+            if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
+                p2p_set_active_path(s, best_path);
+                path_manager_switch_reset(s, now_ms);
+                print("I:", LA_F("State: RELAY → CONNECTED, path=PUNCH[%d]", LA_F342, 342), best_path);
+                p2p_set_state(s, P2P_STATE_CONNECTED);
+            } else {
+                print("W:", LA_F("RELAY recovery: NAT connected but no path available", LA_F441, 441));
+            }
+        }
+
+        // 转换：CONNECTED/RELAY → LOST（NAT 连接丢失）
+        // NAT_LOST 表示所有数据通道都断了（PUNCH/TURN/SIGNALING），等待恢复
+        if ((s->state == P2P_STATE_CONNECTED || s->state == P2P_STATE_RELAY)
+            && s->nat.state == NAT_LOST) {
+            
+            // 标记当前活跃路径为失效
+            path_manager_set_path_state(s, s->active_path, PATH_STATE_FAILED);
+            
+            // 清除活跃路径
+            p2p_set_active_path(s, PATH_IDX_NONE);
+            
+            print("W:", LA_F("State: → LOST (all paths failed)", LA_F338, 338));
+            p2p_set_state(s, P2P_STATE_LOST);
+        }
+
+        // 转换：LOST → CONNECTED（NAT 连接恢复）
+        if (s->state == P2P_STATE_LOST
+            && (s->nat.state == NAT_CONNECTED || s->nat.state == NAT_RELAY)) {
+            
+            int best_path = path_manager_select_best_path(s);
+            if (best_path >= -1) {
+                // 状态机立即切换（不走防抖）
+                p2p_set_active_path(s, best_path);
+                path_manager_switch_reset(s, now_ms);
+                print("I:", LA_F("State: LOST → CONNECTED, path=PUNCH[%d]", LA_F341, 341), best_path);
+                p2p_set_state(s, P2P_STATE_CONNECTED);
+            } else {
+                // 无可用路径，保持 LOST 状态
+                print("W:", LA_F("LOST recovery: NAT connected but no path available", LA_F430, 430));
+            }
+        }
+
+        // 转换：CONNECTED/RELAY/LOST → CLOSED
+        // + NAT FIN 和信令 FIN 都归一化为 NAT_CLOSED，统一在此处理
+        if (s->state >= P2P_STATE_LOST
+            && s->nat.state == NAT_CLOSED) {
+            peer_disconnect(s);
+        }
+
+        /* ========================================================================
+        * 阶段 6：数据传输（应用层数据收发）
+        * ======================================================================== */
+
+        // 发送数据：数据流层 → 传输层 flush 写入
+        if (s->state > P2P_STATE_LOST) {
+            
+            // 如果使用高级传输层（DTLS、SCTP、PseudoTCP）
+            if (s->trans && s->trans->send_data) {
+
+                // 传输层就绪检查：DTLS 握手完成前不 drain 数据，避免丢失
+                int ready = !s->trans->is_ready || s->trans->is_ready(s);
+                if (ready) {
+                    // 由高级传输模块自行处理流的数据
+                    n = ring_read(&s->stream.send_ring, buf, sizeof(buf));
+                    if (n > 0) {
+                        int sent = s->trans->send_data(s, buf, n);
+                        if (sent > 0) {
+                            s->stream.pending_bytes -= n;
+                            s->stream.send_offset += n;
+                        } else {
+                            // send_data 失败，数据已从 ring 消费，记录丢失
+                            print("W:", LA_F("transport send_data failed, %d bytes dropped", LA_F416, 416), n);
+                        }
                     }
                 }
             }
+            // 使用基础 reliable 层
+            else stream_flush_to_reliable(s);
         }
-        // 使用基础 reliable 层
-        else stream_flush_to_reliable(s);
-    }
 
-    // 如果使用了高级传输层（如 DTLS/SCTP/PseudoTCP）
-    if (s->trans) {
+        // 如果使用了高级传输层（如 DTLS/SCTP/PseudoTCP）
+        if (s->trans) {
 
-        // 传输模块周期 tick（重传，拥塞控制等）
-        if (s->trans->tick) {
-            if (s->state > P2P_STATE_LOST) {
-                s->trans->tick(s);
+            // 传输模块周期 tick（重传，拥塞控制等）
+            if (s->trans->tick) {
+                if (s->state > P2P_STATE_LOST) {
+                    s->trans->tick(s);
+                }
+            }
+
+            // 将高级传输层统计同步到路径管理器（Group 2: 数据层 RTT + 丢包率）
+            if (s->trans->get_stats && s->active_path >= -1) {
+                uint32_t rtt_ms = 0;
+                float loss_rate = 0.0f;
+                
+                if (s->trans->get_stats(s, &rtt_ms, &loss_rate) == 0) {
+
+                    if (rtt_ms > 0)
+                        path_manager_on_data_rtt(s, s->active_path, rtt_ms);
+
+                    // 上报数据层丢包率（之前被忽略，导致路径质量评估缺少数据层信息）
+                    if (loss_rate > 0.0f)
+                        path_manager_on_data_loss_rate(s, s->active_path, loss_rate);
+                }
             }
         }
+        // reliable 周期 tick：发送/重传数据包 + 发 ACK
+        // 注：仅在无高级传输层时调用。PseudoTCP 虽然 on_packet==NULL（复用 reliable 收包），
+        //     但它有自己的 tick（cwnd 控制），不能再调 reliable_tick，否则双重发送且绕过拥塞控制。
+        else reliable_tick(s);
 
-        // 将高级传输层统计同步到路径管理器（Group 2: 数据层 RTT + 丢包率）
-        if (s->trans->get_stats && s->active_path >= -1) {
-            uint32_t rtt_ms = 0;
-            float loss_rate = 0.0f;
+        // 接收数据：传输层 → 数据流层
+        // 注：DTLS/SCTP 直接写入 stream.recv_ring，不需要此步骤
+        //     只有基础 reliable 层需要从 reliable 缓冲区读取
+        if (!s->trans || !s->trans->on_packet) {
+            stream_feed_from_reliable(s);
+        }
+
+        // 加密层周期 tick（DTLS 握手推进、重传定时器）
+        if (s->dtls && s->dtls->tick) {
+            s->dtls->tick(s);
+        }
+
+        /* ========================================================================
+        * 阶段 7：路径管理器维护（健康检查与路径选择）
+        * ======================================================================== */
+
+        // LOST 状态下无活跃路径（active_path = -2），恢复由 NAT 层驱动，无需路径管理器维护
+        if (s->state > P2P_STATE_LOST) { assert(s->active_path >= PATH_IDX_SIGNALING && s->path_type != P2P_PATH_NONE);
+
+            // 路径健康检查（检测超时、失效路径）
+            path_manager_tick(s, now_ms);
             
-            if (s->trans->get_stats(s, &rtt_ms, &loss_rate) == 0) {
+            // 周期性路径重选（检查是否有更优路径）
+            if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > PATH_RESELECT_INTERVAL_MS) { 
+                s->path_mgr.last_reselect_ms = now_ms;
 
-                if (rtt_ms > 0)
-                    path_manager_on_data_rtt(s, s->active_path, rtt_ms);
+                int best_path = path_manager_select_best_path(s);        
+                if (best_path >= PATH_IDX_SIGNALING && best_path != s->active_path) { 
+                    
+                    // 如果找到更优路径
+                    path_stats_t *new_stats = p2p_get_path_stats(s, best_path);
+                    path_stats_t *old_stats = p2p_get_path_stats(s, s->active_path);
+                    
+                    // 判断是否值得切换（性能提升显著）
+                    // 根据当前活跃路径类型查抽切换阈值
+                    const path_threshold_config_t *thr = &s->path_mgr.thresholds[s->path_type];
+                    if ((new_stats->rtt_ms < old_stats->rtt_ms - thr->rtt_threshold_ms) ||  // RTT 显著改善
+                        (old_stats->loss_rate > thr->loss_threshold) ||                     // 当前路径丢包严重
+                        (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST
+                        && new_stats->cost_score < old_stats->cost_score)                  // 直连优先模式：更低成本
+                        ) {
 
-                // 上报数据层丢包率（之前被忽略，导致路径质量评估缺少数据层信息）
-                if (loss_rate > 0.0f)
-                    path_manager_on_data_loss_rate(s, s->active_path, loss_rate);
+                        /* 执行路径切换（含防抖、历史记录） */
+                        int ret = path_manager_switch_path(s, best_path, "periodic reselect", now_ms);
+                        if (ret == 0) {
+                            print("I:", LA_F("Path switched to better route (idx=%d)", LA_F288, 288), best_path);
+                        } else if (ret > 0) {
+                            print("V:", LA_F("Path switch debounced, waiting for stability", LA_F287, 287));
+                        }
+                    }
+                }
+                // 如果没有可用路径，那当前路径肯定是最后一个路径，且状态应该是 PATH_STATE_FAILED
+                else assert(best_path == s->active_path || p2p_get_path_stats(s, s->active_path)->state == PATH_STATE_FAILED);
             }
-        }
-    }
-    // reliable 周期 tick：发送/重传数据包 + 发 ACK
-    // 注：仅在无高级传输层时调用。PseudoTCP 虽然 on_packet==NULL（复用 reliable 收包），
-    //     但它有自己的 tick（cwnd 控制），不能再调 reliable_tick，否则双重发送且绕过拥塞控制。
-    else reliable_tick(s);
+        } else assert(s->state != P2P_STATE_LOST || (s->active_path < PATH_IDX_SIGNALING && s->path_type == P2P_PATH_NONE));
 
-    // 接收数据：传输层 → 数据流层
-    // 注：DTLS/SCTP 直接写入 stream.recv_ring，不需要此步骤
-    //     只有基础 reliable 层需要从 reliable 缓冲区读取
-    if (!s->trans || !s->trans->on_packet) {
-        stream_feed_from_reliable(s);
-    }
+        s->last_update = now_ms;
 
-    // 加密层周期 tick（DTLS 握手推进、重传定时器）
-    if (s->dtls && s->dtls->tick) {
-        s->dtls->tick(s);
-    }
-    
+    } // for (s = inst->sessions_head; s; s = s->next)
+
     /* ========================================================================
-     * 阶段 7：信令输出（主动推送本地候选地址）
-     * ======================================================================== */
+    * 信令路径检测
+    * ======================================================================== */
 
-    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT) {
+    path_manager_signaling_tick(inst, now_ms);
+
+    /* ========================================================================
+    * 阶段 8：信令输出
+    * ======================================================================== */
+
+    if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
 
         // ICE 状态时发送候选，READY 状态发送新候选（如果有）
-        if (s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_SYNCING ||
-            s->inst->sig_compact_ctx.state == SIGNAL_COMPACT_READY) {
-            p2p_signal_compact_tick_send(s);
+        if (inst->sig_ctx.compact.state == SIG_COMPACT_SESS_SYNCING ||
+            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_READY) {
+            p2p_signal_compact_tick_send(inst, now_ms);
         }
     }
-    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
 
         // Trickle ICE 增量发送候选（含断点续传）
-        p2p_signal_relay_tick_send(s);
+        p2p_signal_relay_tick_send(inst, now_ms);
     }
-    else { assert(s->inst->signaling_mode == P2P_SIGNALING_MODE_PUBSUB);
+    else { assert(inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB);
 
         // 发布 offer（PUB 角色）
-        p2p_signal_pubsub_tick_send(&s->inst->sig_pubsub_ctx, s);
+        p2p_signal_pubsub_tick_send(&inst->sig_ctx.pubsub, s);
     }
 
     /* ========================================================================
-     * 阶段 8：路径管理器维护（健康检查与路径选择）
-     * ======================================================================== */
+    * 阶段 9：NAT 类型检测（后台定期运行 STUN 探测）
+    * ======================================================================== */
 
-    // LOST 状态下无活跃路径（active_path = -2），恢复由 NAT 层驱动，无需路径管理器维护
-    if (s->state > P2P_STATE_LOST) { assert(s->active_path >= PATH_IDX_SIGNALING && s->path_type != P2P_PATH_NONE);
+    if (inst->cfg.stun_server) p2p_stun_nat_detect_tick(inst, now_ms);
+    if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
+        p2p_signal_compact_nat_detect_tick(inst, now_ms);
 
-        // 路径健康检查（检测超时、失效路径）
-        path_manager_tick(s, now_ms);
-        
-        // 周期性路径重选（检查是否有更优路径）
-        if (tick_diff(now_ms, s->path_mgr.last_reselect_ms) > PATH_RESELECT_INTERVAL_MS) { 
-            s->path_mgr.last_reselect_ms = now_ms;
-
-            int best_path = path_manager_select_best_path(s);        
-            if (best_path >= PATH_IDX_SIGNALING && best_path != s->active_path) { 
-                
-                // 如果找到更优路径
-                path_stats_t *new_stats = p2p_get_path_stats(s, best_path);
-                path_stats_t *old_stats = p2p_get_path_stats(s, s->active_path);
-                
-                // 判断是否值得切换（性能提升显著）
-                // 根据当前活跃路径类型查抽切换阈值
-                const path_threshold_config_t *thr = &s->path_mgr.thresholds[s->path_type];
-                if ((new_stats->rtt_ms < old_stats->rtt_ms - thr->rtt_threshold_ms) ||  // RTT 显著改善
-                    (old_stats->loss_rate > thr->loss_threshold) ||                     // 当前路径丢包严重
-                    (s->path_mgr.strategy == P2P_PATH_STRATEGY_CONNECTION_FIRST
-                     && new_stats->cost_score < old_stats->cost_score)                  // 直连优先模式：更低成本
-                    ) {
-
-                    /* 执行路径切换（含防抖、历史记录） */
-                    int ret = path_manager_switch_path(s, best_path, "periodic reselect", now_ms);
-                    if (ret == 0) {
-                        print("I:", LA_F("Path switched to better route (idx=%d)", LA_F288, 288), best_path);
-                    } else if (ret > 0) {
-                        print("V:", LA_F("Path switch debounced, waiting for stability", LA_F287, 287));
-                    }
-                }
-            }
-            // 如果没有可用路径，那当前路径肯定是最后一个路径，且状态应该是 PATH_STATE_FAILED
-            else assert(best_path == s->active_path || p2p_get_path_stats(s, s->active_path)->state == PATH_STATE_FAILED);
-        }
-    } else assert(s->state != P2P_STATE_LOST || (s->active_path < PATH_IDX_SIGNALING && s->path_type == P2P_PATH_NONE));
-    
-    /* ========================================================================
-     * 阶段 9：NAT 类型检测（后台定期运行 STUN 探测）
-     * ======================================================================== */
-
-    if (s->inst->cfg.stun_server) p2p_stun_nat_detect_tick(s, now_ms);
-    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
-        p2p_signal_compact_nat_detect_tick(s);
-
-    s->last_update = now_ms;
     return 0;
 }
 
@@ -1383,7 +1488,7 @@ p2p_probe(p2p_session_t session) {
     if (s->state == P2P_STATE_CONNECTED) return P2P_PROBE_STATE_CONNECTED;
 
     // 直接返回统一状态
-    return s->probe_ctx.state;
+    return s->probe.state;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1440,9 +1545,9 @@ p2p_request(p2p_session_t session, uint8_t msg, const void *data, int len) {
 
     LOCK(s);
     int ret;
-    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+    if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
         ret = p2p_signal_compact_request(s, msg, data, len);
-    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+    else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
         ret = p2p_signal_relay_request(s, msg, data, len);
     else
         ret = -1;
@@ -1458,9 +1563,9 @@ p2p_response(p2p_session_t session, uint8_t code, const void *data, int len) {
 
     LOCK(s);
     int ret;
-    if (s->inst->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
+    if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
         ret = p2p_signal_compact_response(s, code, data, len);
-    else if (s->inst->signaling_mode == P2P_SIGNALING_MODE_RELAY)
+    else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
         ret = p2p_signal_relay_response(s, code, data, len);
     else
         ret = -1;

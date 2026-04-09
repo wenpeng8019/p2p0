@@ -1,11 +1,11 @@
 /*
- * RELAY 模式信令（TCP，服务器中转 ICE 候选）
+ * RELAY 模式信令（TCP，服务器中转候选）
  *
  * ============================================================================
  * 协议概述
  * ============================================================================
  *
- * 实现基于 TCP 的信令协议，通过服务器中转交换 ICE 候选信息。
+ * 实现基于 TCP 的信令协议，通过服务器中转交换候选信息。
  *
  * 与 COMPACT 模式的核心区别：
  *
@@ -143,22 +143,6 @@ struct p2p_session;
 #define P2P_RELAY_MAX_CANDS_PER_PACKET      10          /* 每包最大候选数 */
 
 /* ============================================================================
- * RELAY 信令状态
- * ============================================================================ */
-
-typedef enum {
-    SIGNAL_RELAY_INIT = 0,                              /* 未启动 */
-    SIGNAL_RELAY_ERROR,                                 /* 错误状态 */
-    SIGNAL_RELAY_CONNECTING,                            /* TCP 连接建立中 */
-    SIGNAL_RELAY_WAIT_ONLINE_ACK,                       /* 等待 ONLINE_ACK */
-    SIGNAL_RELAY_ONLINE,                                /* 已上线 */
-    SIGNAL_RELAY_WAIT_SYNC0_ACK,                        /* 等待 SYNC0_ACK */
-    SIGNAL_RELAY_WAIT_PEER,                             /* 已分配会话，等待对端上线 */
-    SIGNAL_RELAY_SYNCING,                               /* 候选同步中 */
-    SIGNAL_RELAY_READY                                  /* 交换完成，对端候选接收完成 */
-} relay_state_t;
-
-/* ============================================================================
  * TCP 接收状态机
  * ============================================================================ */
 
@@ -179,41 +163,34 @@ typedef struct p2p_send_chunk {
 } p2p_send_chunk_t;
 
 /* ============================================================================
- * RELAY 信令上下文
+ * RELAY 实例上下文（instance 级别：与服务器的 TCP 连接）
  * ============================================================================ */
+
+typedef enum {
+    SIG_RELAY_INIT = 0,                                 /* 未启动 */
+    SIG_RELAY_ERROR,                                    /* 错误状态 */
+    SIG_RELAY_CONNECTING,                               /* TCP 连接建立中 */
+    SIG_RELAY_WAIT_ONLINE_ACK,                          /* 等待 ONLINE_ACK */
+    SIG_RELAY_ONLINE,                                   /* 已上线 */
+} p2p_relay_st;
 
 typedef struct {
     /* 基础状态 */
-    relay_state_t       state;                          /* 信令状态 */
+    p2p_relay_st        state;                          /* 信令状态 */
     sock_t              sockfd;                         /* TCP socket */
     struct sockaddr_in  server_addr;                    /* 服务器地址 */
     uint64_t            last_send_time;                 /* 上次发送时间 */
     uint64_t            last_recv_time;                 /* 上次接收时间 */
-    uint64_t            heartbeat_time;                 /* 上次心跳时间 */
+    int                 sig_sessions;                   /* 正在使用信令服务器的会话（sync0/sync），该值不为 0 则无需 keep-alive */
 
     /* 身份标识 */
-    uint32_t            instance_id;                    /* 本次 online() 生成的实例 ID（参考 RTP SSRC）*/
     char                local_peer_id[P2P_PEER_ID_MAX]; /* 本端名称 */
-    char                remote_peer_id[P2P_PEER_ID_MAX];/* 目标名称 */
-    bool                connected;                      /* 是否存在 connect 意图/会话（用于幂等和异步触发） */
-
-    /* 会话管理 */
-    uint32_t            session_id;                     /* 会话 ID（0=未分配）*/
-    bool                peer_online;                    /* 对端是否在线 */
+    uint32_t            instance_id;                    /* 本次 online() 生成的实例 ID（参考 RTP SSRC）*/
 
     /* 服务器能力（ONLINE_ACK 返回）*/
+    uint8_t             candidate_sync_max;             /* 服务器允许的单包最大候选数（0=使用本地默认）*/
     bool                feature_relay;                  /* 支持数据包中继 */
     bool                feature_msg;                    /* 支持 RPC 机制 */
-    uint8_t             candidate_sync_max;             /* 服务器允许的单包最大候选数（0=使用本地默认）*/
-
-    /* Trickle ICE 控制 */
-    uint16_t            next_candidate_index;           /* 下一个要发送的候选索引 */
-    bool                local_candidates_fin;           /* FIN 已发送（本端候选上传完成）*/
-    bool                awaiting_sync_ack;              /* 等待 SYNC_ACK（流控门控）*/
-    bool                local_delivery_confirmed;       /* 服务器确认所有候选已转发到对端（收到 ACK=0）*/
-    uint8_t             last_sent_cand_count;           /* 上批 SYNC 发送的候选数（用于 ACK 对账）*/
-    uint64_t            trickle_last_time;              /* 上次 trickle 发送时间（用于攒批窗口控制）*/
-    uint8_t             trickle_batch_count;            /* 当前批次累积的候选数（实现攒批）*/
 
     /* TCP 接收状态机 */
     relay_recv_state_t  recv_state;                     /* 接收状态 */
@@ -221,27 +198,52 @@ typedef struct {
     p2p_relay_hdr_t     hdr;                            /* 解析后的包头 */
     uint8_t             payload[P2P_MAX_PAYLOAD];       /* 负载缓冲区（固定 1196 字节）*/
     uint16_t            offset;                         /* 当前读取偏移 */
-    
+
     /* 发送队列 */
     p2p_send_chunk_t   *send_queue_head;                /* 发送队列头（也是正在发送的chunk）*/
-    p2p_send_chunk_t   *send_queue_tail;                /* 发送队列尾 */
-    int                 send_offset;                    /* 当前 chunk 的已发送偏移 */
+    p2p_send_chunk_t   *send_queue_rear;                /* 发送队列尾 */
+    int                send_queue_len;                  /* 发送队列长度（chunk 数）*/
+    int                send_offset;                    /* 当前 chunk 的已发送偏移 */
 
     /* 发送 chunk 回收池（动态内存 + 链表）*/
-    p2p_send_chunk_t   *chunk_free_list;                /* chunk 回收链表头 */
-    int                 chunk_free_count;               /* chunk 回收数量 */
+    p2p_send_chunk_t   *chunk_recycled;                 /* chunk 回收链表头 */
+
+} p2p_relay_ctx_t;
+
+/* ============================================================================
+ * RELAY 会话上下文（session 级别：与对端的关系）
+ * ============================================================================ */
+
+typedef enum {
+    SIG_RELAY_SESS_SUSPENDED = 0,                       /* 挂起的 session，连接过程超时挂起。报错逻辑统一在 p2p_compact_ctx_t 中处理 */
+    SIG_RELAY_SESS_WAIT_SYNCABLE,                       /* 执行 connect() 创建了 session，但信令服务还未完成在线登录；或等待 stun 完成候选地址收集 */
+    SIG_RELAY_SESS_WAIT_SYNC0_ACK,                      /* 已发送 SYNC0，等待 SYNC0_ACK */
+    SIG_RELAY_SESS_WAIT_PEER,                           /* 已收到 SYNC0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
+    SIG_RELAY_SESS_SYNCING,                             /* 收到 PEER SYNC0 或 SYNC0_ACK online=1，向对方同步后续候选队列和 FIN */
+    SIG_RELAY_SESS_READY                                /* 已完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
+} p2p_relay_sess_st;
+
+typedef struct {
+    p2p_relay_sess_st   state;                          /* 会话状态 */
+
+    char                remote_peer_id[P2P_PEER_ID_MAX];/* 目标名称 */
+
+    /* 候选同步管理 */
+    uint16_t            candidate_syncing_base;         /* 下一个要同步发送的候选索引。该值大于 session 的 local_cand_cnt，则说明已经 fin */
+    uint8_t             candidate_synced_count;         /* 已确认同步完成的候选数量，该值小于 candidate_syncing_base 说明上批同步的候选还未确认 */
+    uint64_t            trickle_last_time;              /* 上次 trickle 发送时间（用于攒批窗口控制, 0 表示还未进入 trickle 阶段）*/
 
     /* 数据中继流控 */
-    bool                awaiting_data_ready;            /* 等待 DATA/ACK/CRYPTO 转发确认（READY）*/
+    bool                awaiting_relay_ready;            /* 等待 DATA/ACK/CRYPTO 转发确认（READY）*/
 
-    /* MSG RPC 状态 */
+    /* MSG RPC 上下文管理 */
     uint16_t            rpc_last_sid;                   /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
-    uint8_t             rpc_req_state;                  /* A端: 0=空闲 1=等待 RESP */
-    uint16_t            rpc_req_sid;                    /* A端: 当前挂起的 RPC 序列号（0=无挂起）*/
-    uint8_t             rpc_req_msg;                    /* A端: 挂起请求的消息 ID */
-    uint16_t            rpc_resp_sid;                   /* B端: 待回应的 RPC 序列号（0=无）*/
+    uint8_t             req_state;                      /* A端: 0=空闲 1=等待 RESP */
+    uint16_t            req_sid;                        /* A端: 当前挂起的 RPC 序列号（0=无挂起）*/
+    uint8_t             req_msg;                        /* A端: 挂起请求的消息 ID */
+    uint16_t            resp_sid;                       /* B端: 待回应的 RPC 序列号（0=无）*/
 
-} p2p_signal_relay_ctx_t;
+} p2p_relay_session_t;
 
 /* ============================================================================
  * RELAY 信令 API
@@ -250,7 +252,37 @@ typedef struct {
 /*
  * 初始化 RELAY 信令上下文
  */
-void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx);
+void p2p_signal_relay_init(p2p_relay_ctx_t *ctx);
+
+/*
+ * 信令接收维护（拉取阶段）
+ *
+ * 处理 TCP 接收和协议解析：
+ *   - 读取 TCP 数据
+ *   - 状态机解包（RECV_HEADER → RECV_PAYLOAD）
+ *   - 分发处理各类协议消息
+ *
+ * 在 p2p_update() 的阶段 2（信令拉取）中调用。
+ *
+ * @param s   P2P 会话
+ */
+void p2p_signal_relay_tick_recv(struct p2p_instance *inst, uint64_t now);
+
+/*
+ * 信令发送维护（推送阶段）
+ *
+ * 处理信令发送和重传：
+ *   - 心跳保活（ALIVE）
+ *   - SYNC0 重传
+ *   - 上传候选（SYNC）
+ *
+ * 在 p2p_update() 的阶段 7（信令推送）中调用。
+ *
+ * @param s   P2P 会话
+ */
+void p2p_signal_relay_tick_send(struct p2p_instance *inst, uint64_t now);
+
+//----------------------------------------------------------------------------
 
 /*
  * 客户端上线（阶段1：建立与服务器的 TCP 连接）
@@ -263,7 +295,7 @@ void p2p_signal_relay_init(p2p_signal_relay_ctx_t *ctx);
  * @param server        服务器地址
  * @return              E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_relay_online(struct p2p_session *s, const char *local_peer_id,
+ret_t p2p_signal_relay_online(struct p2p_instance *inst, const char *local_peer_id,
                               const struct sockaddr_in *server);
 
 /*
@@ -275,8 +307,9 @@ ret_t p2p_signal_relay_online(struct p2p_session *s, const char *local_peer_id,
  * @param s   P2P 会话
  * @return    E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_relay_offline(struct p2p_session *s);
+ret_t p2p_signal_relay_offline(struct p2p_instance *inst);
 
+//-----------------------------------------------------------------------------
 
 /*
  * 建立与对端的会话（阶段2：发送 SYNC0 请求）
@@ -315,8 +348,8 @@ void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
  * 此函数作为 signaling_relay_fn 回调，由 p2p_send_packet 调用。
  * 格式：[type(1)][size(2)][session_id(8)][原始 payload]
  *
- * 流控：发送后设置 awaiting_data_ready，收到 STATUS(READY) 后清除。
- *       如果 awaiting_data_ready 为 true，返回 E_BUSY。
+ * 流控：发送后设置 awaiting_relay_ready，收到 STATUS(READY) 后清除。
+ *       如果 awaiting_relay_ready 为 true，返回 E_BUSY。
  *
  * @param s           P2P 会话
  * @param type        包类型（P2P_PKT_DATA / P2P_PKT_ACK / P2P_PKT_CRYPTO）
@@ -326,9 +359,9 @@ void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
  * @param payload_len 负载长度
  * @return            E_NONE=成功，E_BUSY=流控等待，其他=错误码
  */
-ret_t p2p_signal_relay_data(struct p2p_session *s,
-                            uint8_t type, uint8_t flags, uint16_t seq,
-                            const void *payload, uint16_t payload_len);
+ret_t p2p_signal_relay_packet(struct p2p_session *s,
+                              uint8_t type, uint8_t flags, uint16_t seq,
+                              const void *payload, uint16_t payload_len);
 
 /*
  * 通过 RELAY 服务器向对端发起 RPC 请求
@@ -354,35 +387,6 @@ ret_t p2p_signal_relay_request(struct p2p_session *s,
 ret_t p2p_signal_relay_response(struct p2p_session *s,
                                 uint8_t code, const void *data, int len);
 
-//----------------------------------------------------------------------------
-
-/*
- * 信令接收维护（拉取阶段）
- *
- * 处理 TCP 接收和协议解析：
- *   - 读取 TCP 数据
- *   - 状态机解包（RECV_HEADER → RECV_PAYLOAD）
- *   - 分发处理各类协议消息
- *
- * 在 p2p_update() 的阶段 2（信令拉取）中调用。
- *
- * @param s   P2P 会话
- */
-void p2p_signal_relay_tick_recv(struct p2p_session *s);
-
-/*
- * 信令发送维护（推送阶段）
- *
- * 处理信令发送和重传：
- *   - 心跳保活（ALIVE）
- *   - SYNC0 重传
- *   - 上传候选（SYNC）
- *
- * 在 p2p_update() 的阶段 7（信令推送）中调用。
- *
- * @param s   P2P 会话
- */
-void p2p_signal_relay_tick_send(struct p2p_session *s);
 
 ///////////////////////////////////////////////////////////////////////////////
 #pragma clang diagnostic pop

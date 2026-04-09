@@ -35,7 +35,7 @@
  *   目标：验证 MSG_REQ 被转发给 B 端
  *   方法：配对后 A 发送 MSG_REQ，B 等待接收
  *   预期：
- *     - B 收到 MSG_REQ(flags=SIG_MSG_FLAG_RELAY)
+ *     - B 收到 MSG_REQ(flags=SIG_FLAG_RELAY)
  *     - 包含正确的 session_id、sid、msg、data
  *
  * 测试 3: msg_echo_response
@@ -710,7 +710,7 @@ static void test_msg_req_forwarded(void) {
     }
     
     // 验证 flags 含 RELAY 标志
-    if (!(relay_req.flags & SIG_MSG_FLAG_RELAY)) {
+    if (!(relay_req.flags & SIG_FLAG_RELAY)) {
         TEST_FAIL(TEST_NAME, "MSG_REQ relay missing RELAY flag");
         return;
     }

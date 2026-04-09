@@ -5,9 +5,9 @@
  * 测试目标
  * ============================================================================
  * 验证 p2p_server 对 COMPACT 协议中继和 NAT 探测功能的处理逻辑：
- * - DATA + P2P_RELAY_FLAG_SESSION: 数据中继转发（P2P 打洞失败后的降级方案）
- * - ACK + P2P_RELAY_FLAG_SESSION: 中继 ACK 包转发
- * - CRYPTO + P2P_RELAY_FLAG_SESSION: DTLS 加密包转发
+ * - DATA + P2P_FLAG_SESSION: 数据中继转发（P2P 打洞失败后的降级方案）
+ * - ACK + P2P_FLAG_SESSION: 中继 ACK 包转发
+ * - CRYPTO + P2P_FLAG_SESSION: DTLS 加密包转发
  * - NAT_PROBE: NAT 类型探测（返回映射地址）
  *
  * ============================================================================
@@ -228,7 +228,7 @@ static int build_relay_data(uint8_t *buf, int buf_size,
     if (buf_size < 4 + 4 + data_len) return -1;
     
     buf[0] = P2P_PKT_DATA;
-    buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
+    buf[1] = P2P_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -252,7 +252,7 @@ static int build_relay_ack(uint8_t *buf, int buf_size,
     if (buf_size < 4 + 4) return -1;
     
     buf[0] = P2P_PKT_ACK;
-    buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
+    buf[1] = P2P_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -272,7 +272,7 @@ static int build_relay_crypto(uint8_t *buf, int buf_size,
     if (buf_size < 4 + 4 + data_len) return -1;
     
     buf[0] = P2P_PKT_CRYPTO;
-    buf[1] = P2P_RELAY_FLAG_SESSION;  // flags: 携带 session_id
+    buf[1] = P2P_FLAG_SESSION;  // flags: 携带 session_id
     buf[2] = (seq >> 8) & 0xFF;
     buf[3] = seq & 0xFF;
     
@@ -333,7 +333,7 @@ typedef struct {
     int data_len;
 } relay_packet_t;
 
-// 解析中继包 (DATA/ACK/CRYPTO + P2P_RELAY_FLAG_SESSION)
+// 解析中继包 (DATA/ACK/CRYPTO + P2P_FLAG_SESSION)
 static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt) {
     memset(pkt, 0, sizeof(*pkt));
     
@@ -343,7 +343,7 @@ static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt)
     uint8_t type = buf[0];
     uint8_t flags = buf[1];
     if ((type != P2P_PKT_DATA && type != P2P_PKT_ACK && type != P2P_PKT_CRYPTO) ||
-        !(flags & P2P_RELAY_FLAG_SESSION)) return;
+        !(flags & P2P_FLAG_SESSION)) return;
     
     pkt->received = 1;
     pkt->type = type;
@@ -455,9 +455,9 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt_out) {
                               (struct sockaddr*)&from, &from_len);
         
         if (n >= 8 && (
-                (recv_buf[0] == P2P_PKT_DATA && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)) ||
-                (recv_buf[0] == P2P_PKT_ACK && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)) ||
-                (recv_buf[0] == P2P_PKT_CRYPTO && (recv_buf[1] & P2P_RELAY_FLAG_SESSION)))) {
+                (recv_buf[0] == P2P_PKT_DATA && (recv_buf[1] & P2P_FLAG_SESSION)) ||
+                (recv_buf[0] == P2P_PKT_ACK && (recv_buf[1] & P2P_FLAG_SESSION)) ||
+                (recv_buf[0] == P2P_PKT_CRYPTO && (recv_buf[1] & P2P_FLAG_SESSION)))) {
             if (pkt_out) {
                 parse_relay_packet(recv_buf, (int)n, pkt_out);
             }
@@ -867,7 +867,7 @@ static void test_relay_data_bad_payload(void) {
     // 发送 payload 过短的 DATA+SESSION 包
     uint8_t bad_pkt[16];
     bad_pkt[0] = P2P_PKT_DATA;
-    bad_pkt[1] = P2P_RELAY_FLAG_SESSION;
+    bad_pkt[1] = P2P_FLAG_SESSION;
     bad_pkt[2] = 0;
     bad_pkt[3] = 0;
     // 只放 4 字节头 + 几字节（不够 session_id 的 8 字节）

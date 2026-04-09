@@ -5,7 +5,7 @@
  * 测试目标
  * ============================================================================
  * 验证 p2p_server 对 RELAY 协议 DATA 中继转发的处理逻辑：
- * - P2P_RLY_DATA: 数据包转发（内层 P2P hdr 区分 DATA/ACK/CRYPTO）
+ * - P2P_RLY_PACKET: 数据包转发（内层 P2P hdr 区分 DATA/ACK/CRYPTO）
  * - STATUS(READY): 流控确认
  *
  * ============================================================================
@@ -288,7 +288,7 @@ static int build_relay_data(uint8_t *buf, int buf_size, uint32_t session_id,
     uint16_t payload_len = 4 + 4 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_DATA;
+    buf[0] = P2P_RLY_PACKET;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -318,7 +318,7 @@ static int build_relay_ack(uint8_t *buf, int buf_size, uint32_t session_id,
     uint16_t payload_len = 4 + 4 + 2 + 4;  // session_id + P2P_hdr + ack_seq + sack
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_DATA;
+    buf[0] = P2P_RLY_PACKET;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -353,7 +353,7 @@ static int build_relay_crypto(uint8_t *buf, int buf_size, uint32_t session_id,
     uint16_t payload_len = 4 + 4 + crypto_len;
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_DATA;
+    buf[0] = P2P_RLY_PACKET;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -397,7 +397,7 @@ typedef struct {
 
 typedef struct {
     int received;
-    uint8_t type;           // P2P_RLY_DATA (all relay data uses this)
+    uint8_t type;           // P2P_RLY_PACKET (all relay data uses this)
     uint32_t session_id;
     // For DATA/CRYPTO:
     uint8_t data[1024];
@@ -477,7 +477,7 @@ static int wait_status(sock_t sock, status_t *status) {
             return 0;
         }
         
-        if (type == P2P_RLY_STATUS && payload_len >= P2P_RLY_STATUS_PSZ) {
+        if (type == P2P_RLY_STATUS && payload_len >= P2P_RLY_STATUS_PSZ(0, 0)) {
             status->received = 1;
             status->req_type = recv_buf[3];
             status->status_code = recv_buf[4];
@@ -499,7 +499,7 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt) {
             return 0;
         }
         
-        if (type == P2P_RLY_DATA && payload_len >= 8) {
+        if (type == P2P_RLY_PACKET && payload_len >= 8) {
             // All relay data: [session_id(4)][P2P_hdr(4)][data(N)]
             pkt->received = 1;
             pkt->type = type;
@@ -640,7 +640,7 @@ static void test_relay_data_forwarded(void) {
     }
     
     // 验证数据
-    if (recv_pkt.type != P2P_RLY_DATA) {
+    if (recv_pkt.type != P2P_RLY_PACKET) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "wrong packet type");
@@ -721,7 +721,7 @@ static void test_relay_ack_forwarded(void) {
         return;
     }
     
-    if (recv_pkt.type != P2P_RLY_DATA) {
+    if (recv_pkt.type != P2P_RLY_PACKET) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "wrong packet type");
@@ -791,7 +791,7 @@ static void test_relay_crypto_forwarded(void) {
         return;
     }
     
-    if (recv_pkt.type != P2P_RLY_DATA) {
+    if (recv_pkt.type != P2P_RLY_PACKET) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "wrong packet type");
@@ -999,7 +999,7 @@ static void test_relay_data_bad_payload(void) {
     
     // 发送畸形 DATA 包（payload 过短）
     uint8_t bad_pkt[16];
-    bad_pkt[0] = P2P_RLY_DATA;
+    bad_pkt[0] = P2P_RLY_PACKET;
     bad_pkt[1] = 0;
     bad_pkt[2] = 4;  // payload_len = 4（应为 12+）
     memset(bad_pkt + 3, 0, 4);

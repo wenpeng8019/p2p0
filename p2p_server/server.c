@@ -567,7 +567,7 @@ static void retry_relay_rpc_pending(uint64_t now) {
         uint16_t sid = s->rpc_pending_sid;
         s->rpc_pending_sid = 0;
 
-        print("W:", "RELAY RPC timeout: sid=%u (ses_id=%" PRIu32 ")\n", sid, s->base.session_id);
+        print("W:", "RELAY RPC timeout: sid=%u (ses_id=%u)\n", sid, s->base.session_id);
         relay_session_send_rpc_error(s, sid, P2P_MSG_ERR_TIMEOUT);
 
         if (!g_relay_rpc_pending_head) return;
@@ -688,19 +688,20 @@ static void relay_session_send(relay_session_t *s, buffer_item_t* buf_item) {
 
 static void relay_send_error(relay_client_t *client, uint8_t req_type, uint8_t status_code) {
 
-    buffer_item_t *buf_item = relay_buf_alloc(RELAY_SMALL_FRAME_SIZE);
+    uint16_t payload_len = P2P_RLY_STATUS_PSZ(0, 0);
+    buffer_item_t *buf_item = relay_buf_alloc(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) return;
 
     p2p_relay_hdr_t *hdr = (p2p_relay_hdr_t *)ITEM2BUF(buf_item);
     hdr->type = P2P_RLY_STATUS;
-    hdr->size = htons(P2P_RLY_STATUS_PSZ);
+    hdr->size = htons(payload_len);
     uint8_t *p = (uint8_t *)(hdr + 1);
     p[0] = req_type;
     p[1] = status_code;
 
     // STATUS 包不走 session 队列，直接挂到 client 上
     // 借用一个临时空 session 结构是不合适的，这里直接用 tcp_send 尝试发送
-    size_t len = sizeof(p2p_relay_hdr_t) + P2P_RLY_STATUS_PSZ;
+    size_t len = sizeof(p2p_relay_hdr_t) + payload_len;
     tcp_send(client, ITEM2BUF(buf_item), &len, "STATUS");
     relay_buf_free(buf_item);
 }
@@ -755,18 +756,42 @@ static void relay_session_send_status(relay_session_t *s, uint8_t req_type, uint
 
     assert(s && s->base.client);
 
-    buffer_item_t *buf_item = relay_buf_alloc(sizeof(p2p_relay_hdr_t) + P2P_RLY_STATUS_PSZ);
+    uint16_t payload_len = P2P_RLY_STATUS_PSZ(2, 0);
+    buffer_item_t *buf_item = relay_buf_alloc(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) return;
 
     p2p_relay_hdr_t *hdr = (p2p_relay_hdr_t *)ITEM2BUF(buf_item);
     hdr->type = P2P_RLY_STATUS;
-    hdr->size = htons(P2P_RLY_STATUS_PSZ);
+    hdr->size = htons(payload_len);
 
     uint8_t *payload = (uint8_t *)(hdr + 1);
     payload[0] = req_type;
-    payload[1] = status_code;
+    nwrite_l(payload + 1, s->base.session_id);
+    payload[1 + P2P_SESS_ID_PSZ] = status_code;
 
     relay_session_send(s, buf_item);
+}
+
+// SYNC0 专用错误：尚未建立会话，携带 remote_peer_id 标识哪个对端连接请求出错
+static void relay_send_sync0_error(relay_client_t *client, const char *remote_peer_id, uint8_t status_code) {
+
+    uint16_t payload_len = P2P_RLY_STATUS_PSZ(1, 0);
+    buffer_item_t *buf_item = relay_buf_alloc(sizeof(p2p_relay_hdr_t) + payload_len);
+    if (!buf_item) return;
+
+    p2p_relay_hdr_t *hdr = (p2p_relay_hdr_t *)ITEM2BUF(buf_item);
+    hdr->type = P2P_RLY_STATUS;
+    hdr->size = htons(payload_len);
+
+    uint8_t *p = (uint8_t *)(hdr + 1);
+    p[0] = P2P_RLY_SYNC0;
+    memset(p + 1, 0, P2P_PEER_ID_MAX);
+    if (remote_peer_id) strncpy((char*)(p + 1), remote_peer_id, P2P_PEER_ID_MAX);
+    p[1 + P2P_PEER_ID_MAX] = status_code;
+
+    size_t len = sizeof(p2p_relay_hdr_t) + payload_len;
+    tcp_send(client, ITEM2BUF(buf_item), &len, "SYNC0_STATUS");
+    relay_buf_free(buf_item);
 }
 
 // 向 RPC 请求方发送 RPC 错误响应
@@ -823,7 +848,7 @@ static void relay_session_send_complete(relay_session_t *s, buffer_item_t* buf_i
             if (candidate_count)
                 relay_session_send_sync_ack(s, candidate_count);
         }
-        else if (p_hdr->type == P2P_RLY_DATA) {
+        else if (p_hdr->type == P2P_RLY_PACKET) {
             relay_session_send_status(s, p_hdr->type, P2P_RLY_CODE_READY);
         }
     }
@@ -856,6 +881,7 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
     int side = build_session(&client->base, (const char *)payload, (session_t**)&local_s, (session_t**)&remote_s, sizeof(relay_session_t));
     if (side < 0) {
         print("E:", LA_F("%s: build_session failed for '%s'\n", LA_F43, 43), PROTO, (const char *)payload);
+        relay_send_sync0_error(client, (const char *)payload, P2P_RLY_ERR_INTERNAL);
         return;
     }
 
@@ -1062,7 +1088,7 @@ static void handle_relay_fin(relay_session_t *s, uint8_t *payload, uint16_t len)
         return;
     }
 
-    print("I:", LA_F("%s: close ses_id=%" PRIu32 "\n", LA_F44, 44), PROTO, s->base.session_id);
+    print("I:", LA_F("%s: close ses_id=%u\n", LA_F44, 44), PROTO, s->base.session_id);
 
     // 先断开 peer 引用，防止 relay_free_session(s) 递归释放 peer session
     // peer session 保持存活，FIN 通过其发送队列可靠送达对端
@@ -1112,7 +1138,7 @@ static void handle_relay_data(relay_client_t *client, relay_session_t *s, uint8_
     buffer_item_t *new_recv = relay_buf_alloc(RELAY_FRAME_SIZE);
     if (!new_recv) {
         print("E:", LA_F("%s: OOM for zero-copy recv buffer\n", LA_F27, 27), PROTO);
-        relay_session_send_status(s, P2P_RLY_DATA, P2P_RLY_ERR_INTERNAL);
+        relay_session_send_status(s, P2P_RLY_PACKET, P2P_RLY_ERR_INTERNAL);
         return;
     }
 
@@ -1396,7 +1422,7 @@ static void handle_relay_signaling(int idx) {
             session_t *s = NULL;
             HASH_FIND(hh_session, g_sessions, &session_id, P2P_SESS_ID_PSZ, s);
             if (s == NULL || s->client != &client->base) {
-                print("W:", LA_F("unknown ses_id=%" PRIu32 " (type=%u)\n", LA_F152, 152), session_id, (unsigned)type);
+                print("W:", LA_F("unknown ses_id=%u (type=%u)\n", LA_F152, 152), session_id, (unsigned)type);
                 client->recv_len = 0;
                 continue;
             }
@@ -1415,22 +1441,22 @@ static void handle_relay_signaling(int idx) {
                     uint8_t* sid_ptr = payload + P2P_SESS_ID_PSZ;
                     relay_session_send_rpc_error(rs, nget_s(sid_ptr), P2P_MSG_ERR_PEER_OFFLINE);
                 } else {
-                    print("W:", LA_F("ses_id=%" PRIu32 " peer not connected (type=%u)\n", LA_F150, 150), session_id, (unsigned)type);
-                    relay_send_error(client, type, P2P_RLY_ERR_PEER_OFFLINE);
+                    print("W:", LA_F("ses_id=%u peer not connected (type=%u)\n", LA_F150, 150), session_id, (unsigned)type);
+                    relay_session_send_status(rs, type, P2P_RLY_ERR_PEER_OFFLINE);
                 }
             }
             // SYNC / DATA 转发时，最多允许一个在发、一个待发，超过则返回 BUSY
-            else if ((type == P2P_RLY_SYNC || type == P2P_RLY_DATA)
+            else if ((type == P2P_RLY_SYNC || type == P2P_RLY_PACKET)
                      && rs->peer_pending && rs->peer_pending != (buffer_item_t*)-1) {
 
-                print("W:", LA_F("ses_id=%" PRIu32 " busy (pending relay)\n", LA_F149, 149), session_id);
+                print("W:", LA_F("ses_id=%u busy (pending relay)\n", LA_F149, 149), session_id);
                 relay_session_send_status(rs, type, P2P_RLY_ERR_BUSY);
             }
             else switch (type) {
             case P2P_RLY_SYNC:
                 handle_relay_sync(client, rs, payload, payload_len);
                 break;
-            case P2P_RLY_DATA:
+            case P2P_RLY_PACKET:
                 handle_relay_data(client, rs, payload, payload_len);
                 break;
             case P2P_RLY_REQ:
@@ -1440,7 +1466,7 @@ static void handle_relay_signaling(int idx) {
                 handle_relay_resp(client, rs, payload, payload_len);
                 break;
             default:
-                print("E:", LA_F("unsupported type=%u (ses_id=%" PRIu32 ")\n", LA_F153, 153),
+                print("E:", LA_F("unsupported type=%u (ses_id=%u)\n", LA_F153, 153),
                        (unsigned)type, session_id);
                 goto disconnect;
             }
@@ -1532,7 +1558,7 @@ static void compact_clear_client(sock_t udp_fd, compact_client_t *c) {
 
 //-----------------------------------------------------------------------------
 
-// 发送 ONLINE_ACK: [hdr(4)][instance_id(4)][auth_key(8)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] = 25字节
+// 发送 ONLINE_ACK: [hdr(4)][instance_id(4)][auth_key(SIG_AUTH_KEY_PSZ)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] = 25字节
 // auth_key=0 表示服务器拒绝（无可用槽位）
 static void compact_send_online_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str, uint64_t auth_key, uint32_t instance_id) {
     const char* PROTO = "ONLINE_ACK";
@@ -1587,7 +1613,7 @@ static void compact_send_sync0_ack(sock_t udp_fd, const struct sockaddr_in *to, 
     nwrite_l(ack + ofz, session_id); ofz += P2P_SESS_ID_PSZ;
     ack[ofz++] = online;
 
-    print("V:", LA_F("Send %s: ses_id=%" PRIu32 ", peer=%s\n", LA_F114, 114),
+    print("V:", LA_F("Send %s: ses_id=%u, peer=%s\n", LA_F114, 114),
           PROTO, session_id, online ? "online" : "offline");
 
     ssize_t sent = sendto(udp_fd, (const char *)ack, ofz, 0, (const struct sockaddr *)to, sizeof(*to));
@@ -1608,7 +1634,7 @@ static void compact_send_fin(sock_t udp_fd, compact_session_t *cs, const char *r
 
     nwrite_l(pkt + sizeof(p2p_packet_hdr_t), cs->base.session_id);
 
-    print("V:", LA_F("Send %s: peer='%s', reason=%s, ses_id=%" PRIu32 "\n", LA_F112, 112),
+    print("V:", LA_F("Send %s: peer='%s', reason=%s, ses_id=%u\n", LA_F112, 112),
           PROTO, client->base.local_peer_id, reason, cs->base.session_id);
 
     ssize_t sent = sendto(udp_fd, (const char *)pkt, sizeof(pkt), 0,
@@ -1664,7 +1690,7 @@ static void compact_send_sync0(sock_t udp_fd, compact_session_t *cs, uint8_t bas
             ofz += sizeof(p2p_candidate_t);
         }
 
-        print("V:", LA_F("Send %s: cands=%d, ses_id=%" PRIu32 ", peer='%s'\n", LA_F109, 109),
+        print("V:", LA_F("Send %s: cands=%d, ses_id=%u, peer='%s'\n", LA_F109, 109),
               PROTO, cand_cnt, cs->base.session_id, client->base.local_peer_id);
     }
     else {
@@ -1682,7 +1708,7 @@ static void compact_send_sync0(sock_t udp_fd, compact_session_t *cs, uint8_t bas
         memcpy(pkt + ofz, &wire_cand2, sizeof(p2p_candidate_t));
         ofz += sizeof(p2p_candidate_t);
 
-        print("V:", LA_F("Send %s: base_index=%u, cands=%d, ses_id=%" PRIu32 ", peer='%s'\n", LA_F108, 108),
+        print("V:", LA_F("Send %s: base_index=%u, cands=%d, ses_id=%u, peer='%s'\n", LA_F108, 108),
               PROTO, base_index, cand_cnt, cs->base.session_id, client->base.local_peer_id);
     }
 
@@ -1711,7 +1737,7 @@ static void compact_send_msg_req_ack(sock_t udp_fd, const struct sockaddr_in *to
     nwrite_s(ack + ofz, sid); ofz += 2;
     ack[ofz++] = status;
 
-    print("V:", LA_F("Send %s: ses_id=%" PRIu32 ", sid=%u, status=%u\n", LA_F118, 118),
+    print("V:", LA_F("Send %s: ses_id=%u, sid=%u, status=%u\n", LA_F118, 118),
           PROTO, session_id, sid, status);
 
     ssize_t sent = sendto(udp_fd, (const char *)ack, ofz, 0, (const struct sockaddr *)to, sizeof(*to));
@@ -1734,7 +1760,7 @@ static void compact_send_msg_req_to_peer(sock_t udp_fd, compact_session_t *cs) {
     uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_SESS_ID_PSZ + 2 + 1 + P2P_MSG_DATA_MAX];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
     hdr->type = SIG_PKT_MSG_REQ;
-    hdr->flags = SIG_MSG_FLAG_RELAY;
+    hdr->flags = SIG_FLAG_RELAY;
     hdr->seq = 0;
 
     int ofz = sizeof(p2p_packet_hdr_t);
@@ -1746,7 +1772,7 @@ static void compact_send_msg_req_to_peer(sock_t udp_fd, compact_session_t *cs) {
         ofz += cs->rpc_data_len;
     }
 
-    print("V:", LA_F("Send %s: ses_id=%" PRIu32 ", sid=%u, msg=%u, data_len=%d, peer='%s'\n", LA_F115, 115),
+    print("V:", LA_F("Send %s: ses_id=%u, sid=%u, msg=%u, data_len=%d, peer='%s'\n", LA_F115, 115),
           PROTO, peer->base.session_id, cs->rpc_last_sid, cs->rpc_code, cs->rpc_data_len,
           peer_cli->base.local_peer_id);
 
@@ -1775,7 +1801,7 @@ static void compact_send_msg_resp_ack_to_responder(sock_t udp_fd, const struct s
     nwrite_l(pkt + ofz, session_id); ofz += P2P_SESS_ID_PSZ;
     nwrite_s(pkt + ofz, sid); ofz += 2;
 
-    print("V:", LA_F("Send %s: ses_id=%" PRIu32 ", sid=%u, peer='%s'\n", LA_F117, 117),
+    print("V:", LA_F("Send %s: ses_id=%u, sid=%u, peer='%s'\n", LA_F117, 117),
           PROTO, session_id, sid, peer_id);
 
     ssize_t sent = sendto(udp_fd, (const char *)pkt, ofz, 0, (struct sockaddr *)addr, sizeof(*addr));
@@ -1812,7 +1838,7 @@ static void compact_send_msg_resp_to_requester(sock_t udp_fd, compact_session_t 
         }
     }
 
-    print("V:", LA_F("Send %s: ses_id=%" PRIu32 ", sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d\n", LA_F116, 116),
+    print("V:", LA_F("Send %s: ses_id=%u, sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d\n", LA_F116, 116),
           PROTO, cs->base.session_id, cs->rpc_last_sid, client->base.local_peer_id, cs->rpc_flags, cs->rpc_code, cs->rpc_data_len);
 
     ssize_t sent = sendto(udp_fd, (const char *)pkt, ofz, 0, (struct sockaddr *)&client->addr, sizeof(client->addr));
@@ -1933,7 +1959,7 @@ static void retry_compact_sync0_pending(sock_t udp_fd, uint64_t now) {
                 g_compact_sync0_pending_rear = q;
             }
 
-            print("V:", LA_F("SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%" PRIu32 ")\n", LA_F102, 102),
+            print("V:", LA_F("SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%u)\n", LA_F102, 102),
                    COMPACT_CLIENT(q)->base.local_peer_id, cs_remote_peer(q),
                    q->sync0_retry, SYNC0_MAX_RETRY, q->base.session_id);
 
@@ -2008,13 +2034,13 @@ static void retry_compact_rpc_pending(sock_t udp_fd, uint64_t now) {
         if (!q->rpc_responding) {
 
             if (!PEER_ONLINE(q)) {
-                print("W:", LA_F("MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%" PRIu32 ")\n", LA_F85, 85),
+                print("W:", LA_F("MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n", LA_F85, 85),
                       COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->base.session_id);
 
                 compact_transition_to_resp_pending(udp_fd, q, now, SIG_MSG_FLAG_PEER_OFFLINE, 0, NULL, 0);
             }
             else if (q->rpc_retry >= MSG_REQ_MAX_RETRY) {
-                print("W:", LA_F("MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%" PRIu32 ")\n", LA_F84, 84),
+                print("W:", LA_F("MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n", LA_F84, 84),
                       q->rpc_retry, COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->base.session_id);
 
                 compact_transition_to_resp_pending(udp_fd, q, now, SIG_MSG_FLAG_TIMEOUT, 0, NULL, 0);
@@ -2025,7 +2051,7 @@ static void retry_compact_rpc_pending(sock_t udp_fd, uint64_t now) {
                 q->rpc_sent_time = now;
                 enqueue_compact_rpc_pending(q);
 
-                print("V:", LA_F("MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%" PRIu32 ")\n", LA_F86, 86),
+                print("V:", LA_F("MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n", LA_F86, 86),
                       COMPACT_CLIENT(q)->base.local_peer_id, COMPACT_CLIENT(q->peer)->base.local_peer_id,
                       q->rpc_last_sid, q->rpc_retry, MSG_REQ_MAX_RETRY, q->base.session_id);
 
@@ -2035,7 +2061,7 @@ static void retry_compact_rpc_pending(sock_t udp_fd, uint64_t now) {
         else {
 
             if (q->rpc_retry >= MSG_RESP_MAX_RETRY) {
-                print("W:", LA_F("MSG_RESP gave up after %d retries, sid=%u (ses_id=%" PRIu32 ")\n", LA_F87, 87),
+                print("W:", LA_F("MSG_RESP gave up after %d retries, sid=%u (ses_id=%u)\n", LA_F87, 87),
                       q->rpc_retry, q->rpc_last_sid, q->base.session_id);
 
                 q->rpc_pending_next = NULL;
@@ -2048,7 +2074,7 @@ static void retry_compact_rpc_pending(sock_t udp_fd, uint64_t now) {
                 q->rpc_sent_time = now;
                 enqueue_compact_rpc_pending(q);
 
-                print("V:", LA_F("MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%" PRIu32 ")\n", LA_F88, 88),
+                print("V:", LA_F("MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n", LA_F88, 88),
                       COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->rpc_retry, MSG_RESP_MAX_RETRY, q->base.session_id);
 
                 if (g_compact_rpc_pending_head == q) return;
@@ -2098,17 +2124,17 @@ static bool check_addr_change(sock_t udp_fd, compact_client_t *client, const str
             compact_send_sync0(udp_fd, peer, peer->addr_notify_seq);
             enqueue_compact_sync0_pending(peer, peer->addr_notify_seq, P_tick_ms());
 
-            print("I:", LA_F("Addr changed for '%s', notifying '%s' (ses_id=%" PRIu32 ")\n", LA_F76, 76),
+            print("I:", LA_F("Addr changed for '%s', notifying '%s' (ses_id=%u)\n", LA_F76, 76),
                   client->base.local_peer_id, COMPACT_CLIENT(peer)->base.local_peer_id, peer->base.session_id);
         }
         else if (peer->sync0_acked == 0) {
             if (peer->addr_notify_seq == 0) peer->addr_notify_seq = 1;
 
-            print("I:", LA_F("Addr changed for '%s', defer notification until first ACK (ses_id=%" PRIu32 ")\n", LA_F74, 74),
+            print("I:", LA_F("Addr changed for '%s', defer notification until first ACK (ses_id=%u)\n", LA_F74, 74),
                   client->base.local_peer_id, peer->base.session_id);
         }
         else {
-            print("W:", LA_F("Addr changed for '%s', but first info packet was abandoned (ses_id=%" PRIu32 ")\n", LA_F73, 73),
+            print("W:", LA_F("Addr changed for '%s', but first info packet was abandoned (ses_id=%u)\n", LA_F73, 73),
                    client->base.local_peer_id, peer->base.session_id);
         }
     }
@@ -2237,7 +2263,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                PROTO, client->auth_key, P2P_PEER_ID_MAX, local_peer_id);
     } break;
 
-    // SIG_PKT_OFFLINE: [auth_key(8)]
+    // SIG_PKT_OFFLINE: [auth_key(SIG_AUTH_KEY_PSZ)]
     case SIG_PKT_OFFLINE: { const char* PROTO = "OFFLINE";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F134, 134),
@@ -2265,7 +2291,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         }
     } break;
 
-    // SIG_PKT_ALIVE: [auth_key(8)]
+    // SIG_PKT_ALIVE: [auth_key(SIG_AUTH_KEY_PSZ)]
     case SIG_PKT_ALIVE: { const char* PROTO = "ALIVE";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F134, 134),
@@ -2307,7 +2333,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         }
     } break;
 
-    // SIG_PKT_SYNC0: [auth_key(8)][remote_peer_id(32)][candidate_count(1)][candidates(N*sizeof(p2p_candidate_t))]
+    // SIG_PKT_SYNC0: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*sizeof(p2p_candidate_t))]
     // + 客户端请求连接对方
     case SIG_PKT_SYNC0: { const char* PROTO = "SYNC0";
 
@@ -2463,7 +2489,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
             if (!cs->sync0_acked) { cs->sync0_acked = 1;
 
-                print("V:", LA_F("%s: confirmed '%s', retries=%d (ses_id=%" PRIu32 ")\n", LA_F45, 45),
+                print("V:", LA_F("%s: confirmed '%s', retries=%d (ses_id=%u)\n", LA_F45, 45),
                        PROTO, COMPACT_CLIENT(cs)->base.local_peer_id, cs->sync0_retry, session_id);
             }
 
@@ -2481,12 +2507,12 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 compact_send_sync0(udp_fd, cs, cs->addr_notify_seq);
                 enqueue_compact_sync0_pending(cs, cs->addr_notify_seq, P_tick_ms());
 
-                print("I:", LA_F("Addr changed for '%s', deferred notifying '%s' (ses_id=%" PRIu32 ")\n", LA_F75, 75),
+                print("I:", LA_F("Addr changed for '%s', deferred notifying '%s' (ses_id=%u)\n", LA_F75, 75),
                       COMPACT_CLIENT(cs->peer)->base.local_peer_id, COMPACT_CLIENT(cs)->base.local_peer_id,
                       cs->peer->base.session_id);
             }
         }
-        else print("W:", LA_F("%s for unknown ses_id=%" PRIu32 "\n", LA_F16, 16), PROTO, session_id);
+        else print("W:", LA_F("%s for unknown ses_id=%u\n", LA_F16, 16), PROTO, session_id);
 
     } break;
 
@@ -2512,7 +2538,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
         compact_session_t *cs = (compact_session_t*)_s;
 
-        print("V:", LA_F("%s accepted, seq=%u, ses_id=%" PRIu32 "\n", LA_F15, 15),
+        print("V:", LA_F("%s accepted, seq=%u, ses_id=%u\n", LA_F15, 15),
               PROTO, ack_seq, session_id);
 
         // 如果是客户端确认收到 addr change SYNC 包，则停止可靠性重传机制
@@ -2529,10 +2555,10 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 cs->sync0_retry = 0;
                 cs->sync0_sent_time = 0;
 
-                print("V:", LA_F("%s: addr-notify confirmed '%s' (ses_id=%" PRIu32 ")\n", LA_F34, 34),
+                print("V:", LA_F("%s: addr-notify confirmed '%s' (ses_id=%u)\n", LA_F34, 34),
                        PROTO, COMPACT_CLIENT(cs)->base.local_peer_id, session_id);
             }
-            else print("W:", LA_F("%s for unknown ses_id=%" PRIu32 "\n", LA_F16, 16), PROTO, session_id);
+            else print("W:", LA_F("%s for unknown ses_id=%u\n", LA_F16, 16), PROTO, session_id);
         }
         // ack_seq≠0 的 ACK 是客户端之间的确认，服务器负责 relay 转发
         else {
@@ -2546,11 +2572,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                        (struct sockaddr *)&COMPACT_CLIENT(cs->peer)->addr,
                        sizeof(COMPACT_CLIENT(cs->peer)->addr));
 
-                print("V:", LA_F("Relay %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu32 ")\n", LA_F100, 100),
+                print("V:", LA_F("Relay %s seq=%u: '%s' -> '%s' (ses_id=%u)\n", LA_F100, 100),
                        PROTO, ack_seq, COMPACT_CLIENT(cs)->base.local_peer_id,
                        cs_remote_peer(cs), session_id);
             }
-            else print("W:", LA_F("Cannot relay %s: ses_id=%" PRIu32 " (peer unavailable)\n", LA_F77, 77), PROTO, session_id);
+            else print("W:", LA_F("Cannot relay %s: ses_id=%u (peer unavailable)\n", LA_F77, 77), PROTO, session_id);
         }
 
     } break;
@@ -2562,7 +2588,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     case P2P_PKT_CONN:
     case P2P_PKT_CONN_ACK:
     case P2P_PKT_REACH:
-        if (!(hdr->flags & P2P_RELAY_FLAG_SESSION)) {
+        if (!(hdr->flags & P2P_FLAG_SESSION)) {
             print("E:", LA_F("[Relay] %s: missing SESSION flag, dropped\n", LA_F128, 128),
                   (hdr->type == P2P_PKT_DATA) ? "RELAY-DATA" :
                   (hdr->type == P2P_PKT_ACK) ? "RELAY-ACK" :
@@ -2599,18 +2625,18 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
         compact_session_t *cs = (compact_session_t*)_s;
         if (!cs) {
-            print("W:", LA_F("[Relay] %s for unknown ses_id=%" PRIu32 " (dropped)\n", LA_F123, 123), PROTO, session_id);
+            print("W:", LA_F("[Relay] %s for unknown ses_id=%u (dropped)\n", LA_F123, 123), PROTO, session_id);
             return;
         }
 
         if (!PEER_ONLINE(cs)) {
-            print("W:", LA_F("[Relay] %s for ses_id=%" PRIu32 ": peer unavailable (dropped)\n", LA_F122, 122), PROTO, session_id);
+            print("W:", LA_F("[Relay] %s for ses_id=%u: peer unavailable (dropped)\n", LA_F122, 122), PROTO, session_id);
             return;
         }
 
         check_addr_change(udp_fd, COMPACT_CLIENT(cs), from);
 
-        print("V:", LA_F("%s accepted, '%s' -> '%s', ses_id=%" PRIu32 "\n", LA_F13, 13),
+        print("V:", LA_F("%s accepted, '%s' -> '%s', ses_id=%u\n", LA_F13, 13),
               PROTO, COMPACT_CLIENT(cs)->base.local_peer_id, cs_remote_peer(cs), session_id);
 
         nwrite_l((uint8_t *)payload, cs->peer->base.session_id);
@@ -2621,11 +2647,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         if (hdr->type == SIG_PKT_SYNC || hdr->type == P2P_PKT_REACH ||
             hdr->type == P2P_PKT_DATA || hdr->type == P2P_PKT_CRYPTO) {
-            print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%" PRIu32 ")\n", LA_F124, 124),
+            print("V:", LA_F("[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%u)\n", LA_F124, 124),
                    PROTO, ntohs(hdr->seq), COMPACT_CLIENT(cs)->base.local_peer_id,
                    cs_remote_peer(cs), session_id);
         } else {
-            print("V:", LA_F("[Relay] %s: '%s' -> '%s' (ses_id=%" PRIu32 ")\n", LA_F126, 126),
+            print("V:", LA_F("[Relay] %s: '%s' -> '%s' (ses_id=%u)\n", LA_F126, 126),
                    PROTO, COMPACT_CLIENT(cs)->base.local_peer_id, cs_remote_peer(cs), session_id);
         }
     } break;
@@ -2641,7 +2667,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             return;
         }
 
-        if (hdr->flags & SIG_MSG_FLAG_RELAY) {
+        if (hdr->flags & SIG_FLAG_RELAY) {
             print("E:", LA_F("%s: invalid relay flag from client\n", LA_F50, 50), PROTO);
             return;
         }
@@ -2656,7 +2682,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         uint16_t sid = nget_s(payload + 4);
 
         if (session_id == 0 || sid == 0) {
-            print("E:", LA_F("%s: invalid session_id=%" PRIu32 " or sid=%u\n", LA_F52, 52),
+            print("E:", LA_F("%s: invalid session_id=%u or sid=%u\n", LA_F52, 52),
                    PROTO, session_id, sid);
             return;
         }
@@ -2668,11 +2694,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
         compact_session_t *requester = (compact_session_t*)_s;
         if (!requester) {
-            print("W:", LA_F("%s: requester not found for ses_id=%" PRIu32 "\n", LA_F64, 64), PROTO, session_id);
+            print("W:", LA_F("%s: requester not found for ses_id=%u\n", LA_F64, 64), PROTO, session_id);
             return;
         }
 
-        print("V:", LA_F("%s: accepted, ses_id=%" PRIu32 ", sid=%u, msg=%u, len=%d\n", LA_F32, 32),
+        print("V:", LA_F("%s: accepted, ses_id=%u, sid=%u, msg=%u, len=%d\n", LA_F32, 32),
                PROTO, session_id, sid, msg, msg_data_len);
 
         if (!PEER_ONLINE(requester)) {
@@ -2694,11 +2720,11 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
                     compact_send_msg_req_ack(udp_fd, from, from_str, requester->base.session_id, sid, 0);
 
-                    print("V:", LA_F("%s retransmit, resend ACK, sid=%u (ses_id=%" PRIu32 ")\n", LA_F22, 22),
+                    print("V:", LA_F("%s retransmit, resend ACK, sid=%u (ses_id=%u)\n", LA_F22, 22),
                           PROTO, sid, requester->base.session_id);
                 }
                 else {
-                    print("V:", LA_F("%s retransmit during RESP phase, ignoring, sid=%u (ses_id=%" PRIu32 ")\n", LA_F21, 21),
+                    print("V:", LA_F("%s retransmit during RESP phase, ignoring, sid=%u (ses_id=%u)\n", LA_F21, 21),
                           PROTO, sid, requester->base.session_id);
                 }
                 return;
@@ -2710,7 +2736,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 return;
             }
 
-            print("I:", LA_F("%s new sid=%u > pending sid=%u (responding=%d), canceling old RPC (ses_id=%" PRIu32 ")\n", LA_F20, 20),
+            print("I:", LA_F("%s new sid=%u > pending sid=%u (responding=%d), canceling old RPC (ses_id=%u)\n", LA_F20, 20),
                   PROTO, sid, requester->rpc_last_sid, requester->rpc_responding, requester->base.session_id);
 
             remove_compact_rpc_pending(requester);
@@ -2735,7 +2761,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         enqueue_compact_rpc_pending(requester);
         compact_send_msg_req_to_peer(udp_fd, requester);
 
-        print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%" PRIu32 ")\n", LA_F18, 18),
+        print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%u)\n", LA_F18, 18),
                PROTO, COMPACT_CLIENT(requester)->base.local_peer_id,
                COMPACT_CLIENT(requester->peer)->base.local_peer_id,
                sid, msg, requester->base.session_id);
@@ -2761,7 +2787,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         uint32_t session_id = nget_l(payload);
         uint16_t sid = nget_s(payload + 4);
         if (session_id == 0 || sid == 0) {
-            print("E:", LA_F("%s: invalid session_id=%" PRIu32 " or sid=%u\n", LA_F52, 52),
+            print("E:", LA_F("%s: invalid session_id=%u or sid=%u\n", LA_F52, 52),
                   PROTO, session_id, sid);
             return;
         }
@@ -2770,12 +2796,12 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
         compact_session_t *responder = (compact_session_t*)_s;
         if (!responder) {
-            print("W:", LA_F("%s: unknown session_id=%" PRIu32 "\n", LA_F70, 70), PROTO, session_id);
+            print("W:", LA_F("%s: unknown session_id=%u\n", LA_F70, 70), PROTO, session_id);
             return;
         }
 
         if (!PEER_ONLINE(responder)) {
-            print("W:", LA_F("%s: peer '%s' not online for session_id=%" PRIu32 "\n", LA_F60, 60),
+            print("W:", LA_F("%s: peer '%s' not online for session_id=%u\n", LA_F60, 60),
                   PROTO, cs_remote_peer(responder), session_id);
             return;
         }
@@ -2783,7 +2809,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         uint8_t resp_code = payload[6];
         const uint8_t *resp_data = payload + 7;
 
-        print("V:", LA_F("%s: accepted, ses_id=%" PRIu32 ", sid=%u, code=%u, len=%d\n", LA_F31, 31),
+        print("V:", LA_F("%s: accepted, ses_id=%u, sid=%u, code=%u, len=%d\n", LA_F31, 31),
               PROTO, session_id, sid, resp_code, resp_len);
 
         check_addr_change(udp_fd, COMPACT_CLIENT(responder), from);
@@ -2802,7 +2828,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         remove_compact_rpc_pending(requester);
         compact_transition_to_resp_pending(udp_fd, requester, P_tick_ms(), 0, resp_code, resp_data, resp_len);
 
-        print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u (ses_id=%" PRIu32 ")\n", LA_F17, 17),
+        print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u (ses_id=%u)\n", LA_F17, 17),
               PROTO, COMPACT_CLIENT(responder)->base.local_peer_id,
               COMPACT_CLIENT(requester)->base.local_peer_id,
               sid, requester->base.session_id);
@@ -2823,19 +2849,19 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         uint16_t sid = nget_s(payload + 4);
 
         if (session_id == 0 || sid == 0) {
-            print("E:", LA_F("%s: invalid session_id=%" PRIu32 " or sid=%u\n", LA_F52, 52),
+            print("E:", LA_F("%s: invalid session_id=%u or sid=%u\n", LA_F52, 52),
                    PROTO, session_id, sid);
             return;
         }
 
-        print("V:", LA_F("%s: accepted, ses_id=%" PRIu32 ", sid=%u\n", LA_F33, 33),
+        print("V:", LA_F("%s: accepted, ses_id=%u, sid=%u\n", LA_F33, 33),
                PROTO, session_id, sid);
 
         session_t *_s = NULL;
         HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
         compact_session_t *requester = (compact_session_t*)_s;
         if (!requester) {
-            print("W:", LA_F("%s: unknown session_id=%" PRIu32 "\n", LA_F70, 70), PROTO, session_id);
+            print("W:", LA_F("%s: unknown session_id=%u\n", LA_F70, 70), PROTO, session_id);
             return;
         }
 
@@ -2848,7 +2874,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         requester->rpc_responding = false;
         requester->rpc_retry = 0;
 
-        print("I:", LA_F("%s: RPC complete for '%s', sid=%u (ses_id=%" PRIu32 ")\n", LA_F28, 28),
+        print("I:", LA_F("%s: RPC complete for '%s', sid=%u (ses_id=%u)\n", LA_F28, 28),
                PROTO, COMPACT_CLIENT(requester)->base.local_peer_id, sid, requester->base.session_id);
     } break;
 

@@ -227,6 +227,7 @@ typedef void (*p2p_on_ice_candidate_fn)(p2p_session_t session, const char *candi
 
 typedef struct {
     uint16_t                bind_port;                  // 本地 UDP 端口 (0 = any)
+    bool                    multi_session;              // 允许单个实例管理多个并发会话（默认关闭）
     
     /* 信令配置 */
     p2p_signaling_t         signaling_mode;             // P2P_SIGNALING_MODE_* (连接时使用的信令模式)
@@ -242,13 +243,15 @@ typedef struct {
     /* STUN/TURN 配置 (仅当 use_ice=true 或需要高级诊断时使用) */
     const char*             stun_server;                // STUN 服务器 (例如 stun.l.google.com)
     uint16_t                stun_port;
+    bool                    skip_stun_pending;          // 建立连接时，无需等待 srflx 候选地址通过 stun 收集完成
+    bool                    skip_stun_test;             // 跳过 NAT 类型检测（RFC 3489 Test II/III）
+                                                        // 大多数公共 STUN 服务器不支持 CHANGE-REQUEST
+                                                        // 设为 true 可跳过这些会超时的测试
+
     const char*             turn_server;                // TURN 服务器
     uint16_t                turn_port;
     const char*             turn_user;                  // TURN 认证用户
     const char*             turn_pass;                  // TURN 认证密码
-    bool                    skip_stun_test;             // 跳过 NAT 类型检测（RFC 3489 Test II/III）
-                                                        // 大多数公共 STUN 服务器不支持 CHANGE-REQUEST
-                                                        // 设为 true 可跳过这些会超时的测试
 
     /* TCP 选项 */
     bool                    enable_tcp;                 // 是否尝试 TCP 打洞/回退

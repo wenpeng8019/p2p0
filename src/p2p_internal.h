@@ -1,4 +1,3 @@
-
 /*
  *
  * ============================================================================
@@ -95,6 +94,11 @@
 typedef p2p_state_t inst_state_t;
 
 struct p2p_instance {
+    char                            local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识
+    struct p2p_session*             sessions_head;
+    struct p2p_session*             sessions_rear;
+    int                             connections;        // 当前活跃连接数（session 数量 - disconnect by peer count）
+
     /* ======================== 配置与状态 ======================== */
     p2p_config_t                    cfg;                // 用户配置（STUN 服务器、模式等）
     inst_state_t                    state;              // 连接状态 inst_state_t
@@ -102,6 +106,25 @@ struct p2p_instance {
     /* ======================== Socket 资源 ======================== */
     sock_t                          sock;               // UDP 套接字描述符
     sock_t                          tcp_sock;           // TCP 套接字（打洞/回退用）
+
+    /* ======================== NAT 检测 ======================== */
+    int                             nat_type;           // NAT 类型，即 p2p_nat_type() 返回值，也就是支持负值状态
+    stun_detect_ctx_t               stun_ctx;           // NAT 类型检测上下文（实例级别，全局只检测一次）
+
+    /* ======================== TURN 中继 ======================== */
+    turn_ctx_t                      turn;               // TURN allocation 上下文（实例级别，共享一个 relay addr）
+
+    /* ======================== 异步候选 ======================== */
+    uint16_t                        stun_pending;       // STUN/Srflx 候选待响应计数
+    uint16_t                        turn_pending;       // TURN Allocate 待响应计数
+
+    /* ======================== 信令模式和上下文 ======================== */
+    p2p_signaling_t                 sig_mode;           // 信令模式
+    union {
+        p2p_compact_ctx_t       compact;                // COMPACT 模式信令上下文（实例级别：与服务器的关系）
+        p2p_relay_ctx_t         relay;                  // RELAY 模式信令上下文（实例级别：与服务器的 TCP 连接）
+        p2p_signal_pubsub_ctx_t pubsub;                 // PUB/SUB 模式信令上下文
+    }                               sig_ctx;            // 实例级别信令上下文（同时只有一种模式激活）
 
     /* ======================== 信令转发路径 ======================== */
     /*
@@ -112,15 +135,7 @@ struct p2p_instance {
         bool                    active;                 // 是否启用
         struct sockaddr_in      addr;                   // 信令服务器地址
         path_stats_t            stats;                  // 统计信息
-    } signaling;
-
-    p2p_signaling_t                 signaling_mode;     // 信令模式
-    p2p_signal_compact_ctx_t        sig_compact_ctx;    // COMPACT 模式信令上下文
-    p2p_signal_relay_ctx_t          sig_relay_ctx;      // RELAY 模式信令上下文
-    p2p_signal_pubsub_ctx_t         sig_pubsub_ctx;     // PUB/SUB 模式信令上下文
-
-    /* ======================== NAT 检测 ======================== */
-    int                             nat_type;           // NAT 类型，即 p2p_nat_type() 返回值，也就是支持负值状态
+    }                               signaling;
 
     /*
      * 通过信令服务器中转发送数据包（通用接口）
@@ -130,7 +145,7 @@ struct p2p_instance {
      *
      * 参数：
      *   type: P2P 包类型（REACH/DATA/ACK/CRYPTO 等）
-     *   flags: 原始 flags（接口内部会自动添加 P2P_RELAY_FLAG_SESSION）
+     *   flags: 原始 flags（接口内部会自动添加 P2P_FLAG_SESSION）
      *   seq: 序列号
      *   payload: 原始负载（不含 session_id）
      *   payload_len: 原始负载长度
@@ -141,10 +156,8 @@ struct p2p_instance {
                                 uint8_t type, uint8_t flags, uint16_t seq,
                                 const void *payload, uint16_t payload_len);
 
-    char                            local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识
-
-    struct p2p_session*             sessions_head;
-    struct p2p_session*             sessions_rear;
+    /* ======================== 全局转发路径管理 ======================== */
+    path_manager_t                  path_mgr;           // 路径管理器（用于 SIGNALING 路径的状态管理）
 
 #ifdef P2P_THREADED
     /* ======================== 多线程支持 ======================== */
@@ -182,6 +195,15 @@ struct p2p_session {
 
     char                            remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
 
+    /* ======================== 多会话标识 ======================== */
+    uint32_t                        id;                 // 该会话唯一标识 id（随机非零，发包时携带供对端派发）
+                                                        // 仅在 multi_session 模式下有效; 对端收包后据此 ID 路由到对应会话
+                                                        // COMPACT 模式下同时用作 signaling session_id（来自 SYNC0_ACK）
+    union {
+        p2p_compact_session_t   compact;                // COMPACT 模式信令上下文（会话级别：与对端的关系）
+        p2p_relay_session_t     relay;                  // RELAY 模式信令上下文（会话级别：与对端的关系）
+    }                               sig_sess;
+
     /* ======================== 配置与状态 ======================== */
     p2p_state_t                     state;              // 连接状态 P2P_STATE_*
 
@@ -196,7 +218,7 @@ struct p2p_session {
     reliable_t                      reliable;           // 可靠传输层状态
     stream_t                        stream;             // 流传输层状态
     path_manager_t                  path_mgr;           // 路径管理器（多路径并行支持）
-    p2p_probe_ctx_t                 probe_ctx;          // 探测上下文
+    probe_ctx_t                     probe;              // 探测上下文
 
     bool                            rx_confirmed;       // peer→me 已确认（收到对端包）
     bool                            tx_confirmed;       // me→peer 已确认（对端可收到我的包）
@@ -216,6 +238,7 @@ struct p2p_session {
     p2p_local_candidate_entry_t*    local_cands;        // 本地候选地址（动态分配）
     int                             local_cand_cnt;     // 本地候选数量
     int                             local_cand_cap;     // 本地候选容量
+    int                             public_base;        // local_cands 中首个公网(srflx/relay)候选索引（-1 表示当前无公网候选）
     p2p_remote_candidate_entry_t*   remote_cands;       // 远端候选地址（动态分配，含运行时状态）
     int                             remote_cand_cnt;    // 远端候选数量
     int                             remote_cand_cap;    // 远端候选容量
@@ -223,12 +246,6 @@ struct p2p_session {
     uint16_t                        remote_srflx_cnt;   // 对端 srflx 类型候选数量
     uint16_t                        remote_relay_cnt;   // 对端 relay 类型候选数量
     bool                            remote_cand_done;   // 远端候选是否同步完成（由信令层设置，NAT 层判断超时用）
-    int                             stun_pending;       // STUN/Srflx 候选待响应计数（一次性本地候选收集）
-    int                             turn_pending;       // TURN Allocate 待响应计数（本轮连接中的动态 Relay 候选）
-    int                             turn_base;          // local_cands 中首个 TURN 候选索引（-1 表示当前无 TURN 候选）
-
-    /* ======================== 中继服务 ======================== */
-    turn_ctx_t                      turn;               // TURN 中继上下文
 
     /* ======================== PseudoTCP 拥塞控制 ======================== */
     /*
@@ -365,31 +382,31 @@ static inline void p2p_session_reset(struct p2p_session *s, bool closing) {
     if (closing) {
 
         // 清理本地 TURN 候选（TURN 候选随连接失效而失效）
-        if (s->turn_base >= 0) { assert(s->turn_base < s->local_cand_cnt);
+        if (s->public_base >= 0) { assert(s->public_base < s->local_cand_cnt);
 
             // 优先从后向前 pop 掉 TURN 候选（多次连接后，TURN 候选都会位于 local_cands 队列的末尾）
-            while (s->local_cand_cnt > s->turn_base) {
+            while (s->local_cand_cnt > s->public_base) {
                 if (s->local_cands[s->local_cand_cnt - 1].type != P2P_CAND_RELAY) break;
                 s->local_cand_cnt--;
             }
 
             // 如果 TURN 候选并非连续地位于末尾（首次连接可能和 STUN 候选交错）
             // + 紧缩 turn_base..end 范围内的非 TURN 候选，覆盖掉前面的 TURN 候选
-            if (s->local_cand_cnt != s->turn_base) {
-                int j = s->turn_base;
-                for (int i = s->turn_base; i < s->local_cand_cnt; i++) {
+            if (s->local_cand_cnt != s->public_base) {
+                int j = s->public_base;
+                for (int i = s->public_base; i < s->local_cand_cnt; i++) {
                     if (s->local_cands[i].type != P2P_CAND_RELAY)
                         s->local_cands[j++] = s->local_cands[i];
                 }
                 s->local_cand_cnt = j;
             }
 
-            s->turn_base = -1;
+            s->public_base = -1;
         }
-        s->turn_pending = 0;            // 关闭当前 TURN 候选收集
-        p2p_turn_reset(s);
+        s->public_base = -1;
         s->nat.state = NAT_CLOSED;      // 标记 NAT 已关闭
         s->state = P2P_STATE_CLOSED;    // 更新状态为已关闭
+        --s->inst->connections;
     }
     // 重置 NAT
     else nat_reset(&s->nat);
@@ -631,11 +648,11 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
  * 实际链路发送接口（UDP 传输层直接调用）
  * ============================================================================ */
 
-ret_t p2p_udp_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
+ret_t p2p_udp_send_packet(struct p2p_instance *inst, const struct sockaddr_in *addr,
                           uint8_t type, uint8_t flags, uint16_t seq,
                           const void *payload, int payload_len);
 
-ret_t p2p_turn_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
+ret_t p2p_turn_send_packet(struct p2p_instance *inst, const struct sockaddr_in *addr,
                            uint8_t type, uint8_t flags, uint16_t seq,
                            const void *payload, int payload_len);
 

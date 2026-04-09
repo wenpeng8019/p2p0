@@ -240,11 +240,11 @@ void path_stats_init(path_stats_t *st, int cost_score) {
 /*
  * 设置信令转发(SIGNALING)路径
  */
-int path_manager_enable_signaling(struct p2p_session *s, struct sockaddr_in *addr) {
-    s->inst->signaling.active = true;
-    s->inst->signaling.addr = *addr;
-    path_stats_init(&s->inst->signaling.stats, 5);       /* SIGNALING cost=5 */
-    s->inst->signaling.stats.state = PATH_STATE_ACTIVE;   /* SIGNALING 一设置就可用 */
+int path_manager_enable_signaling(struct p2p_instance *inst, struct sockaddr_in *addr) {
+    inst->signaling.active = true;
+    inst->signaling.addr = *addr;
+    path_stats_init(&inst->signaling.stats, 5);   /* SIGNALING cost=5 */
+    inst->signaling.stats.state = PATH_STATE_ACTIVE;        /* SIGNALING 一设置就可用 */
     
     return 0;
 }
@@ -841,22 +841,23 @@ const char* path_quality_str(path_quality_t quality) {
  *                                    状态驱动
  * ========================================================================== */
 
- int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size, bool rt_track) {
-    path_stats_t *stats = p2p_get_path_stats(s, path_idx);
-    if (!stats) return -1;
+int path_manager_on_packet_send(struct p2p_session *s, int path_idx, uint32_t seq, uint64_t now_ms, uint32_t size, bool rt_track) {
+
+    path_stats_t *sta = p2p_get_path_stats(s, path_idx);
+    if (!sta) return -1;
     
     path_manager_t *pm = &s->path_mgr;
     
     // 发送包统计（所有包）
-    stats->last_send_ms = now_ms;
-    stats->total_packets_sent++;
-    if (size > 0) stats->total_bytes_sent += size;
+    sta->last_send_ms = now_ms;
+    sta->total_packets_sent++;
+    if (size > 0) sta->total_bytes_sent += size;
     
     // RTT 追踪：仅需要 per-packet RTT 的控制包（PUNCH/ALIVE）加入队列
     if (!rt_track) return 0;
     
     // RoundTrip 统计（仅 rt_track=true 的包）
-    stats->rt_packets_sent++;
+    sta->rt_packets_sent++;
     
     // 环形队列已满：丢弃队首最老包
     if (pm->pending_count >= MAX_PENDING_PACKETS) {
@@ -884,18 +885,54 @@ const char* path_quality_str(path_quality_t quality) {
     
     return 0;
 }
+int path_manager_on_sig_alive_send(struct p2p_instance *inst, uint64_t now_ms) {
+
+    assert(inst->signaling.active);
+    path_stats_t *sta = &inst->signaling.stats;
+
+    path_manager_t *pm = &inst->path_mgr;
+
+    // 发送包统计（所有包）
+    sta->last_send_ms = now_ms;
+    sta->total_packets_sent++;
+
+    // RoundTrip 统计（仅 rt_track=true 的包）
+    sta->rt_packets_sent++;
+
+    // 环形队列已满：丢弃队首最老包
+    if (pm->pending_count >= MAX_PENDING_PACKETS) {
+        packet_track_t *oldest = &pm->pending_packets[pm->pending_head];
+        if (oldest->sent_time_ms > 0) {
+            sta->rt_packets_lost++;                       // 增加 RoundTrip 层丢包计数
+            sta->total_packets_lost++;                    // 增加总丢包计数
+            sta->consecutive_timeouts++;                  // 增加路径连续超时次数
+            update_metrics(sta);                          // 更新综合指标（丢包率）
+        }
+        pm->pending_head = (pm->pending_head + 1) % MAX_PENDING_PACKETS;
+        pm->pending_count--;
+    }
+
+    // 添加到队尾
+    int tail = (pm->pending_head + pm->pending_count) % MAX_PENDING_PACKETS;
+    packet_track_t *track = &pm->pending_packets[tail];
+    track->sent_time_ms = now_ms;
+    pm->pending_count++;
+
+    return 0;
+}
 
 int path_manager_on_packet_recv(struct p2p_session *s, int path_idx, uint64_t now_ms, uint32_t size, bool rt_ack, uint32_t seq) {
-    path_stats_t *p = p2p_get_path_stats(s, path_idx);
-    if (!p) return -1;
+
+    path_stats_t *sta = p2p_get_path_stats(s, path_idx);
+    if (!sta) return -1;
 
     // 接收包统计（所有包）
-    p->last_recv_ms = now_ms;
-    p->total_packets_recv++;
-    if (size > 0) p->total_bytes_recv += size;
+    sta->last_recv_ms = now_ms;
+    sta->total_packets_recv++;
+    if (size > 0) sta->total_bytes_recv += size;
     
     // 重置路径连续超时次数
-    p->consecutive_timeouts = 0;
+    sta->consecutive_timeouts = 0;
     
     // 如果不是 RoundTrip 确认包，直接返回
     if (!rt_ack) return 0;
@@ -996,6 +1033,93 @@ int path_manager_on_packet_recv(struct p2p_session *s, int path_idx, uint64_t no
         return (int)rtt;  // 返回测量的 RTT
     }
     
+    return -1; /* 未找到对应发送记录 */
+}
+
+int path_manager_on_sig_alive_recv(struct p2p_instance *inst, uint64_t now_ms) {
+
+    assert(inst->signaling.active);
+    path_stats_t *sta = &inst->signaling.stats;
+
+    // 接收包统计（所有包）
+    sta->last_recv_ms = now_ms;
+    sta->total_packets_recv++;
+
+    // 重置路径连续超时次数
+    sta->consecutive_timeouts = 0;
+
+    // ========== RoundTrip 确认：完成 RTT 测量 ==========
+
+    path_manager_t *pm = &inst->path_mgr;
+
+    // 在环形队列中查找对应的发送记录
+    for (int k = 0; k < pm->pending_count; k++) {
+        int idx = (pm->pending_head + k) % MAX_PENDING_PACKETS;
+        packet_track_t *track = &pm->pending_packets[idx];
+        if (track->sent_time_ms == 0) continue;             // 跳过已消费（应答）的槽位
+        //if (track->seq != seq) continue;
+
+        uint64_t sent_ms = track->sent_time_ms;
+        track->sent_time_ms = 0;                            // 标记为已消费（应答）
+
+        // 窗口滑动，推进队首跳过连续空洞
+        while (pm->pending_count > 0 &&
+               pm->pending_packets[pm->pending_head].sent_time_ms == 0) {
+            pm->pending_head = (pm->pending_head + 1) % MAX_PENDING_PACKETS;
+            pm->pending_count--;
+        }
+
+        // 计算 RTT（round trip time）
+        uint32_t rtt = (uint32_t)tick_diff(now_ms, sent_ms);
+
+        // 更新发送路径的 RTT 统计（按原路/跨路径分别记录）
+
+        // 记录原始测量值
+        sta->rt_rtt_direct = rtt;
+
+        // EWMA 平滑算法（TCP-style smoothed RTT）
+        if (sta->rt_rtt_direct_srtt == 0) {
+            // 首次测量：初始化
+            sta->rt_rtt_direct_srtt = rtt;
+            sta->rt_rtt_direct_rttvar = rtt / 2;
+        } else {
+            // 后续测量：应用 EWMA
+            // SRTT = (1-α) * SRTT + α * RTT
+            // RTTVAR = (1-β) * RTTVAR + β * |SRTT - RTT|
+            int32_t err = (int32_t)rtt - (int32_t)sta->rt_rtt_direct_srtt;
+            int32_t new_srtt = (int32_t)sta->rt_rtt_direct_srtt + (int32_t)(ALPHA * (float)err);
+            sta->rt_rtt_direct_srtt = new_srtt > 0 ? (uint32_t)new_srtt : sta->rt_rtt_direct_srtt;
+
+            int32_t var_err = abs(err) - (int32_t)sta->rt_rtt_direct_rttvar;
+            int32_t new_rttvar = (int32_t)sta->rt_rtt_direct_rttvar + (int32_t)(BETA * (float)var_err);
+            sta->rt_rtt_direct_rttvar = new_rttvar > 0 ? (uint32_t)new_rttvar : 1;  // 最小值1
+        }
+
+        // 更新 RTT 样本缓冲区（用于统计分析）
+        sta->rt_samples[sta->rt_sample_idx] = rtt;
+        sta->rt_sample_idx = (sta->rt_sample_idx + 1) % RTT_SAMPLE_COUNT;
+        if (sta->rt_sample_count < RTT_SAMPLE_COUNT) {
+            sta->rt_sample_count++;
+        }
+
+        // 更新 min/max RTT
+        if (rtt < sta->rtt_min) sta->rtt_min = rtt;
+        if (rtt > sta->rtt_max) sta->rtt_max = rtt;
+
+        // 重置连续超时计数
+        sta->consecutive_timeouts = 0;
+
+        // 更新综合指标（rtt_ms, rtt_variance, loss_rate）
+        update_metrics(sta);
+
+        // 调试日志
+        print("V:", "path_manager: RTT path[SIG] = %u ms (direct, srtt=%u, var=%u, seq=%u)",
+              rtt, sta->rt_rtt_direct_srtt,
+              sta->rt_rtt_direct_rttvar, 0);
+
+        return (int)rtt;  // 返回测量的 RTT
+    }
+
     return -1; /* 未找到对应发送记录 */
 }
 
@@ -1147,20 +1271,20 @@ static void update_quality(path_stats_t *p) {
 /*
  * 对单条路径执行健康检查（共享逻辑，SIGNALING 和候选都用）
  */
-static void health_check_one_path(struct p2p_session *s, path_stats_t *p,
+static void health_check_one_path(struct p2p_session *s, path_stats_t *sta,
                                    int path_idx, uint64_t now_ms) {
     path_manager_t *pm = &s->path_mgr;
 
     /* ---- 1. ACTIVE / DEGRADED 超时检测 ---- */
-    if (p->state == PATH_STATE_ACTIVE || p->state == PATH_STATE_DEGRADED) {
-        uint64_t timeout = p->is_lan ? LAN_TIMEOUT_MS : WAN_TIMEOUT_MS;
+    if (sta->state == PATH_STATE_ACTIVE || sta->state == PATH_STATE_DEGRADED) {
+        uint64_t timeout = sta->is_lan ? LAN_TIMEOUT_MS : WAN_TIMEOUT_MS;
 
-        if (p->last_recv_ms) {
-            if ((int)(tick_diff(now_ms, p->last_recv_ms) / timeout) >= FAILED_TIMEOUT_COUNT) {
-                p->state = PATH_STATE_FAILED;
+        if (sta->last_recv_ms) {
+            if ((int)(tick_diff(now_ms, sta->last_recv_ms) / timeout) >= FAILED_TIMEOUT_COUNT) {
+                sta->state = PATH_STATE_FAILED;
 
                 // 记录进入 FAILED 的时间（用于 30s 后触发 RECOVERING）
-                p->state_timestamp_ms = now_ms;
+                sta->state_timestamp_ms = now_ms;
 
                 // 故障转移：当前活跃路径失效时，选择新路径
                 // ! 这里的策略是，如果当前路径失效，且没有其他路径可用，则保持当前路径不变。
@@ -1185,47 +1309,47 @@ static void health_check_one_path(struct p2p_session *s, path_stats_t *p,
     }
 
     /* ---- 2. 性能退化 / 恢复 ---- */
-    if (p->state == PATH_STATE_ACTIVE) {
-        if (p->rtt_ms > DEGRADED_RTT_MS || p->loss_rate > DEGRADED_LOSS_RATE)
-            p->state = PATH_STATE_DEGRADED;
-    } else if (p->state == PATH_STATE_DEGRADED) {
-        if (p->rtt_ms < RECOVER_RTT_MS && p->loss_rate < RECOVER_LOSS_RATE)
-            p->state = PATH_STATE_ACTIVE;
+    if (sta->state == PATH_STATE_ACTIVE) {
+        if (sta->rtt_ms > DEGRADED_RTT_MS || sta->loss_rate > DEGRADED_LOSS_RATE)
+            sta->state = PATH_STATE_DEGRADED;
+    } else if (sta->state == PATH_STATE_DEGRADED) {
+        if (sta->rtt_ms < RECOVER_RTT_MS && sta->loss_rate < RECOVER_LOSS_RATE)
+            sta->state = PATH_STATE_ACTIVE;
     }
 
     /* ---- 3. FAILED → RECOVERING：30 秒后探测恢复 ---- */
-    if (p->state == PATH_STATE_FAILED) {
-        if (p->state_timestamp_ms > 0 && tick_diff(now_ms, p->state_timestamp_ms) > FAILED_TO_RECOVERING_MS) {
-            p->state = PATH_STATE_RECOVERING;
+    if (sta->state == PATH_STATE_FAILED) {
+        if (sta->state_timestamp_ms > 0 && tick_diff(now_ms, sta->state_timestamp_ms) > FAILED_TO_RECOVERING_MS) {
+            sta->state = PATH_STATE_RECOVERING;
 
-            p->consecutive_timeouts = 0;                        // 重置连续超时计数
-            p->state_timestamp_ms = now_ms;                     // 恢复开始时间
-            p->last_recv_ms = now_ms;                           // 初始化 last_recv_ms 为当前时刻
+            sta->consecutive_timeouts = 0;                        // 重置连续超时计数
+            sta->state_timestamp_ms = now_ms;                     // 恢复开始时间
+            sta->last_recv_ms = now_ms;                           // 初始化 last_recv_ms 为当前时刻
         }
     }
 
     /* ---- 4. RECOVERING 超时或恢复成功 ---- */
-    if (p->state == PATH_STATE_RECOVERING) {
-        uint64_t recovering_start = p->state_timestamp_ms;
+    if (sta->state == PATH_STATE_RECOVERING) {
+        uint64_t recovering_start = sta->state_timestamp_ms;
         uint64_t elapsed = tick_diff(now_ms, recovering_start);
 
         // RECOVERING_TIMEOUT_MS 内未恢复 → 回到 FAILED，重新等待
         if (elapsed > RECOVERING_TIMEOUT_MS) {
-            p->state = PATH_STATE_FAILED;
-            p->state_timestamp_ms = now_ms;
+            sta->state = PATH_STATE_FAILED;
+            sta->state_timestamp_ms = now_ms;
         } 
         // 收到数据且最近 2 秒内有活动 → 恢复成功
-        else if (p->last_recv_ms > recovering_start &&
-                   tick_diff(now_ms, p->last_recv_ms) < RECOVERING_ACTIVITY_MS) {
+        else if (sta->last_recv_ms > recovering_start &&
+                   tick_diff(now_ms, sta->last_recv_ms) < RECOVERING_ACTIVITY_MS) {
             
-            p->state = PATH_STATE_ACTIVE;
+            sta->state = PATH_STATE_ACTIVE;
         }
     }
 }
 
 void path_manager_tick(struct p2p_session *s, uint64_t now_ms) {
     path_manager_t *pm = &s->path_mgr;
-    
+
     // 周期 health check
     if (tick_diff(now_ms, pm->last_health_check_ms) < pm->health_check_interval_ms) return;
     pm->last_health_check_ms = now_ms;
@@ -1255,6 +1379,7 @@ void path_manager_tick(struct p2p_session *s, uint64_t now_ms) {
     }
 
     // 检查信令中转路径（如果路径有效）
+    // todo 还需要这里检查吗
     if (s->inst->signaling.active) {
         health_check_one_path(s, &s->inst->signaling.stats, PATH_IDX_SIGNALING, now_ms);
     }
@@ -1262,4 +1387,40 @@ void path_manager_tick(struct p2p_session *s, uint64_t now_ms) {
     for (int i = 0; i < s->remote_cand_cnt; i++) {
         health_check_one_path(s, &s->remote_cands[i].stats, i, now_ms);
     }
+}
+
+void path_manager_signaling_tick(struct p2p_instance *inst, uint64_t now_ms) {
+
+    if (!inst->signaling.active) return;
+
+    path_manager_t *pm = &inst->path_mgr;
+
+    // 周期 health check
+    if (tick_diff(now_ms, pm->last_health_check_ms) < pm->health_check_interval_ms) return;
+    pm->last_health_check_ms = now_ms;
+
+    // 扫描未 ACK 的 RoundTrip 包，如果超时视为丢包
+    for (int k = 0; k < pm->pending_count; k++) {
+        int idx = (pm->pending_head + k) % MAX_PENDING_PACKETS;
+        packet_track_t *track = &pm->pending_packets[idx];
+        if (track->sent_time_ms == 0) continue;     // 跳过已消费（应答）的槽位
+
+        if (tick_diff(now_ms, track->sent_time_ms) > PROBE_LOSS_TIMEOUT_MS) {
+            inst->signaling.stats.rt_packets_lost++;               // 增加 RoundTrip 层丢包计数
+            inst->signaling.stats.total_packets_lost++;            // 增加总丢包计数
+            inst->signaling.stats.consecutive_timeouts++;          // 增加路径连续超时次数
+            update_metrics(&inst->signaling.stats);               // 更新综合指标（丢包率）
+            track->sent_time_ms = 0;
+        }
+    }
+    // 窗口滑动，推进队首跳过连续空洞
+    while (pm->pending_count > 0 &&
+           pm->pending_packets[pm->pending_head].sent_time_ms == 0) {
+        pm->pending_head = (pm->pending_head + 1) % MAX_PENDING_PACKETS;
+        pm->pending_count--;
+           }
+
+    // 检查信令中转路径（如果路径有效）
+    // todo 好像该操作是用于不同路径间的检测
+    // health_check_one_path(s, &s->inst->signaling.stats, PATH_IDX_SIGNALING, now_ms);
 }
