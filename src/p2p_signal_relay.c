@@ -769,10 +769,10 @@ static void handle_relay_fin(const char *PROTO, struct p2p_session *s, const uin
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
 
-    // 清理会话状态，回到 ONLINE 状态
+    // 清理会话状态，回到 WAIT_PEER 被动等待（对端主动断开，不自动重连）
+    print("I:", LA_F("[ST:%s] peer closed session %u\n", LA_F504, 504), "WAIT_PEER", s->id);
     s->id = 0;
     sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
-    print("I:", LA_F("[ST:%s] peer closed session %u\n", LA_F504, 504), "WAIT_PEER", s->id);
 
     reset_peer(sess_ctx);
 
@@ -1671,14 +1671,16 @@ void p2p_signal_relay_tick_recv(struct p2p_instance *inst, uint64_t now) {
             P_sock_close(sig_ctx->sockfd);
             sig_ctx->sockfd = P_INVALID_SOCKET;
             sig_ctx->state = SIG_RELAY_ERROR;
+            return;
         }
         else if (!P_sock_is_wouldblock()) {   // 出现错误
             print("E:", LA_F("[R] TCP recv error(%d)\n", LA_F526, 526), P_sock_errno());
             P_sock_close(sig_ctx->sockfd);
             sig_ctx->sockfd = P_INVALID_SOCKET;
             sig_ctx->state = SIG_RELAY_ERROR;
+            return;
         }
-        return;
+        break; // WOULDBLOCK: 退出 recv 循环，继续执行下方协议状态维护
     }
 
     // ====================================================================

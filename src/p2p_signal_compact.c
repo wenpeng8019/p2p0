@@ -275,6 +275,7 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
                PROTO, inet_ntoa(sig_ctx->server_addr.sin_addr), ntohs(sig_ctx->server_addr.sin_port), n);
 
     sig_ctx->last_send_time = now;
+    sess_ctx->sync_send_time = now;
 }
 
 /*
@@ -346,6 +347,7 @@ static void send_rest_candidates_and_fin(struct p2p_session *s, uint64_t now) {
 
     print("V:", LA_F("%s sent, total=%d (ses_id=%u)\n", LA_F62, 62), PROTO, pkt_cnt, s->id);
     sig_ctx->last_send_time = now;
+    sess_ctx->sync_send_time = now;
 }
 
 /*
@@ -439,6 +441,7 @@ static void resend_candidates_and_fin(struct p2p_session *s, uint64_t now) {
     if (pkt_cnt) {
         print("V:", LA_F("%s resent, %d/%d\n", LA_F51, 51), PROTO, pkt_cnt, seq - 1);
         sig_ctx->last_send_time = now;
+        sess_ctx->sync_send_time = now;
     }
 }
 
@@ -1269,17 +1272,17 @@ void compact_on_fin(struct p2p_session *s, const uint8_t *payload, int len,
 
     print("V:", LA_F("%s: accepted (ses_id=%u)\n", LA_F88, 88), PROTO, session_id);
 
-    // 重置到 WAIT_SYNC0_ACK 状态，等待对端重新上线
+    // 重置到 WAIT_PEER 被动等待状态（对端主动断开，不自动重连）
     // ! 这里可以明确知道是对方断开了连接，所以自己和信令服务器之间的连接和数据状态都是正常的，不需要重置
     //   auth_key 不需要重置，因为它是 client↔server 的认证令牌，对端断开不影响与服务器的关系
     //   session_id 对应 client↔peer 会话，对端断开后将在下一轮 SYNC0_ACK 中重新获得
     s->id = 0;
-    sess_ctx->state = SIG_COMPACT_SESS_WAIT_SYNC0_ACK;
+    sess_ctx->state = SIG_COMPACT_SESS_WAIT_PEER;
 
     // 清除双方协商信息
     reset_peer(sess_ctx);
 
-    print("I:", LA_F("%s: peer disconnected (ses_id=%u), reset to WAIT_SYNC0_ACK\n", LA_F551, 551), PROTO, session_id);
+    print("I:", LA_F("%s: peer disconnected (ses_id=%u), reset to WAIT_PEER\n", LA_F551, 551), PROTO, session_id);
 
     // 标记 NAT 为已关闭
     // + 这里将信令层的 peer close 转换为 NAT 层的 closed 状态，主循环会统一以 NAT 层的 NAT_CLOSED 状态机变更为准
@@ -2114,7 +2117,7 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
                 send_trickle_candidates(s);
             }
 
-            if (tick_diff(now, sess_ctx->sync_send_time) <= SYNC_INTERVAL_MS) {
+            if (tick_diff(now, sess_ctx->sync_send_time) >= SYNC_INTERVAL_MS) {
 
                 // todo 确认 resend_candidates_and_fin 也对 trickle 进行重传？
 

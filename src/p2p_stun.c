@@ -754,7 +754,13 @@ static inline void stun_add_srflx_candidate(struct p2p_instance *inst, const str
     bool sig_ready = false;
     if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
         sig_ready = inst->sig_ctx.compact.state == SIG_COMPACT_ONLINE;
+    } else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
+        sig_ready = inst->sig_ctx.relay.state == SIG_RELAY_ONLINE;
     }
+
+    // 缓存映射地址，供后续 session 复用
+    inst->stun_ctx.mapped_addr = *mapped;
+    inst->stun_ctx.mapped_addr_active = true;
 
     // 如果之前还未进入可同步状态
     // todo stun_pending 超时问题

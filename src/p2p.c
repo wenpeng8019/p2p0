@@ -112,7 +112,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
             if (idx >= 0) {
                 p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                 c->type = P2P_CAND_SRFLX;
-                c->addr = inst->turn.relay_addr;
+                c->addr = inst->stun_ctx.mapped_addr;
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 if (s->public_base < 0) s->public_base = idx;
                 print("I:", LA_F("Reuse STUN Candidate %s:%u (priority=%u)", 0, 0),
