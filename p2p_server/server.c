@@ -858,7 +858,7 @@ static void relay_session_send_complete(relay_session_t *s, buffer_item_t* buf_i
 //-----------------------------------------------------------------------------
 
 // 处理 SYNC0 消息（首次同步）
-// payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
+// 注意：payload 已在接收阶段插入 session_id 间隙，布局为：
 static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_t len) {
     const char *PROTO = "SYNC0";
 
@@ -907,12 +907,15 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
             return;
         }
 
-        // 标记该包是为了零拷贝转发而构造的，后续处理时会区分对待
-        ((p2p_relay_hdr_t *)client->recv_buf)->size = 0;
+        // 零拷贝转发：memmove 为 session_id 腾出空间，替换 target_name → source_name
+        memmove(payload + P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ,
+                payload + P2P_PEER_ID_MAX,
+                1 + cand_count * (int)sizeof(p2p_candidate_t));
+        memset(payload, 0, P2P_PEER_ID_MAX);
+        strncpy((char*)payload, client->base.local_peer_id, P2P_PEER_ID_MAX - 1);
 
-        // 构造零拷贝转发的 SYNC0 包
-        hdr = (p2p_relay_hdr_t *)(client->recv_buf + P2P_PEER_ID_MAX - P2P_SESS_ID_PSZ);
-        hdr->size = P2P_RLY_SYNC_PSZ(cand_count, false);
+        hdr = (p2p_relay_hdr_t *)client->recv_buf;
+        hdr->size = htons(P2P_RLY_SYNC0_S2C_PSZ(cand_count));
 
         buffer_item_t* item = BUF2ITEM(client->recv_buf);
         client->recv_buf = ITEM2BUF(sync0_item);
@@ -928,10 +931,14 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
         }
 
         hdr = (p2p_relay_hdr_t *)(ITEM2BUF(sync0_item));
-        hdr->size = P2P_RLY_SYNC_PSZ(0, false);
+        uint8_t *p = (uint8_t*)(hdr + 1);
+        memset(p, 0, P2P_PEER_ID_MAX);
+        strncpy((char*)p, client->base.local_peer_id, P2P_PEER_ID_MAX - 1);
+        // session_id 由后续 nwrite_l 写入
+        p[P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ] = 0; // cand_count = 0
+        hdr->size = htons(P2P_RLY_SYNC0_S2C_PSZ(0));
     }
     hdr->type = P2P_RLY_SYNC0;
-    hdr->size = htons(hdr->size);
 
     // 对端已在线
     if (remote_s) {
@@ -944,8 +951,8 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
 
         assert(!local_s->peer_pending);
 
-        // 本端 SYNC0 转发给对端前，需要写入对端 session_id
-        uint8_t* sid = (uint8_t*)(hdr+1);
+        // 本端 SYNC0 转发给对端前，需要写入对端 session_id（位于 source_name 之后）
+        uint8_t* sid = (uint8_t*)(hdr+1) + P2P_PEER_ID_MAX;
         nwrite_l(sid, remote_s->base.session_id);
         
         // 添加到对端发送队列（零拷贝转发），设置 refer 触发传完后的 complete 回调
@@ -962,9 +969,8 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
 
             hdr = (p2p_relay_hdr_t *)ITEM2BUF(remote_sync0_item);
 
-            // 对端 SYNC0 转发给本端前，需要写入本端 session_id
-            uint8_t *cached_sid = (uint8_t*)(hdr+1);
-            if (hdr->size == 0) cached_sid += P2P_PEER_ID_MAX - P2P_SESS_ID_PSZ;
+            // 对端 SYNC0 转发给本端前，需要写入本端 session_id（位于 source_name 之后）
+            uint8_t *cached_sid = (uint8_t*)(hdr+1) + P2P_PEER_ID_MAX;
             nwrite_l(cached_sid, local_s->base.session_id);
 
             // 添加到本端发送队列，也要设置 refer
@@ -972,9 +978,9 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
             remote_s->peer_pending = (buffer_item_t*)-1;
             relay_session_send(local_s, remote_sync0_item);
 
-            // 如果对端 sync0 发送的同步数据，发送 SYNC_ACK 告知对端同步数据已（确认）转发
-            if (hdr->size == 0) {
-                uint8_t remote_cand_count = cached_sid[P2P_SESS_ID_PSZ];
+            // 如果对端 sync0 携带了同步数据，发送 SYNC_ACK 告知对端同步数据已（确认）转发
+            uint8_t remote_cand_count = cached_sid[P2P_SESS_ID_PSZ];
+            if (remote_cand_count) {
                 relay_session_send_sync_ack(remote_s, remote_cand_count);
             }
         }
@@ -1306,7 +1312,7 @@ static void handle_relay_signaling(int idx) {
             print("E:", LA_F("bad payload len %u\n", LA_F143, 143), payload_len);
             goto disconnect;
         }
-        
+
         // 读取完整 payload
         uint16_t total_need = sizeof(p2p_relay_hdr_t) + payload_len;
         while (client->recv_len < total_need) {
@@ -1406,7 +1412,14 @@ static void handle_relay_signaling(int idx) {
             relay_send_error(client, type, P2P_RLY_ERR_NOT_ONLINE);
             goto disconnect;
         }
-        else if (type == P2P_RLY_ALIVE) {} // 心跳包：last_active 已在循环入口更新，无需额外处理
+        else if (type == P2P_RLY_ALIVE) {
+            // 心跳包：last_active 已在循环入口更新，就地改写 recv_buf 为 ALIVE_ACK 回复
+            client->recv_buf[0] = P2P_RLY_ALIVE_ACK;
+            // size 已经是 0（ALIVE 无 payload），无需修改
+            size_t ack_len = sizeof(p2p_relay_hdr_t);
+            // 这里直接发送 ACK，理论上不应出现 WOULDBLOCK（3 bytes 数据），如果发生了也无妨，等下次心跳再回复即可
+            tcp_send(client, client->recv_buf, &ack_len, "ALIVE_ACK");
+        }
         else if (type == P2P_RLY_SYNC0) {
             handle_relay_sync0(client, payload, payload_len);
         }
@@ -3351,10 +3364,6 @@ int main(int argc, char *argv[]) {
                     buffer_item_t *item = sending_session->send_head;
                     const p2p_relay_hdr_t *hdr = (const p2p_relay_hdr_t *)ITEM2BUF(item);
 
-                    // 原始入站 SYNC0 零拷贝包：首发时切换到重映射头部位置发送
-                    if (hdr->size == 0) *(uint8_t**)&hdr += P2P_PEER_ID_MAX - P2P_SESS_ID_PSZ;
-
-                    // 零拷贝包：buf[0].size=0 是标记，实际长度从 overlaid header（偏移处）读取
                     const uint16_t len = (uint16_t)(sizeof(p2p_relay_hdr_t) + ntohs(hdr->size));
                     size_t remaining = len - client->send_offset;
                     int rc = tcp_send(client, (const char *)hdr + client->send_offset, &remaining, "session queue");
