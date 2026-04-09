@@ -255,6 +255,11 @@ typedef struct {
 void p2p_signal_relay_init(p2p_relay_ctx_t *ctx);
 
 /*
+ * STUN 候选收集完成后，触发所有 WAIT_SYNCABLE 会话发送 SYNC0
+ */
+void p2p_signal_relay_syncable(struct p2p_instance *inst, p2p_relay_ctx_t *ctx);
+
+/*
  * 信令接收维护（拉取阶段）
  *
  * 处理 TCP 接收和协议解析：

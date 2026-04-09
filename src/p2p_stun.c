@@ -782,8 +782,8 @@ static inline void stun_add_srflx_candidate(struct p2p_instance *inst, const str
             if (syncable) {
                 if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
                     p2p_signal_compact_syncable(inst, &inst->sig_ctx.compact);
-                else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
-                    ;
+                else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
+                    p2p_signal_relay_syncable(inst, &inst->sig_ctx.relay);
             }
         }
     }
