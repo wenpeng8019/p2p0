@@ -28,9 +28,12 @@
 
 #include "p2p_internal.h"
 
-#define TASK_REG                        "REGISTER"
-#define TASK_ICE                        "ICE"
-#define TASK_ICE_REMOTE                 "ICE REMOTE"
+#define TASK_ONLINE                     "ONLINE"
+#define TASK_TOUCH                      "TOUCH"
+#define TASK_SYNC                       "SYNC"
+#define TASK_SYNC_REMOTE                "SYNC REMOTE"
+#define TASK_RELAY                      "RELAY"
+#define TASK_RPC                        "RPC"
 
 /* 一个 SYNC 包所承载的候选数量（单位）*/
 #define SYNC_CAND_UNIT \
@@ -65,7 +68,7 @@ static ret_t tcp_send(p2p_relay_ctx_t *ctx, const char* PROTO,
     } else {        
         chunk = (p2p_send_chunk_t *)malloc(sizeof(p2p_send_chunk_t));
         if (!chunk) {
-            printf(LA_F("[R] %s%s qsend, failed(OOM)\n", 0, 0), type == P2P_RLY_PACKET ? "(PKT-)" : "" , PROTO);
+            print("E:", LA_F("[R] %s%s qsend failed(OOM)\n", 0, 0), type == P2P_RLY_PACKET ? "PKT-" : "" , PROTO);
             return E_OUT_OF_MEMORY;  // 内存分配失败
         }
     }
@@ -112,7 +115,7 @@ static ret_t tcp_send(p2p_relay_ctx_t *ctx, const char* PROTO,
  */
 static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *payload, int len) {
     if (len < 1) {
-        print("E:", LA_F("%s: bad payload len=%d\n", LA_F498, 498), TASK_ICE_REMOTE, len);
+        print("E:", LA_F("%s: bad payload len=%d\n", LA_F498, 498), TASK_SYNC_REMOTE, len);
         return;
     }
 
@@ -120,7 +123,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
 
     if (len < 1 + (int)sizeof(p2p_candidate_t) * cand_cnt) {
         print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F561, 561), 
-              TASK_ICE_REMOTE, len, cand_cnt);
+              TASK_SYNC_REMOTE, len, cand_cnt);
         return;
     }
 
@@ -131,7 +134,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
     for (int i = 0; i < cand_cnt; i++, offset += (int)sizeof(p2p_candidate_t)) {
         if (s->remote_cand_cnt >= s->remote_cand_cap) {
             print("W:", LA_F("%s: remote_cands[] full, skipped %d candidates\n", LA_F505, 505),
-                  TASK_ICE_REMOTE, cand_cnt - i);
+                  TASK_SYNC_REMOTE, cand_cnt - i);
             break;
         }
 
@@ -146,11 +149,11 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
                 s->remote_cands[dup_idx].type = c->type;
                 s->remote_cands[dup_idx].priority = c->priority;
                 print("I:", LA_F("%s: promoted prflx cand[%d]<%s:%d> → %s\n", LA_F601, 601),
-                      TASK_ICE_REMOTE, dup_idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                      TASK_SYNC_REMOTE, dup_idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
                       p2p_candidate_type_str(c->type));
             } else {
                 print("V:", LA_F("%s: duplicate remote cand<%s:%d>, skipped\n", LA_F500, 500),
-                      TASK_ICE_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                      TASK_SYNC_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             }
             continue;
         }
@@ -173,13 +176,13 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
             opt_off = s->inst->cfg.test_ice_relay_off;
         } else {
             print("E:", LA_F("%s: unexpected remote cand type %d, skipped\n", LA_F193, 193),
-                  TASK_ICE_REMOTE, c->type);
+                  TASK_SYNC_REMOTE, c->type);
             continue;
         }
 
         if (opt_off) {
             print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F423, 423),
-                  TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                  TASK_SYNC_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
             continue;
         }
 
@@ -187,12 +190,12 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
         ++*cand_cnt_ptr;
 
         print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F153, 153),
-              TASK_ICE_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+              TASK_SYNC_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
 
         // 启动打洞
         if (sess_ctx->state >= SIG_RELAY_SESS_SYNCING && nat_punch(s, idx) != E_NONE) {
             print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F137, 137),
-                  TASK_ICE_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                  TASK_SYNC_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
         }
     }
 }
@@ -308,7 +311,7 @@ static void send_sync(struct p2p_session *s, uint64_t now) {
             // 如果已经没有待定的候选地址，追加 fin_marker = 0xFF
             if (!s->inst->stun_pending && !s->inst->turn_pending) remaining = 0;
             // 否则启动攒批机制
-            else sess_ctx->trickle_last_time = now;
+            else { sess_ctx->trickle_last_time = now; sig_ctx->trickle_sessions++; }
         }
 
         payload[P2P_SESS_ID_PSZ] = (uint8_t)cand_cnt;
@@ -371,8 +374,9 @@ void p2p_signal_relay_init(p2p_relay_ctx_t *ctx) {
     ctx->sockfd = P_INVALID_SOCKET;
 }
 
-static void reset_peer(p2p_relay_session_t *sess_ctx) {
+static void reset_peer(p2p_relay_session_t *sess_ctx, p2p_relay_ctx_t *sig_ctx) {
 
+    if (sess_ctx->trickle_last_time) sig_ctx->trickle_sessions--;
     sess_ctx->candidate_syncing_base = 0;
     sess_ctx->candidate_synced_count = 0;
     sess_ctx->trickle_last_time = 0;
@@ -391,7 +395,7 @@ void p2p_signal_relay_syncable(struct p2p_instance *inst, p2p_relay_ctx_t *ctx) 
 
         sess_ctx->state = SIG_RELAY_SESS_WAIT_SYNC0_ACK;
         send_sync0(inst, s, P_tick_ms());
-        print("I:", LA_F("[ST:%s] auth_key acquired, auto SYNC0 sent\n", "ONLINE", LA_F475, 475));
+        print("I:", LA_F("%s: syncable ready, auto SYNC0 sent\n", "ONLINE", LA_F475, 475), TASK_TOUCH);
     }
 }
 
@@ -446,13 +450,12 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
     if (!sig_ctx->candidate_sync_max) { def = "(default)";
         sig_ctx->candidate_sync_max = SYNC_CAND_UNIT;
     }
-    print("V:", LA_F("%s: accepted, relay=%s msg=%s cand_max=%d%s\n", LA_F496, 496),
-          PROTO, sig_ctx->feature_relay ? "yes" : "no", sig_ctx->feature_msg ? "yes" : "no",
-          sig_ctx->candidate_sync_max, def);
+    print("V:", LA_F("%s: accepted, cand_max=%d%s relay=%s msg=%s\n", LA_F496, 496),
+          TASK_ONLINE, sig_ctx->candidate_sync_max, def, sig_ctx->feature_relay ? "yes" : "no", sig_ctx->feature_msg ? "yes" : "no");
 
     // 切换到 ONLINE 状态
     sig_ctx->state = SIG_RELAY_ONLINE;
-    print("I:", LA_F("[ST:%s] ready to start session\n", "ONLINE" LA_F518, 518));
+    print("I:", LA_F("%s: ready to start session\n", "ONLINE" LA_F518, 518), TASK_ONLINE);
 
     // 如果服务器支持数据中继
     if (sig_ctx->feature_relay) {
@@ -462,7 +465,7 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
         inst->signaling_relay_fn = p2p_signal_relay_packet;
 
         path_manager_enable_signaling(inst, &sig_ctx->server_addr);
-        print("I:", LA_F("SIGNALING path enabled (server supports relay)\n", LA_F320, 320));
+        print("I:", LA_F("%s: SIGNALING path enabled (server supports relay)\n", LA_F320, 320), TASK_ONLINE);
     }
 
     bool stun_pending = inst->stun_pending && !inst->cfg.skip_stun_pending;
@@ -477,10 +480,10 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
 
             sess_ctx->state = SIG_RELAY_SESS_WAIT_SYNC0_ACK;
             send_sync0(inst, s, now);
-            print("I:", LA_F("[ST:%s] auth_key acquired, auto SYNC0 sent\n", "ONLINE", LA_F475, 475));
+            print("I:", LA_F("%s: auth_key acquired, auto SYNC0 sent\n", "ONLINE", LA_F475, 475), TASK_TOUCH);
         }
         else {
-            print("I:", LA_F("[ST:%s] auth_key acquired, waiting stun pending\n", "ONLINE", LA_F476, 476));
+            print("I:", LA_F("%s: auth_key acquired, waiting stun pending\n", "ONLINE", LA_F476, 476), TASK_TOUCH);
         }
 
         if (s->state == P2P_STATE_REGISTERING) s->state = P2P_STATE_ONLINE;
@@ -497,7 +500,7 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
 /*
  * 处理 ALIVE_ACK，服务器保活确认
  *
- * 包头: [type(P2P_RLY_SYNC) | size(2)]
+ * 包头: [type(P2P_RLY_ALIVE_ACK) | size(2)]
  * 负载: 无
  */
 void handle_alive_ack(struct p2p_instance *inst, uint64_t now) {
@@ -584,51 +587,34 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
  * 处理 SYNC0_ACK
  *
  * 包头: [type(P2P_RLY_SYNC0_ACK) | size(2)]
- * 负载: [session_id(4)][online(1)]
+ * 负载: [target_name(32)][session_id(4)][online(1)]
+ * 注: [target_name(32)][session_id(4)] 已剥离
  */
-static void handle_sync0_ack(const char *PROTO, struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) {
-
-    if (len < (int)P2P_RLY_SYNC0_ACK_PSZ) {
-        print("E:", LA_F("%s: bad payload(%d)\n", LA_F562, 562), PROTO, len);
-        return;
-    }
+static void handle_sync0_ack(struct p2p_session *s, const uint8_t *payload, uint64_t now) {
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
-    if (sess_ctx->state != SIG_RELAY_SESS_WAIT_SYNC0_ACK) {
-        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
-        return;
-    }
 
-    uint32_t session_id = nget_l(payload);
-    if (!session_id) {
-        print("W:", LA_F("%s: invalid session_id=0\n", LA_F168, 168), PROTO);
-        return;
-    }
-
-    // 协议需要确保 SYNC0_ACK 要先于对端上线的 SYNC0 到达，因此本地 session_id 不可能已被占用
-    assert(!s->id);
-    s->id = session_id;
-
-    uint8_t online = payload[P2P_SESS_ID_PSZ];
-    print("V:", LA_F("%s: accepted, ses_id=%u peer=%s\n", LA_F497, 497),
-          PROTO, s->id, online ? "online" : "offline");
+    print("V:", LA_F("%s: accepted (ses_id=%u), peer=%s\n", LA_F497, 497),
+          TASK_TOUCH, s->id, payload[0] ? "online" : "offline");
 
     // SYNC0_ACK 只代表会话建立；候选交换需等待对端在线
-    if (!online) {
+    if (!payload[0]) {
         sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
-        print("I:", LA_F("[ST:%s] session established, waiting for peer info\n", "WAIT_PEER", LA_F576, 576));
+        print("I:", LA_F("%s: session offer(st=%s peer=%s), waiting for peer\n", "WAIT_PEER", LA_F576, 576),
+                TASK_TOUCH, "WAIT_PEER", "online", LA_S("waiting for peer", 0, 0));
         return;
     }
 
     // 切换到 SYNCING 状态，开始上传候选
     sess_ctx->state = SIG_RELAY_SESS_SYNCING;
-    print("I:", LA_F("[ST:%s] session established(peer=online), sync candidates\n", "SYNCING" LA_F571, 571));
+    print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", "SYNCING" 0, 0),
+          TASK_TOUCH, "SYNCING", "offline", LA_S("sync candidates", 0, 0));
 
     // 同步发送首批候选（如果有）
     assert(sess_ctx->candidate_syncing_base == 0);
     if (s->local_cand_cnt || (!s->inst->stun_pending && !s->inst->turn_pending))
         send_sync(s, now);
-    else sess_ctx->trickle_last_time = now;
+    else { sess_ctx->trickle_last_time = now; s->inst->sig_ctx.relay.trickle_sessions++; }
 
     // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
     nat_punch(s, -1/* all candidates */);
@@ -639,59 +625,54 @@ static void handle_sync0_ack(const char *PROTO, struct p2p_session *s, const uin
  *
  * 包头: [type(P2P_RLY_SYNC_ACK) | size(2)]
  * 负载: [session_id(4)][confirmed_count(1)]
+ * 注: [session_id(4)] 已剥离
  *
  * 流程：
  *   - confirmed_count > 0: 服务器接受了 N 个候选（可能少于上传数）；
  *     回滚 candidate_syncing_base 到实际接受点，继续发送剩余批次。
  *   - confirmed_count == 0 且 FIN 标记包已发: 所有候选已转发到对端，标记完成。
  *
- * 服务器仅在中转缓冲区有空间时才发送 ACK（流量控制）。
+ * 服务器仅在中转缓冲区有空间时才发送 ACK（流量控制）
  * 客户端在收到 ACK 前不得发送下一批候选。
  */
-static void handle_sync_ack(const char *PROTO, struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) {
-
-    if (len < (int)P2P_RLY_SYNC_ACK_PSZ) {
-        print("E:", LA_F("%s: bad payload(%d)\n", LA_F455, 455), PROTO, len);
-        return;
-    }
+static void handle_sync_ack(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) {
+    (void)len;
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
     if (sess_ctx->state != SIG_RELAY_SESS_SYNCING) {
-        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
+        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), TASK_SYNC, (int)sess_ctx->state);
         return;
     }
 
-    uint8_t confirmed_count = payload[P2P_SESS_ID_PSZ];
-
     // 根据协议，confirmed_count 为 0 是服务器确认 fin 包已同步发送给对方的通知
-    if (!confirmed_count) {
+    if (!payload[0]) {
 
         // 对账：如果本地此时还有候选(或fin)未同步
         if (sess_ctx->candidate_synced_count < s->local_cand_cnt || sess_ctx->candidate_syncing_base <= s->local_cand_cnt) {
             int n = s->local_cand_cnt + s->inst->stun_pending + s->inst->turn_pending;
             print("E:", LA_F("%s: sync fin ack, but cand synced cnt not match sent cnt (cand=%d synced=%d)\n", LA_F569, 569),
-                  PROTO, n, sess_ctx->candidate_synced_count);
+                  TASK_SYNC, n, sess_ctx->candidate_synced_count);
             return;
         }
 
         sess_ctx->state = SIG_RELAY_SESS_READY;
-        print("I:", LA_F("[ST:%s] all candidates forwarded to peer (fwd=%d)\n", 0, 0),
-              "READY", sess_ctx->candidate_synced_count);
+        print("I:", LA_F("%s: sync done, st=%s cands=%d\n", 0, 0),
+              TASK_SYNC, "READY", sess_ctx->candidate_synced_count);
         return;
     }
 
     // 对账：服务器确认的数量不能超过本地未确认的数量
     assert(sess_ctx->candidate_synced_count <= sess_ctx->candidate_syncing_base);
-    if (confirmed_count > sess_ctx->candidate_syncing_base - sess_ctx->candidate_synced_count) {
+    if (payload[0] > sess_ctx->candidate_syncing_base - sess_ctx->candidate_synced_count) {
         print("E:", LA_F("%s: sync ack confirmed cnt=%d exceeds unacked cnt=%d\n", 0, 0),
-              PROTO, confirmed_count, sess_ctx->candidate_syncing_base - sess_ctx->candidate_synced_count);
+              TASK_SYNC, payload[0], sess_ctx->candidate_syncing_base - sess_ctx->candidate_synced_count);
         return;
     }
 
-    sess_ctx->candidate_synced_count += confirmed_count;
+    sess_ctx->candidate_synced_count += payload[0];
 
-    print("V:", LA_F("%s: forwarded=%d, synced cnt=%d\n", LA_F563, 563),
-          PROTO, confirmed_count, sess_ctx->candidate_synced_count);
+    print("V:", LA_F("%s: sync forwarded, confirmed=%d synced=%d\n", LA_F563, 563),
+          TASK_SYNC, payload[0], sess_ctx->candidate_synced_count);
 
     // 目前策略是，只有上一批次全部确认后才发送下一批，且还未进入攒批阶段
     // + 可改进的点：如果服务器只确认了部分候选，可以考虑提前发送下一批（但所有未确认的同步数量不能超过 candidate_sync_max）
@@ -699,7 +680,7 @@ static void handle_sync_ack(const char *PROTO, struct p2p_session *s, const uint
 
         // 如果已没有待收集的候选了
         if (!s->inst->stun_pending && !s->inst->turn_pending) {
-            sess_ctx->trickle_last_time = 0;
+            if (sess_ctx->trickle_last_time) { sess_ctx->trickle_last_time = 0; s->inst->sig_ctx.relay.trickle_sessions--; }
             send_sync(s, now);
         }
         // 或已经积累了足够的候选；又或者还没进入攒批阶段; 或距离上次发送已经超过攒批时间窗口了
@@ -718,45 +699,38 @@ static void handle_sync_ack(const char *PROTO, struct p2p_session *s, const uint
  *
  * 包头: [type(P2P_RLY_SYNC) | size(2)]
  * 负载: [session_id(4)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ * 注: [session_id(4)] 已剥离
  */
-static void handle_sync(const char *PROTO, struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
+static void handle_sync(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
-
-    if (sess_ctx->state < SIG_RELAY_SESS_WAIT_PEER) {
-        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
+    if (sess_ctx->state != SIG_RELAY_SESS_SYNCING) {
+        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), TASK_SYNC_REMOTE, (int)sess_ctx->state);
         return;
     }
 
-    if (len < (int)P2P_RLY_SYNC_PSZ(0, false)) {
-        print("E:", LA_F("%s: bad payload(%d)\n", LA_F562, 562), PROTO, len);
-        return;
-    }
-
-    uint8_t cand_cnt = payload[P2P_SESS_ID_PSZ];
-    uint32_t base_len = (uint32_t)P2P_RLY_SYNC_PSZ(cand_cnt, false);
+    uint8_t cand_cnt = payload[0]; uint32_t base_len = P2P_RLY_SYNC_PSZ(cand_cnt, false) - P2P_SESS_ID_PSZ;
     bool has_fin = false;
     if ((uint32_t)len == base_len + 1u) {
         has_fin = true;
         if (payload[base_len] != P2P_RLY_SYNC_FIN_MARKER) {
-            print("E:", LA_F("%s: bad FIN marker=0x%02x\n", LA_F99, 99), PROTO, payload[base_len]);
+            print("E:", LA_F("%s: bad FIN marker=0x%02x\n", LA_F99, 99), TASK_SYNC_REMOTE, payload[base_len]);
             return;
         }
     } else if ((uint32_t)len != base_len) {
-        print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F561, 561), PROTO, len, cand_cnt);
+        print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F561, 561), TASK_SYNC_REMOTE, len, cand_cnt);
         return;
     }
 
     // 解析候选列表（首部 session_id；尾部可能有 1B FIN 标记）
-    unpack_remote_candidates(s, payload + P2P_SESS_ID_PSZ, (int)(base_len - P2P_SESS_ID_PSZ));
+    unpack_remote_candidates(s, payload, (int)base_len);
 
     if (has_fin) {
         s->remote_cand_done = true;
-        print("I:", LA_F("%s: received FIN marker from peer\n", LA_F564, 564), TASK_ICE_REMOTE);
+        print("I:", LA_F("%s: sync done\n", LA_F564, 564), TASK_SYNC_REMOTE);
     }
 
-    print("V:", LA_F("%s: processed, remote_cand_cnt=%d\n", LA_F503, 503),
-          PROTO, s->remote_cand_cnt);
+    print("V:", LA_F("%s: processed, synced=%d\n", LA_F503, 503), TASK_SYNC_REMOTE, s->remote_cand_cnt);
 }
 
 /*
@@ -764,17 +738,20 @@ static void handle_sync(const char *PROTO, struct p2p_session *s, const uint8_t 
  *
  * 包头: [type(P2P_RLY_FIN) | size(2)]
  * 负载: [session_id(4)]
+ * 注: [session_id(4)] 已剥离
  */
-static void handle_relay_fin(const char *PROTO, struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
+static void handle_relay_fin(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) {
+    (void)payload; (void)len; (void)now;
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
 
     // 清理会话状态，回到 WAIT_PEER 被动等待（对端主动断开，不自动重连）
-    print("I:", LA_F("[ST:%s] peer closed session %u\n", LA_F504, 504), "WAIT_PEER", s->id);
+    print("I:", LA_F("%s: session suspend(st=%s)\n", LA_F504, 504),
+          TASK_TOUCH, "WAIT_PEER");
     s->id = 0;
     sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
 
-    reset_peer(sess_ctx);
+    reset_peer(sess_ctx, &s->inst->sig_ctx.relay);
 
     // 触发 NAT 层断开，让 p2p_update 走正常的 peer_disconnect 路径
     // RELAY FIN 经 TCP 可靠传输，等同于 NAT FIN；即使 NAT FIN（UDP）丢失也能正确触发断开
@@ -784,42 +761,37 @@ static void handle_relay_fin(const char *PROTO, struct p2p_session *s, const uin
 }
 
 /*
- * 处理服务器转发的 DATA/ACK/CRYPTO 包
+ * 处理服务器转发的 DATA/ACK/CRYPTO/... 包
  *
- * 负载格式: [session_id(4)][P2P hdr(4)][payload(N)]
+ * 包头: [type(P2P_RLY_PACKET) | size(2)]
+ * 负载: [session_id(4)][P2P hdr(4)][payload(N)]
+ * 注: [session_id(4)] 已剥离
  *
  * 处理流程：
  *   1. 验证 session_id
  *   2. 解析 P2P 包头
  *   3. 根据类型调用相应处理函数（CRYPTO→解密后递归，DATA/ACK→reliable 层）
  */
-static void handle_relay_packet(const char *PROTO, struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) {
-
-    // 最小长度: session_id(4) + P2P hdr(4)
-    if (len < (int)(P2P_SESS_ID_PSZ + P2P_HDR_SIZE)) {
-        print("E:", LA_F("%s: bad payload(%d)\n", LA_F584, 584), PROTO, len);
-        return;
-    }
+static void handle_relay_packet(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) {
 
     p2p_relay_ctx_t *sig_ctx = &s->inst->sig_ctx.relay;
 
     // P2P 包头
-    const uint8_t *p2p_hdr = payload + P2P_SESS_ID_PSZ;
     p2p_packet_hdr_t hdr;
-    p2p_pkt_hdr_decode(p2p_hdr, &hdr);
+    p2p_pkt_hdr_decode(payload, &hdr);
 
     // 提取 P2P 负载
-    const uint8_t *p2p_payload = p2p_hdr + P2P_HDR_SIZE;
-    int p2p_payload_len = len - (int)P2P_SESS_ID_PSZ - P2P_HDR_SIZE;
+    const uint8_t *p2p_payload = payload + P2P_HDR_SIZE;
+    int p2p_payload_len = len - P2P_HDR_SIZE;
 
-    print("V:", LA_F("%s: relay, inner type=%u\n", LA_F93, 93), PROTO, hdr.type);
+    print("V:", LA_F("%s: pkt recv (ses_id=%u), inner type=%u\n", LA_F93, 93), TASK_RELAY, s->id, hdr.type);
 
     // 4. 根据类型处理
     switch (hdr.type) {
 
     case P2P_PKT_CRYPTO: {
         if (!s->dtls) {
-            print("W:", LA_F("%s: no DTLS context\n", LA_F590, 590), "PKT-CRYPTO");
+            print("W:", LA_F("%s: no DTLS context for inner type=%u\n", LA_F590, 590), TASK_RELAY, hdr.type);
             break;
         }
         // 解密密文包
@@ -853,7 +825,7 @@ static void handle_relay_packet(const char *PROTO, struct p2p_session *s, const 
     case P2P_PKT_ACK: {
 
         if (p2p_payload_len < 6) {
-            print("E:", LA_F("%s: bad payload(%d)\n", LA_F589, 589), "PKT-ACK", p2p_payload_len);
+            print("E:", LA_F("%s: bad payload(%d) for type=%u\n", LA_F589, 589), TASK_RELAY, p2p_payload_len, hdr.type);
             break;
         }
         uint16_t ack_seq = nget_s(p2p_payload);
@@ -887,7 +859,7 @@ static void handle_relay_packet(const char *PROTO, struct p2p_session *s, const 
         break;
 
     default:
-        print("W:", LA_F("%s: unexpected inner type 0x%02x\n", LA_F594, 594), PROTO, hdr.type);
+        print("W:", LA_F("%s: unexpected inner type 0x%02x\n", LA_F594, 594), TASK_RELAY, hdr.type);
         break;
     }
 }
@@ -896,39 +868,25 @@ static void handle_relay_packet(const char *PROTO, struct p2p_session *s, const 
  * 处理服务器转发的 RPC 请求（B端接收）
  *
  * 负载格式: [session_id(4)][sid(2)][msg(1)][data(N)]
+ * 注: [session_id(4)] 已剥离
  */
-static void handle_relay_req(const char *PROTO, struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
-
-    if (len < (int)P2P_RLY_REQ_MIN_PSZ) {
-        print("E:", LA_F("%s: bad payload(%d)\n", LA_F562, 562), PROTO, len);
-        return;
-    }
+static void handle_relay_req(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
 
-    uint32_t session_id = nget_l(payload);
-    uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
-    uint8_t  msg = payload[P2P_SESS_ID_PSZ + 2];
-    const uint8_t *req_data = payload + P2P_RLY_REQ_MIN_PSZ;
-    int req_len = len - (int)P2P_RLY_REQ_MIN_PSZ;
-
-    // 验证 session_id
-    if (session_id != s->id) {
-        print("W:", LA_F("%s: session_id mismatch (recv=%u, expect=%u)\n", LA_F170, 170),
-              PROTO, session_id, s->id);
-        return;
-    }
+    uint16_t sid = nget_s(payload);
+    uint8_t  msg = payload[2]; const uint8_t *req_data = payload + 3; int req_len = len - 3;
 
     // 去重：忽略正在处理的相同请求
     if (sess_ctx->resp_sid == sid) {
-        print("V:", LA_F("%s: duplicate request ignored (sid=%u)\n", LA_F107, 107), PROTO, sid);
+        print("V:", LA_F("%s: duplicate request ignored (sid=%u)\n", LA_F107, 107), TASK_RPC, sid);
         return;
     }
 
     // 忽略旧请求
     if (sess_ctx->rpc_last_sid != 0 && !uint16_circle_newer(sid, sess_ctx->rpc_last_sid)) {
         print("V:", LA_F("%s: old request ignored (sid=%u <= last_sid=%u)\n", LA_F131, 131),
-              PROTO, sid, sess_ctx->rpc_last_sid);
+              TASK_RPC, sid, sess_ctx->rpc_last_sid);
         return;
     }
 
@@ -936,12 +894,12 @@ static void handle_relay_req(const char *PROTO, struct p2p_session *s, const uin
 
     // msg=0: 自动 echo 回复
     if (msg == 0) {
-        print("V:", LA_F("%s msg=0: echo reply (sid=%u, len=%d)\n", LA_F595, 595), PROTO, sid, req_len);
+        print("V:", LA_F("%s msg=0: echo reply (sid=%u)\n", LA_F595, 595), TASK_RPC, sid);
         p2p_signal_relay_response(s, 0, req_data, req_len);
         return;
     }
 
-    print("V:", LA_F("%s: accepted, sid=%u, msg=%u\n", LA_F93, 93), PROTO, sid, msg);
+    print("V:", LA_F("%s req accepted (ses_id=%u), sid=%u msg=%u\n", LA_F93, 93), TASK_RPC, s->id, sid, msg);
 
     if (s->inst->cfg.on_request)
         s->inst->cfg.on_request((p2p_session_t)s, sid, msg, req_data, req_len, s->inst->cfg.userdata);
@@ -951,42 +909,29 @@ static void handle_relay_req(const char *PROTO, struct p2p_session *s, const uin
  * 处理服务器转发的 RPC 响应（A端接收）
  *
  * 负载格式: [session_id(4)][sid(2)][code(1)][data(N)]
+ * 注: [session_id(4)] 已剥离
  */
-static void handle_relay_resp(const char *PROTO, struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
+static void handle_relay_resp(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
 
-    if (len < (int)P2P_RLY_RESP_MIN_PSZ) {
-        print("E:", LA_F("%s: bad payload(%d)\n", LA_F562, 562), PROTO, len);
-        return;
-    }
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
 
-    uint32_t session_id = nget_l(payload);
-    uint16_t sid  = nget_s(payload + P2P_SESS_ID_PSZ);
-    uint8_t  code = payload[P2P_SESS_ID_PSZ + 2];
-    const uint8_t *res_data = payload + P2P_RLY_RESP_MIN_PSZ;
-    int res_len = len - (int)P2P_RLY_RESP_MIN_PSZ;
-
-    // 验证 session_id
-    if (session_id != s->id) {
-        print("W:", LA_F("%s: session_id mismatch (recv=%u, expect=%u)\n", LA_F170, 170),
-              PROTO, session_id, s->id);
-        return;
-    }
+    uint16_t sid  = nget_s(payload);
+    uint8_t  code = payload[2]; const uint8_t *res_data = payload + 3; int res_len = len - 3;
 
     // 仅命中当前挂起请求
     if (!(sess_ctx->req_state == 1 && sess_ctx->req_sid == sid)) {
         print("E:", LA_F("%s: irrelevant response (sid=%u, current sid=%u, state=%d)\n", LA_F599, 599),
-              PROTO, sid, sess_ctx->req_sid, (int)sess_ctx->req_state);
+              TASK_RPC, sid, sess_ctx->req_sid, (int)sess_ctx->req_state);
         return;
     }
 
     // 错误响应
     if (code >= P2P_MSG_ERR_PEER_OFFLINE) {
         if (code == P2P_MSG_ERR_PEER_OFFLINE)
-            print("W:", LA_F("%s: peer offline (sid=%u)\n", LA_F600, 600), PROTO, sid);
+            print("W:", LA_F("%s: peer offline (sid=%u)\n", LA_F600, 600), TASK_RPC, sid);
         else
-            print("W:", LA_F("%s: timeout (sid=%u)\n", LA_F604, 604), PROTO, sid);
+            print("W:", LA_F("%s: timeout (sid=%u)\n", LA_F604, 604), TASK_RPC, sid);
 
         sess_ctx->req_state = 0;
         sess_ctx->req_sid   = 0;
@@ -996,7 +941,7 @@ static void handle_relay_resp(const char *PROTO, struct p2p_session *s, const ui
         return;
     }
 
-    print("V:", LA_F("%s: RPC complete, sid=%u code=%u\n", LA_F78, 78), PROTO, sid, code);
+    print("V:", LA_F("%s: complete (ses_id=%u), sid=%u code=%u\n", LA_F78, 78), TASK_RPC, s->id, sid, code);
 
     sess_ctx->req_state = 0;
     sess_ctx->req_sid   = 0;
@@ -1052,8 +997,8 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                     }
                 }
                 if (!s) {
-                    print("W:", LA_F("%s: no session for peer_id=%s (req_type=%u)\n", 0, 0),
-                          (int)(P2P_PEER_ID_MAX-1), (char*)sig_ctx->payload + 1);
+                    print("W:", LA_F("%s: no session for peer_id=%.*s (req_type=%u)\n", 0, 0),
+                          PROTO, (int)(P2P_PEER_ID_MAX-1), (char*)sig_ctx->payload + 1, (unsigned)req_type);
                 }
                 break;
             }
@@ -1093,27 +1038,65 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             handle_alive_ack(inst, now); break;
         }
 
-        if (sig_ctx->hdr.type == P2P_RLY_SYNC0) { PROTO = "SYNC0";
+        if (sig_ctx->hdr.type == P2P_RLY_SYNC0_ACK) { PROTO = "SYNC0_ACK";
 
             printf(LA_F("[R] %s recv, len=%d\n", LA_F533, 533), PROTO, sig_ctx->hdr.size);
 
-            if (sig_ctx->hdr.size < (int)P2P_RLY_SYNC0_S2C_PSZ(0)) {
-                print("E:", LA_F("%s: bad payload(%d)\n", LA_F562, 562), "", sig_ctx->hdr.size);
+            if (sig_ctx->hdr.size < (int)P2P_RLY_SYNC0_ACK_PSZ) {
+                print("E:", LA_F("%s: bad payload(%d)\n", LA_F562, 562), PROTO, sig_ctx->hdr.size);
                 return;
             }
 
             uint8_t* ptr = sig_ctx->payload + P2P_PEER_ID_MAX;
             uint32_t session_id = nget_l(ptr);
             if (!session_id) {
-                print("W:", LA_F("%s: missing session_id in payload\n", 0, 0), "");
+                print("W:", LA_F("%s: missing session_id in payload\n", 0, 0), PROTO);
                 return;
             }
 
             struct p2p_session* s = inst->sessions_head;
-            for(; s; s = s->next) {
-                if (strncmp(s->sig_sess.relay.remote_peer_id, (char*)sig_ctx->payload, P2P_PEER_ID_MAX-1) == 0) {
+            for(; s; s = s->next) { p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
+                if (strncmp(sess_ctx->remote_peer_id, (char*)sig_ctx->payload, P2P_PEER_ID_MAX-1) == 0) {
 
-                    p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
+                    if (sess_ctx->state != SIG_RELAY_SESS_WAIT_SYNC0_ACK) {
+                        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
+                        return;
+                    }
+                    assert(!s->id);
+
+                    s->id = session_id;
+
+                    handle_sync0_ack(s, ptr + P2P_SESS_ID_PSZ, now);
+                    break;
+                }
+            }
+            if (!s) {
+                print("W:", LA_F("%s: no session for peer_id=%.*s\n", LA_F601, 601),
+                      PROTO, (int)(P2P_PEER_ID_MAX-1), (char*)sig_ctx->payload);
+                return;
+            }
+            break;
+        }
+
+        if (sig_ctx->hdr.type == P2P_RLY_SYNC0) { PROTO = "SYNC0";
+
+            printf(LA_F("[R] %s recv, len=%d\n", LA_F533, 533), PROTO, sig_ctx->hdr.size);
+
+            if (sig_ctx->hdr.size < (int)P2P_RLY_SYNC0_S2C_PSZ(0)) {
+                print("E:", LA_F("%s: bad payload(%d)\n", LA_F562, 562), PROTO, sig_ctx->hdr.size);
+                return;
+            }
+
+            uint8_t* ptr = sig_ctx->payload + P2P_PEER_ID_MAX;
+            uint32_t session_id = nget_l(ptr);
+            if (!session_id) {
+                print("W:", LA_F("%s: missing session_id in payload\n", 0, 0), PROTO);
+                return;
+            }
+
+            struct p2p_session* s = inst->sessions_head;
+            for(; s; s = s->next) { p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
+                if (strncmp(sess_ctx->remote_peer_id, (char*)sig_ctx->payload, P2P_PEER_ID_MAX-1) == 0) {
 
                     // 协议需要确保服务器转发对方的 SYNC0 前，必须先返回 SYNC0_ACK 给本端
                     if (sess_ctx->state < SIG_RELAY_SESS_WAIT_PEER) {
@@ -1124,9 +1107,6 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
 
                     if (s->id != session_id) {
 
-                        print("W:", LA_F("%s: session renewed by peer (local=%u recv=%u)\n", LA_F580, 580),
-                              PROTO, s->id, session_id);
-
                         // 通知业务层连接断开（session 被对方重置）
                         if (s->state >= P2P_STATE_LOST) {
                             if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, s->state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
@@ -1136,12 +1116,14 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                         p2p_session_reset(s, false);
 
                         // 重置信令层会话状态
-                        reset_peer(sess_ctx);
+                        reset_peer(sess_ctx, sig_ctx);
 
+                        uint32_t old_id = s->id;
                         s->id = session_id;
 
                         sess_ctx->state = SIG_RELAY_SESS_SYNCING;
-                        print("I:", LA_F("[ST:%s] session reset by peer, resync candidates\n", "SYNCING", LA_F581, 581));
+                        print("W:", LA_F("%s: session reset by peer(st=%s old=%u new=%u), %s\n", LA_F580, 580),
+                              TASK_TOUCH, "SYNCING", old_id, session_id, LA_S("resync candidates", 0, 0));
 
                         session_id = 0;
                     }
@@ -1149,8 +1131,13 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                     else if (sess_ctx->state == SIG_RELAY_SESS_WAIT_PEER) {
 
                         sess_ctx->state = SIG_RELAY_SESS_SYNCING;
-                        print("I:", LA_F("[ST:%s] sync0 received(peer online), sync candidates\n", "SYNCING", LA_F514, 514));
+                        print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", "SYNCING" 0, 0),
+                              TASK_TOUCH, "SYNCING", "offline", LA_S("sync candidates", 0, 0));
                         session_id = 0;
+                    }
+                    else {
+                        print("W:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
+                        return;
                     }
 
                     // 对端发起会话初始化连接
@@ -1160,7 +1147,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                         assert(sess_ctx->candidate_syncing_base == 0);
                         if (s->local_cand_cnt || (!s->inst->stun_pending && !s->inst->turn_pending))
                             send_sync(s, now);
-                        else sess_ctx->trickle_last_time = now;
+                        else { sess_ctx->trickle_last_time = now; sig_ctx->trickle_sessions++; }
 
                         // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
                         nat_punch(s, -1/* all candidates */);
@@ -1177,27 +1164,25 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
 
             // 如果存在首批同步的数据
             if (ptr[P2P_SESS_ID_PSZ/* candidate_count */] || sig_ctx->hdr.size > P2P_RLY_SYNC0_S2C_PSZ(0))
-                handle_sync("SYNC0", s, sig_ctx->payload+P2P_PEER_ID_MAX, (int)sig_ctx->hdr.size-P2P_PEER_ID_MAX, now);
+                handle_sync(s, ptr+P2P_SESS_ID_PSZ, (int)(sig_ctx->hdr.size-P2P_PEER_ID_MAX-P2P_SESS_ID_PSZ), now);
 
             break;
         }
 
-        void (*handler)(const char *PROTO, struct p2p_session*, const uint8_t*, int, uint64_t);
+        uint16_t payload_min; void (*handler)(struct p2p_session*, const uint8_t*, int, uint64_t);
         switch (sig_ctx->hdr.type) {
-            case P2P_RLY_SYNC0_ACK:
-                PROTO = "SYNC0_ACK"; handler = handle_sync0_ack; break;
             case P2P_RLY_SYNC_ACK:
-                PROTO = "SYNC_ACK"; handler = handle_sync_ack; break;
+                PROTO = "SYNC_ACK"; payload_min = P2P_RLY_SYNC_ACK_PSZ; handler = handle_sync_ack; break;
             case P2P_RLY_SYNC:
-                PROTO = "SYNC"; handler = handle_sync; break;
+                PROTO = "SYNC"; payload_min = P2P_RLY_SYNC_PSZ(0, false); handler = handle_sync; break;
             case P2P_RLY_FIN:
-                PROTO = "FIN"; handler = handle_relay_fin; break;
+                PROTO = "FIN"; payload_min = P2P_RLY_FIN_PSZ; handler = handle_relay_fin; break;
             case P2P_RLY_PACKET:
-                PROTO = "PACKET"; handler = handle_relay_packet; break;
+                PROTO = "PACKET"; payload_min = P2P_RLY_PACKET_PSZ(0); handler = handle_relay_packet; break;
             case P2P_RLY_REQ:
-                PROTO = "REQ"; handler = handle_relay_req; break;
+                PROTO = "REQ"; payload_min = P2P_RLY_REQ_MIN_PSZ; handler = handle_relay_req; break;
             case P2P_RLY_RESP:
-                PROTO = "RESP"; handler = handle_relay_resp; break;
+                PROTO = "RESP"; payload_min = P2P_RLY_RESP_MIN_PSZ; handler = handle_relay_resp; break;
             default:
                 print("W:", LA_F("[R] Unknown proto type %d\n", LA_F529, 529), sig_ctx->hdr.type);
                 return;
@@ -1205,7 +1190,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
 
         printf(LA_F("[R] %s recv, len=%d\n", LA_F533, 533), PROTO, sig_ctx->hdr.size);
 
-        if (sig_ctx->hdr.size < (int)P2P_SESS_ID_PSZ) {
+        if (sig_ctx->hdr.size < payload_min) {
             print("E:", LA_F("%s: bad payload(%d)\n", LA_F562, 562), PROTO, sig_ctx->hdr.size);
             return;
         }
@@ -1219,13 +1204,13 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
         struct p2p_session* s = inst->sessions_head;
         for(; s; s = s->next) {
             if (s->id == session_id) {
-                handler(PROTO, s, sig_ctx->payload, (int)sig_ctx->hdr.size, now);
+                handler(s, sig_ctx->payload + P2P_SESS_ID_PSZ, (int)(sig_ctx->hdr.size - P2P_SESS_ID_PSZ), now);
                 break;
             }
         }
         if (!s) {
-            print("W:", LA_F("%s: no session for peer_id=%.*s\n", 0, 0),
-                  PROTO, (int)(P2P_PEER_ID_MAX-1), (char*)sig_ctx->payload + 1);
+            print("W:", LA_F("%s: no session for session_id=%u\n", 0, 0),
+                  PROTO, session_id);
             return;
         }
 
@@ -1256,20 +1241,20 @@ ret_t p2p_signal_relay_online(struct p2p_instance *inst, const char *local_peer_
     // 创建 TCP socket
     sig_ctx->sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sig_ctx->sockfd == P_INVALID_SOCKET) {
-        print("E:", LA_F("Failed to create TCP socket\n", LA_F516, 516));
+        print("E:", LA_F("[R] Failed to create TCP socket\n", LA_F516, 516));
         return E_UNKNOWN;
     }
 
     // 设置非阻塞
     if (P_sock_nonblock(sig_ctx->sockfd, true) != E_NONE) {
-        print("E:", LA_F("Failed to set socket non-blocking\n", LA_F517, 517));
+        print("E:", LA_F("[R] Failed to set socket non-blocking\n", LA_F517, 517));
         P_sock_close(sig_ctx->sockfd);
         sig_ctx->sockfd = P_INVALID_SOCKET;
         return E_UNKNOWN;
     }
 
     // 连接到服务器
-    print("I:", LA_F("Connecting to %s:%d\n", LA_F513, 513),
+    print("I:", LA_F("[R] Connecting to %s:%d\n", LA_F513, 513),
           inet_ntoa(server->sin_addr), ntohs(server->sin_port));
 
     int ret = connect(sig_ctx->sockfd, (struct sockaddr *)&sig_ctx->server_addr,
@@ -1378,7 +1363,7 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
     compact_send_fin(s);
 
     // 清理 peer 会话状态
-    reset_peer(sess_ctx);
+    reset_peer(sess_ctx, &s->inst->sig_ctx.relay);
     memset(sess_ctx->remote_peer_id, 0, sizeof(sess_ctx->remote_peer_id));
 
     // 清理会话状态
@@ -1410,7 +1395,7 @@ void p2p_signal_relay_trickle_candidate(struct p2p_session *s) {
     // 发送控制：如果已没有待收集的候选了
     if (!s->inst->stun_pending && !s->inst->turn_pending) {
 
-        sess_ctx->trickle_last_time = 0;
+        sess_ctx->trickle_last_time = 0; s->inst->sig_ctx.relay.trickle_sessions--;
         send_sync(s, P_tick_ms());
     }
     // 或已经积累了足够的候选；又或者距离上次发送已经超过攒批时间窗口了
@@ -1442,7 +1427,7 @@ ret_t p2p_signal_relay_packet(struct p2p_session *s,
     // 流控检查：等待上一个转发完成
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
     if (sess_ctx->awaiting_relay_ready) {
-        print("V:", LA_F("[R] PKT-RELAY throttled: awaiting READY\n", LA_F592, 592));
+        print("V:", LA_F("%s throttled: awaiting READY\n", LA_F592, 592), TASK_RELAY);
         return E_BUSY;
     }
 
@@ -1456,7 +1441,7 @@ ret_t p2p_signal_relay_packet(struct p2p_session *s,
         case P2P_PKT_CONN:     proto = "CONN";     break;
         case P2P_PKT_CONN_ACK: proto = "CONN_ACK"; break;
         default:
-            print("E:", LA_F("[R] RELAY data: unsupported type 0x%02x\n", LA_F593, 593), type);
+            print("E:", LA_F("%s: unsupported type 0x%02x\n", LA_F593, 593), TASK_RELAY, type);
             return E_INVALID;
     }
 
@@ -1464,7 +1449,7 @@ ret_t p2p_signal_relay_packet(struct p2p_session *s,
     uint8_t relay_payload[P2P_MAX_PAYLOAD];
     int total_len = P2P_SESS_ID_PSZ + P2P_HDR_SIZE + payload_len;
     if (total_len > P2P_MAX_PAYLOAD) {
-        print("E:", LA_F("PKT-%s: payload exceeds limit (%d > %d)\n", LA_F586, 586), proto, total_len, P2P_MAX_PAYLOAD);
+        print("E:", LA_F("%s: pkt payload exceeds limit (%d > %d)\n", LA_F586, 586), TASK_RELAY, proto, total_len, P2P_MAX_PAYLOAD);
         return E_OUT_OF_CAPACITY;
     }
 
@@ -1478,8 +1463,8 @@ ret_t p2p_signal_relay_packet(struct p2p_session *s,
 
     sess_ctx->awaiting_relay_ready = true;
 
-    print("V:", LA_F("PKT-%s sent, ses_id=%u flags=%0x%02x seq=%u len=%u\n", LA_F583, 583),
-          proto, s->id, flags, seq, payload_len);
+    print("V:", LA_F("%s %s sent (ses_id=%u), seq=%u flags=0x%02x len=%u\n", LA_F583, 583),
+          TASK_RELAY, proto, s->id, seq, flags, payload_len);
 
     return E_NONE;
 }
@@ -1498,7 +1483,7 @@ ret_t p2p_signal_relay_request(struct p2p_session *s,
     P_check(sess_ctx->state >= SIG_RELAY_SESS_WAIT_SYNC0_ACK, return E_NONE_CONTEXT;)
     p2p_relay_ctx_t *sig_ctx = &s->inst->sig_ctx.relay;
     if (!sig_ctx->feature_msg) {
-        print("E:", LA_F("MSG RPC not supported by server\n", LA_F447, 447));
+        print("E:", LA_F("%s: not supported by server\n", LA_F447, 447), TASK_RPC);
         return E_NO_SUPPORT;
     }
 
@@ -1529,7 +1514,7 @@ ret_t p2p_signal_relay_request(struct p2p_session *s,
         return ret;
     }
 
-    print("I:", LA_F("%s sent, ses_id=%u sid=%u msg=%u len=%d\n", LA_F605, 605), "REQ",
+    print("I:", LA_F("%s req (ses_id=%u), sid=%u msg=%u len=%d\n", LA_F605, 605), TASK_RPC,
           s->id, sid, msg, len);
     return E_NONE;
 }
@@ -1546,7 +1531,7 @@ ret_t p2p_signal_relay_response(struct p2p_session *s,
     P_check(len == 0 || data, return E_INVALID;)
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
     if (!sess_ctx->resp_sid) {
-        print("E:", LA_F("RESP: no pending request\n", LA_F607, 607));
+        print("E:", LA_F("%s: no pending request\n", LA_F607, 607), TASK_RPC);
         return E_INVALID;
     }
 
@@ -1564,8 +1549,8 @@ ret_t p2p_signal_relay_response(struct p2p_session *s,
     ret_t ret = tcp_send(sig_ctx, "RESP", P2P_RLY_RESP, payload, n, P_tick_ms());
     if (ret != E_NONE) return ret;
 
-    print("I:", LA_F("%s sent, sid=%u, code=%u, len=%d\n", LA_F606, 606), "RESP",
-          sess_ctx->resp_sid, code, len);
+    print("I:", LA_F("%s resp (ses_id=%u), sid=%u code=%u len=%d\n", LA_F606, 606), TASK_RPC,
+          s->id, sess_ctx->resp_sid, code, len);
 
     // 标记请求已处理
     sess_ctx->rpc_last_sid = sess_ctx->resp_sid;
@@ -1698,17 +1683,14 @@ void p2p_signal_relay_tick_recv(struct p2p_instance *inst, uint64_t now) {
         return;
     }
 
-    // 如果需要等待 stun 完成对公网候选的收集
-    if (inst->stun_pending && !inst->cfg.skip_stun_pending) return;
+    if (!sig_ctx->trickle_sessions) return;
 
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
 
-        // 前面已经确保完成上线、且无需等待 stun 完成对公网候选的收集，所以不应再有 WAIT SYNCABLE 的会话存在了
-        assert(sess_ctx->state != SIG_RELAY_SESS_WAIT_SYNCABLE);
-
-        // SYNCING: 攒批等待模式
+        // SYNCING: 攒批等待模式（上一批已确认 && 有新候选）
         if (sess_ctx->state == SIG_RELAY_SESS_SYNCING && sess_ctx->trickle_last_time &&
+            sess_ctx->candidate_synced_count == sess_ctx->candidate_syncing_base &&
             sess_ctx->candidate_syncing_base < (uint16_t) s->local_cand_cnt) {
             send_sync(s, now);
             sess_ctx->trickle_last_time = now;

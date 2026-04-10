@@ -706,7 +706,7 @@ static void relay_send_error(relay_client_t *client, uint8_t req_type, uint8_t s
     relay_buf_free(buf_item);
 }
 
-static void relay_session_send_sync0_ack(relay_session_t *s, uint8_t online) {
+static void relay_session_send_sync0_ack(relay_session_t *s, const char *target_name, uint8_t online) {
 
     assert(s && s->base.session_id && s->base.client);
     relay_client_t *client = (relay_client_t*)s->base.client;
@@ -722,9 +722,11 @@ static void relay_session_send_sync0_ack(relay_session_t *s, uint8_t online) {
     hdr->type = P2P_RLY_SYNC0_ACK;
     hdr->size = htons(payload_len);
     uint8_t *payload = (uint8_t*)(hdr + 1);
-    nwrite_l(payload, s->base.session_id);
+    memset(payload, 0, P2P_PEER_ID_MAX);
+    strncpy((char*)payload, target_name, P2P_PEER_ID_MAX - 1);
+    nwrite_l(payload + P2P_PEER_ID_MAX, s->base.session_id);
 
-    payload[P2P_SESS_ID_PSZ] = (uint8_t)(online ? 1 : 0);
+    payload[P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ] = (uint8_t)(online ? 1 : 0);
 
     relay_session_send(s, buf_item);
 }
@@ -893,8 +895,8 @@ static void handle_relay_sync0(relay_client_t *client, uint8_t *payload, uint16_
            PROTO, client->base.local_peer_id, (const char *)payload, side, remote_s ? 1 : 0, cand_count);
 
     // 立即返回 SYNC0_ACK（会话建立确认）
-    // + SYNC0_ACK 告知会话建立结果：session_id + 对端在线状态
-    relay_session_send_sync0_ack(local_s, remote_s && ((relay_client_t*)remote_s->base.client)->fd != P_INVALID_SOCKET);
+    // + SYNC0_ACK 告知会话建立结果：target_name + session_id + 对端在线状态
+    relay_session_send_sync0_ack(local_s, (const char *)payload, remote_s && ((relay_client_t*)remote_s->base.client)->fd != P_INVALID_SOCKET);
 
     assert(client->recv_buf && payload == client->recv_buf + sizeof(p2p_relay_hdr_t));
 

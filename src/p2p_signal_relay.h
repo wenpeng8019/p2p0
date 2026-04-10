@@ -181,7 +181,7 @@ typedef struct {
     struct sockaddr_in  server_addr;                    /* 服务器地址 */
     uint64_t            last_send_time;                 /* 上次发送时间 */
     uint64_t            last_recv_time;                 /* 上次接收时间 */
-    int                 sig_sessions;                   /* 正在使用信令服务器的会话（sync0/sync），该值不为 0 则无需 keep-alive */
+    int                 trickle_sessions;               /* 当前正在进行 trickle sync 的会话数量，该值为 0 则无需攒批检测 */
 
     /* 身份标识 */
     char                local_peer_id[P2P_PEER_ID_MAX]; /* 本端名称 */
@@ -230,7 +230,7 @@ typedef struct {
 
     /* 候选同步管理 */
     uint16_t            candidate_syncing_base;         /* 下一个要同步发送的候选索引。该值大于 session 的 local_cand_cnt，则说明已经 fin */
-    uint8_t             candidate_synced_count;         /* 已确认同步完成的候选数量，该值小于 candidate_syncing_base 说明上批同步的候选还未确认 */
+    uint16_t            candidate_synced_count;         /* 已确认同步完成的候选数量，该值小于 candidate_syncing_base 说明上批同步的候选还未确认 */
     uint64_t            trickle_last_time;              /* 上次 trickle 发送时间（用于攒批窗口控制, 0 表示还未进入 trickle 阶段）*/
 
     /* 数据中继流控 */

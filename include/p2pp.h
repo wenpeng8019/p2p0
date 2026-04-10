@@ -820,13 +820,13 @@ typedef struct {
 #define P2P_RLY_SYNC0_S2C_PSZ(n)    (P2P_SESS_ID_PSZ + P2P_RLY_SYNC0_PSZ(n))
 
 /* P2P_RLY_SYNC0_ACK:
-*   payload: [session_id(P2P_SESS_ID_PSZ)][online(1)]
+*   payload: [target_name(32)][session_id(P2P_SESS_ID_PSZ)][online(1)]
 *   - session_id: 64 位会话 ID（网络字节序）
 *   - online: bool，0=对端离线，1=对端在线
 *   - 该 ACK 对 SYNC0 请求立即返回，仅用于告知会话建立结果
 *   - 若 SYNC0 携带 candidate_count>0，服务器会在候选已处理后，再额外返回一个 SYNC_ACK
 */
-#define P2P_RLY_SYNC0_ACK_PSZ       (P2P_SESS_ID_PSZ + 1u)
+#define P2P_RLY_SYNC0_ACK_PSZ       (P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ + 1u)
 /* P2P_RLY_SYNC:
  *   payload: [session_id(P2P_SESS_ID_PSZ)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *   - session_id: 64 位会话 ID（网络字节序）
@@ -856,7 +856,7 @@ typedef struct {
  *   - session_id 用于会话隔离与服务器路由（转发到配对会话）。
  *   - 服务器零拷贝转发，仅重写 session_id，不解析内层 P2P hdr。
  */
-#define P2P_RLY_DATA_PSZ(n)         (P2P_SESS_ID_PSZ + P2P_HDR_SIZE + (n))
+#define P2P_RLY_PACKET_PSZ(n)       (P2P_SESS_ID_PSZ + P2P_HDR_SIZE + (n))
 
 /* P2P_RLY_REQ / P2P_RLY_RESP 最小负载长度（session_id + sid + msg/code = 11 字节） */
 #define P2P_RLY_REQ_MIN_PSZ         (P2P_SESS_ID_PSZ + 3)
