@@ -1030,12 +1030,14 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
         if (sig_ctx->hdr.type == P2P_RLY_ONLINE_ACK) {
 
             printf(LA_F("[R] %s recv, len=%d\n", LA_F533, 533), "ONLINE_ACK", sig_ctx->hdr.size);
-            handle_online_ack(inst, sig_ctx->payload, (int)sig_ctx->hdr.size, now); break;
+            handle_online_ack(inst, sig_ctx->payload, (int)sig_ctx->hdr.size, now); 
+            break;
         }
         if (sig_ctx->hdr.type == P2P_RLY_ALIVE_ACK) {
 
             printf(LA_F("[R] %s recv, len=%d\n", LA_F533, 533), "ALIVE_ACK", sig_ctx->hdr.size);
-            handle_alive_ack(inst, now); break;
+            handle_alive_ack(inst, now); 
+            break;
         }
 
         if (sig_ctx->hdr.type == P2P_RLY_SYNC0_ACK) { PROTO = "SYNC0_ACK";
@@ -1055,26 +1057,25 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             }
 
             struct p2p_session* s = inst->sessions_head;
-            for(; s; s = s->next) { p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
-                if (strncmp(sess_ctx->remote_peer_id, (char*)sig_ctx->payload, P2P_PEER_ID_MAX-1) == 0) {
-
-                    if (sess_ctx->state != SIG_RELAY_SESS_WAIT_SYNC0_ACK) {
-                        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
-                        return;
-                    }
-                    assert(!s->id);
-
-                    s->id = session_id;
-
-                    handle_sync0_ack(s, ptr + P2P_SESS_ID_PSZ, now);
-                    break;
-                }
+            for(; s; s = s->next) {
+                if (strncmp(s->sig_sess.relay.remote_peer_id, (char*)sig_ctx->payload, P2P_PEER_ID_MAX-1) == 0) break;                
             }
             if (!s) {
                 print("W:", LA_F("%s: no session for peer_id=%.*s\n", LA_F601, 601),
                       PROTO, (int)(P2P_PEER_ID_MAX-1), (char*)sig_ctx->payload);
                 return;
             }
+
+            if (s->sig_sess.relay.state != SIG_RELAY_SESS_WAIT_SYNC0_ACK) {
+                print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)s->sig_sess.relay.state);
+                return;
+            }
+
+            assert(!s->id);
+            s->id = session_id;
+
+            handle_sync0_ack(s, ptr + P2P_SESS_ID_PSZ, now);
+
             break;
         }
 
@@ -1094,72 +1095,69 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 return;
             }
 
-            struct p2p_session* s = inst->sessions_head;
-            for(; s; s = s->next) { p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
-                if (strncmp(sess_ctx->remote_peer_id, (char*)sig_ctx->payload, P2P_PEER_ID_MAX-1) == 0) {
-
-                    // 协议需要确保服务器转发对方的 SYNC0 前，必须先返回 SYNC0_ACK 给本端
-                    if (sess_ctx->state < SIG_RELAY_SESS_WAIT_PEER) {
-                        print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
-                        return;
-                    }
-                    assert(s->id);
-
-                    if (s->id != session_id) {
-
-                        // 通知业务层连接断开（session 被对方重置）
-                        if (s->state >= P2P_STATE_LOST) {
-                            if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, s->state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
-                        }
-
-                        // 重置 p2p 会话
-                        p2p_session_reset(s, false);
-
-                        // 重置信令层会话状态
-                        reset_peer(sess_ctx, sig_ctx);
-
-                        uint32_t old_id = s->id;
-                        s->id = session_id;
-
-                        sess_ctx->state = SIG_RELAY_SESS_SYNCING;
-                        print("W:", LA_F("%s: session reset by peer(st=%s old=%u new=%u), %s\n", LA_F580, 580),
-                              TASK_TOUCH, "SYNCING", old_id, session_id, LA_S("resync candidates", 0, 0));
-
-                        session_id = 0;
-                    }
-                    // 首次收到 SYNC 视为对端上线，启动候选交换
-                    else if (sess_ctx->state == SIG_RELAY_SESS_WAIT_PEER) {
-
-                        sess_ctx->state = SIG_RELAY_SESS_SYNCING;
-                        print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", "SYNCING" 0, 0),
-                              TASK_TOUCH, "SYNCING", "offline", LA_S("sync candidates", 0, 0));
-                        session_id = 0;
-                    }
-                    else {
-                        print("W:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
-                        return;
-                    }
-
-                    // 对端发起会话初始化连接
-                    if (!session_id) {
-
-                        // 同步发送首批候选（如果有）
-                        assert(sess_ctx->candidate_syncing_base == 0);
-                        if (s->local_cand_cnt || (!s->inst->stun_pending && !s->inst->turn_pending))
-                            send_sync(s, now);
-                        else { sess_ctx->trickle_last_time = now; sig_ctx->trickle_sessions++; }
-
-                        // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
-                        nat_punch(s, -1/* all candidates */);
-                    }
-
-                    break;
-                }
+            struct p2p_session* s = inst->sessions_head; p2p_relay_session_t *sess_ctx;
+            for(; s; s = s->next) { sess_ctx = &s->sig_sess.relay;
+                if (strncmp(sess_ctx->remote_peer_id, (char*)sig_ctx->payload, P2P_PEER_ID_MAX-1) == 0) break;
             }
             if (!s) {
                 print("W:", LA_F("%s: no session for peer_id=%.*s\n", LA_F601, 601),
                       PROTO, (int)(P2P_PEER_ID_MAX-1), (char*)sig_ctx->payload);
                 return;
+            }
+
+            // 协议需要确保服务器转发对方的 SYNC0 前，必须先返回 SYNC0_ACK 给本端
+            if (sess_ctx->state < SIG_RELAY_SESS_WAIT_PEER) {
+                print("V:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
+                return;
+            }
+
+            assert(s->id);
+            if (s->id != session_id) {
+
+                // 通知业务层连接断开（session 被对方重置）
+                if (s->state >= P2P_STATE_LOST) {
+                    if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, s->state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
+                }
+
+                // 重置 p2p 会话
+                p2p_session_reset(s, false);
+
+                // 重置信令层会话状态
+                reset_peer(sess_ctx, sig_ctx);
+
+                uint32_t old_id = s->id;
+                s->id = session_id;
+
+                sess_ctx->state = SIG_RELAY_SESS_SYNCING;
+                print("W:", LA_F("%s: session reset by peer(st=%s old=%u new=%u), %s\n", LA_F580, 580),
+                        TASK_TOUCH, "SYNCING", old_id, session_id, LA_S("resync candidates", 0, 0));
+
+                session_id = 0;
+            }
+            // 首次收到 SYNC 视为对端上线，启动候选交换
+            else if (sess_ctx->state == SIG_RELAY_SESS_WAIT_PEER) {
+
+                sess_ctx->state = SIG_RELAY_SESS_SYNCING;
+                print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", "SYNCING" 0, 0),
+                        TASK_TOUCH, "SYNCING", "offline", LA_S("sync candidates", 0, 0));
+                session_id = 0;
+            }
+            else {
+                print("W:", LA_F("%s: ignored in state=%d\n", LA_F117, 117), PROTO, (int)sess_ctx->state);
+                return;
+            }
+
+            // 对端发起会话初始化连接
+            if (!session_id) {
+
+                // 同步发送首批候选（如果有）
+                assert(sess_ctx->candidate_syncing_base == 0);
+                if (s->local_cand_cnt || (!s->inst->stun_pending && !s->inst->turn_pending))
+                    send_sync(s, now);
+                else { sess_ctx->trickle_last_time = now; sig_ctx->trickle_sessions++; }
+
+                // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
+                nat_punch(s, -1/* all candidates */);
             }
 
             // 如果存在首批同步的数据
