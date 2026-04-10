@@ -769,27 +769,28 @@ void compact_on_sync0_ack(struct p2p_session *s, const uint8_t *payload, int len
         return;
     }
 
-    // 存储对端配对会话 ID（与 auth_key 语义不同：auth_key=client↔server, session_id=client↔peer）
-    if (s->id && s->id != session_id) {
+    if (!s->id) s->id = session_id; 
+    else if (s->id != session_id) {
+        print("W:", LA_F("%s: session_id changed (old=%u new=%u) on %s\n", LA_F603, 603),
+              TASK_SYNC, s->id, session_id, PROTO);
+        return;
+    }    
 
-        print("I:", LA_F("%s: session_id changed (old=%u new=%u), resetting peer state\n", LA_F603, 603),
-              TASK_SYNC, s->id, session_id);
-
-        sess_ctx->remote_candidates_mask = 0;
-        sess_ctx->remote_candidates_done = 0;
-        sess_ctx->remote_candidates_0 = false;
-        p2p_session_reset(s, false);
+    // 发送 SYNC0_ACK（方向 2：二次确认，告知服务器已收到 session_id）
+    {
+        uint8_t ack_payload[SIG_PKT_SYNC0_ACK_C2S_PSZ];
+        nwrite_l(ack_payload, s->id);
+        udp_send(s->inst, PROTO, SIG_PKT_SYNC0_ACK, 0, 0, ack_payload, sizeof(ack_payload), P_tick_ms());
     }
-    s->id = session_id;
-
-    uint8_t online = payload[P2P_SESS_ID_PSZ];
-    print("V:", LA_F("%s: accepted (ses_id=%u), peer=%s\n", LA_F97, 97),
-          PROTO, session_id, online ? "online" : "offline");
 
     if (sess_ctx->state != SIG_COMPACT_SESS_WAIT_SYNC0_ACK) {
         s->inst->sig_ctx.compact.last_recv_time = P_tick_ms();
         return;
     }
+
+    uint8_t online = payload[P2P_SESS_ID_PSZ];
+    print("V:", LA_F("%s: accepted (ses_id=%u), peer=%s\n", LA_F97, 97),
+          PROTO, session_id, online ? "online" : "offline");
 
     sess_ctx->state = SIG_COMPACT_SESS_WAIT_PEER;
     if (!online) {
@@ -882,7 +883,7 @@ void compact_on_sync_ack(struct p2p_session *s, uint16_t seq,
  *   - candidate_count: 对端候选数量（首个为服务器观察到的公网地址 srflx，必须 >= 1）
  *   客户端收到后以 SIG_PKT_SYNC_ACK(seq=0) 确认
  */
-void compact_on_server_sync0(struct p2p_session *s,
+void compact_on_peer_sync0(struct p2p_session *s,
                              const uint8_t *payload, int len,
                              const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "SYNC0";
@@ -918,12 +919,15 @@ void compact_on_server_sync0(struct p2p_session *s,
         return;
     }
 
-    // 并行网络中，SYNC0 可能先于 SYNC0_ACK 到达，此时 session_id 可能还未设置
-    if (!s->id) s->id = session_id;
+    // 二次确认机制下，服务器在收到方向2确认前不会转发 SYNC0，此时 s->id 必已在 compact_on_sync0_ack 中设置
+    if (!s->id) {
+        print("E:", LA_F("%s: unexpected s->id=0\n", LA_F169, 169), PROTO);
+        return;
+    }
 
     // 如果 session_id 不一致，说明对端可能重新发起连接（崩溃重启）
     // ! 根据协议，对方将自己的 session 重置，并不会影响自己和信令服务之间的连接和数据状态
-    else if (s->id != session_id) {
+    if (s->id != session_id) {
 
         // 此时本端只能被迫强制重连
         print("W:", LA_F("%s: renew session due to session_id changed (local=%u pkt=%u)\n", LA_F156, 156),
@@ -942,10 +946,10 @@ void compact_on_server_sync0(struct p2p_session *s,
     }
 
     // 进入 SYNCING 有两个入口，谁先发生谁先执行：
-    // 1. compact_on_sync0_ack（SYNC0_ACK online=1）：对端已在线，直接进入 SYNCING
+    // 1. compact_on_sync0_ack（SYNC0_ACK online=1）：对端已在线，直接进入 SYNCING，立即发送本端剩余候选
     // 2. 本处（收到服务器下发的 SYNC0）：服务器下发对端候选，同时触发 SYNCING
     // 两者均在 WAIT_PEER 状态下判断，状态机本身保证幂等（已 SYNCING 则跳过）
-    if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYNC0_ACK || sess_ctx->state == SIG_COMPACT_SESS_WAIT_PEER) {
+    if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_PEER) {
 
         sess_ctx->state = SIG_COMPACT_SESS_SYNCING;
         print("I:", LA_F("%s: entered, %s arrived\n", LA_F619, 619), TASK_SYNC, PROTO);
@@ -1012,7 +1016,7 @@ void compact_on_server_sync0(struct p2p_session *s,
  *   - seq>0: 客户端发送，继续同步剩余候选
  *   - flags: SIG_SYNC_FLAG_FIN (0x01) 表示候选列表发送完毕
  */
-void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
+void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
                           const uint8_t *payload, int len,
                           const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "SYNC";
@@ -1054,18 +1058,20 @@ void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
     // seq>0 时 base_index 为候选起始索引；seq=0 时 base_index 为循环通知序号（1..255）
     uint8_t base_index = payload[P2P_SESS_ID_PSZ];
 
-    // 并行网络中，乱序包（SYNC seq>0 或地址变更通知 seq=0）可能先于 SYNC0_ACK/SYNC0 到达，此时 session_id 可能还未设置
-    if (!s->id) s->id = session_id;
+    // 二次确认机制下，服务器在收到方向2确认前不会转发 SYNC，此时 s->id 必已在 compact_on_sync0_ack 中设置
+    if (!s->id) {
+        print("E:", LA_F("%s: unexpected s->id=0\n", LA_F169, 169), PROTO);
+        return;
+    }
 
-    // 如果 session_id 不一致（session 重置逻辑在 compact_on_server_sync0，此处不处理）
-    else if (s->id != session_id) {
+    if (s->id != session_id) {
         print("E:", LA_F("%s: session mismatch(local=%u pkt=%u)\n", LA_F167, 167), PROTO, s->id, session_id);
         return;
     }
 
-    // SYNCING 通常由 compact_on_sync0_ack 或 compact_on_server_sync0 触发；
-    // 此处为兜底，处理乱序先到（SYNC seq>0 或 seq=0 地址变更通知先于 SYNC0_ACK/SYNC0 到达）
-    if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYNC0_ACK || sess_ctx->state == SIG_COMPACT_SESS_WAIT_PEER) {
+    // SYNCING 通常由 compact_on_sync0_ack 或 compact_on_peer_sync0 触发；
+    // 此处为兜底，处理地址变更通知等先于 SYNC0 到达的情况
+    if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_PEER) {
 
         sess_ctx->state = SIG_COMPACT_SESS_SYNCING;
         print("I:", LA_F("%s: entered early, %s arrived before SYNC0\n", LA_F109, 109), TASK_SYNC, PROTO);
@@ -1740,10 +1746,10 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
         compact_on_sync0_ack(s, payload, payload_len, from);
         break;
     case SIG_PKT_SYNC0:
-        compact_on_server_sync0(s, payload, payload_len, from, now);
+        compact_on_peer_sync0(s, payload, payload_len, from, now);
         break;
     case SIG_PKT_SYNC:
-        compact_on_sync(s, seq, flags, payload, payload_len, from, now);
+        compact_on_peer_sync(s, seq, flags, payload, payload_len, from, now);
         break;
     case SIG_PKT_SYNC_ACK:
         compact_on_sync_ack(s, seq, payload, payload_len, from);

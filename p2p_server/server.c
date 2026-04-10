@@ -227,7 +227,12 @@ typedef struct compact_session {
     int                             candidate_count;            // 候选数量
 
     // SYNC(seq=0) 可靠传输（首包 + 地址变更通知）
-    int                             sync0_acked;                // 是否已收到首包 ACK，-1 表示未收到确认但已放弃
+    // sync0_acked 状态机：
+    //   0  = 初始，未收到过来自客户端的 SYNC0_ACK
+    //   1  = 客户端对服务器返回的 SYNC0_ACK 的（二次）确认。服务器在达成该状态前，确保不向客户端转发来自对端的 SYNC0
+    //   2  = 客户端对（服务器转发的）对端 SYNC0 的 ACK 确认
+    //  -1  = 重传超时放弃
+    int                             sync0_acked;
     struct compact_session*         sync0_pending_next;         // 待确认链表指针（-1 表示链表最后一个）
     uint64_t                        sync0_sent_time;            // 当前待确认 seq=0 最近发送时间（毫秒）
     int                             sync0_retry;                // 当前待确认 seq=0 重传次数
@@ -1640,6 +1645,15 @@ static void compact_send_sync0_ack(sock_t udp_fd, const struct sockaddr_in *to, 
         printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F137, 137), PROTO, to_str, (int)sent);
 }
 
+// 基于 session 重发 SYNC0_ACK（从 session 上下文提取地址/peer_id 等参数）
+static void compact_resend_sync0_ack(sock_t udp_fd, compact_session_t *cs) {
+    compact_client_t *client = COMPACT_CLIENT(cs);
+    char to_str[64];
+    snprintf(to_str, sizeof(to_str), "%s:%d", inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port));
+    compact_send_sync0_ack(udp_fd, &client->addr, to_str,
+                           cs_remote_peer(cs), cs->base.session_id, PEER_ONLINE(cs));
+}
+
 // 发送 FIN 通知给 cs 所代表的 session（"通知 cs 的持有方：对端已断开"）
 static void compact_send_fin(sock_t udp_fd, compact_session_t *cs, const char *reason) {
     const char* PROTO = "FIN";
@@ -1944,7 +1958,7 @@ static void retry_compact_sync0_pending(sock_t udp_fd, uint64_t now) {
 
             q->sync0_pending_next = NULL;
             if (q->sync0_base_index == 0) {
-                q->sync0_acked = -1;
+                q->sync0_acked = -1/* 超时停止 */;
             }
 
             if (g_compact_sync0_pending_head == (compact_session_t*)(void*)-1) {
@@ -1954,17 +1968,26 @@ static void retry_compact_sync0_pending(sock_t udp_fd, uint64_t now) {
             }
         }
         else {
-            if (!PEER_ONLINE(q)) {
-                q->sync0_pending_next = NULL;
-                if (g_compact_sync0_pending_head == (compact_session_t*)(void*)-1) {
-                    g_compact_sync0_pending_head = NULL;
-                    g_compact_sync0_pending_rear = NULL;
-                    return;
-                }
-                continue;
-            }
 
-            compact_send_sync0(udp_fd, q, q->sync0_base_index);
+            // 状态 0：重传 SYNC0_ACK，等待客户端二次确认
+            if (q->sync0_acked == 0) {
+                compact_resend_sync0_ack(udp_fd, q);
+            }
+            // 状态 1：重传 SYNC0，等待客户端确认收到该（来自对端的）SYNC0
+            else {
+
+                // 如果对端已经不在线了，就不必重传了
+                if (!PEER_ONLINE(q)) {
+                    q->sync0_pending_next = NULL;
+                    if (g_compact_sync0_pending_head == (compact_session_t*)(void*)-1) {
+                        g_compact_sync0_pending_head = NULL;
+                        g_compact_sync0_pending_rear = NULL;
+                        return; // sync0_pending 链表已空，直接返回
+                    }
+                    continue;
+                }
+                compact_send_sync0(udp_fd, q, q->sync0_base_index);
+            }
 
             q->sync0_retry++;
             q->sync0_sent_time = now;
@@ -2135,7 +2158,9 @@ static bool check_addr_change(sock_t udp_fd, compact_client_t *client, const str
         if (!PEER_ONLINE(cs)) continue;
 
         compact_session_t *peer = cs->peer;
-        if (peer->sync0_acked > 0) {
+
+        // 如果本端已收到过来自对端的 SYNC0
+        if (peer->sync0_acked > 1) {
             peer->addr_notify_seq = (uint8_t)(peer->addr_notify_seq + 1);
             if (peer->addr_notify_seq == 0) peer->addr_notify_seq = 1;
 
@@ -2145,7 +2170,7 @@ static bool check_addr_change(sock_t udp_fd, compact_client_t *client, const str
             print("I:", LA_F("Addr changed for '%s', notifying '%s' (ses_id=%u)\n", LA_F76, 76),
                   client->base.local_peer_id, COMPACT_CLIENT(peer)->base.local_peer_id, peer->base.session_id);
         }
-        else if (peer->sync0_acked == 0) {
+        else if (peer->sync0_acked >= 0) {
             if (peer->addr_notify_seq == 0) peer->addr_notify_seq = 1;
 
             print("I:", LA_F("Addr changed for '%s', defer notification until first ACK (ses_id=%u)\n", LA_F74, 74),
@@ -2400,7 +2425,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             // + 若上一个伙伴已死亡（peer==-1），清除标记，并重置 SYNC0 确认状态（让服务器可重新推送 SYNC0）
             if (local->peer == (compact_session_t*)(void*)-1) {
                 local->peer = NULL;
-                local->sync0_acked = 0;         // 重置：允许服务器重新推送 SYNC0（含新对端候选地址）
+                local->sync0_acked = 0;         // 重置：SYNC0 握手状态
                 local->addr_notify_seq = 0;     // 重置地址变更序列号
                 print("I:", LA_F("%s: '%.*s' cleared stale peer marker, ready for re-pair\n", LA_F23, 23),
                        PROTO, P2P_PEER_ID_MAX, local_client->base.local_peer_id);
@@ -2463,18 +2488,21 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         print("V:", LA_F("%s: auth_key=%" PRIu64 ", cands=%d from %s\n", LA_F36, 36),
                PROTO, auth_key, candidate_count, from_str);
 
-        // 发送 SYNC0_ACK
+        // 发送 SYNC0_ACK 并加入待确认队列（等待客户端二次确认）
         compact_send_sync0_ack(udp_fd, from, from_str, remote_peer_id, local->base.session_id, PEER_ONLINE(local));
+        if (local->sync0_acked == 0 && !local->sync0_pending_next) {
+            enqueue_compact_sync0_pending(local, 0, local_client->base.last_active);
+        }
 
-        // 已配对，触发 SYNC0
+        // 已配对，触发 SYNC0（仅在对方已二次确认 SYNC0_ACK 后才推送）
         if (PEER_ONLINE(local)) {
 
             compact_session_t *remote = local->peer;
-            if (!local->sync0_pending_next && local->sync0_acked == 0) {
+            if (local->sync0_acked == 1 && !local->sync0_pending_next) {
                 compact_send_sync0(udp_fd, local, 0);
                 enqueue_compact_sync0_pending(local, 0, local_client->base.last_active);
             }
-            if (!remote->sync0_pending_next && remote->sync0_acked == 0) {
+            if (remote->sync0_acked == 1 && !remote->sync0_pending_next) {
                 compact_send_sync0(udp_fd, remote, 0);
                 enqueue_compact_sync0_pending(remote, 0, local_client->base.last_active);
             }
@@ -2486,7 +2514,8 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
     } break;
 
     // SIG_PKT_SYNC0_ACK（client→server）
-    // + 客户端确认收到服务器 SYNC0，停止可靠性重传机制
+    // + 方向 2：客户端二次确认收到 SYNC0_ACK（session_id 已建立）
+    // + 方向 3：客户端确认收到服务器 SYNC0，停止可靠性重传机制
     case SIG_PKT_SYNC0_ACK: { const char* PROTO = "SYNC0_ACK";
 
         printf(LA_F("[UDP] %s recv from %s, len=%zu\n", LA_F133, 133),
@@ -2505,29 +2534,54 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         if (cs) {
             check_addr_change(udp_fd, COMPACT_CLIENT(cs), from);
 
-            if (!cs->sync0_acked) { cs->sync0_acked = 1;
+            // 方向 2：客户端对服务器返回的 SYNC0_ACK 的（二次）确认。此时服务器尚未推送（来自对端的）SYNC0
+            if (cs->sync0_acked == 0) {
 
-                print("V:", LA_F("%s: confirmed '%s', retries=%d (ses_id=%u)\n", LA_F45, 45),
-                       PROTO, COMPACT_CLIENT(cs)->base.local_peer_id, cs->sync0_retry, session_id);
+                cs->sync0_acked = 1;
+
+                // 从 SYNC0_ACK 待确认队列中移除
+                if (cs->sync0_pending_next) {
+                    remove_compact_sync0_pending(cs);
+                }
+                cs->sync0_retry = 0;
+                cs->sync0_sent_time = 0;
+
+                print("V:", LA_F("%s: 2nd-ack confirmed '%s' (ses_id=%u)\n", LA_F45, 45),
+                       PROTO, COMPACT_CLIENT(cs)->base.local_peer_id, session_id);
+
+                // 二次确认后，若已配对则触发 SYNC0 推送
+                if (PEER_ONLINE(cs) && !cs->sync0_pending_next) {
+                    compact_send_sync0(udp_fd, cs, 0);
+                    enqueue_compact_sync0_pending(cs, 0, P_tick_ms());
+                }
             }
+            else {
+                
+                // 方向 3：客户端确认了（服务器转发的）来自对端 SYNC0
+                if (cs->sync0_acked == 1) { cs->sync0_acked = 2;
 
-            if (cs->sync0_pending_next) {
-                remove_compact_sync0_pending(cs);
-            }
+                    print("V:", LA_F("%s: confirmed '%s', retries=%d (ses_id=%u)\n", LA_F45, 45),
+                           PROTO, COMPACT_CLIENT(cs)->base.local_peer_id, cs->sync0_retry, session_id);
+                }
 
-            cs->sync0_base_index = 0;
-            cs->sync0_retry = 0;
-            cs->sync0_sent_time = 0;
+                if (cs->sync0_pending_next) {
+                    remove_compact_sync0_pending(cs);
+                }
 
-            // 有延期的地址变更通知，立即发送
-            if (cs->addr_notify_seq != 0) {
+                cs->sync0_base_index = 0;
+                cs->sync0_retry = 0;
+                cs->sync0_sent_time = 0;
 
-                compact_send_sync0(udp_fd, cs, cs->addr_notify_seq);
-                enqueue_compact_sync0_pending(cs, cs->addr_notify_seq, P_tick_ms());
+                // 有延期的地址变更通知，立即发送
+                if (cs->addr_notify_seq != 0) {
 
-                print("I:", LA_F("Addr changed for '%s', deferred notifying '%s' (ses_id=%u)\n", LA_F75, 75),
-                      COMPACT_CLIENT(cs->peer)->base.local_peer_id, COMPACT_CLIENT(cs)->base.local_peer_id,
-                      cs->peer->base.session_id);
+                    compact_send_sync0(udp_fd, cs, cs->addr_notify_seq);
+                    enqueue_compact_sync0_pending(cs, cs->addr_notify_seq, P_tick_ms());
+
+                    print("I:", LA_F("Addr changed for '%s', deferred notifying '%s' (ses_id=%u)\n", LA_F75, 75),
+                          COMPACT_CLIENT(cs->peer)->base.local_peer_id, COMPACT_CLIENT(cs)->base.local_peer_id,
+                          cs->peer->base.session_id);
+                }
             }
         }
         else print("W:", LA_F("%s for unknown ses_id=%u\n", LA_F16, 16), PROTO, session_id);

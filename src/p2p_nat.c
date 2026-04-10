@@ -20,7 +20,7 @@
 
 #define TASK_NAT                "NAT"
 #define TASK_PATH               "PATH"
-#define TASK_ICE_REMOTE         "ICE REMOTE"
+#define TASK_SYNC_REMOTE         "ICE REMOTE"
 
 /*
  * 查找或添加远端候选（PRFLX 发现）
@@ -35,7 +35,7 @@ static int upsert_prflx(struct p2p_session *s, const struct sockaddr_in *from) {
 
     if (s->inst->cfg.test_ice_prflx_off) {
         print("I:", LA_F("%s: remote %s cand<%s:%d> (disabled)\n", LA_F154, 154),
-              TASK_ICE_REMOTE, "prflx", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+              TASK_SYNC_REMOTE, "prflx", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
         return -1;
     }
 
@@ -57,7 +57,7 @@ static int upsert_prflx(struct p2p_session *s, const struct sockaddr_in *from) {
     path_stats_init(&c->stats, 0);
 
     print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F153, 153),
-          TASK_ICE_REMOTE, "prflx", idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+          TASK_SYNC_REMOTE, "prflx", idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
 
     return idx;
 }

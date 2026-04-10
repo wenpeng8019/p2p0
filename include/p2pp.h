@@ -512,7 +512,12 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - online: 1=对端已上线（已有对端配对），0=对端尚未上线
  *   服务器收到 client SYNC0 后回复，通知客户端候选已缓存以及对端是否已上线
  *
- * 方向 2: client → server（对 server SYNC0 的回复）
+ * 方向 2: client → server（对 server SYNC0_ACK 的二次回复）
+ *   payload: [session_id(P2P_SESS_ID_PSZ)]
+ *   客户端收到 server 的 SYNC0_ACK 后，再次回复 SYNC0_ACK。
+ *   而服务器在收到二次确认前，会确保不会将对端的 SYNC0 包提前转发过来，以确保 session id 的先后一致性。
+ *
+ * 方向 3: client → server（对 server SYNC0 的回复）
  *   payload: [session_id(P2P_SESS_ID_PSZ)]
  *   - session_id: 来自 server SYNC0 中的会话 ID，用于服务器确认对应配对
  *   客户端收到 server SYNC0（首次对端候选推送）后立即回复
@@ -642,11 +647,13 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        · auth_key≠0: 登录成功，用于后续 SYNC0/ALIVE 身份验证
  *      - 收到 ONLINE_ACK 后停止 ONLINE 重发，进入 ONLINE 状态
  *
- *   2. 候选同步阶段（序列化 + 确认）：
+ *   2. 候选同步阶段（三次握手 + 序列化确认）：
  *      - 客户端收到 ONLINE_ACK 后立即发送 SYNC0（含 auth_key + remote_peer_id + 首批候选）
  *      - 服务器回复 SYNC0_ACK（含 session_id + online），online=1 表示对端已上线
- *      - 双方上线后，服务器发送 SYNC(seq=0)，包含缓存的对端候选
- *      - 客户端收到后发送 SYNC_ACK（携带 session_id）确认
+ *      - 客户端收到 SYNC0_ACK 后，回复 SYNC0_ACK（二次确认，含 session_id）
+ *      - 服务器在收到二次确认前，不会将对端的 SYNC0 转发过来（确保 session_id 先建立）
+ *      - 双方上线且均已二次确认后，服务器向双方发送 SYNC0，包含缓存的对端候选
+ *      - 客户端收到 SYNC0 后发送 SYNC0_ACK（携带 session_id）确认
  *      - 客户端通过 SYNC(seq=1,2,3,...) 继续同步剩余候选（携带 session_id）
  *      - 对端通过 SYNC_ACK 确认，未确认则重发
  *      - 允许乱序：seq>0 可能先于 seq=0 到达，接收端按 seq 位图去重并最终收敛
@@ -659,14 +666,16 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        |<-- ONLINE_ACK --------|  (auth_key + capabilities)
  *        |--- SYNC0 ------------>|  (auth_key + 首批候选)    |
  *        |<-- SYNC0_ACK ---------|  (session_id, online=0)   |
+ *        |--- SYNC0_ACK -------->|  (二次确认, session_id)    |
  *        |   [进入 ONLINE]       |  (缓存 Alice 的候选)      |
  *        |    ... Bob 上线 ...                              |
  *        |                       |<-- ONLINE --------------|
  *        |                       |--- ONLINE_ACK ---------->|  (auth_key + capabilities)
  *        |                       |<-- SYNC0 ---------------|  (auth_key + 首批候选)
  *        |                       |--- SYNC0_ACK ----------->|  (session_id, online=1)
- *        |<-- SYNC(seq=0) -------|--- SYNC(seq=0) -------->|  (缓存候选 + session_id)
- *        |--- SYNC_ACK --------->|<-- SYNC_ACK ------------|  (携带 session_id)
+ *        |                       |<-- SYNC0_ACK ------------|  (二次确认, session_id)
+ *        |<-- SYNC0 -------------|--- SYNC0 -------------->|  (缓存候选 + session_id)
+ *        |--- SYNC0_ACK -------->|<-- SYNC0_ACK ------------|  (携带 session_id)
  *        |                       |                          |
  *        |<=============== P2P SYNC 序列化同步 ========>|  (所有包携带 session_id)
  *        |--- SYNC(seq=1, base=5) ----------------->  |  (从第 6 个候选开始)
