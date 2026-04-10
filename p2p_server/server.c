@@ -1614,8 +1614,9 @@ static void compact_send_online_ack(sock_t udp_fd, const struct sockaddr_in *to,
         printf(LA_F("[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n", LA_F138, 138), PROTO, to_str, hdr->flags, (int)sent);     
 }
 
-// 发送 SYNC0_ACK: [hdr(4)][session_id(4)][online(1)] = 9字节
-static void compact_send_sync0_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str, uint32_t session_id, uint8_t online) {
+// 发送 SYNC0_ACK: [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
+static void compact_send_sync0_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str,
+                                   const char *remote_peer_id, uint32_t session_id, uint8_t online) {
     const char* PROTO = "SYNC0_ACK";
 
     uint8_t ack[sizeof(p2p_packet_hdr_t) + SIG_PKT_SYNC0_ACK_PSZ];
@@ -1625,6 +1626,7 @@ static void compact_send_sync0_ack(sock_t udp_fd, const struct sockaddr_in *to, 
     hdr->seq = 0;
 
     int ofz = sizeof(p2p_packet_hdr_t);
+    memcpy(ack + ofz, remote_peer_id, P2P_PEER_ID_MAX); ofz += P2P_PEER_ID_MAX;
     nwrite_l(ack + ofz, session_id); ofz += P2P_SESS_ID_PSZ;
     ack[ofz++] = online;
 
@@ -1674,12 +1676,13 @@ static void compact_send_sync0(sock_t udp_fd, compact_session_t *cs, uint8_t bas
     compact_session_t *peer     = cs->peer;
     compact_client_t  *peer_cli = COMPACT_CLIENT(peer);
 
-    uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_PEER_ID_MAX + 2 + MAX_CANDIDATES * sizeof(p2p_candidate_t)];
+    uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ + 2 + MAX_CANDIDATES * sizeof(p2p_candidate_t)];
     p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)pkt;
     resp_hdr->flags = 0;
     resp_hdr->seq = htons(0);
 
     int ofz = sizeof(p2p_packet_hdr_t);
+    memcpy(pkt + ofz, peer_cli->base.local_peer_id, P2P_PEER_ID_MAX); ofz += P2P_PEER_ID_MAX;
     nwrite_l(pkt + ofz, cs->base.session_id); ofz += P2P_SESS_ID_PSZ;
 
     int cand_cnt;
@@ -2461,7 +2464,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                PROTO, auth_key, candidate_count, from_str);
 
         // 发送 SYNC0_ACK
-        compact_send_sync0_ack(udp_fd, from, from_str, local->base.session_id, PEER_ONLINE(local));
+        compact_send_sync0_ack(udp_fd, from, from_str, remote_peer_id, local->base.session_id, PEER_ONLINE(local));
 
         // 已配对，触发 SYNC0
         if (PEER_ONLINE(local)) {

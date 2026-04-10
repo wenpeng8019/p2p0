@@ -664,9 +664,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 inst->state = P2P_STATE_REGISTERING;
             }
 
-            // 多会话标识：本端随机提案，SYNC0_ACK 中服务器确认后覆盖
-            do { s->id = P_rand32(); } while (!s->id);
-
             if (!s->sig_sess.compact.remote_peer_id[0])
                 print("I:", LA_F("Starting COMPACT session with %s", LA_F615, 615), remote_peer_id);
             if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE)
@@ -959,9 +956,17 @@ p2p_update(p2p_handle_t hdl) {
         p2p_pkt_hdr_decode(pkt, &hdr);
 
         // 获取 payload
-        const uint8_t *payload = pkt + P2P_HDR_SIZE;
-        int payload_len = n - P2P_HDR_SIZE;
-        uint8_t crypto_dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];  /* 解密输出缓冲区 */
+        const uint8_t *payload = pkt + P2P_HDR_SIZE; int payload_len = n - P2P_HDR_SIZE;
+
+        // 对于 COMPACT 模式的信令包，直接交给信令处理器
+        if (hdr.type >= 0x80) {
+
+            p2p_signal_compact_proto(inst, hdr.type, hdr.flags, hdr.seq, (uint8_t*)payload, payload_len, now_ms);
+            continue;
+        }
+
+        /* 解密输出缓冲区 */
+        uint8_t crypto_dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];  
 
         /* ================================================================
          * 多会话派发：根据 session_id 或来源地址将包路由到正确会话
@@ -1125,47 +1130,6 @@ p2p_update(p2p_handle_t hdl) {
                 nat_on_fin(s, &from);
                 break;
 
-            // --------------------
-            // COMPACT 模式的信令包（ONLINE_ACK、SYNC0_ACK、SYNC、SYNC_ACK 等）
-            // --------------------
-
-            case SIG_PKT_ONLINE_ACK:
-                compact_on_online_ack(inst, hdr.seq, hdr.flags, payload, payload_len, &from);
-                break;
-            case SIG_PKT_SYNC0_ACK:
-                compact_on_sync0_ack(s, payload, payload_len, &from);
-                break;
-            case SIG_PKT_SYNC0:
-                // server→client 方向：服务器下发首次对端候选推送（client→server 方向由发送路径处理，不会被路由到此）
-                compact_on_server_sync0(s, payload, payload_len, &from);
-                break;
-            case SIG_PKT_ALIVE_ACK:
-                compact_on_alive_ack(inst, &from);
-                break;
-            case SIG_PKT_SYNC:
-                compact_on_sync(s, hdr.seq, hdr.flags, payload, payload_len, &from);
-                break;
-            case SIG_PKT_SYNC_ACK:
-                compact_on_sync_ack(s, hdr.seq, payload, payload_len, &from);
-                break;
-            case SIG_PKT_FIN:
-                compact_on_fin(s, payload, payload_len, &from);
-                break;
-            case SIG_PKT_NAT_PROBE_ACK:
-                compact_on_nat_probe_ack(inst, hdr.seq, payload, payload_len, &from);
-                break;
-            case SIG_PKT_MSG_REQ:
-                compact_on_request(s, hdr.flags, payload, payload_len, &from);
-                break;
-            case SIG_PKT_MSG_REQ_ACK:
-                compact_on_request_ack(s, payload, payload_len, &from);
-                break;
-            case SIG_PKT_MSG_RESP:
-                compact_on_response(s, hdr.flags, payload, payload_len, &from);
-                break;
-            case SIG_PKT_MSG_RESP_ACK:
-                compact_on_response_ack(s, payload, payload_len, &from);
-                break;
             default:
                 print("V:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F302, 302), hdr.type);
                 printf(LA_F("Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d", LA_F301, 301),

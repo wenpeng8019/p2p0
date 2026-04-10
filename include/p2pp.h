@@ -118,14 +118,15 @@ typedef struct {
 static inline void p2p_pkt_hdr_encode(uint8_t *buf, uint8_t type, uint8_t flags, uint16_t seq) {
     buf[0] = type;
     buf[1] = flags;
-    buf[2] = (uint8_t)(seq >> 8);
-    buf[3] = (uint8_t)(seq & 0xFF);
+    buf += 2;
+    nwrite_s(buf, seq);
 }
 
 static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr) {
     hdr->type  = buf[0];
     hdr->flags = buf[1];
-    hdr->seq   = ((uint16_t)buf[2] << 8) | buf[3];
+    buf += 2;
+    nread_s(&hdr->seq, buf);
 }
 
 /* ============================================================================
@@ -490,7 +491,8 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *     2. 指定 remote_peer_id，建立与对端的配对关系
  *
  * 方向 2: server → client（对端已配对后触发，下发对端候选地址）
- *   payload: [session_id(P2P_SESS_ID_PSZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
+ *   payload: [remote_peer_id(P2P_PEER_ID_MAX)][session_id(P2P_SESS_ID_PSZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
+ *   - remote_peer_id: 对端 ID（32字节，不足补零），用于客户端多会话派发定位目标 session
  *   - session_id: 对端配对会话 ID（network byte order，由服务器在配对成功时分配）
  *   - 0x00: 保留字节（固定为 0，供 unpack_remote_candidates 识别为初始推送）
  *   - candidate_count: 对端候选数量（首个必须是服务器观察到的对端公网地址 srflx）
@@ -498,11 +500,12 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   客户端收到后以 SIG_PKT_SYNC0_ACK（client→server 方向）确认
  */
 #define SIG_PKT_SYNC0_PSZ(n)        (SIG_AUTH_KEY_PSZ + P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t)) // client→server: auth_key(SIG_AUTH_KEY_PSZ) + peer_id(32) + count(1) + cands(n*23)
-#define SIG_PKT_SYNC0_S2C_PSZ(n)    (P2P_SESS_ID_PSZ + 2u + (n)*sizeof(p2p_candidate_t))                    // server→client: session_id(P2P_SESS_ID_PSZ) + reserved(1) + count(1) + cands(n*23)
+#define SIG_PKT_SYNC0_S2C_PSZ(n)    (P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ + 2u + (n)*sizeof(p2p_candidate_t)) // server→client: remote_peer_id(32) + session_id(P2P_SESS_ID_PSZ) + reserved(1) + count(1) + cands(n*23)
 /* SYNC0_ACK（双向，两端 payload 格式不同）:
  *
  * 方向 1: server → client（对 client SYNC0 的回复）
- *   payload: [session_id(P2P_SESS_ID_PSZ)][online(1)]
+ *   payload: [remote_peer_id(P2P_PEER_ID_MAX)][session_id(P2P_SESS_ID_PSZ)][online(1)]
+ *   - remote_peer_id: 对端 ID（32字节，不足补零），用于客户端多会话派发定位目标 session
  *   - session_id: 对端配对会话 ID（network byte order, 64-bit），标识 client↔peer 会话
  *     · 语义不同于 auth_key（auth_key 标识 client↔server）
  *     · 用于后续所有 SYNC/SYNC_ACK/FIN/DATA relay/MSG 包的身份验证
@@ -514,7 +517,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - session_id: 来自 server SYNC0 中的会话 ID，用于服务器确认对应配对
  *   客户端收到 server SYNC0（首次对端候选推送）后立即回复
  */
-#define SIG_PKT_SYNC0_ACK_PSZ       (P2P_SESS_ID_PSZ + 1u)                                              // server→client: session_id(P2P_SESS_ID_PSZ) + online(1)
+#define SIG_PKT_SYNC0_ACK_PSZ       (P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ + 1u)                             // server→client: remote_peer_id(32) + session_id(P2P_SESS_ID_PSZ) + online(1)
 #define SIG_PKT_SYNC0_ACK_C2S_PSZ   (P2P_SESS_ID_PSZ)                                                   // client→server: session_id(P2P_SESS_ID_PSZ)
 /* SYNC:
  *   payload: [session_id(P2P_SESS_ID_PSZ)][notify_seq_or_base(1)][candidate_count(1)][candidates(N*23)]

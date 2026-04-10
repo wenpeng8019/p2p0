@@ -701,7 +701,7 @@ static void handle_sync_ack(struct p2p_session *s, const uint8_t *payload, int l
  * 负载: [session_id(4)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  * 注: [session_id(4)] 已剥离
  */
-static void handle_sync(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
+static void handle_peer_sync(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
     if (sess_ctx->state != SIG_RELAY_SESS_SYNCING) {
@@ -1164,7 +1164,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
 
             // 如果存在首批同步的数据
             if (ptr[P2P_SESS_ID_PSZ/* candidate_count */] || sig_ctx->hdr.size > P2P_RLY_SYNC0_S2C_PSZ(0))
-                handle_sync(s, ptr+P2P_SESS_ID_PSZ, (int)(sig_ctx->hdr.size-P2P_PEER_ID_MAX-P2P_SESS_ID_PSZ), now);
+                handle_peer_sync(s, ptr+P2P_SESS_ID_PSZ, (int)(sig_ctx->hdr.size-P2P_PEER_ID_MAX-P2P_SESS_ID_PSZ), now);
 
             break;
         }
@@ -1174,7 +1174,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             case P2P_RLY_SYNC_ACK:
                 PROTO = "SYNC_ACK"; payload_min = P2P_RLY_SYNC_ACK_PSZ; handler = handle_sync_ack; break;
             case P2P_RLY_SYNC:
-                PROTO = "SYNC"; payload_min = P2P_RLY_SYNC_PSZ(0, false); handler = handle_sync; break;
+                PROTO = "SYNC"; payload_min = P2P_RLY_SYNC_PSZ(0, false); handler = handle_peer_sync; break;
             case P2P_RLY_FIN:
                 PROTO = "FIN"; payload_min = P2P_RLY_FIN_PSZ; handler = handle_relay_fin; break;
             case P2P_RLY_PACKET:

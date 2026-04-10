@@ -348,68 +348,9 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
 
 //-----------------------------------------------------------------------------
 
-/*
- * 处理收到的信令包（独立接口）
- * 
- * 以下函数分别处理不同类型的 COMPACT 信令包，消除包类型派发层。
- */
+void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t flags, uint16_t seq,
+                              uint8_t *payload, int payload_len, uint64_t now);
 
-// 处理 ONLINE_ACK（服务器上线确认）
-void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flags,
-                           const uint8_t *payload, int len,
-                           const struct sockaddr_in *from);
-                             
-// 处理 ALIVE_ACK（保活确认）
-void compact_on_alive_ack(struct p2p_instance *inst, const struct sockaddr_in *from);
-
-// 处理 NAT_PROBE_ACK（服务器返回的 NAT 探测结果）
-void compact_on_nat_probe_ack(struct p2p_instance *inst, uint16_t seq,
-                              const uint8_t *payload, int len,
-                              const struct sockaddr_in *from);
-
-// 处理 SYNC0_ACK（本端向对端首次同步确认）
-void compact_on_sync0_ack(struct p2p_session *s,
-                              const uint8_t *payload, int len,
-                              const struct sockaddr_in *from);
-
-// 处理服务器下发的 SYNC0（对端向本端首次同步） */
-void compact_on_server_sync0(struct p2p_session *s,
-                              const uint8_t *payload, int len,
-                              const struct sockaddr_in *from);
-
-// 处理 SYNC（对端候选信息）
-void compact_on_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
-                          const uint8_t *payload, int len,
-                          const struct sockaddr_in *from);
-
-// 处理 SYNC_ACK（对端候选确认）
-void compact_on_sync_ack(struct p2p_session *s, uint16_t seq,
-                               const uint8_t *payload, int len,
-                               const struct sockaddr_in *from);
-
-// 处理 FIN（对端离线通知）
-void compact_on_fin(struct p2p_session *s, const uint8_t *payload, int len,
-                    const struct sockaddr_in *from);
-
-// 处理 MSG_REQ（可能是 A→Server 原始请求，也可能是 Server→B relay）
-void compact_on_request(struct p2p_session *s, uint8_t flags,
-                        const uint8_t *payload, int len,
-                        const struct sockaddr_in *from);
-
-// 处理 MSG_REQ_ACK（Server→A，确认已缓存并开始中转）
-void compact_on_request_ack(struct p2p_session *s,
-                            const uint8_t *payload, int len,
-                            const struct sockaddr_in *from);
-
-// 处理 MSG_RESP（Server→A relay B 的应答）
-void compact_on_response(struct p2p_session *s, uint8_t flags,
-                         const uint8_t *payload, int len,
-                         const struct sockaddr_in *from);
-
-// 处理 MSG_RESP_ACK（Server 对 B 端响应的确认）
-void compact_on_response_ack(struct p2p_session *s,
-                             const uint8_t *payload, int len,
-                             const struct sockaddr_in *from);
 
 ///////////////////////////////////////////////////////////////////////////////
 
