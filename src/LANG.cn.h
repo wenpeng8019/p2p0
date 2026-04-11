@@ -92,6 +92,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F84] = "%s: PUNCHING → %s (peer CONNECTING)",  /* SID:84 */
     [LA_F85] = "%s: PUNCHING → CLOSED (timeout %llums, %s signaling relay)",  /* SID:85 */
     [LA_F86] = "%s: PUNCHING → CONNECTING (%s%s)",  /* SID:86 */
+    [LA_F198] = "%s: recorded peer conn_seq=%u for future CONN_ACK",  /* SID:198 */
     [LA_F87] = "%s: PUNCHING → RELAY (peer CONNECTING)",  /* SID:87 */
     [LA_F88] = "%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n",  /* SID:88 */
     [LA_F89] = "%s: Peer addr changed -> %s:%d, retrying punch\n",  /* SID:89 */
@@ -203,7 +204,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F195] = "%s: reaching relay via signaling SUCCESS, seq=%u",  /* SID:195 */
     [LA_F196] = "%s: reaching updated: cand[%d], seq=%u->%u",  /* SID:196 */
     [LA_F197] = "%s: ready to start session\n",  /* SID:197 */
-    [LA_F198] = "%s: recorded peer conn_seq=%u for future CONN_ACK",  /* SID:198 */
+    [LA_F471] = "%s: recorded peer conn_seq=%u for future CONN_ACK",  /* SID:471 */
     [LA_F199] = "%s: recv (ses_id=%u), type=%u\n",  /* SID:199 */
     [LA_F200] = "%s: recv from cand[%d]",  /* SID:200 */
     [LA_F201] = "%s: relay busy, will retry\n",  /* SID:201 */
@@ -324,8 +325,6 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F316] = "% Invalid signaling mode in configuration",  /* SID:316 */
     [LA_F317] = "% LOST recovery: NAT connected but no path available",  /* SID:317 */
     [LA_F318] = "Local address detection done: %d address(es)",  /* SID:318 */
-    [LA_F319] = "Login to COMPACT signaling server at %s:%d",  /* SID:319 */
-    [LA_F320] = "Login to RELAY signaling server at %s:%d",  /* SID:320 */
     [LA_F321] = "% MSG RPC not supported by server\n",  /* SID:321 */
     [LA_F322] = "% NAT connected but no available path in path manager",  /* SID:322 */
     [LA_F323] = "% NAT detection skipped (skip_stun_test=true), Srflx gathered",  /* SID:323 */
@@ -349,6 +348,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F341] = "Path switched to better route (idx=%d)",  /* SID:341 */
     [LA_F342] = "Processing (role=%s)",  /* SID:342 */
     [LA_F343] = "% PseudoTCP enabled as transport layer",  /* SID:343 */
+    [LA_F319] = "Login to COMPACT signaling server at %s:%d",  /* SID:319 */
+    [LA_F320] = "Login to RELAY signaling server at %s:%d",  /* SID:320 */
     [LA_F344] = "% RELAY path but TURN not allocated",  /* SID:344 */
     [LA_F345] = "% RELAY path but TURN not allocated (dtls)",  /* SID:345 */
     [LA_F346] = "% RELAY recovery: NAT connected but no path available",  /* SID:346 */

@@ -692,7 +692,7 @@ void p2p_signal_pubsub_tick_send(p2p_signal_pubsub_ctx_t *ctx, struct p2p_sessio
     if (ctx->role != P2P_SIGNAL_ROLE_PUB) return;
     
     /* 等待 STUN 响应后发送 offer（必须包含公网地址）*/
-    if (s->local_cand_cnt == 0 || s->state != P2P_STATE_REGISTERING) return;
+    if (s->local_cand_cnt == 0 || s->state != P2P_STATE_SIGNALING) return;
     
     /* 检查是否已收集到 Srflx 候选地址（公网反射地址）*/
     int has_srflx = 0;

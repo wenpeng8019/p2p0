@@ -275,13 +275,13 @@ static void tui_process_input(p2p_session_t session) {
 static const char* state_name(p2p_state_t state) {
     switch (state) {
         case P2P_STATE_INIT:        return LA_W("INIT", LA_W4, 4);
-        case P2P_STATE_REGISTERING: return LA_W("REGISTERING", LA_W7, 7);
-        case P2P_STATE_ONLINE:      return LA_W("ONLINE", LA_W5, 5);
+        case P2P_STATE_CLOSED:      return LA_W("CLOSED", LA_W1, 1);
+        case P2P_STATE_ERROR:       return LA_W("ERROR", LA_W3, 3);
+        case P2P_STATE_SIGNALING:   return LA_W("SIGNALING", LA_W7, 7);
+        case P2P_STATE_WAITING:     return LA_W("WAITING", LA_W5, 5);
         case P2P_STATE_PUNCHING:    return LA_W("PUNCHING", LA_W6, 6);
         case P2P_STATE_CONNECTED:   return LA_W("CONNECTED", LA_W2, 2);
         case P2P_STATE_RELAY:       return LA_W("RELAY", LA_W8, 8);
-        case P2P_STATE_CLOSED:      return LA_W("CLOSED", LA_W1, 1);
-        case P2P_STATE_ERROR:       return LA_W("ERROR", LA_W3, 3);
         default:                    return LA_W("UNKNOWN", LA_W9, 9);
     }
 }
@@ -558,14 +558,16 @@ int main(int argc, char *argv[]) {
     bool connect_pending = false;
     uint64_t connect_retry_at = 0;
 
-    g_session = p2p_connect(hdl, target_name);
-    if (!g_session) {
-        print("E:", LA_F("Failed to initialize connection\n", LA_F37, 37));
-        return 1;
-    }
-    if (p2p_state(g_session) == P2P_STATE_INIT) {
-        connect_pending = true;
-        connect_retry_at = P_tick_ms() + 500;
+    if (target_name) {
+        g_session = p2p_connect(hdl, target_name);
+        if (!g_session) {
+            print("E:", LA_F("Failed to initialize connection\n", LA_F37, 37));
+            return 1;
+        }
+        if (p2p_state(g_session) == P2P_STATE_INIT) {
+            connect_pending = true;
+            connect_retry_at = P_tick_ms() + 500;
+        }
     }
 
     if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F39, 39), mode_name, target_name); }

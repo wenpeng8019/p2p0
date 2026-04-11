@@ -62,8 +62,8 @@ typedef enum {
     P2P_STATE_INIT = 0,                         // 初始状态
     P2P_STATE_CLOSED,                           // 已关闭
     P2P_STATE_ERROR,                            // 错误状态（不可恢复，等价于自动关闭）
-    P2P_STATE_REGISTERING,                      // 上线中（正在向信令服务器发送 ONLINE）
-    P2P_STATE_ONLINE,                           // 已在信令服务器上线，等待对端上线后开始候选同步
+    P2P_STATE_SIGNALING,                        // 上线中（正在向信令服务器发送 ONLINE）
+    P2P_STATE_WAITING,                          // 等待对端上线后开始候选同步（已在信令服务器上线）
     P2P_STATE_PUNCHING,                         // NAT 打洞中
     P2P_STATE_LOST,                             // 信号丢失（可能恢复，也可能不会，需要由应用层来决定断开或重连；NAT 和 中继都丢失了）
     P2P_STATE_CONNECTED,                        // 已连接（NAT 肯定处于 CONNECTED 状态）

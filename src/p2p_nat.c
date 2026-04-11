@@ -984,11 +984,30 @@ static void nat_on_conn(struct p2p_session *s, uint16_t seq,
     // CONN 控制包不计入流量统计（size=0），但更新路径活跃时间、包计数和重置超时计数器
     path_manager_on_packet_recv(s, path_idx, now, 0, false, 0);
 
-    // 如果本端还未进入 NAT_CONNECTING 状态，标记对方已经进入 CONNECTING 状态
-    // + 此时需要等到本端进入 connected 后再回复 CONN_ACK，因为对方收到 CONN_ACK 后会立刻进入 CONNECTED 状态
+    // 如果本端还未进入 NAT_CONNECTING 状态
     if (n->state < NAT_CONNECTING) {
+
+        // 如果 CONN 来自信令中转路径（signaling relay），说明对端已通过信令中转完成双向确认
+        // 此时不需要等待本端打洞超时，直接接受并进入 RELAY 状态
+        if (path_idx == PATH_IDX_SIGNALING && n->state == NAT_PUNCHING) {
+
+            s->tx_confirmed = s->rx_confirmed = true;
+            p2p_set_active_path(s, PATH_IDX_SIGNALING);
+
+            nat_send_conn_ack(s, now);
+
+            n->state = NAT_RELAY;
+            n->last_keepalive_send_ms = now;
+            p2p_connected(s, now);
+
+            print("I:", LA_F("%s: PUNCHING → RELAY (peer CONN via signaling)", LA_F198, 198), TASK_NAT);
+            return;
+        }
+
+        // 标记对方已经进入 CONNECTING 状态
+        // + 此时需要等到本端进入 connected 后再回复 CONN_ACK，因为对方收到 CONN_ACK 后会立刻进入 CONNECTED 状态
         n->peer_connecting = true;
-        print("V:", LA_F("%s: recorded peer conn_seq=%u for future CONN_ACK", LA_F198, 198),
+        print("V:", LA_F("%s: recorded peer conn_seq=%u for future CONN_ACK", LA_F471, 471),
               PROTO, seq);
         return;
     }

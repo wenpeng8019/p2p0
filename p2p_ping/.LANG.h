@@ -42,9 +42,9 @@ enum {
     LA_W2,  /* "CONNECTED"  [p2p_ping.c] */
     LA_W3,  /* "ERROR"  [p2p_ping.c] */
     LA_W4,  /* "INIT"  [p2p_ping.c] */
-    LA_W5,  /* "ONLINE"  [p2p_ping.c] */
+    LA_W5,  /* "WAITING"  [p2p_ping.c] */
     LA_W6,  /* "PUNCHING"  [p2p_ping.c] */
-    LA_W7,  /* "REGISTERING"  [p2p_ping.c] */
+    LA_W7,  /* "SIGNALING"  [p2p_ping.c] */
     LA_W8,  /* "RELAY"  [p2p_ping.c] */
     LA_W9,  /* "UNKNOWN"  [p2p_ping.c] */
 

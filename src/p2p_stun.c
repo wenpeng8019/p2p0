@@ -762,9 +762,40 @@ static inline void stun_add_srflx_candidate(struct p2p_instance *inst, const str
     inst->stun_ctx.mapped_addr = *mapped;
     inst->stun_ctx.mapped_addr_active = true;
 
-    // 如果之前还未进入可同步状态
+    // trickle 增加模式：信令已上线，且还有更多异步候选待收集
     // todo stun_pending 超时问题
-    if (!sig_ready || inst->cfg.skip_stun_pending) {
+    if (sig_ready && inst->stun_pending && !inst->cfg.skip_stun_pending) {
+        for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
+
+            int idx = p2p_cand_push_local(s);
+            if (idx < 0) {
+                print("W:", LA_F("✗ Add Srflx candidate failed(OOM)", LA_F470, 470));
+                return;
+            }
+
+            p2p_local_candidate_entry_t *c = &s->local_cands[idx];
+            c->type = P2P_CAND_SRFLX;
+            c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
+            c->addr = *mapped;
+
+            print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F469, 469),
+                  inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+
+            if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
+                if (s->sig_sess.compact.state >= SIG_COMPACT_SESS_SYNCING)
+                    p2p_signal_compact_trickle_candidate(s);
+            }
+            else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
+                p2p_signal_relay_trickle_candidate(s);
+            else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.on_ice_candidate) {
+                char sdp_a[256];
+                if (p2p_ice_export_candidate(c, sdp_a, sizeof(sdp_a)) > 0)
+                    s->inst->cfg.on_ice_candidate((p2p_session_t)s, sdp_a, s->inst->cfg.userdata);
+            }
+        }
+    }
+    // 信令还没上线 或 stun 全部完成 或 skip_stun_pending
+    else {
 
         // 是否首次变为可同步状态
         bool syncable = sig_ready && !inst->stun_pending;
@@ -791,35 +822,6 @@ static inline void stun_add_srflx_candidate(struct p2p_instance *inst, const str
                 else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
                     p2p_signal_relay_syncable(inst, &inst->sig_ctx.relay);
             }
-        }
-    }
-    // trickle 增加模式
-    else for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
-
-        int idx = p2p_cand_push_local(s);
-        if (idx < 0) {
-            print("W:", LA_F("✗ Add Srflx candidate failed(OOM)", LA_F470, 470));
-            return;
-        }
-
-        p2p_local_candidate_entry_t *c = &s->local_cands[idx];
-        c->type = P2P_CAND_SRFLX;
-        c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
-        c->addr = *mapped;
-
-        print("I:", LA_F("✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)", LA_F469, 469),
-              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
-
-        if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
-            if (s->sig_sess.compact.state >= SIG_COMPACT_SESS_SYNCING)
-                p2p_signal_compact_trickle_candidate(s);
-        }
-        else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
-            p2p_signal_relay_trickle_candidate(s);
-        else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.on_ice_candidate) {
-            char sdp_a[256];
-            if (p2p_ice_export_candidate(c, sdp_a, sizeof(sdp_a)) > 0)
-                s->inst->cfg.on_ice_candidate((p2p_session_t)s, sdp_a, s->inst->cfg.userdata);
         }
     }
 }

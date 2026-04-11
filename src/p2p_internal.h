@@ -90,8 +90,12 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-/* inst_state_t 与 p2p_state_t 共用相同的状态常量，直接多顿即可 */
-typedef p2p_state_t inst_state_t;
+typedef enum {
+    P2P_SIG_ST_INIT = 0,                        // 初始状态
+    P2P_SIG_ST_ERROR,                           // 错误状态（不可恢复，等价于自动关闭）
+    P2P_SIG_ST_REG,                             // 上线中（正在向信令服务器发起登录注册）
+    P2P_SIG_ST_READY,                           // 已在信令服务器上线，等待对端上线后开始候选同步
+} inst_state_t;
 
 struct p2p_instance {
     char                            local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识

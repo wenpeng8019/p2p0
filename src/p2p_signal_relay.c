@@ -455,6 +455,7 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
 
     // 切换到 ONLINE 状态
     sig_ctx->state = SIG_RELAY_ONLINE;
+    inst->state = P2P_SIG_ST_READY;
     print("I:", LA_F("%s: ready to start session\n", LA_F197, 197"ONLINE" LA_F518, 518), TASK_ONLINE);
 
     // 如果服务器支持数据中继
@@ -485,8 +486,6 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
         else {
             print("I:", LA_F("%s: auth_key acquired, waiting stun pending\n", LA_F113, 113"ONLINE", LA_F476, 476), TASK_TOUCH);
         }
-
-        if (s->state == P2P_STATE_REGISTERING) s->state = P2P_STATE_ONLINE;
 
         // 根据服务器能力设置探测状态
         if (sig_ctx->feature_msg) {
@@ -569,6 +568,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
         p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
         if (sig_ctx->state >= SIG_RELAY_ONLINE) {
             sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
+            s->state = P2P_STATE_WAITING;
             print("I:", LA_F("[ST:%s] peer went offline, waiting for reconnect\n", LA_F460, 460"WAIT_PEER", LA_F575, 575));
         }
     }
@@ -597,9 +597,12 @@ static void handle_sync0_ack(struct p2p_session *s, const uint8_t *payload, uint
     print("V:", LA_F("%s: accepted (ses_id=%u), peer=%s\n", LA_F102, 102),
           TASK_TOUCH, s->id, payload[0] ? "online" : "offline");
 
+    assert(s->state == P2P_STATE_SIGNALING);
+    s->state = P2P_STATE_WAITING;
+
     // SYNC0_ACK 只代表会话建立；候选交换需等待对端在线
+    sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
     if (!payload[0]) {
-        sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
         print("I:", LA_F("%s: session offer(st=%s peer=%s), waiting for peer\n", LA_F222, 222"WAIT_PEER", LA_F576, 576),
                 TASK_TOUCH, "WAIT_PEER", "online", LA_S("waiting for peer", LA_S35, 35));
         return;
@@ -748,8 +751,8 @@ static void handle_relay_fin(struct p2p_session *s, const uint8_t *payload, int 
     // 清理会话状态，回到 WAIT_PEER 被动等待（对端主动断开，不自动重连）
     print("I:", LA_F("%s: session suspend(st=%s)\n", LA_F224, 224),
           TASK_TOUCH, "WAIT_PEER");
-    s->id = 0;
     sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
+    s->id = 0;
 
     reset_peer(sess_ctx, &s->inst->sig_ctx.relay);
 
@@ -1482,7 +1485,7 @@ ret_t p2p_signal_relay_response(struct p2p_session *s,
 void p2p_signal_relay_tick_recv(struct p2p_instance *inst, uint64_t now) {
 
     p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
-    if (sig_ctx->state < SIG_RELAY_WAIT_ONLINE_ACK ||
+    if (sig_ctx->state < SIG_RELAY_CONNECTING ||
         sig_ctx->sockfd == P_INVALID_SOCKET) {
         return;
     }

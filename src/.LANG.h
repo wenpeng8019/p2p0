@@ -239,7 +239,7 @@ enum {
     LA_F195,  /* "%s: reaching relay via signaling SUCCESS, seq=%u" (%s,%u)  [p2p_nat.c] */
     LA_F196,  /* "%s: reaching updated: cand[%d], seq=%u->%u" (%s,%d,%u,%u)  [p2p_nat.c] */
     LA_F197,  /* "%s: ready to start session\n" (%s)  [p2p_signal_relay.c] */
-    LA_F198,  /* "%s: recorded peer conn_seq=%u for future CONN_ACK" (%s,%u)  [p2p_nat.c] */
+    LA_F198,  /* "%s: PUNCHING → RELAY (peer CONN via signaling)" (%s)  [p2p_nat.c] */
     LA_F199,  /* "%s: recv (ses_id=%u), type=%u\n" (%s,%u,%u)  [p2p.c] */
     LA_F200,  /* "%s: recv from cand[%d]" (%s,%d)  [p2p_nat.c] */
     LA_F201,  /* "%s: relay busy, will retry\n" (%s)  [p2p_signal_relay.c] */
@@ -360,8 +360,8 @@ enum {
     LA_F316,  /* "Invalid signaling mode in configuration"  [p2p.c] */
     LA_F317,  /* "LOST recovery: NAT connected but no path available"  [p2p.c] */
     LA_F318,  /* "Local address detection done: %d address(es)" (%d)  [p2p_route.c] */
-    LA_F319,  /* "Login to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
-    LA_F320,  /* "Login to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F319,  /* "REG to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F320,  /* "REG to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
     LA_F321,  /* "MSG RPC not supported by server\n"  [p2p_signal_compact.c] */
     LA_F322,  /* "NAT connected but no available path in path manager"  [p2p.c] */
     LA_F323,  /* "NAT detection skipped (skip_stun_test=true), Srflx gathered"  [p2p_stun.c] */
@@ -512,6 +512,7 @@ enum {
     LA_F468,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
     LA_F469,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
     LA_F470,  /* "✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
+    LA_F471,  /* "%s: recorded peer conn_seq=%u for future CONN_ACK" (%s,%u)  [p2p_nat.c] */
 
     LA_NUM
 };

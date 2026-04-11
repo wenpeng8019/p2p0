@@ -206,7 +206,7 @@ void p2p_connected(struct p2p_session *s, uint64_t now_ms) {
     
     // 仅在 PUNCHING/REGISTERING/REGISTERED 状态下转换
     // NAT 可能从 LOST → CONNECTED，但 p2p 状态可能是 RELAY，不在此处理
-    if (s->state < P2P_STATE_REGISTERING || s->state > P2P_STATE_PUNCHING) {
+    if (s->state < P2P_STATE_SIGNALING || s->state > P2P_STATE_PUNCHING) {
         return;
     }
 
@@ -391,9 +391,9 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 本端身份标识
     strncpy(inst->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
 
+    inst->state = P2P_SIG_ST_INIT;
     inst->tcp_sock = P_INVALID_SOCKET;
     inst->sig_mode = cfg->signaling_mode;
-    inst->state = P2P_STATE_INIT;
 
     p2p_turn_init(&inst->turn);
 
@@ -404,9 +404,49 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         // 启动 STUN NAT 类型检测（并默认作为 Srflx 候选收集）
         p2p_stun_nat_detect_start(inst, inst->sig_mode != P2P_SIGNALING_MODE_COMPACT && !cfg->test_ice_srflx_off);
 
-    } else if (cfg->signaling_mode != P2P_SIGNALING_MODE_COMPACT) {
+    } else if (inst->sig_mode != P2P_SIGNALING_MODE_COMPACT) {
         inst->nat_type = P2P_NAT_UNDETECTABLE;
     }
+
+    if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
+
+        print("I:", LA_F("REG to COMPACT signaling server at %s:%d", LA_F319, 319),
+              inst->cfg.server_host, inst->cfg.server_port);
+
+        do {
+            struct sockaddr_in server_addr;
+            if ((ret = resolve_host(inst->cfg.server_host, inst->cfg.server_port, &server_addr)) != E_NONE) {
+                print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F364, 364),
+                              inst->cfg.server_host, inst->cfg.server_port, ret);
+                inst->state = P2P_SIG_ST_ERROR;
+                break;
+            }
+            if ((ret = p2p_signal_compact_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
+                print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F269, 269), ret);
+                inst->state = P2P_SIG_ST_ERROR;
+                break;
+            }
+            inst->state = P2P_SIG_ST_REG;
+        } while (0);
+    }
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
+
+        print("I:", LA_F("REG to RELAY signaling server at %s:%d", LA_F320, 320),
+              inst->cfg.server_host, inst->cfg.server_port);
+
+        struct sockaddr_in server_addr;
+        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(inst->cfg.server_port);
+        inet_pton(AF_INET, inst->cfg.server_host, &server_addr.sin_addr);
+
+        if ((ret = p2p_signal_relay_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
+            print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F270, 270), ret);
+            inst->state = P2P_SIG_ST_ERROR;
+        }
+        else inst->state = P2P_SIG_ST_REG;
+    }
+
 
 #ifdef P2P_THREADED
     if (cfg->threaded) {
@@ -488,7 +528,9 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     struct p2p_instance *inst = (struct p2p_instance*)hdl;
 
     // 实例出错时不允许继续连接
-    P_check(inst->state != P2P_STATE_ERROR, return NULL;)
+    if (inst->state <= P2P_SIG_ST_ERROR) {
+        return NULL;
+    }
 
     if (remote_peer_id && !*remote_peer_id) remote_peer_id = NULL;
 
@@ -639,68 +681,26 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         // COMPACT 模式
         case P2P_SIGNALING_MODE_COMPACT: {
 
-            // 首次连接：向信令服务器注册
-            if (inst->sig_ctx.compact.state == SIG_COMPACT_INIT) {
-
-                // fixme: online 放到 create 中
-
-                assert(inst->cfg.server_host);
-                print("I:", LA_F("Login to COMPACT signaling server at %s:%d", LA_F319, 319),
-                              inst->cfg.server_host, inst->cfg.server_port);
-                struct sockaddr_in server_addr;
-                if ((ret = resolve_host(inst->cfg.server_host, inst->cfg.server_port, &server_addr)) != E_NONE) {
-                    print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F364, 364),
-                                  inst->cfg.server_host, inst->cfg.server_port, ret);
-                    s->state = P2P_STATE_ERROR;
-                    UNLOCK_INST(inst);
-                    goto fail;
-                }
-                if ((ret = p2p_signal_compact_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
-                    print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F269, 269), ret);
-                    s->state = P2P_STATE_ERROR;
-                    UNLOCK_INST(inst);
-                    goto fail;
-                }
-                inst->state = P2P_STATE_REGISTERING;
-            }
-
             if (!s->sig_sess.compact.remote_peer_id[0])
                 print("I:", LA_F("Starting COMPACT session with %s", LA_F391, 391), remote_peer_id);
             if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE)
                 print("E:", LA_F("Start COMPACT session failed(%d)", LA_F388, 388), ret);
 
-            s->state = P2P_STATE_REGISTERING;
+            // 无需 client 是否已经 online，这里都是 signaling，因为会话需要注册
+            s->state = P2P_STATE_SIGNALING;
             break;
         }
 
         // RELAY 模式
         case P2P_SIGNALING_MODE_RELAY: {
 
-            // 首次连接：向信令服务器注册
-            if (inst->sig_ctx.relay.state == SIG_RELAY_INIT) {
-                assert(inst->cfg.server_host);
-                print("I:", LA_F("Login to RELAY signaling server at %s:%d", LA_F320, 320),
-                              inst->cfg.server_host, inst->cfg.server_port);
-                struct sockaddr_in server_addr;
-                memset(&server_addr, 0, sizeof(server_addr));
-                server_addr.sin_family = AF_INET;
-                server_addr.sin_port = htons(inst->cfg.server_port);
-                inet_pton(AF_INET, inst->cfg.server_host, &server_addr.sin_addr);
-                if ((ret = p2p_signal_relay_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
-                    print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F270, 270), ret);
-                    s->state = P2P_STATE_ERROR;
-                    UNLOCK_INST(inst);
-                    goto fail;
-                }
-                inst->state = P2P_STATE_REGISTERING;
-            }
-
             if (s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_SYNCABLE)
                 print("I:", LA_F("Starting RELAY session with %s", LA_F392, 392), remote_peer_id);
             if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE)
                 print("E:", LA_F("Start RELAY session failed(%d)", LA_F389, 389), ret);
 
-            s->state = P2P_STATE_REGISTERING;
+            // 无需 client 是否已经 online，这里都是 signaling，因为会话需要注册
+            s->state = P2P_STATE_SIGNALING;
             break;
         }
 
@@ -708,8 +708,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         case P2P_SIGNALING_MODE_PUBSUB: {
 
             assert(inst->cfg.gh_token && inst->cfg.gist_id);
-            inst->state = P2P_STATE_REGISTERING;
-            s->state = P2P_STATE_REGISTERING;
+            s->state = P2P_STATE_SIGNALING;
 
             if (remote_peer_id) {
                 p2p_signal_pubsub_set_role(&inst->sig_ctx.pubsub, P2P_SIGNAL_ROLE_PUB);
@@ -1030,7 +1029,7 @@ p2p_update(p2p_handle_t hdl) {
         * ======================================================================== */
 
         // 转换：REGISTERING/ONLINE → PUNCHING（开始打洞）
-        if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
+        if ((s->state == P2P_STATE_SIGNALING || s->state == P2P_STATE_WAITING)
             && (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
 
             print("I:", LA_F("State: → PUNCHING", LA_F399, 399));
@@ -1045,7 +1044,7 @@ p2p_update(p2p_handle_t hdl) {
         // relay 候选也需要通过 NAT 层 connect 握手，已统一处理
 
         // 转换：PUNCHING → ERROR（NAT 打洞超时且无中继服务）
-        if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
+        if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_SIGNALING || s->state == P2P_STATE_WAITING)
             && s->nat.state == NAT_CLOSED) {
 
             print("E:", LA_F("State: → ERROR (punch timeout, no relay available)", LA_F397, 397));
