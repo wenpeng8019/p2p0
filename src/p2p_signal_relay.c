@@ -1054,10 +1054,9 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 sess_ctx->state = SIG_RELAY_SESS_SYNCING;
                 print("W:", LA_F("%s: session reset by peer(st=%s old=%u new=%u), %s\n", LA_F223, 223),
                         TASK_TOUCH, "SYNCING", old_id, session_id, LA_S("resync candidates", LA_S33, 33));
-
                 session_id = 0;
             }
-            // 首次收到 SYNC 视为对端上线，启动候选交换
+            // 首次收到 SYNC0 视为对端上线，启动候选交换
             else if (sess_ctx->state == SIG_RELAY_SESS_WAIT_PEER) {
 
                 sess_ctx->state = SIG_RELAY_SESS_SYNCING;
@@ -1065,12 +1064,13 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                         TASK_TOUCH, "SYNCING", "offline", LA_S("sync candidates", LA_S34, 34));
                 session_id = 0;
             }
-            else {
-                print("W:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sess_ctx->state);
+            // 可能已经在 sync0_ack 时进入到了 SYNCING 状态了
+            else if (sess_ctx->state != SIG_RELAY_SESS_SYNCING) {
+                print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sess_ctx->state);
                 return;
             }
 
-            // 对端发起会话初始化连接
+            // 对端发起会话初始化连接（首次从 WAIT_PEER 转换过来）
             if (!session_id) {
 
                 // 同步发送首批候选（如果有）
