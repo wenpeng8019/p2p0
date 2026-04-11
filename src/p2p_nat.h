@@ -115,6 +115,10 @@ void nat_send_fin(struct p2p_session *s);
 
 //-----------------------------------------------------------------------------
 
+void nat_proto(struct p2p_session *s, uint8_t type, uint8_t flags, uint16_t seq,
+               const uint8_t *payload, int payload_len,
+               const struct sockaddr_in *from, uint64_t now);
+
 /*
  * 通过（ICE connectivity check）STUN 包进行打洞
  *
@@ -127,87 +131,9 @@ void nat_send_fin(struct p2p_session *s);
  * @param len         包长度
  * @param from        来源地址
  */
-void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
-                        uint64_t now, uint16_t msg_type, const uint8_t *buf, int len);
+void nat_on_stun_packet(struct p2p_session *s, uint16_t msg_type, const uint8_t *buf, int len, 
+                       const struct sockaddr_in *from, uint64_t now);
 
-/*
- * 处理 PUNCH 包（NAT 打洞、保活）
- *
- * @param s           会话对象
- * @param hdr         包头（包含 type, flags, seq）
- * @param payload     负载数据（扩展协议时携带 target_addr）
- * @param payload_len 负载长度
- * @param from        来源地址
- */
-void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                  const uint8_t *payload, int payload_len,
-                  const struct sockaddr_in *from, uint64_t now);
-
-/*
- * 处理 REACH 包（PUNCH 到达确认）
- *
- * @param s           会话对象
- * @param hdr         包头（seq = 回传的 PUNCH seq）
- * @param payload     负载数据（携带 target_addr）
- * @param payload_len 负载长度
- * @param from        来源地址
- */
-void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                  const uint8_t *payload, int payload_len,
-                  const struct sockaddr_in *from, uint64_t now);
-
-/*
- * 处理 FIN 包（对方主动断开连接）
- *
- * @param s        会话对象
- * @param from     来源地址
- * @return         0=成功，!0=失败
- */
-void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from);
-
-/*
- * 处理 CONN 包（数据层连接请求）
- *
- * @param s        会话对象
- * @param hdr      包头（包含 seq）
- * @param from     来源地址
- */
-void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                 const struct sockaddr_in *from, uint64_t now);
-
-/*
- * 处理 CONN_ACK 包（数据层连接确认）
- *
- * @param s        会话对象
- * @param hdr      包头（包含 echo seq）
- * @param from     来源地址
- */
-void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                     const struct sockaddr_in *from, uint64_t now);
-
-/*
- * 处理 DATA 数据包（P2P_PKT_DATA）
- *
- * @param s           会话对象
- * @param from        来源地址
- * @param now         当前时间戳
- * @param seq         数据包序列号
- * @param data_len    数据包长度（含 P2P 头）
- */
-void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, 
-                 uint64_t now, uint16_t seq, int data_len);
-
-/*
- * 处理 ACK 包（P2P_PKT_ACK）
- *
- * @param s           会话对象
- * @param from        来源地址
- * @param now         当前时间戳
- * @param ack_seq     ACK 序列号
- * @param sack        SACK 位图
- */
-void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
-                     uint64_t now, uint16_t ack_seq, uint32_t sack);
 
 ///////////////////////////////////////////////////////////////////////////////
 

@@ -1861,35 +1861,6 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
 }
 
 /*
- * COMPACT 信令会话隔离验证（防止旧会话重传包污染新会话）
- */
-bool p2p_signal_compact_relay_validation(struct p2p_session *s,
-                                         const uint8_t **payload, int *len,
-                                         const char *proto_name) {
-    // 至少需要 session_id(P2P_SESS_ID_PSZ)
-    if (*len < (int)P2P_SESS_ID_PSZ) {
-        print("E:", LA_F("%s: bad payload(len=%d, need >=8)\n", LA_F101, 101), proto_name, *len);
-        return false;
-    }
-
-    // 验证 session_id 匹配
-    uint32_t session_id = nget_l(*payload);
-    if (session_id != s->id) {
-        print("W:", LA_F("%s: session mismatch(local=%u, pkt=%u)\n", LA_F602, 602),
-              proto_name, s->id, session_id);
-        return false;
-    }
-
-    print("V:", LA_F("%s: session validated, len=%d (ses_id=%u)\n", LA_F169, 169),
-          proto_name, *len, session_id);
-
-    // 跳过 session_id 头部
-    *payload += P2P_SESS_ID_PSZ;
-    *len -= (int)P2P_SESS_ID_PSZ;
-    return true;
-}
-
-/*
  * 通过信令服务器向对端发起 RPC 消息请求（A 端）
  *
  * 包头: [type=SIG_PKT_MSG_REQ | flags=0 | seq=0]

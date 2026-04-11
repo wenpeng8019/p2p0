@@ -774,94 +774,14 @@ static void handle_relay_fin(struct p2p_session *s, const uint8_t *payload, int 
  */
 static void handle_relay_packet(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) {
 
-    p2p_relay_ctx_t *sig_ctx = &s->inst->sig_ctx.relay;
-
     // P2P 包头
     p2p_packet_hdr_t hdr;
     p2p_pkt_hdr_decode(payload, &hdr);
 
-    // 提取 P2P 负载
-    const uint8_t *p2p_payload = payload + P2P_HDR_SIZE;
-    int p2p_payload_len = len - P2P_HDR_SIZE;
-
     print("V:", LA_F("%s: pkt recv (ses_id=%u), inner type=%u\n", LA_F93, 93), TASK_RELAY, s->id, hdr.type);
 
-    // 4. 根据类型处理
-    switch (hdr.type) {
-
-    case P2P_PKT_CRYPTO: {
-        if (!s->dtls) {
-            print("W:", LA_F("%s: no DTLS context for inner type=%u\n", LA_F590, 590), TASK_RELAY, hdr.type);
-            break;
-        }
-        // 解密密文包
-        uint8_t dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];
-        int dec_len = s->dtls->decrypt_recv(s, p2p_payload, p2p_payload_len, dec_buf, sizeof(dec_buf));
-        if (dec_len >= P2P_HDR_SIZE) {
-            // 解析解密后的内层 P2P 包头
-            p2p_pkt_hdr_decode(dec_buf, &hdr);
-            p2p_payload = dec_buf + P2P_HDR_SIZE;
-            p2p_payload_len = dec_len - P2P_HDR_SIZE;
-            // 递归处理内层包
-            goto handle_inner;
-        }
-        break;
-    }
-
-    handle_inner:
-    case P2P_PKT_DATA:
-
-        // NAT 状态更新（使用服务器地址作为 from）
-        nat_on_data(s, &sig_ctx->server_addr, now, hdr.seq, P2P_HDR_SIZE + p2p_payload_len);
-
-        // 高级传输层或基础 reliable 层
-        if (s->trans && s->trans->on_packet)
-            s->trans->on_packet(s, p2p_payload, p2p_payload_len);
-        else if (p2p_payload_len > 0)
-            reliable_on_data(s, hdr.seq, p2p_payload, p2p_payload_len);
-
-        break;
-
-    case P2P_PKT_ACK: {
-
-        if (p2p_payload_len < 6) {
-            print("E:", LA_F("%s: bad payload(%d) for type=%u\n", LA_F589, 589), TASK_RELAY, p2p_payload_len, hdr.type);
-            break;
-        }
-        uint16_t ack_seq = nget_s(p2p_payload);
-        uint32_t sack; nread_l(&sack, p2p_payload + 2);
-
-        nat_on_data_ack(s, &sig_ctx->server_addr, now, ack_seq, sack);
-
-        // reliable 层处理
-        int old_srtt = s->reliable.srtt;
-        reliable_on_ack(s, ack_seq, sack, now);
-
-        // 同步 RTT 到路径管理器
-        if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0 && s->active_path >= -1) {
-            path_manager_on_data_rtt(s, s->active_path, (uint32_t)s->reliable.srtt);
-        }
-
-        break;
-    }
-
-    case P2P_PKT_REACH:
-        // 信令服务器中转过来的 REACH 包（冷打洞应答），from 使用服务器地址
-        nat_on_reach(s, &hdr, p2p_payload, p2p_payload_len, &sig_ctx->server_addr, now);
-        break;
-
-    case P2P_PKT_CONN:
-        nat_on_conn(s, &hdr, &sig_ctx->server_addr, now);
-        break;
-
-    case P2P_PKT_CONN_ACK:
-        nat_on_conn_ack(s, &hdr, &sig_ctx->server_addr, now);
-        break;
-
-    default:
-        print("W:", LA_F("%s: unexpected inner type 0x%02x\n", LA_F594, 594), TASK_RELAY, hdr.type);
-        break;
-    }
+    nat_proto(s, hdr.type, hdr.flags, hdr.seq, payload + P2P_HDR_SIZE, len - P2P_HDR_SIZE,
+              &s->inst->sig_ctx.relay.server_addr, now);
 }
 
 /*
@@ -1095,7 +1015,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 return;
             }
 
-            struct p2p_session* s = inst->sessions_head; p2p_relay_session_t *sess_ctx;
+            struct p2p_session* s = inst->sessions_head; p2p_relay_session_t *sess_ctx = NULL;
             for(; s; s = s->next) { sess_ctx = &s->sig_sess.relay;
                 if (strncmp(sess_ctx->remote_peer_id, (char*)sig_ctx->payload, P2P_PEER_ID_MAX-1) == 0) break;
             }

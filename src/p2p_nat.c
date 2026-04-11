@@ -20,7 +20,9 @@
 
 #define TASK_NAT                "NAT"
 #define TASK_PATH               "PATH"
-#define TASK_SYNC_REMOTE         "ICE REMOTE"
+#define TASK_SYNC_REMOTE        "SYNC REMOTE"
+#define TASK_CRYPTO             "CRYPTO"
+#define TASK_DATA               "DATA"
 
 /*
  * 查找或添加远端候选（PRFLX 发现）
@@ -512,8 +514,8 @@ void nat_send_fin(struct p2p_session *s) {
  *
  * 注意：ICE connectivity check 要求有效路径必须是可双向通讯的
  */
-void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
-                       uint64_t now, uint16_t msg_type, const uint8_t *buf, int len) {
+void nat_on_stun_packet(struct p2p_session *s, uint16_t msg_type, const uint8_t *buf, int len, 
+                       const struct sockaddr_in *from, uint64_t now) {
 
     // 前提是包含 ICE 属性
     assert(p2p_stun_has_ice_attrs(buf, len));
@@ -635,13 +637,13 @@ void nat_on_stun_packet(struct p2p_session *s, const struct sockaddr_in *from,
  *      此时设置 rx_confirmed=true，等待本端调用 nat_punch() 启动时保留此状态
  *
  */
-void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
+static void nat_on_punch(struct p2p_session *s, uint16_t seq,
                   const uint8_t *payload, int payload_len,
                   const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "PUNCH";
 
     printf(LA_F("Recv %s pkt from %s:%d seq=%u", LA_F307, 307),
-          PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
+          PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq);
 
     // 校验负载长度
     if (payload_len < (int)P2P_PKT_PUNCH_PSZ) {
@@ -681,9 +683,9 @@ void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
         if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)
             && path_is_selectable(s->remote_cands[cand_idx].stats.state)) {
 
-            cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
+            cand_send_packet(s, cand_idx, P2P_PKT_REACH, seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
             print("V:", LA_F("%s sent to %s:%d (writable), echo_seq=%u", LA_F53, 53),
-                  PROTO2, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
+                  PROTO2, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq);
         }
         else {
             // 来源路径不可写，尝试找其他可写候选路径
@@ -693,20 +695,20 @@ void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
                 && (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF) || best_path != cand_idx)
                 && best_path >= 0 && path_is_selectable(s->remote_cands[best_path].stats.state)) {
 
-                cand_send_packet(s, best_path, P2P_PKT_REACH, hdr->seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
+                cand_send_packet(s, best_path, P2P_PKT_REACH, seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
                 print("V:", LA_F("%s sent via best path[%d] to %s:%d, echo_seq=%u", LA_F57, 57),
                       PROTO2, best_path,
                       inet_ntoa(s->remote_cands[best_path].addr.sin_addr),
-                      ntohs(s->remote_cands[best_path].addr.sin_port), hdr->seq);
+                      ntohs(s->remote_cands[best_path].addr.sin_port), seq);
             }
             // 没有可用的 writable 候选路径
             else {
 
                 // 尝试原路发送
                 if (!instrument_option(P2P_INST_OPT_NAT_REACH_BACKWARD_OFF)) {
-                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, hdr->seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
+                    cand_send_packet(s, cand_idx, P2P_PKT_REACH, seq, ack_payload, P2P_PKT_REACH_PSZ, now, false);
                     print("V:", LA_F("%s_ACK sent to %s:%d (try), echo_seq=%u", LA_F195, 195),
-                          PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
+                          PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq);
                 }
 
                 // 缓存 reaching，等待冷打洞策略处理
@@ -734,7 +736,7 @@ void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
                             }
                         }
                         
-                        node->seq = hdr->seq;
+                        node->seq = seq;
                         node->target = target_addr;
                         node->cand_idx = cand_idx;
                         node->next = NULL;
@@ -766,15 +768,15 @@ void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
                         }
                         
                         print("V:", LA_F("%s: reaching enqueued: cand[%d], seq=%u, priority=%u", LA_F145, 145),
-                            TASK_NAT, cand_idx, hdr->seq, priority);
+                            TASK_NAT, cand_idx, seq, priority);
                     }
                     // 更新为最新的 seq
-                    else if (uint16_circle_newer(hdr->seq, existing->seq)) {
+                    else if (uint16_circle_newer(seq, existing->seq)) {
 
                         print("V:", LA_F("%s: reaching updated: cand[%d], seq=%u->%u", LA_F148, 148),
-                                TASK_NAT, cand_idx, existing->seq, hdr->seq);
+                                TASK_NAT, cand_idx, existing->seq, seq);
 
-                        existing->seq = hdr->seq;
+                        existing->seq = seq;
                     }
 
                 } // if (!instrument_option(P2P_INST_OPT_NAT_REACH_FORWARD_OFF))
@@ -808,9 +810,9 @@ void nat_on_punch(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
  *   target_addr 是我方发送 PUNCH 时携带的目标地址，被对方回显。
  *   通过匹配 target_addr 可以确认特定出口路径是 writable。
  */
-void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                  const uint8_t *payload, int payload_len,
-                  const struct sockaddr_in *from, uint64_t now) {
+static void nat_on_reach(struct p2p_session *s, uint16_t seq,
+                         const uint8_t *payload, int payload_len,
+                         const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "REACH";
 
     // 校验负载长度：标准格式 6B (target_addr)
@@ -823,7 +825,7 @@ void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     nat_ctx_t *n = &s->nat;
 
     printf(LA_F("Recv %s pkt from %s:%d echo_seq=%u", LA_F306, 306),
-           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
+           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq);
 
     // 更新最后接收时间
     n->last_recv_time = now;
@@ -876,7 +878,7 @@ void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     // 只有直连路径才需要 RTT 测量和统计更新（信令转发的 REACH 不更新 cand_idx 统计）
     if (path_idx >= 0) {
         // PUNCH_ACK 控制包不计入流量统计（size=0），hdr->seq > 0 时完成 RoundTrip 测量
-        path_manager_on_packet_recv(s, path_idx, now, 0, hdr->seq > 0, hdr->seq);
+        path_manager_on_packet_recv(s, path_idx, now, 0, seq > 0, seq);
     }
 
     // 如果该路径之前已激活，只更新统计即可，直接返回
@@ -915,7 +917,7 @@ void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     if (!s->tx_confirmed) { s->tx_confirmed = true;
 
         print("I:", LA_F("%s: path tx UP (echo seq=%u)", LA_F190, 190),
-              TASK_NAT, hdr->seq);
+              TASK_NAT, seq);
 
         // 首次确认 tx_confirmed，处理所有 reaching 队列（此后不会再有新的 pending）
         flush_reaching_queue(s, target_path, now);
@@ -956,13 +958,13 @@ void nat_on_reach(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
  * 
  * 收到 CONN 后，立即回复 CONN_ACK 并进入 NAT_CONNECTED 状态。
  */
-void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                 const struct sockaddr_in *from, uint64_t now) {
+static void nat_on_conn(struct p2p_session *s, uint16_t seq,
+                        const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "CONN";
     nat_ctx_t *n = &s->nat;
 
     printf(LA_F("Recv %s pkt from %s:%d seq=%u", LA_F307, 307),
-           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
+           PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq);
 
     // 更新最后接收时间
     n->last_recv_time = now;
@@ -987,7 +989,7 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     if (n->state < NAT_CONNECTING) {
         n->peer_connecting = true;
         print("V:", LA_F("%s: recorded peer conn_seq=%u for future CONN_ACK", LA_F151, 151),
-              PROTO, hdr->seq);
+              PROTO, seq);
         return;
     }
 
@@ -1014,8 +1016,8 @@ void nat_on_conn(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
  * 
  * 收到 CONN_ACK 后，停止发送 CONN，进入 NAT_CONNECTED 状态。
  */
-void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
-                     const struct sockaddr_in *from, uint64_t now) {
+static void nat_on_conn_ack(struct p2p_session *s, uint16_t seq,
+                            const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "CONN_ACK";
     nat_ctx_t *n = &s->nat;
 
@@ -1026,7 +1028,7 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
     }
 
     printf(LA_F("Recv %s pkt from %s:%d echo_seq=%u", LA_F306, 306),
-          PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), hdr->seq);
+          PROTO, inet_ntoa(from->sin_addr), ntohs(from->sin_port), seq);
 
     // 更新最后接收时间
     n->last_recv_time = now;
@@ -1060,7 +1062,8 @@ void nat_on_conn_ack(struct p2p_session *s, const p2p_packet_hdr_t *hdr,
 /*
  * 处理 DATA 数据包（P2P_PKT_DATA）
  */
-void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t now, uint16_t seq, int data_len) {
+static void nat_on_data(struct p2p_session *s, uint16_t seq, int data_len,
+                        const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "DATA";
     nat_ctx_t *n = &s->nat;
 
@@ -1116,8 +1119,8 @@ void nat_on_data(struct p2p_session *s, const struct sockaddr_in *from, uint64_t
 /*
  * 处理 ACK 包（P2P_PKT_ACK）
  */
-void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
-                     uint64_t now, uint16_t ack_seq, uint32_t sack) {
+static void nat_on_data_ack(struct p2p_session *s, uint16_t ack_seq, uint32_t sack,
+                            const struct sockaddr_in *from, uint64_t now) {
     const char* PROTO = "ACK";
     nat_ctx_t *n = &s->nat;
 
@@ -1147,7 +1150,7 @@ void nat_on_data_ack(struct p2p_session *s, const struct sockaddr_in *from,
  * 
  * 处理 FIN 包（连接断开）
  */
-void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from) {
+static void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from) {
     const char* PROTO = "FIN";
 
     // 仅在曾经建立过数据通道后接受 FIN。
@@ -1171,6 +1174,132 @@ void nat_on_fin(struct p2p_session *s, const struct sockaddr_in *from) {
         clear_reaching_queue(&s->nat);
 
         print("I:", LA_F("%s: → CLOSED (recv FIN)", LA_F150, 150), TASK_NAT);
+    }
+}
+
+void nat_proto(struct p2p_session *s, uint8_t type, uint8_t flags, uint16_t seq,
+               const uint8_t *payload, int payload_len,
+               const struct sockaddr_in *from, uint64_t now) { (void) flags;
+
+    /* 解密输出缓冲区 */
+    uint8_t dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];
+                
+    switch (type) {
+
+    case P2P_PKT_CRYPTO: {
+        if (!s->dtls) {
+            print("W:", LA_F("%s: no DTLS context for CRYPTO pkt \n", LA_F590, 590), TASK_CRYPTO);
+            break;
+        }
+
+        // 解密密文包
+        int dec_len = s->dtls->decrypt_recv(s, payload, payload_len, dec_buf, sizeof(dec_buf));
+        if (dec_len < P2P_HDR_SIZE) {
+            //print();
+            break;
+        }
+
+        // 解析解密后的内层 P2P 包头
+        p2p_packet_hdr_t hdr;
+        p2p_pkt_hdr_decode(dec_buf, &hdr);
+        seq = hdr.seq; //flags = hdr.flags;
+        payload = dec_buf + P2P_HDR_SIZE;
+        payload_len = dec_len - P2P_HDR_SIZE;
+        if (hdr.type == P2P_PKT_DATA) goto handle_data;
+        if (hdr.type == P2P_PKT_ACK) goto handle_ack;
+        break;
+    }
+
+    /*
+     * 协议：P2P_PKT_DATA (0x20)
+     * 包头: [type=0x20 | flags=见下 | seq=序列号(2B)]
+     * 负载 (flags & 0x01 == 0): [data(N)]
+     * 负载 (flags & 0x01 == 1): [session_id(8)][data(N)]
+     * 说明：P2P 数据包，由 reliable 层或高级传输层处理
+     */
+    case P2P_PKT_DATA: handle_data:
+
+        nat_on_data(s, seq, P2P_HDR_SIZE + payload_len, from, now);
+
+        // 高级传输层或基础 reliable 层
+        if (s->trans && s->trans->on_packet)
+            s->trans->on_packet(s, payload, payload_len);
+        else if (payload_len > 0)
+            reliable_on_data(s, seq, payload, payload_len);
+
+        break;
+
+    /*
+     * 协议：P2P_PKT_ACK (0x21)
+     * 包头: [type=0x21 | flags=见下 | seq=序列号(2B)]
+     * 负载 (flags & 0x01 == 0): [ack_seq(2B) | sack(4B)]
+     * 负载 (flags & 0x01 == 1): [session_id(8)][ack_seq(2B) | sack(4B)]
+     * 说明：ACK 仅基础 reliable 层使用，DTLS/SCTP 有自己的确认机制
+     */
+    case P2P_PKT_ACK: handle_ack: {
+
+        // 协议不匹配：有独立封装的传输层不应该收到 P2P_PKT_ACK
+        // + 注：有 on_packet 的传输层（如 SCTP）会将自己的所有协议数据（含内部 ACK）
+        //   都封装在 P2P_PKT_DATA payload 中，类似 P2P_PKT_CRYPTO 将内层包封装为
+        //   CRYPTO 包。这种独立协议封装的传输层不使用 P2P_PKT_ACK
+        if (s->trans && s->trans->on_packet) {
+            print("E:", LA_F("%s: protocol mismatch, recv PKT_ACK on trans=%s", LA_F200, 200),
+                  TASK_DATA, s->trans->name);
+            break;
+        }
+
+        // ACK 包至少要有 ack_seq(2B) + sack(4B)
+        if (payload_len < (int)P2P_PKT_ACK_PSZ) {
+            print("E:", LA_F("%s: bad payload(%d)\n", LA_F589, 589), TASK_DATA, payload_len);
+            break;
+        }
+
+        uint16_t ack_seq = nget_s(payload);
+        uint32_t sack; nread_l(&sack, payload + 2);
+
+        nat_on_data_ack(s, ack_seq, sack, from, now);
+
+        // reliable 内部会更新 RTT
+        int old_srtt = s->reliable.srtt;
+        reliable_on_ack(s, ack_seq, sack, now);
+
+        // 这里检测 rtt 变化后同步到路径管理器
+        if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0 && s->active_path >= -1) {
+            path_manager_on_data_rtt(s, s->active_path, (uint32_t)s->reliable.srtt);
+        }
+
+        break;
+    }
+
+    // --------------------
+    // NAT 链路层（打洞、保活、断开）
+    // --------------------
+
+    // NAT 打洞/保活包
+    case P2P_PKT_PUNCH:
+        nat_on_punch(s, seq, payload, payload_len, from, now);
+        break;
+    // NAT 打洞/保活包
+    case P2P_PKT_REACH:
+        // 信令服务器中转过来的 REACH 包（冷打洞应答），from 使用服务器地址
+        nat_on_reach(s, seq, payload, payload_len, from, now);
+        break;
+
+    case P2P_PKT_CONN:
+        nat_on_conn(s, seq, from, now);
+        break;
+
+    case P2P_PKT_CONN_ACK:
+        nat_on_conn_ack(s, seq, from, now);
+        break;
+
+    case P2P_PKT_FIN:
+        nat_on_fin(s, from);
+        break;
+
+    default:
+        print("W:", LA_F("%s: unexpected type 0x%02x\n", LA_F594, 594), "PROTO", type);
+        break;
     }
 }
 

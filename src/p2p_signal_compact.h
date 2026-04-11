@@ -313,16 +313,6 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
                                const void *payload, uint16_t payload_len);
 
 /*
- * COMPACT 信令会话隔离验证（防止旧会话重传包污染新会话）
- * 
- * 验证 session_id 并跳过头部，返回 true 表示验证成功。
- * 成功后 payload 指针和 len 会被更新，指向去掉 session_id 后的数据。
- */
-bool p2p_signal_compact_relay_validation(struct p2p_session *s,
-                                         const uint8_t **payload, int *len,
-                                         const char *proto_name);
-
-/*
  * 通过信令代理服务向对端发送 MSG 请求（A 端）
  *
  * @param s     会话对象

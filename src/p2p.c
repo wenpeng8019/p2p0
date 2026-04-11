@@ -863,29 +863,6 @@ p2p_close(p2p_session_t session) {
  * 4. **数据传输独立**：仅在已连接状态下执行，与信令/NAT 解耦
  */
 
-/* 多会话派发：按 session_id 查找 session（发包方将自己的 session_id 写入包头） */
-static struct p2p_session *find_session_by_session_id(struct p2p_instance *inst, uint32_t id) {
-    for (struct p2p_session *s = inst->sessions_head; s; s = s->next)
-        if (s->id == id) return s;
-    return NULL;
-}
-
-/* 多会话派发：按来源地址匹配已知远端候选（无 session_id 时的 fallback） */
-static struct p2p_session *find_session_by_from(struct p2p_instance *inst,
-                                                 const struct sockaddr_in *from) {
-    for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
-        if (s->active_path >= 0 &&
-            s->active_addr.sin_addr.s_addr == from->sin_addr.s_addr &&
-            s->active_addr.sin_port        == from->sin_port)
-            return s;
-        for (int i = 0; i < s->remote_cand_cnt; i++) {
-            if (s->remote_cands[i].addr.sin_addr.s_addr == from->sin_addr.s_addr &&
-                s->remote_cands[i].addr.sin_port        == from->sin_port)
-                return s;
-        }
-    }
-    return NULL;
-}
 int
 p2p_update(p2p_handle_t hdl) {
 
@@ -918,8 +895,9 @@ p2p_update(p2p_handle_t hdl) {
                        inet_ntoa(from.sin_addr), ntohs(from.sin_port), type, n);
                 
                 // 如果使用 ICE 机制进行打洞
-                if (s->inst->cfg.use_ice && p2p_stun_has_ice_attrs(pkt, n)) {
-                    nat_on_stun_packet(s, &from, now_ms, type, pkt, n);
+                // todo ice 打洞如何支持 multi sess
+                if (inst->cfg.use_ice && p2p_stun_has_ice_attrs(pkt, n)) {
+                    nat_on_stun_packet(s, type, pkt, n, &from, now_ms);
                     continue;
                 }
                 
@@ -965,177 +943,53 @@ p2p_update(p2p_handle_t hdl) {
             continue;
         }
 
-        /* 解密输出缓冲区 */
-        uint8_t crypto_dec_buf[P2P_HDR_SIZE + P2P_MAX_PAYLOAD];  
-
         /* ================================================================
          * 多会话派发：根据 session_id 或来源地址将包路由到正确会话
          * 单会话模式直接使用 sessions_head，无附加开销
          * ================================================================ */
-        bool sid_stripped = false; /* multi_session 派发时已剪去 session_id 前缀 */
-        if (inst->cfg.multi_session) {
-            if (hdr.flags & P2P_FLAG_SESSION) {
-                /* 包含 session_id：根据 session_id 匹配 session */
-                if (payload_len < (int)P2P_SESS_ID_PSZ) continue;
-                uint32_t sess_id = nget_l(payload);
-                s = find_session_by_session_id(inst, sess_id);
-                if (!s) {
-                    print("W:", LA_F("multi_session: drop pkt, unknown session_id=0x%08x", LA_F628, 628), sess_id);
-                    continue;
-                }
-                payload     += P2P_SESS_ID_PSZ;
-                payload_len -= (int)P2P_SESS_ID_PSZ;
-                sid_stripped = true;
-            } else {
-                /* 没有 session_id：按来源地址匹配 */
-                struct p2p_session *fs = find_session_by_from(inst, &from);
-                s = fs ? fs : inst->sessions_head;
-                if (!s) continue;
+
+        /* 包含 session_id：根据 session_id 匹配 session，或验证 */
+        if (hdr.flags & P2P_FLAG_SESSION) {
+
+            if (payload_len < (int)P2P_SESS_ID_PSZ) {
+                continue;
             }
-        }
+            uint32_t sess_id = nget_l(payload);
 
-        switch (hdr.type) {
+            if (s->id != sess_id) {
 
-            // --------------------
-            // 加密层
-            // --------------------
-
-            case P2P_PKT_CRYPTO: {
-
-                // 信令中转路径（单会话）：包含 session_id，验证并剪去
-                if (!sid_stripped && (hdr.flags & P2P_FLAG_SESSION)) {
-                    if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "CRYPTO")) break;
-                }
-                if (!s->dtls) break;
-
-                // 解密密文包
-                int dec_len = s->dtls->decrypt_recv(s, payload, payload_len, crypto_dec_buf, sizeof(crypto_dec_buf));
-                if (dec_len >= P2P_HDR_SIZE) {
-
-                    // unpack 解密后的内层 P2P 包头和负载
-                    hdr.type = crypto_dec_buf[0];
-                    hdr.flags = crypto_dec_buf[1];
-                    hdr.seq = (uint16_t)((crypto_dec_buf[2] << 8) | crypto_dec_buf[3]);
-                    payload = crypto_dec_buf + P2P_HDR_SIZE;
-                    payload_len = dec_len - P2P_HDR_SIZE;
-                    if (hdr.type == P2P_PKT_DATA) goto handle_data;
-                    if (hdr.type == P2P_PKT_ACK) goto handle_ack;
-                }
-                break;
-            }
-
-            // --------------------
-            // 数据传输（P2P 直连 或 服务器中继）
-            // --------------------
-
-            /*
-             * 协议：P2P_PKT_DATA (0x20)
-             * 包头: [type=0x20 | flags=见下 | seq=序列号(2B)]
-             * 负载 (flags & 0x01 == 0): [data(N)]
-             * 负载 (flags & 0x01 == 1): [session_id(8)][data(N)]
-             * 说明：P2P 数据包，由 reliable 层或高级传输层处理
-             */
-            case P2P_PKT_DATA:
-                // 信令中转路径（单会话）：包含 session_id，验证并剪去
-                if (!sid_stripped && (hdr.flags & P2P_FLAG_SESSION)) {
-                    if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "DATA")) break;
-                }
-            handle_data:
-
-                nat_on_data(s, &from, now_ms, hdr.seq, P2P_HDR_SIZE + payload_len);
-
-                // 高级传输层（DTLS/SCTP/PseudoTCP）有自己的解包逻辑
-                if (s->trans && s->trans->on_packet)
-                    s->trans->on_packet(s, payload, payload_len);
-                // 基础 reliable 层处理
-                else if (payload_len > 0)
-                    reliable_on_data(s, hdr.seq, payload, payload_len);
-                
-                break;
-
-            /*
-             * 协议：P2P_PKT_ACK (0x21)
-             * 包头: [type=0x21 | flags=见下 | seq=序列号(2B)]
-             * 负载 (flags & 0x01 == 0): [ack_seq(2B) | sack(4B)]
-             * 负载 (flags & 0x01 == 1): [session_id(8)][ack_seq(2B) | sack(4B)]
-             * 说明：ACK 仅基础 reliable 层使用，DTLS/SCTP 有自己的确认机制
-             */
-            case P2P_PKT_ACK:
-                /* 信令中转路径（单会话）：包含 session_id，验证并剪去 */
-                if (!sid_stripped && (hdr.flags & P2P_FLAG_SESSION)) {
-                    if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "ACK")) break;
-                }
-            handle_ack: {
-
-                // 协议不匹配：有独立封装的传输层不应该收到 P2P_PKT_ACK
-                // + 注：有 on_packet 的传输层（如 SCTP）会将自己的所有协议数据（含内部 ACK）
-                //   都封装在 P2P_PKT_DATA payload 中，类似 P2P_PKT_CRYPTO 将内层包封装为
-                //   CRYPTO 包。这种独立协议封装的传输层不使用 P2P_PKT_ACK
-                if (s->trans && s->trans->on_packet) {
-                    print("E:", LA_F("ACK: protocol mismatch, trans=%s has on_packet but received P2P_PKT_ACK", LA_F200, 200),
-                          s->trans->name);
-                    break;
-                }
-
-                // ACK 包至少要有 ack_seq(2B) + sack(4B) 
-                if (payload_len < (int)P2P_PKT_ACK_PSZ) {
-                    print("E:", LA_F("ACK: invalid payload length %d, expected at least 6", LA_F199, 199), payload_len);
-                    break;
-                }
-
-                uint16_t ack_seq = nget_s(payload); 
-                uint32_t sack; nread_l(&sack, payload + 2);
-
-                nat_on_data_ack(s, &from, now_ms, ack_seq, sack);
-
-                // reliable 内部会更新 RTT
-                int old_srtt = s->reliable.srtt;
-                reliable_on_ack(s, ack_seq, sack, now_ms);
-                
-                // 这里检测变化后同步到路径管理器
-                if (s->reliable.srtt != old_srtt && s->reliable.srtt > 0 && s->active_path >= -1) {
-                    path_manager_on_data_rtt(s, s->active_path, (uint32_t)s->reliable.srtt);
-                }
-                break;
-            }
-            
-            // --------------------
-            // NAT 链路层（打洞、保活、断开）
-            // --------------------
-
-            // NAT 打洞/保活包
-            case P2P_PKT_PUNCH:
-                nat_on_punch(s, &hdr, payload, payload_len, &from, now_ms);
-                break;
-            case P2P_PKT_REACH:
-                // 信令中转版本（SIG_FLAG_RELAY 标识）：验证并清除中转标志后传给 NAT 层
-                if (hdr.flags & SIG_FLAG_RELAY) {
-                    if (!sid_stripped && (hdr.flags & P2P_FLAG_SESSION)) {
-                        if (!p2p_signal_compact_relay_validation(s, &payload, &payload_len, "REACH_RELAYED")) break;
+                if (inst->cfg.multi_session) {
+                    if (s == inst->sessions_head) {
+                        for (; s; s = s->next) if (s->id == sess_id) break;
+                        if (!s) { s = inst->sessions_head;
+                            print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F169, 169), "P2P", sess_id);
+                            continue;
+                        }
+                    } else { struct p2p_session *ss = s;
+                        for (s = s->next; s; s = s->next) if (s->id == sess_id) break;
+                        if (!s) {
+                            for (s=inst->sessions_head; s!=ss; s=s->next) if (s->id == sess_id) break;
+                            if (s == ss) {
+                                print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F169, 169), "P2P", sess_id);
+                                continue;
+                            }
+                        }
                     }
-                    // 清除中转标志，再传给 NAT 层
-                    hdr.flags &= (uint8_t)~(SIG_FLAG_RELAY | P2P_FLAG_SESSION);
-                    nat_on_reach(s, &hdr, payload, payload_len, &from, now_ms);
                 }
-                // 直连版本（P2P 路径 或 multi_session 已剪净 session_id）
-                else nat_on_reach(s, &hdr, payload, payload_len, &from, now_ms);
-                break;
-            case P2P_PKT_CONN:
-                nat_on_conn(s, &hdr, &from, now_ms);
-                break;
-            case P2P_PKT_CONN_ACK:
-                nat_on_conn_ack(s, &hdr, &from, now_ms);
-                break;
-            case P2P_PKT_FIN:
-                nat_on_fin(s, &from);
-                break;
+                else { print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F169, 169), "P2P", sess_id); continue; }
+            }
 
-            default:
-                print("V:", LA_F("Received UNKNOWN pkt type: 0x%02X", LA_F302, 302), hdr.type);
-                printf(LA_F("Received UNKNOWN pkt from %s:%d, type=0x%02X, seq=%u, len=%d", LA_F301, 301),
-                       inet_ntoa(from.sin_addr), ntohs(from.sin_port), hdr.type, hdr.seq, payload_len);
-                break;
+            payload     += P2P_SESS_ID_PSZ;
+            payload_len -= (int)P2P_SESS_ID_PSZ;
+
+        } else if (inst->cfg.multi_session) {
+            print("W:", LA_F("%s: no ses_id for multi session\n", 0, 0), "P2P");
+            continue;
         }
+
+        print("V:", LA_F("%s: recv (ses_id=%u), type=%u\n", LA_F93, 93), "P2P", s->id, hdr.type);
+
+        nat_proto(s, hdr.type, hdr.flags, hdr.seq, payload, payload_len, &from, now_ms);
 
     } // while ((n = p2p_udp_recv_from(s, &from, buf, sizeof(buf))) > 0)
 
@@ -1144,23 +998,12 @@ p2p_update(p2p_handle_t hdl) {
      * ======================================================================== */
 
     if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
-
-        // 信令层维护（注册、等待、候选同步）+ MSG 超时重传
-        // 注意：MSG 机制在所有非 INIT 状态下都需要处理超时重传
-        if (inst->sig_ctx.compact.state == SIG_COMPACT_WAIT_ONLINE_ACK ||
-            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_WAIT_SYNC0_ACK ||
-            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_WAIT_PEER ||
-            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_SYNCING ||
-            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_READY) {
-            p2p_signal_compact_tick_recv(inst, now_ms);
-        }
+        p2p_signal_compact_tick_recv(inst, now_ms);
     }
     else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
-
         p2p_signal_relay_tick_recv(inst, now_ms);
     }
-    else { assert(inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB);
-        
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
         p2p_signal_pubsub_tick_recv(&inst->sig_ctx.pubsub, s);
     }
 
@@ -1401,21 +1244,12 @@ p2p_update(p2p_handle_t hdl) {
     * ======================================================================== */
 
     if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
-
-        // ICE 状态时发送候选，READY 状态发送新候选（如果有）
-        if (inst->sig_ctx.compact.state == SIG_COMPACT_SESS_SYNCING ||
-            inst->sig_ctx.compact.state == SIG_COMPACT_SESS_READY) {
-            p2p_signal_compact_tick_send(inst, now_ms);
-        }
+        p2p_signal_compact_tick_send(inst, now_ms);
     }
     else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
-
-        // Trickle ICE 增量发送候选（含断点续传）
         p2p_signal_relay_tick_send(inst, now_ms);
     }
-    else { assert(inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB);
-
-        // 发布 offer（PUB 角色）
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
         p2p_signal_pubsub_tick_send(&inst->sig_ctx.pubsub, s);
     }
 
