@@ -1542,6 +1542,21 @@ static inline const char* cs_remote_peer(const compact_session_t *cs) {
 //-----------------------------------------------------------------------------
 // session / client 生命周期管理
 
+// UDP 发送 + 统一日志
+static inline ssize_t udp_send(sock_t fd, const char *PROTO,
+                                const void *buf, int len,
+                                const struct sockaddr_in *to) {
+    ssize_t sent = sendto(fd, (const char *)buf, len, 0,
+                          (const struct sockaddr *)to, sizeof(*to));
+    if (sent == (ssize_t)len)
+        printf(LA_F("[UDP] %s send to %s:%d, len=%d\n", 0, 0),
+               PROTO, inet_ntoa(to->sin_addr), ntohs(to->sin_port), (int)sent);
+    else
+        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", 0, 0),
+              PROTO, inet_ntoa(to->sin_addr), ntohs(to->sin_port), P_sock_errno());
+    return sent;
+}
+
 // forward declarations
 static void remove_compact_sync0_pending(compact_session_t *cs);
 static void remove_compact_rpc_pending(compact_session_t *cs);
@@ -1580,7 +1595,7 @@ static void compact_clear_client(sock_t udp_fd, compact_client_t *c) {
 
 // 发送 ONLINE_ACK: [hdr(4)][instance_id(4)][auth_key(SIG_AUTH_KEY_PSZ)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] = 25字节
 // auth_key=0 表示服务器拒绝（无可用槽位）
-static void compact_send_online_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str, uint64_t auth_key, uint32_t instance_id) {
+static void compact_send_online_ack(sock_t udp_fd, const struct sockaddr_in *to, uint64_t auth_key, uint32_t instance_id) {
     const char* PROTO = "ONLINE_ACK";
 
     uint8_t ack[sizeof(p2p_packet_hdr_t) + SIG_PKT_ONLINE_ACK_PSZ];
@@ -1612,15 +1627,11 @@ static void compact_send_online_ack(sock_t udp_fd, const struct sockaddr_in *to,
         print("V:", LA_F("Send %s: rejected (no slot available)\n", LA_F113, 113), PROTO);
     }
 
-    ssize_t sent = sendto(udp_fd, (const char *)ack, sizeof(ack), 0, (const struct sockaddr *)to, sizeof(*to));
-    if (sent != (ssize_t)sizeof(ack))
-        print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F135, 135), PROTO, to_str, P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0x%02x, len=%d\n", LA_F138, 138), PROTO, to_str, hdr->flags, (int)sent);     
+    udp_send(udp_fd, PROTO, ack, (int)sizeof(ack), to);
 }
 
 // 发送 SYNC0_ACK: [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
-static void compact_send_sync0_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str,
+static void compact_send_sync0_ack(sock_t udp_fd, const struct sockaddr_in *to,
                                    const char *remote_peer_id, uint32_t session_id, uint8_t online) {
     const char* PROTO = "SYNC0_ACK";
 
@@ -1638,20 +1649,7 @@ static void compact_send_sync0_ack(sock_t udp_fd, const struct sockaddr_in *to, 
     print("V:", LA_F("Send %s: ses_id=%u, peer=%s\n", LA_F114, 114),
           PROTO, session_id, online ? "online" : "offline");
 
-    ssize_t sent = sendto(udp_fd, (const char *)ack, ofz, 0, (const struct sockaddr *)to, sizeof(*to));
-    if (sent != (ssize_t)ofz)
-        print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F135, 135), PROTO, to_str, P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F137, 137), PROTO, to_str, (int)sent);
-}
-
-// 基于 session 重发 SYNC0_ACK（从 session 上下文提取地址/peer_id 等参数）
-static void compact_resend_sync0_ack(sock_t udp_fd, compact_session_t *cs) {
-    compact_client_t *client = COMPACT_CLIENT(cs);
-    char to_str[64];
-    snprintf(to_str, sizeof(to_str), "%s:%d", inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port));
-    compact_send_sync0_ack(udp_fd, &client->addr, to_str,
-                           cs_remote_peer(cs), cs->base.session_id, PEER_ONLINE(cs));
+    udp_send(udp_fd, PROTO, ack, ofz, to);
 }
 
 // 发送 FIN 通知给 cs 所代表的 session（"通知 cs 的持有方：对端已断开"）
@@ -1668,14 +1666,7 @@ static void compact_send_fin(sock_t udp_fd, compact_session_t *cs, const char *r
     print("V:", LA_F("Send %s: peer='%s', reason=%s, ses_id=%u\n", LA_F112, 112),
           PROTO, client->base.local_peer_id, reason, cs->base.session_id);
 
-    ssize_t sent = sendto(udp_fd, (const char *)pkt, sizeof(pkt), 0,
-           (struct sockaddr *)&client->addr, sizeof(client->addr));
-    if (sent != (ssize_t)sizeof(pkt))
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F139, 139),
-              PROTO, inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F140, 140),
-               PROTO, inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), (int)sent);
+    udp_send(udp_fd, PROTO, pkt, (int)sizeof(pkt), &client->addr);
 }
 
 // 发送首次对端候选推送（base_index=0）或地址变更通知（base_index != 0 为循环通知序号）
@@ -1744,17 +1735,11 @@ static void compact_send_sync0(sock_t udp_fd, compact_session_t *cs, uint8_t bas
               PROTO, base_index, cand_cnt, cs->base.session_id, client->base.local_peer_id);
     }
 
-    ssize_t sent = sendto(udp_fd, (const char *)pkt, ofz, 0, (struct sockaddr *)&client->addr, sizeof(client->addr));
-    if (sent != (ssize_t)ofz)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F139, 139),
-              PROTO, inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F140, 140),
-               PROTO, inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), (int)sent);
+    udp_send(udp_fd, PROTO, pkt, ofz, &client->addr);
 }
 
 // 发送 MSG_REQ_ACK
-static void compact_send_msg_req_ack(sock_t udp_fd, const struct sockaddr_in *to, const char *to_str,
+static void compact_send_msg_req_ack(sock_t udp_fd, const struct sockaddr_in *to,
                                      uint32_t session_id, uint16_t sid, uint8_t status) {
     const char* PROTO = "MSG_REQ_ACK";
 
@@ -1772,11 +1757,7 @@ static void compact_send_msg_req_ack(sock_t udp_fd, const struct sockaddr_in *to
     print("V:", LA_F("Send %s: ses_id=%u, sid=%u, status=%u\n", LA_F118, 118),
           PROTO, session_id, sid, status);
 
-    ssize_t sent = sendto(udp_fd, (const char *)ack, ofz, 0, (const struct sockaddr *)to, sizeof(*to));
-    if (sent != (ssize_t)ofz)
-        print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F135, 135), PROTO, to_str, P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F137, 137), PROTO, to_str, (int)sent);
+    udp_send(udp_fd, PROTO, ack, ofz, to);
 }
 
 // 发送 MSG_REQ 给对端（Server→对端 relay）
@@ -1804,18 +1785,11 @@ static void compact_send_msg_req_to_peer(sock_t udp_fd, compact_session_t *cs) {
         ofz += cs->rpc_data_len;
     }
 
-    print("V:", LA_F("Send %s: ses_id=%u, sid=%u, msg=%u, data_len=%d, peer='%s'\n", LA_F115, 115),
+    print("V:", LA_F("Send %s: ses_id=%u, sid=%u, msg=%u, data_len=%d, peer='%s', retries=%d\n", LA_F115, 115),
           PROTO, peer->base.session_id, cs->rpc_last_sid, cs->rpc_code, cs->rpc_data_len,
-          peer_cli->base.local_peer_id);
+          peer_cli->base.local_peer_id, cs->rpc_retry);
 
-    ssize_t sent = sendto(udp_fd, (const char *)pkt, ofz, 0, (struct sockaddr *)&peer_cli->addr, sizeof(peer_cli->addr));
-    if (sent != (ssize_t)ofz)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F139, 139),
-              PROTO, inet_ntoa(peer_cli->addr.sin_addr), ntohs(peer_cli->addr.sin_port), P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n", LA_F141, 141),
-               PROTO, inet_ntoa(peer_cli->addr.sin_addr), ntohs(peer_cli->addr.sin_port),
-               hdr->flags, (int)sent, cs->rpc_retry);
+    udp_send(udp_fd, PROTO, pkt, ofz, &peer_cli->addr);
 }
 
 // 发送 MSG_RESP_ACK 给 B 端（Server→B）
@@ -1836,13 +1810,7 @@ static void compact_send_msg_resp_ack_to_responder(sock_t udp_fd, const struct s
     print("V:", LA_F("Send %s: ses_id=%u, sid=%u, peer='%s'\n", LA_F117, 117),
           PROTO, session_id, sid, peer_id);
 
-    ssize_t sent = sendto(udp_fd, (const char *)pkt, ofz, 0, (struct sockaddr *)addr, sizeof(*addr));
-    if (sent != (ssize_t)ofz)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F139, 139),
-              PROTO, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0, len=%d\n", LA_F140, 140),
-               PROTO, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), (int)sent);
+    udp_send(udp_fd, PROTO, pkt, ofz, addr);
 }
 
 // 发送 MSG_RESP 给请求方（Server→A）
@@ -1870,17 +1838,10 @@ static void compact_send_msg_resp_to_requester(sock_t udp_fd, compact_session_t 
         }
     }
 
-    print("V:", LA_F("Send %s: ses_id=%u, sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d\n", LA_F116, 116),
-          PROTO, cs->base.session_id, cs->rpc_last_sid, client->base.local_peer_id, cs->rpc_flags, cs->rpc_code, cs->rpc_data_len);
+    print("V:", LA_F("Send %s: ses_id=%u, sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d, retries=%d\n", LA_F116, 116),
+          PROTO, cs->base.session_id, cs->rpc_last_sid, client->base.local_peer_id, cs->rpc_flags, cs->rpc_code, cs->rpc_data_len, cs->rpc_retry);
 
-    ssize_t sent = sendto(udp_fd, (const char *)pkt, ofz, 0, (struct sockaddr *)&client->addr, sizeof(client->addr));
-    if (sent != (ssize_t)ofz)
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F139, 139),
-                PROTO, inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s:%d, seq=0, flags=0x%02x, len=%d, retries=%d\n", LA_F141, 141),
-                PROTO, inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port),
-                cs->rpc_flags, (int)sent, cs->rpc_retry);
+    udp_send(udp_fd, PROTO, pkt, ofz, &client->addr);
 }
 
 //-----------------------------------------------------------------------------
@@ -1971,7 +1932,8 @@ static void retry_compact_sync0_pending(sock_t udp_fd, uint64_t now) {
 
             // 状态 0：重传 SYNC0_ACK，等待客户端二次确认
             if (q->sync0_acked == 0) {
-                compact_resend_sync0_ack(udp_fd, q);
+                compact_send_sync0_ack(udp_fd, &COMPACT_CLIENT(q)->addr,
+                                       cs_remote_peer(q), q->base.session_id, PEER_ONLINE(q));
             }
             // 状态 1：重传 SYNC0，等待客户端确认收到该（来自对端的）SYNC0
             else {
@@ -2257,7 +2219,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             check_addr_change(udp_fd, existing, from);
             existing->base.last_active = P_tick_ms();
 
-            compact_send_online_ack(udp_fd, from, from_str, existing->auth_key, instance_id);
+            compact_send_online_ack(udp_fd, from, existing->auth_key, instance_id);
             return;
         }
 
@@ -2277,7 +2239,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
         // 无可用槽位
         if (!client) {
-            compact_send_online_ack(udp_fd, from, from_str, 0, instance_id);
+            compact_send_online_ack(udp_fd, from, 0, instance_id);
             return;
         }
 
@@ -2300,7 +2262,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         do { client->auth_key = P_rand64(); } while (!client->auth_key);
         HASH_ADD(hh_client, g_compact_clients_by_auth, auth_key, sizeof(uint64_t), client);
 
-        compact_send_online_ack(udp_fd, from, from_str, client->auth_key, instance_id);
+        compact_send_online_ack(udp_fd, from, client->auth_key, instance_id);
 
         print("V:", LA_F("%s: auth_key=%" PRIu64 " assigned for '%.*s'\n", LA_F35, 35),
                PROTO, client->auth_key, P2P_PEER_ID_MAX, local_peer_id);
@@ -2365,11 +2327,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                 print("V:", LA_F("Send %s: auth_key=%" PRIu64 ", peer='%s'\n", LA_F107, 107),
                       ACK_PROTO, auth_key, client->base.local_peer_id);
 
-                ssize_t n = sendto(udp_fd, (const char *)ack, sizeof(ack), 0, (struct sockaddr *)from, sizeof(*from));
-                if (n != (ssize_t)sizeof(ack))
-                    print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F135, 135), ACK_PROTO, from_str, P_sock_errno());
-                else
-                    printf(LA_F("[UDP] %s send to %s, seq=0, flags=0, len=%d\n", LA_F137, 137), ACK_PROTO, from_str, (int)n);
+                udp_send(udp_fd, ACK_PROTO, ack, (int)sizeof(ack), from);
             }
         } else {
             print("W:", LA_F("%s: unknown auth_key=%" PRIu64 " from %s\n", LA_F69, 69), PROTO, auth_key, from_str);
@@ -2489,7 +2447,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
                PROTO, auth_key, candidate_count, from_str);
 
         // 发送 SYNC0_ACK 并加入待确认队列（等待客户端二次确认）
-        compact_send_sync0_ack(udp_fd, from, from_str, remote_peer_id, local->base.session_id, PEER_ONLINE(local));
+        compact_send_sync0_ack(udp_fd, from, remote_peer_id, local->base.session_id, PEER_ONLINE(local));
         if (local->sync0_acked == 0 && !local->sync0_pending_next) {
             enqueue_compact_sync0_pending(local, 0, local_client->base.last_active);
         }
@@ -2778,7 +2736,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
             print("W:", LA_F("%s: peer '%s' not online, rejecting sid=%u\n", LA_F61, 61),
                    PROTO, cs_remote_peer(requester), sid);
 
-            compact_send_msg_req_ack(udp_fd, from, from_str, session_id, sid, 1);
+            compact_send_msg_req_ack(udp_fd, from, session_id, sid, 1);
             return;
         }
 
@@ -2790,7 +2748,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
 
                 if (!requester->rpc_responding) {
 
-                    compact_send_msg_req_ack(udp_fd, from, from_str, requester->base.session_id, sid, 0);
+                    compact_send_msg_req_ack(udp_fd, from, requester->base.session_id, sid, 0);
 
                     print("V:", LA_F("%s retransmit, resend ACK, sid=%u (ses_id=%u)\n", LA_F22, 22),
                           PROTO, sid, requester->base.session_id);
@@ -2826,7 +2784,7 @@ static void handle_compact_signaling(sock_t udp_fd, uint8_t *buf, size_t len, st
         requester->rpc_data_len = msg_data_len;
         if (msg_data_len > 0) memcpy(requester->rpc_data, msg_data, msg_data_len);
 
-        compact_send_msg_req_ack(udp_fd, from, from_str, requester->base.session_id, sid, 0);
+        compact_send_msg_req_ack(udp_fd, from, requester->base.session_id, sid, 0);
 
         requester->rpc_sent_time = P_tick_ms();
         requester->rpc_retry = 0;
@@ -3002,12 +2960,7 @@ static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct socka
     print("V:", LA_F("Send %s: mapped=%s:%d\n", LA_F110, 110),
           PROTO_ACK, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
-    ssize_t n = sendto(probe_fd, (const char *)buf, 4 + SIG_PKT_NAT_PROBE_ACK_PSZ, 0, (struct sockaddr *)from, sizeof(*from));
-    if (n != 4 + SIG_PKT_NAT_PROBE_ACK_PSZ)
-        print("E:", LA_F("[UDP] %s send to %s failed(%d)\n", LA_F135, 135), PROTO_ACK, from_str, P_sock_errno());
-    else
-        printf(LA_F("[UDP] %s send to %s, seq=%u, flags=0x00, len=%d\n", LA_F136, 136),
-               PROTO_ACK, from_str, req_seq, (int)n);
+    udp_send(probe_fd, PROTO_ACK, buf, 4 + SIG_PKT_NAT_PROBE_ACK_PSZ, from);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
