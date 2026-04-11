@@ -74,7 +74,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
             for (int i = 0; i < rt->addr_count; i++) {
                 int idx = p2p_cand_push_local(s);
                 if (idx < 0) {
-                    print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S39, 39),
+                    print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S31, 31),
                           inet_ntoa(rt->local_addrs[i].sin_addr), ntohs(rt->local_addrs[i].sin_port));
                     return;
                 }
@@ -87,13 +87,13 @@ static inline void gather_local_candidates(struct p2p_session *s) {
                 uint16_t local_pref = (uint16_t)(65535 - host_index++);
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
 
-                print("I:", LA_F("Gathered Host candidate: %s:%d (priority=0x%08x)", LA_F203, 203),
+                print("I:", LA_F("Gathered Host candidate: %s:%d (priority=0x%08x)", LA_F299, 299),
                       inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
             }
         }
-        else print("W:", LA_F("No shared local route addresses available, host candidates skipped", LA_F532, 532));
+        else print("W:", LA_F("No shared local route addresses available, host candidates skipped", LA_F326, 326));
     }
-    else print("I:", LA_F("Skipping Host Candidate gathering (disabled)", LA_F334, 334));
+    else print("I:", LA_F("Skipping Host Candidate gathering (disabled)", LA_F387, 387));
 
     /* ======================== 2. 收集 Srflx 候选 ======================== */
     /*
@@ -115,7 +115,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
                 c->addr = inst->stun_ctx.mapped_addr;
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 if (s->public_base < 0) s->public_base = idx;
-                print("I:", LA_F("Reuse STUN Candidate %s:%u (priority=%u)", 0, 0),
+                print("I:", LA_F("Reuse STUN Candidate %s:%u (priority=%u)", LA_F366, 366),
                       inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
             }
         }
@@ -140,7 +140,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
                 c->addr = inst->turn.relay_addr;
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
                 if (s->public_base < 0) s->public_base = idx;
-                print("I:", LA_F("Reuse Relay Candidate %s:%u (priority=%u)", LA_F627, 627),
+                print("I:", LA_F("Reuse Relay Candidate %s:%u (priority=%u)", LA_F365, 365),
                       inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
             }
         }
@@ -213,7 +213,7 @@ void p2p_connected(struct p2p_session *s, uint64_t now_ms) {
     // 选择最佳路径
     int best_path = path_manager_select_best_path(s);
     if (best_path < -1) {  // -2=无可用路径
-        print("E:", LA_F("NAT connected but no available path in path manager", LA_F440, 440));
+        print("E:", LA_F("NAT connected but no available path in path manager", LA_F322, 322));
         return;
     }
 
@@ -224,10 +224,10 @@ void p2p_connected(struct p2p_session *s, uint64_t now_ms) {
     
     // P2P 状态与 NAT 状态同步（NAT_RELAY ↔ P2P_STATE_RELAY）
     if (s->nat.state == NAT_RELAY) {
-        print("I:", LA_F("State: → RELAY, path[%d]", LA_F348, 348), best_path);
+        print("I:", LA_F("State: → RELAY, path[%d]", LA_F400, 400), best_path);
         p2p_set_state(s, P2P_STATE_RELAY);
     } else {
-        print("I:", LA_F("State: → CONNECTED, path[%d]", LA_F343, 343), best_path);
+        print("I:", LA_F("State: → CONNECTED, path[%d]", LA_F396, 396), best_path);
         p2p_set_state(s, P2P_STATE_CONNECTED);
     }
 }
@@ -249,7 +249,7 @@ static void disconnect(struct p2p_session *s) {
     // NAT 层 FIN（仅在已连接状态，重复发送提高 UDP 可靠性）
     // 必须在 session_reset 之前发送，reset 会清除 NAT 状态和路径信息
     if (old_state >= P2P_STATE_LOST) {
-        print("V:", LA_F("Sending FIN packet to peer before closing", LA_F326, 326));
+        print("V:", LA_F("Sending FIN packet to peer before closing", LA_F380, 380));
         nat_send_fin(s);
     }
 
@@ -284,7 +284,7 @@ static void peer_disconnect(struct p2p_session *s) {
 
     assert(s->state >= P2P_STATE_LOST);
 
-    print("I:", LA_F("connection closed by peer", LA_F403, 403));
+    print("I:", LA_F("connection closed by peer", LA_F462, 462));
 
     p2p_state_t old_state = s->state;
     p2p_probe_state_t prev_probe_state = s->probe.state;
@@ -321,7 +321,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
         // 初始化网络子系统（Windows 需要，POSIX 是 no-op）
         if ((ret = P_net_init()) != E_NONE) {
-            print("E:", LA_F("Initialize network subsystem failed(%d)", LA_F261, 261), ret);
+            print("E:", LA_F("Initialize network subsystem failed(%d)", LA_F311, 311), ret);
             return NULL;
         }
 
@@ -331,44 +331,44 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         if (!cfg->gh_token || !cfg->gist_id) {
-            print("E:", LA_F("PUBSUB mode requires gh_token and gist_id", LA_F282, 282));
+            print("E:", LA_F("PUBSUB mode requires gh_token and gist_id", LA_F336, 336));
             return NULL;
         }
     }
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT || cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY) {
         if (!cfg->server_host) {
-            print("E:", LA_F("RELAY/COMPACT mode requires server_host", LA_F297, 297));
+            print("E:", LA_F("RELAY/COMPACT mode requires server_host", LA_F348, 348));
             return NULL;
         }
     } else if (cfg->signaling_mode != P2P_SIGNALING_MODE_ICE) {
-        print("E:", LA_F("Invalid signaling mode in configuration", LA_F266, 266));
+        print("E:", LA_F("Invalid signaling mode in configuration", LA_F316, 316));
         return NULL;
     }
 
     // 分配实例结构
     struct p2p_instance *inst = (struct p2p_instance*)calloc(1, sizeof(*inst));
     if (!inst) {
-        print("E:", LA_F("Failed to allocate memory for instance", LA_F241, 241));
+        print("E:", LA_F("Failed to allocate memory for instance", LA_F282, 282));
         return NULL;
     }
 
     // 创建 UDP 套接字
-    print("I:", LA_F("Open P2P UDP socket on port %d", LA_F273, 273), cfg->bind_port);
+    print("I:", LA_F("Open P2P UDP socket on port %d", LA_F330, 330), cfg->bind_port);
     if ((ret = p2p_udp_open(inst, cfg->bind_port)) != E_NONE) {
-        print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F274, 274), cfg->bind_port, ret);
+        print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F331, 331), cfg->bind_port, ret);
         free(inst);
         return NULL;
     }
 
     // 初始化信令上下文（实例级别，只初始化不注册）
-    print("I:", LA_F("Initialize signaling mode: %d", LA_F262, 262), (int)cfg->signaling_mode);
+    print("I:", LA_F("Initialize signaling mode: %d", LA_F312, 312), (int)cfg->signaling_mode);
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
         p2p_signal_compact_init(&inst->sig_ctx.compact);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY)
         p2p_signal_relay_init(&inst->sig_ctx.relay);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         if ((ret = p2p_signal_pubsub_init(&inst->sig_ctx.pubsub, cfg->gh_token, cfg->gist_id)) != E_NONE) {
-            print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F260, 260), ret);
+            print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F310, 310), ret);
             p2p_udp_close(inst); free(inst);
             return NULL;
         }
@@ -378,7 +378,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
     // 初始化共享路由层
     if ((ret = route_shared_acquire()) < 0) {
-        print("E:", LA_F("Detect local network interfaces failed(%d)", LA_F230, 230), ret);
+        print("E:", LA_F("Detect local network interfaces failed(%d)", LA_F275, 275), ret);
         p2p_udp_close(inst); free(inst);
         return NULL;
     }
@@ -410,9 +410,9 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
 #ifdef P2P_THREADED
     if (cfg->threaded) {
-        print("I:", LA_F("Starting internal thread", LA_F337, 337));
+        print("I:", LA_F("Starting internal thread", LA_F393, 393));
         if ((ret = p2p_thread_start(inst)) != E_NONE) {
-            print("E:", LA_F("Start internal thread failed(%d)", LA_F336, 336), ret);
+            print("E:", LA_F("Start internal thread failed(%d)", LA_F390, 390), ret);
             p2p_udp_close(inst); route_shared_release(); free(inst);
             return NULL;
         }
@@ -430,7 +430,7 @@ p2p_destroy(p2p_handle_t hdl) {
 
 #ifdef P2P_THREADED
     if (inst->cfg.threaded) {
-        print("I:", LA_F("Stopping internal thread", LA_F349, 349));
+        print("I:", LA_F("Stopping internal thread", LA_F401, 401));
         p2p_thread_stop(inst);
     }
 #endif
@@ -438,12 +438,12 @@ p2p_destroy(p2p_handle_t hdl) {
     // 先告知信令服务器下线（信令函数需要 session 指针，必须在释放会话前调用）
     if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT &&
         inst->sig_ctx.compact.state != SIG_COMPACT_INIT) {
-        print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F328, 328));
+        print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F381, 381));
         p2p_signal_compact_offline(inst);
     }
     else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY &&
              inst->sig_ctx.relay.state != SIG_RELAY_INIT) {
-        print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F216, 216));
+        print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F268, 268));
         p2p_signal_relay_offline(inst);
     }
 
@@ -471,7 +471,7 @@ p2p_destroy(p2p_handle_t hdl) {
     // todo stun 不需要？sock ？
 
     // 关闭 socket
-    print("I:", LA_F("Close P2P UDP socket", LA_F215, 215));
+    print("I:", LA_F("Close P2P UDP socket", LA_F267, 267));
     p2p_udp_close(inst);
 
     route_shared_release();
@@ -496,7 +496,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     if (!remote_peer_id &&
         (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT ||
          inst->sig_mode == P2P_SIGNALING_MODE_RELAY)) {
-        print("E:", LA_F("Invalid remote_peer_id for %s mode", LA_F211, 211),
+        print("E:", LA_F("Invalid remote_peer_id for %s mode", LA_F315, 315),
               inst->sig_mode == P2P_SIGNALING_MODE_COMPACT ? "COMPACT" : "RELAY");
         return NULL;
     }
@@ -504,7 +504,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     // 分配会话结构
     struct p2p_session *s = (struct p2p_session*)calloc(1, sizeof(*s));
     if (!s) {
-        print("E:", LA_F("Failed to allocate memory for session", LA_F625, 625));
+        print("E:", LA_F("Failed to allocate memory for session", LA_F283, 283));
         return NULL;
     }
 
@@ -513,7 +513,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     s->local_cands  = (p2p_local_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_local_candidate_entry_t));
     s->remote_cands = (p2p_remote_candidate_entry_t *)calloc(initial_cand_cap, sizeof(p2p_remote_candidate_entry_t));
     if (!s->local_cands || !s->remote_cands) {
-        print("E:", LA_F("Failed to allocate memory for candidate lists", LA_F240, 240));
+        print("E:", LA_F("Failed to allocate memory for candidate lists", LA_F281, 281));
         if (s->local_cands) free(s->local_cands);
         if (s->remote_cands) free(s->remote_cands);
         free(s);
@@ -540,10 +540,10 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         if (!s->inst->cfg.test_ice_relay_off && s->inst->cfg.turn_server) {
             if (inst->turn.state == TURN_IDLE || inst->turn.state == TURN_FAILED) {
                 if (p2p_turn_allocate(inst) == 0) {
-                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F314, 314), inst->cfg.turn_server);
+                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F363, 363), inst->cfg.turn_server);
                 }
                 else {
-                    print("E:", LA_F("Failed to start TURN allocation", LA_F315, 315));
+                    print("E:", LA_F("Failed to start TURN allocation", LA_F296, 296));
                 }
             }
         }
@@ -564,7 +564,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     if (strategy < P2P_PATH_STRATEGY_CONNECTION_FIRST || strategy > P2P_PATH_STRATEGY_HYBRID)
         strategy = P2P_PATH_STRATEGY_CONNECTION_FIRST;
     path_manager_init(s, strategy);
-    print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F286, 286), strategy);
+    print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F339, 339), strategy);
 
     reliable_init(s);
 
@@ -575,18 +575,18 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         print("I:", LA_F("SCTP (usrsctp) enabled as transport layer", LA_F289, 289));
         s->trans = &p2p_trans_sctp;
 #else
-        print("W:", LA_F("SCTP (usrsctp) requested but library not linked", LA_F318, 318));
+        print("W:", LA_F("SCTP (usrsctp) requested but library not linked", LA_F367, 367));
 #endif
     }
     else if (inst->cfg.use_pseudotcp) {
-        print("I:", LA_F("PseudoTCP enabled as transport layer", LA_F293, 293));
+        print("I:", LA_F("PseudoTCP enabled as transport layer", LA_F343, 343));
         s->trans = &p2p_trans_pseudotcp;
     }
-    else print("I:", LA_F("No advanced transport layer enabled, using simple reliable layer", LA_F270, 270));
+    else print("I:", LA_F("No advanced transport layer enabled, using simple reliable layer", LA_F324, 324));
 
     if (s->trans && s->trans->init) {
         if (s->trans->init(s) != 0) {
-            print("E:", LA_F("Transport layer '%s' init failed, falling back to simple reliable", LA_F367, 367), s->trans->name);
+            print("E:", LA_F("Transport layer '%s' init failed, falling back to simple reliable", LA_F420, 420), s->trans->name);
             s->trans = NULL;
             s->trans_data = NULL;
         }
@@ -600,7 +600,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         print("I:", LA_F("DTLS (MbedTLS) enabled as encryption layer", LA_F196, 196));
         s->dtls = &p2p_dtls_mbedtls;
 #else
-        print("W:", LA_F("DTLS (MbedTLS) requested but library not linked", LA_F227, 227));
+        print("W:", LA_F("DTLS (MbedTLS) requested but library not linked", LA_F272, 272));
 #endif
     }
     else if (inst->cfg.dtls_backend == 2) {
@@ -608,14 +608,14 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         print("I:", LA_F("OpenSSL DTLS enabled as encryption layer", LA_F243, 243));
         s->dtls = &p2p_dtls_openssl;
 #else
-        print("W:", LA_F("OpenSSL requested but library not linked", LA_F275, 275));
+        print("W:", LA_F("OpenSSL requested but library not linked", LA_F332, 332));
 #endif
     }
 
     // DTLS 初始化（需要 remote_peer_id 以确定自动角色）
     if (s->dtls && s->dtls->init) {
         if (s->dtls->init(s) != 0) {
-            print("E:", LA_F("Crypto layer '%s' init failed, continuing without encryption", LA_F226, 226), s->dtls->name);
+            print("E:", LA_F("Crypto layer '%s' init failed, continuing without encryption", LA_F271, 271), s->dtls->name);
             s->dtls = NULL;
             s->dtls_data = NULL;
         }
@@ -645,18 +645,18 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 // fixme: online 放到 create 中
 
                 assert(inst->cfg.server_host);
-                print("I:", LA_F("Login to COMPACT signaling server at %s:%d", LA_F220, 220),
+                print("I:", LA_F("Login to COMPACT signaling server at %s:%d", LA_F319, 319),
                               inst->cfg.server_host, inst->cfg.server_port);
                 struct sockaddr_in server_addr;
                 if ((ret = resolve_host(inst->cfg.server_host, inst->cfg.server_port, &server_addr)) != E_NONE) {
-                    print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F317, 317),
+                    print("E:", LA_F("Resolve COMPACT signaling server address: %s:%d failed(%d)", LA_F364, 364),
                                   inst->cfg.server_host, inst->cfg.server_port, ret);
                     s->state = P2P_STATE_ERROR;
                     UNLOCK_INST(inst);
                     goto fail;
                 }
                 if ((ret = p2p_signal_compact_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
-                    print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F217, 217), ret);
+                    print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F269, 269), ret);
                     s->state = P2P_STATE_ERROR;
                     UNLOCK_INST(inst);
                     goto fail;
@@ -665,9 +665,9 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             }
 
             if (!s->sig_sess.compact.remote_peer_id[0])
-                print("I:", LA_F("Starting COMPACT session with %s", LA_F615, 615), remote_peer_id);
+                print("I:", LA_F("Starting COMPACT session with %s", LA_F391, 391), remote_peer_id);
             if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE)
-                print("E:", LA_F("Start COMPACT session failed(%d)", LA_F614, 614), ret);
+                print("E:", LA_F("Start COMPACT session failed(%d)", LA_F388, 388), ret);
 
             s->state = P2P_STATE_REGISTERING;
             break;
@@ -679,7 +679,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             // 首次连接：向信令服务器注册
             if (inst->sig_ctx.relay.state == SIG_RELAY_INIT) {
                 assert(inst->cfg.server_host);
-                print("I:", LA_F("Login to RELAY signaling server at %s:%d", LA_F616, 616),
+                print("I:", LA_F("Login to RELAY signaling server at %s:%d", LA_F320, 320),
                               inst->cfg.server_host, inst->cfg.server_port);
                 struct sockaddr_in server_addr;
                 memset(&server_addr, 0, sizeof(server_addr));
@@ -687,7 +687,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
                 server_addr.sin_port = htons(inst->cfg.server_port);
                 inet_pton(AF_INET, inst->cfg.server_host, &server_addr.sin_addr);
                 if ((ret = p2p_signal_relay_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
-                    print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F218, 218), ret);
+                    print("E:", LA_F("Connect to RELAY signaling server failed(%d)", LA_F270, 270), ret);
                     s->state = P2P_STATE_ERROR;
                     UNLOCK_INST(inst);
                     goto fail;
@@ -696,9 +696,9 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
             }
 
             if (s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_SYNCABLE)
-                print("I:", LA_F("Starting RELAY session with %s", LA_F332, 332), remote_peer_id);
+                print("I:", LA_F("Starting RELAY session with %s", LA_F392, 392), remote_peer_id);
             if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE)
-                print("E:", LA_F("Start RELAY session failed(%d)", LA_F323, 323), ret);
+                print("E:", LA_F("Start RELAY session failed(%d)", LA_F389, 389), ret);
 
             s->state = P2P_STATE_REGISTERING;
             break;
@@ -713,10 +713,10 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
             if (remote_peer_id) {
                 p2p_signal_pubsub_set_role(&inst->sig_ctx.pubsub, P2P_SIGNAL_ROLE_PUB);
-                print("I:", LA_F("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_F280, 280));
+                print("I:", LA_F("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_F334, 334));
             } else {
                 p2p_signal_pubsub_set_role(&inst->sig_ctx.pubsub, P2P_SIGNAL_ROLE_SUB);
-                print("I:", LA_F("PUBSUB (SUB): waiting for offer from any peer", LA_F281, 281));
+                print("I:", LA_F("PUBSUB (SUB): waiting for offer from any peer", LA_F335, 335));
             }
             break;
         }
@@ -730,7 +730,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         }
 
         default:
-            print("E:", LA_F("Unknown signaling mode: %d", LA_F371, 371), inst->sig_mode);
+            print("E:", LA_F("Unknown signaling mode: %d", LA_F422, 422), inst->sig_mode);
             s->state = P2P_STATE_ERROR;
             UNLOCK_INST(inst);
             goto fail;
@@ -891,7 +891,7 @@ p2p_update(p2p_handle_t hdl) {
             if (nget_l(ptr) == STUN_MAGIC) {
 
                 uint16_t type = nget_s(pkt); /* [0-1]:type */
-                printf(LA_F("Recv STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F300, 300),
+                printf(LA_F("Recv STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F360, 360),
                        inet_ntoa(from.sin_addr), ntohs(from.sin_port), type, n);
                 
                 // 如果使用 ICE 机制进行打洞
@@ -962,7 +962,7 @@ p2p_update(p2p_handle_t hdl) {
                     if (s == inst->sessions_head) {
                         for (; s; s = s->next) if (s->id == sess_id) break;
                         if (!s) { s = inst->sessions_head;
-                            print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F169, 169), "P2P", sess_id);
+                            print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F150, 150), "P2P", sess_id);
                             continue;
                         }
                     } else { struct p2p_session *ss = s;
@@ -970,24 +970,24 @@ p2p_update(p2p_handle_t hdl) {
                         if (!s) {
                             for (s=inst->sessions_head; s!=ss; s=s->next) if (s->id == sess_id) break;
                             if (s == ss) {
-                                print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F169, 169), "P2P", sess_id);
+                                print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F150, 150), "P2P", sess_id);
                                 continue;
                             }
                         }
                     }
                 }
-                else { print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F169, 169), "P2P", sess_id); continue; }
+                else { print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F150, 150), "P2P", sess_id); continue; }
             }
 
             payload     += P2P_SESS_ID_PSZ;
             payload_len -= (int)P2P_SESS_ID_PSZ;
 
         } else if (inst->cfg.multi_session) {
-            print("W:", LA_F("%s: no ses_id for multi session\n", 0, 0), "P2P");
+            print("W:", LA_F("%s: no ses_id for multi session\n", LA_F159, 159), "P2P");
             continue;
         }
 
-        print("V:", LA_F("%s: recv (ses_id=%u), type=%u\n", LA_F93, 93), "P2P", s->id, hdr.type);
+        print("V:", LA_F("%s: recv (ses_id=%u), type=%u\n", LA_F199, 199), "P2P", s->id, hdr.type);
 
         nat_proto(s, hdr.type, hdr.flags, hdr.seq, payload, payload_len, &from, now_ms);
 
@@ -1033,7 +1033,7 @@ p2p_update(p2p_handle_t hdl) {
         if ((s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
             && (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
 
-            print("I:", LA_F("State: → PUNCHING", LA_F345, 345));
+            print("I:", LA_F("State: → PUNCHING", LA_F399, 399));
             p2p_set_state(s, P2P_STATE_PUNCHING);
         }
 
@@ -1048,7 +1048,7 @@ p2p_update(p2p_handle_t hdl) {
         if ((s->state == P2P_STATE_PUNCHING || s->state == P2P_STATE_REGISTERING || s->state == P2P_STATE_ONLINE)
             && s->nat.state == NAT_CLOSED) {
 
-            print("E:", LA_F("State: → ERROR (punch timeout, no relay available)", LA_F344, 344));
+            print("E:", LA_F("State: → ERROR (punch timeout, no relay available)", LA_F397, 397));
             p2p_set_state(s, P2P_STATE_ERROR);
             // NAT_CLOSED 表示打洞失败且无信令中转服务，连接已不可恢复
         }
@@ -1065,10 +1065,10 @@ p2p_update(p2p_handle_t hdl) {
             if (best_path >= -1) {  // -1=SIGNALING, >=0=候选
                 p2p_set_active_path(s, best_path);
                 path_manager_switch_reset(s, now_ms);
-                print("I:", LA_F("State: RELAY → CONNECTED, path=PUNCH[%d]", LA_F342, 342), best_path);
+                print("I:", LA_F("State: RELAY → CONNECTED, path=PUNCH[%d]", LA_F395, 395), best_path);
                 p2p_set_state(s, P2P_STATE_CONNECTED);
             } else {
-                print("W:", LA_F("RELAY recovery: NAT connected but no path available", LA_F441, 441));
+                print("W:", LA_F("RELAY recovery: NAT connected but no path available", LA_F346, 346));
             }
         }
 
@@ -1083,7 +1083,7 @@ p2p_update(p2p_handle_t hdl) {
             // 清除活跃路径
             p2p_set_active_path(s, PATH_IDX_NONE);
             
-            print("W:", LA_F("State: → LOST (all paths failed)", LA_F338, 338));
+            print("W:", LA_F("State: → LOST (all paths failed)", LA_F398, 398));
             p2p_set_state(s, P2P_STATE_LOST);
         }
 
@@ -1096,11 +1096,11 @@ p2p_update(p2p_handle_t hdl) {
                 // 状态机立即切换（不走防抖）
                 p2p_set_active_path(s, best_path);
                 path_manager_switch_reset(s, now_ms);
-                print("I:", LA_F("State: LOST → CONNECTED, path=PUNCH[%d]", LA_F341, 341), best_path);
+                print("I:", LA_F("State: LOST → CONNECTED, path=PUNCH[%d]", LA_F394, 394), best_path);
                 p2p_set_state(s, P2P_STATE_CONNECTED);
             } else {
                 // 无可用路径，保持 LOST 状态
-                print("W:", LA_F("LOST recovery: NAT connected but no path available", LA_F430, 430));
+                print("W:", LA_F("LOST recovery: NAT connected but no path available", LA_F317, 317));
             }
         }
 
@@ -1133,7 +1133,7 @@ p2p_update(p2p_handle_t hdl) {
                             s->stream.send_offset += n;
                         } else {
                             // send_data 失败，数据已从 ring 消费，记录丢失
-                            print("W:", LA_F("transport send_data failed, %d bytes dropped", LA_F416, 416), n);
+                            print("W:", LA_F("transport send_data failed, %d bytes dropped", LA_F468, 468), n);
                         }
                     }
                 }
@@ -1218,9 +1218,9 @@ p2p_update(p2p_handle_t hdl) {
                         /* 执行路径切换（含防抖、历史记录） */
                         int ret = path_manager_switch_path(s, best_path, "periodic reselect", now_ms);
                         if (ret == 0) {
-                            print("I:", LA_F("Path switched to better route (idx=%d)", LA_F288, 288), best_path);
+                            print("I:", LA_F("Path switched to better route (idx=%d)", LA_F341, 341), best_path);
                         } else if (ret > 0) {
-                            print("V:", LA_F("Path switch debounced, waiting for stability", LA_F287, 287));
+                            print("V:", LA_F("Path switch debounced, waiting for stability", LA_F340, 340));
                         }
                     }
                 }

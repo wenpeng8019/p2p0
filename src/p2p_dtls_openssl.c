@@ -51,14 +51,14 @@ static void openssl_flush_bio(struct p2p_session *s, BIO *write_bio) {
 static int openssl_init(struct p2p_session *s) {
     p2p_openssl_ctx_t *os = calloc(1, sizeof(p2p_openssl_ctx_t));
     if (!os) {
-        print("E:", LA_F("Failed to allocate OpenSSL context", LA_F238, 238));
+        print("E:", LA_F("Failed to allocate OpenSSL context", LA_F280, 280));
         return -1;
     }
     s->dtls_data = os;
 
     os->ctx = SSL_CTX_new(DTLS_method());
     if (!os->ctx) {
-        print("E:", LA_F("SSL_CTX_new failed", LA_F321, 321));
+        print("E:", LA_F("SSL_CTX_new failed", LA_F371, 371));
         free(os); s->dtls_data = NULL;
         return -1;
     }
@@ -71,7 +71,7 @@ static int openssl_init(struct p2p_session *s) {
 
     os->ssl = SSL_new(os->ctx);
     if (!os->ssl) {
-        print("E:", LA_F("SSL_new failed", LA_F322, 322));
+        print("E:", LA_F("SSL_new failed", LA_F372, 372));
         SSL_CTX_free(os->ctx); free(os); s->dtls_data = NULL;
         return -1;
     }
@@ -80,7 +80,7 @@ static int openssl_init(struct p2p_session *s) {
     os->read_bio = BIO_new(BIO_s_mem());
     os->write_bio = BIO_new(BIO_s_mem());
     if (!os->read_bio || !os->write_bio) {
-        print("E:", LA_F("BIO_new failed", LA_F206, 206));
+        print("E:", LA_F("BIO_new failed", LA_F261, 261));
         if (os->read_bio) BIO_free(os->read_bio);
         if (os->write_bio) BIO_free(os->write_bio);
         SSL_free(os->ssl); SSL_CTX_free(os->ctx);
@@ -100,7 +100,7 @@ static int openssl_init(struct p2p_session *s) {
     else if (s->inst->cfg.dtls_role == 2) is_server = 0;
     else /* auto */                 is_server = (s->remote_peer_id[0] == '\0')
                                               || strcmp(s->inst->local_peer_id, s->remote_peer_id) > 0;
-    print("I:", LA_F("[OpenSSL] DTLS role: %s (mode=%s)", LA_F376, 376),
+    print("I:", LA_F("[OpenSSL] DTLS role: %s (mode=%s)", LA_F437, 437),
           is_server ? "server" : "client",
           s->inst->cfg.dtls_role == 0 ? "auto" : "forced");
 
@@ -121,7 +121,7 @@ static void openssl_tick(struct p2p_session *s) {
         int ret = SSL_do_handshake(os->ssl);
         if (ret == 1) {
             os->handshake_done = 1;
-            print("I:", LA_F("[OpenSSL] DTLS handshake completed", LA_F375, 375));
+            print("I:", LA_F("[OpenSSL] DTLS handshake completed", LA_F436, 436));
         }
     }
     openssl_flush_bio(s, os->write_bio);
@@ -166,7 +166,7 @@ static int openssl_decrypt_recv(struct p2p_session *s, const uint8_t *in, int in
         int ret = SSL_do_handshake(os->ssl);
         if (ret == 1) {
             os->handshake_done = 1;
-            print("I:", LA_F("[OpenSSL] DTLS handshake completed", LA_F375, 375));
+            print("I:", LA_F("[OpenSSL] DTLS handshake completed", LA_F436, 436));
         }
         openssl_flush_bio(s, os->write_bio);
         return 0;

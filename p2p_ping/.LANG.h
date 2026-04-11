@@ -1,5 +1,5 @@
 /*
- * 自动生成的语言 ID 枚举（由 i18n.sh 生成）
+ * 自动生成的语言 ID 枚举（由 i18n 工具生成）
  *
  * 除「remove 操作」外请勿手动编辑，重新生成会覆盖所有改动。
  *
@@ -20,7 +20,7 @@
  *
  * 操作说明:
  *   若在枚举注释中看到 "disabled" 前缀，且确认该字符串不再需要，
- *   将注释中的 "disabled" 改为 "remove"，然后重新运行 i18n.sh 即可。
+ *   将注释中的 "disabled" 改为 "remove"，然后重新运行 i18n 工具即可。
  *   示例:
  *     LA_F99,  // disabled "some old string"
  *     改为:
@@ -39,10 +39,10 @@ enum {
 
     /* Words (LA_W) */
     LA_W1,  /* "CLOSED"  [p2p_ping.c] */
-    _LA_2,
-    LA_W3,  /* "CONNECTED"  [p2p_ping.c] */
-    LA_W4,  /* "ERROR"  [p2p_ping.c] */
-    LA_W5,  /* "INIT"  [p2p_ping.c] */
+    LA_W2,  /* "CONNECTED"  [p2p_ping.c] */
+    LA_W3,  /* "ERROR"  [p2p_ping.c] */
+    LA_W4,  /* "INIT"  [p2p_ping.c] */
+    LA_W5,  /* "ONLINE"  [p2p_ping.c] */
     LA_W6,  /* "PUNCHING"  [p2p_ping.c] */
     LA_W7,  /* "REGISTERING"  [p2p_ping.c] */
     LA_W8,  /* "RELAY"  [p2p_ping.c] */
@@ -51,66 +51,48 @@ enum {
     /* Strings (LA_S) */
     LA_S10,  /* "--- Connected ---"  [p2p_ping.c] */
     LA_S11,  /* "--- Disconnected ---"  [p2p_ping.c] */
-    _LA_12,
-    LA_S13,  /* "Auto-echo received messages back to sender"  [p2p_ping.c] */
-    _LA_14,
-    LA_S15,  /* "Enable DTLS (MbedTLS)"  [p2p_ping.c] */
-    LA_S16,  /* "Enable DTLS (OpenSSL)"  [p2p_ping.c] */
-    LA_S17,  /* "Enable PseudoTCP"  [p2p_ping.c] */
-    LA_S18,  /* "GitHub Gist ID for Public Signaling"  [p2p_ping.c] */
-    LA_S19,  /* "GitHub Token for Public Signaling"  [p2p_ping.c] */
-    LA_S20,  /* "Log level (0-5)"  [p2p_ping.c] */
-    LA_S21,  /* "Signaling server IP[:PORT]"  [p2p_ping.c] */
-    _LA_22,
-    LA_S23,  /* "Target Peer Name (if specified: active role)"  [p2p_ping.c] */
-    LA_S24,  /* "TURN password"  [p2p_ping.c] */
-    LA_S25,  /* "TURN server address"  [p2p_ping.c] */
-    LA_S26,  /* "TURN username"  [p2p_ping.c] */
-    LA_S27,  /* "Use Chinese language"  [p2p_ping.c] */
-    LA_S28,  /* "Use COMPACT mode (UDP signaling, default is ICE/TCP)"  [p2p_ping.c] */
-    LA_S29,  /* "Your Peer Name"  [p2p_ping.c] */
+    LA_S12,  /* "Auto-echo received messages back to sender"  [p2p_ping.c] */
+    LA_S13,  /* "Debugger Name"  [p2p_ping.c] */
+    LA_S14,  /* "Disable Host candidates (for testing)"  [p2p_ping.c] */
+    LA_S15,  /* "Disable Prflx candidates (for testing)"  [p2p_ping.c] */
+    LA_S16,  /* "Disable Relay candidates (for testing)"  [p2p_ping.c] */
+    LA_S17,  /* "Disable Srflx candidates (for testing)"  [p2p_ping.c] */
+    LA_S18,  /* "Enable DTLS (MbedTLS)"  [p2p_ping.c] */
+    LA_S19,  /* "Enable DTLS (OpenSSL)"  [p2p_ping.c] */
+    LA_S20,  /* "Enable PseudoTCP"  [p2p_ping.c] */
+    LA_S21,  /* "GitHub Gist ID for Public Signaling"  [p2p_ping.c] */
+    LA_S22,  /* "GitHub Token for Public Signaling"  [p2p_ping.c] */
+    LA_S23,  /* "Log level (0-5)"  [p2p_ping.c] */
+    LA_S24,  /* "Signaling server IP[:PORT]"  [p2p_ping.c] */
+    LA_S25,  /* "Skip NAT type detection (RFC 3489 Test II/III)"  [p2p_ping.c] */
+    LA_S26,  /* "STUN server address"  [p2p_ping.c] */
+    LA_S27,  /* "Target Peer Name (if specified: active role)"  [p2p_ping.c] */
+    LA_S28,  /* "TURN password"  [p2p_ping.c] */
+    LA_S29,  /* "TURN server address"  [p2p_ping.c] */
+    LA_S30,  /* "TURN username"  [p2p_ping.c] */
+    LA_S31,  /* "Use Chinese language"  [p2p_ping.c] */
+    LA_S32,  /* "Use COMPACT mode (UDP signaling, default is ICE/TCP)"  [p2p_ping.c] */
+    LA_S33,  /* "Your Peer Name"  [p2p_ping.c] */
 
     /* Formats (LA_F) */
-    LA_F30,  /* "% === P2P Ping Diagnostic Tool ===\n"  [p2p_ping.c] */
-    LA_F31,  /* "% Failed to create sessions\n"  [p2p_ping.c] */
-    LA_F32,  /* "% Failed to initialize connection\n"  [p2p_ping.c] */
-    LA_F33,  /* "% No signaling mode.\nUse --server or --github\n"  [p2p_ping.c] */
-    LA_F34,  /* "Running in %s mode (connecting to %s)..." (%s,%s)  [p2p_ping.c] */
-    LA_F35,  /* "Running in %s mode (waiting for connection)..." (%s)  [p2p_ping.c] */
-    LA_F36,  /* "% [Chat] Echo mode enabled: received messages will be echoed back.\n"  [p2p_ping.c] */
-    LA_F37,  /* "% [Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n"  [p2p_ping.c] */
-    _LA_38,
-    _LA_39,
-
-    /* Strings (LA_S) */
-    LA_S40,  /* "Debugger Name"  [p2p_ping.c] */
-
-    /* Formats (LA_F) */
-    LA_F41,  /* "% Debugger connected, resuming execution.\n"  [p2p_ping.c] */
-    LA_F42,  /* "% Timeout waiting for debugger. Continuing without debugger.\n"  [p2p_ping.c] */
-    LA_F43,  /* "Waiting Debugger(%s) connecting...\n" (%s)  [p2p_ping.c] */
-
-    /* Strings (LA_S) */
-    LA_S44,  /* "STUN server address"  [p2p_ping.c] */
-    _LA_45,
-    _LA_46,
-    _LA_47,
-
-    /* Formats (LA_F) */
-    LA_F48,  /* "[STATE] %s (%d) -> %s (%d)\n" (%s,%d,%s,%d)  [p2p_ping.c] */
-    LA_F49,  /* "[EVENT] State: %s -> %s\n" (%s,%s)  [p2p_ping.c] */
-
-    /* Strings (LA_S) */
-    LA_S50,  /* "Disable Host candidates (for testing)"  [p2p_ping.c] */
-    LA_S51,  /* "Disable Relay candidates (for testing)"  [p2p_ping.c] */
-    LA_S52,  /* "Disable Srflx candidates (for testing)"  [p2p_ping.c] */
-    LA_S53,  /* "Disable Prflx candidates (for testing)"  [p2p_ping.c] */
-    LA_S54,  /* "Skip NAT type detection (RFC 3489 Test II/III)"  [p2p_ping.c] */
+    LA_F34,  /* "=== P2P Ping Diagnostic Tool ===\n"  [p2p_ping.c] */
+    LA_F35,  /* "Debugger connected, resuming execution.\n"  [p2p_ping.c] */
+    LA_F36,  /* "Failed to create sessions\n"  [p2p_ping.c] */
+    LA_F37,  /* "Failed to initialize connection\n"  [p2p_ping.c] */
+    LA_F38,  /* "No signaling mode.\nUse --server or --github\n"  [p2p_ping.c] */
+    LA_F39,  /* "Running in %s mode (connecting to %s)..." (%s,%s)  [p2p_ping.c] */
+    LA_F40,  /* "Running in %s mode (waiting for connection)..." (%s)  [p2p_ping.c] */
+    LA_F41,  /* "Timeout waiting for debugger. Continuing without debugger.\n"  [p2p_ping.c] */
+    LA_F42,  /* "Waiting Debugger(%s) connecting...\n" (%s)  [p2p_ping.c] */
+    LA_F43,  /* "[Chat] Echo mode enabled: received messages will be echoed back.\n"  [p2p_ping.c] */
+    LA_F44,  /* "[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n"  [p2p_ping.c] */
+    LA_F45,  /* "[EVENT] State: %s -> %s\n" (%s,%s)  [p2p_ping.c] */
+    LA_F46,  /* "[STATE] %s (%d) -> %s (%d)\n" (%s,%d,%s,%d)  [p2p_ping.c] */
 
     LA_NUM
 };
 
 /* 格式字符串起始位置（用于验证） */
-#define LA_FMT_START LA_F30
+#define LA_FMT_START LA_F34
 
 #endif /* LANG_H__ */

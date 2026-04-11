@@ -7,8 +7,8 @@ option(WITH_OPENSSL "启用 OpenSSL DTLS 支持" OFF)
 option(WITH_SCTP    "启用 usrsctp 支持" OFF)
 option(WITH_WSLAY   "启用 wslay WebSocket 支持" ON)
 option(THREADED     "启用内部线程" ON)
-option(I18N_ENABLED "启用 i18n 多语言支持" OFF)
-option(I18N_CN      "生成中文翻译头文件 (LANG.cn.h)" OFF)
+option(I18N_ENABLED "启用 i18n 多语言支持" ON)
+option(I18N_CN      "生成中文翻译头文件 (LANG.cn.h)" ON)
 
 # --- 平台检测 ---
 if(WIN32)
@@ -114,13 +114,19 @@ endif()
 # --- p2p 核心库 i18n 代码生成 ---
 # I18N_ENABLED=ON:  跟踪源文件变化，修改时重新生成（构建时）
 # I18N_ENABLED=OFF: 文件不存在时生成一次（配置时）
+set(_p2p_i18n_outputs
+    ${CMAKE_SOURCE_DIR}/src/.LANG.h
+    ${CMAKE_SOURCE_DIR}/src/.LANG.c
+)
+if(I18N_CN)
+    list(APPEND _p2p_i18n_outputs ${CMAKE_SOURCE_DIR}/src/LANG.cn.h)
+endif()
+
 if(I18N_ENABLED)
     # 开发模式：源文件变化时重新生成
     add_custom_command(
-        OUTPUT
-            ${CMAKE_SOURCE_DIR}/src/.LANG.h
-            ${CMAKE_SOURCE_DIR}/src/.LANG.c
-        COMMAND ${I18N_SCRIPT} src --name p2p ${I18N_NDEBUG_FLAG} ${I18N_IMPORT_FLAG}
+        OUTPUT ${_p2p_i18n_outputs}
+        COMMAND ${I18N_SCRIPT} src --name p2p ${I18N_IMPORT_FLAG} ${I18N_NDEBUG_FLAG}
         DEPENDS
             ${LIB_SRCS}
             ${I18N_SCRIPT}
@@ -129,10 +135,17 @@ if(I18N_ENABLED)
     )
 else()
     # 禁用模式：仅当文件不存在时生成（配置时检查）
+    set(_need_gen OFF)
     if(NOT EXISTS "${CMAKE_SOURCE_DIR}/src/.LANG.h" OR NOT EXISTS "${CMAKE_SOURCE_DIR}/src/.LANG.c")
+        set(_need_gen ON)
+    endif()
+    if(I18N_CN AND NOT EXISTS "${CMAKE_SOURCE_DIR}/src/LANG.cn.h")
+        set(_need_gen ON)
+    endif()
+    if(_need_gen)
         message(STATUS "为 p2p 核心生成 i18n 文件（一次性，I18N_ENABLED=OFF）")
         execute_process(
-            COMMAND ${I18N_SCRIPT} src --name p2p ${I18N_NDEBUG_FLAG} ${I18N_IMPORT_FLAG}
+            COMMAND ${I18N_SCRIPT} src --name p2p ${I18N_IMPORT_FLAG} ${I18N_NDEBUG_FLAG}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             RESULT_VARIABLE _i18n_result
         )
@@ -301,10 +314,7 @@ endif()
 # I18N_ENABLED=ON: 通过 custom_target 跟踪源文件变化
 # I18N_ENABLED=OFF: 文件已在配置时生成
 if(I18N_ENABLED)
-    add_custom_target(p2p_core_i18n_gen DEPENDS
-        ${CMAKE_SOURCE_DIR}/src/.LANG.h
-        ${CMAKE_SOURCE_DIR}/src/.LANG.c
-    )
+    add_custom_target(p2p_core_i18n_gen DEPENDS ${_p2p_i18n_outputs})
     add_dependencies(p2p_static p2p_core_i18n_gen)
 endif()
 

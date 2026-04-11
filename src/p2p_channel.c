@@ -73,7 +73,7 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
     /* TURN 中继路径: 将原始 P2P 包通过 Send Indication 发送 */
     if (s->path_type == P2P_PATH_RELAY) {
         if (s->inst->turn.state != TURN_ALLOCATED) {
-            print("E:", LA_F("RELAY path but TURN not allocated", LA_F429, 429));
+            print("E:", LA_F("RELAY path but TURN not allocated", LA_F344, 344));
             return -1;
         }
         return p2p_turn_send_packet(s->inst, addr, type, flags, seq, payload, payload_len);
@@ -82,7 +82,7 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
     /* 信令转发路径: 调用信令模式特定的中转接口 */
     if (s->path_type == P2P_PATH_SIGNALING) {
         if (!s->inst->signaling_relay_fn) {
-            print("E:", LA_F("SIGNALING path but signaling relay not available", LA_F319, 319));
+            print("E:", LA_F("SIGNALING path but signaling relay not available", LA_F369, 369));
             return -1;
         }
         return s->inst->signaling_relay_fn(s, type, flags, seq, payload, payload_len);
@@ -107,7 +107,7 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
     /* TURN 中继: CRYPTO 包通过 Send Indication 发送 */
     if (s->path_type == P2P_PATH_RELAY) {
         if (s->inst->turn.state != TURN_ALLOCATED) {
-            print("W:", LA_F("RELAY path but TURN not allocated (dtls)", LA_F434, 434));
+            print("W:", LA_F("RELAY path but TURN not allocated (dtls)", LA_F345, 345));
             return;
         }
         p2p_turn_send_packet(s->inst, addr, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
@@ -117,7 +117,7 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
     /* 信令转发: CRYPTO 包通过信令中转接口发送 */
     if (s->path_type == P2P_PATH_SIGNALING) {
         if (!s->inst->signaling_relay_fn) {
-            print("E:", LA_F("SIGNALING path but signaling relay not available", LA_F319, 319));
+            print("E:", LA_F("SIGNALING path but signaling relay not available", LA_F369, 369));
             return;
         }
         s->inst->signaling_relay_fn(s, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);

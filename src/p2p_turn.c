@@ -285,7 +285,7 @@ static int allocate_auth(struct p2p_instance *inst) {
 
     if (!t->has_key) {
         if (!inst->cfg.turn_user || !inst->cfg.turn_pass) {
-            print("E:", LA_F("TURN auth required but no credentials configured", LA_F360, 360));
+            print("E:", LA_F("TURN auth required but no credentials configured", LA_F410, 410));
             t->state = TURN_FAILED;
             return -1;
         }
@@ -364,12 +364,12 @@ int p2p_turn_allocate(struct p2p_instance *inst) {
     turn_ctx_t *t = &inst->turn;
 
     if (!resolve_server(t, inst->cfg.turn_server, inst->cfg.turn_port)) {
-        print("E:", LA_F("Failed to resolve TURN server: %s", LA_F248, 248), inst->cfg.turn_server);
+        print("E:", LA_F("Failed to resolve TURN server: %s", LA_F291, 291), inst->cfg.turn_server);
         t->state = TURN_FAILED;
         return -1;
     }
 
-    print("I:", LA_F("Sending Allocate Request to %s:%d", LA_F325, 325),
+    print("I:", LA_F("Sending Allocate Request to %s:%d", LA_F379, 379),
                  inst->cfg.turn_server, inst->cfg.turn_port ? inst->cfg.turn_port : 3478);
 
     uint8_t buf[64];
@@ -383,7 +383,7 @@ int p2p_turn_allocate(struct p2p_instance *inst) {
 
     int ret = p2p_udp_send_to(inst, &t->server_addr, buf, off);
     if (ret <= 0) {
-        print("E:", LA_F("Failed to send Allocate Request: %d", 0, 0), ret);
+        print("E:", LA_F("Failed to send Allocate Request: %d", LA_F292, 292), ret);
         return -1;
     }
 
@@ -499,7 +499,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
         t->last_perm_ms   = t->alloc_time_ms;
         t->state          = TURN_ALLOCATED;
 
-        print("I:", LA_F("TURN Allocated relay %s:%u (lifetime=%us)", LA_F354, 354),
+        print("I:", LA_F("TURN Allocated relay %s:%u (lifetime=%us)", LA_F404, 404),
               inet_ntoa(relay.sin_addr), ntohs(relay.sin_port), lifetime);
 
         assert(inst->turn_pending);
@@ -517,7 +517,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
             c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
             if (s->public_base < 0) s->public_base = idx;
 
-            print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F256, 256),
+            print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F300, 300),
                     inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
 
             if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
@@ -573,7 +573,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
 
         /* 401: 首次认证挑战 */
         if (error_code == 401 && t->state == TURN_ALLOCATING && realm[0] && nonce[0]) {
-            print("I:", LA_F("TURN 401 Unauthorized (realm=%s), authenticating...", LA_F352, 352), realm);
+            print("I:", LA_F("TURN 401 Unauthorized (realm=%s), authenticating...", LA_F402, 402), realm);
             strncpy(t->realm, realm, sizeof(t->realm) - 1);
             strncpy(t->nonce, nonce, sizeof(t->nonce) - 1);
             t->has_key = false;  /* realm 变化需重新计算 key */
@@ -589,7 +589,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
             return 0;
         }
 
-        print("E:", LA_F("TURN Allocate failed with error %d", LA_F353, 353), error_code);
+        print("E:", LA_F("TURN Allocate failed with error %d", LA_F403, 403), error_code);
         t->state = TURN_FAILED;
 
         /* 通知所有等待 TURN 的会话放弃等待 */
@@ -620,7 +620,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
             if (at == STUN_ATTR_ERROR_CODE && al >= 4)
                 error_code = (val[2] & 0x07) * 100 + val[3];
         }
-        print("E:", LA_F("TURN CreatePermission failed (error=%d)", LA_F355, 355), error_code);
+        print("E:", LA_F("TURN CreatePermission failed (error=%d)", LA_F405, 405), error_code);
         return 0;
     }
 
@@ -640,7 +640,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
         }
         t->lifetime = lifetime;
         t->last_refresh_ms = P_tick_ms();
-        print("V:", LA_F("TURN Refresh ok (lifetime=%us)", LA_F359, 359), lifetime);
+        print("V:", LA_F("TURN Refresh ok (lifetime=%us)", LA_F409, 409), lifetime);
         return 0;
     }
 
@@ -669,7 +669,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
             turn_refresh(inst);
             return 0;
         }
-        print("E:", LA_F("TURN Refresh failed (error=%d)", LA_F358, 358), error_code);
+        print("E:", LA_F("TURN Refresh failed (error=%d)", LA_F408, 408), error_code);
         return 0;
     }
 
@@ -704,7 +704,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
         }
 
         if (data && data_len > 0 && peer.sin_family == AF_INET) {
-            print("V:", LA_F("TURN Data Indication from %s:%u (%d bytes)", LA_F357, 357),
+            print("V:", LA_F("TURN Data Indication from %s:%u (%d bytes)", LA_F407, 407),
                   inet_ntoa(peer.sin_addr), ntohs(peer.sin_port), data_len);
 
             if (out_data)  *out_data = data;
@@ -740,7 +740,7 @@ static int turn_create_permission(struct p2p_instance *inst, const struct sockad
     /* 去重：同一 IP 不重复发送（端口无关，RFC 5766 Section 9.1） */
     if (has_permission(t, peer_addr)) return 0;
 
-    print("V:", LA_F("TURN CreatePermission for %s", LA_F356, 356),
+    print("V:", LA_F("TURN CreatePermission for %s", LA_F406, 406),
           inet_ntoa(((struct sockaddr_in *)peer_addr)->sin_addr));
 
     uint8_t buf[768];

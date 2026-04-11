@@ -22,31 +22,31 @@
 #include "LANG.cn.h"
 
 // 命令行参数定义
-ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", LA_S20, 20));
-ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable DTLS (MbedTLS)", LA_S15, 15));
-ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S16, 16));
-ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S17, 17));
-ARGS_B(false, compact,      'c', "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S28, 28));
-ARGS_B(false, echo,         0,   "echo",         LA_CS("Auto-echo received messages back to sender", LA_S13, 13));
-ARGS_S(false, server,       's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S21, 21));
-ARGS_S(false, github,       0,   "github",       LA_CS("GitHub Token for Public Signaling", LA_S19, 19));
-ARGS_S(false, gist,         0,   "gist",         LA_CS("GitHub Gist ID for Public Signaling", LA_S18, 18));
-ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", LA_S29, 29));
-ARGS_S(false, to,           't', "to",           LA_CS("Target Peer Name (if specified: active role)", LA_S23, 23));
-ARGS_S(false, stun,         0,   "stun",         LA_CS("STUN server address", LA_S44, 44));
-ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S25, 25));
-ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S26, 26));
-ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S24, 24));
-ARGS_B(false, skip_stun_test, 0, "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", LA_S54, 54));
-ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S40, 40));
-ARGS_B(false, no_host,      0,   "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S50, 50));
-ARGS_B(false, no_srflx,     0,   "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S52, 52));
-ARGS_B(false, no_relay,     0,   "no-relay",     LA_CS("Disable Relay candidates (for testing)", LA_S51, 51));
-ARGS_B(false, no_prflx,     0,   "no-prflx",     LA_CS("Disable Prflx candidates (for testing)", LA_S53, 53));
+ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", LA_S23, 23));
+ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable DTLS (MbedTLS)", LA_S18, 18));
+ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S19, 19));
+ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S20, 20));
+ARGS_B(false, compact,      'c', "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S32, 32));
+ARGS_B(false, echo,         0,   "echo",         LA_CS("Auto-echo received messages back to sender", LA_S12, 12));
+ARGS_S(false, server,       's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S24, 24));
+ARGS_S(false, github,       0,   "github",       LA_CS("GitHub Token for Public Signaling", LA_S22, 22));
+ARGS_S(false, gist,         0,   "gist",         LA_CS("GitHub Gist ID for Public Signaling", LA_S21, 21));
+ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", LA_S33, 33));
+ARGS_S(false, to,           't', "to",           LA_CS("Target Peer Name (if specified: active role)", LA_S27, 27));
+ARGS_S(false, stun,         0,   "stun",         LA_CS("STUN server address", LA_S26, 26));
+ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S29, 29));
+ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S30, 30));
+ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S28, 28));
+ARGS_B(false, skip_stun_test, 0, "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", LA_S25, 25));
+ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S13, 13));
+ARGS_B(false, no_host,      0,   "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S14, 14));
+ARGS_B(false, no_srflx,     0,   "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S17, 17));
+ARGS_B(false, no_relay,     0,   "no-relay",     LA_CS("Disable Relay candidates (for testing)", LA_S16, 16));
+ARGS_B(false, no_prflx,     0,   "no-prflx",     LA_CS("Disable Prflx candidates (for testing)", LA_S15, 15));
 
 static p2p_language_t s_lang = P2P_LANG_EN;
 static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }
-ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", LA_S27, 27));
+ARGS_PRE(cb_cn, cn,         0,   "cn",           LA_CS("Use Chinese language", LA_S31, 31));
 
 #undef LOG_CALLBACK
 #define LOG_CALLBACK    p2p_log_callback
@@ -274,14 +274,14 @@ static void tui_process_input(p2p_session_t session) {
 
 static const char* state_name(p2p_state_t state) {
     switch (state) {
-        case P2P_STATE_INIT:        return LA_W("INIT", LA_W5, 5);
+        case P2P_STATE_INIT:        return LA_W("INIT", LA_W4, 4);
         case P2P_STATE_REGISTERING: return LA_W("REGISTERING", LA_W7, 7);
-        case P2P_STATE_ONLINE:      return LA_W("ONLINE", LA_W10, 10);
+        case P2P_STATE_ONLINE:      return LA_W("ONLINE", LA_W5, 5);
         case P2P_STATE_PUNCHING:    return LA_W("PUNCHING", LA_W6, 6);
-        case P2P_STATE_CONNECTED:   return LA_W("CONNECTED", LA_W3, 3);
+        case P2P_STATE_CONNECTED:   return LA_W("CONNECTED", LA_W2, 2);
         case P2P_STATE_RELAY:       return LA_W("RELAY", LA_W8, 8);
         case P2P_STATE_CLOSED:      return LA_W("CLOSED", LA_W1, 1);
-        case P2P_STATE_ERROR:       return LA_W("ERROR", LA_W4, 4);
+        case P2P_STATE_ERROR:       return LA_W("ERROR", LA_W3, 3);
         default:                    return LA_W("UNKNOWN", LA_W9, 9);
     }
 }
@@ -290,7 +290,7 @@ static void log_state_change(p2p_session_t s) {
     static int last_state = -1;
     int state = p2p_state(s);
     if (state != last_state) {
-        print("I:", LA_F("[STATE] %s (%d) -> %s (%d)\n", LA_F48, 48),
+        print("I:", LA_F("[STATE] %s (%d) -> %s (%d)\n", LA_F46, 46),
               state_name(last_state), last_state,
               state_name(state), state);
         last_state = state;
@@ -300,7 +300,7 @@ static void log_state_change(p2p_session_t s) {
 /* 状态变化回调 */
 static void on_state(p2p_handle_t s, p2p_state_t old_state, p2p_state_t new_state, void *userdata) {
     (void)s; (void)userdata;
-    print("I:", LA_F("[EVENT] State: %s -> %s\n", LA_F49, 49), state_name(old_state), state_name(new_state));
+    print("I:", LA_F("[EVENT] State: %s -> %s\n", LA_F45, 45), state_name(old_state), state_name(new_state));
 }
 
 /* MSG RPC 请求到达回调（B 端） */
@@ -512,7 +512,7 @@ int main(int argc, char *argv[]) {
     else if (ARGS_github.str && ARGS_gist.str)
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 
-    print("I:", LA_F("=== P2P Ping Diagnostic Tool ===\n", LA_F30, 30));
+    print("I:", LA_F("=== P2P Ping Diagnostic Tool ===\n", LA_F34, 34));
 
     if (ARGS_debugger.str) {
         /* 
@@ -524,18 +524,18 @@ int main(int argc, char *argv[]) {
          */
         instrument_listen(on_instrument, ARGS_debugger.str);
 
-        print("I:", LA_F("Waiting Debugger(%s) connecting...\n", LA_F43, 43), ARGS_debugger.str);
+        print("I:", LA_F("Waiting Debugger(%s) connecting...\n", LA_F42, 42), ARGS_debugger.str);
 
         ret_t r = instrument_wait(my_name, ARGS_debugger.str, 60 * 1000);
         if (r == E_NONE) {
-            print("I:", LA_F("Debugger connected, resuming execution.\n", LA_F41, 41));
+            print("I:", LA_F("Debugger connected, resuming execution.\n", LA_F35, 35));
         } else {
-            print("W:", LA_F("Timeout waiting for debugger. Continuing without debugger.\n", LA_F42, 42));
+            print("W:", LA_F("Timeout waiting for debugger. Continuing without debugger.\n", LA_F41, 41));
         }
     }
 
     p2p_handle_t hdl = p2p_create(my_name, &cfg);
-    if (!hdl) { print("E:", LA_F("Failed to create sessions\n", LA_F31, 31)); return 1; }
+    if (!hdl) { print("E:", LA_F("Failed to create sessions\n", LA_F36, 36)); return 1; }
     g_hdl = hdl;  /* 供 instrument 回调使用 */
 
     /* 重新注册 instrument 回调（p2p_create 会覆盖之前的设置） */
@@ -547,20 +547,20 @@ int main(int argc, char *argv[]) {
     if (ARGS_server.str) mode_name = cfg.use_ice ? "RELAY" : "COMPACT";
     else if (ARGS_github.str && ARGS_gist.str) mode_name = "PUBSUB";
     else {
-        print("E:", LA_F("No signaling mode.\nUse --server or --github\n" ,LA_F33, 33));
+        print("E:", LA_F("No signaling mode.\nUse --server or --github\n" ,LA_F38, 38));
         ARGS_print(argv[0]);
         return 1;
     }
 
     // if (ARGS_disable_lan.i64) print("I:", LA_F("[TEST] LAN shortcut disabled - forcing NAT punch\n", LA_F39, 39));
-    if (ARGS_echo.i64) print("I:", LA_F("[Chat] Echo mode enabled: received messages will be echoed back.\n", LA_F36, 36));
+    if (ARGS_echo.i64) print("I:", LA_F("[Chat] Echo mode enabled: received messages will be echoed back.\n", LA_F43, 43));
 
     bool connect_pending = false;
     uint64_t connect_retry_at = 0;
 
     g_session = p2p_connect(hdl, target_name);
     if (!g_session) {
-        print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
+        print("E:", LA_F("Failed to initialize connection\n", LA_F37, 37));
         return 1;
     }
     if (p2p_state(g_session) == P2P_STATE_INIT) {
@@ -568,8 +568,8 @@ int main(int argc, char *argv[]) {
         connect_retry_at = P_tick_ms() + 500;
     }
 
-    if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F34, 34), mode_name, target_name); }
-    else             { print("I:", LA_F("Running in %s mode (waiting for connection)...", LA_F35, 35), mode_name); }
+    if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F39, 39), mode_name, target_name); }
+    else             { print("I:", LA_F("Running in %s mode (waiting for connection)...", LA_F40, 40), mode_name); }
 
     g_running = true;
 
@@ -606,7 +606,7 @@ int main(int argc, char *argv[]) {
             if (g_session) { p2p_close(g_session); g_session = NULL; }
             g_session = p2p_connect(hdl, target_name);
             if (!g_session) {
-                print("E:", LA_F("Failed to initialize connection\n", LA_F32, 32));
+                print("E:", LA_F("Failed to initialize connection\n", LA_F37, 37));
                 break;
             }
             connect_pending = false;  // 已触发，等状态机推进；CLOSED 时再重置
@@ -624,7 +624,7 @@ int main(int argc, char *argv[]) {
 
             /* 首次连接成功：初始化 TUI，降低日志等级 */
             if (!g_connected_once) { g_connected_once = true;
-                print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F37, 37));
+                print("I:", LA_F("[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n", LA_F44, 44));
                 tui_init();
                 if (g_term_height) {
                     tui_println(P2P_LOG_LEVEL_INFO, LA_S("--- Connected ---", LA_S10, 10));
