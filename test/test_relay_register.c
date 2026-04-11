@@ -385,9 +385,11 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
         
         if (type == P2P_RLY_SYNC0_ACK && payload_len >= P2P_RLY_SYNC0_ACK_PSZ) {
             ack->received = 1;
-            ack->session_id = ((uint32_t)recv_buf[3] << 24) | ((uint32_t)recv_buf[4] << 16) |
-                              ((uint32_t)recv_buf[5] << 8)  | (uint32_t)recv_buf[6];
-            ack->online = recv_buf[7];
+            // [relay_hdr(3)][target_name(32)][session_id(4)][online(1)]
+            int off = 3 + P2P_PEER_ID_MAX;
+            ack->session_id = ((uint32_t)recv_buf[off] << 24) | ((uint32_t)recv_buf[off+1] << 16) |
+                              ((uint32_t)recv_buf[off+2] << 8)  | (uint32_t)recv_buf[off+3];
+            ack->online = recv_buf[off + 4];
             return 1;
         }
         

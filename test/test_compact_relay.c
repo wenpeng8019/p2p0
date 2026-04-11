@@ -395,15 +395,17 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
         // 接收 SYNC0_ACK 获取 session_id
-        uint8_t sync_ack[32];
+        // [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
+        uint8_t sync_ack[64];
         struct sockaddr_in sync_from; socklen_t sync_len = sizeof(sync_from);
         P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
         n = recvfrom(sock, (char*)sync_ack, sizeof(sync_ack), 0,
                      (struct sockaddr*)&sync_from, &sync_len);
-        if (n >= 8 && sync_ack[0] == SIG_PKT_SYNC0_ACK) {
+        if (n >= (ssize_t)(4 + SIG_PKT_SYNC0_ACK_PSZ) && sync_ack[0] == SIG_PKT_SYNC0_ACK) {
+            int off = 4 + P2P_PEER_ID_MAX;
             uint32_t session_id = 0;
             for (int i = 0; i < 4; i++) {
-                session_id = (session_id << 8) | sync_ack[4 + i];
+                session_id = (session_id << 8) | sync_ack[off + i];
             }
             return session_id;
         }

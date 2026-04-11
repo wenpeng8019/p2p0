@@ -254,25 +254,33 @@ static int is_sync_packet(uint8_t type) {
 static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
     memset(info, 0, sizeof(*info));
     
-    if (len < 4 + 4 + 1 + 1) return;
     if (buf[0] != SIG_PKT_SYNC && buf[0] != SIG_PKT_SYNC0) return;
+    
+    // SYNC:  [hdr(4)][session_id(4)][base_index(1)][count(1)][cands]
+    // SYNC0: [hdr(4)][remote_peer_id(32)][session_id(4)][0x00(1)][count(1)][cands]
+    int off = 4;  // skip hdr
+    if (buf[0] == SIG_PKT_SYNC0) {
+        if (len < 4 + (int)P2P_PEER_ID_MAX + 4 + 1 + 1) return;
+        off += P2P_PEER_ID_MAX;  // skip remote_peer_id
+    } else {
+        if (len < 4 + 4 + 1 + 1) return;
+    }
     
     info->received = 1;
     
     // session_id (4 bytes)
-    info->session_id = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
-                       ((uint32_t)buf[6] << 8)  | (uint32_t)buf[7];
+    info->session_id = ((uint32_t)buf[off] << 24) | ((uint32_t)buf[off+1] << 16) |
+                       ((uint32_t)buf[off+2] << 8)  | (uint32_t)buf[off+3];
+    off += 4;
     
-    // SYNC:  [session_id(4)][base_index(1)][count(1)][cands]
-    // SYNC0: [session_id(4)][0x00(1)     ][count(1)][cands]
-    info->base_index = buf[8];
-    info->candidate_count = buf[9];
+    info->base_index = buf[off];
+    info->candidate_count = buf[off+1];
+    off += 2;
     
     // 解析候选列表
-    int offset = 10;
-    for (int i = 0; i < info->candidate_count && i < 16 && offset + (int)sizeof(p2p_candidate_t) <= len; i++) {
-        memcpy(&info->candidates[i], buf + offset, sizeof(p2p_candidate_t));
-        offset += sizeof(p2p_candidate_t);
+    for (int i = 0; i < info->candidate_count && i < 16 && off + (int)sizeof(p2p_candidate_t) <= len; i++) {
+        memcpy(&info->candidates[i], buf + off, sizeof(p2p_candidate_t));
+        off += sizeof(p2p_candidate_t);
     }
 }
 
@@ -309,14 +317,24 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
         // 消耗 SYNC0_ACK，从中提取 session_id
-        uint8_t drain_buf[32];
+        // [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
+        uint8_t drain_buf[64];
         struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
         P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
         ssize_t drain_n = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
                  (struct sockaddr*)&drain_from, &drain_len);
-        if (drain_n >= 9 && drain_buf[0] == SIG_PKT_SYNC0_ACK) {
-            return ((uint32_t)drain_buf[4] << 24) | ((uint32_t)drain_buf[5] << 16) |
-                   ((uint32_t)drain_buf[6] << 8)  | (uint32_t)drain_buf[7];
+        if (drain_n >= (ssize_t)(4 + SIG_PKT_SYNC0_ACK_PSZ) && drain_buf[0] == SIG_PKT_SYNC0_ACK) {
+            int off = 4 + P2P_PEER_ID_MAX;
+            uint32_t ses = ((uint32_t)drain_buf[off] << 24) | ((uint32_t)drain_buf[off+1] << 16) |
+                           ((uint32_t)drain_buf[off+2] << 8)  | (uint32_t)drain_buf[off+3];
+            // 发送 C2S SYNC0_ACK 二次确认，触发服务器 SYNC0 推送
+            uint8_t ack2[8];
+            ack2[0] = SIG_PKT_SYNC0_ACK;
+            ack2[1] = 0; ack2[2] = 0; ack2[3] = 0;
+            for (int i = 0; i < 4; i++) ack2[4 + i] = (uint8_t)(ses >> (24 - i * 8));
+            sendto(sock, (const char*)ack2, 8, 0,
+                   (struct sockaddr*)&server_addr, sizeof(server_addr));
+            return ses;
         }
     }
     return 0;

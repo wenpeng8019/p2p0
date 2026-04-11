@@ -506,7 +506,8 @@ static void test_register_peer_online(void) {
         ssize_t n = recvfrom(g_sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
-            alice_sync0_status = recv_buf[8];  // online byte
+            // [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
+            alice_sync0_status = recv_buf[4 + P2P_PEER_ID_MAX + 4];  // online byte
             printf("    Alice SYNC0_ACK: peer_online=%d\n", alice_sync0_status);
         }
     }
@@ -522,7 +523,7 @@ static void test_register_peer_online(void) {
         ssize_t n = recvfrom(g_sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
-            uint8_t online = recv_buf[8];
+            uint8_t online = recv_buf[4 + P2P_PEER_ID_MAX + 4];
             printf("    Bob SYNC0_ACK: peer_online=%d\n", online);
             if (online == 1) {
                 TEST_PASS(TEST_NAME);
@@ -1179,7 +1180,7 @@ static void test_register_reconnect_after_disconnect(void) {
     
     uint8_t bob_sync0_online = 0;
     if (n > 0 && recv_buf[0] == SIG_PKT_SYNC0_ACK) {
-        bob_sync0_online = recv_buf[8];
+        bob_sync0_online = recv_buf[4 + P2P_PEER_ID_MAX + 4];
     }
     printf("    Bob SYNC0_ACK: peer_online=%d\n", bob_sync0_online);
     

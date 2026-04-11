@@ -455,9 +455,11 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
         
         if (type == P2P_RLY_SYNC0_ACK && payload_len >= P2P_RLY_SYNC0_ACK_PSZ) {
             ack->received = 1;
-            ack->session_id = ((uint32_t)recv_buf[3] << 24) | ((uint32_t)recv_buf[4] << 16) |
-                              ((uint32_t)recv_buf[5] << 8)  | (uint32_t)recv_buf[6];
-            ack->online = recv_buf[7];
+            // [relay_hdr(3)][target_name(32)][session_id(4)][online(1)]
+            int off = 3 + P2P_PEER_ID_MAX;
+            ack->session_id = ((uint32_t)recv_buf[off] << 24) | ((uint32_t)recv_buf[off+1] << 16) |
+                              ((uint32_t)recv_buf[off+2] << 8)  | (uint32_t)recv_buf[off+3];
+            ack->online = recv_buf[off + 4];
             return 1;
         }
     }
@@ -477,10 +479,11 @@ static int wait_status(sock_t sock, status_t *status) {
             return 0;
         }
         
-        if (type == P2P_RLY_STATUS && payload_len >= P2P_RLY_STATUS_PSZ(0, 0)) {
+        if (type == P2P_RLY_STATUS && payload_len >= P2P_RLY_STATUS_PSZ(2, 0)) {
+            // [relay_hdr(3)][req_type(1)][session_id(4)][status_code(1)]
             status->received = 1;
             status->req_type = recv_buf[3];
-            status->status_code = recv_buf[4];
+            status->status_code = recv_buf[3 + 1 + P2P_SESS_ID_PSZ];
             return 1;
         }
     }
