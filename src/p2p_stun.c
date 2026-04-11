@@ -824,6 +824,12 @@ static inline void stun_add_srflx_candidate(struct p2p_instance *inst, const str
             }
         }
     }
+
+    // 如果没有活跃 session，将 mapped_addr 标记为失效（可能在首个 session 创建前过期）
+    // 下次创建 session 时会重新 collect
+    if (inst->connections == 0) {
+        inst->stun_ctx.mapped_addr_active = false;
+    }
 }
 
 void p2p_stun_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *from,

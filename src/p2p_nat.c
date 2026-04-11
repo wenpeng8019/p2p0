@@ -408,6 +408,7 @@ ret_t nat_punch(struct p2p_session *s, int idx) {
         
         n->state = NAT_PUNCHING;
         n->punch_start = P_tick_ms();
+        p2p_connecting(s);  // 首次进入打洞状态，递增 connections 并启动 STUN 收集
         
         // 这里只重置 tx_confirmed，保留 rx_confirmed 原值（需要考虑对端先启动打洞的场景）
         s->tx_confirmed = false;
@@ -452,6 +453,7 @@ ret_t nat_punch(struct p2p_session *s, int idx) {
     if (n->state < NAT_PUNCHING) {
         n->state = NAT_PUNCHING;
         n->punch_start = now;
+        p2p_connecting(s);  // 首次进入打洞状态，递增 connections 并启动 STUN 收集
 
         // 只重置 tx_confirmed，保留 rx_confirmed 原值（需要考虑对端先启动打洞的场景）
         s->tx_confirmed = false;

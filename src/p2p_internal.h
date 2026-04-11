@@ -410,7 +410,6 @@ static inline void p2p_session_reset(struct p2p_session *s, bool closing) {
         s->public_base = -1;
         s->nat.state = NAT_CLOSED;      // 标记 NAT 已关闭
         s->state = P2P_STATE_CLOSED;    // 更新状态为已关闭
-        --s->inst->connections;
     }
     // 重置 NAT
     else nat_reset(&s->nat);
@@ -637,6 +636,9 @@ static inline int p2p_find_path_by_addr(struct p2p_session *s, const struct sock
  *   - 自动处理中继封装（TURN / Compact 信令）
  *   - 调用者总是传"基础"包类型（DATA / ACK）
  * ============================================================================ */
+
+/* 连接中：NAT 首次进入 PUNCHING 状态时调用，递增 connections 并启动 STUN 收集 */
+void p2p_connecting(struct p2p_session *s);
 
 void p2p_connected(struct p2p_session *s, uint64_t now_ms);
 

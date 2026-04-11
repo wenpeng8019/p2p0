@@ -185,6 +185,40 @@ static inline bool p2p_set_state(struct p2p_session *s, p2p_state_t new_state) {
 }
 
 /*
+ * 连接中 — NAT 模块首次进入 NAT_PUNCHING 状态时调用
+ *
+ * 与 p2p_connected 对应：
+ *   - p2p_connecting: NAT 开始打洞时触发
+ *   - p2p_connected:  NAT 打洞成功后触发
+ *
+ * 功能：
+ *   - 递增 connections 计数
+ *   - 当从 0→1 时启动 STUN Srflx 候选收集
+ *
+ * 注：TURN 在 p2p_create 时申请，不依赖 session 状态
+ */
+void p2p_connecting(struct p2p_session *s) {
+
+    struct p2p_instance *inst = s->inst;
+
+    // 递增连接计数
+    if (inst->connections++ != 0) {
+        return;  // 已有活跃 session，资源已分配
+    }
+
+    // 首个 session 激活
+
+    // STUN: 如果检测已完成但 mapped_addr 已失效，重新收集 Srflx 候选
+    if (inst->sig_mode != P2P_SIGNALING_MODE_COMPACT
+        && !inst->cfg.test_ice_srflx_off && inst->cfg.stun_server) {
+
+        if (inst->nat_type != P2P_NAT_DETECTING && !inst->stun_ctx.mapped_addr_active) {
+            p2p_stun_collect(inst);
+        }
+    }
+}
+
+/*
  * NAT_CONNECTED 同步转换为 P2P_STATE_CONNECTED
  * 
  * NAT 模块在进入 NAT_CONNECTED 状态时同步调用此函数，触发：
@@ -233,6 +267,24 @@ void p2p_connected(struct p2p_session *s, uint64_t now_ms) {
 }
 
 /*
+ * session 去激活 — 当所有 session 关闭后调用
+ *
+ * STUN: 无状态协议，只需标记 mapped_addr 失效，下次激活时重新收集
+ * 注：TURN 在 p2p_destroy 时释放，不依赖 session 状态
+ */
+static void session_deactivate(struct p2p_instance *inst) {
+
+    // STUN: 标记映射地址失效，下次激活时重新收集
+    // NAT 类型检测结果保留（nat_type 是环境属性，不随 session 改变）
+    inst->stun_ctx.mapped_addr_active = false;
+
+    // 丢弃未完成的 STUN 异步响应计数
+    inst->stun_pending = 0;
+
+    print("I:", LA_F("STUN resources released (no active sessions)", LA_F464, 464));
+}
+
+/*
  * 主动断开 — 通过 NAT 层和信令层双通道通知对端
  *
  * NAT FIN:  UDP 直连（不可靠，重复发送提高成功率）
@@ -270,6 +322,11 @@ static void disconnect(struct p2p_session *s) {
 
         p2p_signal_relay_disconnect(s);
     }
+
+    // 递减连接计数，归零时释放 STUN 资源
+    if (--s->inst->connections == 0) {
+        session_deactivate(s->inst);
+    }
 }
 
 /*
@@ -299,6 +356,11 @@ static void peer_disconnect(struct p2p_session *s) {
 
     // 触发状态回调
     if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, old_state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
+
+    // 递减连接计数，归零时释放 STUN 资源
+    if (--s->inst->connections == 0) {
+        session_deactivate(s->inst);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -402,10 +464,21 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     if (cfg->stun_server) {
 
         // 启动 STUN NAT 类型检测（并默认作为 Srflx 候选收集）
+        // 注：如果检测完成时 connections==0，stun_add_srflx_candidate 会将 mapped_addr_active 置为 false
         p2p_stun_nat_detect_start(inst, inst->sig_mode != P2P_SIGNALING_MODE_COMPACT && !cfg->test_ice_srflx_off);
 
     } else if (inst->sig_mode != P2P_SIGNALING_MODE_COMPACT) {
         inst->nat_type = P2P_NAT_UNDETECTABLE;
+    }
+
+    // TURN 分配（实例级资源，与 session 无关）
+    if (!cfg->test_ice_relay_off && cfg->turn_server) {
+        if (p2p_turn_allocate(inst) == 0) {
+            print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F363, 363), cfg->turn_server);
+        }
+        else {
+            print("E:", LA_F("Failed to start TURN allocation", LA_F296, 296));
+        }
     }
 
     if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
@@ -565,31 +638,6 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
 
     s->inst = inst;
     s->next = NULL;
-
-    // 如果创建首个可用连接
-    if (inst->connections++ == 0) {
-
-        // 启动收集 Srflx 候选
-        if (s->inst->sig_mode != P2P_SIGNALING_MODE_COMPACT
-            && !s->inst->cfg.test_ice_srflx_off && s->inst->cfg.stun_server) {
-
-            if (inst->nat_type != P2P_NAT_DETECTING && !inst->stun_ctx.mapped_addr_active) {
-                p2p_stun_collect(inst);
-            }
-        }
-
-        //
-        if (!s->inst->cfg.test_ice_relay_off && s->inst->cfg.turn_server) {
-            if (inst->turn.state == TURN_IDLE || inst->turn.state == TURN_FAILED) {
-                if (p2p_turn_allocate(inst) == 0) {
-                    print("I:", LA_F("Requested Relay Candidate from TURN %s", LA_F363, 363), inst->cfg.turn_server);
-                }
-                else {
-                    print("E:", LA_F("Failed to start TURN allocation", LA_F296, 296));
-                }
-            }
-        }
-    }
 
     // 初始化对端 ID
     if (remote_peer_id) {
