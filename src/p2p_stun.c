@@ -832,6 +832,13 @@ static inline void add_srflx_candidate(struct p2p_instance *inst, int recv_sock_
                 p2p_signal_relay_stun_ready(s);
             }
         }
+        else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
+            if (s->sig_sess.pubsub.state == SIG_PUBSUB_SESS_SYNCING) {
+                p2p_signal_pubsub_trickle_candidate(s);
+            } else if (s->sig_sess.pubsub.state == SIG_PUBSUB_SESS_WAIT_STUN && inst->srflx_active >= inst->srflx_count) {
+                p2p_signal_pubsub_stun_ready(s);
+            }
+        }
         else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.on_ice_candidate) {
             char sdp_a[256];
             if (p2p_ice_export_candidate(c, sdp_a, sizeof(sdp_a)) > 0)
@@ -1000,6 +1007,10 @@ void p2p_stun_nat_detect_tick(struct p2p_instance *inst, uint64_t now_ms) {
                     if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY
                         && s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_STUN) {
                         p2p_signal_relay_stun_ready(s);
+                    }
+                    else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB
+                             && s->sig_sess.pubsub.state == SIG_PUBSUB_SESS_WAIT_STUN) {
+                        p2p_signal_pubsub_stun_ready(s);
                     }
                 }
             }

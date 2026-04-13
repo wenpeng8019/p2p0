@@ -217,6 +217,7 @@ struct p2p_session {
     union {
         p2p_compact_session_t   compact;                // COMPACT 模式信令上下文（会话级别：与对端的关系）
         p2p_relay_session_t     relay;                  // RELAY 模式信令上下文（会话级别：与对端的关系）
+        p2p_pubsub_session_t    pubsub;                 // PUBSUB 模式信令上下文（会话级别：与对端的关系）
     }                               sig_sess;
 
     /* ======================== 配置与状态 ======================== */

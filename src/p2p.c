@@ -416,13 +416,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY)
         p2p_signal_relay_init(&inst->sig_ctx.relay);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
-        if ((ret = p2p_signal_pubsub_init(&inst->sig_ctx.pubsub, cfg->gh_token, cfg->gist_id)) != E_NONE) {
-            print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F310, 310), ret);
-            p2p_udp_close_all(inst); free(inst);
-            return NULL;
-        }
-        if (cfg->auth_key)
-            strncpy(inst->sig_ctx.pubsub.auth_key, cfg->auth_key, sizeof(inst->sig_ctx.pubsub.auth_key) - 1);
+        p2p_signal_pubsub_init(&inst->sig_ctx.pubsub);
     }
 
     // 初始化共享路由层
@@ -548,6 +542,17 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         }
         else inst->state = P2P_SIG_ST_REG;
     }
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
+
+        print("I:", LA_F("REG to PUBSUB signaling (Gist: %s)", LA_F320, 320), inst->cfg.gist_id);
+
+        if ((ret = p2p_signal_pubsub_online(inst, inst->local_peer_id,
+                                             inst->cfg.gh_token, inst->cfg.gist_id)) != E_NONE) {
+            print("E:", LA_F("PUBSUB online failed(%d)", LA_F270, 270), ret);
+            inst->state = P2P_SIG_ST_ERROR;
+        }
+        else inst->state = P2P_SIG_ST_REG;
+    }
 
 
 #ifdef P2P_THREADED
@@ -587,6 +592,10 @@ p2p_destroy(p2p_handle_t hdl) {
              inst->sig_ctx.relay.state != SIG_RELAY_INIT) {
         print("I:", LA_F("Closing TCP connection to RELAY signaling server", LA_F268, 268));
         p2p_signal_relay_offline(inst);
+    }
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB &&
+             inst->sig_ctx.pubsub.state != SIG_PUBSUB_INIT) {
+        p2p_signal_pubsub_offline(inst);
     }
 
     // 释放所有会话
@@ -789,16 +798,10 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
         // PUBSUB 模式
         case P2P_SIGNALING_MODE_PUBSUB: {
 
-            assert(inst->cfg.gh_token && inst->cfg.gist_id);
-            s->state = P2P_STATE_SIGNALING;
+            if ((ret = p2p_signal_pubsub_connect(s, remote_peer_id)) != E_NONE)
+                print("E:", LA_F("Start PUBSUB session failed(%d)", LA_F389, 389), ret);
 
-            if (remote_peer_id) {
-                p2p_signal_pubsub_set_role(&inst->sig_ctx.pubsub, P2P_SIGNAL_ROLE_PUB);
-                print("I:", LA_F("PUBSUB (PUB): gathering candidates, waiting for STUN before publishing", LA_F334, 334));
-            } else {
-                p2p_signal_pubsub_set_role(&inst->sig_ctx.pubsub, P2P_SIGNAL_ROLE_SUB);
-                print("I:", LA_F("PUBSUB (SUB): waiting for offer from any peer", LA_F335, 335));
-            }
+            s->state = P2P_STATE_SIGNALING;
             break;
         }
 
@@ -1085,7 +1088,7 @@ p2p_update(p2p_handle_t hdl) {
         p2p_signal_relay_tick_recv(inst, now_ms);
     }
     else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
-        p2p_signal_pubsub_tick_recv(&inst->sig_ctx.pubsub, s);
+        p2p_signal_pubsub_tick_recv(inst, now_ms);
     }
 
     /* ========================================================================
@@ -1331,7 +1334,7 @@ p2p_update(p2p_handle_t hdl) {
         p2p_signal_relay_tick_send(inst, now_ms);
     }
     else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
-        p2p_signal_pubsub_tick_send(&inst->sig_ctx.pubsub, s);
+        p2p_signal_pubsub_tick_send(inst, now_ms);
     }
 
     /* ========================================================================

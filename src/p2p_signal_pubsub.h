@@ -14,282 +14,227 @@
  * 服务（GitHub Gist）实现去中心化的信令交换：
  *
  *   - 无需部署或维护专用服务器
- *   - 双方通过共享的 Gist 文件交换 ICE 候选
+ *   - 双方通过各自独立的 Gist 发布板交换 ICE 候选
  *   - 天然支持异步场景：双方无需同时在线
  *   - 数据在 Gist 中持久化，不受网络抖动影响
  *   - 使用 DES 加密 + Base64 编码保护候选信息隐私
  *
- * 典型使用场景：
- *   - 开发/测试环境：无服务器资源时的快速 P2P 验证
- *   - 低频连接：无需长期维护服务器连接
- *   - 跨网络调试：利用公共 Gist 穿越防火墙进行诊断
- *
- * 注：与其他信令模式的对比请参考 doc/ARCHITECTURE.md
- *
  * ============================================================================
- * PUB/SUB 角色与信令流程
+ * 独立发布板架构
  * ============================================================================
  *
- * 双端通过同一个 Gist 文件的两个字段交换信息：
+ * 每方拥有独立的 Gist 作为自己的"发布板"，避免共享 Gist 的读写一致性问题。
+ * 各方的 Gist ID 即为其 peer_id。
  *
- *   Gist 文件（p2p_signal.json）：
- *   +------------------------------------------------------------------+
- *   |  {                                                               |
- *   |    "offer":  "<PUB 的 ICE 候选，DES 加密后 Base64 编码>",       |
- *   |    "answer": "<SUB 的 ICE 候选，DES 加密后 Base64 编码>"        |
- *   |  }                                                               |
- *   +------------------------------------------------------------------+
+ *   Peer A (gist_a)                            Peer B (gist_b)
+ *   ┌────────────────────┐                    ┌────────────────────┐
+ *   │  Gist A 发布板      │                    │  Gist B 发布板      │
+ *   │  (p2p_signal.json) │                    │  (p2p_signal.json) │
+ *   │  {                 │  ← B 轮询读取 ──── │                    │
+ *   │    "candidates":   │                    │  {                 │
+ *   │      "<A 的候选>"  │                    │    "candidates":   │
+ *   │  }                 │ ──── A 轮询读取 → │      "<B 的候选>"  │
+ *   └────────────────────┘                    │  }                 │
+ *                                              └────────────────────┘
  *
- * 角色定义：
- *   - PUB（Publisher，发起端）：主动创建信道，写入 offer，等待 answer
- *   - SUB（Subscriber，订阅端）：轮询信道，读取 offer，写入 answer
+ * 连接流程：
  *
- * 完整信令流程：
- *
- *   PUB                    GitHub Gist                    SUB
+ *   Peer A                  GitHub Gists                  Peer B
  *    |                          |                           |
- *    |--- PATCH offer --------->|                           |  [1]
- *    |    (PUB 的 ICE 候选)     |                           |
+ *    | 1. 写候选到自己的发布板  |                           |
+ *    |--- PATCH gist_a ------->|                           |
  *    |                          |                           |
- *    |                          |   .--- tick() 每 5s ----> |
- *    |                          |<------- GET (轮询) -------|
- *    |                          |   If-None-Match: ETag     |
- *    |                          |--- 304 Not Modified ----->|  (offer 未更新，继续等待)
- *    |                          |   .--- tick() 每 5s ----> |
- *    |                          |<------- GET (轮询) -------|
- *    |                          |   If-None-Match: ETag     |
- *    |                          |-------- 200 OK ---------->|  (offer 有新内容)
- *    |                          |   offer 字段有新内容       |
+ *    |                          |  2. B 轮询 A 的发布板     |
+ *    |                          |<------ GET gist_a --------|
+ *    |                          |------- 200 OK ----------->|
  *    |                          |                           |
- *    |                          |      [2] SUB 解密 offer   |
- *    |                          |          添加远端候选      |
+ *    |                          |  3. B 解密 A 的候选       |
+ *    |                          |     B 写候选到自己的发布板 |
+ *    |                          |<------ PATCH gist_b ------|
  *    |                          |                           |
- *    |                          |<------- PATCH answer -----|
- *    |                          |       (SUB 的 ICE 候选)   |
+ *    |  4. A 轮询 B 的发布板   |                           |
+ *    |------- GET gist_b ----->|                           |
+ *    |<------- 200 OK ---------|                           |
  *    |                          |                           |
- *    |   .--- tick() 每 1s ---> |                           |
- *    |<------- GET (轮询) ------|                           |
- *    |   If-None-Match: ETag    |                           |
- *    |--- 304 Not Modified ---->|                           |  (answer 未更新，继续等待)
- *    |   .--- tick() 每 1s ---> |                           |
- *    |<------- GET (轮询) ------|                           |
- *    |   If-None-Match: ETag    |                           |
- *    |<-------- 200 OK ---------|                           |  (answer 有新内容)
- *    |   answer 字段有新内容    |                           |
+ *    |  5. A 解密 B 的候选     |                           |
  *    |                          |                           |
- *    |  [3] PUB 解密 answer     |                           |
- *    |      添加远端候选         |                           |
- *    |                          |                           |
- *    |<======= ICE 连通性检查（直连 / STUN 打洞）==========>|
- *
- * 步骤说明：
- *   [1] PUB 调用 p2p_signal_pubsub_send() 将加密候选写入 "offer" 字段
- *   [2] SUB 通过 p2p_signal_pubsub_tick_recv() 轮询检测 offer 更新，
- *       解密后自动调用 p2p_signal_pubsub_send() 写入 "answer"（仅一次）
- *   [3] PUB 通过 p2p_signal_pubsub_tick_recv() 轮询检测 answer 更新，
- *       解密后将候选注入 p2p_session
- *
- * ETag 轮询优化：
- *   - 每次 GET 请求携带 If-None-Match: <etag>
- *   - 若 Gist 内容未变化，服务器返回 304 Not Modified（节省流量）
- *   - 若内容有更新，服务器返回 200 OK 并携带新 ETag
- *   - etag 字段由上下文维护，每次成功读取后自动更新
+ *    |<========= ICE 连通性检查（直连 / STUN 打洞）=========>|
  *
  * ============================================================================
- * 状态机
+ * 状态机（对齐 RELAY 模式两阶段设计）
  * ============================================================================
  *
- * PUB 端状态流转：
+ * 阶段1: 实例级（online）
+ *   INIT ──→ ONLINE
  *
- *   IDLE --> PUBLISHING --> WAITING_ANSWER --> READY
- *                |                  |
- *                | (写入 offer)      | (轮询 answer 成功)
- *                v                  v
- *          (p2p_signal_         (process_payload
- *           pubsub_send)         更新远端候选)
+ * 阶段2: 会话级（connect）
+ *   WAIT_STUN ──→ SYNCING ──→ READY
  *
- * SUB 端状态流转：
- *
- *   IDLE --> POLLING --> RECEIVING_OFFER --> ANSWERING --> READY
- *               |               |                 |
- *               | (轮询 offer)  | (解密成功)       | (写入 answer)
- *               v               v                 v
- *         (tick: GET)    (process_payload    (p2p_signal_
- *                         添加远端候选)       pubsub_send,
- *                                            answered=1)
- *
- * 状态变量说明：
- *   - answered：SUB 专用，防止重复写入 answer（SUB 收到 offer 后仅回应一次）
- *   - last_poll：上次轮询时间戳（毫秒），控制轮询间隔（PUB 默认 P2P_PUBSUB_PUB_POLL_MS，SUB 默认 P2P_PUBSUB_SUB_POLL_MS）
- *   - etag：    上次读取 Gist 的 HTTP ETag，用于 304 条件请求优化
+ *   - INIT:       未启动
+ *   - ONLINE:     已初始化，可以发起 connect
+ *   - WAIT_STUN:  等待本地 STUN 收集完成
+ *   - SYNCING:    候选同步中（写入本端发布板 + 轮询对端发布板）
+ *   - READY:      本端候选已发布，对端候选已接收
  *
  * ============================================================================
  * 数据格式
  * ============================================================================
  *
+ * Gist 文件内容（p2p_signal.json）：
+ *   <DES 加密 + Base64 编码的候选列表>
+ *
  * 加密编码流程：
  *
- *   p2p_signaling_payload_t
- *         |
- *         v  pack_signaling_payload_hdr() + pack_candidate()
- *   二进制字节流（76B header + N*32B candidates）
- *         |
- *         v  p2p_des_encrypt(key)
+ *   候选数组
+ *     |
+ *     v  pack_candidate() × N
+ *   二进制字节流（N × sizeof(p2p_candidate_t)）
+ *     |
+ *     v  p2p_des_encrypt(key)
  *   DES 加密密文（ECB 模式，8 字节块对齐）
- *         |
- *         v  p2p_base64_encode()
- *   Base64 字符串
- *         |
- *         v  JSON 转义
- *   "offer" / "answer" 字段值
- *
- * p2p_signaling_payload_t 结构（序列化后 76 + N*32 字节）：
- *   - sender[32]:        发送方 local_peer_id（字符串）
- *   - target[32]:        目标方 local_peer_id（字符串）
- *   - candidate_count:   本次携带的候选数量（0-8）
- *   - candidates[N]:     ICE 候选（每个 32 字节）
- *     · type:            候选类型（host / srflx / relay）
- *     · addr:            地址和端口（网络序）
- *     · priority:        ICE 优先级
- *
- * DES 密钥派生：
- *   - 密钥来源：p2p_signal_pubsub_ctx_t.auth_key（由 p2p_config_t.auth_key 初始化时拷入）
- *   - 注意：DES 仅用于演示，生产环境应使用 AES-256-GCM
- *   - 若 auth_key 为空，使用默认值 0xAA*8（不安全，仅测试用）
+ *     |
+ *     v  p2p_base64_encode()
+ *   Base64 字符串 → 直接作为 Gist 文件内容
  *
  * GitHub Gist API：
  *   - 读取：GET  https://api.github.com/gists/{gist_id}
  *           头部：Authorization: token {github_token}
- *                 If-None-Match: {etag}（条件请求）
  *   - 写入：PATCH https://api.github.com/gists/{gist_id}
  *           头部：Authorization: token {github_token}
  *                 Content-Type: application/json
- *           体：  {"files":{"p2p_signal.json":{"content":"{\"offer\":\"...\",\"answer\":\"...\"}"}}}
- *
- * 安全注意事项：
- *   - auth_token 需具备 GitHub Gist 读写权限（scope: gist）
- *   - channel_id 只允许字母、数字、连字符、下划线、点（防命令注入）
- *   - 当前使用 system() + curl，生产环境应替换为 libcurl API 调用
+ *           体：  {"files":{"p2p_signal.json":{"content":"<Base64密文>"}}}
  */
-
 #ifndef P2P_SIGNAL_PUBSUB_H
 #define P2P_SIGNAL_PUBSUB_H
 
 #include "predefine.h"
 
-/* PUB 端轮询 answer 的间隔（毫秒）：尽快获取 answer，缩短建连延迟 */
-#ifndef P2P_PUBSUB_PUB_POLL_MS
-#define P2P_PUBSUB_PUB_POLL_MS  1000
-#endif
-
-/* SUB 端轮询 offer 的间隔（毫秒）：offer 写入后等待时间较长，无需频繁轮询 */
-#ifndef P2P_PUBSUB_SUB_POLL_MS
-#define P2P_PUBSUB_SUB_POLL_MS  5000
+/* 轮询对端发布板的间隔（毫秒）*/
+#ifndef P2P_PUBSUB_POLL_MS
+#define P2P_PUBSUB_POLL_MS  3000
 #endif
 
 struct p2p_session;
+struct p2p_instance;
 
-/*
- * P2P 信令角色
- *
- * PUB（发起端）：主动写入 offer，等待对方写入 answer
- * SUB（订阅端）：轮询 offer，收到后自动写入 answer
- */
+/* ============================================================================
+ * PUBSUB 实例上下文（instance 级别）
+ * ============================================================================ */
+
 typedef enum {
-    P2P_SIGNAL_ROLE_UNKNOWN = 0,
-    P2P_SIGNAL_ROLE_PUB,            /* Publisher：发起端，写 offer / 读 answer */
-    P2P_SIGNAL_ROLE_SUB             /* Subscriber：订阅端，读 offer / 写 answer */
-} p2p_signal_role_t;
+    SIG_PUBSUB_INIT = 0,                               /* 未启动 */
+    SIG_PUBSUB_ERROR,                                   /* 错误状态 */
+    SIG_PUBSUB_ONLINE,                                  /* 已上线 */
+} p2p_pubsub_st;
 
-/*
- * PUBSUB 信令上下文
- *
- * 通过 p2p_signal_pubsub_init() 初始化，
- * 通过 p2p_signal_pubsub_set_role() 设置角色后方可使用。
- */
 typedef struct {
-    p2p_signal_role_t role;         /* 本端角色（PUB / SUB）*/
-    char backend_url[256];          /* GitHub Gist API 基础 URL（保留扩展字段）*/
-    char auth_token[128];           /* GitHub Personal Access Token */
-    char auth_key[64];              /* DES 加密密钥（来自 p2p_config_t.auth_key）*/
-    char channel_id[128];           /* Gist ID（作为信令通道标识）*/
-    char etag[128];                 /* 上次读取 Gist 的 HTTP ETag，用于 304 条件请求 */
-    uint64_t last_poll;             /* 上次轮询时间戳（毫秒），控制轮询间隔 */
-    int answered;                   /* SUB 专用：是否已发送过 answer（防重复回应）*/
+    /* 基础状态 */
+    p2p_pubsub_st       state;                          /* 信令状态 */
+
+    /* 身份标识 */
+    char                local_peer_id[P2P_PEER_ID_MAX]; /* 本端名称 */
+    char                auth_token[128];                /* GitHub Personal Access Token */
+    char                auth_key[64];                   /* DES 加密密钥 */
+    char                local_gist_id[128];             /* 本端发布板 Gist ID */
+
 } p2p_signal_pubsub_ctx_t;
+
+/* ============================================================================
+ * PUBSUB 会话上下文（session 级别：与对端的关系）
+ * ============================================================================ */
+
+typedef enum {
+    SIG_PUBSUB_SESS_WAIT_ONLINE = 0,                   /* 执行 connect() 但实例未就绪 */
+    SIG_PUBSUB_SESS_WAIT_STUN,                         /* 等待本地 STUN 收集完成 */
+    SIG_PUBSUB_SESS_SYNCING,                            /* 候选同步中 */
+    SIG_PUBSUB_SESS_READY,                              /* 本端已发布 + 对端候选已接收 */
+} p2p_pubsub_sess_st;
+
+typedef struct {
+    p2p_pubsub_sess_st  state;                          /* 会话状态 */
+
+    char                remote_gist_id[128];            /* 对端发布板 Gist ID（= remote_peer_id）*/
+
+    /* 发布状态 */
+    bool                local_published;                /* 本端候选是否已写入发布板 */
+    int                 local_published_cnt;            /* 已发布的候选数量 */
+
+    /* 轮询状态 */
+    uint64_t            last_poll;                      /* 上次轮询对端发布板的时间戳 */
+    bool                remote_received;                /* 是否已成功接收对端候选 */
+
+} p2p_pubsub_session_t;
+
+/* ============================================================================
+ * PUBSUB 信令 API（对齐 RELAY/COMPACT 风格）
+ * ============================================================================ */
 
 /*
  * 初始化 PUBSUB 信令上下文
- *
- * 必须在 p2p_signal_pubsub_set_role() 之前调用。
- *
- * @param ctx        信令上下文（调用者分配）
- * @param token      GitHub Personal Access Token（需具备 gist 读写权限）
- * @param channel_id Gist ID（仅允许字母、数字、连字符、下划线、点）
- * @return           0=成功，-1=失败（channel_id 格式非法）
  */
-ret_t p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx, const char *token, const char *channel_id);
+void p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx);
 
 /*
- * 设置本端角色（PUB / SUB）
+ * 信令接收维护（拉取阶段）
  *
- * 必须在 p2p_signal_pubsub_tick_recv() / p2p_signal_pubsub_tick_send() 之前调用。
- *
- * @param ctx   信令上下文
- * @param role  P2P_SIGNAL_ROLE_PUB 或 P2P_SIGNAL_ROLE_SUB
+ * 轮询对端发布板，接收远端候选。
+ * 在 p2p_update() 的阶段 2（信令拉取）中调用。
  */
-void p2p_signal_pubsub_set_role(p2p_signal_pubsub_ctx_t *ctx, p2p_signal_role_t role);
+void p2p_signal_pubsub_tick_recv(struct p2p_instance *inst, uint64_t now);
 
 /*
- * 周期调用（接收）：轮询 Gist，处理接收到的信令数据
+ * 信令发送维护（推送阶段）
  *
- * Phase 2: Signal Pull - 从 Gist 获取远端候选
- *
- * 应由主循环频繁调用（建议 ≤P2P_PUBSUB_PUB_POLL_MS）。内部通过 last_poll 控制实际轮询频率：
- *   - PUB 端：间隔 P2P_PUBSUB_PUB_POLL_MS ms（尽快获取 answer，缩短建连延迟）
- *   - SUB 端：间隔 P2P_PUBSUB_SUB_POLL_MS ms（offer 写入后等待时间较长，无需频繁轮询）
- *
- * PUB 端行为：
- *   - 轮询 Gist 的 "answer" 字段，若有更新则解密并注入远端 ICE 候选
- *
- * SUB 端行为：
- *   - 轮询 Gist 的 "offer" 字段，若有更新则解密、注入远端候选，
- *     并自动调用 p2p_signal_pubsub_send() 写入 answer（仅一次）
- *
- * @param ctx  信令上下文
- * @param s    P2P 会话对象（候选存储目标）
+ * 将本端候选写入自己的发布板。
+ * 在 p2p_update() 的阶段 8（信令推送）中调用。
  */
-void p2p_signal_pubsub_tick_recv(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s);
+void p2p_signal_pubsub_tick_send(struct p2p_instance *inst, uint64_t now);
+
+//----------------------------------------------------------------------------
 
 /*
- * 周期调用（发送）：PUB 角色发布 offer 到 Gist
+ * 实例上线（配置 token 和 gist_id）
  *
- * Phase 7: Signal Push - 将本端候选推送到 Gist
- *
- * 仅 PUB 角色使用，SUB 角色在 tick_recv 中自动回应 answer。
- * PUB 端在收集到 Srflx 候选后，定期发送 offer 直到收到对方的 answer。
- *
- * @param ctx  信令上下文
- * @param s    P2P 会话对象（本端候选来源）
+ * @param inst          P2P 实例
+ * @param local_peer_id 本端名称
+ * @param token         GitHub Personal Access Token
+ * @param gist_id       本端发布板 Gist ID
+ * @return              E_NONE=成功
  */
-void p2p_signal_pubsub_tick_send(p2p_signal_pubsub_ctx_t *ctx, struct p2p_session *s);
+ret_t p2p_signal_pubsub_online(struct p2p_instance *inst, const char *local_peer_id,
+                                const char *token, const char *gist_id);
 
 /*
- * 发送本端 ICE 候选到 Gist
- *
- * 将 data 经 DES 加密、Base64 编码后，PATCH 到 Gist 对应字段：
- *   - PUB 角色 --> 写入 "offer" 字段
- *   - SUB 角色 --> 写入 "answer" 字段
- *
- * 注意：内部通过 system() + curl 发起 HTTP 请求，写入前会读取现有 Gist
- * 内容以保留另一字段（避免覆盖对方数据）。
- *
- * @param ctx         信令上下文
- * @param target_name 目标 peer ID（当前版本保留，未使用）
- * @param data        待发送的原始二进制数据（p2p_signaling_payload_t 序列化结果）
- * @param len         数据长度（字节）
- * @return            0=成功，-1=失败（角色未设置、curl 失败等）
+ * 实例下线
  */
-int  p2p_signal_pubsub_send(p2p_signal_pubsub_ctx_t *ctx, const char *target_name, const void *data, int len);
+ret_t p2p_signal_pubsub_offline(struct p2p_instance *inst);
+
+//-----------------------------------------------------------------------------
+
+/*
+ * STUN 候选收集完成后，将 WAIT_STUN 会话转入 SYNCING
+ */
+void p2p_signal_pubsub_stun_ready(struct p2p_session *s);
+
+/*
+ * Trickle ICE：本地候选异步补发入口
+ */
+void p2p_signal_pubsub_trickle_candidate(struct p2p_session *s);
+
+//-----------------------------------------------------------------------------
+
+/*
+ * 建立与对端的会话
+ *
+ * @param s              P2P 会话
+ * @param remote_peer_id 对端发布板 Gist ID
+ * @return               E_NONE=成功
+ */
+ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_peer_id);
+
+/*
+ * 断开当前会话
+ */
+ret_t p2p_signal_pubsub_disconnect(struct p2p_session *s);
 
 #endif /* P2P_SIGNAL_PUBSUB_H */
