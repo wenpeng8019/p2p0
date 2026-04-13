@@ -41,8 +41,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_S31] = "Push local cand<%s:%d> failed(OOM)\n",  /* SID:31 */
     [LA_S32] = "Push remote cand<%s:%d> failed(OOM)\n",  /* SID:32 */
     [LA_S33] = "resync candidates",  /* SID:33 */
-    [LA_S34] = "sync candidates",  /* SID:34 */
-    [LA_S35] = "waiting for peer",  /* SID:35 */
     [LA_F36] = "  [%d] %s/%d",  /* SID:36 */
     [LA_F37] = "%s %s sent (ses_id=%u), seq=%u flags=0x%02x len=%u\n",  /* SID:37 */
     [LA_F38] = "%s NOTIFY: accepted\n",  /* SID:38 */
@@ -229,8 +227,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F218] = "%s: server rejected (no slot)\n",  /* SID:218 */
     [LA_F219] = "%s: sess_id=%u req_type=%u code=%u msg=%s\n",  /* SID:219 */
     [LA_F220] = "%s: sess_id=%u req_type=%u code=%u\n",  /* SID:220 */
-    [LA_F221] = "%s: session established(st=%s peer=%s), %s\n",  /* SID:221 */
-    [LA_F222] = "%s: session offer(st=%s peer=%s), waiting for peer\n",  /* SID:222 */
+    [LA_F221] = "%s: session established(st=%s peer=%s), syncing\n",  /* SID:221 */
+    [LA_F222] = "%s: session offer(st=%s peer=%s), waiting\n",  /* SID:222 */
     [LA_F223] = "%s: session reset by peer(st=%s old=%u new=%u), %s\n",  /* SID:223 */
     [LA_F224] = "%s: session suspend(st=%s)\n",  /* SID:224 */
     [LA_F225] = "%s: session_id changed (old=%u new=%u)\n",  /* SID:225 */
@@ -382,6 +380,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F371] = "% SSL_CTX_new failed",  /* SID:371 */
     [LA_F372] = "% SSL_new failed",  /* SID:372 */
     [LA_F373] = "STUN collecting to %s:%d (len=%d)",  /* SID:373 */
+    [LA_F464] = "% STUN resources released (no active sessions)",  /* SID:464 */
     [LA_F374] = "SYNC(trickle): batching, queued %d cand(s) for seq=%u\n",  /* SID:374 */
     [LA_F375] = "% SYNC(trickle): seq overflow, cannot trickle more\n",  /* SID:375 */
     [LA_F376] = "SYNC0: retry, (attempt %d/%d)\n",  /* SID:376 */
@@ -472,13 +471,15 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F461] = "congestion detected, new ssthresh: %u, cwnd: %u",  /* SID:461 */
     [LA_F462] = "% connection closed by peer",  /* SID:462 */
     [LA_F463] = "ctr_drbg_seed failed: -0x%x",  /* SID:463 */
-    [LA_F464] = "retry seq=%u retx=%d rto=%d",  /* SID:464 */
+    [LA_F472] = "retry seq=%u retx=%d rto=%d",  /* SID:472 */
     [LA_F465] = "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d",  /* SID:465 */
     [LA_F466] = "ssl_config_defaults failed: -0x%x",  /* SID:466 */
     [LA_F467] = "ssl_setup failed: -0x%x",  /* SID:467 */
     [LA_F468] = "transport send_data failed, %d bytes dropped",  /* SID:468 */
     [LA_F469] = "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)",  /* SID:469 */
     [LA_F470] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:470 */
+    [LA_S34] = "sync candidates",  /* SID:34 disabled */
+    [LA_S35] = "waiting for peer",  /* SID:35 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

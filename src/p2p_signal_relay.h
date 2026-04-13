@@ -216,9 +216,10 @@ typedef struct {
 
 typedef enum {
     SIG_RELAY_SESS_SUSPENDED = 0,                       /* 挂起的 session，连接过程超时挂起。报错逻辑统一在 p2p_compact_ctx_t 中处理 */
-    SIG_RELAY_SESS_WAIT_SYNCABLE,                       /* 执行 connect() 创建了 session，但信令服务还未完成在线登录；或等待 stun 完成候选地址收集 */
+    SIG_RELAY_SESS_WAIT_ONLINE,                         /* 执行 connect() 创建了 session，但信令服务还未完成在线登录 */
     SIG_RELAY_SESS_WAIT_SYNC0_ACK,                      /* 已发送 SYNC0，等待 SYNC0_ACK */
     SIG_RELAY_SESS_WAIT_PEER,                           /* 已收到 SYNC0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
+    SIG_RELAY_SESS_WAIT_STUN,                           /* 双方在线，已启动 NAT 打洞，等待本地 STUN 收集完成后再同步候选 */
     SIG_RELAY_SESS_SYNCING,                             /* 收到 PEER SYNC0 或 SYNC0_ACK online=1，向对方同步后续候选队列和 FIN */
     SIG_RELAY_SESS_READY                                /* 已完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
 } p2p_relay_sess_st;
@@ -253,11 +254,6 @@ typedef struct {
  * 初始化 RELAY 信令上下文
  */
 void p2p_signal_relay_init(p2p_relay_ctx_t *ctx);
-
-/*
- * STUN 候选收集完成后，触发所有 WAIT_SYNCABLE 会话发送 SYNC0
- */
-void p2p_signal_relay_syncable(struct p2p_instance *inst, p2p_relay_ctx_t *ctx);
 
 /*
  * 信令接收维护（拉取阶段）
@@ -317,6 +313,20 @@ ret_t p2p_signal_relay_offline(struct p2p_instance *inst);
 //-----------------------------------------------------------------------------
 
 /*
+ * STUN 候选收集完成后，将 WAIT_STUN 会话转入 SYNCING 并发送首批候选
+ */
+void p2p_signal_relay_stun_ready(struct p2p_session *s);
+
+/*
+ * Trickle ICE：本地候选异步补发入口（支持 STUN/TURN）
+ *
+ * @param s   P2P 会话
+ */
+void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
+
+//-----------------------------------------------------------------------------
+
+/*
  * 建立与对端的会话（阶段2：发送 SYNC0 请求）
  *
  * 向服务器请求建立与目标对端的会话，服务器分配 session_id。
@@ -339,13 +349,6 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
  * @return    E_NONE=成功，其他=错误码
  */
 ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
-
-/*
- * Trickle ICE：本地候选异步补发入口（支持 STUN/TURN）
- *
- * @param s   P2P 会话
- */
-void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
 
 /*
  * 通过 RELAY 服务器转发数据包（DATA/ACK/CRYPTO）

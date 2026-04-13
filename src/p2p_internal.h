@@ -97,6 +97,13 @@ typedef enum {
     P2P_SIG_ST_READY,                           // 已在信令服务器上线，等待对端上线后开始候选同步
 } inst_state_t;
 
+typedef struct p2p_sock {
+    struct sockaddr_in              local_addr;
+    struct sockaddr_in              mapped_addr;
+    sock_t                          sock;
+    int                             state;              // 0:idle; 1:bound(无mapped); 2:active(有mapped); -1:invalid
+} p2p_sock_t;
+
 struct p2p_instance {
     char                            local_peer_id[P2P_PEER_ID_MAX];  // 本端身份标识
     struct p2p_session*             sessions_head;
@@ -108,18 +115,21 @@ struct p2p_instance {
     inst_state_t                    state;              // 连接状态 inst_state_t
 
     /* ======================== Socket 资源 ======================== */
-    sock_t                          sock;               // UDP 套接字描述符
+    p2p_sock_t*                     socks;              // UDP 套接字数组（第 0 项为默认自动绑定端口）
+    int                             sock_cnt;           // 当前套接字数量
+    int                             sock_cap;           // 套接字数组容量
     sock_t                          tcp_sock;           // TCP 套接字（打洞/回退用）
 
     /* ======================== NAT 检测 ======================== */
     int                             nat_type;           // NAT 类型，即 p2p_nat_type() 返回值，也就是支持负值状态
-    stun_detect_ctx_t               stun_ctx;           // NAT 类型检测上下文（实例级别，全局只检测一次）
+    stun_ctx_t                      stun_ctx;           // NAT 类型检测上下文（实例级别，全局只检测一次）
 
     /* ======================== TURN 中继 ======================== */
     turn_ctx_t                      turn;               // TURN allocation 上下文（实例级别，共享一个 relay addr）
 
     /* ======================== 异步候选 ======================== */
-    uint16_t                        stun_pending;       // STUN/Srflx 候选待响应计数
+    uint16_t                        srflx_count;        // 预期 srflx 候选数量（init 时统计，目前最多 1）
+    uint16_t                        srflx_active;       // 已生效的 srflx 候选数量
     uint16_t                        turn_pending;       // TURN Allocate 待响应计数
 
     /* ======================== 信令模式和上下文 ======================== */
@@ -198,6 +208,7 @@ struct p2p_session {
     struct p2p_session*             next;               // 实例会话链表（next 指针）
 
     char                            remote_peer_id[P2P_PEER_ID_MAX]; // 目标对等体 ID
+    bool                            wait_stun_pending;  // 该 session 需要等待 srflx 候选通过 stun 收集完成后再同步
 
     /* ======================== 多会话标识 ======================== */
     uint32_t                        id;                 // 该会话唯一标识 id（随机非零，发包时携带供对端派发）
@@ -272,6 +283,12 @@ struct p2p_session {
     /* ======================== 定时器 ======================== */
     uint64_t                        last_update;        // 上次调用 p2p_update() 的时间
 };
+
+#define P2P_CAND_PENDING(inst) \
+    ((inst)->srflx_active < (inst)->srflx_count || (inst)->turn_pending > 0)
+
+#define P2P_SESSION_WAITING_STUN(sess)  \
+    ((sess)->wait_stun_pending && (sess)->inst->srflx_active < (sess)->inst->srflx_count)
 
 /*
  * NAT 类型转可读字符串

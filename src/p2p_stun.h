@@ -251,7 +251,8 @@ bool p2p_stun_has_ice_attrs(const uint8_t *buf, int len);
  * 处理 STUN 响应包
  * 功能：解析响应，提取映射地址（Srflx），推进 NAT 检测状态机
  */
-void p2p_stun_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *from,
+void p2p_stun_handle_packet(struct p2p_instance *inst, int recv_sock_idx,
+                            const struct sockaddr_in *from,
                             uint16_t type, const uint8_t *buf, int len);
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -276,23 +277,25 @@ typedef enum {
  * NAT 检测上下文（属于 p2p_instance，每个实例共享一次 NAT 类型检测）
  */
 typedef struct {
+    struct sockaddr_in  server_addr;    /* 预解析的 STUN 服务器地址（init 时缓存） */
     stun_detect_state_t state;          /* 当前状态 */
-    uint64_t last_send_time;            /* 上次发送时间戳 */
-    int retry_count;                    /* 当前测试的重试次数 */
+    uint64_t            last_send_time; /* 上次发送时间戳 */
+    int                 retry_count;    /* 当前测试的重试次数 */
 
-    struct sockaddr_in mapped_addr;     /* Test I 获取的映射地址 (Srflx) */
-    bool mapped_addr_active;
-
+    bool as_candidate;                  /* Test I 映射地址是否作为 Srflx 候选 */
     struct sockaddr_in alt_addr;        /* CHANGED-ADDRESS（备用服务器地址） */
     struct sockaddr_in mapped_addr_alt; /* Test I(alt) 获取的映射地址 */
     bool test_ii_success;               /* Test II 是否收到响应 */
     bool test_i2_success;               /* Test I(alt) 是否收到响应 */
     bool test_iii_success;              /* Test III 是否收到响应 */
-    bool as_candidate;                  /* Test I 映射地址是否作为 Srflx 候选 */
     bool symmetric_mapping;             /* 主/备服务器映射是否不同（对称映射） */
 
-    uint8_t tsx_id[12];                 /* 当前 Transaction ID */
-} stun_detect_ctx_t;
+    uint8_t detect_tsx_id[12];          /* NAT 检测当前 Transaction ID */
+
+    uint64_t collect_time;               /* 上次 collect 发送时间（0=未在收集中） */
+} stun_ctx_t;
+
+bool p2p_stun_init(stun_ctx_t *ctx, const char *stun_server, uint16_t stun_port);
 
 ret_t p2p_stun_nat_detect_start(struct p2p_instance *inst, bool as_candidate);
 

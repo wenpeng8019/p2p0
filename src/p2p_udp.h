@@ -10,14 +10,21 @@
 
 struct p2p_instance;
 struct p2p_session;
+typedef struct p2p_sock p2p_sock_t;
 
-ret_t p2p_udp_open(struct p2p_instance *inst, uint16_t port);
-void p2p_udp_close(struct p2p_instance *inst);
+ret_t p2p_udp_open(struct p2p_instance *inst, const struct sockaddr_in *bind_ip, uint16_t port);
+void p2p_udp_close(struct p2p_instance *inst, int sock_idx);
+void p2p_udp_close_all(struct p2p_instance *inst);
+
+#define p2p_udp_default_fd(inst) ((inst)->socks[0].sock)
 
 ret_t p2p_udp_send_to(struct p2p_instance *inst, const struct sockaddr_in *addr,
                       const void *data, int len);
+ret_t p2p_udp_send_to_sock(struct p2p_instance *inst, int sock_idx,
+                                    const struct sockaddr_in *addr,
+                                    const void *data, int len);
 
 ret_t p2p_udp_recv_from(struct p2p_instance *inst, struct sockaddr_in *from,
-                        void *buf, int buf_size);
+                                void *buf, int buf_size, int *recv_sock_idx);
 
 #endif /* P2P_UDP_H */

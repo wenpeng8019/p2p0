@@ -438,7 +438,7 @@ ret_t p2p_turn_send_indication(struct p2p_instance *inst, const struct sockaddr_
     // 更新消息体长度
     update_body_len(buf, off);
 
-    return P_msg_send_to(inst->sock, msgs, num+1, &t->server_addr);
+    return P_msg_send_to(p2p_udp_default_fd(inst), msgs, num+1, &t->server_addr);
 }
 
 /* ============================================================================

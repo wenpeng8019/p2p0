@@ -62,27 +62,21 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      */
     if (!inst->cfg.test_ice_host_off) {
 
-        const route_ctx_t *rt = route_shared_get();
-        if (rt && rt->addr_count > 0) {
-            
-            /* 获取本地端口 */
-            struct sockaddr_in loc; socklen_t len = sizeof(loc);
-            getsockname(inst->sock, (struct sockaddr *)&loc, &len);
+        if (inst->sock_cnt > 0 && inst->socks) {
 
             int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
 
-            for (int i = 0; i < rt->addr_count; i++) {
+            for (int i = 0; i < inst->sock_cnt; i++) {
                 int idx = p2p_cand_push_local(s);
                 if (idx < 0) {
                     print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S31, 31),
-                          inet_ntoa(rt->local_addrs[i].sin_addr), ntohs(rt->local_addrs[i].sin_port));
+                          inet_ntoa(inst->socks[i].local_addr.sin_addr), ntohs(inst->socks[i].local_addr.sin_port));
                     return;
                 }
 
                 p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                 c->type = P2P_CAND_HOST;
-                c->addr = rt->local_addrs[i];
-                c->addr.sin_port = loc.sin_port;  // 使用实际绑定端口
+                c->addr = inst->socks[i].local_addr;
 
                 uint16_t local_pref = (uint16_t)(65535 - host_index++);
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
@@ -104,15 +98,17 @@ static inline void gather_local_candidates(struct p2p_session *s) {
          *   1. 发送 STUN Binding Request 时递增 cand_pending
          *   2. 接收 STUN Binding Response 时，stun_add_srflx_candidate 递减 cand_pending
      */
-    if (inst->sig_mode != P2P_SIGNALING_MODE_COMPACT
-        && !inst->cfg.test_ice_srflx_off && inst->cfg.stun_server) {
-        if (inst->stun_ctx.mapped_addr_active) {
+    if (!inst->cfg.test_ice_srflx_off && inst->cfg.stun_server) {
+        // COMPACT 模式下 sock[0] 的 srflx 由信令服务器提供，仅复用 socks[1..N]
+        int start_idx = (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) ? 1 : 0;
+        for (int i = start_idx; i < inst->sock_cnt; i++) {
+            if (inst->socks[i].state != 2/*active*/) continue;
 
             int idx = p2p_cand_push_local(s);
             if (idx >= 0) {
                 p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                 c->type = P2P_CAND_SRFLX;
-                c->addr = inst->stun_ctx.mapped_addr;
+                c->addr = inst->socks[i].mapped_addr;
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 if (s->public_base < 0) s->public_base = idx;
                 print("I:", LA_F("Reuse STUN Candidate %s:%u (priority=%u)", LA_F366, 366),
@@ -206,15 +202,10 @@ void p2p_connecting(struct p2p_session *s) {
         return;  // 已有活跃 session，资源已分配
     }
 
-    // 首个 session 激活
-
-    // STUN: 如果检测已完成但 mapped_addr 已失效，重新收集 Srflx 候选
-    if (inst->sig_mode != P2P_SIGNALING_MODE_COMPACT
-        && !inst->cfg.test_ice_srflx_off && inst->cfg.stun_server) {
-
-        if (inst->nat_type != P2P_NAT_DETECTING && !inst->stun_ctx.mapped_addr_active) {
-            p2p_stun_collect(inst);
-        }
+    // 首个 session 激活，启动 srflx 收集
+    if (!inst->cfg.test_ice_srflx_off && inst->cfg.stun_server 
+        && inst->srflx_active < inst->srflx_count) {
+        p2p_stun_collect(inst);
     }
 }
 
@@ -276,10 +267,13 @@ static void session_deactivate(struct p2p_instance *inst) {
 
     // STUN: 标记映射地址失效，下次激活时重新收集
     // NAT 类型检测结果保留（nat_type 是环境属性，不随 session 改变）
-    inst->stun_ctx.mapped_addr_active = false;
+    for (int i = 0; i < inst->sock_cnt; i++) {
+        inst->socks[i].state = 1/*bound*/;
+    }
 
-    // 丢弃未完成的 STUN 异步响应计数
-    inst->stun_pending = 0;
+    // 重置已生效的 srflx 候选计数（映射地址已失效，待重新收集）
+    inst->srflx_active = 0;
+    inst->stun_ctx.collect_time = 0;
 
     print("I:", LA_F("STUN resources released (no active sessions)", LA_F464, 464));
 }
@@ -414,14 +408,6 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         return NULL;
     }
 
-    // 创建 UDP 套接字
-    print("I:", LA_F("Open P2P UDP socket on port %d", LA_F330, 330), cfg->bind_port);
-    if ((ret = p2p_udp_open(inst, cfg->bind_port)) != E_NONE) {
-        print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F331, 331), cfg->bind_port, ret);
-        free(inst);
-        return NULL;
-    }
-
     // 初始化信令上下文（实例级别，只初始化不注册）
     print("I:", LA_F("Initialize signaling mode: %d", LA_F312, 312), (int)cfg->signaling_mode);
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_COMPACT)
@@ -431,7 +417,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         if ((ret = p2p_signal_pubsub_init(&inst->sig_ctx.pubsub, cfg->gh_token, cfg->gist_id)) != E_NONE) {
             print("E:", LA_F("Initialize PUBSUB signaling context failed(%d)", LA_F310, 310), ret);
-            p2p_udp_close(inst); free(inst);
+            p2p_udp_close_all(inst); free(inst);
             return NULL;
         }
         if (cfg->auth_key)
@@ -441,7 +427,42 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     // 初始化共享路由层
     if ((ret = route_shared_acquire()) < 0) {
         print("E:", LA_F("Detect local network interfaces failed(%d)", LA_F275, 275), ret);
-        p2p_udp_close(inst); free(inst);
+        free(inst);
+        return NULL;
+    }
+
+    // 创建 UDP 套接字
+    print("I:", LA_F("Open P2P UDP socket on port %d", LA_F330, 330), cfg->bind_port);    
+    do {
+        const route_ctx_t *rt = route_shared_get(); assert(rt);
+
+        int cap = 1 + rt->addr_count;
+        inst->socks = (p2p_sock_t *)calloc((size_t)cap, sizeof(p2p_sock_t));
+        if (!inst->socks) {
+            ret = E_OUT_OF_MEMORY;
+            break;
+        }
+        inst->sock_cap = cap;
+        inst->sock_cnt = 0;
+
+        // socks[0]: 默认套接字: 绑定 INADDR_ANY（所有地址）+ 用户指定端口
+        // 作为收发的默认出口，其余 socks[1..N] 绑定各网卡地址用于多路 srflx 收集
+        if ((ret = p2p_udp_open(inst, NULL, cfg->bind_port)) != E_NONE) {
+            break;
+        }
+
+        // socks[1..N]: 各网卡地址，绑定系统分配的随机端口，用于多路 srflx 收集
+        if (cfg->multi_srflx) {
+            for (int i = 0; i < rt->addr_count; i++) {
+                p2p_udp_open(inst, &rt->local_addrs[i], 0);
+            }
+        }
+    } while (0);
+    if (ret != E_NONE) {
+        print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F331, 331), cfg->bind_port, ret);
+        p2p_udp_close_all(inst);
+        route_shared_release();
+        free(inst);
         return NULL;
     }
 
@@ -463,8 +484,15 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     inst->nat_type = P2P_NAT_UNKNOWN;
     if (cfg->stun_server) {
 
+        // 初始化 STUN 上下文（预解析服务器地址）
+        if (p2p_stun_init(&inst->stun_ctx, cfg->stun_server, cfg->stun_port) &&
+            !cfg->test_ice_srflx_off) {
+            inst->srflx_count = (uint16_t)inst->sock_cnt;
+            if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) --inst->srflx_count;
+        }
+
         // 启动 STUN NAT 类型检测（并默认作为 Srflx 候选收集）
-        // 注：如果检测完成时 connections==0，stun_add_srflx_candidate 会将 mapped_addr_active 置为 false
+        // 注：如果检测完成时 connections==0，nat_detect_done 会将 sock.state 重置为 1（bound）
         p2p_stun_nat_detect_start(inst, inst->sig_mode != P2P_SIGNALING_MODE_COMPACT && !cfg->test_ice_srflx_off);
 
     } else if (inst->sig_mode != P2P_SIGNALING_MODE_COMPACT) {
@@ -526,7 +554,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("I:", LA_F("Starting internal thread", LA_F393, 393));
         if ((ret = p2p_thread_start(inst)) != E_NONE) {
             print("E:", LA_F("Start internal thread failed(%d)", LA_F390, 390), ret);
-            p2p_udp_close(inst); route_shared_release(); free(inst);
+            p2p_udp_close_all(inst); route_shared_release(); free(inst);
             return NULL;
         }
     }
@@ -585,7 +613,7 @@ p2p_destroy(p2p_handle_t hdl) {
 
     // 关闭 socket
     print("I:", LA_F("Close P2P UDP socket", LA_F267, 267));
-    p2p_udp_close(inst);
+    p2p_udp_close_all(inst);
 
     route_shared_release();
     free(inst);
@@ -594,7 +622,7 @@ p2p_destroy(p2p_handle_t hdl) {
 ///////////////////////////////////////////////////////////////////////////////
 
 p2p_session_t
-p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
+p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending) {
 
     P_check(hdl, return NULL;)
 
@@ -646,6 +674,11 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
     } else {
         s->remote_peer_id[0] = '\0';
     }
+
+    // P2P_SIGNALING_MODE_COMPACT 信令无需等待 STUN 结果（信令服务器会自动交换双方的 srflx 候选地址）
+    // 禁用 srflx 时也无需等待
+    s->wait_stun_pending = inst->sig_mode != P2P_SIGNALING_MODE_COMPACT
+                           && !inst->cfg.test_ice_srflx_off && wait_stun_pending;
 
     // 会话级状态初始化
     nat_init(&s->nat);
@@ -742,7 +775,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id) {
         // RELAY 模式
         case P2P_SIGNALING_MODE_RELAY: {
 
-            if (s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_SYNCABLE)
+            if (s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_ONLINE)
                 print("I:", LA_F("Starting RELAY session with %s", LA_F392, 392), remote_peer_id);
             if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE)
                 print("E:", LA_F("Start RELAY session failed(%d)", LA_F389, 389), ret);
@@ -919,14 +952,14 @@ p2p_update(p2p_handle_t hdl) {
     struct p2p_session *s = inst->sessions_head;
     if (!s) return 0;  /* 尚无活跃会话 */
 
-    uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; uint8_t* pkt; int n;
+    uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; uint8_t* pkt; int n; int recv_sock_idx;
 
     uint64_t now_ms = P_tick_ms();
 
     /* ========================================================================
      * 阶段 1：远程数据输入（被动接收所有网络数据包）
      * ======================================================================== */
-    while ((n = p2p_udp_recv_from(inst, &from, buf, sizeof(buf))) > 0) { pkt = buf;
+    while ((n = p2p_udp_recv_from(inst, &from, buf, sizeof(buf), &recv_sock_idx)) > 0) { pkt = buf;
 
         // --------------------
         // STUN/TURN 协议包
@@ -950,7 +983,7 @@ p2p_update(p2p_handle_t hdl) {
                 
                 // STUN 模块处理（NAT 检测 / Srflx 地址探测）
                 if (p2p_stun_is_binding_response(type, pkt, n)) {
-                    p2p_stun_handle_packet(inst, &from, type, pkt, n);
+                    p2p_stun_handle_packet(inst, recv_sock_idx, &from, type, pkt, n);
                     continue;
                 }
 

@@ -18,7 +18,7 @@ ret_t p2p_udp_send_packet(struct p2p_instance *inst, const struct sockaddr_in *a
     if (payload_len > 0 && payload)
         P_msg_set(&msgs[n++], payload, payload_len);
 
-    return P_msg_send_to(inst->sock, msgs, n, addr);
+    return P_msg_send_to(p2p_udp_default_fd(inst), msgs, n, addr);
 }
 
 ret_t p2p_turn_send_packet(struct p2p_instance *inst, const struct sockaddr_in *addr,

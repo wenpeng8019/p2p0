@@ -73,8 +73,8 @@ enum {
     LA_S31,  /* "Push local cand<%s:%d> failed(OOM)\n"  [p2p.c] */
     LA_S32,  /* "Push remote cand<%s:%d> failed(OOM)\n"  [p2p_signal_pubsub.c] */
     LA_S33,  /* "resync candidates"  [p2p_signal_relay.c] */
-    LA_S34,  /* "sync candidates"  [p2p_signal_relay.c] */
-    LA_S35,  /* "waiting for peer"  [p2p_signal_relay.c] */
+    LA_S34,  /* disabled "sync candidates" */
+    LA_S35,  /* disabled "waiting for peer" */
 
     /* Formats (LA_F) */
     LA_F36,  /* "  [%d] %s/%d" (%d,%s,%d)  [p2p_route.c] */
@@ -262,8 +262,8 @@ enum {
     LA_F218,  /* "%s: server rejected (no slot)\n" (%s)  [p2p_signal_compact.c] */
     LA_F219,  /* "%s: sess_id=%u req_type=%u code=%u msg=%s\n" (%s,%u,%u,%u,%s)  [p2p_signal_relay.c] */
     LA_F220,  /* "%s: sess_id=%u req_type=%u code=%u\n" (%s,%u,%u,%u)  [p2p_signal_relay.c] */
-    LA_F221,  /* "%s: session established(st=%s peer=%s), %s\n" (%s,%s,%s,%s)  [p2p_signal_relay.c] */
-    LA_F222,  /* "%s: session offer(st=%s peer=%s), waiting for peer\n" (%s,%s,%s)  [p2p_signal_relay.c] */
+    LA_F221,  /* "%s: session established(st=%s peer=%s), syncing\n" (%s,%s,%s)  [p2p_signal_relay.c] */
+    LA_F222,  /* "%s: session offer(st=%s peer=%s), waiting\n" (%s,%s,%s)  [p2p_signal_relay.c] */
     LA_F223,  /* "%s: session reset by peer(st=%s old=%u new=%u), %s\n" (%s,%s,%u,%u,%s)  [p2p_signal_relay.c] */
     LA_F224,  /* "%s: session suspend(st=%s)\n" (%s,%s)  [p2p_signal_relay.c] */
     LA_F225,  /* "%s: session_id changed (old=%u new=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
@@ -505,7 +505,7 @@ enum {
     LA_F461,  /* "congestion detected, new ssthresh: %u, cwnd: %u" (%u,%u)  [p2p_trans_pseudotcp.c] */
     LA_F462,  /* "connection closed by peer"  [p2p.c] */
     LA_F463,  /* "ctr_drbg_seed failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
-    LA_F464,  /* "retry seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
+    LA_F464,  /* "STUN resources released (no active sessions)"  [p2p.c] */
     LA_F465,  /* "send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d" (%u,%u,%s,%d)  [p2p_trans_reliable.c] */
     LA_F466,  /* "ssl_config_defaults failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
     LA_F467,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
@@ -513,6 +513,7 @@ enum {
     LA_F469,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
     LA_F470,  /* "✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
     LA_F471,  /* "%s: recorded peer conn_seq=%u for future CONN_ACK" (%s,%u)  [p2p_nat.c] */
+    LA_F472,  /* "retry seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
 
     LA_NUM
 };

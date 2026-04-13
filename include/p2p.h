@@ -243,10 +243,11 @@ typedef struct {
     /* STUN/TURN 配置 (仅当 use_ice=true 或需要高级诊断时使用) */
     const char*             stun_server;                // STUN 服务器 (例如 stun.l.google.com)
     uint16_t                stun_port;
-    bool                    skip_stun_pending;          // 建立连接时，无需等待 srflx 候选地址通过 stun 收集完成
     bool                    skip_stun_test;             // 跳过 NAT 类型检测（RFC 3489 Test II/III）
                                                         // 大多数公共 STUN 服务器不支持 CHANGE-REQUEST
                                                         // 设为 true 可跳过这些会超时的测试
+    bool                    multi_srflx;                // 多路 Srflx：为每个网卡创建独立 socket 收集映射地址
+                                                        // false(默认) = 仅用一个 socket 收集单个 Srflx
 
     const char*             turn_server;                // TURN 服务器
     uint16_t                turn_port;
@@ -394,7 +395,7 @@ p2p_nat_type(p2p_handle_t hdl);
  * 返回：0 = 成功，-1 = 失败
  */
 p2p_session_t
-p2p_connect(p2p_handle_t hdl, const char *remote_peer_id);
+p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending);
 
 /**
  * 发起优雅关闭。

@@ -88,7 +88,11 @@ void mock_transfer_packets(void) {
 /* 创建虚拟 session */
 struct p2p_session *create_mock_session(void) {
     struct p2p_instance *inst = calloc(1, sizeof(struct p2p_instance));
-    inst->sock = mock_sock;
+    inst->sock_cap = 1;
+    inst->sock_cnt = 1;
+    inst->socks = calloc(1, sizeof(*inst->socks));
+    inst->socks[0].sock = mock_sock;
+    inst->socks[0].state = 2;
 
     struct p2p_session *s = calloc(1, sizeof(struct p2p_session));
     s->inst = inst;
@@ -104,6 +108,7 @@ struct p2p_session *create_mock_session(void) {
 }
 
 void destroy_mock_session(struct p2p_session *s) {
+    free(s->inst->socks);
     free(s->inst);
     free(s);
 }

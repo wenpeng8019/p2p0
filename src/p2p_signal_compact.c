@@ -188,7 +188,7 @@ static int pack_local_candidates(struct p2p_session *s, uint16_t seq, uint8_t *p
     }
 
     // 对于最后一个 SYNC 包，设置 FIN 标志
-    if (seq == 16 || (!s->inst->stun_pending && !s->inst->turn_pending && base_index + cnt >= s->local_cand_cnt)) {
+    if (seq == 16 || (s->inst->srflx_active >= s->inst->srflx_count && !s->inst->turn_pending && base_index + cnt >= s->local_cand_cnt)) {
         *r_flags |= SIG_SYNC_FLAG_FIN;
     }
 
@@ -349,7 +349,7 @@ static void send_rest_candidates_and_fin(struct p2p_session *s, uint64_t now) {
           PROTO, s->id, pkt_cnt, e);
 
     // 首批发完后，如果还有异步候选收集未完成，启动攒批计时器
-    if (s->inst->stun_pending || s->inst->turn_pending)
+    if (s->inst->srflx_active < s->inst->srflx_count || s->inst->turn_pending)
         sess_ctx->trickle_last_pack_time = P_tick_ms();
 
     sess_ctx->sync_send_time = now;
@@ -394,7 +394,7 @@ static void send_trickle_candidates(struct p2p_session *s) {
     print("I:", LA_F("%s trickle (ses_id=%u), cnt=%d, seq=%u \n", LA_F72, 72),
           PROTO, s->id, new_cands, seq);
 
-    sess_ctx->trickle_last_pack_time = s->inst->stun_pending || s->inst->turn_pending ? now : 0;
+    sess_ctx->trickle_last_pack_time = s->inst->srflx_active < s->inst->srflx_count || s->inst->turn_pending ? now : 0;
 }
 
 /*
@@ -562,24 +562,6 @@ static void reset_peer(p2p_compact_session_t *sess_ctx) {
     sess_ctx->resp_session_id = 0;
 }
 
-void p2p_signal_compact_syncable(struct p2p_instance *inst, p2p_compact_ctx_t *ctx) {
-
-    assert(ctx->state == SIG_COMPACT_ONLINE);
-    assert(inst->cfg.skip_stun_pending || inst->stun_pending == 0);
-
-    for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
-        p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
-
-        // 首次变为 SYNCABLE 之前，session 肯定都处于 WAIT SYNCABLE 阶段
-        assert(sess_ctx->remote_peer_id[0] && sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYNCABLE);
-
-        sess_ctx->state = SIG_COMPACT_SESS_WAIT_SYNC0_ACK;
-        send_sync0(inst, s, P_tick_ms());
-        sess_ctx->sync_attempts = 1;
-        print("I:", LA_F("ONLINE: auth_key acquired, auto SYNC0 sent\n", LA_F328, 328));
-    }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -669,24 +651,16 @@ void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flag
     }
     else inst->nat_type = P2P_NAT_UNDETECTABLE;
 
-    bool stun_pending = inst->stun_pending && !inst->cfg.skip_stun_pending;
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
         // 上线完成之前，session 肯定处于 WAIT SYNCABLE 阶段
-        assert(sess_ctx->remote_peer_id[0] && sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYNCABLE);
+        assert(sess_ctx->remote_peer_id[0] && sess_ctx->state == SIG_COMPACT_SESS_WAIT_ONLINE);
 
-        // 如果无需等待 stun 收集的异步候选完成
-        if (!stun_pending) {
-
-            sess_ctx->state = SIG_COMPACT_SESS_WAIT_SYNC0_ACK;
-            send_sync0(inst, s, P_tick_ms());
-            sess_ctx->sync_attempts = 1;
-            print("I:", LA_F("ONLINE: auth_key acquired, auto SYNC0 sent\n", LA_F328, 328));
-        }
-        else {
-            print("I:", LA_F("ONLINE: auth_key acquired, waiting stun pending\n", LA_F329, 329));
-        }
+        sess_ctx->state = SIG_COMPACT_SESS_WAIT_SYNC0_ACK;
+        send_sync0(inst, s, P_tick_ms());
+        sess_ctx->sync_attempts = 1;
+        print("I:", LA_F("ONLINE: auth_key acquired, auto SYNC0 sent\n", LA_F328, 328));
 
         // 根据服务器能力设置探测状态
         if (sig_ctx->feature_msg) {
@@ -812,7 +786,7 @@ void compact_on_sync_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     sess_ctx->candidates_acked |= bit;
 
     // 如果所有动态收集的候选都已经完成
-    if (!s->inst->stun_pending && !s->inst->turn_pending && (seq > 16 || !sess_ctx->trickle_queue[seq])) {
+    if (s->inst->srflx_active >= s->inst->srflx_count && !s->inst->turn_pending && (seq > 16 || !sess_ctx->trickle_queue[seq])) {
 
         // 如果所有的候选队列都已确认被对方接收完成
         if ((sess_ctx->candidates_acked & sess_ctx->candidates_mask) == sess_ctx->candidates_mask) {
@@ -1736,13 +1710,13 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_
     ssss_ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
     // ONLINE_ACK 已收到，且无需等待 stun 返回的异步候选，则立即发 SYNC0
-    if (sig_ctx->state == SIG_COMPACT_ONLINE && (!s->inst->stun_pending || s->inst->cfg.skip_stun_pending)) {
+    if (sig_ctx->state == SIG_COMPACT_ONLINE) {
 
         ssss_ctx->state = SIG_COMPACT_SESS_WAIT_SYNC0_ACK;
         send_sync0(s->inst, s, P_tick_ms());
         ssss_ctx->sync_attempts = 1;
     }
-    else ssss_ctx->state = SIG_COMPACT_SESS_WAIT_SYNCABLE;
+    else ssss_ctx->state = SIG_COMPACT_SESS_WAIT_ONLINE;
 
     return E_NONE;
 }
@@ -1762,7 +1736,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     if (!sess_ctx->remote_peer_id[0]) return E_NONE;        // 没有建立过配对
 
     // 尚未完成配对（WAIT_SYNC0_ACK 之前）：仅清除 remote，无需通知服务器
-    if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYNCABLE)
+    if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_ONLINE)
         sess_ctx->state = SIG_COMPACT_SESS_SUSPENDED;
     if (sess_ctx->state == SIG_COMPACT_SESS_SUSPENDED) {
         *sess_ctx->remote_peer_id = 0;
@@ -1975,14 +1949,11 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
     }
     assert(sig_ctx->state == SIG_COMPACT_ONLINE);
 
-    // 如果需要等待 stun 完成对公网候选的收集
-    if (inst->stun_pending && !inst->cfg.skip_stun_pending) return;
-
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
         // 前面已经确保完成上线、且无需等待 stun 完成对公网候选的收集，所以不应再有 WAIT SYNCABLE 的会话存在了
-        assert(sess_ctx->state != SIG_COMPACT_SESS_WAIT_SYNCABLE);
+        assert(sess_ctx->state != SIG_COMPACT_SESS_WAIT_ONLINE);
         if (sess_ctx->state == SIG_COMPACT_SESS_SUSPENDED) continue;
 
         // WAIT_SYNC0_ACK 状态：SYNC0 重传

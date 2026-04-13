@@ -242,7 +242,7 @@ void reliable_tick(struct p2p_session *s) {
             e->retx_count++;
             r->rto = r->rto * 2;
             if (r->rto > RELIABLE_RTO_MAX) r->rto = RELIABLE_RTO_MAX;
-            print("W:", LA_F("retry seq=%u retx=%d rto=%d", LA_F464, 464),
+            print("W:", LA_F("retry seq=%u retx=%d rto=%d", LA_F472, 472),
                          e->seq, e->retx_count, r->rto);
         }
     }

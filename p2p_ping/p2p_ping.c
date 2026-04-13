@@ -34,10 +34,12 @@ ARGS_S(false, gist,         0,   "gist",         LA_CS("GitHub Gist ID for Publi
 ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", LA_S33, 33));
 ARGS_S(false, to,           't', "to",           LA_CS("Target Peer Name (if specified: active role)", LA_S27, 27));
 ARGS_S(false, stun,         0,   "stun",         LA_CS("STUN server address", LA_S26, 26));
+ARGS_B(false, wait_stun,     0,  "wait-stun",    LA_CS("Wait for STUN srflx candidates before sync", LA_S34, 34));
+ARGS_B(false, skip_stun_test, 0, "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", LA_S25, 25));
+ARGS_B(false, multi_srflx,   0,  "multi-srflx",  LA_CS("Enable multi-path Srflx (per-interface STUN)", 0, 0));
 ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S29, 29));
 ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S30, 30));
 ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S28, 28));
-ARGS_B(false, skip_stun_test, 0, "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", LA_S25, 25));
 ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S13, 13));
 ARGS_B(false, no_host,      0,   "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S14, 14));
 ARGS_B(false, no_srflx,     0,   "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S17, 17));
@@ -427,10 +429,12 @@ int main(int argc, char *argv[]) {
         &ARGS_DEF_name,
         &ARGS_DEF_to,
         &ARGS_DEF_stun,
+        &ARGS_DEF_wait_stun,
+        &ARGS_DEF_skip_stun_test,
+        &ARGS_DEF_multi_srflx,
         &ARGS_DEF_turn,
         &ARGS_DEF_turn_user,
         &ARGS_DEF_turn_pass,
-        &ARGS_DEF_skip_stun_test,
         &ARGS_DEF_log,
         &ARGS_DEF_debugger,
         &ARGS_DEF_no_host,
@@ -486,6 +490,7 @@ int main(int argc, char *argv[]) {
     cfg.turn_user       = ARGS_turn_user.str;
     cfg.turn_pass       = ARGS_turn_pass.str;
     cfg.skip_stun_test  = ARGS_skip_stun_test.i64 ? true : false;
+    cfg.multi_srflx     = ARGS_multi_srflx.i64 ? true : false;
     cfg.server_host     = server_host;
     cfg.server_port     = server_port;
     cfg.gh_token        = ARGS_github.str;
@@ -559,7 +564,7 @@ int main(int argc, char *argv[]) {
     uint64_t connect_retry_at = 0;
 
     if (target_name) {
-        g_session = p2p_connect(hdl, target_name);
+        g_session = p2p_connect(hdl, target_name, ARGS_wait_stun.i64 ? true : false);
         if (!g_session) {
             print("E:", LA_F("Failed to initialize connection\n", LA_F37, 37));
             return 1;
@@ -606,7 +611,7 @@ int main(int argc, char *argv[]) {
             && (st == P2P_STATE_INIT || st == P2P_STATE_CLOSED)
             && P_tick_ms() >= connect_retry_at) {
             if (g_session) { p2p_close(g_session); g_session = NULL; }
-            g_session = p2p_connect(hdl, target_name);
+            g_session = p2p_connect(hdl, target_name, ARGS_wait_stun.i64 ? true : false);
             if (!g_session) {
                 print("E:", LA_F("Failed to initialize connection\n", LA_F37, 37));
                 break;

@@ -258,17 +258,43 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
     p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
 
-    uint8_t payload[P2P_PEER_ID_MAX + 1];
+    assert(sess_ctx->state == SIG_RELAY_SESS_WAIT_SYNC0_ACK);
+    assert(!sess_ctx->candidate_syncing_base && !sess_ctx->candidate_synced_count);
+    assert(!sess_ctx->trickle_last_time);
+
+    uint8_t payload[P2P_MAX_PAYLOAD]; int payload_len;
     memset(payload, 0, sizeof(payload));
     strncpy((char*)payload, sess_ctx->remote_peer_id, P2P_PEER_ID_MAX - 1);
-    payload[P2P_PEER_ID_MAX] = 0; // 目前 SYNC0 不携带候选，候选通过后续 SYNC 上送
 
-    if (tcp_send(sig_ctx, PROTO, P2P_RLY_SYNC0, payload, sizeof(payload), now) != E_NONE) {
+    // 如果需要延迟等待 stun ready，则 SYNC0 不携带候选
+    if (P2P_SESSION_WAITING_STUN(s)) { payload[P2P_PEER_ID_MAX] = 0; payload_len = P2P_PEER_ID_MAX + 1; }
+    // 初始携带的候选
+    else {
+
+        int cand_cnt = s->local_cand_cnt;
+        if (cand_cnt > sig_ctx->candidate_sync_max)
+            cand_cnt = sig_ctx->candidate_sync_max;
+
+        payload[P2P_PEER_ID_MAX] = (uint8_t)cand_cnt;
+
+        payload_len = (int)P2P_RLY_SYNC0_PSZ(0);
+        for (int i = 0; i < cand_cnt; i++) {
+            pack_candidate(&s->local_cands[i], payload + payload_len);
+            payload_len += (int)sizeof(p2p_candidate_t);
+        }
+    }
+
+    int cand_sent = payload[P2P_PEER_ID_MAX];
+
+    if (tcp_send(sig_ctx, PROTO, P2P_RLY_SYNC0, payload, payload_len, now) != E_NONE) {
         return;
     }
 
+    // SYNC0 携带的候选视为已发送（服务器转发后会回 SYNC_ACK 确认）
+    sess_ctx->candidate_syncing_base = cand_sent;
+
     print("V:", LA_F("%s sent, target='%s' cand=%u\n", LA_F68, 68),
-          PROTO, sess_ctx->remote_peer_id, 0);
+          PROTO, sess_ctx->remote_peer_id, cand_sent);
 }
 
 /*
@@ -309,7 +335,7 @@ static void send_sync(struct p2p_session *s, uint64_t now) {
         else { cand_cnt = remaining;
 
             // 如果已经没有待定的候选地址，追加 fin_marker = 0xFF
-            if (!s->inst->stun_pending && !s->inst->turn_pending) remaining = 0;
+            if (s->inst->srflx_active >= s->inst->srflx_count && !s->inst->turn_pending) remaining = 0;
             // 否则启动攒批机制
             else { sess_ctx->trickle_last_time = now; sig_ctx->trickle_sessions++; }
         }
@@ -324,7 +350,7 @@ static void send_sync(struct p2p_session *s, uint64_t now) {
         if (!remaining) payload[payload_len++] = P2P_RLY_SYNC_FIN_MARKER;
     }
     // 此时调用者要确保已经没有待定的候选地址
-    else { assert(!s->inst->stun_pending && !s->inst->turn_pending);
+    else { assert(s->inst->srflx_active >= s->inst->srflx_count && !s->inst->turn_pending);
 
         remaining = cand_cnt = 0;
 
@@ -376,26 +402,11 @@ void p2p_signal_relay_init(p2p_relay_ctx_t *ctx) {
 
 static void reset_peer(p2p_relay_session_t *sess_ctx, p2p_relay_ctx_t *sig_ctx) {
 
-    if (sess_ctx->trickle_last_time) sig_ctx->trickle_sessions--;
     sess_ctx->candidate_syncing_base = 0;
     sess_ctx->candidate_synced_count = 0;
-    sess_ctx->trickle_last_time = 0;
-}
-
-void p2p_signal_relay_syncable(struct p2p_instance *inst, p2p_relay_ctx_t *ctx) {
-
-    assert(ctx->state == SIG_RELAY_ONLINE);
-    assert(inst->cfg.skip_stun_pending || inst->stun_pending == 0);
-
-    for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
-        p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
-
-        // 首次变为 SYNCABLE 之前，session 肯定都处于 WAIT SYNCABLE 阶段
-        assert(sess_ctx->remote_peer_id[0] && sess_ctx->state == SIG_RELAY_SESS_WAIT_SYNCABLE);
-
-        sess_ctx->state = SIG_RELAY_SESS_WAIT_SYNC0_ACK;
-        send_sync0(inst, s, P_tick_ms());
-        print("I:", LA_F("%s: syncable ready, auto SYNC0 sent\n", LA_F237, 237"ONLINE", LA_F475, 475), TASK_TOUCH);
+    if (sess_ctx->trickle_last_time) {
+        sig_ctx->trickle_sessions--;
+        sess_ctx->trickle_last_time = 0;
     }
 }
 
@@ -456,7 +467,7 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
     // 切换到 ONLINE 状态
     sig_ctx->state = SIG_RELAY_ONLINE;
     inst->state = P2P_SIG_ST_READY;
-    print("I:", LA_F("%s: ready to start session\n", LA_F197, 197"ONLINE" LA_F518, 518), TASK_ONLINE);
+    print("I:", LA_F("%s: ready to start session\n", LA_F197, 197), TASK_ONLINE);
 
     // 如果服务器支持数据中继
     if (sig_ctx->feature_relay) {
@@ -469,23 +480,16 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
         print("I:", LA_F("%s: SIGNALING path enabled (server supports relay)\n", LA_F95, 95), TASK_ONLINE);
     }
 
-    bool stun_pending = inst->stun_pending && !inst->cfg.skip_stun_pending;
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
 
-        // 上线完成之前，session 肯定处于 WAIT SYNCABLE 阶段
-        assert(sess_ctx->remote_peer_id[0] && sess_ctx->state == SIG_RELAY_SESS_WAIT_SYNCABLE);
+        // 上线完成之前，session 肯定处于 WAIT ONLINE 阶段
+        assert(sess_ctx->remote_peer_id[0] && sess_ctx->state <= SIG_RELAY_SESS_WAIT_ONLINE);
+        if (sess_ctx->state != SIG_RELAY_SESS_WAIT_ONLINE) continue;
 
-        // 如果无需等待 stun 收集的异步候选完成
-        if (!stun_pending) {
-
-            sess_ctx->state = SIG_RELAY_SESS_WAIT_SYNC0_ACK;
-            send_sync0(inst, s, now);
-            print("I:", LA_F("%s: auth_key acquired, auto SYNC0 sent\n", LA_F112, 112"ONLINE", LA_F475, 475), TASK_TOUCH);
-        }
-        else {
-            print("I:", LA_F("%s: auth_key acquired, waiting stun pending\n", LA_F113, 113"ONLINE", LA_F476, 476), TASK_TOUCH);
-        }
+        sess_ctx->state = SIG_RELAY_SESS_WAIT_SYNC0_ACK;
+        print("I:", LA_F("%s: auth_key acquired, auto SYNC0 sent\n", LA_F112, 112), TASK_TOUCH);
+        send_sync0(inst, s, now);
 
         // 根据服务器能力设置探测状态
         if (sig_ctx->feature_msg) {
@@ -569,7 +573,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
         if (sig_ctx->state >= SIG_RELAY_ONLINE) {
             sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
             s->state = P2P_STATE_WAITING;
-            print("I:", LA_F("[ST:%s] peer went offline, waiting for reconnect\n", LA_F460, 460"WAIT_PEER", LA_F575, 575));
+            print("I:", LA_F("[ST:%s] peer went offline, waiting for reconnect\n", LA_F460, 460), "WAIT_PEER");
         }
     }
     // NOT_ONLINE / PROTOCOL / INTERNAL / UNKNOWN → 致命错误
@@ -597,30 +601,44 @@ static void handle_sync0_ack(struct p2p_session *s, const uint8_t *payload, uint
     print("V:", LA_F("%s: accepted (ses_id=%u), peer=%s\n", LA_F102, 102),
           TASK_TOUCH, s->id, payload[0] ? "online" : "offline");
 
+    sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
     assert(s->state == P2P_STATE_SIGNALING);
     s->state = P2P_STATE_WAITING;
 
-    // SYNC0_ACK 只代表会话建立；候选交换需等待对端在线
-    sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
+    // 如果对端未在线
     if (!payload[0]) {
-        print("I:", LA_F("%s: session offer(st=%s peer=%s), waiting for peer\n", LA_F222, 222"WAIT_PEER", LA_F576, 576),
-                TASK_TOUCH, "WAIT_PEER", "online", LA_S("waiting for peer", LA_S35, 35));
+        print("I:", LA_F("%s: session offer(st=%s peer=%s), %s\n", LA_F576, 576),
+                TASK_TOUCH, "WAIT_PEER", "offline", LA_S("waiting for peer", LA_S35, 35));
         return;
     }
 
-    // 切换到 SYNCING 状态，开始上传候选
-    sess_ctx->state = SIG_RELAY_SESS_SYNCING;
-    print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", LA_F221, 221"SYNCING" 0, 0),
-          TASK_TOUCH, "SYNCING", "offline", LA_S("sync candidates", LA_S34, 34));
-
-    // 同步发送首批候选（如果有）
-    assert(sess_ctx->candidate_syncing_base == 0);
-    if (s->local_cand_cnt || (!s->inst->stun_pending && !s->inst->turn_pending))
-        send_sync(s, now);
-    else { sess_ctx->trickle_last_time = now; s->inst->sig_ctx.relay.trickle_sessions++; }
-
-    // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
+    // 首次确认双方在线，启动 NAT 打洞（即使当前还没收到远程候选也要启动，用于实现打洞整体超时后 fallback 到信令中转）
+    // + 该操作会触发 p2p_connecting，并启动 p2p_stun_collect
     nat_punch(s, -1/* all candidates */);
+
+    // 如果需要等待 stun 收集完成再同步
+    if (P2P_SESSION_WAITING_STUN(s)) {
+
+        sess_ctx->state = SIG_RELAY_SESS_WAIT_STUN;
+        print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", 0, 0),
+              TASK_TOUCH, "WAIT_STUN", "online", LA_S("waiting stun pending", 0, 0));
+    }
+    // 否则直接进入 SYNCING 状态，开始上传候选
+    else {
+
+        sess_ctx->state = SIG_RELAY_SESS_SYNCING;
+        print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", 0, 0),
+              TASK_TOUCH, "SYNCING", "online", LA_S("sync candidates", LA_S34, 34));
+
+        // SYNC0 携带的候选可能尚未被 SYNC_ACK 确认（TCP 保序：SYNC0_ACK 先于 SYNC_ACK 到达）
+        // 如果 SYNC0 候选已确认（或未携带候选），立即发送后续候选
+        if (sess_ctx->candidate_synced_count == sess_ctx->candidate_syncing_base) {
+            if (sess_ctx->candidate_syncing_base < (uint16_t)s->local_cand_cnt || !P2P_CAND_PENDING(s->inst))
+                send_sync(s, now);
+            else { sess_ctx->trickle_last_time = now; s->inst->sig_ctx.relay.trickle_sessions++; }
+        }
+        // 否则等待 SYNC_ACK 确认后再由 handle_sync_ack 触发后续发送
+    }
 }
 
 /*
@@ -652,7 +670,7 @@ static void handle_sync_ack(struct p2p_session *s, const uint8_t *payload, int l
 
         // 对账：如果本地此时还有候选(或fin)未同步
         if (sess_ctx->candidate_synced_count < s->local_cand_cnt || sess_ctx->candidate_syncing_base <= s->local_cand_cnt) {
-            int n = s->local_cand_cnt + s->inst->stun_pending + s->inst->turn_pending;
+            int n = s->local_cand_cnt + (s->inst->srflx_count - s->inst->srflx_active) + s->inst->turn_pending;
             print("E:", LA_F("%s: sync fin ack, but cand synced cnt not match sent cnt (cand=%d synced=%d)\n", LA_F234, 234),
                   TASK_SYNC, n, sess_ctx->candidate_synced_count);
             return;
@@ -682,7 +700,7 @@ static void handle_sync_ack(struct p2p_session *s, const uint8_t *payload, int l
     if (sess_ctx->candidate_synced_count == sess_ctx->candidate_syncing_base) {
 
         // 如果已没有待收集的候选了
-        if (!s->inst->stun_pending && !s->inst->turn_pending) {
+        if (s->inst->srflx_active >= s->inst->srflx_count && !s->inst->turn_pending) {
             if (sess_ctx->trickle_last_time) { sess_ctx->trickle_last_time = 0; s->inst->sig_ctx.relay.trickle_sessions--; }
             send_sync(s, now);
         }
@@ -707,7 +725,7 @@ static void handle_sync_ack(struct p2p_session *s, const uint8_t *payload, int l
 static void handle_peer_sync(struct p2p_session *s, const uint8_t *payload, int len, uint64_t now) { (void)now;
 
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
-    if (sess_ctx->state != SIG_RELAY_SESS_SYNCING) {
+    if (sess_ctx->state != SIG_RELAY_SESS_SYNCING && sess_ctx->state != SIG_RELAY_SESS_WAIT_STUN) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), TASK_SYNC_REMOTE, (int)sess_ctx->state);
         return;
     }
@@ -1037,6 +1055,9 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             assert(s->id);
             if (s->id != session_id) {
 
+                // 重置信令层会话状态
+                reset_peer(sess_ctx, sig_ctx);
+
                 // 通知业务层连接断开（session 被对方重置）
                 if (s->state >= P2P_STATE_LOST) {
                     if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, s->state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
@@ -1045,42 +1066,46 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 // 重置 p2p 会话
                 p2p_session_reset(s, false);
 
-                // 重置信令层会话状态
-                reset_peer(sess_ctx, sig_ctx);
-
+                // 初始化 p2p 新会话状态
                 uint32_t old_id = s->id;
                 s->id = session_id;
+                s->state = P2P_STATE_WAITING;
 
-                sess_ctx->state = SIG_RELAY_SESS_SYNCING;
-                print("W:", LA_F("%s: session reset by peer(st=%s old=%u new=%u), %s\n", LA_F223, 223),
-                        TASK_TOUCH, "SYNCING", old_id, session_id, LA_S("resync candidates", LA_S33, 33));
-                session_id = 0;
+                sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
+                print("W:", LA_F("%s: session reset by peer(old=%u new=%u), %s\n", LA_F223, 223),
+                        TASK_TOUCH, old_id, session_id, LA_S("resync for peer", LA_S33, 33));
             }
+
             // 首次收到 SYNC0 视为对端上线，启动候选交换
-            else if (sess_ctx->state == SIG_RELAY_SESS_WAIT_PEER) {
+            if (sess_ctx->state == SIG_RELAY_SESS_WAIT_PEER) {
 
-                sess_ctx->state = SIG_RELAY_SESS_SYNCING;
-                print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", LA_F221, 221"SYNCING" 0, 0),
-                        TASK_TOUCH, "SYNCING", "offline", LA_S("sync candidates", LA_S34, 34));
-                session_id = 0;
+                // 首次确认双方在线，启动 NAT 打洞
+                // + 该操作会触发 p2p_connecting，并启动 p2p_stun_collect
+                nat_punch(s, -1/* all candidates */);
+
+                if (P2P_SESSION_WAITING_STUN(s)) {
+                    sess_ctx->state = SIG_RELAY_SESS_WAIT_STUN;
+                    print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", 0, 0),
+                                  TASK_TOUCH, "WAIT_STUN", "sync0", LA_S("waiting stun pending", 0, 0));
+                }
+                else {
+                    sess_ctx->state = SIG_RELAY_SESS_SYNCING;
+                    print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", LA_F221, 221),
+                            TASK_TOUCH, "SYNCING", "sync0", LA_S("sync candidates", LA_S34, 34));
+
+                    // SYNC0 携带的候选可能尚未被 SYNC_ACK 确认
+                    if (sess_ctx->candidate_synced_count == sess_ctx->candidate_syncing_base) {
+                        if (sess_ctx->candidate_syncing_base < (uint16_t)s->local_cand_cnt || !P2P_CAND_PENDING(s->inst))
+                            send_sync(s, now);
+                        else { sess_ctx->trickle_last_time = now; sig_ctx->trickle_sessions++; }
+                    }
+                }
             }
-            // 可能已经在 sync0_ack 时进入到了 SYNCING 状态了
-            else if (sess_ctx->state != SIG_RELAY_SESS_SYNCING) {
+            // 可能已经在（本端的）sync0_ack 时就直接进入到了 SYNCING 状态了
+            // + 对于这种情况，则肯定已经执行过 nat_punch -1 了
+            else if (sess_ctx->state != SIG_RELAY_SESS_SYNCING && sess_ctx->state != SIG_RELAY_SESS_WAIT_STUN) {
                 print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sess_ctx->state);
                 return;
-            }
-
-            // 对端发起会话初始化连接（首次从 WAIT_PEER 转换过来）
-            if (!session_id) {
-
-                // 同步发送首批候选（如果有）
-                assert(sess_ctx->candidate_syncing_base == 0);
-                if (s->local_cand_cnt || (!s->inst->stun_pending && !s->inst->turn_pending))
-                    send_sync(s, now);
-                else { sess_ctx->trickle_last_time = now; sig_ctx->trickle_sessions++; }
-
-                // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
-                nat_punch(s, -1/* all candidates */);
             }
 
             // 如果存在首批同步的数据
@@ -1229,6 +1254,65 @@ ret_t p2p_signal_relay_offline(struct p2p_instance *inst) {
     return E_NONE;
 }
 
+//-----------------------------------------------------------------------------
+
+void p2p_signal_relay_stun_ready(struct p2p_session *s) {
+
+    assert(s->inst->srflx_active >= s->inst->srflx_count);
+
+    p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
+
+    if (sess_ctx->state == SIG_RELAY_SESS_WAIT_STUN) {
+
+        sess_ctx->state = SIG_RELAY_SESS_SYNCING;
+        print("I:", LA_F("%s: stun collection ready, auto SYNC sent\n", LA_F475, 475), TASK_TOUCH);
+
+        // 同步发送首批候选（如果有）
+        assert(sess_ctx->candidate_syncing_base == 0);
+        if (s->local_cand_cnt || !s->inst->turn_pending)
+            send_sync(s, P_tick_ms());
+        else { sess_ctx->trickle_last_time = P_tick_ms(); s->inst->sig_ctx.relay.trickle_sessions++; }
+    }
+}
+
+void p2p_signal_relay_trickle_candidate(struct p2p_session *s) {
+
+    p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
+
+    if (sess_ctx->state == SIG_RELAY_SESS_SYNCING) {
+
+        // 还没进入 trickle 阶段
+        // + 也就是 sync_ack 首次将现有的候选全部同步完成，但又存在待收集的异步候选（如 STUN/TURN）
+        if (!sess_ctx->trickle_last_time) return;
+
+        // 检查是否有新候选
+        if (sess_ctx->candidate_syncing_base >= s->local_cand_cnt) {
+            assert(sess_ctx->candidate_syncing_base == s->local_cand_cnt);
+            return;
+        }
+
+        // 如果上次发送后还没有收到对端的 SYNC_AC
+        if (sess_ctx->candidate_synced_count < sess_ctx->candidate_syncing_base) return;
+        assert(sess_ctx->candidate_synced_count == sess_ctx->candidate_syncing_base);
+
+        // 发送控制：如果已没有待收集的候选了
+        if (s->inst->srflx_active >= s->inst->srflx_count && !s->inst->turn_pending) {
+
+            sess_ctx->trickle_last_time = 0; s->inst->sig_ctx.relay.trickle_sessions--;
+            send_sync(s, P_tick_ms());
+        }
+        // 或已经积累了足够的候选；又或者距离上次发送已经超过攒批时间窗口了
+        else if ((s->local_cand_cnt - sess_ctx->candidate_syncing_base >= s->inst->sig_ctx.relay.candidate_sync_max) ||
+                 (P_tick_ms() - sess_ctx->trickle_last_time) >= P2P_RELAY_TRICKLE_BATCH_MS) {
+
+            send_sync(s, P_tick_ms());
+        }
+    }
+    // todo: >SIG_RELAY_SESS_SYNCING 用于动态更新 srflx 地址的变更
+}
+
+//-----------------------------------------------------------------------------
+
 ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id) {
 
     P_check(remote_peer_id && remote_peer_id[0], return E_INVALID;)
@@ -1249,13 +1333,12 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
     strncpy(sess_ctx->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
     sess_ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
-
     // 已上线：立即发送 SYNC0；否则等待 ONLINE_ACK 后自动触发
-    if (sig_ctx->state == SIG_RELAY_ONLINE && (!s->inst->stun_pending || s->inst->cfg.skip_stun_pending)) {
+    if (sig_ctx->state == SIG_RELAY_ONLINE) {
         sess_ctx->state = SIG_RELAY_SESS_WAIT_SYNC0_ACK;
         send_sync0(s->inst, s, P_tick_ms());
     }
-    else sess_ctx->state = SIG_RELAY_SESS_WAIT_SYNCABLE;
+    else sess_ctx->state = SIG_RELAY_SESS_WAIT_ONLINE;
 
     return E_NONE;
 }
@@ -1266,7 +1349,7 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
     if (!sess_ctx->remote_peer_id[0]) return E_NONE;        // 没有建立过配对
 
     // 如果尚未完成在线：直接取消 connect 连接状态
-    if (sess_ctx->state == SIG_RELAY_SESS_WAIT_SYNCABLE)
+    if (sess_ctx->state == SIG_RELAY_SESS_WAIT_ONLINE)
         sess_ctx->state = SIG_RELAY_SESS_SUSPENDED;
     if (sess_ctx->state == SIG_RELAY_SESS_SUSPENDED) {
         *sess_ctx->remote_peer_id = 0;
@@ -1280,7 +1363,7 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
 
     print("I:", LA_F("[R] Disconnected, back to ONLINE state\n", LA_F443, 443));
 
-    // 发送 FIN 消息
+    // 发送 FIN 消息, fixme 为啥是 compact_send_fin ？
     compact_send_fin(s);
 
     // 清理 peer 会话状态
@@ -1290,41 +1373,6 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
     // 清理会话状态
     s->id = 0;
     return E_NONE;
-}
-
-void p2p_signal_relay_trickle_candidate(struct p2p_session *s) {
-
-    p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
-    P_check(sess_ctx->state <= SIG_RELAY_SESS_SYNCING, return;)
-
-    // 还没进入 trickle 阶段
-    // + 也就是 sync_ack 首次将现有的候选全部同步完成，但又存在待收集的异步候选（如 STUN/TURN）
-    if (!sess_ctx->trickle_last_time) return;
-
-    // 检查是否有新候选
-    if (sess_ctx->candidate_syncing_base >= s->local_cand_cnt) {
-        assert(sess_ctx->candidate_syncing_base == s->local_cand_cnt);
-        return;
-    }
-
-    // 如果上次发送后还没有收到对端的 SYNC_AC
-    if (sess_ctx->candidate_synced_count < sess_ctx->candidate_syncing_base) {
-        return;
-    }
-    assert(sess_ctx->candidate_synced_count == sess_ctx->candidate_syncing_base);
-
-    // 发送控制：如果已没有待收集的候选了
-    if (!s->inst->stun_pending && !s->inst->turn_pending) {
-
-        sess_ctx->trickle_last_time = 0; s->inst->sig_ctx.relay.trickle_sessions--;
-        send_sync(s, P_tick_ms());
-    }
-    // 或已经积累了足够的候选；又或者距离上次发送已经超过攒批时间窗口了
-    else if ((s->local_cand_cnt - sess_ctx->candidate_syncing_base >= s->inst->sig_ctx.relay.candidate_sync_max) ||
-             (P_tick_ms() - sess_ctx->trickle_last_time) >= P2P_RELAY_TRICKLE_BATCH_MS) {
-
-        send_sync(s, P_tick_ms());
-    }
 }
 
 /*

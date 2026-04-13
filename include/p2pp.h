@@ -815,7 +815,8 @@ typedef struct {
  *   - candidate_sync_max: 单包最大候选数（0=客户端用默认）
  */
 #define P2P_RLY_ONLINE_ACK_PSZ      2
- /* P2P_RLY_SYNC0 (双向，上下行负载格式不同):
+/* P2P_RLY_SYNC0 (双向，上下行负载格式不同):
+ * + 注意一个细节，SYNC0 的候选肯定不带有 FIN 标识，也就是 SYN0 肯定不是最后一个 SYNC 包
  *
  *   上行 Client -> Server:
  *     payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
@@ -824,7 +825,7 @@ typedef struct {
  *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *
  *   下行 Server -> Client（转发对端的首批候选）:
- *     payload: [source_name(32)][session_id(P2P_SESS_ID_PSZ)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ *     payload: [source_name(32)][session_id(P2P_SESS_ID_PSZ)][candidate_count(1)][candidates(N*23)]
  *     - 格式同 P2P_RLY_SYNC，表示对端重新发起了连接
  *     - 接收端应据此重置会话状态（session_id 变化时强制 p2p_session_reset）
  */

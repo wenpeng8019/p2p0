@@ -149,7 +149,7 @@ typedef struct {
 
 typedef enum {
     SIG_COMPACT_SESS_SUSPENDED = 0,                         /* 挂起的 session，连接过程超时挂起。报错逻辑统一在 p2p_compact_ctx_t 中处理 */
-    SIG_COMPACT_SESS_WAIT_SYNCABLE,                         /* 执行 connect() 创建了 session，但信令服务还未完成在线登录；或等待 stun 完成候选地址收集 */
+    SIG_COMPACT_SESS_WAIT_ONLINE,                           /* 执行 connect() 创建了 session，但信令服务还未完成在线登录 */
     SIG_COMPACT_SESS_WAIT_SYNC0_ACK,                        /* 已发送 SYNC0，等待 SYNC0_ACK */
     SIG_COMPACT_SESS_WAIT_PEER,                             /* 已收到 SYNC0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
     SIG_COMPACT_SESS_SYNCING,                               /* 收到 PEER SYNC0 或 SYNC0_ACK online=1，向对方同步后续候选队列和 FIN */
@@ -207,11 +207,6 @@ typedef struct {
  * 初始化信令上下文
  */
 void p2p_signal_compact_init(p2p_compact_ctx_t *ctx);
-
-/*
- * 信令（首次）变为可 sync 状态
- */
-void p2p_signal_compact_syncable(struct p2p_instance *inst, p2p_compact_ctx_t *ctx);
 
 /*
  * 信令服务周期维护（拉取阶段）— 注册重试、保活
