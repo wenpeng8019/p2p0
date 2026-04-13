@@ -64,25 +64,26 @@ static inline void gather_local_candidates(struct p2p_session *s) {
 
         if (inst->sock_cnt > 0 && inst->socks) {
 
-            int host_index = 0;  /* 用于区分多个 Host 候选的本地偏好值 */
+            const route_ctx_t *rt = route_shared_get(); int host_index = 0;
 
-            for (int i = 0; i < inst->sock_cnt; i++) {
+            // socks[0] 绑定 INADDR_ANY：展开为路由表中的每个真实网卡地址
+            // socks[1..N] 是多路 srflx 收集专用（随机端口），不作为 HOST 候选
+            uint16_t port = inst->socks[0].local_addr.sin_port;
+            for (int r = 0; r < rt->addr_count; r++) {
                 int idx = p2p_cand_push_local(s);
-                if (idx < 0) {
-                    print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S31, 31),
-                          inet_ntoa(inst->socks[i].local_addr.sin_addr), ntohs(inst->socks[i].local_addr.sin_port));
-                    return;
-                }
+                if (idx < 0) { print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S31, 31),
+                        inet_ntoa(rt->local_addrs[r].sin_addr), ntohs(port)); return; }
 
                 p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                 c->type = P2P_CAND_HOST;
-                c->addr = inst->socks[i].local_addr;
+                c->addr = rt->local_addrs[r];
+                c->addr.sin_port = port;
 
                 uint16_t local_pref = (uint16_t)(65535 - host_index++);
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
 
                 print("I:", LA_F("Gathered Host candidate: %s:%d (priority=0x%08x)", LA_F299, 299),
-                      inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                        inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
             }
         }
         else print("W:", LA_F("No shared local route addresses available, host candidates skipped", LA_F326, 326));

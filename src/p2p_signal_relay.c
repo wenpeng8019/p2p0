@@ -700,16 +700,21 @@ static void handle_sync_ack(struct p2p_session *s, const uint8_t *payload, int l
     if (sess_ctx->candidate_synced_count == sess_ctx->candidate_syncing_base) {
 
         // 如果已没有待收集的候选了
-        if (s->inst->srflx_active >= s->inst->srflx_count && !s->inst->turn_pending) {
+        if (!P2P_CAND_PENDING(s->inst)) {
             if (sess_ctx->trickle_last_time) { sess_ctx->trickle_last_time = 0; s->inst->sig_ctx.relay.trickle_sessions--; }
             send_sync(s, now);
         }
         // 或已经积累了足够的候选；又或者还没进入攒批阶段; 或距离上次发送已经超过攒批时间窗口了
-        else if ((s->local_cand_cnt - sess_ctx->candidate_syncing_base >= s->inst->sig_ctx.relay.candidate_sync_max) ||
-                 !sess_ctx->trickle_last_time ||
-                 (P_tick_ms() - sess_ctx->trickle_last_time) >= P2P_RELAY_TRICKLE_BATCH_MS) {
+        else if (sess_ctx->candidate_syncing_base < (uint16_t)s->local_cand_cnt &&
+                 ((s->local_cand_cnt - sess_ctx->candidate_syncing_base >= s->inst->sig_ctx.relay.candidate_sync_max) ||
+                  !sess_ctx->trickle_last_time ||
+                  (P_tick_ms() - sess_ctx->trickle_last_time) >= P2P_RELAY_TRICKLE_BATCH_MS)) {
 
             send_sync(s, now);
+        }
+        // 还有候选待收集但当前已全部发完，进入攒批等待
+        else if (!sess_ctx->trickle_last_time) {
+            sess_ctx->trickle_last_time = P_tick_ms(); s->inst->sig_ctx.relay.trickle_sessions++;
         }
     }
 }

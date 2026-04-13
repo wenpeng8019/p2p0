@@ -267,8 +267,76 @@ endif()
 
 # 添加测试
 enable_testing()
+
+# --- 独立单元测试（无外部依赖） ---
 add_test(NAME test_transport     COMMAND test_transport)
 if(WITH_WSLAY)
     add_test(NAME test_ws                    COMMAND test_ws)
     add_test(NAME test_ws_server_integration COMMAND test_ws_server_integration)
 endif()
+
+# --- COMPACT 协议测试（需要 p2p_server） ---
+set(SERVER_PATH $<TARGET_FILE:p2p_server>)
+
+add_test(NAME test_compact_register  COMMAND test_compact_register  ${SERVER_PATH})
+add_test(NAME test_compact_sync      COMMAND test_compact_sync      ${SERVER_PATH})
+add_test(NAME test_compact_lifecycle COMMAND test_compact_lifecycle  ${SERVER_PATH})
+add_test(NAME test_compact_rpc       COMMAND test_compact_rpc       ${SERVER_PATH})
+add_test(NAME test_compact_relay     COMMAND test_compact_relay      ${SERVER_PATH})
+
+# --- RELAY 协议测试（需要 p2p_server） ---
+add_test(NAME test_relay_register    COMMAND test_relay_register    ${SERVER_PATH})
+add_test(NAME test_relay_lifecycle   COMMAND test_relay_lifecycle   ${SERVER_PATH})
+add_test(NAME test_relay_data        COMMAND test_relay_data        ${SERVER_PATH})
+add_test(NAME test_relay_rpc         COMMAND test_relay_rpc         ${SERVER_PATH})
+
+# --- 端到端测试 COMPACT（需要 p2p_ping + p2p_server） ---
+set(PING_PATH $<TARGET_FILE:p2p_ping>)
+
+add_test(NAME test_ping_c_template   COMMAND test_ping_c_template   ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_c_connect    COMMAND test_ping_c_connect    ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_c_msg        COMMAND test_ping_c_msg        ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_c_sync       COMMAND test_ping_c_sync       ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_c_reconnect  COMMAND test_ping_c_reconnect  ${PING_PATH} ${SERVER_PATH})
+
+# --- 端到端测试 RELAY（需要 p2p_ping + p2p_server） ---
+add_test(NAME test_ping_r_template   COMMAND test_ping_r_template   ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_r_msg        COMMAND test_ping_r_msg        ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_r_sync       COMMAND test_ping_r_sync       ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_r_reconnect  COMMAND test_ping_r_reconnect  ${PING_PATH} ${SERVER_PATH})
+
+# --- 测试标签（用于分组运行：ctest -L unit / ctest -L protocol / ctest -L e2e） ---
+set_tests_properties(test_transport PROPERTIES LABELS "unit")
+if(WITH_WSLAY)
+    set_tests_properties(test_ws test_ws_server_integration PROPERTIES LABELS "unit")
+endif()
+
+set_tests_properties(
+    test_compact_register test_compact_sync test_compact_lifecycle
+    test_compact_rpc test_compact_relay
+    test_relay_register test_relay_lifecycle test_relay_data test_relay_rpc
+    PROPERTIES LABELS "protocol"
+)
+
+set_tests_properties(
+    test_ping_c_template test_ping_c_connect test_ping_c_msg
+    test_ping_c_sync test_ping_c_reconnect
+    test_ping_r_template test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
+    PROPERTIES LABELS "e2e"
+)
+
+# 协议测试超时（启动子进程，需要额外裕量）
+set_tests_properties(
+    test_compact_register test_compact_sync test_compact_lifecycle
+    test_compact_rpc test_compact_relay
+    test_relay_register test_relay_lifecycle test_relay_data test_relay_rpc
+    PROPERTIES TIMEOUT 30
+)
+
+# e2e 测试超时（内部有 30s connect timeout，需要更多裕量）
+set_tests_properties(
+    test_ping_c_template test_ping_c_connect test_ping_c_msg
+    test_ping_c_sync test_ping_c_reconnect
+    test_ping_r_template test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
+    PROPERTIES TIMEOUT 120
+)
