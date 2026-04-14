@@ -277,10 +277,16 @@ static bool poll_offer(struct p2p_instance *inst, struct p2p_session *s) {
             strncpy(sess->remote_gist_id, pub_gist_id, sizeof(sess->remote_gist_id) - 1);
             sess->remote_gist_id[sizeof(sess->remote_gist_id) - 1] = '\0';
         }
-        sess->state = SIG_PUBSUB_SESS_SYNCING;
         nat_punch(s, -1);
-        print("I:", LA_F("%s: received offer from %s (peer=%s) → SYNCING", LA_F351, 351),
-              TASK_POLL, sess->remote_gist_id, sess->remote_peer_id);
+        if (P2P_SESSION_WAITING_STUN(s)) {
+            sess->state = SIG_PUBSUB_SESS_WAIT_STUN;
+            print("I:", LA_F("%s: received offer from %s (peer=%s) → WAIT_STUN", LA_F351, 351),
+                  TASK_POLL, sess->remote_gist_id, sess->remote_peer_id);
+        } else {
+            sess->state = SIG_PUBSUB_SESS_SYNCING;
+            print("I:", LA_F("%s: received offer from %s (peer=%s) → SYNCING", LA_F351, 351),
+                  TASK_POLL, sess->remote_gist_id, sess->remote_peer_id);
+        }
         return true;
     }
     return false;
@@ -314,8 +320,9 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
                     print("W:", LA_F("%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",
                         LA_F351, 351), TASK_POLL, age, P2P_PUBSUB_HEARTBEAT_SEC);
                 } else {
-                    print("I:", LA_F("%s: SUB online (heartbeat %llds ago)", LA_F351, 351),
+                    print("I:", LA_F("%s: SUB online (heartbeat %llds ago), early nat_punch", LA_F351, 351),
                         TASK_POLL, age);
+                    nat_punch(s, -1);  /* 提前启动 STUN 收集，nat_punch 幂等（state>=PUNCHING 时跳过）*/
                 }
             } else {
                 print("W:", LA_F("%s: SUB gist not ONLINE (content: %.20s...)", LA_F351, 351),
@@ -395,8 +402,13 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
             s->remote_cand_done = true;
         }
         nat_punch(s, -1);
-        sess->state = SIG_PUBSUB_SESS_SYNCING;
-        print("I:", LA_F("%s: → SYNCING", LA_F475, 475), TASK_POLL);
+        if (P2P_SESSION_WAITING_STUN(s)) {
+            sess->state = SIG_PUBSUB_SESS_WAIT_STUN;
+            print("I:", LA_F("%s: → WAIT_STUN", LA_F475, 475), TASK_POLL);
+        } else {
+            sess->state = SIG_PUBSUB_SESS_SYNCING;
+            print("I:", LA_F("%s: → SYNCING", LA_F475, 475), TASK_POLL);
+        }
     }
 }
 
@@ -615,9 +627,15 @@ void p2p_signal_pubsub_disconnect(struct p2p_session *s) {
 void p2p_signal_pubsub_stun_ready(struct p2p_session *s) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
-    /* PUBSUB 不依赖 WAIT_STUN 状态，但日志记录 STUN 就绪 */
-    if (sess->state == SIG_PUBSUB_SESS_SYNCING || sess->state == SIG_PUBSUB_SESS_OFFERING) {
-        print("I:", LA_F("%s: STUN ready (state=%d)", LA_F475, 475), TASK_PUBLISH, sess->state);
+    if (sess->state != SIG_PUBSUB_SESS_WAIT_STUN) return;
+
+    sess->state = SIG_PUBSUB_SESS_SYNCING;
+    print("I:", LA_F("%s: STUN ready → SYNCING", LA_F475, 475), TASK_PUBLISH);
+
+    /* 首次发布：有候选则立即同步，否则等 tick_send */
+    if (s->local_cand_cnt > 0 || !P2P_CAND_PENDING(s->inst)) {
+        sync_candidates(s->inst, s);
+        sess->last_sync = P_tick_ms();
     }
 }
 

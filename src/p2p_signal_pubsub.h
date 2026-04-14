@@ -89,15 +89,16 @@
  * 阶段2: 会话级（connect）
  *
  *   SUB（被动方，remote_peer_id = NULL）：
- *     WAIT_OFFER ──→ SYNCING ──→ READY
+ *     WAIT_OFFER ──→ [WAIT_STUN ──→] SYNCING ──→ READY
  *
  *   PUB（主动方，remote_peer_id = 对端 gist_id）：
- *     OFFERING ──→ SYNCING ──→ READY
+ *     OFFERING ──→ [WAIT_STUN ──→] SYNCING ──→ READY
  *
  *   - INIT:        未启动
  *   - ONLINE:      已初始化，可以发起 connect
  *   - WAIT_OFFER:  SUB 心跳模式，写入时间戳并轮询自己的 Gist 等待 offer（5s 间隔）
  *   - OFFERING:    PUB 已投递 offer 到 SUB 的 Gist，等待 SUB 响应（1s 间隔）
+ *   - WAIT_STUN:   等待 STUN 收集完成（nat_punch 已启动，stun_ready 回调后 → SYNCING）
  *   - SYNCING:     候选同步中（发布本端候选 + 轮询对端候选，1s 间隔）
  *   - READY:       本端候选已发布，对端候选已接收
  *
@@ -200,6 +201,7 @@ typedef enum {
     SIG_PUBSUB_SESS_IDLE = 0,                           /* 未初始化 */
     SIG_PUBSUB_SESS_WAIT_OFFER,                         /* SUB: 心跳模式，写入时间戳并轮询自己的 Gist 等待 offer */
     SIG_PUBSUB_SESS_OFFERING,                           /* PUB: offer 已投递，轮询 SUB 的 Gist 等待响应 */
+    SIG_PUBSUB_SESS_WAIT_STUN,                          /* 等待 STUN 收集完成 */
     SIG_PUBSUB_SESS_SYNCING,                            /* 候选同步中 */
     SIG_PUBSUB_SESS_READY,                              /* 本端候选同步完成（ver=0 已发布）*/
 } p2p_pubsub_sess_st;
