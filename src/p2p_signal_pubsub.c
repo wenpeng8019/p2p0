@@ -739,3 +739,316 @@ void p2p_signal_pubsub_tick_send(struct p2p_instance *inst, uint64_t now) {
         }
     }
 }
+
+/* ============================================================================
+ * 单元测试
+ *
+ * 构建：
+ *   cd build && cmake .. && make test_pubsub
+ *
+ * 运行（纯本地，无需网络）：
+ *   ./test/test_pubsub
+ *
+ * 运行（含 Gist 协议测试，需要 GitHub PAT + Gist ID）：
+ *   P2P_TEST_TOKEN="ghp_xxx" P2P_TEST_GIST="<gist_id>" ./test/test_pubsub
+ *
+ * CTest：
+ *   ctest -R test_pubsub -V
+ * ============================================================================ */
+#ifdef TEST_PUBSUB
+
+#include "test_framework.h"
+
+/* --- fake 桩 --- */
+
+/* p2p.c 全局变量 */
+p2p_log_callback_t p2p_log_callback = (p2p_log_callback_t)-1;
+p2p_log_level_t    p2p_log_level    = P2P_LOG_LEVEL_DEBUG;
+bool               p2p_log_pre_tag  = false;
+uint16_t           p2p_instrument_base = 0;
+
+ret_t nat_punch(struct p2p_session *s, int idx) {
+    (void)s; (void)idx;
+    return 0;
+}
+
+void path_stats_init(path_stats_t *st, int cost_score) {
+    (void)st; (void)cost_score;
+}
+
+int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
+                              const char *username, const char *password,
+                              uint32_t priority, int is_controlling,
+                              uint64_t tie_breaker, int use_candidate) {
+    (void)buf; (void)max_len; (void)tsx_id; (void)username; (void)password;
+    (void)priority; (void)is_controlling; (void)tie_breaker; (void)use_candidate;
+    return 0;
+}
+
+/* --- 测试辅助 --- */
+
+/*
+ * 环境变量：
+ *   P2P_TEST_TOKEN  - GitHub PAT（必须）
+ *   P2P_TEST_GIST   - Gist ID（必须，单个即可，同时充当 local/remote）
+ *   P2P_TEST_KEY    - DES 加密密钥（可选，默认 "testkey1"）
+ *
+ * 运行后可用 curl 验证：
+ *   curl -s -H "Authorization: token $P2P_TEST_TOKEN" \
+ *        https://api.github.com/gists/$P2P_TEST_GIST \
+ *        | jq '.files.p2p_signal_json.content'
+ */
+
+static const char *env_token;
+static const char *env_gist;
+static const char *env_key;
+
+static bool env_ready(void) {
+    return env_token && env_gist;
+}
+
+/* 创建一组可用于测试的 instance + session（calloc 保证全零初始化） */
+static void setup(struct p2p_instance **out_inst, struct p2p_session **out_s) {
+    struct p2p_instance *inst = calloc(1, sizeof(*inst));
+    struct p2p_session  *s    = calloc(1, sizeof(*s));
+    s->inst = inst;
+    inst->sessions_head = s;
+
+    p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
+    strncpy(ctx->auth_token, env_token, sizeof(ctx->auth_token) - 1);
+    strncpy(ctx->local_gist_id, env_gist, sizeof(ctx->local_gist_id) - 1);
+    strncpy(ctx->local_peer_id, "test_pub", sizeof(ctx->local_peer_id) - 1);
+    strncpy(ctx->auth_key, env_key ? env_key : "testkey1", sizeof(ctx->auth_key) - 1);
+    ctx->state = SIG_PUBSUB_ONLINE;
+
+    s->sig_sess.pubsub.remote_sync_ver = -1;
+
+    *out_inst = inst;
+    *out_s    = s;
+}
+
+static void teardown(struct p2p_instance *inst, struct p2p_session *s) {
+    free(s->local_cands);
+    free(s->remote_cands);
+    free(s);
+    free(inst);
+}
+
+/* --- 测试用例 --- */
+
+TEST(init) {
+    p2p_signal_pubsub_ctx_t ctx;
+    p2p_signal_pubsub_init(&ctx);
+    ASSERT_EQ(ctx.state, SIG_PUBSUB_INIT);
+    ASSERT_EQ(ctx.local_peer_id[0], '\0');
+}
+
+/*
+ * gist_roundtrip: 写入→读回 验证基础 HTTP 通道
+ */
+TEST(gist_roundtrip) {
+    if (!env_ready()) { printf("SKIP (no env)\n"); return; }
+    struct p2p_instance *inst; struct p2p_session *s;
+    setup(&inst, &s);
+    p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
+
+    int ret = gist_write(ctx, env_gist, "TEST_ROUNDTRIP:hello");
+    ASSERT_EQ(ret, 0);
+
+    char buf[4096];
+    ret = gist_poll(ctx, env_gist, buf, sizeof(buf));
+    ASSERT_EQ(ret, 0);
+    ASSERT(strncmp(buf, "TEST_ROUNDTRIP:hello", 20) == 0);
+
+    teardown(inst, s);
+}
+
+/*
+ * heartbeat_write: sync0_sub 写入心跳 → 读回验证 "ONLINE:<ts>:<peer>"
+ */
+TEST(heartbeat_write) {
+    if (!env_ready()) { printf("SKIP (no env)\n"); return; }
+    struct p2p_instance *inst; struct p2p_session *s;
+    setup(&inst, &s);
+    p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
+
+    sync0_sub(inst, s, P_tick_ms());
+
+    char buf[4096];
+    int ret = gist_poll(ctx, env_gist, buf, sizeof(buf));
+    ASSERT_EQ(ret, 0);
+    ASSERT(strncmp(buf, "ONLINE:", 7) == 0);
+    /* 检查 peer_id 出现在末尾 */
+    ASSERT(strstr(buf, ":test_pub") != NULL);
+
+    teardown(inst, s);
+}
+
+/*
+ * offer_write: sync0_offer 写入邀约 → 读回验证 "OFFER:<gist>:<peer>"
+ */
+TEST(offer_write) {
+    if (!env_ready()) { printf("SKIP (no env)\n"); return; }
+    struct p2p_instance *inst; struct p2p_session *s;
+    setup(&inst, &s);
+    p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
+    p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
+
+    /* 先写入心跳，让 sync0_offer 读到有效内容（同一个 gist 充当 remote） */
+    gist_write(ctx, env_gist, "ONLINE:9999999999:remote_sub");
+
+    sess->is_pub = true;
+    strncpy(sess->remote_gist_id, env_gist, sizeof(sess->remote_gist_id) - 1);
+    sync0_offer(inst, s, false);
+
+    ASSERT_EQ(sess->offer_sent, 1);
+
+    /* 读回验证 offer 格式 */
+    char buf[4096];
+    int ret = gist_poll(ctx, env_gist, buf, sizeof(buf));
+    ASSERT_EQ(ret, 0);
+    ASSERT(strncmp(buf, "OFFER:", 6) == 0);
+    ASSERT(strstr(buf, env_gist) != NULL);       /* 包含本端 gist id */
+    ASSERT(strstr(buf, ":test_pub") != NULL);    /* 包含 peer id */
+
+    teardown(inst, s);
+}
+
+/*
+ * offer_detect: 向 gist_a 写入 OFFER → poll_offer 检测并解析
+ */
+TEST(offer_detect) {
+    if (!env_ready()) { printf("SKIP (no env)\n"); return; }
+    struct p2p_instance *inst; struct p2p_session *s;
+    setup(&inst, &s);
+    p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
+    p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
+
+    sess->is_pub = false;
+    sess->state = SIG_PUBSUB_SESS_WAIT_OFFER;
+
+    /* 模拟 PUB 端写入 offer（用同一个 gist，remote_gist 写个假 ID 区分） */
+    char fake_offer[256];
+    snprintf(fake_offer, sizeof(fake_offer), "OFFER:%s:remote_pub", "fake_remote_gist_id_0123456789ab");
+    gist_write(ctx, env_gist, fake_offer);
+
+    bool found = poll_offer(inst, s);
+    ASSERT(found);
+    ASSERT(strcmp(sess->remote_gist_id, "fake_remote_gist_id_0123456789ab") == 0);
+    ASSERT(strcmp(sess->remote_peer_id, "remote_pub") == 0);
+    /* nat_punch 是 fake，不涉及 WAIT_STUN → 应进入 SYNCING */
+    ASSERT_EQ(sess->state, SIG_PUBSUB_SESS_SYNCING);
+
+    teardown(inst, s);
+}
+
+/*
+ * candidate_roundtrip: sync_candidates 加密发布 → poll_candidates 解密接收
+ *
+ * 用两个 gist 模拟双方：
+ *   A(inst1) 发布候选到 gist_a → B(inst2) 从 gist_a 读取
+ */
+TEST(candidate_roundtrip) {
+    if (!env_ready()) { printf("SKIP (no env)\n"); return; }
+
+    /* --- A 端：发布候选 --- */
+    struct p2p_instance *inst_a; struct p2p_session *s_a;
+    setup(&inst_a, &s_a);
+    p2p_pubsub_session_t *sess_a = &s_a->sig_sess.pubsub;
+    sess_a->state = SIG_PUBSUB_SESS_SYNCING;
+
+    /* 注入一个 host 候选 */
+    s_a->local_cands = calloc(4, sizeof(p2p_local_candidate_entry_t));
+    s_a->local_cand_cap = 4;
+    s_a->local_cand_cnt = 1;
+    s_a->local_cands[0].type = P2P_CAND_HOST;
+    s_a->local_cands[0].addr.sin_family = AF_INET;
+    s_a->local_cands[0].addr.sin_port = htons(12345);
+    inet_pton(AF_INET, "192.168.1.100", &s_a->local_cands[0].addr.sin_addr);
+    s_a->local_cands[0].priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, 65535, 1);
+
+    /* 标记候选收集完毕（srflx_active >= srflx_count） → final ver=0 */
+    inst_a->srflx_count  = 0;
+    inst_a->srflx_active = 0;
+    inst_a->turn_pending = 0;
+
+    sync_candidates(inst_a, s_a);
+    ASSERT_EQ(sess_a->state, SIG_PUBSUB_SESS_READY);  /* final → READY */
+
+    /* --- B 端：读取候选 --- */
+    struct p2p_instance *inst_b; struct p2p_session *s_b;
+    setup(&inst_b, &s_b);
+    p2p_pubsub_session_t *sess_b = &s_b->sig_sess.pubsub;
+    sess_b->state = SIG_PUBSUB_SESS_SYNCING;
+    strncpy(sess_b->remote_gist_id, env_gist, sizeof(sess_b->remote_gist_id) - 1);
+
+    /* 分配远端候选缓冲 */
+    s_b->remote_cands = calloc(16, sizeof(p2p_remote_candidate_entry_t));
+    s_b->remote_cand_cap = 16;
+
+    poll_candidates(inst_b, s_b);
+
+    ASSERT_GE(s_b->remote_cand_cnt, 1);
+    ASSERT_EQ(s_b->remote_cands[0].type, P2P_CAND_HOST);
+    ASSERT_EQ(ntohs(s_b->remote_cands[0].addr.sin_port), 12345);
+    ASSERT(s_b->remote_cand_done);  /* ver=0 → done */
+
+    teardown(inst_a, s_a);
+    teardown(inst_b, s_b);
+}
+
+/*
+ * poll_answer_heartbeat_resend: SUB 心跳覆盖 offer → poll_answer 重发
+ */
+TEST(poll_answer_heartbeat_resend) {
+    if (!env_ready()) { printf("SKIP (no env)\n"); return; }
+    struct p2p_instance *inst; struct p2p_session *s;
+    setup(&inst, &s);
+    p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
+    p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
+
+    sess->is_pub = true;
+    sess->state = SIG_PUBSUB_SESS_OFFERING;
+    sess->offer_sent = 1;
+    strncpy(sess->remote_gist_id, env_gist, sizeof(sess->remote_gist_id) - 1);
+
+    /* 写入心跳，模拟 offer 被覆盖 */
+    gist_write(ctx, env_gist, "ONLINE:9999999999:remote_sub");
+
+    poll_answer(inst, s);
+
+    /* poll_answer 检测到 ONLINE → 重发 offer */
+    ASSERT_EQ(sess->offer_sent, 1);  /* resend 后 offer_sent=1 */
+
+    /* 验证现在又是 offer */
+    char buf[4096];
+    gist_poll(ctx, env_gist, buf, sizeof(buf));
+    ASSERT(strncmp(buf, "OFFER:", 6) == 0);
+
+    teardown(inst, s);
+}
+
+/* --- main --- */
+
+int main(void) {
+    env_token = getenv("P2P_TEST_TOKEN");
+    env_gist   = getenv("P2P_TEST_GIST");
+    env_key    = getenv("P2P_TEST_KEY");
+
+    printf("=== test_pubsub ===\n");
+    if (!env_ready())
+        printf("  ⚠ P2P_TEST_TOKEN / P2P_TEST_GIST not set — Gist tests will SKIP\n\n");
+
+    RUN_TEST(init);
+    RUN_TEST(gist_roundtrip);       if (env_ready()) sleep(1);
+    RUN_TEST(heartbeat_write);      if (env_ready()) sleep(1);
+    RUN_TEST(offer_write);          if (env_ready()) sleep(1);
+    RUN_TEST(offer_detect);         if (env_ready()) sleep(1);
+    RUN_TEST(candidate_roundtrip);  if (env_ready()) sleep(1);
+    RUN_TEST(poll_answer_heartbeat_resend);
+
+    printf("\n%d passed, %d failed\n", test_passed, test_failed);
+    return test_failed > 0 ? 1 : 0;
+}
+
+#endif /* TEST_PUBSUB */

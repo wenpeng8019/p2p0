@@ -340,3 +340,28 @@ set_tests_properties(
     test_ping_r_template test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
     PROPERTIES TIMEOUT 120
 )
+
+# PUBSUB 信令单元测试（单文件编译，fake 外部依赖）
+add_executable(test_pubsub
+    ${CMAKE_SOURCE_DIR}/src/p2p_signal_pubsub.c
+    ${CMAKE_SOURCE_DIR}/src/p2p_http.c
+    ${CMAKE_SOURCE_DIR}/src/p2p_crypto.c
+    ${CMAKE_SOURCE_DIR}/src/p2p_ice.c
+    ${CMAKE_SOURCE_DIR}/src/.LANG.c
+    ${CMAKE_SOURCE_DIR}/i18n/i18n.c
+)
+target_compile_definitions(test_pubsub PRIVATE TEST_PUBSUB)
+target_include_directories(test_pubsub PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/stdc
+    ${CMAKE_SOURCE_DIR}/i18n
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(test_pubsub stdc ${TEST_PLATFORM_LIBS})
+target_compile_options(test_pubsub PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
+)
+
+add_test(NAME test_pubsub COMMAND test_pubsub)
+set_tests_properties(test_pubsub PROPERTIES LABELS "unit")
