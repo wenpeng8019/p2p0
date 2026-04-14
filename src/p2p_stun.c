@@ -835,7 +835,7 @@ static inline void add_srflx_candidate(struct p2p_instance *inst, int recv_sock_
         else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
             if (s->sig_sess.pubsub.state == SIG_PUBSUB_SESS_SYNCING) {
                 p2p_signal_pubsub_trickle_candidate(s);
-            } else if (s->sig_sess.pubsub.state == SIG_PUBSUB_SESS_WAIT_STUN && inst->srflx_active >= inst->srflx_count) {
+            } else if (inst->srflx_active >= inst->srflx_count) {
                 p2p_signal_pubsub_stun_ready(s);
             }
         }
@@ -1008,8 +1008,7 @@ void p2p_stun_nat_detect_tick(struct p2p_instance *inst, uint64_t now_ms) {
                         && s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_STUN) {
                         p2p_signal_relay_stun_ready(s);
                     }
-                    else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB
-                             && s->sig_sess.pubsub.state == SIG_PUBSUB_SESS_WAIT_STUN) {
+                    else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
                         p2p_signal_pubsub_stun_ready(s);
                     }
                 }
