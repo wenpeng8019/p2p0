@@ -267,8 +267,8 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
     n += P2P_PEER_ID_MAX;
 
     // candidate_count + candidates
-    int cand_cnt = s->local_cand_cnt;
-    if (cand_cnt > SYNC_CAND_UNIT) cand_cnt = SYNC_CAND_UNIT;
+    int cand_cnt = (int)SYNC_CAND_UNIT;
+    if (s->local_cand_cnt < cand_cnt) cand_cnt = s->local_cand_cnt;
     if (cand_cnt > sig_ctx->max_candidates)
         cand_cnt = sig_ctx->max_candidates;
     sess_ctx->candidates_cached = cand_cnt;

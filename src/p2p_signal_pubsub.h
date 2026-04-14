@@ -107,9 +107,9 @@
  *
  * Gist 文件内容（p2p_signal.json）在不同阶段承载不同内容：
  *
- *   心跳：        "ONLINE:<unix_timestamp>"  （SUB 上线标识，每 5 分钟刷新）
- *   Offer：      "OFFER:<pub_gist_id>"       （明文，SUB 据此知道 PUB 的发布板地址）
- *   候选列表：    Base64(DES(SDP 候选文本))  （加密候选）
+ *   心跳：        "ONLINE:<unix_timestamp>:<peer_id>"  （SUB 上线标识，每 5 分钟刷新）
+ *   Offer：      "OFFER:<pub_gist_id>:<pub_peer_id>"  （SUB 据此知道 PUB 的发布板和身份）
+ *   候选列表：    Base64(DES(SDP 候选文本))            （加密候选）
  *
  * 加密编码流程（候选列表）：
  *
@@ -157,6 +157,9 @@
 #ifndef P2P_PUBSUB_POLL_SYNC_MS
 #define P2P_PUBSUB_POLL_SYNC_MS     1000    /* 活跃同步轮询 */
 #endif
+#ifndef P2P_PUBSUB_POLL_CONFIRM_MS
+#define P2P_PUBSUB_POLL_CONFIRM_MS  300     /* offer 确认轮询（心跳竞争期） */
+#endif
 #ifndef P2P_PUBSUB_HEARTBEAT_SEC
 #define P2P_PUBSUB_HEARTBEAT_SEC    300     /* SUB 心跳刷新间隔（秒） */
 #endif
@@ -192,7 +195,6 @@ typedef struct {
 
 typedef enum {
     SIG_PUBSUB_SESS_IDLE = 0,                           /* 未初始化 */
-    SIG_PUBSUB_SESS_WAIT_ONLINE,                        /* connect() 但实例未就绪 */
     SIG_PUBSUB_SESS_WAIT_OFFER,                         /* SUB: 心跳模式，写入时间戳并轮询自己的 Gist 等待 offer */
     SIG_PUBSUB_SESS_OFFERING,                           /* PUB: offer 已投递，轮询 SUB 的 Gist 等待响应 */
     SIG_PUBSUB_SESS_SYNCING,                            /* 候选同步中 */
@@ -200,23 +202,22 @@ typedef enum {
 } p2p_pubsub_sess_st;
 
 typedef struct {
-    p2p_pubsub_sess_st  state;                          /* 会话状态 */
     bool                is_pub;                         /* true=PUB（主动方） false=SUB（被动方）*/
+    p2p_pubsub_sess_st  state;                          /* 会话状态 */
+    uint64_t            last_poll;                      /* 上次轮询时间戳 */
+
+    uint64_t            last_sub;                       /* SUB: 上次写入订阅的时间 (now_ms)，0=未发送 */
+    int                 offer_sent;                     /* PUB: 0=未发送, 1=已写入(待确认), 2=已确认 */
 
     char                remote_gist_id[128];            /* 对端发布板 Gist ID（PUB: connect 传入; SUB: offer 提取）*/
+    char                remote_peer_id[P2P_PEER_ID_MAX]; /* 对端 peer_id（从 ONLINE/OFFER 协议提取）*/
 
     /* 发布状态 */
     bool                local_published;                /* 本端候选是否已写入发布板 */
     int                 local_published_cnt;            /* 已发布的候选数量 */
 
     /* 轮询状态 */
-    uint64_t            last_poll;                      /* 上次轮询时间戳 */
     bool                remote_received;                /* 是否已成功接收对端候选 */
-
-    /* PUB/SUB 握手状态 */
-    bool                heartbeat_sent;                 /* SUB: 首次心跳已写入 */
-    uint64_t            last_heartbeat;                 /* SUB: 上次写入心跳的时间 (now_ms) */
-    bool                offer_sent;                     /* PUB: offer 已投递到 SUB 的 Gist */
 
 } p2p_pubsub_session_t;
 
@@ -285,7 +286,7 @@ void p2p_signal_pubsub_trickle_candidate(struct p2p_session *s);
  * @param remote_peer_id 对端发布板 Gist ID
  * @return               E_NONE=成功
  */
-ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_peer_id);
+ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_gist_id);
 
 /*
  * 断开当前会话

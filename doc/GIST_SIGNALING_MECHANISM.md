@@ -126,24 +126,26 @@ t4: P2P 连接建立
 
 | 阶段 | content 内容 | 说明 |
 |------|-------------|------|
-| **心跳** | `"ONLINE:<unix_timestamp>"` | SUB 方上线标识，每 5 分钟刷新 |
-| **Offer** | `"OFFER:<pub_gist_id>"` | PUB 投递到 SUB 的信箱 |
+| **心跳** | `"ONLINE:<timestamp>:<peer_id>"` | SUB 方上线标识，每 5 分钟刷新 |
+| **Offer** | `"OFFER:<gist_id>:<peer_id>"` | PUB 投递到 SUB 的信箱 |
 | **候选列表** | `Base64(DES(SDP candidates))` | 各方发布自己的候选 |
 
 **心跳格式（明文）：**
 ```
-ONLINE:1713100800
+ONLINE:1713100800:alice
 ```
 - `ONLINE:` — 固定前缀，标识 SUB 在线状态
-- 后接 Unix 时间戳（秒），PUB 据此判断 SUB 是否仍在线
+- `<timestamp>` — Unix 时间戳（秒），PUB 据此判断 SUB 是否仍在线
+- `<peer_id>` — SUB 的 peer_id，PUB 据此知道对端身份（gist_id 的别名）
 - PUB 检测时间戳超过 5 分钟未刷新则打印警告
 
 **Offer 格式（明文）：**
 ```
-OFFER:abc123def456789
+OFFER:abc123def456789:bob
 ```
 - `OFFER:` — 固定前缀，用于区分 offer 和候选数据
-- 后接 PUB 方的 Gist ID，SUB 据此知道去哪里轮询 PUB 的候选
+- `<gist_id>` — PUB 方的 Gist ID，SUB 据此知道去哪里轮询 PUB 的候选
+- `<peer_id>` — PUB 方的 peer_id，SUB 据此知道对端身份
 
 **候选列表格式（SDP 协议）：**
 ```
