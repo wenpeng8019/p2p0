@@ -160,6 +160,9 @@
 #ifndef P2P_PUBSUB_POLL_CONFIRM_MS
 #define P2P_PUBSUB_POLL_CONFIRM_MS  300     /* offer 确认轮询（心跳竞争期） */
 #endif
+#ifndef P2P_PUBSUB_TRICKLE_BATCH_MS
+#define P2P_PUBSUB_TRICKLE_BATCH_MS 1000    /* trickle 攒批窗口（毫秒）*/
+#endif
 #ifndef P2P_PUBSUB_HEARTBEAT_SEC
 #define P2P_PUBSUB_HEARTBEAT_SEC    300     /* SUB 心跳刷新间隔（秒） */
 #endif
@@ -198,7 +201,7 @@ typedef enum {
     SIG_PUBSUB_SESS_WAIT_OFFER,                         /* SUB: 心跳模式，写入时间戳并轮询自己的 Gist 等待 offer */
     SIG_PUBSUB_SESS_OFFERING,                           /* PUB: offer 已投递，轮询 SUB 的 Gist 等待响应 */
     SIG_PUBSUB_SESS_SYNCING,                            /* 候选同步中 */
-    SIG_PUBSUB_SESS_READY,                              /* 本端已发布 + 对端候选已接收 */
+    SIG_PUBSUB_SESS_READY,                              /* 本端候选同步完成（ver=0 已发布）*/
 } p2p_pubsub_sess_st;
 
 typedef struct {
@@ -213,11 +216,12 @@ typedef struct {
     char                remote_peer_id[P2P_PEER_ID_MAX]; /* 对端 peer_id（从 ONLINE/OFFER 协议提取）*/
 
     /* 发布状态 */
-    bool                local_published;                /* 本端候选是否已写入发布板 */
-    int                 local_published_cnt;            /* 已发布的候选数量 */
+    int                 local_sync_ver;                 /* 本端发布版本 (>=1 trickle, 0=final) */
+    int                 candidate_synced_count;         /* 已发布的候选数量 */
+    uint64_t            last_sync;                      /* 上次发布候选的时间 (now_ms) */
 
     /* 轮询状态 */
-    bool                remote_received;                /* 是否已成功接收对端候选 */
+    int                 remote_sync_ver;                /* 对端最后处理版本 (-1=未收到, 0=全部完成) */
 
 } p2p_pubsub_session_t;
 
@@ -291,6 +295,6 @@ ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_gist_i
 /*
  * 断开当前会话
  */
-ret_t p2p_signal_pubsub_disconnect(struct p2p_session *s);
+void p2p_signal_pubsub_disconnect(struct p2p_session *s);
 
 #endif /* P2P_SIGNAL_PUBSUB_H */

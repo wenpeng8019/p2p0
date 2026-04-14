@@ -29,7 +29,7 @@ static const char *TASK_POLL    = "POLL";
  * @param b64   Base64 编码的密文
  * @return      0=成功
  */
-static int write_gist(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, const char *content) {
+static int gist_write(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, const char *content) {
     char url[256];
     snprintf(url, sizeof(url), "https://api.github.com/gists/%s", gist_id);
 
@@ -55,17 +55,13 @@ static int write_gist(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, const c
  * @param out_sz    缓冲区大小
  * @return          0=成功且有内容，-1=失败或无内容
  */
-static int poll_from_gist(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id,
-                           char *out, int out_sz) {
-    char url[256];
-    snprintf(url, sizeof(url), "https://api.github.com/gists/%s", gist_id);
+static int gist_poll(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, char *out, int out_sz) {
 
-    char *resp = (char *)calloc(1, 32768);
-    if (!resp) return -1;
+    snprintf(out, out_sz, "https://api.github.com/gists/%s", gist_id);
 
-    int got = p2p_http_get(url, ctx->auth_token, resp, 32768);
+    static char resp[32768];
+    int got = p2p_http_get(out, ctx->auth_token, resp, (int)sizeof(resp));
     if (got <= 0) {
-        free(resp);
         return -1;
     }
 
@@ -104,7 +100,6 @@ static int poll_from_gist(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id,
             }
         }
     }
-    free(resp);
 
     /* 内容过短视为空 */
     if (ret == 0 && (int)strlen(out) < 10) return -1;
@@ -200,11 +195,14 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
  *   - 示例: "OFFER:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4:bob"
  *
  * 候选协议（双方 → 自己的 Gist）：
- *   base64( des_ecb( sdp_candidates ) )
+ *   version(ascii_decimal) ":" base64( des_ecb( sdp_candidates ) )
+ *   - version: 1,2,3... = trickle 增量版本；0 = 全部发送完成
  *   - sdp_candidates: p2p_ice_export_sdp() 输出的 "a=candidate:..." 文本
  *   - des_ecb: DES ECB 模式，密钥 = derive_key(auth_key) → 8 字节
  *              明文按 8 字节块对齐（补零）
  *   - base64: 标准 Base64 编码
+ *   - 示例: "2:ABCDef..." (第 2 次 trickle)
+ *   - 示例: "0:ABCDef..." (全部完成)
  *
  * 操作矩阵：
  *   函数                 角色   HTTP          Gist    写入内容
@@ -212,7 +210,7 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
  *   poll_offer()         SUB    GET local     自己    检测 "OFFER:*"
  *   sync0_offer()        PUB    GET+PATCH     对方    "OFFER:<gist_id>:<peer_id>"
  *   poll_answer()        PUB    GET remote    对方    检测候选/ONLINE/OFFER
- *   sync_candidates()    双方   PATCH local   自己    Base64(DES(SDP))
+ *   sync_candidates()    双方   PATCH local   自己    "<ver>:" Base64(DES(SDP))
  *   poll_candidates()    双方   GET remote    对方    解码候选
  * ============================================================================ */
 
@@ -236,7 +234,7 @@ static void sync0_sub(struct p2p_instance *inst, struct p2p_session *s, uint64_t
     print("I:", LA_F("%s: writing heartbeat (gist=%s) %s", LA_F423, 423),
           TASK_PUBLISH, ctx->local_gist_id, ts_str);
 
-    if (write_gist(ctx, ctx->local_gist_id, ts_str) == 0) {
+    if (gist_write(ctx, ctx->local_gist_id, ts_str) == 0) {
         sess->last_sub = now;
         print("I:", LA_F("%s: heartbeat written", LA_F260, 260), TASK_PUBLISH);
     } else {
@@ -258,7 +256,7 @@ static bool poll_offer(struct p2p_instance *inst, struct p2p_session *s) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
     char content[4096];
-    if (poll_from_gist(ctx, ctx->local_gist_id, content, (int)sizeof(content)) != 0) {
+    if (gist_poll(ctx, ctx->local_gist_id, content, (int)sizeof(content)) != 0) {
         print("V:", LA_F("%s: mailbox empty, waiting", LA_F142, 142), TASK_POLL);
         return false;
     }
@@ -307,7 +305,7 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
     /* 首次发送时读取 SUB 的 Gist，检查心跳时间戳；resend 时跳过 */
     if (!resend) {
         char probe[4096];
-        if (poll_from_gist(ctx, sess->remote_gist_id, probe, (int)sizeof(probe)) == 0) {
+        if (gist_poll(ctx, sess->remote_gist_id, probe, (int)sizeof(probe)) == 0) {
             if (strncmp(probe, "ONLINE:", 7) == 0) {
                 time_t sub_ts = (time_t)strtoll(probe + 7, NULL, 10);
                 time_t now_sec = time(NULL);
@@ -333,7 +331,7 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
     char offer[256];
     snprintf(offer, sizeof(offer), "OFFER:%s:%s", ctx->local_gist_id, ctx->local_peer_id);
 
-    if (write_gist(ctx, sess->remote_gist_id, offer) == 0) {
+    if (gist_write(ctx, sess->remote_gist_id, offer) == 0) {
         sess->offer_sent = 1;  /* 已写入，待确认 */
         print("I:", LA_F("%s: offer %s (my gist=%s)", LA_F260, 260),
               TASK_PUBLISH, resend ? "resent" : "sent", ctx->local_gist_id);
@@ -358,7 +356,7 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
     char content[4096];
-    if (poll_from_gist(ctx, sess->remote_gist_id, content, (int)sizeof(content)) != 0) {
+    if (gist_poll(ctx, sess->remote_gist_id, content, (int)sizeof(content)) != 0) {
         print("V:", LA_F("%s: SUB gist empty, waiting", LA_F142, 142), TASK_POLL);
         return;
     }
@@ -380,16 +378,22 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
         return;
     }
 
-    /* SUB 已响应，内容是候选数据 */
+    /* SUB 已响应，内容是候选数据: "<ver>:<b64>" */
+    char *colon = strchr(content, ':');
+    if (!colon) return;
+    int ver = atoi(content);
+    sess->remote_sync_ver = ver;
+
     uint8_t key[8];
     derive_key(ctx->auth_key, key);
 
-    int added = unpack_remote_candidates(s, key, content);
+    int added = unpack_remote_candidates(s, key, colon + 1);
     if (added > 0) {
-        print("I:", LA_F("%s: SUB responded with %d candidates", LA_F351, 351),
-              TASK_POLL, added);
-        sess->remote_received = true;
-        s->remote_cand_done = true;
+        print("I:", LA_F("%s: SUB responded with %d candidates (ver=%d)", LA_F351, 351),
+              TASK_POLL, added, ver);
+        if (ver == 0) {
+            s->remote_cand_done = true;
+        }
         nat_punch(s, -1);
         sess->state = SIG_PUBSUB_SESS_SYNCING;
         print("I:", LA_F("%s: → SYNCING", LA_F475, 475), TASK_POLL);
@@ -400,13 +404,14 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
  * SYNCING: 发布本端候选到自己的 Gist
  *
  * PATCH local_gist
- * 内容: base64( des_ecb( sdp_text ) )
+ * 内容: version ":" base64( des_ecb( sdp_text ) )
+ *   - version:  >=1 trickle 增量, 0=全部完成
  *   - sdp_text: p2p_ice_export_sdp(candidates_only=true) 输出的 "a=candidate:..." 文本
  *   - des_ecb:  密钥 derive_key(auth_key)，明文按 8 字节块对齐（补零）
  *   - base64:   标准 Base64 编码
  *
- * tick_send 检测 local_published=false 且候选收集完毕时调用。
- * 发布成功后若已收到对端候选 → READY
+ * tick_send: 有新候选时 trickle 发布（ver>=1），候选收集完毕时发终版（ver=0）。
+ * 本端发布 ver=0 成功 → READY（与 relay/compact 一致，只关注本端同步完成）
  */
 static void sync_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
@@ -438,16 +443,23 @@ static void sync_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     free(enc);
     if (b64_len <= 0) return;
 
-    print("I:", LA_F("%s: publishing %d candidates to local gist", LA_F423, 423),
-          TASK_PUBLISH, s->local_cand_cnt);
+    /* 版本号: >=1 trickle 增量, 0=全部完成 */
+    bool final = !P2P_CAND_PENDING(inst);
+    int ver = final ? 0 : ++sess->local_sync_ver;
 
-    if (write_gist(ctx, ctx->local_gist_id, b64) == 0) {
-        sess->local_published = true;
-        sess->local_published_cnt = s->local_cand_cnt;
-        print("I:", LA_F("%s: published %d candidates", LA_F260, 260),
-              TASK_PUBLISH, s->local_cand_cnt);
+    char payload[4200];
+    snprintf(payload, sizeof(payload), "%d:%s", ver, b64);
 
-        if (sess->remote_received) {
+    print("I:", LA_F("%s: publishing %d candidates (ver=%d) to local gist", LA_F423, 423),
+          TASK_PUBLISH, s->local_cand_cnt, ver);
+
+    if (gist_write(ctx, ctx->local_gist_id, payload) == 0) {
+        sess->candidate_synced_count = s->local_cand_cnt;
+        print("I:", LA_F("%s: published %d candidates (ver=%d)", LA_F260, 260),
+              TASK_PUBLISH, s->local_cand_cnt, ver);
+
+        if (final) {
+            sess->local_sync_ver = 0;
             sess->state = SIG_PUBSUB_SESS_READY;
             print("I:", LA_F("%s: → READY", LA_F475, 475), TASK_PUBLISH);
         }
@@ -461,15 +473,15 @@ static void sync_candidates(struct p2p_instance *inst, struct p2p_session *s) {
  *
  * GET remote_gist
  * 匹配:
- *   "OFFER:*" → 跳过（对端尚未发布候选）
- *   其他      → base64 → des_ecb_decrypt → sdp → inject remote_cands
+ *   "OFFER:*"     → 跳过（对端尚未发布候选）
+ *   "<ver>:<b64>" → 解码候选，ver==0 表示对端全部完成
  */
 static void poll_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
     char content[4096];
-    if (poll_from_gist(ctx, sess->remote_gist_id, content, (int)sizeof(content)) != 0) {
+    if (gist_poll(ctx, sess->remote_gist_id, content, (int)sizeof(content)) != 0) {
         print("V:", LA_F("%s: GET %s — empty or failed", LA_F142, 142), TASK_POLL, sess->remote_gist_id);
         return;
     }
@@ -477,21 +489,25 @@ static void poll_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     /* 跳过 offer 内容（可能是 PUB 还没发布候选）*/
     if (strncmp(content, "OFFER:", 6) == 0) return;
 
+    /* 解析版本号: "<ver>:<b64>" */
+    char *colon = strchr(content, ':');
+    if (!colon) return;
+    int ver = atoi(content);
+    if (ver == sess->remote_sync_ver) return;  /* 同版本已处理 */
+    sess->remote_sync_ver = ver;
+
     uint8_t key[8];
     derive_key(ctx->auth_key, key);
 
-    int added = unpack_remote_candidates(s, key, content);
+    int added = unpack_remote_candidates(s, key, colon + 1);
     if (added > 0) {
-        print("I:", LA_F("%s: received %d candidates from %s", LA_F351, 351),
-              TASK_POLL, added, sess->remote_gist_id);
+        print("I:", LA_F("%s: received %d candidates (ver=%d) from %s", LA_F351, 351),
+              TASK_POLL, added, ver, sess->remote_gist_id);
+    }
 
-        sess->remote_received = true;
+    /* ver==0: 对端全部候选发送完成 */
+    if (ver == 0) {
         s->remote_cand_done = true;
-
-        if (sess->local_published) {
-            sess->state = SIG_PUBSUB_SESS_READY;
-            print("I:", LA_F("%s: → READY", LA_F475, 475), TASK_POLL);
-        }
     }
 }
 
@@ -506,12 +522,13 @@ void p2p_signal_pubsub_init(p2p_signal_pubsub_ctx_t *ctx) {
 
 static void reset_peer(p2p_pubsub_session_t *sess) {
     sess->remote_peer_id[0]   = '\0';
-    sess->local_published     = false;
-    sess->local_published_cnt = 0;
+    sess->candidate_synced_count = 0;
     sess->last_poll           = 0;
-    sess->remote_received     = false;
-    sess->last_sub      = 0;
+    sess->last_sync           = 0;
+    sess->remote_sync_ver     = -1;
+    sess->last_sub            = 0;
     sess->offer_sent          = 0;
+    sess->local_sync_ver      = 0;
 }
 
 /* ============================================================================
@@ -560,6 +577,8 @@ ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_gist_i
         return E_BUSY;
     }
 
+    sess->remote_sync_ver = -1;
+
     // SUB 模式：不知道对方，等待 offer
     if (!remote_gist_id || !remote_gist_id[0]) {
         sess->is_pub = false;
@@ -579,9 +598,9 @@ ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_gist_i
     return E_NONE;
 }
 
-ret_t p2p_signal_pubsub_disconnect(struct p2p_session *s) {
+void p2p_signal_pubsub_disconnect(struct p2p_session *s) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
-    if (!sess->remote_gist_id[0]) return E_NONE;  /* 没有建立过配对 */
+    if (!sess->remote_gist_id[0]) return;
 
     sess->state             = SIG_PUBSUB_SESS_IDLE;
     sess->is_pub            = false;
@@ -589,7 +608,6 @@ ret_t p2p_signal_pubsub_disconnect(struct p2p_session *s) {
     reset_peer(sess);
 
     print("I:", LA_F("DISCONNECT", LA_F268, 268));
-    return E_NONE;
 }
 
 //-----------------------------------------------------------------------------
@@ -605,11 +623,25 @@ void p2p_signal_pubsub_stun_ready(struct p2p_session *s) {
 
 void p2p_signal_pubsub_trickle_candidate(struct p2p_session *s) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
+    if (sess->state != SIG_PUBSUB_SESS_SYNCING) return;
 
-    /* 有新候选时，标记需要重新发布 */
-    if (sess->state == SIG_PUBSUB_SESS_SYNCING &&
-        s->local_cand_cnt > sess->local_published_cnt) {
-        sess->local_published = false;
+    /* 还没进入 trickle 阶段（首次 sync 尚未执行）*/
+    if (!sess->last_sync) return;
+
+    /* 无新候选 */
+    if (sess->candidate_synced_count >= s->local_cand_cnt) return;
+
+    /* 候选收集全部完成 → 立即发终版（绕过攒批）*/
+    if (!P2P_CAND_PENDING(s->inst)) {
+        sync_candidates(s->inst, s);
+        sess->last_sync = P_tick_ms();
+        return;
+    }
+
+    /* 攒批窗口到期 → 发 trickle */
+    if (tick_diff(P_tick_ms(), sess->last_sync) >= P2P_PUBSUB_TRICKLE_BATCH_MS) {
+        sync_candidates(s->inst, s);
+        sess->last_sync = P_tick_ms();
     }
 }
 
@@ -656,7 +688,7 @@ void p2p_signal_pubsub_tick_recv(struct p2p_instance *inst, uint64_t now) {
             continue;
         }
 
-        if (sess->state == SIG_PUBSUB_SESS_SYNCING && !sess->remote_received) {
+        if (sess->state >= SIG_PUBSUB_SESS_SYNCING && sess->remote_sync_ver != 0) {
             if (tick_diff(now, sess->last_poll) < P2P_PUBSUB_POLL_SYNC_MS) continue;
             sess->last_poll = now;
             poll_candidates(inst, s);
@@ -674,10 +706,18 @@ void p2p_signal_pubsub_tick_send(struct p2p_instance *inst, uint64_t now) {
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
-        if (sess->state == SIG_PUBSUB_SESS_SYNCING && !sess->local_published) {
-            if (s->local_cand_cnt == 0) continue;
-            if (P2P_CAND_PENDING(inst)) continue;
+        if (sess->state == SIG_PUBSUB_SESS_SYNCING) {
+
+            /* 触发: 有新候选未发布 || 已发 trickle 但收集完毕需发终版(ver=0) */
+            bool need_trickle = sess->candidate_synced_count < s->local_cand_cnt;
+            bool need_final = !need_trickle && sess->local_sync_ver > 0 && !P2P_CAND_PENDING(inst);
+            if (!need_trickle && !need_final) continue;
+
+            /* trickle 攒批：等待窗口到期再发，final 立即发 */
+            if (need_trickle && sess->last_sync &&
+                tick_diff(now, sess->last_sync) < P2P_PUBSUB_TRICKLE_BATCH_MS) continue;
             sync_candidates(inst, s);
+            sess->last_sync = now;
         }
     }
 }
