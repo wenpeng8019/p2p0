@@ -573,6 +573,13 @@ int main(int argc, char *argv[]) {
             connect_pending = true;
             connect_retry_at = P_tick_ms() + 500;
         }
+    } else if (cfg.signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
+        /* PUBSUB SUB 模式：无 target 时创建被动会话，等待 PUB 投递 offer */
+        g_session = p2p_connect(hdl, NULL, ARGS_wait_stun.i64 ? true : false);
+        if (!g_session) {
+            print("E:", LA_F("Failed to initialize PUBSUB SUB session\n", LA_F37, 37));
+            return 1;
+        }
     }
 
     if (target_name) { print("I:", LA_F("Running in %s mode (connecting to %s)...", LA_F39, 39), mode_name, target_name); }
@@ -591,7 +598,9 @@ int main(int argc, char *argv[]) {
         p2p_state_t st = p2p_state(g_session);
 
         // 首次连接或对端断开后的重连都走这里统一调度。
-        if (target_name && !connect_pending && st == P2P_STATE_CLOSED) {
+        // PUB 端（有 target_name）和 PUBSUB SUB 端（无 target 但需要重回 WAIT_OFFER）均触发。
+        if (!connect_pending && st == P2P_STATE_CLOSED
+            && (target_name || cfg.signaling_mode == P2P_SIGNALING_MODE_PUBSUB)) {
             connect_pending = true;
             connect_retry_at = P_tick_ms() + 200;
             print("I:", "[Chat] Peer disconnected, scheduling reconnect...");

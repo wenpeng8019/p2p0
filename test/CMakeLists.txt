@@ -118,14 +118,14 @@ target_include_directories(test_ping_c_reconnect PRIVATE
 target_link_libraries(test_ping_c_reconnect stdc ${TEST_PLATFORM_LIBS})
 
 # P2P ICE 候选测试集合 (COMPACT 模式, 候选过滤验证)
-add_executable(test_ping_c_sync
-    test_ping_c_sync.c
+add_executable(test_ping_c_filter
+    test_ping_c_filter.c
 )
-target_include_directories(test_ping_c_sync PRIVATE
+target_include_directories(test_ping_c_filter PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_c_sync stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_c_filter stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY 协议注册/上线单元测试
 add_executable(test_relay_register
@@ -198,15 +198,34 @@ target_include_directories(test_ping_r_reconnect PRIVATE
 target_link_libraries(test_ping_r_reconnect stdc ${TEST_PLATFORM_LIBS})
 
 # P2P ICE 候选测试集合 (RELAY 模式, 候选过滤验证)
-add_executable(test_ping_r_sync
-    test_ping_r_sync.c
+add_executable(test_ping_r_filter
+    test_ping_r_filter.c
 )
-target_include_directories(test_ping_r_sync PRIVATE
+target_include_directories(test_ping_r_filter PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_r_sync stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_r_filter stdc ${TEST_PLATFORM_LIBS})
 
+# P2P Ping 双客户端连接测试 (PUBSUB 模式, Alice <-> Bob, GitHub Gist 信令)
+add_executable(test_ping_g_connect
+    test_ping_g_connect.c
+)
+target_include_directories(test_ping_g_connect PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_g_connect stdc ${TEST_PLATFORM_LIBS})
+
+# P2P PUBSUB 模式重连测试 (双端崩溃 + 单端崩溃, GitHub Gist 信令)
+add_executable(test_ping_g_reconnect
+    test_ping_g_reconnect.c
+)
+target_include_directories(test_ping_g_reconnect PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_g_reconnect stdc ${TEST_PLATFORM_LIBS})
 # WebSocket server + client 集成测试
 if(WITH_WSLAY)
     add_executable(test_ws
@@ -296,14 +315,18 @@ set(PING_PATH $<TARGET_FILE:p2p_ping>)
 add_test(NAME test_ping_template     COMMAND test_ping_template     ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_c_connect    COMMAND test_ping_c_connect    ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_c_msg        COMMAND test_ping_c_msg        ${PING_PATH} ${SERVER_PATH})
-add_test(NAME test_ping_c_sync       COMMAND test_ping_c_sync       ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_c_filter     COMMAND test_ping_c_filter     ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_c_reconnect  COMMAND test_ping_c_reconnect  ${PING_PATH} ${SERVER_PATH})
 
 # --- 端到端测试 RELAY（需要 p2p_ping + p2p_server） ---
 add_test(NAME test_ping_r_connect    COMMAND test_ping_r_connect    ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_r_msg        COMMAND test_ping_r_msg        ${PING_PATH} ${SERVER_PATH})
-add_test(NAME test_ping_r_sync       COMMAND test_ping_r_sync       ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_r_filter     COMMAND test_ping_r_filter     ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_r_reconnect  COMMAND test_ping_r_reconnect  ${PING_PATH} ${SERVER_PATH})
+
+# --- 端到端测试 PUBSUB（需要 p2p_ping + GitHub Token/Gist） ---
+add_test(NAME test_ping_g_connect    COMMAND test_ping_g_connect    ${PING_PATH})
+add_test(NAME test_ping_g_reconnect  COMMAND test_ping_g_reconnect  ${PING_PATH})
 
 # --- 测试标签（用于分组运行：ctest -L unit / ctest -L protocol / ctest -L e2e） ---
 set_tests_properties(test_transport PROPERTIES LABELS "unit")
@@ -320,8 +343,9 @@ set_tests_properties(
 
 set_tests_properties(
     test_ping_template test_ping_c_connect test_ping_c_msg
-    test_ping_c_sync test_ping_c_reconnect
-    test_ping_r_connect test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
+    test_ping_c_filter test_ping_c_reconnect
+    test_ping_r_connect test_ping_r_msg test_ping_r_filter test_ping_r_reconnect
+    test_ping_g_connect test_ping_g_reconnect
     PROPERTIES LABELS "e2e"
 )
 
@@ -336,9 +360,24 @@ set_tests_properties(
 # e2e 测试超时（内部有 30s connect timeout，需要更多裕量）
 set_tests_properties(
     test_ping_template test_ping_c_connect test_ping_c_msg
-    test_ping_c_sync test_ping_c_reconnect
-    test_ping_r_connect test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
+    test_ping_c_filter test_ping_c_reconnect
+    test_ping_r_connect test_ping_r_msg test_ping_r_filter test_ping_r_reconnect
     PROPERTIES TIMEOUT 120
+)
+
+# PUBSUB e2e 测试超时（Gist HTTP 轮询延迟大，reconnect 需要两轮连接）
+set_tests_properties(
+    PROPERTIES TIMEOUT 120
+)
+
+# PUBSUB e2e 测试超时（Gist HTTP 轮询延迟大，reconnect 需要两轮连接）
+set_tests_properties(
+    test_ping_g_connect
+    PROPERTIES TIMEOUT 180
+)
+set_tests_properties(
+    test_ping_g_reconnect
+    PROPERTIES TIMEOUT 360
 )
 
 # PUBSUB 信令单元测试（单文件编译，fake 外部依赖）

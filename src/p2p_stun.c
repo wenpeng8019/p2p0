@@ -812,6 +812,7 @@ static inline void add_srflx_candidate(struct p2p_instance *inst, int recv_sock_
         c->type = P2P_CAND_SRFLX;
         c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
         c->addr = *mapped;
+        c->base_addr = inst->socks[recv_sock_idx].local_addr;
 
         print("I:", LA_F("✓ Gathered Srflx Candidate %s:%d, priority=%u (ses_id=%u)", LA_F469, 469),
               inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority, s->id);
@@ -881,6 +882,9 @@ void p2p_stun_handle_packet(struct p2p_instance *inst, int recv_sock_idx,
     // 如果不是 Test 任务的响应
     // + 默认为 Srflx 候选探测，需要添加 Srflx 候选到本地候选列表
     if (!is_nat_detect_resp) {
+        // 该 socket 已有有效映射地址 → 旧轮次的迟到响应，忽略
+        if (inst->socks[recv_sock_idx].state >= 2/*active*/)
+            return;
         add_srflx_candidate(inst, recv_sock_idx, &mapped);
         return;
     }

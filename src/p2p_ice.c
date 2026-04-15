@@ -663,13 +663,18 @@ int p2p_ice_export_candidate(const p2p_local_candidate_entry_t *cand, char *buf,
     int n;
     if (cand->type == P2P_CAND_SRFLX || cand->type == P2P_CAND_RELAY) {
         /* Srflx/Relay: 包含 raddr/rport (base_addr) */
+        /* inet_ntoa 使用静态缓冲区，不能在同一调用中使用两次 */
+        char addr_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &cand->addr.sin_addr, addr_str, sizeof(addr_str));
+        char raddr_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &cand->base_addr.sin_addr, raddr_str, sizeof(raddr_str));
         n = snprintf(buf, buf_size,
             "candidate:1 1 UDP %u %s %d typ %s raddr %s rport %d",
             cand->priority,                        /* priority */
-            inet_ntoa(cand->addr.sin_addr),        /* IP */
+            addr_str,                              /* IP */
             ntohs(cand->addr.sin_port),            /* port */
             type_str,                              /* type */
-            inet_ntoa(cand->base_addr.sin_addr),   /* related address */
+            raddr_str,                             /* related address */
             ntohs(cand->base_addr.sin_port)        /* related port */
         );
     } else {
@@ -834,14 +839,19 @@ int p2p_ice_export_sdp(const p2p_local_candidate_entry_t *cands, int cnt,
         int n;
         if (c->type == P2P_CAND_SRFLX || c->type == P2P_CAND_RELAY) {
             /* Srflx/Relay: 包含 raddr/rport (base_addr) */
+            /* inet_ntoa 使用静态缓冲区，不能在同一调用中使用两次 */
+            char addr_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &c->addr.sin_addr, addr_str, sizeof(addr_str));
+            char raddr_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &c->base_addr.sin_addr, raddr_str, sizeof(raddr_str));
             n = snprintf(sdp_buf + offset, buf_size - offset,
                 "a=candidate:%d 1 UDP %u %s %d typ %s raddr %s rport %d\r\n",
                 i + 1,                              /* foundation */
                 c->priority,                        /* priority */
-                inet_ntoa(c->addr.sin_addr),        /* IP */
+                addr_str,                           /* IP */
                 ntohs(c->addr.sin_port),            /* port */
                 type_str,                           /* type */
-                inet_ntoa(c->base_addr.sin_addr),   /* related address */
+                raddr_str,                          /* related address */
                 ntohs(c->base_addr.sin_port)        /* related port */
             );
         } else {

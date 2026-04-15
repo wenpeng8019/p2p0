@@ -315,8 +315,11 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
-    /* 首次发送时读取 SUB 的 Gist，检查心跳时间戳；resend 时跳过 */
+    /* 首次发送时：清除本端 Gist 文件（防止对端读到上一轮残留的 SDP ver=0）
+     * resend 时跳过（文件已在首次发送时清除）*/
     if (!resend) {
+        gist_write(ctx, ctx->local_gist_id, ctx->local_peer_id, "CLEAR");
+
         char probe[4096];
         if (gist_poll(ctx, sess->remote_gist_id, sess->remote_peer_id, probe, (int)sizeof(probe)) == 0) {
             if (strncmp(probe, "ONLINE:", 7) == 0) {
@@ -396,6 +399,14 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
     char *colon = strchr(content, ':');
     if (!colon) return;
     int ver = atoi(content);
+
+    /* 首次 poll 就读到 ver=0（终版）：上一轮残留，跳过 */
+    if (ver == 0 && sess->remote_sync_ver == -1) {
+        print("W:", LA_F("%s: skip stale ver=0 from SUB (previous session)", LA_F351, 351),
+              TASK_POLL);
+        sess->remote_sync_ver = ver;
+        return;
+    }
     sess->remote_sync_ver = ver;
 
     uint8_t key[8];
@@ -513,6 +524,14 @@ static void poll_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     if (!colon) return;
     int ver = atoi(content);
     if (ver == sess->remote_sync_ver) return;  /* 同版本已处理 */
+
+    /* 首次 poll 就读到 ver=0（终版）：上一轮残留，跳过 */
+    if (ver == 0 && sess->remote_sync_ver == -1) {
+        print("W:", LA_F("%s: skip stale ver=0 from %s (previous session)", LA_F351, 351),
+              TASK_POLL, sess->remote_gist_id);
+        sess->remote_sync_ver = ver;
+        return;
+    }
     sess->remote_sync_ver = ver;
 
     uint8_t key[8];

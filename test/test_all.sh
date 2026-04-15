@@ -49,14 +49,19 @@
 #   │ 端到端测试（需要 p2p_ping + p2p_server）                            │
 #   ├─────────────────────────────────────────────────────────────────────┤
 #   │ test_ping_template      通用 ping 模板测试                          │
+#   ├─────────────────────────────────────────────────────────────────────┤
 #   │ test_ping_c_connect     COMPACT 模式双向连接测试                    │
 #   │ test_ping_c_msg         COMPACT 模式消息互发测试                    │
-#   │ test_ping_c_sync        COMPACT 模式候选同步测试                    │
+#   │ test_ping_c_filter      COMPACT 模式候选过滤测试                    │
 #   │ test_ping_c_reconnect   COMPACT 模式断线重连测试                    │
+#   ├─────────────────────────────────────────────────────────────────────┤
 #   │ test_ping_r_connect     RELAY 模式双向连接测试                      │
 #   │ test_ping_r_msg         RELAY 模式消息互发测试                      │
-#   │ test_ping_r_sync        RELAY 模式候选同步测试                      │
+#   │ test_ping_r_filter      RELAY 模式候选过滤测试                      │
 #   │ test_ping_r_reconnect   RELAY 模式断线重连测试                      │
+#   ├─────────────────────────────────────────────────────────────────────┤
+#   │ test_ping_g_connect     PUBSUB 模式双向连接测试（需要 GitHub Token）│
+#   │ test_ping_g_reconnect   PUBSUB 模式断线重连测试（需要 GitHub Token）│
 #   └─────────────────────────────────────────────────────────────────────┘
 #
 # =============================================================================
@@ -252,7 +257,7 @@ if $RUN_E2E; then
         run_test "test_ping_template" ./test_ping_template "$PING_PATH" "$SERVER_PATH"
         run_test "test_ping_c_connect" ./test_ping_c_connect "$PING_PATH" "$SERVER_PATH"
         run_test "test_ping_c_msg" ./test_ping_c_msg "$PING_PATH" "$SERVER_PATH"
-        run_test "test_ping_c_sync" ./test_ping_c_sync "$PING_PATH" "$SERVER_PATH"
+        run_test "test_ping_c_filter" ./test_ping_c_filter "$PING_PATH" "$SERVER_PATH"
         run_test "test_ping_c_reconnect" ./test_ping_c_reconnect "$PING_PATH" "$SERVER_PATH"
     fi
     
@@ -267,8 +272,21 @@ if $RUN_E2E; then
     else
         run_test "test_ping_r_connect" ./test_ping_r_connect "$PING_PATH" "$SERVER_PATH"
         run_test "test_ping_r_msg" ./test_ping_r_msg "$PING_PATH" "$SERVER_PATH"
-        run_test "test_ping_r_sync" ./test_ping_r_sync "$PING_PATH" "$SERVER_PATH"
+        run_test "test_ping_r_filter" ./test_ping_r_filter "$PING_PATH" "$SERVER_PATH"
         run_test "test_ping_r_reconnect" ./test_ping_r_reconnect "$PING_PATH" "$SERVER_PATH"
+    fi
+    
+    print_section "端到端测试 - PUBSUB 模式（需要 p2p_ping + GitHub Token）"
+    
+    if [[ ! -x "$PING_PATH" ]]; then
+        echo -e "  ${YELLOW}跳过: p2p_ping 未构建${NC}"
+        SKIP_COUNT=$((SKIP_COUNT + 2))
+    elif [[ -z "$P2P_TEST_TOKEN" ]] || [[ -z "$P2P_TEST_GIST" ]]; then
+        echo -e "  ${YELLOW}跳过: P2P_TEST_TOKEN 或 P2P_TEST_GIST 未设置${NC}"
+        SKIP_COUNT=$((SKIP_COUNT + 2))
+    else
+        run_test "test_ping_g_connect" ./test_ping_g_connect "$PING_PATH"
+        run_test "test_ping_g_reconnect" ./test_ping_g_reconnect "$PING_PATH"
     fi
 fi
 
