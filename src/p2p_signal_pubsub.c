@@ -23,23 +23,26 @@ static const char *TASK_POLL    = "POLL";
  * ============================================================================ */
 
  /*
- * 写入本端发布板（PATCH Gist）
+ * 写入发布板指定文件（PATCH Gist）
  *
- * @param ctx   实例上下文
- * @param b64   Base64 编码的密文
- * @return      0=成功
+ * @param ctx      实例上下文
+ * @param gist_id  Gist ID
+ * @param filename 文件名（peer_id）
+ * @param content  写入内容
+ * @return         0=成功
  */
-static int gist_write(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, const char *content) {
+static int gist_write(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, const char *filename, const char *content) {
     char url[256];
     snprintf(url, sizeof(url), "https://api.github.com/gists/%s", gist_id);
 
     size_t content_len = strlen(content);
-    size_t body_sz = content_len + 128;
+    size_t fname_len = strlen(filename);
+    size_t body_sz = content_len + fname_len + 128;
     char *body = (char *)malloc(body_sz);
     if (!body) return -1;
 
     snprintf(body, body_sz,
-             "{\"files\":{\"p2p_signal.json\":{\"content\":\"%s\"}}}", content);
+             "{\"files\":{\"%.64s\":{\"content\":\"%s\"}}}", filename, content);
 
     int ret = p2p_http_patch(url, ctx->auth_token, body);
     free(body);
@@ -47,15 +50,16 @@ static int gist_write(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, const c
 }
 
 /*
- * 读取对端发布板（GET Gist）
+ * 读取发布板指定文件（GET Gist）
  *
  * @param ctx       实例上下文
- * @param gist_id   对端 Gist ID
+ * @param gist_id   Gist ID
+ * @param filename  文件名（peer_id）
  * @param out       输出内容缓冲区
  * @param out_sz    缓冲区大小
  * @return          0=成功且有内容，-1=失败或无内容
  */
-static int gist_poll(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, char *out, int out_sz) {
+static int gist_poll(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, const char *filename, char *out, int out_sz) {
 
     snprintf(out, out_sz, "https://api.github.com/gists/%s", gist_id);
 
@@ -65,9 +69,11 @@ static int gist_poll(p2p_signal_pubsub_ctx_t *ctx, const char *gist_id, char *ou
         return -1;
     }
 
-    /* 从 Gist API 响应中提取 p2p_signal.json 的 content 字段 */
+    /* 从 Gist API 响应中提取指定文件的 content 字段 */
     int ret = -1;
-    const char *file_sec = strstr(resp, "\"p2p_signal.json\"");
+    char file_key[256];
+    snprintf(file_key, sizeof(file_key), "\"%.64s\"", filename);
+    const char *file_sec = strstr(resp, file_key);
     if (file_sec) {
         const char *cnt_key = strstr(file_sec, "\"content\"");
         if (cnt_key) {
@@ -179,7 +185,8 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
  * 协议操作函数（静态）— 每个函数对应一个协议操作项
  *
  * 传输层：PATCH/GET https://api.github.com/gists/{gist_id}
- * 存储文件：p2p_signal.json
+ * 存储文件：以 peer_id 为文件名（每个 peer 对应 Gist 中的一个文件）
+ * 地址模型：<gist_id>/<peer_id> 唯一标识一个信箱
  * 内容格式：纯文本字符串（非 JSON），三种互斥协议：
  *
  * 心跳协议（SUB → 自己的 Gist）：
@@ -205,13 +212,13 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
  *   - 示例: "0:ABCDef..." (全部完成)
  *
  * 操作矩阵：
- *   函数                 角色   HTTP          Gist    写入内容
- *   sync0_sub()          SUB    PATCH local   自己    "ONLINE:<ts>:<peer_id>"
- *   poll_offer()         SUB    GET local     自己    检测 "OFFER:*"
- *   sync0_offer()        PUB    GET+PATCH     对方    "OFFER:<gist_id>:<peer_id>"
- *   poll_answer()        PUB    GET remote    对方    检测候选/ONLINE/OFFER
- *   sync_candidates()    双方   PATCH local   自己    "<ver>:" Base64(DES(SDP))
- *   poll_candidates()    双方   GET remote    对方    解码候选
+ *   函数                 角色   HTTP          文件(peer_id)   写入内容
+ *   sync0_sub()          SUB    PATCH local   local_peer      "ONLINE:<ts>:<peer_id>"
+ *   poll_offer()         SUB    GET local     local_peer      检测 "OFFER:*"
+ *   sync0_offer()        PUB    GET+PATCH     remote_peer     "OFFER:<gist_id>:<peer_id>"
+ *   poll_answer()        PUB    GET remote    remote_peer     检测候选/ONLINE/OFFER
+ *   sync_candidates()    双方   PATCH local   local_peer      "<ver>:" Base64(DES(SDP))
+ *   poll_candidates()    双方   GET remote    remote_peer     解码候选
  * ============================================================================ */
 
 /*
@@ -234,7 +241,7 @@ static void sync0_sub(struct p2p_instance *inst, struct p2p_session *s, uint64_t
     print("I:", LA_F("%s: writing heartbeat (gist=%s) %s", LA_F423, 423),
           TASK_PUBLISH, ctx->local_gist_id, ts_str);
 
-    if (gist_write(ctx, ctx->local_gist_id, ts_str) == 0) {
+    if (gist_write(ctx, ctx->local_gist_id, ctx->local_peer_id, ts_str) == 0) {
         sess->last_sub = now;
         print("I:", LA_F("%s: heartbeat written", LA_F260, 260), TASK_PUBLISH);
     } else {
@@ -256,7 +263,7 @@ static bool poll_offer(struct p2p_instance *inst, struct p2p_session *s) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
     char content[4096];
-    if (gist_poll(ctx, ctx->local_gist_id, content, (int)sizeof(content)) != 0) {
+    if (gist_poll(ctx, ctx->local_gist_id, ctx->local_peer_id, content, (int)sizeof(content)) != 0) {
         print("V:", LA_F("%s: mailbox empty, waiting", LA_F142, 142), TASK_POLL);
         return false;
     }
@@ -311,7 +318,7 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
     /* 首次发送时读取 SUB 的 Gist，检查心跳时间戳；resend 时跳过 */
     if (!resend) {
         char probe[4096];
-        if (gist_poll(ctx, sess->remote_gist_id, probe, (int)sizeof(probe)) == 0) {
+        if (gist_poll(ctx, sess->remote_gist_id, sess->remote_peer_id, probe, (int)sizeof(probe)) == 0) {
             if (strncmp(probe, "ONLINE:", 7) == 0) {
                 time_t sub_ts = (time_t)strtoll(probe + 7, NULL, 10);
                 time_t now_sec = time(NULL);
@@ -338,7 +345,7 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
     char offer[256];
     snprintf(offer, sizeof(offer), "OFFER:%s:%s", ctx->local_gist_id, ctx->local_peer_id);
 
-    if (gist_write(ctx, sess->remote_gist_id, offer) == 0) {
+    if (gist_write(ctx, sess->remote_gist_id, sess->remote_peer_id, offer) == 0) {
         sess->offer_sent = 1;  /* 已写入，待确认 */
         print("I:", LA_F("%s: offer %s (my gist=%s)", LA_F260, 260),
               TASK_PUBLISH, resend ? "resent" : "sent", ctx->local_gist_id);
@@ -363,7 +370,7 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
     char content[4096];
-    if (gist_poll(ctx, sess->remote_gist_id, content, (int)sizeof(content)) != 0) {
+    if (gist_poll(ctx, sess->remote_gist_id, sess->remote_peer_id, content, (int)sizeof(content)) != 0) {
         print("V:", LA_F("%s: SUB gist empty, waiting", LA_F142, 142), TASK_POLL);
         return;
     }
@@ -465,7 +472,7 @@ static void sync_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     print("I:", LA_F("%s: publishing %d candidates (ver=%d) to local gist", LA_F423, 423),
           TASK_PUBLISH, s->local_cand_cnt, ver);
 
-    if (gist_write(ctx, ctx->local_gist_id, payload) == 0) {
+    if (gist_write(ctx, ctx->local_gist_id, ctx->local_peer_id, payload) == 0) {
         sess->candidate_synced_count = s->local_cand_cnt;
         print("I:", LA_F("%s: published %d candidates (ver=%d)", LA_F260, 260),
               TASK_PUBLISH, s->local_cand_cnt, ver);
@@ -493,7 +500,7 @@ static void poll_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
     char content[4096];
-    if (gist_poll(ctx, sess->remote_gist_id, content, (int)sizeof(content)) != 0) {
+    if (gist_poll(ctx, sess->remote_gist_id, sess->remote_peer_id, content, (int)sizeof(content)) != 0) {
         print("V:", LA_F("%s: GET %s — empty or failed", LA_F142, 142), TASK_POLL, sess->remote_gist_id);
         return;
     }
@@ -551,6 +558,12 @@ ret_t p2p_signal_pubsub_online(struct p2p_instance *inst, const char *local_peer
                                 const char *token, const char *gist_id) {
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
 
+    /* peer_id 用作 Gist 文件名，不允许含 '/' */
+    if (local_peer_id && strchr(local_peer_id, '/')) {
+        print("E:", LA_F("ONLINE: peer_id cannot contain '/' (got \"%s\")", 0, 0), local_peer_id);
+        return E_INVALID;
+    }
+
     strncpy(ctx->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
     strncpy(ctx->auth_token, token, sizeof(ctx->auth_token) - 1);
     strncpy(ctx->local_gist_id, gist_id, sizeof(ctx->local_gist_id) - 1);
@@ -573,7 +586,7 @@ ret_t p2p_signal_pubsub_offline(struct p2p_instance *inst) {
 
 //-----------------------------------------------------------------------------
 
-ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_gist_id) {
+ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_addr) {
     p2p_signal_pubsub_ctx_t *ctx = &s->inst->sig_ctx.pubsub;
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
@@ -582,28 +595,56 @@ ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_gist_i
         return E_NONE_CONTEXT;
     }
 
-    /* 幂等：相同 target 则成功，不同则忙 */
+    /* 幂等：已有活跃会话 → 相同 target 成功，不同则忙 */
     if (sess->remote_gist_id[0]) {
-        if (remote_gist_id && remote_gist_id[0])
-            return strncmp(sess->remote_gist_id, remote_gist_id, sizeof(sess->remote_gist_id)) == 0 ? E_NONE : E_BUSY;
+        if (remote_addr && remote_addr[0]) {
+            /* 重构 target 地址并比较 */
+            const char *slash = strchr(remote_addr, '/');
+            const char *cmp_gist = slash ? remote_addr : ctx->local_gist_id;
+            size_t cmp_gist_len = slash ? (size_t)(slash - remote_addr) : strlen(ctx->local_gist_id);
+            const char *cmp_peer = slash ? slash + 1 : remote_addr;
+            if (strncmp(sess->remote_gist_id, cmp_gist, cmp_gist_len) == 0
+                && sess->remote_gist_id[cmp_gist_len] == '\0'
+                && strcmp(sess->remote_peer_id, cmp_peer) == 0)
+                return E_NONE;
+        }
         return E_BUSY;
     }
 
     sess->remote_sync_ver = -1;
 
     // SUB 模式：不知道对方，等待 offer
-    if (!remote_gist_id || !remote_gist_id[0]) {
+    if (!remote_addr || !remote_addr[0]) {
         sess->is_pub = false;
         sess->state = SIG_PUBSUB_SESS_WAIT_OFFER;
-        print("I:", LA_F("CONNECT SUB: waiting for offer in mailbox (gist=%s)", 0, 0), ctx->local_gist_id);
+        print("I:", LA_F("CONNECT SUB: waiting for offer (gist=%s/%s)", 0, 0),
+              ctx->local_gist_id, ctx->local_peer_id);
         sync0_sub(s->inst, s, P_tick_ms());
     }
-    // PUB 模式：知道对方的 gist_id，主动发起
+    // PUB 模式：解析对方地址，主动发起
     else {
         sess->is_pub = true;
-        strncpy(sess->remote_gist_id, remote_gist_id, sizeof(sess->remote_gist_id) - 1);
+
+        /* 解析 remote_addr: "gist_id/peer_id" 或 "peer_id"（同 gist） */
+        const char *slash = strchr(remote_addr, '/');
+        if (slash) {
+            size_t gid_len = (size_t)(slash - remote_addr);
+            if (gid_len >= sizeof(sess->remote_gist_id)) gid_len = sizeof(sess->remote_gist_id) - 1;
+            memcpy(sess->remote_gist_id, remote_addr, gid_len);
+            sess->remote_gist_id[gid_len] = '\0';
+            strncpy(sess->remote_peer_id, slash + 1, sizeof(sess->remote_peer_id) - 1);
+            sess->remote_peer_id[sizeof(sess->remote_peer_id) - 1] = '\0';
+        } else {
+            /* 无 "/"：同 gist 模式，remote_gist = local_gist */
+            strncpy(sess->remote_gist_id, ctx->local_gist_id, sizeof(sess->remote_gist_id) - 1);
+            sess->remote_gist_id[sizeof(sess->remote_gist_id) - 1] = '\0';
+            strncpy(sess->remote_peer_id, remote_addr, sizeof(sess->remote_peer_id) - 1);
+            sess->remote_peer_id[sizeof(sess->remote_peer_id) - 1] = '\0';
+        }
+
         sess->state = SIG_PUBSUB_SESS_OFFERING;
-        print("I:", LA_F("CONNECT PUB: target=%s", 0, 0), remote_gist_id);
+        print("I:", LA_F("CONNECT PUB: target=%s/%s", 0, 0),
+              sess->remote_gist_id, sess->remote_peer_id);
         sync0_offer(s->inst, s, false);
     }
 
@@ -767,19 +808,12 @@ p2p_log_level_t    p2p_log_level    = P2P_LOG_LEVEL_DEBUG;
 bool               p2p_log_pre_tag  = false;
 uint16_t           p2p_instrument_base = 0;
 
-ret_t nat_punch(struct p2p_session *s, int idx) {
-    (void)s; (void)idx;
-    return 0;
-}
-
-void path_stats_init(path_stats_t *st, int cost_score) {
-    (void)st; (void)cost_score;
-}
-
+ret_t nat_punch(struct p2p_session *s, int idx) { (void)s; (void)idx; return 0; }
+void path_stats_init(path_stats_t *st, int cost_score) { (void)st; (void)cost_score; }
 int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
-                              const char *username, const char *password,
-                              uint32_t priority, int is_controlling,
-                              uint64_t tie_breaker, int use_candidate) {
+                             const char *username, const char *password,
+                             uint32_t priority, int is_controlling,
+                             uint64_t tie_breaker, int use_candidate) {
     (void)buf; (void)max_len; (void)tsx_id; (void)username; (void)password;
     (void)priority; (void)is_controlling; (void)tie_breaker; (void)use_candidate;
     return 0;
@@ -796,7 +830,7 @@ int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
  * 运行后可用 curl 验证：
  *   curl -s -H "Authorization: token $P2P_TEST_TOKEN" \
  *        https://api.github.com/gists/$P2P_TEST_GIST \
- *        | jq '.files.p2p_signal_json.content'
+ *        | jq '.files.test_pub.content'
  */
 
 static const char *env_token;
@@ -808,7 +842,8 @@ static bool env_ready(void) {
 }
 
 /* 创建一组可用于测试的 instance + session（calloc 保证全零初始化） */
-static void setup(struct p2p_instance **out_inst, struct p2p_session **out_s) {
+static void setup_with_peer(struct p2p_instance **out_inst, struct p2p_session **out_s,
+                             const char *peer_id) {
     struct p2p_instance *inst = calloc(1, sizeof(*inst));
     struct p2p_session  *s    = calloc(1, sizeof(*s));
     s->inst = inst;
@@ -817,7 +852,7 @@ static void setup(struct p2p_instance **out_inst, struct p2p_session **out_s) {
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
     strncpy(ctx->auth_token, env_token, sizeof(ctx->auth_token) - 1);
     strncpy(ctx->local_gist_id, env_gist, sizeof(ctx->local_gist_id) - 1);
-    strncpy(ctx->local_peer_id, "test_pub", sizeof(ctx->local_peer_id) - 1);
+    strncpy(ctx->local_peer_id, peer_id, sizeof(ctx->local_peer_id) - 1);
     strncpy(ctx->auth_key, env_key ? env_key : "testkey1", sizeof(ctx->auth_key) - 1);
     ctx->state = SIG_PUBSUB_ONLINE;
 
@@ -825,6 +860,10 @@ static void setup(struct p2p_instance **out_inst, struct p2p_session **out_s) {
 
     *out_inst = inst;
     *out_s    = s;
+}
+
+static void setup(struct p2p_instance **out_inst, struct p2p_session **out_s) {
+    setup_with_peer(out_inst, out_s, "test_pub");
 }
 
 static void teardown(struct p2p_instance *inst, struct p2p_session *s) {
@@ -852,11 +891,11 @@ TEST(gist_roundtrip) {
     setup(&inst, &s);
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
 
-    int ret = gist_write(ctx, env_gist, "TEST_ROUNDTRIP:hello");
+    int ret = gist_write(ctx, env_gist, "test_pub", "TEST_ROUNDTRIP:hello");
     ASSERT_EQ(ret, 0);
 
     char buf[4096];
-    ret = gist_poll(ctx, env_gist, buf, sizeof(buf));
+    ret = gist_poll(ctx, env_gist, "test_pub", buf, sizeof(buf));
     ASSERT_EQ(ret, 0);
     ASSERT(strncmp(buf, "TEST_ROUNDTRIP:hello", 20) == 0);
 
@@ -875,7 +914,7 @@ TEST(heartbeat_write) {
     sync0_sub(inst, s, P_tick_ms());
 
     char buf[4096];
-    int ret = gist_poll(ctx, env_gist, buf, sizeof(buf));
+    int ret = gist_poll(ctx, env_gist, "test_pub", buf, sizeof(buf));
     ASSERT_EQ(ret, 0);
     ASSERT(strncmp(buf, "ONLINE:", 7) == 0);
     /* 检查 peer_id 出现在末尾 */
@@ -895,17 +934,18 @@ TEST(offer_write) {
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
     /* 先写入心跳，让 sync0_offer 读到有效内容（同一个 gist 充当 remote） */
-    gist_write(ctx, env_gist, "ONLINE:9999999999:remote_sub");
+    gist_write(ctx, env_gist, "remote_sub", "ONLINE:9999999999:remote_sub");
 
     sess->is_pub = true;
     strncpy(sess->remote_gist_id, env_gist, sizeof(sess->remote_gist_id) - 1);
+    strncpy(sess->remote_peer_id, "remote_sub", sizeof(sess->remote_peer_id) - 1);
     sync0_offer(inst, s, false);
 
     ASSERT_EQ(sess->offer_sent, 1);
 
     /* 读回验证 offer 格式 */
     char buf[4096];
-    int ret = gist_poll(ctx, env_gist, buf, sizeof(buf));
+    int ret = gist_poll(ctx, env_gist, "remote_sub", buf, sizeof(buf));
     ASSERT_EQ(ret, 0);
     ASSERT(strncmp(buf, "OFFER:", 6) == 0);
     ASSERT(strstr(buf, env_gist) != NULL);       /* 包含本端 gist id */
@@ -930,7 +970,7 @@ TEST(offer_detect) {
     /* 模拟 PUB 端写入 offer（用同一个 gist，remote_gist 写个假 ID 区分） */
     char fake_offer[256];
     snprintf(fake_offer, sizeof(fake_offer), "OFFER:%s:remote_pub", "fake_remote_gist_id_0123456789ab");
-    gist_write(ctx, env_gist, fake_offer);
+    gist_write(ctx, env_gist, "test_pub", fake_offer);
 
     bool found = poll_offer(inst, s);
     ASSERT(found);
@@ -981,6 +1021,7 @@ TEST(candidate_roundtrip) {
     p2p_pubsub_session_t *sess_b = &s_b->sig_sess.pubsub;
     sess_b->state = SIG_PUBSUB_SESS_SYNCING;
     strncpy(sess_b->remote_gist_id, env_gist, sizeof(sess_b->remote_gist_id) - 1);
+    strncpy(sess_b->remote_peer_id, "test_pub", sizeof(sess_b->remote_peer_id) - 1);
 
     /* 分配远端候选缓冲 */
     s_b->remote_cands = calloc(16, sizeof(p2p_remote_candidate_entry_t));
@@ -1011,9 +1052,10 @@ TEST(poll_answer_heartbeat_resend) {
     sess->state = SIG_PUBSUB_SESS_OFFERING;
     sess->offer_sent = 1;
     strncpy(sess->remote_gist_id, env_gist, sizeof(sess->remote_gist_id) - 1);
+    strncpy(sess->remote_peer_id, "remote_sub", sizeof(sess->remote_peer_id) - 1);
 
     /* 写入心跳，模拟 offer 被覆盖 */
-    gist_write(ctx, env_gist, "ONLINE:9999999999:remote_sub");
+    gist_write(ctx, env_gist, "remote_sub", "ONLINE:9999999999:remote_sub");
 
     poll_answer(inst, s);
 
@@ -1022,10 +1064,149 @@ TEST(poll_answer_heartbeat_resend) {
 
     /* 验证现在又是 offer */
     char buf[4096];
-    gist_poll(ctx, env_gist, buf, sizeof(buf));
+    gist_poll(ctx, env_gist, "remote_sub", buf, sizeof(buf));
     ASSERT(strncmp(buf, "OFFER:", 6) == 0);
 
     teardown(inst, s);
+}
+
+/*
+ * same_gist_e2e: 同一个 Gist，不同 peer_id 的完整协议流程
+ *
+ * alice (SUB) 和 bob (PUB) 使用同一个 gist_id，各自写自己的文件（alice/bob）。
+ * 流程：
+ *   1. alice 写心跳到 gist/alice
+ *   2. bob 读 gist/alice 检测心跳 → 写 offer 到 gist/alice
+ *   3. alice 读 gist/alice 检测 offer → 提取 bob 地址 → SYNCING
+ *   4. alice 发布候选到 gist/alice
+ *   5. bob 读 gist/alice 获取候选 → SYNCING
+ *   6. bob 发布候选到 gist/bob
+ *   7. alice 读 gist/bob 获取候选
+ *   8. 双方候选交换完毕
+ */
+TEST(same_gist_e2e) {
+    if (!env_ready()) { printf("SKIP (no env)\n"); return; }
+
+    /* === 创建 alice (SUB) 和 bob (PUB) === */
+    struct p2p_instance *inst_a; struct p2p_session *s_a;
+    setup_with_peer(&inst_a, &s_a, "alice");
+    p2p_signal_pubsub_ctx_t *ctx_a = &inst_a->sig_ctx.pubsub;
+    p2p_pubsub_session_t *sess_a = &s_a->sig_sess.pubsub;
+
+    struct p2p_instance *inst_b; struct p2p_session *s_b;
+    setup_with_peer(&inst_b, &s_b, "bob");
+    p2p_signal_pubsub_ctx_t *ctx_b = &inst_b->sig_ctx.pubsub;
+    p2p_pubsub_session_t *sess_b = &s_b->sig_sess.pubsub;
+
+    /* === 步骤 1: alice (SUB) 写心跳 === */
+    sess_a->is_pub = false;
+    sess_a->state = SIG_PUBSUB_SESS_WAIT_OFFER;
+    sync0_sub(inst_a, s_a, P_tick_ms());
+
+    /* 验证心跳写到了 gist/alice */
+    char buf[4096];
+    int ret = gist_poll(ctx_b, env_gist, "alice", buf, sizeof(buf));
+    ASSERT_EQ(ret, 0);
+    ASSERT(strncmp(buf, "ONLINE:", 7) == 0);
+    ASSERT(strstr(buf, ":alice") != NULL);
+    printf("  [1] alice heartbeat ok\n");
+
+    sleep(1);
+
+    /* === 步骤 2: bob (PUB) 读心跳 → 写 offer 到 gist/alice === */
+    sess_b->is_pub = true;
+    strncpy(sess_b->remote_gist_id, env_gist, sizeof(sess_b->remote_gist_id) - 1);
+    strncpy(sess_b->remote_peer_id, "alice", sizeof(sess_b->remote_peer_id) - 1);
+    sync0_offer(inst_b, s_b, false);
+    ASSERT_EQ(sess_b->offer_sent, 1);
+
+    /* 验证 alice 的文件被覆写为 offer */
+    ret = gist_poll(ctx_a, env_gist, "alice", buf, sizeof(buf));
+    ASSERT_EQ(ret, 0);
+    ASSERT(strncmp(buf, "OFFER:", 6) == 0);
+    ASSERT(strstr(buf, ":bob") != NULL);
+    printf("  [2] bob offer written to gist/alice ok\n");
+
+    sleep(1);
+
+    /* === 步骤 3: alice 检测 offer → SYNCING === */
+    bool found = poll_offer(inst_a, s_a);
+    ASSERT(found);
+    ASSERT(strcmp(sess_a->remote_gist_id, env_gist) == 0);
+    ASSERT(strcmp(sess_a->remote_peer_id, "bob") == 0);
+    ASSERT_EQ(sess_a->state, SIG_PUBSUB_SESS_SYNCING);
+    printf("  [3] alice detected offer → SYNCING (remote=%s/%s) ok\n",
+           sess_a->remote_gist_id, sess_a->remote_peer_id);
+
+    sleep(1);
+
+    /* === 步骤 4: alice 发布候选到 gist/alice === */
+    sess_a->state = SIG_PUBSUB_SESS_SYNCING;
+    s_a->local_cands = calloc(4, sizeof(p2p_local_candidate_entry_t));
+    s_a->local_cand_cap = 4;
+    s_a->local_cand_cnt = 1;
+    s_a->local_cands[0].type = P2P_CAND_HOST;
+    s_a->local_cands[0].addr.sin_family = AF_INET;
+    s_a->local_cands[0].addr.sin_port = htons(10001);
+    inet_pton(AF_INET, "10.0.0.1", &s_a->local_cands[0].addr.sin_addr);
+    s_a->local_cands[0].priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, 65535, 1);
+    inst_a->srflx_count = 0; inst_a->srflx_active = 0; inst_a->turn_pending = 0;
+
+    sync_candidates(inst_a, s_a);
+    ASSERT_EQ(sess_a->state, SIG_PUBSUB_SESS_READY);
+    printf("  [4] alice published candidates → READY ok\n");
+
+    sleep(1);
+
+    /* === 步骤 5: bob 读 gist/alice 获取候选 → SYNCING === */
+    sess_b->state = SIG_PUBSUB_SESS_OFFERING;
+    sess_b->offer_sent = 2;  /* 已确认 */
+
+    s_b->remote_cands = calloc(16, sizeof(p2p_remote_candidate_entry_t));
+    s_b->remote_cand_cap = 16;
+
+    /* poll_answer 检测到候选数据 → SYNCING */
+    poll_answer(inst_b, s_b);
+    ASSERT_GE(s_b->remote_cand_cnt, 1);
+    ASSERT_EQ(ntohs(s_b->remote_cands[0].addr.sin_port), 10001);
+    ASSERT(sess_b->state >= SIG_PUBSUB_SESS_SYNCING);
+    printf("  [5] bob received alice's candidates (%d) ok\n", s_b->remote_cand_cnt);
+
+    sleep(1);
+
+    /* === 步骤 6: bob 发布候选到 gist/bob === */
+    sess_b->state = SIG_PUBSUB_SESS_SYNCING;
+    s_b->local_cands = calloc(4, sizeof(p2p_local_candidate_entry_t));
+    s_b->local_cand_cap = 4;
+    s_b->local_cand_cnt = 1;
+    s_b->local_cands[0].type = P2P_CAND_HOST;
+    s_b->local_cands[0].addr.sin_family = AF_INET;
+    s_b->local_cands[0].addr.sin_port = htons(20002);
+    inet_pton(AF_INET, "10.0.0.2", &s_b->local_cands[0].addr.sin_addr);
+    s_b->local_cands[0].priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, 65535, 1);
+    inst_b->srflx_count = 0; inst_b->srflx_active = 0; inst_b->turn_pending = 0;
+
+    sync_candidates(inst_b, s_b);
+    ASSERT_EQ(sess_b->state, SIG_PUBSUB_SESS_READY);
+    printf("  [6] bob published candidates → READY ok\n");
+
+    sleep(1);
+
+    /* === 步骤 7: alice 读 gist/bob 获取候选 === */
+    s_a->remote_cands = calloc(16, sizeof(p2p_remote_candidate_entry_t));
+    s_a->remote_cand_cap = 16;
+
+    poll_candidates(inst_a, s_a);
+    ASSERT_GE(s_a->remote_cand_cnt, 1);
+    ASSERT_EQ(ntohs(s_a->remote_cands[0].addr.sin_port), 20002);
+    ASSERT(s_a->remote_cand_done);
+    printf("  [7] alice received bob's candidates (%d) ok\n", s_a->remote_cand_cnt);
+
+    /* === 验证完毕：双方候选交换成功 === */
+    printf("  [OK] same gist e2e: alice(10.0.0.1:10001) ↔ bob(10.0.0.2:20002)\n");
+
+    teardown(inst_a, s_a);
+    teardown(inst_b, s_b);
 }
 
 /* --- main --- */
@@ -1045,7 +1226,8 @@ int main(void) {
     RUN_TEST(offer_write);          if (env_ready()) sleep(1);
     RUN_TEST(offer_detect);         if (env_ready()) sleep(1);
     RUN_TEST(candidate_roundtrip);  if (env_ready()) sleep(1);
-    RUN_TEST(poll_answer_heartbeat_resend);
+    RUN_TEST(poll_answer_heartbeat_resend);  if (env_ready()) sleep(1);
+    RUN_TEST(same_gist_e2e);
 
     printf("\n%d passed, %d failed\n", test_passed, test_failed);
     return test_failed > 0 ? 1 : 0;

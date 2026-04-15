@@ -9,6 +9,9 @@
  *
  * 核心特点：无需专用信令服务器
  *
+ * 地址模型：每个对等体的信箱地址为 <gist_id>/<peer_id>，对应 Gist 中的一个文件。
+ * 同一个 Gist 可以承载多个对等体（不同文件名），也可以每人各自一个 Gist。
+ *
  * 标准 P2P 信令方案均依赖专用服务器（COMPACT 模式的 UDP 服务器、
  * RELAY 模式的 TCP 长连接服务器）。PUBSUB 模式通过第三方 HTTP 存储
  * 服务（GitHub Gist）实现去中心化的信令交换：
@@ -23,58 +26,59 @@
  * 信箱 + 发布板架构（PUB/SUB 角色）
  * ============================================================================
  *
- * 每方拥有独立的 Gist。SUB（被动方）的 Gist 初始为"信箱"，等待 PUB 投递 offer。
- * 收到 offer 后，各方的 Gist 转为发布自己候选列表的"发布板"。
+ * 每方拥有独立的 Gist（或共享同一 Gist）。信箱地址 = <gist_id>/<peer_id>，对应 Gist 中的一个文件。
+ * SUB（被动方）的信箱初始写入心跳，PUB 投递 offer 后各方转入候选发布。
  *
- * 角色由 p2p_connect(handle, remote_peer_id) 决定：
- *   - remote_peer_id != NULL → PUB（主动方，知道对方 gist_id）
- *   - remote_peer_id == NULL → SUB（被动方，等待 offer 告知对方 gist_id）
+ * 角色由 p2p_connect(handle, remote_addr) 决定：
+ *   - remote_addr = "gist_id/peer_id" → PUB（主动方，不同 Gist）
+ *   - remote_addr = "peer_id"         → PUB（主动方，同 Gist）
+ *   - remote_addr = NULL              → SUB（被动方，等待 offer）
  *
- *   SUB (gist_a = 信箱)                       PUB (gist_b)
- *   ┌────────────────────┐                    ┌────────────────────┐
- *   │  Gist A            │                    │  Gist B            │
- *   │  (p2p_signal.json) │                    │  (p2p_signal.json) │
- *   │                    │                    │                    │
- *   │ 阶段1: ONLINE:<ts> │ ← PUB 读取时间戳  │                    │
- *   │ 阶段2: OFFER:gist_b│                    │                    │
- *   │ 阶段3: <A 的候选>  │ ← PUB 轮询检测 ── │                    │
- *   │                    │                    │ 阶段4: <B 的候选>  │
- *   │                    │ ── SUB 轮询读取 → │                    │
- *   └────────────────────┘                    └────────────────────┘
+ *   SUB (Alice)                                 PUB (Bob)
+ *   ┌────────────────────────┐                  ┌────────────────────────┐
+ *   │ Gist X / "alice"       │                  │ Gist X / "bob"         │
+ *   │ (或 Gist A / "alice")  │                  │ (或 Gist B / "bob")    │
+ *   │                        │                  │                        │
+ *   │ 阶段1: ONLINE:<ts>     │ ← PUB 读取 ──── │                        │
+ *   │ 阶段2: OFFER:gist:bob  │                  │                        │
+ *   │ 阶段3: <A 的候选>      │ ← PUB 轮询 ──── │                        │
+ *   │                        │                  │ 阶段4: <B 的候选>      │
+ *   │                        │ ── SUB 轮询 ──→ │                        │
+ *   └────────────────────────┘                  └────────────────────────┘
  *
  * 连接流程：
  *
  *   SUB (Alice)              GitHub Gists                  PUB (Bob)
  *    |                          |                            |
- *    | 1. 写入心跳时间戳        |                            |
- *    |-- PATCH gist_a --------> |                            |
+ *    | 1. 写入心跳到 gist/alice |                            |
+ *    |-- PATCH gist/alice ----> |                            |
  *    |   "ONLINE:<timestamp>"   |                            |
  *    |                          |                            |
- *    |                          | 2. PUB 读取 gist_a 时间戳  |
- *    |                          | <------ GET gist_a --------|
- *    |                          |    检查 SUB 是否在线       |
+ *    |                          | 2. PUB 读取 gist/alice     |
+ *    |                          | <------ GET gist ----------|
+ *    |                          |    检查 alice 是否在线     |
  *    |                          |                            |
  *    |                          | 3. PUB 投递 offer          |
- *    |                          | <-- PATCH gist_a ----------|
- *    |                          |    "OFFER:gist_b"          |
+ *    |                          | <-- PATCH gist/alice ------|
+ *    |                          |    "OFFER:gist:bob"        |
  *    |                          |                            |
  *    | 4. SUB 检测到 offer      |                            |
- *    |--- GET gist_a ---------> |                            |
- *    | → 提取 gist_b           |                            |
+ *    |--- GET gist/alice -----> |                            |
+ *    | → 提取 gist:bob         |                            |
  *    |                          |                            |
- *    | 5. SUB 发布候选到 gist_a |                            |
- *    |--- PATCH gist_a -------> |                            |
+ *    | 5. SUB 发布候选到 alice  |                            |
+ *    |--- PATCH gist/alice ---> |                            |
  *    |    Base64(DES(cands))    |                            |
  *    |                          |                            |
  *    |                          | 6. PUB 检测到 SUB 候选     |
- *    |                          | <------ GET gist_a --------|
+ *    |                          | <------ GET gist/alice ----|
  *    |                          | → 解密 SUB 候选           |
  *    |                          |                            |
- *    |                          | 7. PUB 发布候选到 gist_b   |
- *    |                          | <------ PATCH gist_b ------|
+ *    |                          | 7. PUB 发布候选到 bob      |
+ *    |                          | <------ PATCH gist/bob ----|
  *    |                          |                            |
- *    | 8. SUB 轮询 gist_b       |                            |
- *    |--- GET gist_b ---------> |                            |
+ *    | 8. SUB 轮询 gist/bob     |                            |
+ *    |--- GET gist/bob -------> |                            |
  *    | → 解密 PUB 候选         |                            |
  *    |                          |                            |
  *    |<========= ICE 连通性检查（直连 / STUN 打洞）=========>|
@@ -288,15 +292,19 @@ void p2p_signal_pubsub_trickle_candidate(struct p2p_session *s);
 /*
  * 建立与对端的会话
  *
- * @param s              P2P 会话
- * @param remote_peer_id 对端发布板 Gist ID
- * @return               E_NONE=成功
+ * @param s           P2P 会话
+ * @param remote_addr 对端地址，格式：
+ *                    - "gist_id/peer_id" — 不同 Gist（PUB 模式）
+ *                    - "peer_id"         — 同 Gist（PUB 模式，remote_gist = local_gist）
+ *                    - NULL              — SUB 模式（等待 offer）
+ * @return            E_NONE=成功
  */
-ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_gist_id);
+ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_addr);
 
 /*
  * 断开当前会话
  */
 void p2p_signal_pubsub_disconnect(struct p2p_session *s);
 
+///////////////////////////////////////////////////////////////////////////////
 #endif /* P2P_SIGNAL_PUBSUB_H */
