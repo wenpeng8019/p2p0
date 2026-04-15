@@ -29,8 +29,8 @@ ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S2
 ARGS_B(false, compact,      'c', "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S32, 32));
 ARGS_B(false, echo,         0,   "echo",         LA_CS("Auto-echo received messages back to sender", LA_S12, 12));
 ARGS_S(false, server,       's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S24, 24));
-ARGS_S(false, github,       0,   "github",       LA_CS("GitHub Token for Public Signaling", LA_S22, 22));
-ARGS_S(false, gist,         0,   "gist",         LA_CS("GitHub Gist ID for Public Signaling", LA_S21, 21));
+ARGS_S(false, github,       'G',   "github",     LA_CS("GitHub Token for Pub/Sub Signaling", LA_S22, 22));
+ARGS_S(false, gist,         'g',   "gist",       LA_CS("GitHub Gist ID for Pub/Sub Signaling", LA_S21, 21));
 ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", LA_S33, 33));
 ARGS_S(false, to,           't', "to",           LA_CS("Target Peer Name (if specified: active role)", LA_S27, 27));
 ARGS_S(false, stun,         0,   "stun",         LA_CS("STUN server address", LA_S26, 26));

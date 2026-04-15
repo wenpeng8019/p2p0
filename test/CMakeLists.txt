@@ -77,15 +77,15 @@ target_include_directories(test_compact_relay PRIVATE
 )
 target_link_libraries(test_compact_relay stdc ${TEST_PLATFORM_LIBS})
 
-# P2P Ping 客户端单元测试模版 (COMPACT 模式)
-add_executable(test_ping_c_template
-    test_ping_c_template.c
+# P2P Ping 客户端单元测试模版（通用，不区分信令模式）
+add_executable(test_ping_template
+    test_ping_template.c
 )
-target_include_directories(test_ping_c_template PRIVATE
+target_include_directories(test_ping_template PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_c_template stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_template stdc ${TEST_PLATFORM_LIBS})
 
 # P2P Ping 双客户端连接测试 (COMPACT 模式, Alice <-> Bob)
 add_executable(test_ping_c_connect
@@ -167,15 +167,15 @@ target_include_directories(test_relay_rpc PRIVATE
 )
 target_link_libraries(test_relay_rpc stdc ${TEST_PLATFORM_LIBS})
 
-# P2P Ping 客户端单元测试模版 (RELAY 模式)
-add_executable(test_ping_r_template
-    test_ping_r_template.c
+# P2P Ping 双客户端连接测试 (RELAY 模式, Alice <-> Bob)
+add_executable(test_ping_r_connect
+    test_ping_r_connect.c
 )
-target_include_directories(test_ping_r_template PRIVATE
+target_include_directories(test_ping_r_connect PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_ping_r_template stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_ping_r_connect stdc ${TEST_PLATFORM_LIBS})
 
 # P2P Ping 消息互发测试 (RELAY 模式, 基于 instrument req/resp)
 add_executable(test_ping_r_msg
@@ -293,14 +293,14 @@ add_test(NAME test_relay_rpc         COMMAND test_relay_rpc         ${SERVER_PAT
 # --- 端到端测试 COMPACT（需要 p2p_ping + p2p_server） ---
 set(PING_PATH $<TARGET_FILE:p2p_ping>)
 
-add_test(NAME test_ping_c_template   COMMAND test_ping_c_template   ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_template     COMMAND test_ping_template     ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_c_connect    COMMAND test_ping_c_connect    ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_c_msg        COMMAND test_ping_c_msg        ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_c_sync       COMMAND test_ping_c_sync       ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_c_reconnect  COMMAND test_ping_c_reconnect  ${PING_PATH} ${SERVER_PATH})
 
 # --- 端到端测试 RELAY（需要 p2p_ping + p2p_server） ---
-add_test(NAME test_ping_r_template   COMMAND test_ping_r_template   ${PING_PATH} ${SERVER_PATH})
+add_test(NAME test_ping_r_connect    COMMAND test_ping_r_connect    ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_r_msg        COMMAND test_ping_r_msg        ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_r_sync       COMMAND test_ping_r_sync       ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_r_reconnect  COMMAND test_ping_r_reconnect  ${PING_PATH} ${SERVER_PATH})
@@ -319,9 +319,9 @@ set_tests_properties(
 )
 
 set_tests_properties(
-    test_ping_c_template test_ping_c_connect test_ping_c_msg
+    test_ping_template test_ping_c_connect test_ping_c_msg
     test_ping_c_sync test_ping_c_reconnect
-    test_ping_r_template test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
+    test_ping_r_connect test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
     PROPERTIES LABELS "e2e"
 )
 
@@ -335,9 +335,9 @@ set_tests_properties(
 
 # e2e 测试超时（内部有 30s connect timeout，需要更多裕量）
 set_tests_properties(
-    test_ping_c_template test_ping_c_connect test_ping_c_msg
+    test_ping_template test_ping_c_connect test_ping_c_msg
     test_ping_c_sync test_ping_c_reconnect
-    test_ping_r_template test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
+    test_ping_r_connect test_ping_r_msg test_ping_r_sync test_ping_r_reconnect
     PROPERTIES TIMEOUT 120
 )
 

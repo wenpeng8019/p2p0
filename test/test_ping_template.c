@@ -193,11 +193,11 @@ static int start_ping(const char *name, const char *target, const char *debugger
         // 子进程：执行 ping
         if (target) {
             execl(g_ping_path, g_ping_path, 
-                  "--compact", "-s", server_arg, "-n", name, "-t", target,
+                  "-s", server_arg, "-n", name, "-t", target,
                   "--debugger", debugger_name, NULL);
         } else {
             execl(g_ping_path, g_ping_path, 
-                  "--compact", "-s", server_arg, "-n", name,
+                  "-s", server_arg, "-n", name,
                   "--debugger", debugger_name, NULL);
         }
         fprintf(stderr, "Failed to exec ping: %s\n", strerror(errno));
@@ -313,7 +313,6 @@ static void test_debugger_sync(void) {
     // 同步成功就算通过
     // 注：instrument 日志收集可能因为进程退出太快而不完整
     TEST_PASS(TEST_NAME);
-    
     stop_ping();
 }
 
