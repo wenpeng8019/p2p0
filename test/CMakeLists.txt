@@ -217,6 +217,16 @@ target_include_directories(test_ping_g_connect PRIVATE
 )
 target_link_libraries(test_ping_g_connect stdc ${TEST_PLATFORM_LIBS})
 
+# P2P PUBSUB 模式消息互发测试 (PUB=Alice, SUB=Bob, GitHub Gist 信令)
+add_executable(test_ping_g_msg
+    test_ping_g_msg.c
+)
+target_include_directories(test_ping_g_msg PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+)
+target_link_libraries(test_ping_g_msg stdc ${TEST_PLATFORM_LIBS})
+
 # P2P PUBSUB 模式重连测试 (双端崩溃 + 单端崩溃, GitHub Gist 信令)
 add_executable(test_ping_g_reconnect
     test_ping_g_reconnect.c
@@ -326,6 +336,7 @@ add_test(NAME test_ping_r_reconnect  COMMAND test_ping_r_reconnect  ${PING_PATH}
 
 # --- 端到端测试 PUBSUB（需要 p2p_ping + GitHub Token/Gist） ---
 add_test(NAME test_ping_g_connect    COMMAND test_ping_g_connect    ${PING_PATH})
+add_test(NAME test_ping_g_msg        COMMAND test_ping_g_msg        ${PING_PATH})
 add_test(NAME test_ping_g_reconnect  COMMAND test_ping_g_reconnect  ${PING_PATH})
 
 # --- 测试标签（用于分组运行：ctest -L unit / ctest -L protocol / ctest -L e2e） ---
@@ -345,7 +356,7 @@ set_tests_properties(
     test_ping_template test_ping_c_connect test_ping_c_msg
     test_ping_c_filter test_ping_c_reconnect
     test_ping_r_connect test_ping_r_msg test_ping_r_filter test_ping_r_reconnect
-    test_ping_g_connect test_ping_g_reconnect
+    test_ping_g_connect test_ping_g_msg test_ping_g_reconnect
     PROPERTIES LABELS "e2e"
 )
 
@@ -367,12 +378,7 @@ set_tests_properties(
 
 # PUBSUB e2e 测试超时（Gist HTTP 轮询延迟大，reconnect 需要两轮连接）
 set_tests_properties(
-    PROPERTIES TIMEOUT 120
-)
-
-# PUBSUB e2e 测试超时（Gist HTTP 轮询延迟大，reconnect 需要两轮连接）
-set_tests_properties(
-    test_ping_g_connect
+    test_ping_g_connect test_ping_g_msg
     PROPERTIES TIMEOUT 180
 )
 set_tests_properties(

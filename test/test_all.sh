@@ -61,6 +61,7 @@
 #   │ test_ping_r_reconnect   RELAY 模式断线重连测试                      │
 #   ├─────────────────────────────────────────────────────────────────────┤
 #   │ test_ping_g_connect     PUBSUB 模式双向连接测试（需要 GitHub Token）│
+#   │ test_ping_g_msg         PUBSUB 模式消息互发测试（需要 GitHub Token）│
 #   │ test_ping_g_reconnect   PUBSUB 模式断线重连测试（需要 GitHub Token）│
 #   └─────────────────────────────────────────────────────────────────────┘
 #
@@ -280,12 +281,13 @@ if $RUN_E2E; then
     
     if [[ ! -x "$PING_PATH" ]]; then
         echo -e "  ${YELLOW}跳过: p2p_ping 未构建${NC}"
-        SKIP_COUNT=$((SKIP_COUNT + 2))
+        SKIP_COUNT=$((SKIP_COUNT + 3))
     elif [[ -z "$P2P_TEST_TOKEN" ]] || [[ -z "$P2P_TEST_GIST" ]]; then
         echo -e "  ${YELLOW}跳过: P2P_TEST_TOKEN 或 P2P_TEST_GIST 未设置${NC}"
-        SKIP_COUNT=$((SKIP_COUNT + 2))
+        SKIP_COUNT=$((SKIP_COUNT + 3))
     else
         run_test "test_ping_g_connect" ./test_ping_g_connect "$PING_PATH"
+        run_test "test_ping_g_msg" ./test_ping_g_msg "$PING_PATH"
         run_test "test_ping_g_reconnect" ./test_ping_g_reconnect "$PING_PATH"
     fi
 fi

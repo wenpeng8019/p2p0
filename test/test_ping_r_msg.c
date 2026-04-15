@@ -617,6 +617,8 @@ static void test_message_exchange(void) {
 }
 
 // 测试 2: 非交互模式验证
+// NOTE: start_ping_client 已对所有子进程 dup2(null_fd, STDIN)，
+//       test_message_exchange 已隐含覆盖此场景，本用例仅做额外 state 查询冒烟。
 static void test_non_interactive_mode(void) {
     const char *TEST_NAME = "relay_non_interactive_mode";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -698,6 +700,8 @@ static void test_non_interactive_mode(void) {
 }
 
 // 测试 3: instrument 日志收集验证
+// NOTE: 对测试基础设施的冒烟测试（日志回调是否正常工作），
+//       test_message_exchange 的 print_log_summary 也能间接验证。
 static void test_log_collection(void) {
     const char *TEST_NAME = "relay_log_collection";
     printf("\n--- Test: %s ---\n", TEST_NAME);
