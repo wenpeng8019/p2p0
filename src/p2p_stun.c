@@ -766,6 +766,45 @@ bool p2p_stun_has_ice_attrs(const uint8_t *buf, int len) {
 }
 
 /*
+ * 从 ICE STUN 包的 USERNAME 属性中提取本地标识（':' 前的部分）
+ *
+ * USERNAME 格式: "local_id:remote_id"（接收方视角，RFC 8445 §7.2）
+ * 标准 ICE 下为 ufrag，兼容模式下为 session_id hex
+ */
+int p2p_stun_extract_sess_key(const uint8_t *pkt, int len, char *ufrag, int max_len) {
+    if (!pkt || len < 20 || !ufrag || max_len < 2) return 0;
+
+    int msg_len = nget_s(pkt + 2);
+    if (20 + msg_len > len) return 0;
+    const uint8_t *end = pkt + 20 + msg_len;
+
+    const uint8_t *ptr = pkt + 20;
+    while (ptr + 4 <= end) {
+        uint16_t attr_type = nget_s(ptr);
+        uint16_t attr_len  = nget_s(ptr + 2);
+        const uint8_t *next = (ptr + 4) + ((attr_len + 3) & ~3);
+        if (next > end) break;
+
+        if (attr_type == STUN_ATTR_USERNAME) {
+            const uint8_t *data = ptr + 4;
+            /* 找到 ':' 分隔符, 取前半部分（接收方的 ufrag） */
+            for (int i = 0; i < attr_len; i++) {
+                if (data[i] == ':') {
+                    if (i == 0 || i >= max_len) return 0;
+                    memcpy(ufrag, data, i);
+                    ufrag[i] = '\0';
+                    return i;
+                }
+            }
+            return 0; /* 无 ':' 分隔符 */
+        }
+
+        ptr = next;
+    }
+    return 0;
+}
+
+/*
  * ============================================================================
  * 处理 STUN 响应包（统一入口）
  * ============================================================================

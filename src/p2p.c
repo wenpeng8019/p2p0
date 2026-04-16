@@ -105,7 +105,6 @@ static inline void gather_local_candidates(struct p2p_session *s) {
                     uint16_t local_pref = (uint16_t)(65535 - host_index++);
                     c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
 
-                    char _ab[INET6_ADDRSTRLEN];
                     print("I:", LA_F("Gathered Host6 candidate: %s:%d (priority=0x%08x)", LA_F298, 298),
                             sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), c->priority);
                 }
@@ -124,7 +123,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
          *   1. 发送 STUN Binding Request 时递增 cand_pending
          *   2. 接收 STUN Binding Response 时，stun_add_srflx_candidate 递减 cand_pending
      */
-    if (!inst->cfg.test_ice_srflx_off && !inst->cfg.test_ice_ipv4_off && inst->cfg.stun_server) {
+    if (!inst->cfg.test_ice_srflx_off && !inst->cfg.test_ice_ipv4_off && inst->cfg.stun_server && inst->socks) {
         // COMPACT 模式下 sock[0] 的 srflx 由信令服务器提供，仅复用 socks[1..N]
         int start_idx = (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) ? 1 : 0;
         for (int i = start_idx; i < inst->sock_cnt; i++) {
@@ -668,7 +667,8 @@ p2p_destroy(p2p_handle_t hdl) {
     // 释放 TURN 分配
     p2p_turn_reset(inst);
 
-    // todo stun 不需要？sock ？
+    // stun_ctx 是内嵌结构体（无堆内存、无独立 socket），随 inst 一起释放
+    // STUN 收发复用 socks[0]，由下方 p2p_udp_close_all 关闭
 
     // 关闭 socket
     print("I:", LA_F("Close P2P UDP socket", LA_F267, 267));
@@ -810,6 +810,15 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
     s->state = P2P_STATE_INIT;
     s->path_type = P2P_PATH_NONE;
     s->active_path = PATH_IDX_NONE;
+
+    // 生成 ICE 凭证（ufrag/pwd），用于 ICE connectivity check 的认证和多会话派发
+    // COMPACT/RELAY: 凭证在收到 session_id 时从 s->id 派生（p2p_ice_set_ufrag_from_id）
+    // PUBSUB/ICE:    随机生成凭证，通过 SDP 交换
+    if (inst->cfg.use_ice &&
+        (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB || inst->sig_mode == P2P_SIGNALING_MODE_ICE)) {
+        p2p_ice_gen_credentials(s->ice_ufrag, s->ice_pwd);
+        print("V:", LA_F("ICE credentials generated: ufrag=%s", LA_F448, 448), s->ice_ufrag);
+    }
 
     // 收集本地候选地址（Host/TURN）
     gather_local_candidates(s);
@@ -1028,10 +1037,25 @@ p2p_update(p2p_handle_t hdl) {
                 printf(LA_F("Recv STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F360, 360),
                        inet_ntoa(from.addr.v4.sin_addr), ntohs(from.addr.v4.sin_port), type, n);
                 
-                // 如果使用 ICE 机制进行打洞
-                // todo ice 打洞如何支持 multi sess
+                // ICE connectivity check 派发（按 USERNAME 中的 ufrag 路由到正确会话）
                 if (inst->cfg.use_ice && p2p_stun_has_ice_attrs(pkt, n)) {
-                    nat_on_stun_packet(s, type, pkt, n, &from, now_ms);
+                    struct p2p_session *target = s;
+                    if (inst->cfg.multi_session) {
+                        char ufrag[32];
+                        if (p2p_stun_extract_sess_key(pkt, n, ufrag, sizeof(ufrag)) > 0) {
+                            for (target = inst->sessions_head; target; target = target->next) {
+                                // 标准 ICE（ice_ufrag 非空）：匹配 ufrag; 兼容模式（ice_ufrag 空）：匹配 ice_pwd（存 session_id hex）
+                                if (strcmp(target->ice_ufrag[0] ? target->ice_ufrag : target->ice_pwd, ufrag) == 0) break;
+                            }
+                        } else {
+                            target = NULL;
+                        }
+                        if (!target) {
+                            print("W:", LA_F("ICE-STUN: no session for ufrag, dropped", LA_F449, 449));
+                            continue;
+                        }
+                    }
+                    nat_on_stun_packet(target, type, pkt, n, &from, now_ms);
                     continue;
                 }
                 

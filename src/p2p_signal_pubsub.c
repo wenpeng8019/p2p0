@@ -152,6 +152,23 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
     p2p_des_decrypt(key, enc_buf, enc_len, dec);
     dec[enc_len] = '\0';  /* 确保 NUL 终止（SDP 是文本）*/
 
+    /* 提取 ICE 凭证（a=ice-ufrag: / a=ice-pwd:） */
+    const char *p;
+    if ((p = strstr((const char *)dec, "a=ice-ufrag:")) != NULL) {
+        p += 12;
+        int i = 0;
+        while (*p && *p != '\r' && *p != '\n' && i < (int)sizeof(s->ice_remote_ufrag) - 1)
+            s->ice_remote_ufrag[i++] = *p++;
+        s->ice_remote_ufrag[i] = '\0';
+    }
+    if ((p = strstr((const char *)dec, "a=ice-pwd:")) != NULL) {
+        p += 10;
+        int i = 0;
+        while (*p && *p != '\r' && *p != '\n' && i < (int)sizeof(s->ice_remote_pwd) - 1)
+            s->ice_remote_pwd[i++] = *p++;
+        s->ice_remote_pwd[i] = '\0';
+    }
+
     /* SDP 解析 */
     p2p_remote_candidate_entry_t tmp_cands[32];
     int parsed = p2p_ice_import_sdp((const char *)dec, tmp_cands, 32);
@@ -466,6 +483,12 @@ static void sync_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     int sdp_len = p2p_ice_export_sdp(s->local_cands, cnt, sdp_buf, (int)sizeof(sdp_buf),
                                       true, NULL, NULL, NULL);
     if (sdp_len <= 0) return;
+
+    /* 追加 ICE 凭证到 SDP（用于多会话派发和 STUN 认证） */
+    if (s->ice_ufrag[0]) {
+        sdp_len += snprintf(sdp_buf + sdp_len, (int)sizeof(sdp_buf) - sdp_len,
+                            "a=ice-ufrag:%s\r\na=ice-pwd:%s\r\n", s->ice_ufrag, s->ice_pwd);
+    }
 
     int padded = (sdp_len + 7) & ~7;
     uint8_t *raw = (uint8_t *)calloc(1, (size_t)padded);

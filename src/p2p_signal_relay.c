@@ -1024,6 +1024,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
 
             assert(!s->id);
             s->id = session_id;
+            if (s->inst->cfg.use_ice) p2p_ice_set_ufrag_from_id(s);
 
             handle_sync0_ack(s, ptr + P2P_SESS_ID_PSZ, now);
 
@@ -1079,6 +1080,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 // 初始化 p2p 新会话状态
                 uint32_t old_id = s->id;
                 s->id = session_id;
+                if (s->inst->cfg.use_ice) p2p_ice_set_ufrag_from_id(s);
                 s->state = P2P_STATE_WAITING;
 
                 sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;

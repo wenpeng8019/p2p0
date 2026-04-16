@@ -245,6 +245,21 @@ int p2p_stun_build_ice_check(uint8_t *buf, int max_len, uint8_t tsx_id[12],
  */
 bool p2p_stun_has_ice_attrs(const uint8_t *buf, int len);
 
+/*
+ * 从 ICE STUN 包的 USERNAME 属性中提取本地标识（':' 前的部分）
+ *
+ * ICE USERNAME 格式: "local_id:remote_id"（接收方视角，RFC 8445 §7.2）
+ *   - 标准 ICE: local_id = ice_ufrag
+ *   - 兼容模式(COMPACT/RELAY): local_id = session_id hex（存于 ice_pwd）
+ *
+ * @param pkt     STUN 数据包
+ * @param len     数据包长度
+ * @param id      输出: 提取的本地标识（NUL 终止）
+ * @param max_len id 缓冲区大小
+ * @return        提取的标识长度，失败返回 0
+ */
+int p2p_stun_extract_sess_key(const uint8_t *pkt, int len, char *id, int max_len);
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*

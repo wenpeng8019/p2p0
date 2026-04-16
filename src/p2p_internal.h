@@ -222,6 +222,12 @@ struct p2p_session {
         p2p_pubsub_session_t    pubsub;                 // PUBSUB 模式信令上下文（会话级别：与对端的关系）
     }                               sig_sess;
 
+    // ICE 会话凭证（用户名 fragment 和密码），用于 STUN 绑定和 ICE 验证
+    char                            ice_ufrag[8];       // 本地 ICE ufrag（4 chars + NUL, RFC 8445 ≥4 ICE-CHARS）
+    char                            ice_pwd[28];        // 本地 ICE pwd（24 chars + NUL, RFC 8445 ≥22 ICE-CHARS）
+    char                            ice_remote_ufrag[8]; // 对端 ICE ufrag（信令交换得到）
+    char                            ice_remote_pwd[28];  // 对端 ICE pwd（信令交换得到）
+
     /* ======================== 配置与状态 ======================== */
     p2p_state_t                     state;              // 连接状态 P2P_STATE_*
 
@@ -375,6 +381,10 @@ struct p2p_local_candidate_entry {
  */
 static inline void p2p_session_reset(struct p2p_session *s, bool closing) {
     
+    // 清除远端 ICE 凭证（本地凭证保留，会话复用时对端需要重新交换）
+    s->ice_remote_ufrag[0] = '\0';
+    s->ice_remote_pwd[0] = '\0';
+
     // 清除远端候选
     s->remote_cand_cnt = 0;
     s->remote_host_cnt = 0;
@@ -433,6 +443,44 @@ static inline void p2p_session_reset(struct p2p_session *s, bool closing) {
     }
     // 重置 NAT
     else nat_reset(&s->nat);
+}
+
+/*
+ * 生成 ICE 凭证（ufrag + pwd）
+ *
+ * RFC 8445 §5.3: ICE-CHARS = ALPHA / DIGIT / "+" / "/"（64 字符）
+ *   - ufrag: ≥4 字符, ≥24 bits 熵
+ *   - pwd:   ≥22 字符, ≥128 bits 熵
+ *
+ * 本实现：ufrag=4 chars, pwd=24 chars，字符集正好 64 个，& 0x3F 无偏采样
+ */
+#define P2P_ICE_UFRAG_LEN  4
+#define P2P_ICE_PWD_LEN    24
+
+static inline void p2p_ice_gen_credentials(char *ufrag, char *pwd) {
+    static const char ICE_CHARS[] =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/";
+    uint8_t raw[P2P_ICE_PWD_LEN];
+
+    P_rand_bytes(raw, P2P_ICE_UFRAG_LEN);
+    for (int i = 0; i < P2P_ICE_UFRAG_LEN; i++) ufrag[i] = ICE_CHARS[raw[i] & 0x3F];
+    ufrag[P2P_ICE_UFRAG_LEN] = '\0';
+
+    P_rand_bytes(raw, P2P_ICE_PWD_LEN);
+    for (int i = 0; i < P2P_ICE_PWD_LEN; i++) pwd[i] = ICE_CHARS[raw[i] & 0x3F];
+    pwd[P2P_ICE_PWD_LEN] = '\0';
+}
+
+/*
+ * 从 session_id 派生 ICE 凭证（COMPACT/RELAY 兼容模式）
+ *
+ * COMPACT/RELAY 不支持 SDP 交换，将 session_id 写入 ice_pwd，
+ * ice_ufrag 留空以标识「兼容模式」（区别于 PUBSUB/ICE 的标准随机 ufrag）。
+ * 多会话派发时通过 ice_pwd 匹配 session_id。
+ */
+static inline void p2p_ice_set_ufrag_from_id(struct p2p_session *s) {
+    s->ice_ufrag[0] = '\0';
+    snprintf(s->ice_pwd, sizeof(s->ice_pwd), "%x", s->id);
 }
 
 /* ============================================================================

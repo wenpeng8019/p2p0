@@ -1499,7 +1499,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             }
 
             // 会话初始化：首次收到 session_id 时绑定
-            if (!s->id) s->id = session_id;
+            if (!s->id) { s->id = session_id; if (s->inst->cfg.use_ice) p2p_ice_set_ufrag_from_id(s); }
             else if (s->id != session_id) {
                 print("W:", LA_F("%s: session_id changed (old=%u new=%u)\n", LA_F225, 225),
                       PROTO, s->id, session_id);
@@ -1559,6 +1559,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
                 p2p_session_reset(s, false);
 
                 s->id = session_id;
+                if (s->inst->cfg.use_ice) p2p_ice_set_ufrag_from_id(s);
                 s->sig_sess.compact.state = SIG_COMPACT_SESS_WAIT_PEER;
                 s->state = P2P_STATE_WAITING;
             }
