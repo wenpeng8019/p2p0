@@ -44,24 +44,7 @@
 #include "uthash.h"
 
 #ifdef WITH_WSLAY
-#  include "ws_server.h"
-#  include <stdlib.h>   /* malloc / free */
-static ws_server_t *g_ws_srv = NULL;
-
-/* 将收到的文本消息广播给所有已连接的 WS 客户端 */
-static void ws_on_msg_broadcast(ws_server_t *srv, ws_client_id_t cid,
-                                ws_srv_msg_type_t type,
-                                const uint8_t *data, size_t len,
-                                void *user_data) {
-    (void)cid; (void)user_data;
-    if (type != WS_SRV_MSG_TEXT || len == 0) return;
-    char *tmp = (char *)malloc(len + 1);
-    if (!tmp) return;
-    memcpy(tmp, data, len);
-    tmp[len] = '\0';
-    ws_server_broadcast_text(srv, tmp);
-    free(tmp);
-}
+#include "ws_server.h"
 #endif
 
 // 命令行参数定义
@@ -277,8 +260,22 @@ static compact_session_t*           g_compact_rpc_pending_rear = NULL;
 
 //-----------------------------------------------------------------------------
 
+#ifdef WITH_WSLAY
+
+/* peer_id → ws_client_id_t 映射 */
+typedef struct ws_ice_peer {
+    char            peer_id[P2P_PEER_ID_MAX];
+    ws_client_id_t  cid;
+    UT_hash_handle  hh;
+} ws_ice_peer_t;
+
+static ws_ice_peer_t*               g_ws_ice_peers = NULL;
+
+static ws_server_t*                 g_ws_srv = NULL;
+#endif
+
 // 全局运行状态标志（用于信号处理）
-static volatile sig_atomic_t g_running = 1;
+static volatile sig_atomic_t        g_running = 1;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -2965,6 +2962,177 @@ static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct socka
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#ifdef WITH_WSLAY
+
+#ifdef MOD_TAG
+#undef MOD_TAG
+#endif
+#define MOD_TAG "WS_ICE"
+
+/*
+ * WS ICE 信令：通过 WebSocket 为 P2P_SIGNALING_MODE_ICE 提供 SDP 交换
+ *
+ * 协议（纯文本帧，每条 WS text frame 一条消息）：
+ *
+ *   客户端 → 服务器：
+ *     REG <peer_id>               注册身份
+ *     FWD <to_peer_id>\n<payload> 转发给指定 peer（payload 可含换行）
+ *
+ *   服务器 → 客户端：
+ *     REG OK                      注册成功
+ *     REG FAIL <reason>           注册失败
+ *     MSG <from_peer_id>\n<payload> 来自其他 peer 的消息
+ */
+
+/* 按 cid 查找 peer（线性扫描，WS_SERVER_MAX_CLIENTS 最多 32，可接受） */
+static ws_ice_peer_t *ws_ice_find_by_cid(ws_client_id_t cid) {
+    ws_ice_peer_t *p, *tmp;
+    HASH_ITER(hh, g_ws_ice_peers, p, tmp) {
+        if (p->cid == cid) return p;
+    }
+    return NULL;
+}
+
+/* 处理 REG 消息 */
+static void ws_ice_handle_reg(ws_server_t *srv, ws_client_id_t cid,
+                               const char *peer_id) {
+    if (!peer_id || peer_id[0] == '\0') {
+        ws_server_send_text(srv, cid, "REG FAIL empty peer_id");
+        return;
+    }
+
+    /* 检查 peer_id 是否已被其他连接注册 */
+    ws_ice_peer_t *existing = NULL;
+    HASH_FIND_STR(g_ws_ice_peers, peer_id, existing);
+    if (existing) {
+        if (existing->cid == cid) {
+            /* 重复注册同一连接，幂等返回 OK */
+            ws_server_send_text(srv, cid, "REG OK");
+            return;
+        }
+        /* 已被另一个连接注册 — 踢掉旧连接 */
+        print("W:", "[WS_ICE] peer '%s' re-register, kick old cid=%d\n",
+              peer_id, existing->cid);
+        ws_server_disconnect(srv, existing->cid, 1000);
+        HASH_DELETE(hh, g_ws_ice_peers, existing);
+        free(existing);
+    }
+
+    /* 同一 cid 已有旧的 peer_id？先移除 */
+    ws_ice_peer_t *old = ws_ice_find_by_cid(cid);
+    if (old) {
+        HASH_DELETE(hh, g_ws_ice_peers, old);
+        free(old);
+    }
+
+    ws_ice_peer_t *p = (ws_ice_peer_t *)calloc(1, sizeof(*p));
+    if (!p) {
+        ws_server_send_text(srv, cid, "REG FAIL OOM");
+        return;
+    }
+    strncpy(p->peer_id, peer_id, P2P_PEER_ID_MAX - 1);
+    p->peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+    p->cid = cid;
+    HASH_ADD_STR(g_ws_ice_peers, peer_id, p);
+
+    print("I:", "[WS_ICE] peer '%s' registered (cid=%d)\n", p->peer_id, cid);
+    ws_server_send_text(srv, cid, "REG OK");
+}
+
+/* 处理 FWD 消息：转发给目标 peer */
+static void ws_ice_handle_fwd(ws_server_t *srv, ws_client_id_t cid,
+                               const char *to_peer_id, const char *payload) {
+    /* 发送者必须已注册 */
+    ws_ice_peer_t *sender = ws_ice_find_by_cid(cid);
+    if (!sender) {
+        ws_server_send_text(srv, cid, "REG FAIL not registered");
+        return;
+    }
+
+    /* 查找目标 peer */
+    ws_ice_peer_t *target = NULL;
+    HASH_FIND_STR(g_ws_ice_peers, to_peer_id, target);
+    if (!target) {
+        print("V:", "[WS_ICE] FWD target '%s' not found (from '%s')\n",
+              to_peer_id, sender->peer_id);
+        return;  /* 静默丢弃——对端可能尚未上线 */
+    }
+
+    /* 构造 "MSG <from_peer_id>\n<payload>" */
+    size_t from_len = strlen(sender->peer_id);
+    size_t pay_len  = payload ? strlen(payload) : 0;
+    size_t msg_len  = 4 + from_len + 1 + pay_len;  /* "MSG " + peer_id + '\n' + payload */
+    char *msg = (char *)malloc(msg_len + 1);
+    if (!msg) return;
+    snprintf(msg, msg_len + 1, "MSG %s\n%s", sender->peer_id, payload ? payload : "");
+    ws_server_send_text(srv, target->cid, msg);
+    free(msg);
+
+    print("V:", "[WS_ICE] FWD '%s' -> '%s' (%zu bytes)\n",
+          sender->peer_id, target->peer_id, pay_len);
+}
+
+/* WS on_message 回调 */
+static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
+                               ws_srv_msg_type_t type,
+                               const uint8_t *data, size_t len,
+                               void *user_data) {
+    (void)user_data;
+    if (type != WS_SRV_MSG_TEXT || len == 0) return;
+
+    /* 确保以 NUL 结尾 */
+    char *txt = (char *)malloc(len + 1);
+    if (!txt) return;
+    memcpy(txt, data, len);
+    txt[len] = '\0';
+
+    if (strncmp(txt, "REG ", 4) == 0) {
+        /* REG <peer_id> */
+        char *peer_id = txt + 4;
+        /* 去除末尾换行 */
+        size_t plen = strlen(peer_id);
+        while (plen > 0 && (peer_id[plen - 1] == '\n' || peer_id[plen - 1] == '\r'))
+            peer_id[--plen] = '\0';
+        ws_ice_handle_reg(srv, cid, peer_id);
+    }
+    else if (strncmp(txt, "FWD ", 4) == 0) {
+        /* FWD <to_peer_id>\n<payload> */
+        char *to = txt + 4;
+        char *nl = strchr(to, '\n');
+        if (nl) {
+            *nl = '\0';
+            /* 去除 to 末尾 \r */
+            size_t tlen = strlen(to);
+            if (tlen > 0 && to[tlen - 1] == '\r') to[tlen - 1] = '\0';
+            ws_ice_handle_fwd(srv, cid, to, nl + 1);
+        } else {
+            /* 无 payload */
+            ws_ice_handle_fwd(srv, cid, to, "");
+        }
+    }
+    else {
+        print("V:", "[WS_ICE] unknown msg from cid=%d: %.32s...\n", cid, txt);
+    }
+
+    free(txt);
+}
+
+/* WS on_disconnect 回调：清理 peer 注册 */
+static void ws_ice_on_disconnect(ws_server_t *srv, ws_client_id_t cid,
+                                  void *user_data) {
+    (void)srv; (void)user_data;
+    ws_ice_peer_t *p = ws_ice_find_by_cid(cid);
+    if (p) {
+        print("I:", "[WS_ICE] peer '%s' disconnected (cid=%d)\n", p->peer_id, cid);
+        HASH_DELETE(hh, g_ws_ice_peers, p);
+        free(p);
+    }
+}
+
+#endif /* WITH_WSLAY */
+
+///////////////////////////////////////////////////////////////////////////////
+
 #ifdef MOD_TAG
 #undef MOD_TAG
 #endif
@@ -3153,7 +3321,8 @@ int main(int argc, char *argv[]) {
 #ifdef WITH_WSLAY
     if (ARGS_ws.i64) {
         ws_server_cfg_t ws_cfg = {0};
-        ws_cfg.on_message = ws_on_msg_broadcast; /* 广播收到的消息给所有客户端 */
+        ws_cfg.on_message    = ws_ice_on_message;    /* ICE 信令路由 */
+        ws_cfg.on_disconnect = ws_ice_on_disconnect;  /* 断连清理 peer 注册 */
         /* ws_port>0: 独立端口，ws_server 自建监听；否则嵌入同端口（port=0）*/
         uint16_t ws_listen_port = (uint16_t)(ARGS_ws_port.i64 > 0 ? ARGS_ws_port.i64 : 0);
         g_ws_srv = ws_server_create(&ws_cfg, ws_listen_port);

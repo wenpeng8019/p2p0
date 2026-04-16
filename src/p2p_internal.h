@@ -85,6 +85,7 @@
 #include "p2p_signal_relay.h"   /* 中继模式信令 */
 #include "p2p_signal_pubsub.h"  /* 发布/订阅模式信令 */
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
+#include "p2p_signal_ice_ws.h"  /* ICE WebSocket 信令 */
 #include "p2p_path_manager.h"   /* 多路径管理器 */
 #include "p2p_probe.h"          /* 信道外可达性探测 */
 
@@ -140,6 +141,9 @@ struct p2p_instance {
         p2p_compact_ctx_t       compact;                // COMPACT 模式信令上下文（实例级别：与服务器的关系）
         p2p_relay_ctx_t         relay;                  // RELAY 模式信令上下文（实例级别：与服务器的 TCP 连接）
         p2p_signal_pubsub_ctx_t pubsub;                 // PUB/SUB 模式信令上下文
+#ifdef WITH_WSLAY
+        p2p_ice_ws_ctx_t        ice_ws;                 // ICE WebSocket 信令上下文
+#endif
     }                               sig_ctx;            // 实例级别信令上下文（同时只有一种模式激活）
 
     /* ======================== 信令转发路径 ======================== */
@@ -220,6 +224,9 @@ struct p2p_session {
         p2p_compact_session_t   compact;                // COMPACT 模式信令上下文（会话级别：与对端的关系）
         p2p_relay_session_t     relay;                  // RELAY 模式信令上下文（会话级别：与对端的关系）
         p2p_pubsub_session_t    pubsub;                 // PUBSUB 模式信令上下文（会话级别：与对端的关系）
+#ifdef WITH_WSLAY
+        p2p_ice_ws_session_t    ice_ws;                 // ICE WebSocket 信令上下文（会话级别）
+#endif
     }                               sig_sess;
 
     // ICE 会话凭证（用户名 fragment 和密码），用于 STUN 绑定和 ICE 验证

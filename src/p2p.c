@@ -453,6 +453,11 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         p2p_signal_pubsub_init(&inst->sig_ctx.pubsub);
     }
+#ifdef WITH_WSLAY
+    else if (cfg->signaling_mode == P2P_SIGNALING_MODE_ICE && cfg->server_host) {
+        p2p_signal_ice_ws_init(inst);
+    }
+#endif
 
     // 初始化共享路由层
     if ((ret = route_shared_acquire()) < 0) {
@@ -645,6 +650,11 @@ p2p_destroy(p2p_handle_t hdl) {
              inst->sig_ctx.pubsub.state != SIG_PUBSUB_INIT) {
         p2p_signal_pubsub_offline(inst);
     }
+#ifdef WITH_WSLAY
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
+        p2p_signal_ice_ws_destroy(inst);
+    }
+#endif
 
     // 释放所有会话
     struct p2p_session *s = inst->sessions_head;
@@ -866,7 +876,15 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
 
         // ICE 模式（应用层自定义信令）
         case P2P_SIGNALING_MODE_ICE: {
-            s->state = P2P_STATE_PUNCHING;
+#ifdef WITH_WSLAY
+            if (inst->cfg.server_host) {
+                p2p_signal_ice_ws_connect(s, remote_peer_id);
+                s->state = P2P_STATE_SIGNALING;
+            } else
+#endif
+            {
+                s->state = P2P_STATE_PUNCHING;
+            }
             nat_punch(s, -1);
             print("I: %s", "ICE mode: starting NAT punching, waiting for application to exchange candidates and SDP via custom signaling");
             break;
@@ -1193,6 +1211,11 @@ p2p_update(p2p_handle_t hdl) {
     else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
         p2p_signal_pubsub_tick_recv(inst, now_ms);
     }
+#ifdef WITH_WSLAY
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
+        p2p_signal_ice_ws_tick(inst, now_ms);
+    }
+#endif
 
     /* ========================================================================
      * 阶段 3：TURN 定时维护（Refresh 续期、权限同步）—实例级，不内于会话循环
