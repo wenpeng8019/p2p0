@@ -37,16 +37,16 @@ static void on_ws_open(ws_client_t *c, void *user_data) {
     (void)c;
 
     /* 发送注册消息 */
-    char reg[4 + P2P_PEER_ID_MAX];
-    snprintf(reg, sizeof(reg), "REG %s", inst->local_peer_id);
+    char reg[8 + P2P_PEER_ID_MAX];
+    snprintf(reg, sizeof(reg), "ONLINE %s", inst->local_peer_id);
     ws_client_send_text(c, reg);
 
     ctx->state = ICE_WS_REGISTERING;
     print("I:", "[WS] connected, registering as '%s'\n", inst->local_peer_id);
 }
 
-/* 处理来自服务器的 MSG：找到对应 session 并导入候选 */
-static void on_ws_msg_from_peer(struct p2p_instance *inst,
+/* 处理来自服务器的 SYNC：找到对应 session 并导入候选 */
+static void on_ws_sync_from_peer(struct p2p_instance *inst,
                                 const char *from_peer_id,
                                 const char *payload) {
     char _ab[INET6_ADDRSTRLEN];
@@ -57,7 +57,7 @@ static void on_ws_msg_from_peer(struct p2p_instance *inst,
         if (strcmp(s->remote_peer_id, from_peer_id) == 0) break;
     }
     if (!s) {
-        print("V:", "[WS] MSG from unknown peer '%s', ignored\n", from_peer_id);
+        print("V:", "[WS] SYNC from unknown peer '%s', ignored\n", from_peer_id);
         return;
     }
 
@@ -156,21 +156,21 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
     memcpy(txt, data, len);
     txt[len] = '\0';
 
-    if (strcmp(txt, "REG OK") == 0) {
+    if (strcmp(txt, "ONLINE OK") == 0) {
         ctx->state = ICE_WS_ONLINE;
         print("I:", "[WS] registered OK\n");
     }
-    else if (strncmp(txt, "REG FAIL", 8) == 0) {
+    else if (strncmp(txt, "ONLINE FAIL", 11) == 0) {
         ctx->state = ICE_WS_ERROR;
-        print("E:", "[WS] registration failed: %s\n", txt + 9);
+        print("E:", "[WS] registration failed: %s\n", txt + 12);
     }
-    else if (strncmp(txt, "MSG ", 4) == 0) {
-        /* MSG <from_peer_id>\n<payload> */
-        char *from = txt + 4;
+    else if (strncmp(txt, "SYNC ", 5) == 0) {
+        /* SYNC <from_peer_id>\n<payload> */
+        char *from = txt + 5;
         char *nl = strchr(from, '\n');
         if (nl) {
             *nl = '\0';
-            on_ws_msg_from_peer(inst, from, nl + 1);
+            on_ws_sync_from_peer(inst, from, nl + 1);
         }
     }
 
@@ -192,18 +192,18 @@ static void on_ws_close(ws_client_t *c, uint16_t status_code, const char *reason
  * 信令发送辅助
  * ============================================================================ */
 
-/* 发送 FWD 消息到服务器 */
-static int ws_fwd(struct p2p_instance *inst, const char *to_peer_id,
+/* 发送 SYNC 消息到服务器 */
+static int ws_sync(struct p2p_instance *inst, const char *to_peer_id,
                   const char *payload) {
     p2p_ice_ws_ctx_t *ctx = &inst->sig_ctx.ice_ws;
     if (ctx->state != ICE_WS_ONLINE || !ctx->ws) return -1;
 
     size_t to_len  = strlen(to_peer_id);
     size_t pay_len = strlen(payload);
-    size_t msg_len = 4 + to_len + 1 + pay_len;  /* "FWD " + to + '\n' + payload */
+    size_t msg_len = 5 + to_len + 1 + pay_len;  /* "SYNC " + to + '\n' + payload */
     char *msg = (char *)malloc(msg_len + 1);
     if (!msg) return -1;
-    snprintf(msg, msg_len + 1, "FWD %s\n%s", to_peer_id, payload);
+    snprintf(msg, msg_len + 1, "SYNC %s\n%s", to_peer_id, payload);
 
     int ret = ws_client_send_text((ws_client_t *)ctx->ws, msg);
     free(msg);
@@ -231,7 +231,7 @@ static void ws_send_sdp(struct p2p_instance *inst, struct p2p_session *s) {
     if (!payload) return;
     snprintf(payload, payload_len + 1, "SDP\n%s", sdp_buf);
 
-    if (ws_fwd(inst, s->remote_peer_id, payload) == 0) {
+    if (ws_sync(inst, s->remote_peer_id, payload) == 0) {
         p2p_ice_ws_session_t *sess = &s->sig_sess.ice_ws;
         sess->candidate_synced = s->local_cand_cnt;
         sess->last_sync = P_tick_ms();
@@ -328,7 +328,7 @@ void p2p_signal_ice_ws_tick(struct p2p_instance *inst, uint64_t now_ms) {
 
                 /* 候选收集完毕后发 ICE_DONE */
                 if (!P2P_CAND_PENDING(inst) && sess->state != ICE_WS_SESS_READY) {
-                    ws_fwd(inst, s->remote_peer_id, "ICE_DONE");
+                    ws_sync(inst, s->remote_peer_id, "ICE_DONE");
                     sess->state = ICE_WS_SESS_READY;
                     print("I:", "[WS] sent ICE_DONE to '%s'\n", s->remote_peer_id);
                 }
@@ -337,7 +337,7 @@ void p2p_signal_ice_ws_tick(struct p2p_instance *inst, uint64_t now_ms) {
         else if (!P2P_CAND_PENDING(inst) && sess->state < ICE_WS_SESS_READY) {
             /* 没有新候选但收集已完成——发 ICE_DONE */
             if (sess->candidate_synced > 0) {
-                ws_fwd(inst, s->remote_peer_id, "ICE_DONE");
+                ws_sync(inst, s->remote_peer_id, "ICE_DONE");
                 sess->state = ICE_WS_SESS_READY;
                 print("I:", "[WS] sent ICE_DONE to '%s'\n", s->remote_peer_id);
             }

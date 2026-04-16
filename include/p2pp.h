@@ -664,26 +664,26 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        |                       |                          |
  *        |--- ONLINE ----------->|                          |
  *        |<-- ONLINE_ACK --------|  (auth_key + capabilities)
- *        |--- SYNC0 ------------>|  (auth_key + 首批候选)    |
- *        |<-- SYNC0_ACK ---------|  (session_id, online=0)   |
- *        |--- SYNC0_ACK -------->|  (二次确认, session_id)    |
- *        |   [进入 ONLINE]       |  (缓存 Alice 的候选)      |
+ *        |--- SYNC0 ------------>|  (auth_key + 首批候选)   |
+ *        |<-- SYNC0_ACK ---------|  (session_id, online=0)  |
+ *        |--- SYNC0_ACK -------->|  (二次确认, session_id)  |
+ *        |   [进入 ONLINE]       |  (缓存 Alice 的候选)     |
  *        |    ... Bob 上线 ...                              |
- *        |                       |<-- ONLINE --------------|
+ *        |                       |<-- ONLINE ---------------|
  *        |                       |--- ONLINE_ACK ---------->|  (auth_key + capabilities)
- *        |                       |<-- SYNC0 ---------------|  (auth_key + 首批候选)
+ *        |                       |<-- SYNC0 ----------------|  (auth_key + 首批候选)
  *        |                       |--- SYNC0_ACK ----------->|  (session_id, online=1)
  *        |                       |<-- SYNC0_ACK ------------|  (二次确认, session_id)
- *        |<-- SYNC0 -------------|--- SYNC0 -------------->|  (缓存候选 + session_id)
+ *        |<-- SYNC0 -------------|--- SYNC0 --------------->|  (缓存候选 + session_id)
  *        |--- SYNC0_ACK -------->|<-- SYNC0_ACK ------------|  (携带 session_id)
  *        |                       |                          |
- *        |<=============== P2P SYNC 序列化同步 ========>|  (所有包携带 session_id)
- *        |--- SYNC(seq=1, base=5) ----------------->  |  (从第 6 个候选开始)
- *        |<-- SYNC_ACK(seq=1) ----------------------  |
- *        |--- SYNC(seq=2, base=10) ---------------->  |
- *        |<-- SYNC_ACK(seq=2) ----------------------  |
- *        |--- SYNC(seq=3, count=0, FIN) ----------->  |  (结束标识)
- *        |<-- SYNC_ACK(seq=3) ----------------------  |
+ *        |<=============== P2P SYNC 序列化同步 ============>|  (所有包携带 session_id)
+ *        |----------- SYNC(seq=1, base=5) ----------------->|  (从第 6 个候选开始)
+ *        |<---------- SYNC_ACK(seq=1) ----------------------|
+ *        |----------- SYNC(seq=2, base=10) ---------------->|
+ *        |<---------- SYNC_ACK(seq=2) ----------------------|
+ *        |----------- SYNC(seq=3, count=0, FIN) ----------->|  (结束标识)
+ *        |<---------- SYNC_ACK(seq=3) ----------------------|
  *
  * 注：ONLINE 仅在上线阶段发送，收到 ONLINE_ACK 后停止（直到重连）；SYNC0 在收到 ONLINE_ACK 后发送
  *
@@ -706,33 +706,33 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  * 流程（7 次传输）：
  *
- *   A                      Server                      B
- *   │                         │                        │
- *   ├── MSG_REQ(sid) ────────►│  A 重发直到收到 REQ_ACK  │
- *   │   [session_id][sid]     │  Server 查找 A 的会话槽  │
- *   │   [msg][data]           │  msg=消息类型            │
- *   │                         │                        │
- *   │◄── MSG_REQ_ACK ─────────┤  status=0 成功/1 B不在线 │
- *   │   [session_id][sid]     │  A 停止重发              │
- *   │   [status]              │                         │
- *   │                         ├── MSG_REQ ─────────────►│  Server 重发直到收到 RESP
- *   │                         │   [session_id][sid]     │  (relay 标志位=1)
- *   │                         │   [msg][data]           │  B 循环比较 sid：
- *   │                         │                         │  sid>last_sid → 执行新请求
- *   │                         │                         │  sid≤last_sid → 忽略旧请求
- *   │                         │◄── MSG_RESP ────────────┤  B 定时重发直到收到 ACK
- *   │                         │   [session_id][sid]     │  Server 收到后停止向 B 发 REQ
- *   │                         │   [code][data]          │  code=响应码
- *   │                         │                         │
- *   │                         ├── MSG_RESP_ACK ────────►│  Server 每次收到 RESP 都回 ACK
- *   │                         │   [session_id][sid]     │  B 收到 ACK 后停止重发
- *   │                         │                         │
- *   │◄── MSG_RESP ────────────┤  Server 转发第一次 RESP 给 A
- *   │   [session_id][sid]     │  后续重发直到收到 A 的 ACK
- *   │   [code][data]          │  (flags 可能标识特殊错误) │
- *   │                         │                         │
- *   ├── MSG_RESP_ACK ────────►│  流程完成                │
- *   │   [session_id][sid]     │                         │
+ *   A                      Server                            B
+ *   │                         │                              │
+ *   ├── MSG_REQ(sid) ───────►│  A 重发直到收到 REQ_ACK      │
+ *   │   [session_id][sid]     │  Server 查找 A 的会话槽      │
+ *   │   [msg][data]           │  msg=消息类型                │
+ *   │                         │                              │
+ *   │◄── MSG_REQ_ACK ────────┤  status=0 成功/1 B不在线     │
+ *   │   [session_id][sid]     │  A 停止重发                  │
+ *   │   [status]              │                              │
+ *   │                         ├────── MSG_REQ ─────────────►│  Server 重发直到收到 RESP
+ *   │                         │   [session_id][sid]          │  (relay 标志位=1)
+ *   │                         │   [msg][data]                │  B 循环比较 sid：
+ *   │                         │                              │  sid>last_sid → 执行新请求
+ *   │                         │                              │  sid≤last_sid → 忽略旧请求
+ *   │                         │◄────── MSG_RESP ────────────┤  B 定时重发直到收到 ACK
+ *   │                         │   [session_id][sid]          │  Server 收到后停止向 B 发 REQ
+ *   │                         │   [code][data]               │  code=响应码
+ *   │                         │                              │
+ *   │                         ├────── MSG_RESP_ACK ────────►│  Server 每次收到 RESP 都回 ACK
+ *   │                         │   [session_id][sid]          │  B 收到 ACK 后停止重发
+ *   │                         │                              │
+ *   │◄── MSG_RESP ───────────┤  Server 转发第一次 RESP 给 A │
+ *   │   [session_id][sid]     │  后续重发直到收到 A 的 ACK   │
+ *   │   [code][data]          │  (flags 可能标识特殊错误)    │
+ *   │                         │                              │
+ *   ├── MSG_RESP_ACK ───────►│  流程完成                    │
+ *   │   [session_id][sid]     │                              │
  * 
  */
 
@@ -912,16 +912,16 @@ typedef struct {
  *
  *   Client                    Server
  *   │                            │
- *   ├── TCP Connect ────────────►│
+ *   ├── TCP Connect ───────────►│
  *   │                            │
- *   ├── ONLINE ─────────────────►│  [my_name][target_name]
+ *   ├── ONLINE ────────────────►│  [my_name][target_name]
  *   │                            │
- *   │◄── ONLINE_ACK ─────────────┤  [features]
- *   │   (features: RELAY|MSG)     │  告知服务器支持的功能
+ *   │◄── ONLINE_ACK ────────────┤  [features]
+ *   │   (features: RELAY|MSG)    │  告知服务器支持的功能
  *   │                            │
- *   [进入 ONLINE 状态]            │
+ *   [进入 ONLINE 状态]           │
  *   │                            │
- *   ├── ALIVE ──────────────────►│  (每 20 秒心跳)
+ *   ├── ALIVE ─────────────────►│  (每 20 秒心跳)
  *   │                            │
  *
  * 2. 初始化会话同步（建立会话 + 首批候选同步）
@@ -932,120 +932,120 @@ typedef struct {
  *   ├── SYNC0 ─────────────────►│  [target][cnt=5][cands]
  *   │                            │  查找 B 的状态
  *   │                            │  分配 session_id
- *   │◄── SYNC0_ACK ──────────────┤  [sid][online=1]
- *   │   (立即返回，建立会话)       │
+ *   │◄── SYNC0_ACK ─────────────┤  [sid][online=1]
+ *   │   (立即返回，建立会话)     │
  *   │                            │
- *   │◄── SYNC_ACK ───────────────┤  [sid][fwd=5]
- *   │   (仅当 SYNC0.cnt>0 才返回)  │  返回首批候选处理数
+ *   │◄── SYNC_ACK ──────────────┤  [sid][fwd=5]
+ *   │ (仅当 SYNC0.cnt>0 才返回)  │  返回首批候选处理数
  *   │                            │
- *   [收到 session_id，可继续上传]  │
+ *   [收到 session_id，可继续上传] 
  *
  * 3. 后续会话同步（对端在线，实时转发）
  * ============================================================================
  *
- *   Client A                  Server                    Client B
- *   │                            │                         │
- *   ├── SYNC0 ─────────────────►│  [target=B][cnt=5]     │
- *   │                            │  B 在线，分配 sid=123   │
- *   │◄── SYNC0_ACK ──────────────┤  [sid=123][online=1]
- *   │   (立即返回)                │                          │
- *   │                            │                         │
- *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=5]      │
- *   │                            │   (A 的 5 个候选)        │
- *   │                            │                         │
- *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=5]       │
- *   │   (SYNC0 首批候选处理确认)   │                          │
- *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=5]       │
- *   │   (上传剩余 5 个候选)       │  立即转发给 B            │
- *   │                            │                         │
- *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=5]      │
- *   │                            │   (A 的 5 个候选)        │
- *   │                            │                         │
- *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=5]       │
- *   │   (已转发 5 个，ACK 解锁)   │  缓冲区有空间才回        │
- *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=3]       │
- *   │   (再上传 3 个)             │                         │
- *   │                            │                         │
- *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=3]      │
- *   │                            │                         │
- *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=3]       │
- *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=0][fin=0xFF] │
- *   │   (上传完成，FIN 标记)       │                          │
- *   │                            │                         │
- *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=0][fin=0xFF] │
- *   │                            │   (A 候选传输完成)            │
- *   │                            │                         │
- *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=0]       │
- *   │   (fwd=0 表示全部完成)      │  FIN 确认               │
- *   │                            │                         │
- *   │<==================== P2P ICE 打洞 ====================>│
+ *   Client A                     Server                         Client B
+ *   │                               │                              │
+ *   ├───── SYNC0 ─────────────────►│  [target=B][cnt=5]           │
+ *   │                               │  B 在线，分配 sid=123        │
+ *   │◄──── SYNC0_ACK ──────────────┤  [sid=123][online=1]
+ *   │   (立即返回)                  │                              │
+ *   │                               │                              │
+ *   │                               ├────── SYNC ────────────────►│
+ *   │                               │   [sid=456][cnt=5]           │
+ *   │                               │   (A 的 5 个候选)            │
+ *   │                               │                              │
+ *   │◄──── SYNC_ACK ───────────────┤  [sid=123][fwd=5]            │
+ *   │   (SYNC0 首批候选处理确认)    │                              │
+ *   │                               │                              │
+ *   ├───── SYNC ──────────────────►│  [sid=123][cnt=5]            │
+ *   │   (上传剩余 5 个候选)         │  立即转发给 B                │
+ *   │                               │                              │
+ *   │                               ├────── SYNC ────────────────►│
+ *   │                               │   [sid=456][cnt=5]           │
+ *   │                               │   (A 的 5 个候选)            │
+ *   │                               │                              │
+ *   │◄──── SYNC_ACK ───────────────┤  [sid=123][fwd=5]            │
+ *   │   (已转发 5 个，ACK 解锁)     │  缓冲区有空间才回            │
+ *   │                               │                              │
+ *   ├───── SYNC ──────────────────►│  [sid=123][cnt=3]            │
+ *   │   (再上传 3 个)               │                              │
+ *   │                               │                              │
+ *   │                               ├────── SYNC ────────────────►│
+ *   │                               │   [sid=456][cnt=3]           │
+ *   │                               │                              │
+ *   │◄──── SYNC_ACK ───────────────┤  [sid=123][fwd=3]            │
+ *   │                               │                              │
+ *   ├───── SYNC ──────────────────►│  [sid=123][cnt=0][fin=0xFF]  │
+ *   │   (上传完成，FIN 标记)        │                              │
+ *   │                               │                              │
+ *   │                               ├────── SYNC ────────────────►│
+ *   │                               │   [sid=456][cnt=0][fin=0xFF] │
+ *   │                               │   (A 候选传输完成)           │
+ *   │                               │                              │
+ *   │◄──── SYNC_ACK ───────────────┤  [sid=123][fwd=0]            │
+ *   │   (fwd=0 表示全部完成)        │  FIN 确认                    │
+ *   │                               │                              │
+ *   │<======================== P2P ICE 打洞 ======================>│
  *
  * 4. 后续会话同步（对端离线，缓存后推送）
  * ============================================================================
  *
- *   Client A (在线)           Server                    Client B (离线)
- *   │                            │                         │
- *   ├── ONLINE ─────────────────►│                         │
- *   │◄── ONLINE_ACK ─────────────┤                         │
- *   │                            │                         │
- *   ├── SYNC0 ─────────────────►│  [target=B][cnt=5]      │
- *   │                            │  B 离线                 │
- *   │◄── SYNC0_ACK ──────────────┤  [sid=123][online=0]
- *   │   (立即返回，B 当前离线)     │                          │
- *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=5]       │
- *   │   (上传 5 个候选)           │  尝试缓存               │
- *   │                            │  [缓冲区空间有限]        │
- *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=3]       │
- *   │   (仅缓存了 3 个)           │  有空间才回 ACK          │
- *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=2]       │
- *   │   (从第 4 个重传)           │  继续缓存                │
- *   │                            │                         │
- *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=2]       │
- *   │   (再缓存 2 个，空间满)     │  暂不 ACK，等空间        │
- *   │   [buffer full, no ACK]    │                         │
- *   │                            │                         │
- *   [等待对端上线...]            │                         │
- *   │                            │                         │
- *   │    ... B 上线 ...          │                         │
- *   │                            │◄── ONLINE ──────────────┤
- *   │                            ├── ONLINE_ACK ──────────►│
- *   │                            │                         │
- *   │                            │◄── SYNC0 ───────────────┤  [target=A][cnt=3]
- *   │                            ├── SYNC0_ACK ───────────►│  [sid=456][online=1]
- *   │                            │                         │
- *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=3]      │
- *   │                            │   (推送 A 其余候选)      │
- *   │                            │                         │
- *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=0][fin=0xFF] │
- *   │                            │   (A 候选推送完成)            │
- *   │                            │                         │
- *   │◄── SYNC_ACK ───────────────┤  [sid=123][fwd=5]       │
- *   │   (对端上线后，补回 SYNC0 首批)│  有空间才回 ACK         │
- *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=2]       │
- *   │   (继续上传剩余候选)        │  B 在线，实时转发        │
- *   │                            │                         │
- *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=2]      │
- *   │                            │                         │
- *   ├── SYNC ──────────────────►│  [sid=123][cnt=0][fin=0xFF] │
- *   │   (上传完成，FIN 标记)       │                          │
- *   │                            │                         │
- *   │                            ├── SYNC ────────────────►│
- *   │                            │   [sid=456][cnt=0][fin=0xFF] │
- *   │                            │                         │
- *   │<==================== P2P ICE 打洞 ====================>│
+ *   Client A (在线)           Server                         Client B (离线)
+ *   │                               │                              │
+ *   ├──── ONLINE ─────────────────►│                              │
+ *   │◄──── ONLINE_ACK ─────────────┤                              │
+ *   │                               │                              │
+ *   ├───── SYNC0 ─────────────────►│  [target=B][cnt=5]           │
+ *   │                               │  B 离线                      │
+ *   │◄──── SYNC0_ACK ──────────────┤  [sid=123][online=0]         |
+ *   │   (立即返回，B 当前离线)      │                              │
+ *   │                               │                              │
+ *   ├───── SYNC ──────────────────►│  [sid=123][cnt=5]            │
+ *   │   (上传 5 个候选)             │  尝试缓存                    │
+ *   │                               │  [缓冲区空间有限]            │
+ *   │◄──── SYNC_ACK ───────────────┤  [sid=123][fwd=3]            │
+ *   │   (仅缓存了 3 个)             │  有空间才回 ACK              │
+ *   │                               │                              │
+ *   ├───── SYNC ──────────────────►│  [sid=123][cnt=2]            │
+ *   │   (从第 4 个重传)             │  继续缓存                    │
+ *   │                               │                              │
+ *   │◄──── SYNC_ACK ───────────────┤  [sid=123][fwd=2]            │
+ *   │   (再缓存 2 个，空间满)       │  暂不 ACK，等空间            │
+ *   │   [buffer full, no ACK]       │                              │
+ *   │                               │                              │
+ *   [等待对端上线...]               │                              │
+ *   │                               │                              │
+ *   │    ... B 上线 ...             │                              │
+ *   │                               │◄────── ONLINE ──────────────┤
+ *   │                               ├────── ONLINE_ACK ──────────►│
+ *   │                               │                              │
+ *   │                               │◄────── SYNC0 ───────────────┤  [target=A][cnt=3]
+ *   │                               ├────── SYNC0_ACK ───────────►│  [sid=456][online=1]
+ *   │                               │                              │
+ *   │                               ├────── SYNC ────────────────►│
+ *   │                               │   [sid=456][cnt=3]           │
+ *   │                               │   (推送 A 其余候选)          │
+ *   │                               │                              │
+ *   │                               ├───────── SYNC ─────────────►│
+ *   │                               │   [sid=456][cnt=0][fin=0xFF] │
+ *   │                               │   (A 候选推送完成)           │
+ *   │                               │                              │
+ *   │◄──── SYNC_ACK ───────────────┤  [sid=123][fwd=5]            │
+ *   │ (对端上线后，补回 SYNC0 首批) │  有空间才回 ACK              │
+ *   │                               │                              │
+ *   ├───── SYNC ──────────────────►│  [sid=123][cnt=2]            │
+ *   │   (继续上传剩余候选)          │  B 在线，实时转发            │
+ *   │                               │                              │
+ *   │                               ├────── SYNC ────────────────►│
+ *   │                               │   [sid=456][cnt=2]           │
+ *   │                               │                              │
+ *   ├──────── SYNC ───────────────►│  [sid=123][cnt=0][fin=0xFF]  │
+ *   │   (上传完成，FIN 标记)        │                              │
+ *   │                               │                              │
+ *   │                               ├────── SYNC ────────────────►│
+ *   │                               │   [sid=456][cnt=0][fin=0xFF] │
+ *   │                               │                              │
+ *   │<======================== P2P ICE 打洞 ======================>│
  *
  *
  * 5. P2P_RLY_PACKET - P2P 包中继
@@ -1081,14 +1081,14 @@ typedef struct {
  *
  *   A (requester)         Server                    B (responder)
  *   │                        │                        │
- *   ├── RLY_REQ ────────────►│                        │
+ *   ├── RLY_REQ ───────────►│                        │
  *   │  [ses_id_A][sid][msg]  │                        │
  *   │  [data]                │                        │
- *   │                        ├── RLY_REQ ────────────►│
+ *   │                        ├── RLY_REQ ───────────►│
  *   │                        │  [ses_id_B][sid][msg]  │
  *   │                        │  [data]                │
  *   │                        │                        │
- *   │                        │◄── RLY_RESP ───────────┤
+ *   │                        │◄── RLY_RESP ──────────┤
  *   │                        │  [ses_id_B][sid][code] │
  *   │                        │  [data]                │
  *   │◄── RLY_RESP ──────────┤                        │
@@ -1145,20 +1145,339 @@ typedef struct {
  */
 
 
-/*
- * RELAY 模式信令负载头部
- * todo: 过时定义，目前用于 pubsub 模式
+/* ============================================================================
+ * WS_ICE 模式协议 (WebSocket, 纯文本帧)
+ * ============================================================================
  *
- * 用于封装 ICE 候选交换的元数据。
- * 序列化格式（76字节）：[sender:32B][target:32B][timestamp:4B][delay_trigger:4B][count:4B]
+ * 基于 WebSocket 的 ICE 信令通道，为 P2P_SIGNALING_MODE_ICE 模式提供
+ * ICE 候选交换。每条 WS text frame 承载一条消息，纯文本格式。
+ *
+ * 与 COMPACT/RELAY 的二进制协议不同，WS_ICE 采用可读文本协议，
+ * 便于调试和跨语言集成（如浏览器 JavaScript 客户端）。
+ *
+ * 传输层：WebSocket (RFC 6455)，text frame (opcode=0x1)
+ * 编码：UTF-8 纯文本
+ * 分帧：每条 WS text frame = 一条完整消息，无粘包问题
+ * 可靠性：WebSocket over TCP，保证有序可靠传输，无需应用层重传
+ *
+ * 服务端维护 client_t / session_t 体系，提供会话感知的信令服务：
+ * - 断线重连保留会话状态（类似 RELAY fd 迁移）
+ * - 对端上线主动通知（统一 SYNC0 推送，应答与推送同格式）
+ * - 离线客户端超时清理（WS_ICE_CLIENT_TIMEOUT_S = 60s）
+ *
+ * 消息格式通用规则：
+ * - 第一个空格前为命令关键字（大写）
+ * - 空格分隔字段
+ * - SYNC 消息中第一个 '\n' 分隔 session_id 与 payload
+ * - peer_id: UTF-8 字符串，最长 P2P_PEER_ID_MAX-1 字节（不含 NUL）
+ * - session_id: uint32 十进制 ASCII 表示
  */
-typedef struct {
-    char                sender[P2P_PEER_ID_MAX];    // 发送方 peer_id
-    char                target[P2P_PEER_ID_MAX];    // 目标方 peer_id
-    uint32_t            timestamp;                  // 时间戳（用于排序和去重）
-    uint32_t            delay_trigger;              // 延迟触发打洞（毫秒）
-    int                 candidate_count;            // ICE 候选数量
-} p2p_signaling_payload_hdr_t;
+
+/* ============================================================================
+ * WS_ICE 协议详细定义说明
+ * ============================================================================
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ONLINE — 身份注册（客户端 → 服务器）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "ONLINE <peer_id>"
+ *   - peer_id: 本端身份标识，UTF-8 字符串，最长 P2P_PEER_ID_MAX-1 字节
+ *
+ * 功能: 注册本端身份，建立 peer_id → WS 连接的映射。
+ *       类似 RELAY P2P_RLY_ONLINE / COMPACT SIG_PKT_ONLINE。
+ *
+ * 服务端处理:
+ *   1. peer_id 为空 → 返回 "ONLINE FAIL empty peer_id"
+ *   2. peer_id 已被同一 cid 注册 → 幂等，返回 "ONLINE OK"
+ *   3. peer_id 已被其他 cid 注册（重连场景）:
+ *      - 踢掉旧 WS 连接（ws_server_disconnect, code=1000）
+ *      - 复用 ws_ice_client_t，更新 cid，保留所有会话
+ *      - 遍历已配对会话，向所有在线对端推送 "SYNC0 <peer_id> <peer_session_id> online"
+ *      - 向本端推送所有在线对端的 "SYNC0 <remote_peer_id> <session_id> online"
+ *      - 返回 "ONLINE OK"
+ *   4. 同一 cid 曾注册其他 peer_id → 清除旧 client 及其会话
+ *   5. 全新注册 → 创建 ws_ice_client_t，返回 "ONLINE OK"
+ *
+ * 响应:
+ *   "ONLINE OK"               — 注册成功
+ *   "ONLINE FAIL <reason>"    — 注册失败
+ *     reason: "empty peer_id" — peer_id 为空
+ *             "OOM"           — 内存分配失败
+ *
+ * 示例:
+ *   → "ONLINE alice_device_01"
+ *   ← "ONLINE OK"
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * SYNC0 — 创建/恢复会话（客户端 → 服务器）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "SYNC0 <remote_peer_id>"
+ *   - remote_peer_id: 目标对端 peer_id
+ *
+ * 功能: 创建与指定对端的信令会话，建立 session_pair_t 双向配对。
+ *       类似 RELAY P2P_RLY_SYNC0 / COMPACT SIG_PKT_SYNC0。
+ *       不传输候选（候选通过 SYNC 交换），仅建立会话关系。
+ *
+ * 前置条件: 发送方必须已 ONLINE 注册，否则返回 "ONLINE FAIL not registered"
+ *
+ * 服务端处理:
+ *   1. remote_peer_id 为空 → 返回 "SYNC0 FAIL empty peer_id"
+ *   2. 已有到该对端的活跃会话（session_pair 中已存在）:
+ *      a. 对端标记已死亡（peer == -1）→ 清除标记，尝试重新配对
+ *      b. 返回 "SYNC0 <remote_peer_id> <session_id> online|offline"
+ *      c. 若对端在线 → 向对端推送 "SYNC0 <local_peer_id> <peer_session_id> online"
+ *   3. 无已有会话 → 调用 build_session() 创建:
+ *      a. 创建 ws_ice_session_t，分配 session_id
+ *      b. 查找 session_pair（双向 key），已有则配对
+ *      c. 对端已创建会话且未死亡 → 双向配对（peer 指针互指）
+ *      d. 返回 "SYNC0 <remote_peer_id> <session_id> online|offline"
+ *      e. 若配对成功且对端在线 → 向对端推送 "SYNC0 <local_peer_id> <peer_session_id> online"
+ *   4. build_session 失败 → 返回 "SYNC0 FAIL internal"
+ *
+ * 响应 (S2C 与推送统一格式 "SYNC0 <peer_id> <session_id> online|offline"):
+ *   "SYNC0 <remote_peer_id> <session_id> online"
+ *     — 会话已建立，对端已注册且 WS 连接有效
+ *     — session_id: uint32 十进制（由 generate_session_id() 分配）
+ *
+ *   "SYNC0 <remote_peer_id> <session_id> offline"
+ *     — 会话已建立，对端未注册或 WS 已断开
+ *     — 会话保留在服务端，对端上线时自动推送 "SYNC0 ... online"
+ *
+ *   "SYNC0 FAIL <reason>"
+ *     — 会话创建失败
+ *     reason: "empty peer_id"   — remote_peer_id 为空
+ *             "internal"        — build_session 内部错误（OOM / 重复创建）
+ *             "not registered"  — 发送方未 ONLINE（返回 "ONLINE FAIL not registered"）
+ *
+ * 示例:
+ *   → "SYNC0 bob_device_02"
+ *   ← "SYNC0 bob_device_02 42 offline"
+ *
+ *   (bob 随后也发 SYNC0)
+ *   → "SYNC0 alice_device_01"      (bob 发送)
+ *   ← "SYNC0 alice_device_01 43 online"  (bob 收到，应答)
+ *   ← "SYNC0 bob_device_02 42 online"    (alice 收到，服务器推送，携带 alice 的 sid=42)
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * SYNC — 同步数据交换（双向：客户端 ↔ 服务器）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "SYNC <session_id>\n<payload>"
+ *   - session_id: 发送方的 session_id（由 SYNC0 分配，uint32 十进制）
+ *   - payload: 任意文本（可含换行符），服务器透传不解析
+ *
+ * 功能: 通过会话路由向对端同步 ICE 候选。
+ *       类似 RELAY P2P_RLY_SYNC：服务器按 session_id 查找配对会话，
+ *       将 session_id 重写为对端的 session_id 后原样投递。
+ *       因为服务端自身维护了 session，不需要交换 SDP，只需交换 ICE 候选行。
+ *
+ * 前置条件: 发送方必须已 ONLINE 注册，且已通过 SYNC0 建立会话
+ *
+ * 服务端处理:
+ *   1. 发送方未注册 → 返回 "ONLINE FAIL not registered"
+ *   2. session_id 无效或对端离线 → 静默丢弃（无错误返回）
+ *   3. 对端在线 → 重写 session_id 为对端的 session_id，
+ *      构造 "SYNC <peer_session_id>\n<payload>" 发送给对端
+ *
+ * payload 子类型（应用层约定，服务器透传）:
+ *
+ *   "ICE\n<candidate_line>"
+ *     ICE 候选行：单个候选（逐条上报，类似 RELAY SYNC trickle）。
+ *     candidate_line 格式:
+ *       a=candidate:<foundation> <component> <transport> <priority> <addr> <port> typ <type> [raddr <raddr> rport <rport>]
+ *
+ *   "ICE_DONE"
+ *     候选收集完成通知（所有候选均已通过 ICE trickle 发送）。
+ *
+ * 示例（alice sid=42, bob sid=43）:
+ *   → "SYNC 42\nICE\na=candidate:1 1 udp 2130706431 192.168.1.100 12345 typ host"
+ *   (bob 收到 →) "SYNC 43\nICE\na=candidate:1 1 udp 2130706431 192.168.1.100 12345 typ host"
+ *
+ *   → "SYNC 42\nICE_DONE"
+ *   (bob 收到 →) "SYNC 43\nICE_DONE"
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * SYNC0 推送 — 对端上线通知（服务器 → 客户端，S2C 方向）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "SYNC0 <peer_id> <session_id> online"
+ *   - peer_id: 对端 peer_id
+ *   - session_id: 接收方自己的 session_id（uint32 十进制）
+ *
+ * 功能: 通知客户端某个已配对对端上线，应发起/重新发起 ICE 候选交换。
+ *       与 RELAY 一致：SYNC0 在 C2S 方向为会话请求（无 session_id），
+ *       在 S2C 方向为应答/推送（服务器插入 session_id）。
+ *       应答与推送统一格式 "SYNC0 <peer_id> <session_id> online|offline"，
+ *       客户端无需区分，统一处理即可。
+ *
+ * 触发时机（服务器主动推送，无需客户端请求）:
+ *   1. 对端 ONLINE 注册/重连成功 → 遍历其所有已配对会话，
+ *      向每个在线对端推送 "SYNC0 <reconnected_peer_id> <my_session_id> online"，
+ *      同时向重连方推送所有在线对端的 "SYNC0 <peer_id> <my_session_id> online"
+ *   2. 本端 SYNC0 创建会话时对端已在线 → 双向:
+ *      向本端返回 "SYNC0 <remote_peer_id> <my_session_id> online"（应答），
+ *      向对端推送 "SYNC0 <local_peer_id> <peer_session_id> online"（推送）
+ *
+ * 客户端处理:
+ *   收到 "SYNC0 <peer_id> <session_id> online" 后应：
+ *   1. 根据 session_id 查找/创建本地 session
+ *   2. 通过 SYNC 发送 ICE 候选发起候选交换
+ *   3. 若此前已有候选交换（重连场景），应重新收集并发送
+ *
+ * 示例:
+ *   ← "SYNC0 bob_device_02 42 online"
+ *   (客户端随后发起 ICE 候选交换)
+ *   → "SYNC 42\nICE\na=candidate:..."
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * OFFLINE — 对端离线通知（服务器 → 客户端）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "OFFLINE <peer_id>"
+ *   - peer_id: 离线的对端 peer_id
+ *
+ * 功能: 通知客户端某个已配对对端离线。
+ *       会话在服务端保留（等待重连或超时清理），不需要客户端操作。
+ *
+ * 触发时机（服务器主动推送）:
+ *   1. 对端 WS 连接断开（网络中断/主动关闭）→ 通知所有已配对的在线对端
+ *   2. 对端会话被释放（ws_ice_free_session 清理时）
+ *
+ * 客户端处理:
+ *   收到 OFFLINE 后应：
+ *   1. 标记该 peer 为离线，暂停向其发送 SYNC（按 session_id 暂停）
+ *   2. 等待后续 SYNC0 推送再恢复交换
+ *   3. 不需要销毁本地 session（服务端会话仍保留）
+ *
+ * 示例:
+ *   ← "OFFLINE bob_device_02"
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * 协议流程详解
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 1. 上线流程（建立 WebSocket 连接）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ *   Client                        Server
+ *   │                                │
+ *   ├── WebSocket Connect ─────────►│  HTTP Upgrade → WS
+ *   │                                │
+ *   ├── "ONLINE alice" ────────────►│  创建 ws_ice_client_t
+ *   │                                │  peer_id="alice", cid=N
+ *   │◄── "ONLINE OK" ───────────────┤
+ *   │                                │
+ *   [进入 ONLINE 状态]               │
+ *   │                                │
+ *   [WebSocket 自身的 PING/PONG]     │  (保活由 WS 协议层处理)
+ *
+ * 2. 会话建立（首方离线等待）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ *   Alice                         Server                          Bob (离线)
+ *   │                                │                                │
+ *   ├── "SYNC0 bob" ───────────────►│  build_session("alice","bob")  │
+ *   │                                │  pair 创建，side=0             │
+ *   │                                │  remote_s=NULL (bob 未注册)    │
+ *   │◄── "SYNC0 bob 42 offline" ────┤                                │
+ *   │                                │                                │
+ *   [等待 SYNC0 bob 42 online]       │                                │
+ *
+ * 3. 会话配对（对端上线 + 双向通知）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ *   Alice                         Server                             Bob
+ *   │                                │                                │
+ *   │                                │◄── "ONLINE bob" ──────────────┤
+ *   │                                │  创建 ws_ice_client_t          │
+ *   │                                ├── "ONLINE OK" ───────────────►│
+ *   │                                │                                │
+ *   │                                │◄── "SYNC0 alice" ─────────────┤
+ *   │                                │  build_session("bob","alice")  │
+ *   │                                │  pair 找到，side=1             │
+ *   │                                │  remote_s=alice's session      │
+ *   │                                │  → 双向配对                   │
+ *   │                                │                                │
+ *   │◄── "SYNC0 bob 42 online" ─────┤  (推送给 alice，携带 alice 的 sid=42)
+ *   │                                ├── "SYNC0 alice 43 online" ───►│  (应答给 bob，bob 的 sid=43)
+ *   │                                │                                │
+ *    [收到 SYNC0，发起 ICE 候选交换] │ [收到 SYNC0，发起 ICE 候选交换]
+ *
+ * 4. 同步交换 ICE 候选（alice sid=42, bob sid=43）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ *   Alice                         Server                             Bob
+ *   │                                │                                │
+ *   ├──── "SYNC 42\nICE\n..." ─────►│  sid=42 → 配对 → bob sid=43  │
+ *   │                                ├──── "SYNC 43\nICE\n..." ─────►│
+ *   │                                │                                │
+ *   │                                │◄──── "SYNC 43\nICE\n..." ─────┤
+ *   │◄──── "SYNC 42\nICE\n..." ─────┤ sid=43 → 配对 → alice sid=42 │
+ *   │                                │                                │
+ *   ├──── "SYNC 42\nICE_DONE" ─────►│                                │
+ *   │                                ├──── "SYNC 43\nICE_DONE" ─────►│
+ *   │                                │                                │
+ *   │                                │◄──── "SYNC 43\nICE_DONE" ─────┤
+ *   │◄──── "SYNC 42\nICE_DONE" ─────┤                                │
+ *   │                                │                                │
+ *   │◄════════════════════════ P2P ICE 打洞 ═══════════════════════►│
+ *
+ * 5. 断线重连（会话保留 + 自动恢复）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ *   Alice                         Server                             Bob
+ *   │                                │                                │
+ *   │                                │  Bob WS 断开                   ╳
+ *   │                                │  bob.cid = -1 (标记离线)       │
+ *   │                                │  bob 会话保留                  │
+ *   │◄── "OFFLINE bob" ─────────────┤                                │
+ *   │                                │                                │
+ *   [暂停向 bob 发送 SYNC]           │     ... 网络恢复 ...           │
+ *   │                                │                                │
+ *   │                                │◄── WebSocket Connect ─────────┤
+ *   │                                │◄── "ONLINE bob" ──────────────┤
+ *   │                                │  复用 ws_ice_client_t          │
+ *   │                                │  更新 cid，保留会话            │
+ *   │                                ├── "ONLINE OK" ───────────────►│
+ *   │                                │                                │
+ *   │                                │  遍历 bob 的已配对会话         │
+ *   │◄── "SYNC0 bob 42 online" ─────┤                                │
+ *   │                                ├── "SYNC0 alice 43 online" ───►│
+ *   │                                │                                │
+ *       [重新发起 ICE 候选交换]      │    [重新发起 ICE 候选交换]
+ *   ├── "SYNC 42\nICE\n..." ─────►│  ...
+ *
+ * 6. 超时清理（离线过久，释放资源）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ *   Server (每 CLEANUP_INTERVAL_S 秒执行一次):
+ *   │
+ *   ├── 遍历 g_ws_ice_clients
+ *   │   └── 对每个离线 client (cid == -1):
+ *   │       └── 若 now - last_active > WS_ICE_CLIENT_TIMEOUT_S (60s):
+ *   │           ├── 释放所有会话 (ws_ice_free_session)
+ *   │           │   └── 每个有配对的会话 → 通知对端 "OFFLINE <peer_id>"
+ *   │           │       并标记对端 peer 指针为 -1
+ *   │           └── 移除 client (HASH_DELETE + free)
+ */
+
+/* WS_ICE 消息类型前缀（纯文本匹配，非二进制编码） */
+#define P2P_WS_ICE_CMD_ONLINE       "ONLINE "   /* + <peer_id>                 注册身份 */
+#define P2P_WS_ICE_CMD_SYNC0        "SYNC0 "    /* + <remote_peer_id>          创建/恢复会话 */
+#define P2P_WS_ICE_CMD_SYNC         "SYNC "     /* + <session_id>\n<payload>   同步数据 (C2S & S2C) */
+
+#define P2P_WS_ICE_RSP_ONLINE_OK    "ONLINE OK"
+#define P2P_WS_ICE_RSP_ONLINE_FAIL  "ONLINE FAIL "  /* + <reason> */
+#define P2P_WS_ICE_RSP_SYNC0        "SYNC0 "        /* + <peer_id> <session_id> online|offline  S2C 应答/推送 */
+#define P2P_WS_ICE_RSP_SYNC0_FAIL   "SYNC0 FAIL "   /* + <reason> */
+#define P2P_WS_ICE_RSP_OFFLINE      "OFFLINE "      /* + <peer_id> */
+
+/* SYNC payload 子类型前缀（应用层约定，服务器透传） */
+#define P2P_WS_ICE_PAY_ICE          "ICE\n"     /* + <candidate_line> */
+#define P2P_WS_ICE_PAY_ICE_DONE     "ICE_DONE"
+
 
 #pragma pack(pop)
 #pragma ide diagnostic pop

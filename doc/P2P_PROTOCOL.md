@@ -572,23 +572,6 @@ Client                    Server
 
 #### CONNECT 消息结构
 
-```c
-// Payload = 目标名称 + 信令负载头部 + N 个候选
-[target_name: 32B]
-[p2p_signaling_payload_hdr_t: 76B]  // sender, target, timestamp, count, ...
-[candidates: N * 32B]               // ICE 候选列表
-```
-
-**信令负载头部**：
-```c
-typedef struct {
-    char     sender[32];         // 发送方 peer_id
-    char     target[32];         // 目标方 peer_id
-    uint32_t timestamp;          // 时间戳（用于排序和去重）
-    uint32_t delay_trigger;      // 延迟触发打洞（毫秒）
-    int      candidate_count;    // 本次发送的候选数量
-} p2p_signaling_payload_hdr_t;
-```
 
 **ICE 候选结构**：
 ```c
