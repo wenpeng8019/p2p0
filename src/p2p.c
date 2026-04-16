@@ -71,6 +71,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
             // socks[1..N] 是多路 srflx 收集专用（随机端口），不作为 HOST 候选
             uint16_t port = inst->socks[0].local_addr.sin_port;
             for (int r = 0; r < rt->addr_count; r++) {
+                if (inst->cfg.test_ice_ipv4_off) continue;
                 int idx = p2p_cand_push_local(s);
                 if (idx < 0) { print("E:", LA_S("Push local cand<%s:%d> failed(OOM)\n", LA_S31, 31),
                         inet_ntoa(rt->local_addrs[r].sin_addr), ntohs(port)); return; }
@@ -89,7 +90,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
             }
 
             /* IPv6 host candidates */
-            if (inst->sock6 != P_INVALID_SOCKET && rt->addr6_count > 0) {
+            if (inst->sock6 != P_INVALID_SOCKET && rt->addr6_count > 0 && !inst->cfg.test_ice_ipv6_off) {
                 uint16_t port6 = inst->sock6_addr.sin6_port;
                 for (int r = 0; r < rt->addr6_count; r++) {
                     int idx = p2p_cand_push_local(s);
@@ -123,7 +124,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
          *   1. 发送 STUN Binding Request 时递增 cand_pending
          *   2. 接收 STUN Binding Response 时，stun_add_srflx_candidate 递减 cand_pending
      */
-    if (!inst->cfg.test_ice_srflx_off && inst->cfg.stun_server) {
+    if (!inst->cfg.test_ice_srflx_off && !inst->cfg.test_ice_ipv4_off && inst->cfg.stun_server) {
         // COMPACT 模式下 sock[0] 的 srflx 由信令服务器提供，仅复用 socks[1..N]
         int start_idx = (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) ? 1 : 0;
         for (int i = start_idx; i < inst->sock_cnt; i++) {
@@ -152,7 +153,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
      *   1. p2p_turn_allocate() 发送请求时递增 turn_pending
      *   2. 接收 Allocate Success 时，在 turn_handle_packet 中递减 turn_pending
      */
-    if (!inst->cfg.test_ice_relay_off && inst->cfg.turn_server) {
+    if (!inst->cfg.test_ice_relay_off && !inst->cfg.test_ice_ipv4_off && inst->cfg.turn_server) {
         if (inst->turn.state == TURN_ALLOCATED) {
 
             int idx = p2p_cand_push_local(s);
@@ -415,6 +416,15 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         if (!cfg->gh_token || !cfg->gist_id) {
             print("E:", LA_F("PUBSUB mode requires gh_token and gist_id", LA_F336, 336));
+            return NULL;
+        }
+        /* PUBSUB 无信令中转：若所有候选地址族或所有候选类型都被禁用，则无法建立连接 */
+        if (cfg->test_ice_ipv4_off && cfg->test_ice_ipv6_off) {
+            print("E:", LA_F("PUBSUB mode: both IPv4 and IPv6 disabled, no candidates possible", LA_F336, 336));
+            return NULL;
+        }
+        if (cfg->test_ice_host_off && cfg->test_ice_srflx_off && cfg->test_ice_relay_off) {
+            print("E:", LA_F("PUBSUB mode: all candidate types (host/srflx/relay) disabled, no candidates possible", LA_F336, 336));
             return NULL;
         }
     }

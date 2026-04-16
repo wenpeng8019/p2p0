@@ -18,6 +18,11 @@
  *    - 验证 RELAY 模式下的日志格式
  *    - 验证连接状态转换
  *
+ * 4. test_relay_ipv6_only:
+ *    - 关闭 IPv4 候选收集（--no-ipv4 --no-srflx --no-relay）
+ *    - 验证只有 IPv6 候选被使用，无 IPv4 Host 候选
+ *    - 允许超时（本地可能无 IPv6 接口）
+ *
  * ============================================================================
  * 命令行选项（p2p_ping）
  * ============================================================================
@@ -25,6 +30,8 @@
  * --no-host   - 禁用 HOST 候选收集（不收集本地网卡地址）
  * --no-srflx  - 禁用 SRFLX 候选收集（不收集 NAT 反射地址）
  * --no-relay  - 禁用 RELAY 候选收集（不收集 TURN 中继地址）
+ * --no-ipv4   - 禁用 IPv4 候选（不收集/不接受 IPv4 地址）
+ * --no-ipv6   - 禁用 IPv6 候选（不收集/不接受 IPv6 地址）
  */
 
 #define MOD_TAG "TEST_SYNC_R"
@@ -600,6 +607,85 @@ static void test_relay_log_format(void) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// 测试 4: IPv6 only（关闭 IPv4 候选）(RELAY 模式)
+///////////////////////////////////////////////////////////////////////////////
+
+static void test_relay_ipv6_only(void) {
+    const char *TEST_NAME = "relay_ipv6_only";
+    printf("\n--- Test: %s ---\n", TEST_NAME);
+    printf("    Disabling IPv4 candidates, IPv6 only (RELAY mode)\n");
+    printf("    Note: may fail if no IPv6 interfaces available\n");
+    clear_logs();
+
+    if (restart_server() != 0) {
+        TEST_FAIL(TEST_NAME, "failed to restart server");
+        return;
+    }
+
+    // 启动 Alice（使用 --no-ipv4 禁用 IPv4，同时禁用 srflx/relay 因为它们当前仅 IPv4）
+    if (start_client(&g_alice, "bob", "--no-ipv4 --no-srflx --no-relay") != 0) {
+        TEST_FAIL(TEST_NAME, "failed to start alice");
+        return;
+    }
+    if (wait_for_waiting(&g_alice, SYNC_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "alice waiting timeout");
+        stop_client(&g_alice);
+        return;
+    }
+    sync_client(&g_alice);
+
+    // 启动 Bob（同样使用 --no-ipv4）
+    if (start_client(&g_bob, "alice", "--no-ipv4 --no-srflx --no-relay") != 0) {
+        TEST_FAIL(TEST_NAME, "failed to start bob");
+        stop_client(&g_alice);
+        return;
+    }
+    if (wait_for_waiting(&g_bob, SYNC_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "bob waiting timeout");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    sync_client(&g_bob);
+
+    // 等待连接（IPv6 only，本地可能无 IPv6 接口，允许超时）
+    printf("[1] Waiting for connection (IPv6 only, RELAY mode)...\n");
+    int connect_result = wait_for_connection(15000);
+
+    // 验证：不应该有 IPv4 Host 候选
+    printf("[2] Verifying no IPv4 candidates...\n");
+    int host4_gathered = 0;
+    for (int i = 0; i < g_log_count; i++) {
+        // 匹配 "Gathered Host candidate:" 但不匹配 "Host6"
+        if (strstr(g_logs[i].txt, "Gathered Host candidate:"))
+            host4_gathered++;
+    }
+    int host6_gathered = count_logs("Host6 candidate");
+
+    printf("    IPv4 Host gathered: %d logs\n", host4_gathered);
+    printf("    IPv6 Host gathered: %d logs\n", host6_gathered);
+
+    if (host4_gathered > 0) {
+        TEST_FAIL(TEST_NAME, "IPv4 candidates should have been filtered");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+
+    if (connect_result == 0) {
+        printf("    Connection succeeded via IPv6!\n");
+    } else {
+        printf("    Connection timed out (no IPv6 interfaces or no IPv6 connectivity)\n");
+    }
+
+    print_log_summary();
+    TEST_PASS(TEST_NAME);
+
+    stop_client(&g_alice);
+    stop_client(&g_bob);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // 主函数
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -646,6 +732,7 @@ int main(int argc, char *argv[]) {
     test_relay_host_only();
     test_relay_no_host_punch();
     test_relay_log_format();
+    test_relay_ipv6_only();
 
     // 清理
     printf("\n[*] Cleaning up...\n");

@@ -167,6 +167,15 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
         /* 检查重复 */
         if (p2p_find_remote_candidate_by_addr(s, &tmp_cands[i].addr) >= 0) continue;
 
+        /* IPv4/IPv6 过滤 */
+        if ((tmp_cands[i].addr.family == AF_INET  && s->inst->cfg.test_ice_ipv4_off) ||
+            (tmp_cands[i].addr.family == AF_INET6 && s->inst->cfg.test_ice_ipv6_off)) {
+            print("I:", LA_F("SDP REMOTE: %s cand<%s:%d> (disabled)", LA_F208, 208),
+                  tmp_cands[i].type == P2P_CAND_HOST ? "host" : tmp_cands[i].type == P2P_CAND_SRFLX ? "srflx" : "relay",
+                  sockAddr_str(&tmp_cands[i].addr, _ab, sizeof(_ab)), sockAddr_port(&tmp_cands[i].addr));
+            continue;
+        }
+
         int idx = p2p_cand_push_remote(s);
         if (idx < 0) break;
 

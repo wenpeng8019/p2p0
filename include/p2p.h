@@ -296,6 +296,8 @@ typedef struct {
     bool                    test_ice_host_off;          // 禁用 Host 候选（不收集本地网卡地址）
     bool                    test_ice_srflx_off;         // 禁用 Srflx 候选（不收集 NAT 反射地址）
     bool                    test_ice_relay_off;         // 禁用 Relay 候选（不收集 TURN 中继地址）
+    bool                    test_ice_ipv4_off;          // 禁用 IPv4 候选（不收集/不接受 IPv4 地址）
+    bool                    test_ice_ipv6_off;          // 禁用 IPv6 候选（不收集/不接受 IPv6 地址）
 
 } p2p_config_t;
 

@@ -129,7 +129,9 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
             continue;
         }
 
-        if (opt_off) {
+        if (opt_off
+            || (c->addr.family == AF_INET  && s->inst->cfg.test_ice_ipv4_off)
+            || (c->addr.family == AF_INET6 && s->inst->cfg.test_ice_ipv6_off)) {
             print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F204, 204),
                   TASK_SYNC_REMOTE, type_str, idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
             continue;
