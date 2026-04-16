@@ -18,10 +18,21 @@
     - **警告**: 对于需要最新安全补丁和 TLS 1.3 支持的生产系统，建议未来升级到 **MbedTLS 3.6.x LTS**。
     - 当前的集成主要作为模块化传输架构的功能性验证（Proof-of-Concept）。
 
-### 2. usrsctp (待全面集成)
+### 2. usrsctp
 - **目录**: `third_party/usrsctp`
+- **版本**: 0.9.5.0
 - **用途**: 提供 SCTP (流控制传输协议) 支持，实现在 UDP/DTLS 之上的多流复用。
-- **状态**: 已完成骨架集成，完整的构建集成正在进行中。
+- **集成方式**: 可选，通过 `WITH_SCTP=ON` 启用（默认关闭）。CMake 以子目录方式编译并链接。
+- **使用位置**: `src/p2p_trans_sctp.c`，运行时通过 `cfg.use_sctp` 选择。
+
+### 3. wslay
+- **目录**: `third_party/wslay`
+- **版本**: 1.1.1
+- **用途**: WebSocket 协议库，用于信令通道的 WebSocket 通信。
+- **集成方式**: 默认启用（`WITH_WSLAY=ON`）。直接嵌入源文件编译（event, frame, net, queue, stack），避免上游 `-Werror` 导致的编译问题。
+- **使用位置**:
+    - 客户端: `src/ws_client.c` — WebSocket 客户端，连接信令服务器。
+    - 服务端: `p2p_server/ws_server.c` — WebSocket 服务器，接受 peer 信令连接。
 
 ## 如何更新
 若要更新库版本：
