@@ -114,6 +114,7 @@ static ret_t tcp_send(p2p_relay_ctx_t *ctx, const char* PROTO,
  * 格式: [candidate_count(1)][candidates(N*23)]
  */
 static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *payload, int len) {
+    char _ab[INET6_ADDRSTRLEN];
     if (len < 1) {
         print("E:", LA_F("%s: bad payload len=%d\n", LA_F115, 115), TASK_SYNC_REMOTE, len);
         return;
@@ -149,11 +150,11 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
                 s->remote_cands[dup_idx].type = c->type;
                 s->remote_cands[dup_idx].priority = c->priority;
                 print("I:", LA_F("%s: promoted prflx cand[%d]<%s:%d> → %s\n", LA_F182, 182),
-                      TASK_SYNC_REMOTE, dup_idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                      TASK_SYNC_REMOTE, dup_idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr),
                       p2p_candidate_type_str(c->type));
             } else {
                 print("V:", LA_F("%s: duplicate remote cand<%s:%d>, skipped\n", LA_F128, 128),
-                      TASK_SYNC_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                      TASK_SYNC_REMOTE, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
             }
             continue;
         }
@@ -182,7 +183,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
 
         if (opt_off) {
             print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F204, 204),
-                  TASK_SYNC_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                  TASK_SYNC_REMOTE, type_str, idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
             continue;
         }
 
@@ -190,12 +191,12 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
         ++*cand_cnt_ptr;
 
         print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F205, 205),
-              TASK_SYNC_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+              TASK_SYNC_REMOTE, type_str, idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
 
         // 启动打洞
         if (sess_ctx->state >= SIG_RELAY_SESS_SYNCING && nat_punch(s, idx) != E_NONE) {
             print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F185, 185),
-                  TASK_SYNC_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                  TASK_SYNC_REMOTE, idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
         }
     }
 }
@@ -806,8 +807,10 @@ static void handle_relay_packet(struct p2p_session *s, const uint8_t *payload, i
 
     print("V:", LA_F("%s: pkt recv (ses_id=%u), inner type=%u\n", LA_F180, 180), TASK_RELAY, s->id, hdr.type);
 
+    sockAddr_t from;
+    sockAddr_from_v4(&from, &s->inst->sig_ctx.relay.server_addr);
     nat_proto(s, hdr.type, hdr.flags, hdr.seq, payload + P2P_HDR_SIZE, len - P2P_HDR_SIZE,
-              &s->inst->sig_ctx.relay.server_addr, now);
+              &from, now);
 }
 
 /*

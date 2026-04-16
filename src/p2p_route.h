@@ -7,9 +7,11 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 typedef struct {
-    struct sockaddr_in* local_addrs;
-    uint32_t*           local_masks;
-    int                 addr_count;
+    struct sockaddr_in*     local_addrs;
+    uint32_t*               local_masks;
+    int                     addr_count;
+    struct sockaddr_in6*    local_addrs6;
+    int                     addr6_count;
 } route_ctx_t;
 
 /*

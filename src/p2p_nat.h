@@ -34,7 +34,7 @@ enum {
 /* reaching 队列节点（NAT 内部使用，单向链表） */
 typedef struct punch_reaching {
     uint16_t                   seq;             // PUNCH seq（需要 echo）
-    struct sockaddr_in         target;          // PUNCH 携带的 target_addr（需要 echo）
+    sockAddr_t                 target;          // PUNCH 携带的 target_addr（需要 echo）
     int                        cand_idx;        // 来源候选索引
     struct punch_reaching*     next;            // 下一个节点
 } punch_reaching_t;
@@ -117,7 +117,7 @@ void nat_send_fin(struct p2p_session *s);
 
 void nat_proto(struct p2p_session *s, uint8_t type, uint8_t flags, uint16_t seq,
                const uint8_t *payload, int payload_len,
-               const struct sockaddr_in *from, uint64_t now);
+               const sockAddr_t *from, uint64_t now);
 
 /*
  * 通过（ICE connectivity check）STUN 包进行打洞
@@ -132,7 +132,7 @@ void nat_proto(struct p2p_session *s, uint8_t type, uint8_t flags, uint16_t seq,
  * @param from        来源地址
  */
 void nat_on_stun_packet(struct p2p_session *s, uint16_t msg_type, const uint8_t *buf, int len, 
-                       const struct sockaddr_in *from, uint64_t now);
+                       const sockAddr_t *from, uint64_t now);
 
 
 ///////////////////////////////////////////////////////////////////////////////

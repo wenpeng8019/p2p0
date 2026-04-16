@@ -646,6 +646,7 @@ uint64_t p2p_ice_calc_pair_priority(uint32_t controlling_prio, uint32_t controll
  * 输出格式："candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host"
  */
 int p2p_ice_export_candidate(const p2p_local_candidate_entry_t *cand, char *buf, int buf_size ) {
+    char _ab[INET6_ADDRSTRLEN];
 
     if (!cand || !buf || buf_size < 100) return -1;
     
@@ -665,25 +666,25 @@ int p2p_ice_export_candidate(const p2p_local_candidate_entry_t *cand, char *buf,
         /* Srflx/Relay: 包含 raddr/rport (base_addr) */
         /* inet_ntoa 使用静态缓冲区，不能在同一调用中使用两次 */
         char addr_str[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &cand->addr.sin_addr, addr_str, sizeof(addr_str));
+        inet_ntop(AF_INET, &cand->addr.addr.v4.sin_addr, addr_str, sizeof(addr_str));
         char raddr_str[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &cand->base_addr.sin_addr, raddr_str, sizeof(raddr_str));
+        inet_ntop(AF_INET, &cand->base_addr.addr.v4.sin_addr, raddr_str, sizeof(raddr_str));
         n = snprintf(buf, buf_size,
             "candidate:1 1 UDP %u %s %d typ %s raddr %s rport %d",
             cand->priority,                        /* priority */
             addr_str,                              /* IP */
-            ntohs(cand->addr.sin_port),            /* port */
+            sockAddr_port(&cand->addr),            /* port */
             type_str,                              /* type */
             raddr_str,                             /* related address */
-            ntohs(cand->base_addr.sin_port)        /* related port */
+            ntohs(cand->base_addr.addr.v4.sin_port)        /* related port */
         );
     } else {
         /* Host/Prflx: 不包含 raddr/rport */
         n = snprintf(buf, buf_size,
             "candidate:1 1 UDP %u %s %d typ %s",
             cand->priority,                        /* priority */
-            inet_ntoa(cand->addr.sin_addr),        /* IP */
-            ntohs(cand->addr.sin_port),            /* port */
+            sockAddr_str(&cand->addr, _ab, sizeof(_ab)),        /* IP */
+            sockAddr_port(&cand->addr),            /* port */
             type_str                               /* type */
         );
     }
@@ -754,6 +755,7 @@ int p2p_ice_export_sdp(const p2p_local_candidate_entry_t *cands, int cnt,
                        const char *ice_ufrag,
                        const char *ice_pwd,
                        const char *dtls_fingerprint) {
+    char _ab[INET6_ADDRSTRLEN];
 
     if (!cands || !sdp_buf || buf_size < 100) return -1;
     
@@ -841,18 +843,18 @@ int p2p_ice_export_sdp(const p2p_local_candidate_entry_t *cands, int cnt,
             /* Srflx/Relay: 包含 raddr/rport (base_addr) */
             /* inet_ntoa 使用静态缓冲区，不能在同一调用中使用两次 */
             char addr_str[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &c->addr.sin_addr, addr_str, sizeof(addr_str));
+            inet_ntop(AF_INET, &c->addr.addr.v4.sin_addr, addr_str, sizeof(addr_str));
             char raddr_str[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &c->base_addr.sin_addr, raddr_str, sizeof(raddr_str));
+            inet_ntop(AF_INET, &c->base_addr.addr.v4.sin_addr, raddr_str, sizeof(raddr_str));
             n = snprintf(sdp_buf + offset, buf_size - offset,
                 "a=candidate:%d 1 UDP %u %s %d typ %s raddr %s rport %d\r\n",
                 i + 1,                              /* foundation */
                 c->priority,                        /* priority */
                 addr_str,                           /* IP */
-                ntohs(c->addr.sin_port),            /* port */
+                sockAddr_port(&c->addr),            /* port */
                 type_str,                           /* type */
                 raddr_str,                          /* related address */
-                ntohs(c->base_addr.sin_port)        /* related port */
+                ntohs(c->base_addr.addr.v4.sin_port)        /* related port */
             );
         } else {
             /* Host/Prflx: 不包含 raddr/rport */
@@ -860,8 +862,8 @@ int p2p_ice_export_sdp(const p2p_local_candidate_entry_t *cands, int cnt,
                 "a=candidate:%d 1 UDP %u %s %d typ %s\r\n",
                 i + 1,                              /* foundation */
                 c->priority,                        /* priority */
-                inet_ntoa(c->addr.sin_addr),        /* IP */
-                ntohs(c->addr.sin_port),            /* port */
+                sockAddr_str(&c->addr, _ab, sizeof(_ab)),        /* IP */
+                sockAddr_port(&c->addr),            /* port */
                 type_str                            /* type */
             );
         }
@@ -889,6 +891,7 @@ overflow:
  */
 int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands, int max_cands) {
 
+    char _ab[INET6_ADDRSTRLEN];
     if (!sdp_text || !cands || max_cands <= 0) return -1;
     
     int count = 0;
@@ -947,15 +950,16 @@ int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands
         
         /* 解析 IP 地址 */
         memset(&c->addr, 0, sizeof(c->addr));
-        c->addr.sin_family = AF_INET;
-        if (inet_pton(AF_INET, ip_str, &c->addr.sin_addr) != 1) {
+        c->addr.family = AF_INET;
+        c->addr.addr.v4.sin_family = AF_INET;
+        if (inet_pton(AF_INET, ip_str, &c->addr.addr.v4.sin_addr) != 1) {
             print("W:", LA_F("Invalid IP address: %s", LA_F314, 314), ip_str);
             /* 跳到下一行 */
             while (*line && *line != '\n' && *line != '\r') line++;
             while (*line == '\n' || *line == '\r') line++;
             continue;
         }
-        c->addr.sin_port = htons((uint16_t)port);
+        c->addr.addr.v4.sin_port = htons((uint16_t)port);
         
         /* 设置优先级 */
         c->priority = priority;
@@ -967,7 +971,7 @@ int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands
         count++;
         
         print("I:", LA_F("Imported SDP candidate: %s:%d typ %s (priority=0x%08x)", LA_F309, 309),
-               inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), type_str, priority);
+               sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), type_str, priority);
         
         /* 跳到下一行 */
         while (*line && *line != '\n' && *line != '\r') line++;

@@ -203,10 +203,11 @@ void reliable_tick_ack(struct p2p_session *s) {
     build_ack_payload(r, ack_payload);
     uint16_t ack_seq = nget_s(ack_payload);
     uint32_t sack = nget_l(ack_payload + 2);
+    char _ab[INET6_ADDRSTRLEN];
     printf(LA_F("send ACK ack_seq=%u sack=0x%08x recv_base=%u to %s:%d", LA_F465, 465),
                   ack_seq, sack, r->recv_base,
-                  inet_ntoa(s->active_addr.sin_addr),
-                  ntohs(s->active_addr.sin_port));
+                  sockAddr_str(&s->active_addr, _ab, sizeof(_ab)),
+                  sockAddr_port(&s->active_addr));
     uint64_t now = P_tick_ms();
     p2p_send_packet(s, &s->active_addr, P2P_PKT_ACK, 0, 0, ack_payload, 6, now);
 }

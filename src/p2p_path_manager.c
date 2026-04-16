@@ -242,7 +242,8 @@ void path_stats_init(path_stats_t *st, int cost_score) {
  */
 int path_manager_enable_signaling(struct p2p_instance *inst, struct sockaddr_in *addr) {
     inst->signaling.active = true;
-    inst->signaling.addr = *addr;
+    inst->signaling.addr.family = AF_INET;
+    inst->signaling.addr.addr.v4 = *addr;
     path_stats_init(&inst->signaling.stats, 5);   /* SIGNALING cost=5 */
     inst->signaling.stats.state = PATH_STATE_ACTIVE;        /* SIGNALING 一设置就可用 */
     

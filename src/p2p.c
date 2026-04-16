@@ -49,6 +49,7 @@ uint16_t             p2p_instrument_base = 0;
 #endif
 
 static inline void gather_local_candidates(struct p2p_session *s) {
+    char _ab[INET6_ADDRSTRLEN];
 
     s->local_cand_cnt = 0;
     s->public_base = -1;  // 重新收集候选，当前尚无 TURN 候选
@@ -76,14 +77,37 @@ static inline void gather_local_candidates(struct p2p_session *s) {
 
                 p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                 c->type = P2P_CAND_HOST;
-                c->addr = rt->local_addrs[r];
-                c->addr.sin_port = port;
+                c->addr.family = AF_INET;
+                c->addr.addr.v4 = rt->local_addrs[r];
+                c->addr.addr.v4.sin_port = port;
 
                 uint16_t local_pref = (uint16_t)(65535 - host_index++);
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
 
                 print("I:", LA_F("Gathered Host candidate: %s:%d (priority=0x%08x)", LA_F299, 299),
-                        inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                        sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), c->priority);
+            }
+
+            /* IPv6 host candidates */
+            if (inst->sock6 != P_INVALID_SOCKET && rt->addr6_count > 0) {
+                uint16_t port6 = inst->sock6_addr.sin6_port;
+                for (int r = 0; r < rt->addr6_count; r++) {
+                    int idx = p2p_cand_push_local(s);
+                    if (idx < 0) { print("E:", LA_S("Push local IPv6 cand failed(OOM)\n", LA_S32, 32)); break; }
+
+                    p2p_local_candidate_entry_t *c = &s->local_cands[idx];
+                    c->type = P2P_CAND_HOST;
+                    c->addr.family = AF_INET6;
+                    c->addr.addr.v6 = rt->local_addrs6[r];
+                    c->addr.addr.v6.sin6_port = port6;
+
+                    uint16_t local_pref = (uint16_t)(65535 - host_index++);
+                    c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
+
+                    char _ab[INET6_ADDRSTRLEN];
+                    print("I:", LA_F("Gathered Host6 candidate: %s:%d (priority=0x%08x)", LA_F298, 298),
+                            sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), c->priority);
+                }
             }
         }
         else print("W:", LA_F("No shared local route addresses available, host candidates skipped", LA_F326, 326));
@@ -109,11 +133,12 @@ static inline void gather_local_candidates(struct p2p_session *s) {
             if (idx >= 0) {
                 p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                 c->type = P2P_CAND_SRFLX;
-                c->addr = inst->socks[i].mapped_addr;
+                c->addr.family = AF_INET;
+                c->addr.addr.v4 = inst->socks[i].mapped_addr;
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
                 if (s->public_base < 0) s->public_base = idx;
                 print("I:", LA_F("Reuse STUN Candidate %s:%u (priority=%u)", LA_F366, 366),
-                      inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                      sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), c->priority);
             }
         }
     }
@@ -134,11 +159,12 @@ static inline void gather_local_candidates(struct p2p_session *s) {
             if (idx >= 0) {
                 p2p_local_candidate_entry_t *c = &s->local_cands[idx];
                 c->type = P2P_CAND_RELAY;
-                c->addr = inst->turn.relay_addr;
+                c->addr.family = AF_INET;
+                c->addr.addr.v4 = inst->turn.relay_addr;
                 c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
                 if (s->public_base < 0) s->public_base = idx;
                 print("I:", LA_F("Reuse Relay Candidate %s:%u (priority=%u)", LA_F365, 365),
-                      inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                      sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), c->priority);
             }
         }
     }
@@ -452,6 +478,19 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
                 p2p_udp_open(inst, &rt->local_addrs[i], 0);
             }
         }
+
+        // IPv6 socket: 绑定与 IPv4 相同端口（或系统分配），用于双栈候选通路
+        inst->sock6 = P_INVALID_SOCKET;
+        if (rt->addr6_count > 0) {
+            if (p2p_ipv6_open(inst, cfg->bind_port) == E_NONE) {
+                char buf6[INET6_ADDRSTRLEN];
+                inet_ntop(AF_INET6, &inst->sock6_addr.sin6_addr, buf6, sizeof(buf6));
+                print("I:", LA_F("IPv6 socket opened [%s]:%d", LA_F338, 338),
+                      buf6, ntohs(inst->sock6_addr.sin6_port));
+            } else {
+                print("W:", LA_F("IPv6 socket open failed, IPv6 candidates disabled", LA_F339, 339));
+            }
+        }
     } while (0);
     if (ret != E_NONE) {
         print("E:", LA_F("Open P2P UDP socket on port %d failed(%d)", LA_F331, 331), cfg->bind_port, ret);
@@ -560,7 +599,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         print("I:", LA_F("Starting internal thread", LA_F393, 393));
         if ((ret = p2p_thread_start(inst)) != E_NONE) {
             print("E:", LA_F("Start internal thread failed(%d)", LA_F390, 390), ret);
-            p2p_udp_close_all(inst); route_shared_release(); free(inst);
+            p2p_ipv6_close(inst); p2p_udp_close_all(inst); route_shared_release(); free(inst);
             return NULL;
         }
     }
@@ -623,6 +662,7 @@ p2p_destroy(p2p_handle_t hdl) {
 
     // 关闭 socket
     print("I:", LA_F("Close P2P UDP socket", LA_F267, 267));
+    p2p_ipv6_close(inst);
     p2p_udp_close_all(inst);
 
     route_shared_release();
@@ -956,14 +996,14 @@ p2p_update(p2p_handle_t hdl) {
     struct p2p_session *s = inst->sessions_head;
     if (!s) return 0;  /* 尚无活跃会话 */
 
-    uint8_t buf[P2P_MTU + 16]; struct sockaddr_in from; uint8_t* pkt; int n; int recv_sock_idx;
+    uint8_t buf[P2P_MTU + 16]; sockAddr_t from; uint8_t* pkt; int n; int recv_sock_idx;
 
     uint64_t now_ms = P_tick_ms();
 
     /* ========================================================================
      * 阶段 1：远程数据输入（被动接收所有网络数据包）
      * ======================================================================== */
-    while ((n = p2p_udp_recv_from(inst, &from, buf, sizeof(buf), &recv_sock_idx)) > 0) { pkt = buf;
+    while ((n = p2p_udp_recv_from(inst, &from.addr.v4, buf, sizeof(buf), &recv_sock_idx)) > 0) { pkt = buf; from.family = AF_INET;
 
         // --------------------
         // STUN/TURN 协议包
@@ -976,7 +1016,7 @@ p2p_update(p2p_handle_t hdl) {
 
                 uint16_t type = nget_s(pkt); /* [0-1]:type */
                 printf(LA_F("Recv STUN/TURN pkt from %s:%d, type=0x%04x, len=%d", LA_F360, 360),
-                       inet_ntoa(from.sin_addr), ntohs(from.sin_port), type, n);
+                       inet_ntoa(from.addr.v4.sin_addr), ntohs(from.addr.v4.sin_port), type, n);
                 
                 // 如果使用 ICE 机制进行打洞
                 // todo ice 打洞如何支持 multi sess
@@ -987,18 +1027,18 @@ p2p_update(p2p_handle_t hdl) {
                 
                 // STUN 模块处理（NAT 检测 / Srflx 地址探测）
                 if (p2p_stun_is_binding_response(type, pkt, n)) {
-                    p2p_stun_handle_packet(inst, recv_sock_idx, &from, type, pkt, n);
+                    p2p_stun_handle_packet(inst, recv_sock_idx, &from.addr.v4, type, pkt, n);
                     continue;
                 }
 
                 // TURN 响应处理（Allocate/Refresh/CreatePermission/Data Indication）
                 const uint8_t *inner_data = NULL; int inner_len = 0; struct sockaddr_in inner_peer = {0};
-                int turn_ret = p2p_turn_handle_packet(inst, &from, type, pkt, n,
+                int turn_ret = p2p_turn_handle_packet(inst, &from.addr.v4, type, pkt, n,
                                                       &inner_data, &inner_len, &inner_peer);
                 if (turn_ret == 1 && inner_data && inner_len >= P2P_HDR_SIZE) {
 
                     // Data Indication: 解包为内层完整 P2P 包，转换为 P2P 协议继续执行下面主派发循环
-                    pkt = (uint8_t*)inner_data; n = inner_len; from = inner_peer;
+                    pkt = (uint8_t*)inner_data; n = inner_len; from.addr.v4 = inner_peer; from.family = AF_INET;
                     goto dispatch_p2p;
                 }
 
@@ -1076,6 +1116,35 @@ p2p_update(p2p_handle_t hdl) {
         nat_proto(s, hdr.type, hdr.flags, hdr.seq, payload, payload_len, &from, now_ms);
 
     } // while ((n = p2p_udp_recv_from(s, &from, buf, sizeof(buf))) > 0)
+
+    /* ---- IPv6 recv ---- */
+    memset(&from, 0, sizeof(from));
+    while ((n = p2p_ipv6_recv_from(inst, &from, buf, sizeof(buf))) > 0) {
+
+        if (n < P2P_HDR_SIZE) continue;
+
+        p2p_packet_hdr_t hdr;
+        p2p_pkt_hdr_decode(buf, &hdr);
+
+        const uint8_t *payload = buf + P2P_HDR_SIZE; int payload_len = n - P2P_HDR_SIZE;
+
+        /* 0x80+ 是 COMPACT 信令包，IPv6 上不走信令 */
+        if (hdr.type >= 0x80) continue;
+
+        /* 多会话派发 */
+        if (hdr.flags & P2P_FLAG_SESSION) {
+            if (payload_len < (int)P2P_SESS_ID_PSZ) continue;
+            uint32_t sess_id = nget_l(payload);
+            struct p2p_session *ts = inst->sessions_head;
+            for (; ts; ts = ts->next) if (ts->id == sess_id) break;
+            if (!ts) continue;
+            s = ts;
+            payload     += P2P_SESS_ID_PSZ;
+            payload_len -= (int)P2P_SESS_ID_PSZ;
+        }
+
+        nat_proto(s, hdr.type, hdr.flags, hdr.seq, payload, payload_len, &from, now_ms);
+    }
 
     /* ========================================================================
      * 阶段 2：信令服务维护（主动拉取远端候选地址）

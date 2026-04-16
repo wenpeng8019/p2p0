@@ -50,9 +50,9 @@ ret_t p2p_turn_send_packet(struct p2p_instance *inst, const struct sockaddr_in *
  *   1. DTLS 加密 → encrypt_send → p2p_send_dtls_record
  *   2. TURN 中继（P2P_PATH_RELAY + TURN_ALLOCATED）→ Send Indication
  *   3. Compact 信令转发（P2P_PATH_SIGNALING）→ session_id 封装
- *   4. 直连 → p2p_udp_send_packet
+ *   4. 直连 → p2p_udp_send_packet / p2p_ipv6_send_packet
  */
-int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
+int p2p_send_packet(struct p2p_session *s, const sockAddr_t *addr,
                        uint8_t type, uint8_t flags, uint16_t seq,
                        const void *payload, int payload_len, uint64_t now_ms) {
 
@@ -76,7 +76,7 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
             print("E:", LA_F("RELAY path but TURN not allocated", LA_F344, 344));
             return -1;
         }
-        return p2p_turn_send_packet(s->inst, addr, type, flags, seq, payload, payload_len);
+        return p2p_turn_send_packet(s->inst, &addr->addr.v4, type, flags, seq, payload, payload_len);
     }
 
     /* 信令转发路径: 调用信令模式特定的中转接口 */
@@ -88,7 +88,12 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
         return s->inst->signaling_relay_fn(s, type, flags, seq, payload, payload_len);
     }
 
-    return p2p_udp_send_packet(s->inst, addr, type, flags, seq, payload, payload_len);
+    /* IPv6 直连路径 */
+    if (addr->family == AF_INET6) {
+        return p2p_ipv6_send_packet(s->inst, &addr->addr.v6, type, flags, seq, payload, payload_len);
+    }
+
+    return p2p_udp_send_packet(s->inst, &addr->addr.v4, type, flags, seq, payload, payload_len);
 }
 
 /*
@@ -101,7 +106,7 @@ int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
  * 对于 signaling relay 中转添加 session_id 的情况，
  * 信令中转接口（signaling_relay_fn）会自动处理封装，无需本函数关心
  */
-void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
+void p2p_send_dtls_record(struct p2p_session *s, const sockAddr_t *addr,
                        const void *dtls_record, int record_len) {
 
     /* TURN 中继: CRYPTO 包通过 Send Indication 发送 */
@@ -110,7 +115,7 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
             print("W:", LA_F("RELAY path but TURN not allocated (dtls)", LA_F345, 345));
             return;
         }
-        p2p_turn_send_packet(s->inst, addr, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
+        p2p_turn_send_packet(s->inst, &addr->addr.v4, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
         return;
     }
 
@@ -124,5 +129,11 @@ void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
         return;
     }
 
-    p2p_udp_send_packet(s->inst, addr, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
+    /* IPv6 直连路径 */
+    if (addr->family == AF_INET6) {
+        p2p_ipv6_send_packet(s->inst, &addr->addr.v6, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
+        return;
+    }
+
+    p2p_udp_send_packet(s->inst, &addr->addr.v4, P2P_PKT_CRYPTO, 0, 0, dtls_record, record_len);
 }

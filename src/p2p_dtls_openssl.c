@@ -135,7 +135,7 @@ static int openssl_is_ready(struct p2p_session *s) {
 /*
  * 加密并发送: 打包内层 [type|flags|seq|payload] → SSL_write → flush
  */
-static ret_t openssl_encrypt_send(struct p2p_session *s, const struct sockaddr_in *addr,
+static ret_t openssl_encrypt_send(struct p2p_session *s, const sockAddr_t *addr,
                                 const void *plain, int plain_len) {
     p2p_openssl_ctx_t *os = (p2p_openssl_ctx_t *)s->dtls_data;
     if (!os || !os->handshake_done) return 0;

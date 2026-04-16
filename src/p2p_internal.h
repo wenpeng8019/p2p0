@@ -119,6 +119,8 @@ struct p2p_instance {
     int                             sock_cnt;           // 当前套接字数量
     int                             sock_cap;           // 套接字数组容量
     sock_t                          tcp_sock;           // TCP 套接字（打洞/回退用）
+    sock_t                          sock6;              // IPv6 UDP 套接字（双栈候选通路）
+    struct sockaddr_in6             sock6_addr;         // IPv6 绑定后的本地地址
 
     /* ======================== NAT 检测 ======================== */
     int                             nat_type;           // NAT 类型，即 p2p_nat_type() 返回值，也就是支持负值状态
@@ -147,7 +149,7 @@ struct p2p_instance {
      */
     struct {
         bool                    active;                 // 是否启用
-        struct sockaddr_in      addr;                   // 信令服务器地址
+        sockAddr_t              addr;                   // 信令服务器地址
         path_stats_t            stats;                  // 统计信息
     }                               signaling;
 
@@ -225,7 +227,7 @@ struct p2p_session {
 
     /* ======================== 活跃路径 ======================== */
     int                             active_path;        // 当前活跃路径索引 (-2=无, -1=SIGNALING, >=0=候选)
-    struct sockaddr_in              active_addr;        // 当前通信目标地址（与 active_path 一致）
+    sockAddr_t                      active_addr;        // 当前通信目标地址（与 active_path 一致）
     p2p_path_type_t                 path_type;          // 连接路径 P2P_PATH_*
 
     /* ======================== p2p 链路 ======================== */
@@ -349,13 +351,13 @@ static inline const char* p2p_candidate_type_str(p2p_cand_type_t type) {
 }
 
 /*
- * ICE 候选地址（内部类型，使用平台原生 struct sockaddr_in）
+ * ICE 候选地址（内部类型，sockAddr_t 支持 IPv4/IPv6 双栈）
  */
 struct p2p_local_candidate_entry {
     p2p_cand_type_t    type;                    // 候选类型
     uint32_t           priority;                // 候选优先级
-    struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
-    struct sockaddr_in base_addr;               // 基础地址（平台原生 16B）
+    sockAddr_t         addr;                    // 传输地址（sockAddr_t 28B, IPv4/IPv6）
+    sockAddr_t         base_addr;               // 基础地址（sockAddr_t 28B）
 };
 
 /*
@@ -446,7 +448,7 @@ static inline void p2p_session_reset(struct p2p_session *s, bool closing) {
 struct p2p_remote_candidate_entry {
     p2p_cand_type_t    type;                    // 候选类型
     uint32_t           priority;                // 候选优先级
-    struct sockaddr_in addr;                    // 传输地址（平台原生 16B）
+    sockAddr_t         addr;                    // 传输地址（sockAddr_t 28B, IPv4/IPv6）
 
     /* 收发分离状态 */
     uint64_t           last_punch_send_ms;      // 最近一次发送 PUNCH 的时间
@@ -479,7 +481,7 @@ static inline bool p2p_remote_candidate_writable(const p2p_remote_candidate_entr
 static inline int pack_candidate(const p2p_local_candidate_entry_t *c, uint8_t *buf) {
     p2p_candidate_t* w = (p2p_candidate_t*)buf;
     w->type     = (uint8_t)c->type;
-    sockaddr_to_p2p_wire(&c->addr, &w->addr);
+    sockAddr_to_p2p_wire(&c->addr, &w->addr);
     w->priority = htonl(c->priority);
     return (int)sizeof(p2p_candidate_t);  /* 23 */
 }
@@ -490,7 +492,7 @@ static inline int pack_candidate(const p2p_local_candidate_entry_t *c, uint8_t *
 static inline int unpack_candidate(p2p_remote_candidate_entry_t *c, const uint8_t *buf) {
     const p2p_candidate_t* w = (p2p_candidate_t*)buf;
     c->type     = (int)w->type;
-    sockaddr_from_p2p_wire(&c->addr, &w->addr);
+    sockAddr_from_p2p_wire(&c->addr, &w->addr);
     c->priority = ntohl(w->priority);
 
     c->last_punch_send_ms = 0;
@@ -531,10 +533,10 @@ static inline ret_t p2p_cand_push_remote(struct p2p_session *s) {
     return s->remote_cand_cnt++;
 }
 
-static inline int p2p_find_remote_candidate_by_addr(const struct p2p_session *s, const struct sockaddr_in *addr) {
+static inline int p2p_find_remote_candidate_by_addr(const struct p2p_session *s, const sockAddr_t *addr) {
     if (!s || !addr) return -1;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        if (sockaddr_equal(&s->remote_cands[i].addr, addr)) return i;
+        if (sockAddr_equal(&s->remote_cands[i].addr, addr)) return i;
     }
     return -1;
 }
@@ -583,7 +585,7 @@ static inline ret_t p2p_remote_cands_reserve(struct p2p_session *s, int need) {
     }
     else {
         s->active_path = PATH_IDX_NONE;
-        s->active_addr = (struct sockaddr_in){0};
+        memset(&s->active_addr, 0, sizeof(s->active_addr));
         s->path_type = P2P_PATH_NONE;
     }
 }
@@ -629,7 +631,7 @@ static inline path_stats_t* p2p_get_path_stats(struct p2p_session *s, int path_i
     return NULL;
 }
 
-static inline const struct sockaddr_in* p2p_get_path_addr(struct p2p_session *s, int path_idx) {
+static inline const sockAddr_t* p2p_get_path_addr(struct p2p_session *s, int path_idx) {
     if (path_idx == PATH_IDX_SIGNALING)
         return s->inst->signaling.active ? &s->inst->signaling.addr : NULL;
     if (path_idx >= 0 && path_idx < s->remote_cand_cnt)
@@ -637,11 +639,11 @@ static inline const struct sockaddr_in* p2p_get_path_addr(struct p2p_session *s,
     return NULL;
 }
 
-static inline int p2p_find_path_by_addr(struct p2p_session *s, const struct sockaddr_in *addr) {
-    if (s->inst->signaling.active && sockaddr_equal(&s->inst->signaling.addr, addr))
+static inline int p2p_find_path_by_addr(struct p2p_session *s, const sockAddr_t *addr) {
+    if (s->inst->signaling.active && sockAddr_equal(&s->inst->signaling.addr, addr))
         return PATH_IDX_SIGNALING;
     for (int i = 0; i < s->remote_cand_cnt; i++) {
-        if (sockaddr_equal(&s->remote_cands[i].addr, addr)) return i;
+        if (sockAddr_equal(&s->remote_cands[i].addr, addr)) return i;
     }
     return -2;
 }
@@ -660,12 +662,12 @@ void p2p_connecting(struct p2p_session *s);
 
 void p2p_connected(struct p2p_session *s, uint64_t now_ms);
 
-int p2p_send_packet(struct p2p_session *s, const struct sockaddr_in *addr,
+int p2p_send_packet(struct p2p_session *s, const sockAddr_t *addr,
                     uint8_t type, uint8_t flags, uint16_t seq,
                     const void *payload, int payload_len, uint64_t now_ms);
 
 /* 发送原始 DTLS 记录（加密模块的握手/加密输出使用） */
-void p2p_send_dtls_record(struct p2p_session *s, const struct sockaddr_in *addr,
+void p2p_send_dtls_record(struct p2p_session *s, const sockAddr_t *addr,
                   const void *dtls_record, int record_len);
 
 /* ============================================================================
@@ -679,6 +681,14 @@ ret_t p2p_udp_send_packet(struct p2p_instance *inst, const struct sockaddr_in *a
 ret_t p2p_turn_send_packet(struct p2p_instance *inst, const struct sockaddr_in *addr,
                            uint8_t type, uint8_t flags, uint16_t seq,
                            const void *payload, int payload_len);
+
+ret_t p2p_ipv6_send_packet(struct p2p_instance *inst, const struct sockaddr_in6 *addr,
+                            uint8_t type, uint8_t flags, uint16_t seq,
+                            const void *payload, int payload_len);
+ret_t p2p_ipv6_open(struct p2p_instance *inst, uint16_t port);
+void  p2p_ipv6_close(struct p2p_instance *inst);
+ret_t p2p_ipv6_recv_from(struct p2p_instance *inst, sockAddr_t *from,
+                          void *buf, int buf_size);
 
 ///////////////////////////////////////////////////////////////////////////////
 #pragma ide diagnostic pop

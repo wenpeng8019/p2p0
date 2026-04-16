@@ -784,6 +784,7 @@ bool p2p_stun_has_ice_attrs(const uint8_t *buf, int len) {
 /* 将 mapped 地址作为本地 Srflx 候选写入，并在 ICE 模式下触发 Trickle 回调 */
 static inline void add_srflx_candidate(struct p2p_instance *inst, int recv_sock_idx,
                                        const struct sockaddr_in *mapped) {
+    char _ab[INET6_ADDRSTRLEN];
 
     assert(inst->srflx_active < inst->srflx_count);
     ++inst->srflx_active;
@@ -811,11 +812,13 @@ static inline void add_srflx_candidate(struct p2p_instance *inst, int recv_sock_
         p2p_local_candidate_entry_t *c = &s->local_cands[idx];
         c->type = P2P_CAND_SRFLX;
         c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_SRFLX, 65535, 1);
-        c->addr = *mapped;
-        c->base_addr = inst->socks[recv_sock_idx].local_addr;
+        c->addr.family = AF_INET;
+        c->addr.addr.v4 = *mapped;
+        c->base_addr.family = AF_INET;
+        c->base_addr.addr.v4 = inst->socks[recv_sock_idx].local_addr;
 
         print("I:", LA_F("✓ Gathered Srflx Candidate %s:%d, priority=%u (ses_id=%u)", LA_F469, 469),
-              inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority, s->id);
+              sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), c->priority, s->id);
 
         // 如果信令还未上线
         if (!sig_ready) continue;

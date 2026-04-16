@@ -394,7 +394,7 @@ fail_cleanup:
  * 构造内部明文 [type|flags|seq|payload]，通过 DTLS 加密后发送。
  * BIO 回调 p2p_dtls_send 会自动调用 p2p_send_dtls_record 输出密文。
  */
-static ret_t mbedtls_encrypt_send(struct p2p_session *s, const struct sockaddr_in *addr,
+static ret_t mbedtls_encrypt_send(struct p2p_session *s, const sockAddr_t *addr,
                                 const void *plain, int plain_len) {
     (void)addr;  /* BIO 回调使用 s->active_addr */
     p2p_dtls_ctx_t *dtls = (p2p_dtls_ctx_t *)s->dtls_data;

@@ -137,6 +137,7 @@ static void derive_key(const char *auth_key, uint8_t key_out[8]) {
  * @return        新增的候选数量
  */
 static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8], const char *b64) {
+    char _ab[INET6_ADDRSTRLEN];
     /* Base64 解码 */
     uint8_t enc_buf[4096];
     size_t enc_len = (size_t)p2p_base64_decode(b64, strlen(b64), enc_buf, sizeof(enc_buf));
@@ -174,7 +175,7 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
 
         print("I:", LA_F("SDP REMOTE: %s cand[%d]<%s:%d> accepted", LA_F208, 208),
               c->type == P2P_CAND_HOST ? "host" : c->type == P2P_CAND_SRFLX ? "srflx" : "relay",
-              idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+              idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
         added++;
     }
 
@@ -1021,9 +1022,10 @@ TEST(candidate_roundtrip) {
     s_a->local_cand_cap = 4;
     s_a->local_cand_cnt = 1;
     s_a->local_cands[0].type = P2P_CAND_HOST;
-    s_a->local_cands[0].addr.sin_family = AF_INET;
-    s_a->local_cands[0].addr.sin_port = htons(12345);
-    inet_pton(AF_INET, "192.168.1.100", &s_a->local_cands[0].addr.sin_addr);
+    s_a->local_cands[0].addr.family = AF_INET;
+    s_a->local_cands[0].addr.addr.v4.sin_family = AF_INET;
+    s_a->local_cands[0].addr.addr.v4.sin_port = htons(12345);
+    inet_pton(AF_INET, "192.168.1.100", &s_a->local_cands[0].addr.addr.v4.sin_addr);
     s_a->local_cands[0].priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, 65535, 1);
 
     /* 标记候选收集完毕（srflx_active >= srflx_count） → final ver=0 */
@@ -1050,7 +1052,7 @@ TEST(candidate_roundtrip) {
 
     ASSERT_GE(s_b->remote_cand_cnt, 1);
     ASSERT_EQ(s_b->remote_cands[0].type, P2P_CAND_HOST);
-    ASSERT_EQ(ntohs(s_b->remote_cands[0].addr.sin_port), 12345);
+    ASSERT_EQ(ntohs(s_b->remote_cands[0].addr.addr.v4.sin_port), 12345);
     ASSERT(s_b->remote_cand_done);  /* ver=0 → done */
 
     teardown(inst_a, s_a);
@@ -1165,9 +1167,10 @@ TEST(same_gist_e2e) {
     s_a->local_cand_cap = 4;
     s_a->local_cand_cnt = 1;
     s_a->local_cands[0].type = P2P_CAND_HOST;
-    s_a->local_cands[0].addr.sin_family = AF_INET;
-    s_a->local_cands[0].addr.sin_port = htons(10001);
-    inet_pton(AF_INET, "10.0.0.1", &s_a->local_cands[0].addr.sin_addr);
+    s_a->local_cands[0].addr.family = AF_INET;
+    s_a->local_cands[0].addr.addr.v4.sin_family = AF_INET;
+    s_a->local_cands[0].addr.addr.v4.sin_port = htons(10001);
+    inet_pton(AF_INET, "10.0.0.1", &s_a->local_cands[0].addr.addr.v4.sin_addr);
     s_a->local_cands[0].priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, 65535, 1);
     inst_a->srflx_count = 0; inst_a->srflx_active = 0; inst_a->turn_pending = 0;
 
@@ -1187,7 +1190,7 @@ TEST(same_gist_e2e) {
     /* poll_answer 检测到候选数据 → SYNCING */
     poll_answer(inst_b, s_b);
     ASSERT_GE(s_b->remote_cand_cnt, 1);
-    ASSERT_EQ(ntohs(s_b->remote_cands[0].addr.sin_port), 10001);
+    ASSERT_EQ(ntohs(s_b->remote_cands[0].addr.addr.v4.sin_port), 10001);
     ASSERT(sess_b->state >= SIG_PUBSUB_SESS_SYNCING);
     printf("  [5] bob received alice's candidates (%d) ok\n", s_b->remote_cand_cnt);
 
@@ -1199,9 +1202,10 @@ TEST(same_gist_e2e) {
     s_b->local_cand_cap = 4;
     s_b->local_cand_cnt = 1;
     s_b->local_cands[0].type = P2P_CAND_HOST;
-    s_b->local_cands[0].addr.sin_family = AF_INET;
-    s_b->local_cands[0].addr.sin_port = htons(20002);
-    inet_pton(AF_INET, "10.0.0.2", &s_b->local_cands[0].addr.sin_addr);
+    s_b->local_cands[0].addr.family = AF_INET;
+    s_b->local_cands[0].addr.addr.v4.sin_family = AF_INET;
+    s_b->local_cands[0].addr.addr.v4.sin_port = htons(20002);
+    inet_pton(AF_INET, "10.0.0.2", &s_b->local_cands[0].addr.addr.v4.sin_addr);
     s_b->local_cands[0].priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, 65535, 1);
     inst_b->srflx_count = 0; inst_b->srflx_active = 0; inst_b->turn_pending = 0;
 
@@ -1217,7 +1221,7 @@ TEST(same_gist_e2e) {
 
     poll_candidates(inst_a, s_a);
     ASSERT_GE(s_a->remote_cand_cnt, 1);
-    ASSERT_EQ(ntohs(s_a->remote_cands[0].addr.sin_port), 20002);
+    ASSERT_EQ(ntohs(s_a->remote_cands[0].addr.addr.v4.sin_port), 20002);
     ASSERT(s_a->remote_cand_done);
     printf("  [7] alice received bob's candidates (%d) ok\n", s_a->remote_cand_cnt);
 

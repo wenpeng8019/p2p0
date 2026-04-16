@@ -22,7 +22,7 @@
 #include <stdint.h>
 
 struct p2p_session;
-struct sockaddr_in;
+struct sockAddr;
 
 /* ============================================================================
  * 加密层操作接口（DTLS backend vtable）
@@ -52,7 +52,7 @@ typedef struct p2p_dtls_ops {
      * @param plain_len       明文包长度
      * @return                发送的明文包字节数, 0=暂不可发, -1=失败
      */
-    ret_t   (*encrypt_send)(struct p2p_session *s, const struct sockaddr_in *addr,
+    ret_t   (*encrypt_send)(struct p2p_session *s, const struct sockAddr *addr,
                             const void *plain, int plain_len);
 
     /*

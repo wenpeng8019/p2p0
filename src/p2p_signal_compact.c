@@ -56,6 +56,7 @@ static inline err_t udp_send(struct p2p_instance *inst, const char* PROTO,
  * 格式: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
  */
 static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *payload, int cand_cnt) {
+    char _ab[INET6_ADDRSTRLEN];
 
     assert(cand_cnt && s->remote_cand_cnt + cand_cnt <= s->remote_cand_cap);
 
@@ -78,7 +79,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
         }
 
         print("I:", LA_F("%s: sync0 srflx cand[%d]<%s:%d>%s\n", LA_F236, 236),
-                        TASK_SYNC_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                        TASK_SYNC_REMOTE, 0, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr),
                         s->inst->cfg.test_ice_srflx_off ? " (disabled)" : "");
 
         if (s->inst->cfg.test_ice_srflx_off) --s->remote_cand_cnt;
@@ -88,7 +89,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
             // + 该标志用于决定所使用的冷打洞机制，如果冷打洞不依赖服务器中转，则打洞可以不依赖 REGISTER_ACK 包
             if (s->sig_sess.compact.state >= SIG_COMPACT_SESS_WAIT_SYNC0_ACK && nat_punch(s, 0) != E_NONE) {
                 print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F185, 185),
-                    TASK_SYNC_REMOTE, 0, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                    TASK_SYNC_REMOTE, 0, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
             }
         }
 
@@ -109,11 +110,11 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
                 s->remote_cands[dup_idx].type = c->type;
                 s->remote_cands[dup_idx].priority = c->priority;
                 print("I:", LA_F("%s: promoted prflx cand[%d]<%s:%d> → %s\n", LA_F182, 182),
-                      TASK_SYNC_REMOTE, dup_idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port),
+                      TASK_SYNC_REMOTE, dup_idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr),
                       p2p_candidate_type_str(c->type));
             } else {
                 print("V:", LA_F("%s: duplicate remote cand<%s:%d> from signaling, skipped\n", LA_F127, 127),
-                      TASK_SYNC_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                      TASK_SYNC_REMOTE, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
             }
             continue;
         }
@@ -130,20 +131,20 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
 
         if (opt_off) {
             print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> (disabled)\n", LA_F204, 204),
-                  TASK_SYNC_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                  TASK_SYNC_REMOTE, type_str, idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
             continue;
         }
 
         ++s->remote_cand_cnt; ++*cand_cnt_ptr;
 
         print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F205, 205),
-              TASK_SYNC_REMOTE, type_str, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+              TASK_SYNC_REMOTE, type_str, idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
 
         if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYNC0_ACK) continue;
 
         if (nat_punch(s, idx) != E_NONE)
             print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F185, 185),
-                  TASK_SYNC_REMOTE, idx, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                  TASK_SYNC_REMOTE, idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
     }
 }
 
@@ -898,6 +899,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
 void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
                           const uint8_t *payload, int len,
                           uint64_t now) {
+    char _ab[INET6_ADDRSTRLEN];
     const char* PROTO = "SYNC";
 
     if (seq > 16) {
@@ -979,7 +981,8 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
         p2p_remote_candidate_entry_t *c = &s->remote_cands[0];
         c->type = (p2p_cand_type_t)payload[P2P_SESS_ID_PSZ+2];
         c->priority = 0;
-        sockaddr_init_with_net(&c->addr, (uint32_t *) (payload + P2P_SESS_ID_PSZ + 3),
+        c->addr.family = AF_INET;
+        sockaddr_init_with_net(&c->addr.addr.v4, (uint32_t *) (payload + P2P_SESS_ID_PSZ + 3),
                                (uint16_t *) (payload + P2P_SESS_ID_PSZ + 7));
         c->last_punch_send_ms = 0;
         if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
@@ -988,7 +991,7 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
         if (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_RELAY) {
 
             print("I:", LA_F("%s: Peer addr changed -> %s:%d, retrying punch\n", LA_F89, 89),
-                  TASK_SYNC_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port));
+                  TASK_SYNC_REMOTE, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
 
             // 标记旧的活跃路径为失效（地址已变更）
             // fixme: 这个逻辑好像有问题
@@ -1007,7 +1010,7 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
         }
         else {
             print("I:", LA_F("%s: Peer addr changed -> %s:%d, punch deferred (NAT=%d)\n", LA_F88, 88),
-                  TASK_SYNC_REMOTE, inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), (int)s->nat.state);
+                  TASK_SYNC_REMOTE, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), (int)s->nat.state);
         }
 
         sess_ctx->remote_addr_notify_seq = base_index;

@@ -453,6 +453,7 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
                            uint16_t type, const uint8_t *buf, int len,
                            const uint8_t **out_data, int *out_len,
                            struct sockaddr_in *out_peer) {
+    char _ab[INET6_ADDRSTRLEN];
     if (len < 20) return -1;
 
     /* 来源验证：仅处理来自 TURN 服务器的包（防止伪造） */
@@ -513,12 +514,13 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
 
             p2p_local_candidate_entry_t *c = &s->local_cands[idx];
             c->type = P2P_CAND_RELAY;
-            c->addr = relay;
+            c->addr.family = AF_INET;
+            c->addr.addr.v4 = relay;
             c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_RELAY, 65535, 1);
             if (s->public_base < 0) s->public_base = idx;
 
             print("I:", LA_F("Gathered Relay Candidate %s:%u (priority=%u)", LA_F300, 300),
-                    inet_ntoa(c->addr.sin_addr), ntohs(c->addr.sin_port), c->priority);
+                  sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), c->priority);
 
             if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
                 if (s->sig_sess.compact.state >= SIG_COMPACT_SESS_SYNCING)
@@ -789,7 +791,8 @@ void p2p_turn_tick(struct p2p_instance *inst, uint64_t now_ms) {
     /* ---- 权限同步：遍历所有会话的远端候选，为每个 IP 创建 Permission ---- */
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         for (int i = 0; i < s->remote_cand_cnt; i++) {
-            turn_create_permission(inst, &s->remote_cands[i].addr);
+            if (s->remote_cands[i].addr.family == AF_INET)
+                turn_create_permission(inst, &s->remote_cands[i].addr.addr.v4);
         }
     }
 }

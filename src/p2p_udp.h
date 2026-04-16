@@ -6,11 +6,9 @@
 #define P2P_UDP_H
 
 #include "predefine.h"
-#include <p2pp.h>               /* p2p_packet_hdr_t 定义 */
+#include "p2p_common.h"
 
 struct p2p_instance;
-struct p2p_session;
-typedef struct p2p_sock p2p_sock_t;
 
 ret_t p2p_udp_open(struct p2p_instance *inst, const struct sockaddr_in *bind_ip, uint16_t port);
 void p2p_udp_close(struct p2p_instance *inst, int sock_idx);

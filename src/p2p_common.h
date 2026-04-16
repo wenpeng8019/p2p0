@@ -78,6 +78,77 @@ static inline bool sockaddr_equal(const struct sockaddr_in *a, const struct sock
            a->sin_port == b->sin_port;
 }
 
+//-----------------------------------------------------------------------------
+
+typedef struct sockAddr {
+    sa_family_t family;                 /* 协议类型标签 */
+    union {
+        struct sockaddr_in  v4;         /* IPv4 */
+        struct sockaddr_in6 v6;         /* IPv6 */
+    } addr;
+} sockAddr_t;
+
+/* 端口（网络字节序） */
+static inline uint16_t sockAddr_port_n(const sockAddr_t *a) {
+    return a->family == AF_INET6 ? a->addr.v6.sin6_port : a->addr.v4.sin_port;
+}
+
+/* 端口（主机字节序） */
+static inline uint16_t sockAddr_port(const sockAddr_t *a) {
+    return ntohs(sockAddr_port_n(a));
+}
+
+/* sockaddr 长度 */
+static inline socklen_t sockAddr_len(const sockAddr_t *a) {
+    return a->family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+}
+
+/* 地址转字符串（写入 buf，返回 buf 指针） */
+static inline const char* sockAddr_str(const sockAddr_t *a, char *buf, socklen_t size) {
+    if (a->family == AF_INET6)
+        return inet_ntop(AF_INET6, &a->addr.v6.sin6_addr, buf, size);
+    return inet_ntop(AF_INET, &a->addr.v4.sin_addr, buf, size);
+}
+
+/* 地址相等比较 */
+static inline bool sockAddr_equal(const sockAddr_t *a, const sockAddr_t *b) {
+    if (a->family != b->family) return false;
+    if (a->family == AF_INET6)
+        return a->addr.v6.sin6_port == b->addr.v6.sin6_port &&
+               memcmp(&a->addr.v6.sin6_addr, &b->addr.v6.sin6_addr, 16) == 0;
+    return a->addr.v4.sin_port == b->addr.v4.sin_port &&
+           a->addr.v4.sin_addr.s_addr == b->addr.v4.sin_addr.s_addr;
+}
+
+/* 从 sockaddr_in 构造 */
+static inline void sockAddr_from_v4(sockAddr_t *a, const struct sockaddr_in *v4) {
+    a->addr.v4 = *v4;
+    a->family = AF_INET;
+}
+
+/* 从 sockaddr_in6 构造 */
+static inline void sockAddr_from_v6(sockAddr_t *a, const struct sockaddr_in6 *v6) {
+    a->addr.v6 = *v6;
+    a->family = AF_INET6;
+}
+
+/* 是否为 IPv6 全局单播地址（GUA: 2000::/3） */
+static inline bool sockAddr_is_ipv6_gua(const struct in6_addr *a) {
+    return (a->s6_addr[0] & 0xE0) == 0x20;
+}
+
+/* 是否为 IPv6 ULA（fd00::/8）— 类似 IPv4 私有地址 */
+static inline bool sockAddr_is_ipv6_ula(const struct in6_addr *a) {
+    return a->s6_addr[0] == 0xFD;
+}
+
+/* 是否为 IPv6 链路本地地址（fe80::/10）— 不可跨网段路由 */
+static inline bool sockAddr_is_ipv6_link_local(const struct in6_addr *a) {
+    return a->s6_addr[0] == 0xFE && (a->s6_addr[1] & 0xC0) == 0x80;
+}
+
+//-----------------------------------------------------------------------------
+
 /*
  * struct sockaddr_in → p2p_sockaddr_t
  *
@@ -103,6 +174,41 @@ static inline void sockaddr_from_p2p_wire(struct sockaddr_in *s, const p2p_socka
     s->sin_family      = AF_INET;
     s->sin_port        = w->port;           /* 已是网络字节序 */
     memcpy(&s->sin_addr.s_addr, &w->ip[12], 4);
+}
+
+/*
+ * sockAddr_t → p2p_sockaddr_t
+ *
+ * IPv4: 编码为 IPv4-mapped IPv6
+ * IPv6: 直接存储 128-bit 地址
+ */
+static inline void sockAddr_to_p2p_wire(const sockAddr_t *a, p2p_sockaddr_t *w) {
+    if (a->family == AF_INET6) {
+        w->port = a->addr.v6.sin6_port;
+        memcpy(w->ip, &a->addr.v6.sin6_addr, 16);
+    } else {
+        sockaddr_to_p2p_wire(&a->addr.v4, w);
+    }
+}
+
+/*
+ * p2p_sockaddr_t → sockAddr_t
+ *
+ * 自动检测 IPv4-mapped 前缀，还原为对应的 sockaddr_in 或 sockaddr_in6。
+ */
+static inline void sockAddr_from_p2p_wire(sockAddr_t *a, const p2p_sockaddr_t *w) {
+    memset(a, 0, sizeof(*a));
+    if (p2p_sockaddr_is_ipv4(w)) {
+        a->family = AF_INET;
+        a->addr.v4.sin_family = AF_INET;
+        a->addr.v4.sin_port   = w->port;
+        memcpy(&a->addr.v4.sin_addr.s_addr, &w->ip[12], 4);
+    } else {
+        a->family = AF_INET6;
+        a->addr.v6.sin6_family = AF_INET6;
+        a->addr.v6.sin6_port   = w->port;
+        memcpy(&a->addr.v6.sin6_addr, w->ip, 16);
+    }
 }
 
 /* ============================================================================

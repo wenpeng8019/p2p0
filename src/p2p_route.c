@@ -33,6 +33,7 @@ static int              g_ref = 0;
 
 static void route_final(route_ctx_t *rt) {
     if (rt->local_addrs) free(rt->local_addrs);
+    if (rt->local_addrs6) free(rt->local_addrs6);
     memset(rt, 0, sizeof(*rt));
 }
 
@@ -115,6 +116,56 @@ ret_t route_detect_local(route_ctx_t *rt) {
     }
 
     free(pAddrs);
+
+    /* --- IPv6 addresses (Windows) --- */
+    {
+        ULONG buf6Len = 15000;
+        PIP_ADAPTER_ADDRESSES p6Addrs = NULL;
+        DWORD ret6;
+        do {
+            p6Addrs = (PIP_ADAPTER_ADDRESSES)malloc(buf6Len);
+            if (!p6Addrs) break;
+            ret6 = GetAdaptersAddresses(AF_INET6,
+                    GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                    GAA_FLAG_SKIP_DNS_SERVER,
+                    NULL, p6Addrs, &buf6Len);
+            if (ret6 == ERROR_BUFFER_OVERFLOW) { free(p6Addrs); p6Addrs = NULL; }
+        } while (ret6 == ERROR_BUFFER_OVERFLOW);
+
+        if (ret6 == NO_ERROR) {
+            int cnt6 = 0;
+            for (PIP_ADAPTER_ADDRESSES a = p6Addrs; a; a = a->Next) {
+                if (a->OperStatus != IfOperStatusUp) continue;
+                if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+                for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress; ua; ua = ua->Next) {
+                    if (ua->Address.lpSockaddr->sa_family != AF_INET6) continue;
+                    struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)ua->Address.lpSockaddr;
+                    if (IN6_IS_ADDR_LINKLOCAL(&s6->sin6_addr)) continue;
+                    if (IN6_IS_ADDR_LOOPBACK(&s6->sin6_addr)) continue;
+                    cnt6++;
+                }
+            }
+            if (cnt6 > 0) {
+                rt->local_addrs6 = malloc(sizeof(struct sockaddr_in6) * cnt6);
+                if (rt->local_addrs6) {
+                    int j = 0;
+                    for (PIP_ADAPTER_ADDRESSES a = p6Addrs; a; a = a->Next) {
+                        if (a->OperStatus != IfOperStatusUp) continue;
+                        if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+                        for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress; ua; ua = ua->Next) {
+                            if (ua->Address.lpSockaddr->sa_family != AF_INET6) continue;
+                            struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)ua->Address.lpSockaddr;
+                            if (IN6_IS_ADDR_LINKLOCAL(&s6->sin6_addr)) continue;
+                            if (IN6_IS_ADDR_LOOPBACK(&s6->sin6_addr)) continue;
+                            rt->local_addrs6[j++] = *s6;
+                        }
+                    }
+                    rt->addr6_count = cnt6;
+                }
+            }
+        }
+        if (p6Addrs) free(p6Addrs);
+    }
 #else
     /* POSIX: 使用 getifaddrs */
     struct ifaddrs *ifa_list, *ifa;
@@ -143,17 +194,54 @@ ret_t route_detect_local(route_ctx_t *rt) {
         rt->local_masks[i++] = ((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr.s_addr;   // 计算子网掩码
     }
 
+    /* --- IPv6 addresses (POSIX) --- */
+    {
+        int cnt6 = 0;
+        for (ifa = ifa_list; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr) continue;
+            if (!(ifa->ifa_flags & IFF_UP)) continue;
+            if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+            if (ifa->ifa_addr->sa_family != AF_INET6) continue;
+            struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)ifa->ifa_addr;
+            if (IN6_IS_ADDR_LINKLOCAL(&s6->sin6_addr)) continue;
+            if (IN6_IS_ADDR_LOOPBACK(&s6->sin6_addr)) continue;
+            cnt6++;
+        }
+        if (cnt6 > 0) {
+            rt->local_addrs6 = malloc(sizeof(struct sockaddr_in6) * cnt6);
+            if (rt->local_addrs6) {
+                int j = 0;
+                for (ifa = ifa_list; ifa; ifa = ifa->ifa_next) {
+                    if (!ifa->ifa_addr) continue;
+                    if (!(ifa->ifa_flags & IFF_UP)) continue;
+                    if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+                    if (ifa->ifa_addr->sa_family != AF_INET6) continue;
+                    struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)ifa->ifa_addr;
+                    if (IN6_IS_ADDR_LINKLOCAL(&s6->sin6_addr)) continue;
+                    if (IN6_IS_ADDR_LOOPBACK(&s6->sin6_addr)) continue;
+                    rt->local_addrs6[j++] = *s6;
+                }
+                rt->addr6_count = cnt6;
+            }
+        }
+    }
+
     freeifaddrs(ifa_list);
 #endif
 
-    print("I:", LA_F("Local address detection done: %d address(es)", LA_F318, 318), rt->addr_count);
+    print("I:", LA_F("Local address detection done: %d IPv4, %d IPv6 address(es)", LA_F318, 318), rt->addr_count, rt->addr6_count);
     if (p2p_log_level == P2P_LOG_LEVEL_VERBOSE) {
         for (i = 0; i < rt->addr_count; i++) {
             print("V:", LA_F("  [%d] %s/%d", LA_F36, 36), i,
                   inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
         }
+        for (i = 0; i < rt->addr6_count; i++) {
+            char buf6[INET6_ADDRSTRLEN];
+            inet_ntop(AF_INET6, &rt->local_addrs6[i].sin6_addr, buf6, sizeof(buf6));
+            print("V:", LA_F("  [v6:%d] %s", LA_F37, 37), i, buf6);
+        }
     }
-    return rt->addr_count;
+    return rt->addr_count + rt->addr6_count;
 }
 
 // 探测对方内网 IP 和自己是否属于同一个子网段内

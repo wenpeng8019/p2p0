@@ -66,6 +66,7 @@ add_subdirectory(stdc)
 # --- 源文件 ---
 set(LIB_SRCS
     src/p2p_udp.c
+    src/p2p_ipv6.c
     src/p2p_nat.c
     src/p2p_trans_reliable.c
     src/p2p_stream.c
