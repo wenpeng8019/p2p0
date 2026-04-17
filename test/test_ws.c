@@ -175,12 +175,11 @@ static void st_cli_on_open(ws_client_t *c, void *ud) {
     (void)c; (void)ud; g_st_cli_open = 1;
 }
 static void st_srv_on_msg(ws_server_t *s, ws_client_id_t cid,
-                           ws_srv_msg_type_t type,
-                           const uint8_t *data, size_t len,
+                           char *msg, size_t len,
                            void *ud) {
     (void)s; (void)cid; (void)ud;
-    if (type == WS_SRV_MSG_TEXT && len < sizeof(g_st_recv_buf)) {
-        memcpy(g_st_recv_buf, data, len);
+    if (len < sizeof(g_st_recv_buf)) {
+        memcpy(g_st_recv_buf, msg, len);
         g_st_recv_buf[len] = '\0';
         g_st_recv_flag = 1;
     }
@@ -229,12 +228,11 @@ static int     g_bin_cli_open = 0;
 static void bin_cli_on_open(ws_client_t *c, void *ud) {
     (void)c; (void)ud; g_bin_cli_open = 1;
 }
-static void bin_srv_on_msg(ws_server_t *s, ws_client_id_t cid,
-                            ws_srv_msg_type_t type,
+static void bin_srv_on_data(ws_server_t *s, ws_client_id_t cid,
                             const uint8_t *data, size_t len,
                             void *ud) {
     (void)s; (void)cid; (void)ud;
-    if (type == WS_SRV_MSG_BINARY && len <= sizeof(g_bin_recv)) {
+    if (len <= sizeof(g_bin_recv)) {
         memcpy(g_bin_recv, data, len);
         g_bin_recv_len = len;
         g_bin_recv_flag = 1;
@@ -248,7 +246,7 @@ TEST(send_binary) {
     uint16_t port = pick_free_port();
 
     ws_server_cfg_t scfg = {0};
-    scfg.on_message = bin_srv_on_msg;
+    scfg.on_data = bin_srv_on_data;
     ws_server_t *srv = ws_server_create(&scfg, port);
     ASSERT(srv != NULL);
 

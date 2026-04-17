@@ -3113,15 +3113,6 @@ static void cleanup_relay_clients(void) {
  *     FIN <session_id>               会话结束通知 (C2S & S2C)
  */
 
-/* 按 cid 查找 client（线性扫描，WS client 总数有限，可接受） */
-static ws_ice_client_t *ws_ice_find_by_cid(ws_client_id_t cid) {
-    ws_ice_client_t *c, *tmp;
-    HASH_ITER(hh, g_ws_ice_clients, c, tmp) {
-        if (c->cid == cid) return c;
-    }
-    return NULL;
-}
-
 /* 判断 client 是否在线（已注册且 WS 连接有效） */
 static inline bool ws_ice_client_online(const ws_ice_client_t *c) {
     return c && c->base.valid && c->cid != (ws_client_id_t)-1;
@@ -3146,126 +3137,46 @@ static void ws_ice_free_session(ws_ice_session_t *s) {
     free_session(&s->base);
 }
 
-/* 清理 client 的所有会话并移除注册 */
-static void ws_ice_clear_client(ws_ice_client_t *client) {
+/* 使 client 失效
+ * do_free=false: 标记离线（僵尸态）+ 通知对端，有会话则保留等重连
+ * do_free=true:  硬销毁（清除所有会话 + 移除注册 + free）
+ */
+static void ws_ice_invalidate_client(ws_ice_client_t *client, bool do_free) {
 
-    while (client->base.sessions) {
-        ws_ice_free_session((ws_ice_session_t *)client->base.sessions);
-    }
+    client->cid = (ws_client_id_t)-1;
 
-    HASH_DELETE(hh, g_ws_ice_clients, client);
-    free(client);
-}
-
-/* 清理超时的离线客户端 */
-static void cleanup_ws_ice_clients(void) {
-
-    uint64_t now = P_tick_ms();
-    ws_ice_client_t *c, *tmp;
-    HASH_ITER(hh, g_ws_ice_clients, c, tmp) {
-        if (c->cid == (ws_client_id_t)-1
-            && now - c->base.last_active > (uint64_t)WS_ICE_CLIENT_TIMEOUT_S * 1000) {
-            print("I:", "[WS_ICE] timeout: removing offline client '%s'\n",
-                  c->base.local_peer_id);
-            ws_ice_clear_client(c);
-        }
-    }
-}
-
-/* 处理 ONLINE 消息：注册身份 */
-static void ws_ice_handle_online(ws_server_t *srv, ws_client_id_t cid,
-                               const char *peer_id) {
-    if (!peer_id || peer_id[0] == '\0') {
-        ws_server_send_text(srv, cid, "ONLINE FAIL empty peer_id");
-        return;
-    }
-
-    /* 查找已有 client */
-    ws_ice_client_t *client = NULL;
-    HASH_FIND_STR(g_ws_ice_clients, peer_id, client);
-
-    if (client) {
-        if (client->cid == cid) {
-            /* 重复注册同一连接，幂等 */
-            ws_server_send_text(srv, cid, "ONLINE OK");
-            return;
-        }
-        /* 重连：踢掉旧 WS 连接，保留 client 和会话 */
-        if (ws_ice_client_online(client)) {
-            print("W:", "[WS_ICE] peer '%s' re-register, kick old cid=%d\n",
-                  peer_id, client->cid);
-            ws_server_disconnect(srv, client->cid, 1000);
-        }
-
-        client->cid = cid;
-        client->base.valid = true;
+    if (!do_free) {
         client->base.last_active = P_tick_ms();
 
-        print("I:", "[WS_ICE] peer '%s' reconnected (cid=%d)\n", peer_id, cid);
-        ws_server_send_text(srv, cid, "ONLINE OK");
-
-        /* 通知已配对会话的双方 */
+        /* 通知所有配对对端 */
         for (session_t *s = client->base.sessions; s; s = s->next) {
             ws_ice_session_t *ws_s = (ws_ice_session_t *)s;
             if (!PEER_ONLINE(ws_s)) continue;
 
-            ws_ice_session_t *peer_s = ws_s->peer;
-            ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
-
-            if (ws_ice_client_online(peer_c)) {
-                char buf[12 + P2P_PEER_ID_MAX + 12 + 8];
-                snprintf(buf, sizeof(buf), "SYNC0 %s %u online",
-                         client->base.local_peer_id, peer_s->base.session_id);
+            ws_ice_client_t *peer_c = (ws_ice_client_t *)ws_s->peer->base.client;
+            char buf[16];
+            snprintf(buf, sizeof(buf), "FIN %u", ws_s->peer->base.session_id);
+            if (ws_ice_client_online(peer_c))
                 ws_server_send_text(g_ws_srv, peer_c->cid, buf);
-
-                snprintf(buf, sizeof(buf), "SYNC0 %s %u online",
-                         peer_c->base.local_peer_id, s->session_id);
-                ws_server_send_text(g_ws_srv, client->cid, buf);
-            }
         }
-        return;
+
+        if (client->base.sessions) return;  /* 有会话，保留等重连 */
     }
 
-    /* 同一 cid 已有其他 peer_id？先移除 */
-    ws_ice_client_t *old = ws_ice_find_by_cid(cid);
-    if (old) {
-        print("W:", "[WS_ICE] cid=%d re-register as '%s' (was '%s'), clearing old\n",
-              cid, peer_id, old->base.local_peer_id);
-        ws_ice_clear_client(old);
-    }
-
-    /* 新建 client */
-    client = (ws_ice_client_t *)calloc(1, sizeof(*client));
-    if (!client) {
-        ws_server_send_text(srv, cid, "ONLINE FAIL OOM");
-        return;
-    }
-    client->base.valid = true;
-    strncpy(client->base.local_peer_id, peer_id, P2P_PEER_ID_MAX - 1);
-    client->base.local_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
-    client->base.last_active = P_tick_ms();
-    client->cid = cid;
-    HASH_ADD_KEYPTR(hh, g_ws_ice_clients, client->base.local_peer_id,
-                    strlen(client->base.local_peer_id), client);
-
-    print("I:", "[WS_ICE] peer '%s' registered (cid=%d)\n", peer_id, cid);
-    ws_server_send_text(srv, cid, "ONLINE OK");
+    HASH_DELETE(hh, g_ws_ice_clients, client);
+    free_client(&client->base, BASE_FREE_CLIENT(ws_ice_free_session));
+    free(client);
 }
 
-/* 处理 SYNC0 消息：创建/恢复会话 */
-static void ws_ice_handle_sync0(ws_server_t *srv, ws_client_id_t cid,
-                                const char *remote_peer_id) {
-    ws_ice_client_t *client = ws_ice_find_by_cid(cid);
-    if (!client) {
-        ws_server_send_text(srv, cid, "ONLINE FAIL not registered");
-        return;
-    }
-    if (!remote_peer_id || remote_peer_id[0] == '\0') {
-        ws_server_send_text(srv, cid, "SYNC0 FAIL empty peer_id");
-        return;
-    }
+//-----------------------------------------------------------------------------
 
-    client->base.last_active = P_tick_ms();
+/* 处理 SYNC0 消息：创建/恢复会话 */
+static void ws_ice_handle_sync0(ws_ice_client_t *client,
+                                const char *remote_peer_id) {
+    if (!remote_peer_id || remote_peer_id[0] == '\0') {
+        ws_server_send_text(g_ws_srv, client->cid, "SYNC0 FAIL empty peer_id");
+        return;
+    }
 
     /* 检查是否已有到该对端的会话 */
     for (session_t *s = client->base.sessions; s; s = s->next) {
@@ -3298,7 +3209,7 @@ static void ws_ice_handle_sync0(ws_server_t *srv, ws_client_id_t cid,
         snprintf(buf, sizeof(buf), "SYNC0 %s %u %s",
                  remote_peer_id, s->session_id,
                  peer_online ? "online" : "offline");
-        ws_server_send_text(srv, cid, buf);
+        ws_server_send_text(g_ws_srv, client->cid, buf);
 
         if (peer_online) {
             char online_buf[12 + P2P_PEER_ID_MAX + 12 + 8];
@@ -3319,7 +3230,7 @@ static void ws_ice_handle_sync0(ws_server_t *srv, ws_client_id_t cid,
     if (side < 0) {
         print("E:", "[WS_ICE] build_session failed: '%s' -> '%s'\n",
               client->base.local_peer_id, remote_peer_id);
-        ws_server_send_text(srv, cid, "SYNC0 FAIL internal");
+        ws_server_send_text(g_ws_srv, client->cid, "SYNC0 FAIL internal");
         return;
     }
 
@@ -3351,7 +3262,7 @@ static void ws_ice_handle_sync0(ws_server_t *srv, ws_client_id_t cid,
     snprintf(buf, sizeof(buf), "SYNC0 %s %u %s",
              remote_peer_id, local_s->base.session_id,
              peer_online ? "online" : "offline");
-    ws_server_send_text(srv, cid, buf);
+    ws_server_send_text(g_ws_srv, client->cid, buf);
 
     print("I:", "[WS_ICE] session created: '%s' -> '%s' (id=%u, peer_%s)\n",
           client->base.local_peer_id, remote_peer_id,
@@ -3359,51 +3270,34 @@ static void ws_ice_handle_sync0(ws_server_t *srv, ws_client_id_t cid,
 }
 
 /* 处理 SYNC 消息：转发给目标 peer */
-static void ws_ice_handle_sync(ws_server_t *srv, ws_client_id_t cid,
+static void ws_ice_handle_sync(ws_ice_client_t *client,
                                const char *to_peer_id, const char *payload) {
-    ws_ice_client_t *sender = ws_ice_find_by_cid(cid);
-    if (!sender) {
-        ws_server_send_text(srv, cid, "ONLINE FAIL not registered");
-        return;
-    }
-
-    sender->base.last_active = P_tick_ms();
-
     /* 查找目标 client */
     ws_ice_client_t *target = NULL;
     HASH_FIND_STR(g_ws_ice_clients, to_peer_id, target);
     if (!target || !ws_ice_client_online(target)) {
         print("V:", "[WS_ICE] SYNC target '%s' offline (from '%s')\n",
-              to_peer_id, sender->base.local_peer_id);
+              to_peer_id, client->base.local_peer_id);
         return;
     }
 
     /* 构造 "SYNC <from_peer_id>\n<payload>" */
-    size_t from_len = strlen(sender->base.local_peer_id);
+    size_t from_len = strlen(client->base.local_peer_id);
     size_t pay_len  = payload ? strlen(payload) : 0;
     size_t msg_len  = 5 + from_len + 1 + pay_len;
     char *msg = (char *)malloc(msg_len + 1);
     if (!msg) return;
-    snprintf(msg, msg_len + 1, "SYNC %s\n%s", sender->base.local_peer_id,
+    snprintf(msg, msg_len + 1, "SYNC %s\n%s", client->base.local_peer_id,
              payload ? payload : "");
-    ws_server_send_text(srv, target->cid, msg);
+    ws_server_send_text(g_ws_srv, target->cid, msg);
     free(msg);
 
     print("V:", "[WS_ICE] SYNC '%s' -> '%s' (%zu bytes)\n",
-          sender->base.local_peer_id, to_peer_id, pay_len);
+          client->base.local_peer_id, to_peer_id, pay_len);
 }
 
 /* 处理 FIN 消息：客户端主动断开会话 */
-static void ws_ice_handle_fin(ws_server_t *srv, ws_client_id_t cid,
-                              uint32_t session_id) {
-    ws_ice_client_t *client = ws_ice_find_by_cid(cid);
-    if (!client) {
-        ws_server_send_text(srv, cid, "ONLINE FAIL not registered");
-        return;
-    }
-
-    client->base.last_active = P_tick_ms();
-
+static void ws_ice_handle_fin(ws_ice_client_t *client, uint32_t session_id) {
     /* 查找 session */
     session_t *_s = NULL;
     HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
@@ -3420,85 +3314,176 @@ static void ws_ice_handle_fin(ws_server_t *srv, ws_client_id_t cid,
     ws_ice_free_session(ws_s);
 }
 
+//-----------------------------------------------------------------------------
+
 /* WS on_message 回调 */
 static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
-                               ws_srv_msg_type_t type,
-                               const uint8_t *data, size_t len,
+                               char *msg, size_t len,
                                void *user_data) {
     (void)user_data;
-    if (type != WS_SRV_MSG_TEXT || len == 0) return;
+    if (len == 0) return;
 
-    char *txt = (char *)malloc(len + 1);
-    if (!txt) return;
-    memcpy(txt, data, len);
-    txt[len] = '\0';
-
-    if (strncmp(txt, "ONLINE ", 7) == 0) {
-        char *peer_id = txt + 7;
-        size_t n = strlen(peer_id);
-        while (n > 0 && (peer_id[n - 1] == '\n' || peer_id[n - 1] == '\r'))
-            peer_id[--n] = '\0';
-        ws_ice_handle_online(srv, cid, peer_id);
+    /* 查找当前 cid 对应的 client */
+    ws_ice_client_t *client = NULL;
+    { ws_ice_client_t *c, *tmp;
+        HASH_ITER(hh, g_ws_ice_clients, c, tmp) {
+            if (c->cid == cid) { client = c; break; }
+        }
     }
-    else if (strncmp(txt, "SYNC0 ", 6) == 0) {
-        char *remote = txt + 6;
+
+    if (strncmp(msg, "ONLINE ", 7) == 0) {
+        char *peer_id = msg + 7;
+        size_t n = strlen(peer_id);
+        while (n > 0 && (peer_id[n - 1] == '\n' || peer_id[n - 1] == '\r')) peer_id[--n] = '\0';
+        if (!peer_id[0]) {
+            ws_server_send_text(srv, cid, "ONLINE FAIL empty peer_id");
+            return;
+        }
+
+        // 查找已有 client（按 peer_id）
+        ws_ice_client_t *by_name = NULL;
+        HASH_FIND_STR(g_ws_ice_clients, peer_id, by_name);
+
+        if (by_name) {
+            if (by_name->cid == cid) {
+                /* 重复注册同一连接，幂等 */
+                ws_server_send_text(srv, cid, "ONLINE OK");
+                return;
+            }
+            /* 重连：踢掉旧 WS 连接，保留 client 和会话 */
+            if (ws_ice_client_online(by_name)) {
+                print("W:", "[WS_ICE] peer '%s' re-register, kick old cid=%d\n",
+                      peer_id, by_name->cid);
+                ws_server_disconnect(srv, by_name->cid, 1000);
+            }
+
+            by_name->cid = cid;
+            by_name->base.valid = true;
+            by_name->base.last_active = P_tick_ms();
+
+            print("I:", "[WS_ICE] peer '%s' reconnected (cid=%d)\n", peer_id, cid);
+            ws_server_send_text(srv, cid, "ONLINE OK");
+
+            /* 通知已配对会话的双方 */
+            for (session_t *s = by_name->base.sessions; s; s = s->next) {
+                ws_ice_session_t *ws_s = (ws_ice_session_t *)s;
+                if (!PEER_ONLINE(ws_s)) continue;
+
+                ws_ice_session_t *peer_s = ws_s->peer;
+                ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
+
+                if (ws_ice_client_online(peer_c)) {
+                    char buf[12 + P2P_PEER_ID_MAX + 12 + 8];
+                    snprintf(buf, sizeof(buf), "SYNC0 %s %u online",
+                             by_name->base.local_peer_id, peer_s->base.session_id);
+                    ws_server_send_text(g_ws_srv, peer_c->cid, buf);
+
+                    snprintf(buf, sizeof(buf), "SYNC0 %s %u online",
+                             peer_c->base.local_peer_id, s->session_id);
+                    ws_server_send_text(g_ws_srv, by_name->cid, buf);
+                }
+            }
+            return;
+        }
+
+        /* 同一 cid 已有其他 peer_id？先移除 */
+        if (client) {
+            print("W:", "[WS_ICE] cid=%d re-register as '%s' (was '%s'), clearing old\n",
+                  cid, peer_id, client->base.local_peer_id);
+            ws_ice_invalidate_client(client, true);
+        }
+
+        /* 新建 client */
+        ws_ice_client_t *nc = (ws_ice_client_t *)calloc(1, sizeof(*nc));
+        if (!nc) {
+            ws_server_send_text(srv, cid, "ONLINE FAIL OOM");
+            return;
+        }
+        nc->base.valid = true;
+        strncpy(nc->base.local_peer_id, peer_id, P2P_PEER_ID_MAX - 1);
+        nc->base.local_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+        nc->base.last_active = P_tick_ms();
+        nc->cid = cid;
+        HASH_ADD_KEYPTR(hh, g_ws_ice_clients, nc->base.local_peer_id,
+                        strlen(nc->base.local_peer_id), nc);
+
+        print("I:", "[WS_ICE] peer '%s' registered (cid=%d)\n", peer_id, cid);
+        ws_server_send_text(srv, cid, "ONLINE OK");
+        return;
+    }
+
+    if (!client) {
+        ws_server_send_text(srv, cid, "ONLINE FAIL not registered");
+        return;
+    }
+
+    client->base.last_active = P_tick_ms();
+
+    if (strncmp(msg, "SYNC0 ", 6) == 0) {
+        char *remote = msg + 6;
         size_t n = strlen(remote);
         while (n > 0 && (remote[n - 1] == '\n' || remote[n - 1] == '\r'))
             remote[--n] = '\0';
-        ws_ice_handle_sync0(srv, cid, remote);
+        ws_ice_handle_sync0(client, remote);
+        return;
     }
-    else if (strncmp(txt, "SYNC ", 5) == 0) {
-        char *to = txt + 5;
+
+    if (strncmp(msg, "SYNC ", 5) == 0) {
+        char *to = msg + 5;
         char *nl = strchr(to, '\n');
         if (nl) { *nl = '\0';
             size_t n = strlen(to);
             if (n > 0 && to[n - 1] == '\r') to[n - 1] = '\0';
-            ws_ice_handle_sync(srv, cid, to, nl + 1);
+            ws_ice_handle_sync(client, to, nl + 1);
         } else {
-            ws_ice_handle_sync(srv, cid, to, "");
+            ws_ice_handle_sync(client, to, "");
         }
-    }
-    else if (strncmp(txt, "FIN ", 4) == 0) {
-        uint32_t sid = (uint32_t)strtoul(txt + 4, NULL, 10);
-        ws_ice_handle_fin(srv, cid, sid);
-    }
-    else {
-        print("V:", "[WS_ICE] unknown msg from cid=%d: %.32s...\n", cid, txt);
+        return;
     }
 
-    free(txt);
+    if (strncmp(msg, "FIN ", 4) == 0) {
+        uint32_t sid = (uint32_t)strtoul(msg + 4, NULL, 10);
+        ws_ice_handle_fin(client, sid);
+        return;
+    }
+
+    print("V:", "[WS_ICE] unknown msg from cid=%d: %.32s...\n", cid, msg);
 }
 
 /* WS on_disconnect 回调：标记离线 + 通知对端 */
 static void ws_ice_on_disconnect(ws_server_t *srv, ws_client_id_t cid,
                                   void *user_data) {
     (void)srv; (void)user_data;
-    ws_ice_client_t *client = ws_ice_find_by_cid(cid);
+
+    /* 查找当前 cid 对应的 client */
+    ws_ice_client_t *client = NULL;
+    {   ws_ice_client_t *c, *tmp;
+        HASH_ITER(hh, g_ws_ice_clients, c, tmp) {
+            if (c->cid == cid) { client = c; break; }
+        }
+    }
     if (!client) return;
 
     print("I:", "[WS_ICE] peer '%s' disconnected (cid=%d)\n",
           client->base.local_peer_id, cid);
 
-    /* 标记离线（保留 client 和会话，等待重连或超时清理） */
-    client->cid = (ws_client_id_t)-1;
-    client->base.last_active = P_tick_ms();
+    ws_ice_invalidate_client(client, false);
+}
 
-    /* 通知所有配对对端 */
-    for (session_t *s = client->base.sessions; s; s = s->next) {
-        ws_ice_session_t *ws_s = (ws_ice_session_t *)s;
-        if (!PEER_ONLINE(ws_s)) continue;
+/* 清理超时的离线客户端 */
+static void cleanup_ws_ice_clients(void) {
 
-        ws_ice_client_t *peer_c = (ws_ice_client_t *)ws_s->peer->base.client;
-        char buf[16];
-        snprintf(buf, sizeof(buf), "FIN %u", ws_s->peer->base.session_id);
-        if (ws_ice_client_online(peer_c))
-            ws_server_send_text(g_ws_srv, peer_c->cid, buf);
-    }
+    uint64_t now = P_tick_ms();
+    ws_ice_client_t *c, *tmp;
+    HASH_ITER(hh, g_ws_ice_clients, c, tmp) {
 
-    /* 如果没有会话，立即清理 */
-    if (!client->base.sessions) {
-        HASH_DELETE(hh, g_ws_ice_clients, client);
-        free(client);
+        if (c->cid != (ws_client_id_t)-1) continue;
+        if (tick_diff(now, c->base.last_active) <= WS_ICE_CLIENT_TIMEOUT_S * 1000) continue;
+
+        print("I:", "[WS_ICE] timeout: removing offline client '%s'\n",
+              c->base.local_peer_id);
+
+        ws_ice_invalidate_client(c, true);
     }
 }
 
@@ -3701,8 +3686,8 @@ int main(int argc, char *argv[]) {
 #ifdef WITH_WSLAY
     if (ARGS_ws.i64) {
         ws_server_cfg_t ws_cfg = {0};
-        ws_cfg.on_message    = ws_ice_on_message;    /* ICE 信令路由 */
-        ws_cfg.on_disconnect = ws_ice_on_disconnect;  /* 断连清理 peer 注册 */
+        ws_cfg.on_message    = ws_ice_on_message;       /* ICE 信令路由 */
+        ws_cfg.on_disconnect = ws_ice_on_disconnect;    /* 断连清理 peer 注册 */
         /* ws_port>0: 独立端口，ws_server 自建监听；否则嵌入同端口（port=0）*/
         uint16_t ws_listen_port = (uint16_t)(ARGS_ws_port.i64 > 0 ? ARGS_ws_port.i64 : 0);
         g_ws_srv = ws_server_create(&ws_cfg, ws_listen_port);

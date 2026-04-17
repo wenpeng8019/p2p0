@@ -197,17 +197,18 @@ static void sslot_on_msg_cb(wslay_event_context_ptr ctx,
         return;
     }
 
-    if (!srv->cfg.on_message) return;
-
-    ws_srv_msg_type_t type;
-    switch (arg->opcode) {
-        case WSLAY_TEXT_FRAME:   type = WS_SRV_MSG_TEXT;   break;
-        case WSLAY_BINARY_FRAME: type = WS_SRV_MSG_BINARY; break;
-        case WSLAY_PING:         type = WS_SRV_MSG_PING;   break;
-        case WSLAY_PONG:         type = WS_SRV_MSG_PONG;   break;
-        default: return;
+    if (arg->opcode == WSLAY_TEXT_FRAME) {
+        if (!srv->cfg.on_message) return;
+        char *buf = (char *)malloc(arg->msg_length + 1);
+        if (!buf) return;
+        memcpy(buf, arg->msg, arg->msg_length);
+        buf[arg->msg_length] = '\0';
+        srv->cfg.on_message(srv, slot->id, buf, arg->msg_length, srv->cfg.user_data);
+        free(buf);
+    } else if (arg->opcode == WSLAY_BINARY_FRAME) {
+        if (!srv->cfg.on_data) return;
+        srv->cfg.on_data(srv, slot->id, arg->msg, arg->msg_length, srv->cfg.user_data);
     }
-    srv->cfg.on_message(srv, slot->id, type, arg->msg, arg->msg_length, srv->cfg.user_data);
 }
 
 /* =========================================================================
@@ -505,7 +506,7 @@ int ws_server_send_text(ws_server_t *srv, ws_client_id_t cid, const char *text) 
     return wslay_event_queue_msg(slot->ws_ctx, &msg) == 0 ? 0 : -1;
 }
 
-int ws_server_send_binary(ws_server_t *srv, ws_client_id_t cid,
+int ws_server_send_bin(ws_server_t *srv, ws_client_id_t cid,
                            const uint8_t *data, size_t len) {
     ws_slot_t *slot = find_slot(srv, cid);
     if (!slot || !slot->ws_ctx) return -1;

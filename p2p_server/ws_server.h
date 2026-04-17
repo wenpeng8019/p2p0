@@ -44,16 +44,6 @@ extern "C" {
 typedef struct ws_server ws_server_t;
 
 /* -------------------------------------------------------------------------
- * 消息类型
- * ---------------------------------------------------------------------- */
-typedef enum {
-    WS_SRV_MSG_TEXT   = 0x01,
-    WS_SRV_MSG_BINARY = 0x02,
-    WS_SRV_MSG_PING   = 0x09,
-    WS_SRV_MSG_PONG   = 0x0A,
-} ws_srv_msg_type_t;
-
-/* -------------------------------------------------------------------------
  * 客户端 ID（从 1 起，0 表示无效）
  * ---------------------------------------------------------------------- */
 typedef int ws_client_id_t;
@@ -67,12 +57,17 @@ typedef void (*ws_srv_on_connect_cb)(ws_server_t *srv,
                                      ws_client_id_t cid,
                                      void *user_data);
 
-/* 收到客户端消息 */
+/* 收到文本消息（msg 为可写 null-terminated 字符串，回调返回后释放） */
 typedef void (*ws_srv_on_message_cb)(ws_server_t *srv,
                                      ws_client_id_t cid,
-                                     ws_srv_msg_type_t type,
-                                     const uint8_t *data, size_t len,
+                                     char *msg, size_t len,
                                      void *user_data);
+
+/* 收到二进制消息（data 为只读，回调返回后失效） */
+typedef void (*ws_srv_on_data_cb)(ws_server_t *srv,
+                                  ws_client_id_t cid,
+                                  const uint8_t *data, size_t len,
+                                  void *user_data);
 
 /* 客户端断开 */
 typedef void (*ws_srv_on_disconnect_cb)(ws_server_t *srv,
@@ -84,7 +79,8 @@ typedef void (*ws_srv_on_disconnect_cb)(ws_server_t *srv,
  * ---------------------------------------------------------------------- */
 typedef struct {
     ws_srv_on_connect_cb    on_connect;     /* 可为 NULL */
-    ws_srv_on_message_cb    on_message;     /* 可为 NULL */
+    ws_srv_on_message_cb    on_message;     /* 可为 NULL：TEXT 帧 */
+    ws_srv_on_data_cb       on_data;        /* 可为 NULL：BINARY 帧 */
     ws_srv_on_disconnect_cb on_disconnect;  /* 可为 NULL */
     void                   *user_data;      /* 透传给所有回调 */
 
@@ -130,7 +126,7 @@ void ws_server_update(ws_server_t *srv);
 int ws_server_send_text(ws_server_t *srv, ws_client_id_t cid, const char *text);
 
 /* 向指定客户端发送二进制帧，返回 0 成功，-1 失败 */
-int ws_server_send_binary(ws_server_t *srv, ws_client_id_t cid,
+int ws_server_send_bin(ws_server_t *srv, ws_client_id_t cid,
                            const uint8_t *data, size_t len);
 
 /* 向所有已连接客户端广播文本帧 */
