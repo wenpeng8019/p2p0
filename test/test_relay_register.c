@@ -352,7 +352,7 @@ static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t insta
         return 0;
     }
     
-    if (type == P2P_RLY_ONLINE_ACK && payload_len >= P2P_RLY_ONLINE_ACK_PSZ) {
+    if (type == P2P_RLY_ONLINE && payload_len >= P2P_RLY_ONLINE_S2C_PSZ) {
         ack->received = 1;
         ack->features = recv_buf[3];
         ack->candidate_sync_max = recv_buf[4];
@@ -383,13 +383,13 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
             return 0;
         }
         
-        if (type == P2P_RLY_SYNC0_ACK && payload_len >= P2P_RLY_SYNC0_ACK_PSZ) {
+        if (type == P2P_RLY_SYNC0 && payload_len >= P2P_RLY_SYNC0_S2C_PSZ(0)) {
             ack->received = 1;
-            // [relay_hdr(3)][target_name(32)][session_id(4)][online(1)]
+            // [relay_hdr(3)][target_name(32)][session_id(P2P_SESS_ID_PSZ)][state(1)]
             int off = 3 + P2P_PEER_ID_MAX;
             ack->session_id = ((uint32_t)recv_buf[off] << 24) | ((uint32_t)recv_buf[off+1] << 16) |
                               ((uint32_t)recv_buf[off+2] << 8)  | (uint32_t)recv_buf[off+3];
-            ack->online = recv_buf[off + 4];
+            ack->online = (recv_buf[off + P2P_SESS_ID_PSZ] == 0xFF) ? 0 : 1;
             return 1;
         }
         

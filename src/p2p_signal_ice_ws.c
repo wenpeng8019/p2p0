@@ -173,6 +173,12 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
             on_ws_sync_from_peer(inst, from, nl + 1);
         }
     }
+    else if (strncmp(txt, "FIN ", 4) == 0) {
+        uint32_t session_id = (uint32_t)strtoul(txt + 4, NULL, 10);
+        print("I:", "[WS] FIN received (session_id=%u)\n", session_id);
+        /* TODO: find session by id, trigger peer_disconnect */
+        (void)session_id;
+    }
 
     free(txt);
 }

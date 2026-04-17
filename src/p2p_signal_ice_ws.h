@@ -10,11 +10,13 @@
  *     ONLINE <peer_id>            注册身份
  *     SYNC0 <remote_peer_id>      创建/恢复会话
  *     SYNC <to_peer_id>\n<payload> 同步数据给指定 peer
+ *     FIN <session_id>            主动断开会话
  *
  *   服务器 → 客户端：
  *     ONLINE OK                   注册成功
  *     SYNC0 <peer_id> <session_id> online|offline  会话应答/对端上线推送
  *     SYNC <from_peer_id>\n<payload> 来自其他 peer 的同步数据
+ *     FIN <session_id>            对端断连通知
  *
  * payload 格式（纯文本，应用层约定）：
  *     SDP\n<sdp_text>             SDP offer/answer（含 ice-ufrag/ice-pwd + candidates）
