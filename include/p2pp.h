@@ -1185,13 +1185,13 @@ typedef struct {
  */
 
  /* WS_ICE 消息类型前缀（纯文本匹配，非二进制编码） */
-#define P2P_WS_ICE_CMD_REG          "REG "          /* + <peer_id> */                       // 注册身份
+#define P2P_WS_ICE_CMD_REG          "REG "          /* + <peer_id> <instance_id> */          // 注册身份
 #define P2P_WS_ICE_CMD_OFF          "OFF"                                                   // 主动下线（立即释放资源）
 #define P2P_WS_ICE_CMD_SYNC0        "SYNC0 "        /* + <remote_peer_id>[\n<payload>] */   // 创建/恢复会话（可选预缓存负载）
 #define P2P_WS_ICE_CMD_SYNC         "SYNC "         /* + <session_id>\n<payload> */         // 同步数据 (C2S & S2C)
 #define P2P_WS_ICE_CMD_FIN          "FIN "          /* + <session_id> */                    // 会话结束 (C2S & S2C)
 
-#define P2P_WS_ICE_RSP_REG_OK       "REG OK "       /* + <sync_max> */                      // 注册成功，sync_max=预缓存负载上限
+#define P2P_WS_ICE_RSP_REG_OK       "REG OK "       /* + <sync_max> <features> */           // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
 #define P2P_WS_ICE_RSP_REG_FAIL     "REG FAIL "     /* + <reason> */
 #define P2P_WS_ICE_RSP_SYNC0        "SYNC0 "        /* + <peer_id> <session_id> online[\n<payload>]|offline|confirm|busy */
 #define P2P_WS_ICE_RSP_SYNC0_FAIL   "SYNC0 FAIL "   /* + <reason> */
@@ -1230,33 +1230,44 @@ typedef struct {
  * REG — 身份注册（客户端 → 服务器）
  * ────────────────────────────────────────────────────────────────────────────
  *
- * 格式: "REG <peer_id>"
+ * 格式: "REG <peer_id> <instance_id>"
  *   - peer_id: 本端身份标识，UTF-8 字符串，最长 P2P_PEER_ID_MAX-1 字节
+ *   - instance_id: 客户端实例 ID（uint32 十进制 ASCII），每次 online() 生成新随机数
+ *                  用于服务器区分网络重连（保留会话）和客户端重启（销毁旧会话）
  *
  * 功能: 注册本端身份，建立 peer_id → WS 连接的映射。
  *       类似 RELAY P2P_RLY_ONLINE / COMPACT SIG_PKT_ONLINE。
  *
  * 服务端处理:
- *   1. peer_id 为空 → 返回 "REG FAIL empty peer_id"
- *   2. peer_id 已被同一 cid 注册 → 幂等，返回 "REG OK <sync_max>"
- *   3. peer_id 已被其他 cid 注册（重连场景）:
+ *   1. peer_id 为空 / instance_id 无效 → 返回 "REG FAIL ..."
+ *   2. peer_id + instance_id 均匹配（同一 cid）→ 幂等，返回 "REG OK <sync_max>"
+ *   3. peer_id 匹配 + instance_id 相同（不同 cid，网络重连）:
  *      - 踢掉旧 WS 连接（ws_server_disconnect, code=1000）
  *      - 复用 ws_ice_client_t，更新 cid，保留所有会话
  *      - 遍历已配对会话，向所有在线对端推送 "SYNC0 <peer_id> <peer_session_id> online"
  *      - 向本端推送所有在线对端的 "SYNC0 <remote_peer_id> <session_id> online"
  *      - 返回 "REG OK <sync_max>"
- *   4. 同一 cid 曾注册其他 peer_id → 清除旧 client 及其会话
- *   5. 全新注册 → 创建 ws_ice_client_t，返回 "REG OK <sync_max>"
+ *   4. peer_id 匹配 + instance_id 不同（客户端重启）:
+ *      - 销毁旧 client 及其所有会话（通知对端 FIN）
+ *      - 创建新 ws_ice_client_t
+ *      - 返回 "REG OK <sync_max>"
+ *   5. 同一 cid 曾注册其他 peer_id → 清除旧 client 及其会话
+ *   6. 全新注册 → 创建 ws_ice_client_t，返回 "REG OK <sync_max>"
  *
  * 响应:
- *   "REG OK <sync_max>"       — 注册成功，sync_max 为 SYNC0 预缓存负载字节上限（不含 NUL）
+ *   "REG OK <sync_max> <features>" — 注册成功
+ *     - sync_max: SYNC0 预缓存负载字节上限（不含 NUL）
+ *     - features: 服务器功能位掩码（十进制），与 RELAY 一致:
+ *         0x01 = P2P_RLY_FEATURE_RELAY（支持数据包中继）
+ *         0x02 = P2P_RLY_FEATURE_MSG（支持 MSG RPC 机制）
  *   "REG FAIL <reason>"       — 注册失败
- *     reason: "empty peer_id" — peer_id 为空
- *             "OOM"           — 内存分配失败
+ *     reason: "empty peer_id"      — peer_id 为空
+ *             "invalid instance_id" — instance_id 缺失或为 0
+ *             "OOM"                — 内存分配失败
  *
  * 示例:
- *   → "REG alice_device_01"
- *   ← "REG OK 2048"
+ *   → "REG alice_device_01 3827401956"
+ *   ← "REG OK 2048 3"
  *
  * ────────────────────────────────────────────────────────────────────────────
  * OFF — 主动下线（客户端 → 服务器）

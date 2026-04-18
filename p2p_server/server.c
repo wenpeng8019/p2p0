@@ -2681,13 +2681,8 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *s, uint8_
 }
 
 // 处理 FIN 消息（会话结束）
-static void relay_handle_fin(relay_session_t *s, uint8_t *payload, uint16_t len) {
+static void relay_handle_fin(relay_session_t *s) {
     const char *PROTO = "FIN";
-
-    if (len != P2P_RLY_FIN_PSZ) {
-        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F41, 41), PROTO, len);
-        return;
-    }
 
     print("I:", LA_F("%s: close ses_id=%u\n", LA_F45, 45), PROTO, s->base.session_id);
 
@@ -3011,7 +3006,7 @@ static void handle_relay_signaling(int idx) {
 
             // FIN 不需要对端在线（单边关闭）
             if (type == P2P_RLY_FIN) {
-                relay_handle_fin(rs, payload, payload_len);
+                relay_handle_fin(rs);
             }
             // SYNC / DATA 等转发操作需要对端已连接
             else if (!PEER_ONLINE(rs)) {
@@ -3172,6 +3167,14 @@ static inline size_t ws_ice_sync_copy_out(const ws_ice_session_t *s, char *dest)
 /* 判断 client 是否在线（已注册且 WS 连接有效） */
 static inline bool ws_ice_client_online(const ws_ice_client_t *c) {
     return c && c->base.valid && c->cid != (ws_client_id_t)-1;
+}
+
+/* 生成 REG OK 的 features 位掩码（与 P2P_RLY_FEATURE_* 一致） */
+static inline int ws_ice_features(void) {
+    int f = 0;
+    if (ARGS_relay.i64) f |= P2P_RLY_FEATURE_RELAY;
+    if (ARGS_msg.i64)   f |= P2P_RLY_FEATURE_MSG;
+    return f;
 }
 
 /* RPC 超时链表操作（与 relay_pending_enqueue/remove_rpc 同构） */
@@ -3696,6 +3699,20 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid, char *msg, s
         char *peer_id = msg + 4;
         size_t n = strlen(peer_id);
         while (n > 0 && (peer_id[n - 1] == '\n' || peer_id[n - 1] == '\r')) peer_id[--n] = '\0';
+
+        // 解析 instance_id（最后一个空格分隔的十进制数）
+        char *sp = strrchr(peer_id, ' ');
+        if (!sp || sp == peer_id) {
+            ws_server_send_text(srv, cid, "REG FAIL invalid instance_id");
+            return;
+        }
+        *sp = '\0';
+        uint32_t instance_id = (uint32_t)strtoul(sp + 1, NULL, 10);
+        if (instance_id == 0) {
+            ws_server_send_text(srv, cid, "REG FAIL invalid instance_id");
+            return;
+        }
+
         if (!peer_id[0]) {
             ws_server_send_text(srv, cid, "REG FAIL empty peer_id");
             return;
@@ -3706,59 +3723,67 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid, char *msg, s
         HASH_FIND_STR(g_ws_ice_clients, peer_id, by_name);
 
         if (by_name) {
-            if (by_name->cid == cid) {
-                /* 重复注册同一连接，幂等 */
-                char ok[32]; snprintf(ok, sizeof(ok), "REG OK %d", WS_ICE_SYNC_PAYLOAD_MAX);
-                ws_server_send_text(srv, cid, ok);
+            if (by_name->base.instance_id == instance_id) {
+                if (by_name->cid == cid) {
+                    /* 同一连接 + 同一实例 → 幂等 */
+                    char ok[48]; snprintf(ok, sizeof(ok), "REG OK %d %d", WS_ICE_SYNC_PAYLOAD_MAX, ws_ice_features());
+                    ws_server_send_text(srv, cid, ok);
+                    return;
+                }
+                /* 同实例 + 不同 cid → 网络重连：保留会话 */
+                if (ws_ice_client_online(by_name)) {
+                    print("W:", "[WS_ICE] peer '%s' reconnect, kick old cid=%d\n",
+                          peer_id, by_name->cid);
+                    ws_server_disconnect(srv, by_name->cid, 1000);
+                }
+
+                by_name->cid = cid;
+                by_name->base.valid = true;
+                by_name->base.last_active = P_tick_ms();
+
+                print("I:", "[WS_ICE] peer '%s' reconnected (inst=%u, cid=%d)\n",
+                      peer_id, instance_id, cid);
+                { char ok[48]; snprintf(ok, sizeof(ok), "REG OK %d %d", WS_ICE_SYNC_PAYLOAD_MAX, ws_ice_features());
+                  ws_server_send_text(srv, cid, ok); }
+
+                /* 通知已配对会话的双方 + 转发预缓存负载 */
+                for (session_t *s = by_name->base.sessions; s; s = s->next) {
+                    ws_ice_session_t *ws_s = (ws_ice_session_t *)s;
+                    if (!PEER_ONLINE(ws_s)) continue;
+
+                    ws_ice_session_t *peer_s = ws_s->peer;
+                    ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
+
+                    if (ws_ice_client_online(peer_c)) {
+
+                        // 记录待确认大小（转发后清空）
+                        int ws_confirmed   = (int)ws_s->sync_len;
+                        int peer_confirmed = (int)peer_s->sync_len;
+
+                        // 给对端：通知重连方上线 + 转发重连方缓存给对端
+                        ws_ice_send_sync0(peer_c->cid, by_name->base.local_peer_id, peer_s->base.session_id, true, ws_s);
+                        ws_s->sync_head = ws_s->sync_len = 0;
+
+                        // 给重连方：通知对端在线 + 转发对端缓存给重连方
+                        ws_ice_send_sync0(by_name->cid, peer_c->base.local_peer_id, s->session_id, true, peer_s);
+                        peer_s->sync_head = peer_s->sync_len = 0;
+
+                        // 发送 confirm
+                        if (ws_confirmed)
+                            ws_ice_send_sync0_confirm(by_name->cid, peer_c->base.local_peer_id, s->session_id, ws_confirmed);
+                        if (peer_confirmed)
+                            ws_ice_send_sync0_confirm(peer_c->cid, by_name->base.local_peer_id, peer_s->base.session_id, peer_confirmed);
+                    }
+                }
                 return;
             }
-            /* 重连：踢掉旧 WS 连接，保留 client 和会话 */
-            if (ws_ice_client_online(by_name)) {
-                print("W:", "[WS_ICE] peer '%s' re-register, kick old cid=%d\n",
-                      peer_id, by_name->cid);
-                ws_server_disconnect(srv, by_name->cid, 1000);
-            }
 
-            by_name->cid = cid;
-            by_name->base.valid = true;
-            by_name->base.last_active = P_tick_ms();
-
-            print("I:", "[WS_ICE] peer '%s' reconnected (cid=%d)\n", peer_id, cid);
-            { char ok[32]; snprintf(ok, sizeof(ok), "REG OK %d", WS_ICE_SYNC_PAYLOAD_MAX);
-              ws_server_send_text(srv, cid, ok); }
-
-            /* 通知已配对会话的双方 + 转发预缓存负载 */
-            for (session_t *s = by_name->base.sessions; s; s = s->next) {
-                ws_ice_session_t *ws_s = (ws_ice_session_t *)s;
-                if (!PEER_ONLINE(ws_s)) continue;
-
-                ws_ice_session_t *peer_s = ws_s->peer;
-                ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
-
-                if (ws_ice_client_online(peer_c)) {
-
-                    // 记录待确认大小（转发后清空）
-                    int ws_confirmed   = (int)ws_s->sync_len;
-                    int peer_confirmed = (int)peer_s->sync_len;
-
-                    // 给对端：通知重连方上线 + 转发重连方缓存给对端
-                    ws_ice_send_sync0(peer_c->cid, by_name->base.local_peer_id, peer_s->base.session_id,
-                                      true, ws_s);
-                    ws_s->sync_head = ws_s->sync_len = 0;
-
-                    // 给重连方：通知对端在线 + 转发对端缓存给重连方
-                    ws_ice_send_sync0(by_name->cid, peer_c->base.local_peer_id, s->session_id,
-                                      true, peer_s);
-                    peer_s->sync_head = peer_s->sync_len = 0;
-
-                    // 发送 confirm
-                    if (ws_confirmed)
-                        ws_ice_send_sync0_confirm(by_name->cid, peer_c->base.local_peer_id, s->session_id, ws_confirmed);
-                    if (peer_confirmed)
-                        ws_ice_send_sync0_confirm(peer_c->cid, by_name->base.local_peer_id, peer_s->base.session_id, peer_confirmed);
-                }
-            }
-            return;
+            /* 不同 instance_id → 客户端重启：销毁旧 client 及所有会话 */
+            print("I:", "[WS_ICE] peer '%s' new instance (old=%u, new=%u), destroying old\n",
+                  peer_id, by_name->base.instance_id, instance_id);
+            ws_ice_invalidate_client(by_name, true);
+            by_name = NULL;
+            /* 落入下方新建 client 逻辑 */
         }
 
         // 同一 cid 已有其他 peer_id？先移除
@@ -3777,13 +3802,14 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid, char *msg, s
         nc->base.valid = true;
         strncpy(nc->base.local_peer_id, peer_id, P2P_PEER_ID_MAX - 1);
         nc->base.local_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
+        nc->base.instance_id = instance_id;
         nc->base.last_active = P_tick_ms();
         nc->cid = cid;
         HASH_ADD_KEYPTR(hh, g_ws_ice_clients, nc->base.local_peer_id,
                         strlen(nc->base.local_peer_id), nc);
 
-        print("I:", "[WS_ICE] peer '%s' registered (cid=%d)\n", peer_id, cid);
-        { char ok[32]; snprintf(ok, sizeof(ok), "REG OK %d", WS_ICE_SYNC_PAYLOAD_MAX);
+        print("I:", "[WS_ICE] peer '%s' registered (inst=%u, cid=%d)\n", peer_id, instance_id, cid);
+        { char ok[48]; snprintf(ok, sizeof(ok), "REG OK %d %d", WS_ICE_SYNC_PAYLOAD_MAX, ws_ice_features());
           ws_server_send_text(srv, cid, ok); }
         return;
     }

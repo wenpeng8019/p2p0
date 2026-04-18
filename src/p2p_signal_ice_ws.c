@@ -36,13 +36,14 @@ static void on_ws_open(ws_client_t *c, void *user_data) {
     p2p_ice_ws_ctx_t *ctx = &inst->sig_ctx.ice_ws;
     (void)c;
 
-    /* 发送注册消息 */
-    char reg[8 + P2P_PEER_ID_MAX];
-    snprintf(reg, sizeof(reg), "ONLINE %s", inst->local_peer_id);
+    /* 发送注册消息: "REG <peer_id> <instance_id>" */
+    char reg[16 + P2P_PEER_ID_MAX];
+    snprintf(reg, sizeof(reg), "REG %s %u", inst->local_peer_id, ctx->instance_id);
     ws_client_send_text(c, reg);
 
     ctx->state = ICE_WS_REGISTERING;
-    print("I:", "[WS] connected, registering as '%s'\n", inst->local_peer_id);
+    print("I:", "[WS] connected, registering as '%s' (inst=%u)\n",
+          inst->local_peer_id, ctx->instance_id);
 }
 
 /* 处理来自服务器的 SYNC：找到对应 session 并导入候选 */
@@ -156,13 +157,22 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
     memcpy(txt, data, len);
     txt[len] = '\0';
 
-    if (strcmp(txt, "ONLINE OK") == 0) {
+    if (strncmp(txt, "REG OK", 6) == 0) {
+        /* "REG OK <sync_max> <features>" */
+        int features = 0;
+        if (txt[6] == ' ') {
+            char *sp = strchr(txt + 7, ' ');
+            if (sp) features = (int)strtol(sp + 1, NULL, 10);
+        }
+        ctx->feature_relay = (features & P2P_RLY_FEATURE_RELAY) != 0;
+        ctx->feature_msg   = (features & P2P_RLY_FEATURE_MSG) != 0;
         ctx->state = ICE_WS_ONLINE;
-        print("I:", "[WS] registered OK\n");
+        print("I:", "[WS] registered OK (relay=%s, msg=%s)\n",
+              ctx->feature_relay ? "yes" : "no", ctx->feature_msg ? "yes" : "no");
     }
-    else if (strncmp(txt, "ONLINE FAIL", 11) == 0) {
+    else if (strncmp(txt, "REG FAIL", 8) == 0) {
         ctx->state = ICE_WS_ERROR;
-        print("E:", "[WS] registration failed: %s\n", txt + 12);
+        print("E:", "[WS] registration failed: %s\n", txt + 9);
     }
     else if (strncmp(txt, "SYNC ", 5) == 0) {
         /* SYNC <from_peer_id>\n<payload> */
@@ -254,6 +264,11 @@ static void ws_send_sdp(struct p2p_instance *inst, struct p2p_session *s) {
 void p2p_signal_ice_ws_init(struct p2p_instance *inst) {
     p2p_ice_ws_ctx_t *ctx = &inst->sig_ctx.ice_ws;
     memset(ctx, 0, sizeof(*ctx));
+
+    /* 每次 init 生成新 instance_id（区分重连 vs 重启） */
+    uint32_t rid = 0;
+    while (rid == 0) rid = P_rand32();
+    ctx->instance_id = rid;
 
     ws_client_cfg_t cfg = {0};
     cfg.on_open    = on_ws_open;
