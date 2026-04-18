@@ -265,10 +265,17 @@ static relay_session_t*             g_relay_rpc_pending_rear = NULL;
 #ifdef WITH_WSLAY
 
 #define WS_ICE_CLIENT_TIMEOUT_S     60          /* 离线客户端保留时间（秒） */
+#define WS_ICE_SYNC_PAYLOAD_MAX     2048        /* SYNC0 预缓存负载上限（字节，不含 NUL） */
 
 typedef struct ws_ice_session {
     session_t                       base;
     struct ws_ice_session*          peer;        /* 对端会话指针（NULL=未配对, -1=对端已断开） */
+    char*                           pending_sync; /* SYNC0 预缓存负载（对端未在线时缓存，对端上线后转发） */
+
+    /* MSG RPC 状态（与 relay_session_t 一致，独立于 SYNC 通道） */
+    uint16_t                        rpc_pending_sid;    /* 0=空闲, 非零=等待 RESP 的 REQ sid */
+    uint64_t                        rpc_sent_time;      /* REQ 转发时间戳（用于超时检测） */
+    struct ws_ice_session*          rpc_pending_next;   /* RPC 超时链表指针（-1=尾部） */
 } ws_ice_session_t;
 
 typedef struct ws_ice_client {
@@ -278,6 +285,10 @@ typedef struct ws_ice_client {
 } ws_ice_client_t;
 
 static ws_ice_client_t*             g_ws_ice_clients = NULL;
+
+/* WS ICE RPC 超时链表（按 rpc_sent_time 排序，队头最早） */
+static ws_ice_session_t*            g_ws_ice_rpc_pending_head = NULL;
+static ws_ice_session_t*            g_ws_ice_rpc_pending_rear = NULL;
 
 static ws_server_t*                 g_ws_srv = NULL;
 #endif
@@ -3099,18 +3110,34 @@ static void cleanup_relay_clients(void) {
  * 协议（纯文本帧，每条 WS text frame 一条消息）：
  *
  *   客户端 → 服务器：
- *     ONLINE <peer_id>              注册身份（类似 RELAY ONLINE）
+ *     REG <peer_id>                 注册身份（类似 RELAY ONLINE）
+ *     OFF                           主动下线，立即释放服务器资源（与 REG 配对）
  *     SYNC0 <remote_peer_id>        创建/恢复会话（类似 RELAY SYNC0）
- *     SYNC <to_peer_id>\n<payload>  同步数据给指定 peer
+ *     SYNC0 <remote_peer_id>\n<payload>  创建会话 + 携带预缓存负载
+ *     SYNC <session_id>\n<payload>  按 session_id 路由同步数据（类似 RELAY SYNC）
  *     FIN <session_id>              主动断开会话（类似 RELAY FIN）
  *
  *   服务器 → 客户端：
- *     ONLINE OK                     注册成功
- *     ONLINE FAIL <reason>          注册失败
+ *     REG OK <sync_max>             注册成功（sync_max = 预缓存负载上限）
+ *     REG FAIL <reason>             注册失败
  *     SYNC0 <peer_id> <session_id> online|offline  应答/推送（统一格式）
+ *     SYNC0 <peer_id> <session_id> online\n<payload>  应答 + 对端预缓存负载
+ *     SYNC0 <peer_id> <session_id> confirm <bytes>  预缓存负载转发确认
+ *     SYNC0 <peer_id> <session_id> busy  负载超出缓存可用空间
  *     SYNC0 FAIL <reason>           会话创建失败
- *     SYNC <from_peer_id>\n<payload> 来自其他 peer 的同步数据
+ *     SYNC <session_id>\n<payload>  对端同步数据（session_id 已重写）
+ *     SYNC <session_id> confirm <bytes>  同步数据转发确认
+ *     SYNC <session_id> busy        同步缓存空间不足
  *     FIN <session_id>               会话结束通知 (C2S & S2C)
+ *
+ *   二进制帧（WebSocket binary frame, 用于 P2P 数据中继和 MSG RPC）:
+ *   帧格式: [type(1)][session_id(4)][payload(N)]，服务器重写 session_id 并透传
+ *     PACKET (0x01): [0x01][ses_id(4)][p2p_hdr(4)][data(N)]  中继 P2P 包
+ *     REQ    (0x02): [0x02][ses_id(4)][sid(2)][msg(1)][data(N)]  RPC 请求
+ *     RESP   (0x03): [0x03][ses_id(4)][sid(2)][code(1)][data(N)] RPC 响应
+ *   错误（服务器生成伪 RESP）:
+ *     code=0xFF: 对端离线 (P2P_MSG_ERR_PEER_OFFLINE)
+ *     code=0xFE: 转发超时 (P2P_MSG_ERR_TIMEOUT)
  */
 
 /* 判断 client 是否在线（已注册且 WS 连接有效） */
@@ -3118,13 +3145,78 @@ static inline bool ws_ice_client_online(const ws_ice_client_t *c) {
     return c && c->base.valid && c->cid != (ws_client_id_t)-1;
 }
 
-/* 释放会话：通知对端 + 调用共享 free_session */
+/* RPC 超时链表操作（与 relay_pending_enqueue/remove_rpc 同构） */
+static void ws_ice_rpc_enqueue(ws_ice_session_t *s) {
+    s->rpc_pending_next = (ws_ice_session_t *)(void *)-1;
+    if (g_ws_ice_rpc_pending_rear) {
+        g_ws_ice_rpc_pending_rear->rpc_pending_next = s;
+        g_ws_ice_rpc_pending_rear = s;
+    } else {
+        g_ws_ice_rpc_pending_head = s;
+        g_ws_ice_rpc_pending_rear = s;
+    }
+}
+
+static void ws_ice_rpc_remove(ws_ice_session_t *s) {
+    if (!g_ws_ice_rpc_pending_head || !s->rpc_pending_next) return;
+
+    if (g_ws_ice_rpc_pending_head == s) {
+        g_ws_ice_rpc_pending_head = s->rpc_pending_next;
+        s->rpc_pending_next = NULL;
+        if (g_ws_ice_rpc_pending_head == (void *)-1) {
+            g_ws_ice_rpc_pending_head = NULL;
+            g_ws_ice_rpc_pending_rear = NULL;
+        }
+        return;
+    }
+
+    ws_ice_session_t *prev = g_ws_ice_rpc_pending_head;
+    while (prev->rpc_pending_next != s) {
+        if (prev->rpc_pending_next == (void *)-1) return;
+        prev = prev->rpc_pending_next;
+    }
+    prev->rpc_pending_next = s->rpc_pending_next;
+    if (s->rpc_pending_next == (void *)-1)
+        g_ws_ice_rpc_pending_rear = prev;
+    s->rpc_pending_next = NULL;
+}
+
+/* 服务器生成 RPC 错误 RESP（二进制帧） */
+static void ws_ice_send_rpc_code(ws_ice_session_t *s, uint16_t sid, uint8_t code) {
+    ws_ice_client_t *c = (ws_ice_client_t *)s->base.client;
+    if (!ws_ice_client_online(c)) return;
+
+    uint8_t buf[P2P_WS_ICE_BIN_RESP_MIN];
+    buf[0] = P2P_WS_ICE_BIN_RESP;
+    nwrite_l(buf + 1, s->base.session_id);
+    nwrite_s(buf + 1 + P2P_SESS_ID_PSZ, sid);
+    buf[1 + P2P_SESS_ID_PSZ + 2] = code;
+    ws_server_send_bin(g_ws_srv, c->cid, buf, sizeof(buf));
+}
+
+/* 释放会话：通知对端 + 清理 RPC + 调用共享 free_session */
 static void ws_ice_free_session(ws_ice_session_t *s) {
     if (!s) return;
+
+    free(s->pending_sync);
+    s->pending_sync = NULL;
+
+    /* 清理本端 RPC 待确认状态 */
+    if (s->rpc_pending_sid) {
+        ws_ice_rpc_remove(s);
+        s->rpc_pending_sid = 0;
+    }
 
     if (PEER_ONLINE(s)) {
         ws_ice_session_t *peer_s = s->peer;
         ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
+
+        /* 对端有等待本端的 RESP → 返回 peer_offline 错误 */
+        if (peer_s->rpc_pending_sid) {
+            ws_ice_send_rpc_code(peer_s, peer_s->rpc_pending_sid, P2P_MSG_ERR_PEER_OFFLINE);
+            ws_ice_rpc_remove(peer_s);
+            peer_s->rpc_pending_sid = 0;
+        }
 
         char buf[16];
         snprintf(buf, sizeof(buf), "FIN %u", peer_s->base.session_id);
@@ -3171,155 +3263,427 @@ static void ws_ice_invalidate_client(ws_ice_client_t *client, bool do_free) {
 //-----------------------------------------------------------------------------
 
 /* 处理 SYNC0 消息：创建/恢复会话 */
+/* 追加 SYNC0 预缓存负载（对端未在线时保存，对端上线后转发）
+ * 返回: 0=成功, -1=超出 sync_max / OOM（busy） */
+static int ws_ice_cache_payload(ws_ice_session_t *s, const char *payload) {
+    if (!payload || !payload[0]) return 0;
+    size_t new_len = strlen(payload);
+    size_t cur_len = s->pending_sync ? strlen(s->pending_sync) : 0;
+    size_t sep = (cur_len > 0) ? 1 : 0;            /* \n 分隔追加部分 */
+    if (cur_len + sep + new_len > WS_ICE_SYNC_PAYLOAD_MAX) return -1;
+    char *buf = (char *)realloc(s->pending_sync, cur_len + sep + new_len + 1);
+    if (!buf) return -1;
+    if (sep) buf[cur_len] = '\n';
+    memcpy(buf + cur_len + sep, payload, new_len + 1);
+    s->pending_sync = buf;
+    return 0;
+}
+
+/* 生成 SYNC0 应答（可选携带对端预缓存负载） */
+static void ws_ice_send_sync0(ws_client_id_t cid, const char *peer_id,
+                              uint32_t session_id, bool online,
+                              char *cached_payload) {
+    if (cached_payload) {
+        /* SYNC0 <peer_id> <session_id> online\n<payload> */
+        size_t plen = strlen(cached_payload);
+        size_t hdr = 8 + P2P_PEER_ID_MAX + 12 + 8;
+        char *buf = malloc(hdr + 1 + plen + 1);
+        if (buf) {
+            int n = snprintf(buf, hdr, "SYNC0 %s %u online\n", peer_id, session_id);
+            memcpy(buf + n, cached_payload, plen + 1);
+            ws_server_send_text(g_ws_srv, cid, buf);
+            free(buf);
+        }
+        free(cached_payload);
+    } else {
+        char buf[8 + P2P_PEER_ID_MAX + 12 + 8];
+        snprintf(buf, sizeof(buf), "SYNC0 %s %u %s",
+                 peer_id, session_id, online ? "online" : "offline");
+        ws_server_send_text(g_ws_srv, cid, buf);
+    }
+}
+
+/* 发送 SYNC0 confirm 通知：告知发送方预缓存负载已转发至对端 */
+static void ws_ice_send_sync0_confirm(ws_client_id_t cid, const char *peer_id,
+                                       uint32_t session_id, int confirmed) {
+    char buf[8 + P2P_PEER_ID_MAX + 12 + 16 + 12];
+    snprintf(buf, sizeof(buf), "SYNC0 %s %u confirm %d",
+             peer_id, session_id, confirmed);
+    ws_server_send_text(g_ws_srv, cid, buf);
+}
+
 static void ws_ice_handle_sync0(ws_ice_client_t *client,
-                                const char *remote_peer_id) {
+                                const char *remote_peer_id,
+                                const char *payload) {
     if (!remote_peer_id || remote_peer_id[0] == '\0') {
         ws_server_send_text(g_ws_srv, client->cid, "SYNC0 FAIL empty peer_id");
         return;
     }
 
-    /* 检查是否已有到该对端的会话 */
-    for (session_t *s = client->base.sessions; s; s = s->next) {
-        session_pair_t *pair = s->pair;
-        if (!pair) continue;
-        int my_side = (pair->sessions[0] == s) ? 0 : 1;
-        if (strcmp(pair->peer_id[1 - my_side], remote_peer_id) != 0) continue;
+    ws_ice_session_t *local_s = NULL, *remote_s = NULL;
+    ret_t side = build_session(&client->base, remote_peer_id,
+                               (session_t **)&local_s, (session_t **)&remote_s,
+                               sizeof(ws_ice_session_t));
 
-        ws_ice_session_t *ws_s = (ws_ice_session_t *)s;
-
-        /* 如果对端标记已死亡，清除标记准备重新配对 */
-        if (ws_s->peer == (ws_ice_session_t *)(void *)-1) {
-            ws_s->peer = NULL;
-            session_t *other = pair->sessions[1 - my_side];
-            if (other) {
-                ws_ice_session_t *other_ws = (ws_ice_session_t *)other;
-                if (other_ws->peer == NULL || other_ws->peer == (ws_ice_session_t *)(void *)-1) {
-                    ws_s->peer = other_ws;
-                    other_ws->peer = ws_s;
-                    print("I:", "[WS_ICE] re-paired '%s' <-> '%s'\n",
-                          client->base.local_peer_id, remote_peer_id);
-                }
-            }
-        }
-
-        bool peer_online = PEER_ONLINE(ws_s)
-            && ws_ice_client_online((ws_ice_client_t *)ws_s->peer->base.client);
-
-        char buf[8 + P2P_PEER_ID_MAX + 12 + 8];
-        snprintf(buf, sizeof(buf), "SYNC0 %s %u %s",
-                 remote_peer_id, s->session_id,
-                 peer_online ? "online" : "offline");
-        ws_server_send_text(g_ws_srv, client->cid, buf);
-
-        if (peer_online) {
-            char online_buf[12 + P2P_PEER_ID_MAX + 12 + 8];
-            ws_ice_client_t *peer_c = (ws_ice_client_t *)ws_s->peer->base.client;
-            snprintf(online_buf, sizeof(online_buf), "SYNC0 %s %u online",
-                     client->base.local_peer_id, ws_s->peer->base.session_id);
-            if (ws_ice_client_online(peer_c))
-                ws_server_send_text(g_ws_srv, peer_c->cid, online_buf);
-        }
+    if (side == E_OUT_OF_MEMORY) {
+        ws_server_send_text(g_ws_srv, client->cid, "SYNC0 FAIL OOM");
         return;
     }
 
-    /* 创建新会话 */
-    ws_ice_session_t *local_s = NULL, *remote_s = NULL;
-    int side = build_session(&client->base, remote_peer_id,
-                             (session_t **)&local_s, (session_t **)&remote_s,
-                             sizeof(ws_ice_session_t));
-    if (side < 0) {
-        print("E:", "[WS_ICE] build_session failed: '%s' -> '%s'\n",
-              client->base.local_peer_id, remote_peer_id);
+    /* 重复 SYNC0：幂等返回已有会话状态（WS_ICE 特有，relay 视为错误） */
+    if (side == E_DUPLICATE) {
+        for (session_t *s = client->base.sessions; s; s = s->next) {
+            session_pair_t *pair = s->pair;
+            if (!pair) continue;
+            int my_side = (pair->sessions[0] == s) ? 0 : 1;
+            if (strcmp(pair->peer_id[1 - my_side], remote_peer_id) != 0) continue;
+
+            ws_ice_session_t *ws_s = (ws_ice_session_t *)s;
+
+            /* 对端标记已死亡，尝试重新配对 */
+            if (ws_s->peer == (ws_ice_session_t *)(void *)-1) {
+                ws_s->peer = NULL;
+                session_t *other = pair->sessions[1 - my_side];
+                if (other) {
+                    ws_ice_session_t *other_ws = (ws_ice_session_t *)other;
+                    if (!other_ws->peer || other_ws->peer == (ws_ice_session_t *)(void *)-1) {
+                        ws_s->peer = other_ws;
+                        other_ws->peer = ws_s;
+                        print("I:", "[WS_ICE] re-paired '%s' <-> '%s'\n",
+                              client->base.local_peer_id, remote_peer_id);
+                    }
+                }
+            }
+
+            /* 追加本端预缓存 */
+            bool payload_busy = (ws_ice_cache_payload(ws_s, payload) != 0);
+
+            bool peer_online = PEER_ONLINE(ws_s)
+                && ws_ice_client_online((ws_ice_client_t *)ws_s->peer->base.client);
+
+            if (peer_online) {
+                ws_ice_client_t *peer_c = (ws_ice_client_t *)ws_s->peer->base.client;
+                ws_ice_session_t *peer_s = ws_s->peer;
+
+                /* 记录待确认大小（交换后指针转移/清空） */
+                int local_confirmed  = ws_s->pending_sync  ? (int)strlen(ws_s->pending_sync)  : 0;
+                int peer_confirmed   = peer_s->pending_sync ? (int)strlen(peer_s->pending_sync) : 0;
+
+                /* 取出对端缓存发给本端 */
+                ws_ice_send_sync0(client->cid, remote_peer_id, s->session_id,
+                                  true, peer_s->pending_sync);
+                peer_s->pending_sync = NULL;  /* 所有权已转移 */
+
+                /* 取出本端缓存发给对端 */
+                ws_ice_send_sync0(peer_c->cid, client->base.local_peer_id,
+                                  peer_s->base.session_id,
+                                  true, ws_s->pending_sync);
+                ws_s->pending_sync = NULL;
+
+                /* 发送 confirm（各方得知自己的缓存已被转发） */
+                if (local_confirmed)
+                    ws_ice_send_sync0_confirm(client->cid, remote_peer_id,
+                                              s->session_id, local_confirmed);
+                if (peer_confirmed)
+                    ws_ice_send_sync0_confirm(peer_c->cid, client->base.local_peer_id,
+                                              peer_s->base.session_id, peer_confirmed);
+            } else {
+                ws_ice_send_sync0(client->cid, remote_peer_id, s->session_id,
+                                  false, NULL);
+            }
+
+            /* 新增 payload 超出缓存上限 → busy */
+            if (payload_busy) {
+                char busy[8 + P2P_PEER_ID_MAX + 12 + 8];
+                snprintf(busy, sizeof(busy), "SYNC0 %s %u busy",
+                         remote_peer_id, s->session_id);
+                ws_server_send_text(g_ws_srv, client->cid, busy);
+            }
+            return;
+        }
+        return;  /* E_DUPLICATE but session not found — shouldn't happen */
+    }
+
+    if (side < E_NONE) {
+        print("E:", "[WS_ICE] build_session failed: '%s' -> '%s' (err=%d)\n",
+              client->base.local_peer_id, remote_peer_id, side);
         ws_server_send_text(g_ws_srv, client->cid, "SYNC0 FAIL internal");
         return;
     }
 
+    print("V:", "[WS_ICE] SYNC0: local='%s', remote='%s', side=%d, peer_online=%d\n",
+          client->base.local_peer_id, remote_peer_id, side, remote_s ? 1 : 0);
+
+    /* 建立双向引用关系（对齐 relay: if (!peer) peer = ...） */
     bool peer_online = false;
+    bool payload_busy = false;
     if (remote_s) {
-        ws_ice_session_t *remote_ws = (ws_ice_session_t *)remote_s;
-        if (remote_ws->peer != (ws_ice_session_t *)(void *)-1) {
-            local_s->peer = remote_ws;
-            remote_ws->peer = local_s;
 
-            ws_ice_client_t *remote_c = (ws_ice_client_t *)remote_s->base.client;
-            peer_online = ws_ice_client_online(remote_c);
+        if (!local_s->peer) local_s->peer = remote_s;
+        if (!remote_s->peer || remote_s->peer == (ws_ice_session_t *)(void *)-1)
+            remote_s->peer = local_s;
 
-            print("I:", "[WS_ICE] paired '%s' <-> '%s' (session=%u/%u)\n",
-                  client->base.local_peer_id, remote_peer_id,
-                  local_s->base.session_id, remote_s->base.session_id);
+        //-------
 
-            if (peer_online) {
-                char buf[12 + P2P_PEER_ID_MAX + 12 + 8];
-                snprintf(buf, sizeof(buf), "SYNC0 %s %u online",
-                         client->base.local_peer_id, remote_s->base.session_id);
-                if (ws_ice_client_online(remote_c))
-                    ws_server_send_text(g_ws_srv, remote_c->cid, buf);
-            }
+        ws_ice_client_t *remote_c = (ws_ice_client_t *)remote_s->base.client;
+        peer_online = ws_ice_client_online(remote_c);
+
+        print("I:", "[WS_ICE] paired '%s' <-> '%s' (session=%u/%u)\n",
+              client->base.local_peer_id, remote_peer_id,
+              local_s->base.session_id, remote_s->base.session_id);
+
+        /* 缓存本端 payload */
+        payload_busy = (ws_ice_cache_payload(local_s, payload) != 0);
+
+        if (peer_online) {
+            /* 记录待确认大小 */
+            int local_confirmed  = local_s->pending_sync  ? (int)strlen(local_s->pending_sync)  : 0;
+            int peer_confirmed   = remote_s->pending_sync ? (int)strlen(remote_s->pending_sync) : 0;
+
+            /* 取出对端缓存发给本端 */
+            ws_ice_send_sync0(client->cid, remote_peer_id,
+                              local_s->base.session_id,
+                              true, remote_s->pending_sync);
+            remote_s->pending_sync = NULL;
+
+            /* 取出本端缓存发给对端 */
+            ws_ice_send_sync0(remote_c->cid, client->base.local_peer_id,
+                              remote_s->base.session_id,
+                              true, local_s->pending_sync);
+            local_s->pending_sync = NULL;
+
+            /* 发送 confirm */
+            if (local_confirmed)
+                ws_ice_send_sync0_confirm(client->cid, remote_peer_id,
+                                          local_s->base.session_id, local_confirmed);
+            if (peer_confirmed)
+                ws_ice_send_sync0_confirm(remote_c->cid, client->base.local_peer_id,
+                                          remote_s->base.session_id, peer_confirmed);
         }
+    } else {
+        /* 无对端：缓存 payload */
+        payload_busy = (ws_ice_cache_payload(local_s, payload) != 0);
     }
 
-    char buf[8 + P2P_PEER_ID_MAX + 12 + 8];
-    snprintf(buf, sizeof(buf), "SYNC0 %s %u %s",
-             remote_peer_id, local_s->base.session_id,
-             peer_online ? "online" : "offline");
-    ws_server_send_text(g_ws_srv, client->cid, buf);
+    /* 通知本端（peer_online 时已在上方发送） */
+    if (!peer_online) {
+        ws_ice_send_sync0(client->cid, remote_peer_id,
+                          local_s->base.session_id, false, NULL);
+    }
+
+    /* payload 超出缓存上限 → busy */
+    if (payload_busy) {
+        char busy[8 + P2P_PEER_ID_MAX + 12 + 8];
+        snprintf(busy, sizeof(busy), "SYNC0 %s %u busy",
+                 remote_peer_id, local_s->base.session_id);
+        ws_server_send_text(g_ws_srv, client->cid, busy);
+    }
 
     print("I:", "[WS_ICE] session created: '%s' -> '%s' (id=%u, peer_%s)\n",
           client->base.local_peer_id, remote_peer_id,
           local_s->base.session_id, peer_online ? "online" : "offline");
 }
 
-/* 处理 SYNC 消息：转发给目标 peer */
-static void ws_ice_handle_sync(ws_ice_client_t *client,
-                               const char *to_peer_id, const char *payload) {
-    /* 查找目标 client */
-    ws_ice_client_t *target = NULL;
-    HASH_FIND_STR(g_ws_ice_clients, to_peer_id, target);
-    if (!target || !ws_ice_client_online(target)) {
-        print("V:", "[WS_ICE] SYNC target '%s' offline (from '%s')\n",
-              to_peer_id, client->base.local_peer_id);
-        return;
+/* 处理 SYNC 消息：按 session_id 路由转发（对齐 relay: 重写 session_id 后投递） */
+static void ws_ice_handle_sync(ws_ice_session_t *ws_s, const char *payload) {
+    ws_ice_client_t *client = (ws_ice_client_t *)ws_s->base.client;
+    uint32_t session_id = ws_s->base.session_id;
+
+    size_t pay_len = payload ? strlen(payload) : 0;
+    if (!pay_len) return;
+
+    /* 对端在线 → 立即转发 + confirm */
+    if (PEER_ONLINE(ws_s)) {
+        ws_ice_session_t *peer_s = ws_s->peer;
+        ws_ice_client_t *peer_c = (ws_ice_client_t *)peer_s->base.client;
+        if (ws_ice_client_online(peer_c)) {
+            /* 构造 "SYNC <peer_session_id>\n<payload>" */
+            size_t buf_len = 5 + 12 + 1 + pay_len;
+            char *msg = (char *)malloc(buf_len + 1);
+            if (msg) {
+                int n = snprintf(msg, buf_len + 1, "SYNC %u\n", peer_s->base.session_id);
+                memcpy(msg + n, payload, pay_len + 1);
+                ws_server_send_text(g_ws_srv, peer_c->cid, msg);
+                free(msg);
+            }
+            /* confirm */
+            char confirm[48];
+            snprintf(confirm, sizeof(confirm), "SYNC %u confirm %d",
+                     session_id, (int)pay_len);
+            ws_server_send_text(g_ws_srv, client->cid, confirm);
+
+            print("V:", "[WS_ICE] SYNC forwarded: sid=%u -> peer_sid=%u (%zu bytes)\n",
+                  session_id, peer_s->base.session_id, pay_len);
+            return;
+        }
     }
 
-    /* 构造 "SYNC <from_peer_id>\n<payload>" */
-    size_t from_len = strlen(client->base.local_peer_id);
-    size_t pay_len  = payload ? strlen(payload) : 0;
-    size_t msg_len  = 5 + from_len + 1 + pay_len;
-    char *msg = (char *)malloc(msg_len + 1);
-    if (!msg) return;
-    snprintf(msg, msg_len + 1, "SYNC %s\n%s", client->base.local_peer_id,
-             payload ? payload : "");
-    ws_server_send_text(g_ws_srv, target->cid, msg);
-    free(msg);
+    /* 对端离线 → 缓存到 pending_sync */
+    if (ws_ice_cache_payload(ws_s, payload) != 0) {
+        char busy[48];
+        snprintf(busy, sizeof(busy), "SYNC %u busy", session_id);
+        ws_server_send_text(g_ws_srv, client->cid, busy);
+    }
 
-    print("V:", "[WS_ICE] SYNC '%s' -> '%s' (%zu bytes)\n",
-          client->base.local_peer_id, to_peer_id, pay_len);
+    print("V:", "[WS_ICE] SYNC cached: sid=%u (%zu bytes, peer offline)\n",
+          session_id, pay_len);
 }
 
 /* 处理 FIN 消息：客户端主动断开会话 */
-static void ws_ice_handle_fin(ws_ice_client_t *client, uint32_t session_id) {
-    /* 查找 session */
-    session_t *_s = NULL;
-    HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
-    ws_ice_session_t *ws_s = (ws_ice_session_t *)_s;
-    if (!ws_s || _s->client != &client->base) {
-        print("W:", "[WS_ICE] FIN: unknown session_id=%u from '%s'\n",
-              session_id, client->base.local_peer_id);
+static void ws_ice_handle_fin(ws_ice_session_t *ws_s) {
+    print("I:", "[WS_ICE] FIN from '%s' (session_id=%u)\n",
+          ws_s->base.client->local_peer_id, ws_s->base.session_id);
+
+    ws_ice_free_session(ws_s);
+}
+
+/* 处理 PACKET — P2P 数据包中继（重写 session_id，透传 payload） */
+static void ws_ice_handle_packet(ws_ice_session_t *ws_s,
+                                 const uint8_t *data, size_t len) {
+    if (len < P2P_WS_ICE_BIN_PACKET_MIN) {
+        print("E:", "[WS_ICE] PACKET: bad frame len=%zu\n", len);
         return;
     }
 
-    print("I:", "[WS_ICE] FIN from '%s' (session_id=%u)\n",
-          client->base.local_peer_id, session_id);
+    if (!PEER_ONLINE(ws_s)) {
+        print("V:", "[WS_ICE] PACKET: peer offline (sid=%u)\n", ws_s->base.session_id);
+        return;
+    }
 
-    ws_ice_free_session(ws_s);
+    ws_ice_session_t *peer_s = ws_s->peer;
+    ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
+    if (!ws_ice_client_online(peer_c)) return;
+
+    /* 重写 session_id → 对端 session_id，转发整帧 */
+    uint8_t *fwd = (uint8_t *)malloc(len);
+    if (!fwd) return;
+    memcpy(fwd, data, len);
+    nwrite_l(fwd + 1, peer_s->base.session_id);
+    ws_server_send_bin(g_ws_srv, peer_c->cid, fwd, len);
+    free(fwd);
+}
+
+/* 处理 REQ — RPC 请求转发 */
+static void ws_ice_handle_req(ws_ice_session_t *ws_s,
+                              const uint8_t *data, size_t len) {
+    if (len < P2P_WS_ICE_BIN_REQ_MIN) {
+        print("E:", "[WS_ICE] REQ: bad frame len=%zu\n", len);
+        return;
+    }
+
+    uint16_t sid = nget_s(data + 1 + P2P_SESS_ID_PSZ);
+    uint8_t  msg = data[1 + P2P_SESS_ID_PSZ + 2];
+    (void)msg;
+
+    print("V:", "[WS_ICE] REQ: '%s' sid=%u msg=%u len=%zu\n",
+          ws_s->base.client->local_peer_id, sid, msg, len);
+
+    /* 对端检查 */
+    if (!PEER_ONLINE(ws_s)) {
+        print("W:", "[WS_ICE] REQ: peer offline (ses_id=%u)\n", ws_s->base.session_id);
+        ws_ice_send_rpc_code(ws_s, sid, P2P_MSG_ERR_PEER_OFFLINE);
+        return;
+    }
+
+    ws_ice_session_t *peer_s = ws_s->peer;
+    ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
+    if (!ws_ice_client_online(peer_c)) {
+        ws_ice_send_rpc_code(ws_s, sid, P2P_MSG_ERR_PEER_OFFLINE);
+        return;
+    }
+
+    /* RPC 忙检查 */
+    if (ws_s->rpc_pending_sid) {
+        print("W:", "[WS_ICE] REQ: rpc busy (pending sid=%u)\n", ws_s->rpc_pending_sid);
+        ws_ice_send_rpc_code(ws_s, sid, P2P_MSG_ERR_TIMEOUT);  /* 客户端视同超时重试 */
+        return;
+    }
+
+    /* 重写 session_id → 对端 session_id，转发 */
+    uint8_t *fwd = (uint8_t *)malloc(len);
+    if (!fwd) return;
+    memcpy(fwd, data, len);
+    nwrite_l(fwd + 1, peer_s->base.session_id);
+    ws_server_send_bin(g_ws_srv, peer_c->cid, fwd, len);
+    free(fwd);
+
+    /* 记录 pending（等 RESP 回来解锁） */
+    ws_s->rpc_pending_sid  = sid;
+    ws_s->rpc_sent_time    = P_tick_ms();
+    ws_ice_rpc_enqueue(ws_s);
+}
+
+/* 处理 RESP — RPC 响应转发 */
+static void ws_ice_handle_resp(ws_ice_session_t *ws_s,
+                               const uint8_t *data, size_t len) {
+    if (len < P2P_WS_ICE_BIN_RESP_MIN) {
+        print("E:", "[WS_ICE] RESP: bad frame len=%zu\n", len);
+        return;
+    }
+
+    uint16_t sid  = nget_s(data + 1 + P2P_SESS_ID_PSZ);
+    uint8_t  code = data[1 + P2P_SESS_ID_PSZ + 2];
+
+    print("V:", "[WS_ICE] RESP: '%s' sid=%u code=%u\n",
+          ws_s->base.client->local_peer_id, sid, code);
+
+    /* 请求方检查 */
+    if (!PEER_ONLINE(ws_s)) {
+        print("W:", "[WS_ICE] RESP: requester offline, discarding\n");
+        return;
+    }
+
+    ws_ice_session_t *peer_s = ws_s->peer;
+    ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
+    if (!ws_ice_client_online(peer_c)) return;
+
+    /* sid 校验 */
+    if (peer_s->rpc_pending_sid != sid) {
+        print("W:", "[WS_ICE] RESP: sid mismatch (got=%u, pending=%u)\n",
+              sid, peer_s->rpc_pending_sid);
+        return;
+    }
+
+    /* 重写 session_id → 请求方 session_id，转发 */
+    uint8_t *fwd = (uint8_t *)malloc(len);
+    if (!fwd) return;
+    memcpy(fwd, data, len);
+    nwrite_l(fwd + 1, peer_s->base.session_id);
+    ws_server_send_bin(g_ws_srv, peer_c->cid, fwd, len);
+    free(fwd);
+
+    /* 解锁 RPC pending */
+    ws_ice_rpc_remove(peer_s);
+    peer_s->rpc_pending_sid = 0;
+}
+
+/* WS ICE RPC 超时检查（与 retry_relay_rpc_pending 同构） */
+static void ws_ice_check_rpc_timeout(uint64_t now) {
+    while (g_ws_ice_rpc_pending_head) {
+        ws_ice_session_t *s = g_ws_ice_rpc_pending_head;
+
+        if (tick_diff(now, s->rpc_sent_time) < MSG_REQ_MAX_RETRY * MSG_RPC_RETRY_INTERVAL_MS) return;
+
+        /* 移除队头 */
+        g_ws_ice_rpc_pending_head = s->rpc_pending_next;
+        if (g_ws_ice_rpc_pending_head == (void *)-1) {
+            g_ws_ice_rpc_pending_head = NULL;
+            g_ws_ice_rpc_pending_rear = NULL;
+        }
+        s->rpc_pending_next = NULL;
+
+        uint16_t sid = s->rpc_pending_sid;
+        s->rpc_pending_sid = 0;
+
+        print("W:", "[WS_ICE] RPC timeout: sid=%u (ses_id=%u)\n", sid, s->base.session_id);
+        ws_ice_send_rpc_code(s, sid, P2P_MSG_ERR_TIMEOUT);
+    }
 }
 
 //-----------------------------------------------------------------------------
 
 /* WS on_message 回调 */
-static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
-                               char *msg, size_t len,
-                               void *user_data) {
+static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid, char *msg, size_t len, void *user_data) {
     (void)user_data;
     if (len == 0) return;
 
@@ -3331,12 +3695,12 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
         }
     }
 
-    if (strncmp(msg, "ONLINE ", 7) == 0) {
-        char *peer_id = msg + 7;
+    if (strncmp(msg, "REG ", 4) == 0) {
+        char *peer_id = msg + 4;
         size_t n = strlen(peer_id);
         while (n > 0 && (peer_id[n - 1] == '\n' || peer_id[n - 1] == '\r')) peer_id[--n] = '\0';
         if (!peer_id[0]) {
-            ws_server_send_text(srv, cid, "ONLINE FAIL empty peer_id");
+            ws_server_send_text(srv, cid, "REG FAIL empty peer_id");
             return;
         }
 
@@ -3347,7 +3711,8 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
         if (by_name) {
             if (by_name->cid == cid) {
                 /* 重复注册同一连接，幂等 */
-                ws_server_send_text(srv, cid, "ONLINE OK");
+                char ok[32]; snprintf(ok, sizeof(ok), "REG OK %d", WS_ICE_SYNC_PAYLOAD_MAX);
+                ws_server_send_text(srv, cid, ok);
                 return;
             }
             /* 重连：踢掉旧 WS 连接，保留 client 和会话 */
@@ -3362,9 +3727,10 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
             by_name->base.last_active = P_tick_ms();
 
             print("I:", "[WS_ICE] peer '%s' reconnected (cid=%d)\n", peer_id, cid);
-            ws_server_send_text(srv, cid, "ONLINE OK");
+            { char ok[32]; snprintf(ok, sizeof(ok), "REG OK %d", WS_ICE_SYNC_PAYLOAD_MAX);
+              ws_server_send_text(srv, cid, ok); }
 
-            /* 通知已配对会话的双方 */
+            /* 通知已配对会话的双方 + 转发预缓存负载 */
             for (session_t *s = by_name->base.sessions; s; s = s->next) {
                 ws_ice_session_t *ws_s = (ws_ice_session_t *)s;
                 if (!PEER_ONLINE(ws_s)) continue;
@@ -3373,14 +3739,29 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
                 ws_ice_client_t  *peer_c = (ws_ice_client_t *)peer_s->base.client;
 
                 if (ws_ice_client_online(peer_c)) {
-                    char buf[12 + P2P_PEER_ID_MAX + 12 + 8];
-                    snprintf(buf, sizeof(buf), "SYNC0 %s %u online",
-                             by_name->base.local_peer_id, peer_s->base.session_id);
-                    ws_server_send_text(g_ws_srv, peer_c->cid, buf);
+                    /* 记录待确认大小（转发后指针转移/清空） */
+                    int ws_confirmed   = ws_s->pending_sync  ? (int)strlen(ws_s->pending_sync)  : 0;
+                    int peer_confirmed = peer_s->pending_sync ? (int)strlen(peer_s->pending_sync) : 0;
 
-                    snprintf(buf, sizeof(buf), "SYNC0 %s %u online",
-                             peer_c->base.local_peer_id, s->session_id);
-                    ws_server_send_text(g_ws_srv, by_name->cid, buf);
+                    /* 给对端：通知重连方上线 + 转发重连方缓存给对端 */
+                    ws_ice_send_sync0(peer_c->cid, by_name->base.local_peer_id,
+                                      peer_s->base.session_id,
+                                      true, ws_s->pending_sync);
+                    ws_s->pending_sync = NULL;
+
+                    /* 给重连方：通知对端在线 + 转发对端缓存给重连方 */
+                    ws_ice_send_sync0(by_name->cid, peer_c->base.local_peer_id,
+                                      s->session_id,
+                                      true, peer_s->pending_sync);
+                    peer_s->pending_sync = NULL;
+
+                    /* 发送 confirm */
+                    if (ws_confirmed)
+                        ws_ice_send_sync0_confirm(by_name->cid, peer_c->base.local_peer_id,
+                                                  s->session_id, ws_confirmed);
+                    if (peer_confirmed)
+                        ws_ice_send_sync0_confirm(peer_c->cid, by_name->base.local_peer_id,
+                                                  peer_s->base.session_id, peer_confirmed);
                 }
             }
             return;
@@ -3396,7 +3777,7 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
         /* 新建 client */
         ws_ice_client_t *nc = (ws_ice_client_t *)calloc(1, sizeof(*nc));
         if (!nc) {
-            ws_server_send_text(srv, cid, "ONLINE FAIL OOM");
+            ws_server_send_text(srv, cid, "REG FAIL OOM");
             return;
         }
         nc->base.valid = true;
@@ -3408,12 +3789,23 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
                         strlen(nc->base.local_peer_id), nc);
 
         print("I:", "[WS_ICE] peer '%s' registered (cid=%d)\n", peer_id, cid);
-        ws_server_send_text(srv, cid, "ONLINE OK");
+        { char ok[32]; snprintf(ok, sizeof(ok), "REG OK %d", WS_ICE_SYNC_PAYLOAD_MAX);
+          ws_server_send_text(srv, cid, ok); }
+        return;
+    }
+
+    /* OFF — 主动下线，立即释放服务器资源 */
+    if (strncmp(msg, "OFF", 3) == 0 && (msg[3] == '\0' || msg[3] == '\n' || msg[3] == '\r')) {
+        if (client) {
+            print("I:", "[WS_ICE] peer '%s' OFF (cid=%d)\n",
+                  client->base.local_peer_id, cid);
+            ws_ice_invalidate_client(client, true);
+        }
         return;
     }
 
     if (!client) {
-        ws_server_send_text(srv, cid, "ONLINE FAIL not registered");
+        ws_server_send_text(srv, cid, "REG FAIL not registered");
         return;
     }
 
@@ -3421,38 +3813,94 @@ static void ws_ice_on_message(ws_server_t *srv, ws_client_id_t cid,
 
     if (strncmp(msg, "SYNC0 ", 6) == 0) {
         char *remote = msg + 6;
+        char *nl = strchr(remote, '\n');
+        const char *payload = "";
+        if (nl) { *nl = '\0'; payload = nl + 1; }
         size_t n = strlen(remote);
         while (n > 0 && (remote[n - 1] == '\n' || remote[n - 1] == '\r'))
             remote[--n] = '\0';
-        ws_ice_handle_sync0(client, remote);
+        ws_ice_handle_sync0(client, remote, payload);
         return;
     }
 
     if (strncmp(msg, "SYNC ", 5) == 0) {
-        char *to = msg + 5;
-        char *nl = strchr(to, '\n');
-        if (nl) { *nl = '\0';
-            size_t n = strlen(to);
-            if (n > 0 && to[n - 1] == '\r') to[n - 1] = '\0';
-            ws_ice_handle_sync(client, to, nl + 1);
-        } else {
-            ws_ice_handle_sync(client, to, "");
+        char *sid_str = msg + 5;
+        char *nl = strchr(sid_str, '\n');
+        const char *payload = "";
+        if (nl) { *nl = '\0'; payload = nl + 1; }
+        uint32_t session_id = (uint32_t)strtoul(sid_str, NULL, 10);
+
+        session_t *_s = NULL;
+        HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
+        ws_ice_session_t *ws_s = (ws_ice_session_t *)_s;
+        if (!ws_s || _s->client != &client->base) {
+            print("W:", "[WS_ICE] SYNC: unknown session_id=%u from '%s'\n",
+                  session_id, client->base.local_peer_id);
+            return;
         }
+        ws_ice_handle_sync(ws_s, payload);
         return;
     }
 
     if (strncmp(msg, "FIN ", 4) == 0) {
         uint32_t sid = (uint32_t)strtoul(msg + 4, NULL, 10);
-        ws_ice_handle_fin(client, sid);
+
+        session_t *_s = NULL;
+        HASH_FIND(hh_session, g_sessions, &sid, sizeof(uint32_t), _s);
+        ws_ice_session_t *ws_s = (ws_ice_session_t *)_s;
+        if (!ws_s || _s->client != &client->base) {
+            print("W:", "[WS_ICE] FIN: unknown session_id=%u from '%s'\n",
+                  sid, client->base.local_peer_id);
+            return;
+        }
+        ws_ice_handle_fin(ws_s);
         return;
     }
 
     print("V:", "[WS_ICE] unknown msg from cid=%d: %.32s...\n", cid, msg);
 }
 
+/* WS on_data 回调 — 二进制帧（PACKET 中继 + MSG RPC） */
+static void ws_ice_on_data(ws_server_t *srv, ws_client_id_t cid, const uint8_t *data, size_t len, void *user_data) {
+    (void)srv; (void)user_data;
+    if (len < P2P_WS_ICE_BIN_HDR_SIZE) return;      /* 至少 type(1)+session_id(4) */
+
+    /* 查找 client */
+    ws_ice_client_t *client = NULL;
+    { ws_ice_client_t *c, *tmp;
+        HASH_ITER(hh, g_ws_ice_clients, c, tmp) {
+            if (c->cid == cid) { client = c; break; }
+        }
+    }
+    if (!client) return;
+
+    client->base.last_active = P_tick_ms();
+
+    uint8_t  type       = data[0];
+    uint32_t session_id = nget_l(data + 1);
+
+    /* 查找 session */
+    session_t *_s = NULL;
+    HASH_FIND(hh_session, g_sessions, &session_id, sizeof(uint32_t), _s);
+    ws_ice_session_t *ws_s = (ws_ice_session_t *)_s;
+    if (!ws_s || _s->client != &client->base) {
+        print("W:", "[WS_ICE] BIN: unknown session_id=%u type=0x%02x from '%s'\n",
+              session_id, type, client->base.local_peer_id);
+        return;
+    }
+
+    switch (type) {
+    case P2P_WS_ICE_BIN_PACKET: ws_ice_handle_packet(ws_s, data, len); break;
+    case P2P_WS_ICE_BIN_REQ:    ws_ice_handle_req(ws_s, data, len);    break;
+    case P2P_WS_ICE_BIN_RESP:   ws_ice_handle_resp(ws_s, data, len);   break;
+    default:
+        print("W:", "[WS_ICE] BIN: unknown type=0x%02x from '%s'\n", type, client->base.local_peer_id);
+        break;
+    }
+}
+
 /* WS on_disconnect 回调：标记离线 + 通知对端 */
-static void ws_ice_on_disconnect(ws_server_t *srv, ws_client_id_t cid,
-                                  void *user_data) {
+static void ws_ice_on_disconnect(ws_server_t *srv, ws_client_id_t cid, void *user_data) {
     (void)srv; (void)user_data;
 
     /* 查找当前 cid 对应的 client */
@@ -3686,7 +4134,8 @@ int main(int argc, char *argv[]) {
 #ifdef WITH_WSLAY
     if (ARGS_ws.i64) {
         ws_server_cfg_t ws_cfg = {0};
-        ws_cfg.on_message    = ws_ice_on_message;       /* ICE 信令路由 */
+        ws_cfg.on_message    = ws_ice_on_message;       /* ICE 信令路由（text frame） */
+        ws_cfg.on_data       = ws_ice_on_data;          /* PACKET/RPC 路由（binary frame） */
         ws_cfg.on_disconnect = ws_ice_on_disconnect;    /* 断连清理 peer 注册 */
         /* ws_port>0: 独立端口，ws_server 自建监听；否则嵌入同端口（port=0）*/
         uint16_t ws_listen_port = (uint16_t)(ARGS_ws_port.i64 > 0 ? ARGS_ws_port.i64 : 0);
@@ -3723,6 +4172,9 @@ int main(int argc, char *argv[]) {
             if (g_compact_sync0_pending_head) retry_compact_sync0_pending(udp_fd, now);
             if (g_compact_rpc_pending_head) retry_compact_rpc_pending(udp_fd, now);
             if (g_relay_rpc_pending_head)  retry_relay_rpc_pending(now);
+#ifdef WITH_WSLAY
+            if (g_ws_ice_rpc_pending_head) ws_ice_check_rpc_timeout(now);
+#endif
             last_compact_retry_check = now;
         }
 

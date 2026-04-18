@@ -22,31 +22,32 @@
 #include "LANG.cn.h"
 
 // 命令行参数定义
-ARGS_I(false, log,          'l', "log",          LA_CS("Log level (0-5)", LA_S23, 23));
-ARGS_B(false, dtls,         0,   "dtls",         LA_CS("Enable DTLS (MbedTLS)", LA_S18, 18));
-ARGS_B(false, openssl,      0,   "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S19, 19));
-ARGS_B(false, pseudo,       0,   "pseudo",       LA_CS("Enable PseudoTCP", LA_S20, 20));
-ARGS_B(false, compact,      'c', "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is ICE/TCP)", LA_S32, 32));
-ARGS_B(false, echo,         0,   "echo",         LA_CS("Auto-echo received messages back to sender", LA_S12, 12));
-ARGS_S(false, server,       's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S24, 24));
-ARGS_S(false, github,       'G',   "github",     LA_CS("GitHub Token for Pub/Sub Signaling", LA_S22, 22));
-ARGS_S(false, gist,         'g',   "gist",       LA_CS("GitHub Gist ID for Pub/Sub Signaling", LA_S21, 21));
-ARGS_S(false, name,         'n', "name",         LA_CS("Your Peer Name", LA_S33, 33));
-ARGS_S(false, to,           't', "to",           LA_CS("Target Peer Name (if specified: active role)", LA_S27, 27));
-ARGS_S(false, stun,         0,   "stun",         LA_CS("STUN server address", LA_S26, 26));
-ARGS_B(false, wait_stun,     0,  "wait-stun",    LA_CS("Wait for STUN srflx candidates before sync", LA_S34, 34));
-ARGS_B(false, skip_stun_test, 0, "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", LA_S25, 25));
-ARGS_B(false, multi_srflx,   0,  "multi-srflx",  LA_CS("Enable multi-path Srflx (per-interface STUN)", 0, 0));
-ARGS_S(false, turn,         0,   "turn",         LA_CS("TURN server address", LA_S29, 29));
-ARGS_S(false, turn_user,    0,   "turn-user",    LA_CS("TURN username", LA_S30, 30));
-ARGS_S(false, turn_pass,    0,   "turn-pass",    LA_CS("TURN password", LA_S28, 28));
-ARGS_S(false, debugger,     0,   "debugger",     LA_CS("Debugger Name", LA_S13, 13));
-ARGS_B(false, no_host,      0,   "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S14, 14));
-ARGS_B(false, no_srflx,     0,   "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S17, 17));
-ARGS_B(false, no_relay,     0,   "no-relay",     LA_CS("Disable Relay candidates (for testing)", LA_S16, 16));
-ARGS_B(false, no_prflx,     0,   "no-prflx",     LA_CS("Disable Prflx candidates (for testing)", LA_S15, 15));
-ARGS_B(false, no_ipv4,      0,   "no-ipv4",      LA_CS("Disable IPv4 candidates (for testing)", LA_S41, 41));
-ARGS_B(false, no_ipv6,      0,   "no-ipv6",      LA_CS("Disable IPv6 candidates (for testing)", LA_S42, 42));
+ARGS_I(false, log,           'l', "log",          LA_CS("Log level (0-5)", LA_S23, 23));
+ARGS_B(false, dtls,           0,  "dtls",         LA_CS("Enable DTLS (MbedTLS)", LA_S18, 18));
+ARGS_B(false, openssl,        0,  "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S19, 19));
+ARGS_B(false, pseudo,         0,  "pseudo",       LA_CS("Enable PseudoTCP", LA_S20, 20));
+ARGS_B(false, compact,       'c', "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is TCP/RELAY)", LA_S32, 32));
+ARGS_B(false, websock,       'w', "websock",      LA_CS("Use WS_ICE mode (WebSocket signaling, default is TCP/RELAY)", LA_S35, 35));
+ARGS_B(false, echo,           0,  "echo",         LA_CS("Auto-echo received messages back to sender", LA_S12, 12));
+ARGS_S(false, server,        's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S24, 24));
+ARGS_S(false, github,        'G', "github",       LA_CS("GitHub Token for Pub/Sub Signaling", LA_S22, 22));
+ARGS_S(false, gist,          'g', "gist",         LA_CS("GitHub Gist ID for Pub/Sub Signaling", LA_S21, 21));
+ARGS_S(false, name,          'n', "name",         LA_CS("Your Peer Name", LA_S33, 33));
+ARGS_S(false, to,            't', "to",           LA_CS("Target Peer Name (if specified: active role)", LA_S27, 27));
+ARGS_S(false, stun,           0,  "stun",         LA_CS("STUN server address", LA_S26, 26));
+ARGS_B(false, wait_stun,      0,  "wait-stun",    LA_CS("Wait for STUN srflx candidates before sync", LA_S34, 34));
+ARGS_B(false, skip_stun_test, 0,  "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", LA_S25, 25));
+ARGS_B(false, multi_srflx,    0,  "multi-srflx",  LA_CS("Enable multi-path Srflx (per-interface STUN)", 0, 0));
+ARGS_S(false, turn,           0,  "turn",         LA_CS("TURN server address", LA_S29, 29));
+ARGS_S(false, turn_user,      0,  "turn-user",    LA_CS("TURN username", LA_S30, 30));
+ARGS_S(false, turn_pass,      0,  "turn-pass",    LA_CS("TURN password", LA_S28, 28));
+ARGS_S(false, debugger,       0,  "debugger",     LA_CS("Debugger Name", LA_S13, 13));
+ARGS_B(false, no_host,        0,  "no-host",      LA_CS("Disable Host candidates (for testing)", LA_S14, 14));
+ARGS_B(false, no_srflx,       0,  "no-srflx",     LA_CS("Disable Srflx candidates (for testing)", LA_S17, 17));
+ARGS_B(false, no_relay,       0,  "no-relay",     LA_CS("Disable Relay candidates (for testing)", LA_S16, 16));
+ARGS_B(false, no_prflx,       0,  "no-prflx",     LA_CS("Disable Prflx candidates (for testing)", LA_S15, 15));
+ARGS_B(false, no_ipv4,        0,  "no-ipv4",      LA_CS("Disable IPv4 candidates (for testing)", LA_S41, 41));
+ARGS_B(false, no_ipv6,        0,  "no-ipv6",      LA_CS("Disable IPv6 candidates (for testing)", LA_S42, 42));
 
 static p2p_language_t s_lang = P2P_LANG_EN;
 static void cb_cn(const char* argv) { (void)argv;  s_lang = P2P_LANG_CN; lang_cn(); }

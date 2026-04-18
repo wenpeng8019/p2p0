@@ -1184,92 +1184,237 @@ typedef struct {
  * - session_id: uint32 十进制 ASCII 表示
  */
 
+ /* WS_ICE 消息类型前缀（纯文本匹配，非二进制编码） */
+#define P2P_WS_ICE_CMD_REG          "REG "          /* + <peer_id> */                       // 注册身份
+#define P2P_WS_ICE_CMD_OFF          "OFF"                                                   // 主动下线（立即释放资源）
+#define P2P_WS_ICE_CMD_SYNC0        "SYNC0 "        /* + <remote_peer_id>[\n<payload>] */   // 创建/恢复会话（可选预缓存负载）
+#define P2P_WS_ICE_CMD_SYNC         "SYNC "         /* + <session_id>\n<payload> */         // 同步数据 (C2S & S2C)
+#define P2P_WS_ICE_CMD_FIN          "FIN "          /* + <session_id> */                    // 会话结束 (C2S & S2C)
+
+#define P2P_WS_ICE_RSP_REG_OK       "REG OK "       /* + <sync_max> */                      // 注册成功，sync_max=预缓存负载上限
+#define P2P_WS_ICE_RSP_REG_FAIL     "REG FAIL "     /* + <reason> */
+#define P2P_WS_ICE_RSP_SYNC0        "SYNC0 "        /* + <peer_id> <session_id> online[\n<payload>]|offline|confirm|busy */
+#define P2P_WS_ICE_RSP_SYNC0_FAIL   "SYNC0 FAIL "   /* + <reason> */
+#define P2P_WS_ICE_RSP_SYNC         "SYNC "         /* + <session_id> confirm <bytes>|busy  (S2C 响应) */
+
+/* SYNC payload 子类型前缀（应用层约定，服务器透传） */
+#define P2P_WS_ICE_PAY_ICE          "ICE\n"         /* + <candidate_line> */
+#define P2P_WS_ICE_PAY_ICE_DONE     "ICE_DONE"
+
+/* WS_ICE 二进制帧类型（WebSocket binary frame, opcode=0x2）
+ *
+ * 帧格式: [type(1)][session_id(4)][payload(N)]
+ *   - type: 见下方 P2P_WS_ICE_BIN_* 定义
+ *   - session_id: uint32 网络字节序，路由键
+ *   - payload: 类型相关数据（服务器仅重写 session_id，透传 payload）
+ *
+ * 与 RELAY 模式的区别:
+ *   - 无需 relay_hdr.size（WebSocket 帧自带长度）
+ *   - 无需 STATUS 应答（WebSocket 可靠传输，PACKET 无需 ACK/流控）
+ *   - RPC 错误统一用伪造 RESP 返回（peer_offline / timeout）
+ */
+#define P2P_WS_ICE_BIN_PACKET      0x01    /* [type][ses_id][p2p_hdr(4)][data(N)] */        // 中继 P2P 数据包:
+#define P2P_WS_ICE_BIN_REQ         0x02    /* [type][ses_id][sid(2)][msg(1)][data(N)] */    // RPC 请求
+#define P2P_WS_ICE_BIN_RESP        0x03    /* [type][ses_id][sid(2)][code(1)][data(N)] */   // RPC 响应
+
+#define P2P_WS_ICE_BIN_HDR_SIZE    (1u + P2P_SESS_ID_PSZ)                       /* type(1) + session_id(4) = 5 */
+#define P2P_WS_ICE_BIN_PACKET_MIN  (P2P_WS_ICE_BIN_HDR_SIZE + P2P_HDR_SIZE)     /* 9: 最小 PACKET 帧 */
+#define P2P_WS_ICE_BIN_REQ_MIN     (P2P_WS_ICE_BIN_HDR_SIZE + 3u)               /* 8: type+ses_id+sid+msg */
+#define P2P_WS_ICE_BIN_RESP_MIN    (P2P_WS_ICE_BIN_HDR_SIZE + 3u)               /* 8: type+ses_id+sid+code */
+
 /* ============================================================================
  * WS_ICE 协议详细定义说明
  * ============================================================================
  *
  * ────────────────────────────────────────────────────────────────────────────
- * ONLINE — 身份注册（客户端 → 服务器）
+ * REG — 身份注册（客户端 → 服务器）
  * ────────────────────────────────────────────────────────────────────────────
  *
- * 格式: "ONLINE <peer_id>"
+ * 格式: "REG <peer_id>"
  *   - peer_id: 本端身份标识，UTF-8 字符串，最长 P2P_PEER_ID_MAX-1 字节
  *
  * 功能: 注册本端身份，建立 peer_id → WS 连接的映射。
  *       类似 RELAY P2P_RLY_ONLINE / COMPACT SIG_PKT_ONLINE。
  *
  * 服务端处理:
- *   1. peer_id 为空 → 返回 "ONLINE FAIL empty peer_id"
- *   2. peer_id 已被同一 cid 注册 → 幂等，返回 "ONLINE OK"
+ *   1. peer_id 为空 → 返回 "REG FAIL empty peer_id"
+ *   2. peer_id 已被同一 cid 注册 → 幂等，返回 "REG OK <sync_max>"
  *   3. peer_id 已被其他 cid 注册（重连场景）:
  *      - 踢掉旧 WS 连接（ws_server_disconnect, code=1000）
  *      - 复用 ws_ice_client_t，更新 cid，保留所有会话
  *      - 遍历已配对会话，向所有在线对端推送 "SYNC0 <peer_id> <peer_session_id> online"
  *      - 向本端推送所有在线对端的 "SYNC0 <remote_peer_id> <session_id> online"
- *      - 返回 "ONLINE OK"
+ *      - 返回 "REG OK <sync_max>"
  *   4. 同一 cid 曾注册其他 peer_id → 清除旧 client 及其会话
- *   5. 全新注册 → 创建 ws_ice_client_t，返回 "ONLINE OK"
+ *   5. 全新注册 → 创建 ws_ice_client_t，返回 "REG OK <sync_max>"
  *
  * 响应:
- *   "ONLINE OK"               — 注册成功
- *   "ONLINE FAIL <reason>"    — 注册失败
+ *   "REG OK <sync_max>"       — 注册成功，sync_max 为 SYNC0 预缓存负载字节上限（不含 NUL）
+ *   "REG FAIL <reason>"       — 注册失败
  *     reason: "empty peer_id" — peer_id 为空
  *             "OOM"           — 内存分配失败
  *
  * 示例:
- *   → "ONLINE alice_device_01"
- *   ← "ONLINE OK"
+ *   → "REG alice_device_01"
+ *   ← "REG OK 2048"
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * OFF — 主动下线（客户端 → 服务器）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "OFF"
+ *
+ * 功能: 主动注销身份并立即释放服务器资源（client + 所有会话）。
+ *       与 REG 配对使用。相比直接断开 WS 连接，OFF 无需等待超时回收。
+ *
+ * 服务端处理:
+ *   1. 已注册 → 调用 ws_ice_invalidate_client(do_free=true)
+ *      - 遍历所有会话，通知在线对端 "FIN <peer_session_id>"
+ *      - 释放所有会话和 client 结构
+ *   2. 未注册 → 静默忽略
+ *
+ * 无响应（服务器不回复）。
+ *
+ * 示例:
+ *   → "OFF
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * OFF — 主动下线（客户端 → 服务器）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "OFF"
+ *
+ * 功能: 主动注销身份并立即释放服务器资源（client + 所有会话）。
+ *       与 REG 配对使用。相比直接断开 WS 连接，OFF 无需等待超时回收。
+ *
+ * 服务端处理:
+ *   1. 已注册 → 调用 ws_ice_invalidate_client(do_free=true)
+ *      - 遍历所有会话，通知在线对端 "FIN <peer_session_id>"
+ *      - 释放所有会话和 client 结构
+ *   2. 未注册 → 静默忽略
+ *
+ * 无响应（服务器不回复）。
+ *
+ * 示例:
+ *   → "OFF"
  *
  * ────────────────────────────────────────────────────────────────────────────
  * SYNC0 — 创建/恢复会话（客户端 → 服务器）
  * ────────────────────────────────────────────────────────────────────────────
  *
  * 格式: "SYNC0 <remote_peer_id>"
+ *       "SYNC0 <remote_peer_id>\n<payload>"   （可选携带预缓存负载）
  *   - remote_peer_id: 目标对端 peer_id
+ *   - payload: 可选，预缓存的 ICE 候选数据（对端离线时服务器缓存，上线后转发）
+ *     最大长度由 REG OK 返回的 sync_max 决定（不含 NUL）
  *
  * 功能: 创建与指定对端的信令会话，建立 session_pair_t 双向配对。
  *       类似 RELAY P2P_RLY_SYNC0 / COMPACT SIG_PKT_SYNC0。
- *       不传输候选（候选通过 SYNC 交换），仅建立会话关系。
+ *       可选携带首批 ICE 候选作为预缓存负载（类似 RELAY SYNC0 的 peer_pending）。
  *
- * 前置条件: 发送方必须已 ONLINE 注册，否则返回 "ONLINE FAIL not registered"
+ * 前置条件: 发送方必须已 REG 注册，否则返回 "REG FAIL not registered"
  *
  * 服务端处理:
  *   1. remote_peer_id 为空 → 返回 "SYNC0 FAIL empty peer_id"
  *   2. 已有到该对端的活跃会话（session_pair 中已存在）:
  *      a. 对端标记已死亡（peer == -1）→ 清除标记，尝试重新配对
- *      b. 返回 "SYNC0 <remote_peer_id> <session_id> online|offline"
- *      c. 若对端在线 → 向对端推送 "SYNC0 <local_peer_id> <peer_session_id> online"
+ *      b. 追加本端预缓存负载（超出 sync_max 则返回 busy）
+ *      c. 对端在线 → 交换双方缓存 + 发送 confirm:
+ *         - 向本端发送 "SYNC0 <remote_peer_id> <session_id> online\n<对端缓存>"
+ *         - 向对端发送 "SYNC0 <local_peer_id> <peer_session_id> online\n<本端缓存>"
+ *         - 向本端发送 "SYNC0 <remote_peer_id> <session_id> confirm <bytes>"
+ *         - 向对端发送 "SYNC0 <local_peer_id> <peer_session_id> confirm <bytes>"
+ *      d. 对端离线 → 返回 "SYNC0 <remote_peer_id> <session_id> offline"
+ *      e. payload 超出缓存可用空间 → 追加返回 "SYNC0 ... busy"
  *   3. 无已有会话 → 调用 build_session() 创建:
  *      a. 创建 ws_ice_session_t，分配 session_id
  *      b. 查找 session_pair（双向 key），已有则配对
  *      c. 对端已创建会话且未死亡 → 双向配对（peer 指针互指）
- *      d. 返回 "SYNC0 <remote_peer_id> <session_id> online|offline"
- *      e. 若配对成功且对端在线 → 向对端推送 "SYNC0 <local_peer_id> <peer_session_id> online"
+ *      d. 追加本端 payload（超出 sync_max 则 busy）
+ *      e. 若配对成功且对端在线 → 交换双方缓存 + 发送 confirm（同 2c）
+ *      f. 否则返回 "SYNC0 <remote_peer_id> <session_id> offline"
  *   4. build_session 失败 → 返回 "SYNC0 FAIL internal"
  *
- * 响应 (S2C 与推送统一格式 "SYNC0 <peer_id> <session_id> online|offline"):
+ * 响应 (S2C 与推送统一格式):
  *   "SYNC0 <remote_peer_id> <session_id> online"
  *     — 会话已建立，对端已注册且 WS 连接有效
  *     — session_id: uint32 十进制（由 generate_session_id() 分配）
  *
+ *   "SYNC0 <remote_peer_id> <session_id> online\n<payload>"
+ *     — 对端在线且对端有预缓存负载，\n 后为对端的缓存内容
+ *
  *   "SYNC0 <remote_peer_id> <session_id> offline"
  *     — 会话已建立，对端未注册或 WS 已断开
- *     — 会话保留在服务端，对端上线时自动推送 "SYNC0 ... online"
+ *     — 本端 payload 已缓存，会话保留在服务端，对端上线时自动转发
+ *
+ *   "SYNC0 <remote_peer_id> <session_id> confirm <confirmed_bytes>"
+ *     — 预缓存负载已转发至对端，confirmed_bytes 为转发字节数（不含 NUL）
+ *     — 客户端可据此计算剩余缓存空间: remaining = sync_max - (sent - confirmed)
+ *
+ *   "SYNC0 <remote_peer_id> <session_id> busy"
+ *     — 本次 payload 超出服务器缓存可用空间（sync_max），未被接受
+ *     — 客户端应等待 confirm（缓存空间释放）后重试
  *
  *   "SYNC0 FAIL <reason>"
  *     — 会话创建失败
  *     reason: "empty peer_id"   — remote_peer_id 为空
  *             "internal"        — build_session 内部错误（OOM / 重复创建）
- *             "not registered"  — 发送方未 ONLINE（返回 "ONLINE FAIL not registered"）
+ *             "not registered"  — 发送方未 REG（返回 "REG FAIL not registered"）
  *
  * 示例:
  *   → "SYNC0 bob_device_02"
  *   ← "SYNC0 bob_device_02 42 offline"
  *
+ *   → "SYNC0 bob_device_02\nICE\na=candidate:1 1 udp ..."
+ *   ← "SYNC0 bob_device_02 42 offline"              (负载已缓存)
+ *
  *   (bob 随后也发 SYNC0)
- *   → "SYNC0 alice_device_01"      (bob 发送)
- *   ← "SYNC0 alice_device_01 43 online"  (bob 收到，应答)
- *   ← "SYNC0 bob_device_02 42 online"    (alice 收到，服务器推送，携带 alice 的 sid=42)
+ *   → "SYNC0 alice_device_01\nICE\na=candidate:2 1 udp ..."      (bob 发送)
+ *   ← "SYNC0 alice_device_01 43 online\nICE\na=candidate:1 1 udp ..."  (bob 收到，携带 alice 的缓存)
+ *   ← "SYNC0 alice_device_01 43 confirm 52"                            (bob 收到，缓存已转发)
+ *   ← "SYNC0 bob_device_02 42 online\nICE\na=candidate:2 1 udp ..."    (alice 收到，携带 bob 的缓存)
+ *   ← "SYNC0 bob_device_02 42 confirm 48"                              (alice 收到，缓存已转发)
+ *
+ *   → "SYNC0 bob_device_02\nICE\n..."       (alice 再次追加，缓存已满)
+ *   ← "SYNC0 bob_device_02 42 busy"         (超出 sync_max)
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * SYNC0 推送 — 对端上线通知（服务器 → 客户端，S2C 方向）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "SYNC0 <peer_id> <session_id> online"
+ *       "SYNC0 <peer_id> <session_id> online\n<payload>"   （携带对端预缓存负载）
+ *   - peer_id: 对端 peer_id
+ *   - session_id: 接收方自己的 session_id（uint32 十进制）
+ *   - payload: 可选，对端此前 SYNC0 中缓存的负载（存在时紧跟 \n 后）
+ *
+ * 功能: 通知客户端某个已配对对端上线，应发起/重新发起 ICE 候选交换。
+ *       与 RELAY 一致：SYNC0 在 C2S 方向为会话请求（无 session_id），
+ *       在 S2C 方向为应答/推送（服务器插入 session_id）。
+ *       应答与推送统一格式，客户端无需区分，统一处理即可。
+ *       若对端此前 SYNC0 时携带了 payload 且尚未被消费，则一并转发。
+ *
+ * 触发时机（服务器主动推送，无需客户端请求）:
+ *   1. 对端 ONLINE 注册/重连成功 → 遍历其所有已配对会话，
+ *      向每个在线对端推送 "SYNC0 <reconnected_peer_id> <my_session_id> online[\n<cached>]"，
+ *      同时向重连方推送所有在线对端的 "SYNC0 <peer_id> <my_session_id> online[\n<cached>]"
+ *      若任一方有预缓存负载被转发，则向原缓存方追加发送 "SYNC0 ... confirm <bytes>"
+ *   2. 本端 SYNC0 创建会话时对端已在线 → 双向交换缓存 + confirm
+ *
+ * 客户端处理:
+ *   收到 "SYNC0 <peer_id> <session_id> online[\n<payload>]" 后应：
+ *   1. 根据 session_id 查找/创建本地 session
+ *   2. 若有 \n<payload>，先处理对端预缓存的 ICE 候选
+ *   3. 通过 SYNC 发送 ICE 候选发起候选交换
+ *   4. 若此前已有候选交换（重连场景），应重新收集并发送
+ *
+ * 示例:
+ *   ← "SYNC0 bob_device_02 42 online"
+ *   (客户端随后发起 ICE 候选交换)
+ *   → "SYNC 42\nICE\na=candidate:..."
+ *
+ *   ← "SYNC0 bob_device_02 42 online\nICE\na=candidate:2 1 udp ..."
+ *   (客户端先处理 bob 的预缓存候选，再发送自己的候选)
  *
  * ────────────────────────────────────────────────────────────────────────────
  * SYNC — 同步数据交换（双向：客户端 ↔ 服务器）
@@ -1283,14 +1428,32 @@ typedef struct {
  *       类似 RELAY P2P_RLY_SYNC：服务器按 session_id 查找配对会话，
  *       将 session_id 重写为对端的 session_id 后原样投递。
  *       因为服务端自身维护了 session，不需要交换 SDP，只需交换 ICE 候选行。
+ *       SYNC 与 SYNC0 共享 pending_sync 缓存空间（受 sync_max 限制）。
  *
  * 前置条件: 发送方必须已 ONLINE 注册，且已通过 SYNC0 建立会话
  *
  * 服务端处理:
- *   1. 发送方未注册 → 返回 "ONLINE FAIL not registered"
- *   2. session_id 无效或对端离线 → 静默丢弃（无错误返回）
- *   3. 对端在线 → 重写 session_id 为对端的 session_id，
- *      构造 "SYNC <peer_session_id>\n<payload>" 发送给对端
+ *   1. 发送方未注册 → 返回 "REG FAIL not registered"
+ *   2. session_id 无效（查不到或不属于该 client）→ 静默丢弃
+ *   3. 对端在线 → 立即转发:
+ *      - 重写 session_id 为对端的 session_id
+ *      - 构造 "SYNC <peer_session_id>\n<payload>" 发送给对端
+ *      - 向发送方返回 "SYNC <session_id> confirm <bytes>"（bytes = payload 字节数）
+ *   4. 对端离线 → 追加缓存到 pending_sync（与 SYNC0 共享缓存空间）:
+ *      - 缓存成功 → 静默（对端上线后通过 SYNC0 online 转发 + confirm）
+ *      - 缓存已满（超出 sync_max）→ 返回 "SYNC <session_id> busy"
+ *
+ * 响应 (S2C):
+ *   "SYNC <session_id>\n<payload>"
+ *     — 对端同步数据（session_id 已重写为接收方的 session_id）
+ *
+ *   "SYNC <session_id> confirm <confirmed_bytes>"
+ *     — 同步数据已转发至对端，confirmed_bytes 为转发字节数（不含 NUL）
+ *     — 客户端可据此计算剩余缓存空间: remaining = sync_max - (sent - confirmed)
+ *
+ *   "SYNC <session_id> busy"
+ *     — 服务器同步缓存空间不足（超出 sync_max），payload 未被接受
+ *     — 客户端应等待 confirm（缓存空间释放）后重试
  *
  * payload 子类型（应用层约定，服务器透传）:
  *
@@ -1304,43 +1467,15 @@ typedef struct {
  *
  * 示例（alice sid=42, bob sid=43）:
  *   → "SYNC 42\nICE\na=candidate:1 1 udp 2130706431 192.168.1.100 12345 typ host"
+ *   ← "SYNC 42 confirm 67"
  *   (bob 收到 →) "SYNC 43\nICE\na=candidate:1 1 udp 2130706431 192.168.1.100 12345 typ host"
  *
  *   → "SYNC 42\nICE_DONE"
+ *   ← "SYNC 42 confirm 8"
  *   (bob 收到 →) "SYNC 43\nICE_DONE"
  *
- * ────────────────────────────────────────────────────────────────────────────
- * SYNC0 推送 — 对端上线通知（服务器 → 客户端，S2C 方向）
- * ────────────────────────────────────────────────────────────────────────────
- *
- * 格式: "SYNC0 <peer_id> <session_id> online"
- *   - peer_id: 对端 peer_id
- *   - session_id: 接收方自己的 session_id（uint32 十进制）
- *
- * 功能: 通知客户端某个已配对对端上线，应发起/重新发起 ICE 候选交换。
- *       与 RELAY 一致：SYNC0 在 C2S 方向为会话请求（无 session_id），
- *       在 S2C 方向为应答/推送（服务器插入 session_id）。
- *       应答与推送统一格式 "SYNC0 <peer_id> <session_id> online|offline"，
- *       客户端无需区分，统一处理即可。
- *
- * 触发时机（服务器主动推送，无需客户端请求）:
- *   1. 对端 ONLINE 注册/重连成功 → 遍历其所有已配对会话，
- *      向每个在线对端推送 "SYNC0 <reconnected_peer_id> <my_session_id> online"，
- *      同时向重连方推送所有在线对端的 "SYNC0 <peer_id> <my_session_id> online"
- *   2. 本端 SYNC0 创建会话时对端已在线 → 双向:
- *      向本端返回 "SYNC0 <remote_peer_id> <my_session_id> online"（应答），
- *      向对端推送 "SYNC0 <local_peer_id> <peer_session_id> online"（推送）
- *
- * 客户端处理:
- *   收到 "SYNC0 <peer_id> <session_id> online" 后应：
- *   1. 根据 session_id 查找/创建本地 session
- *   2. 通过 SYNC 发送 ICE 候选发起候选交换
- *   3. 若此前已有候选交换（重连场景），应重新收集并发送
- *
- * 示例:
- *   ← "SYNC0 bob_device_02 42 online"
- *   (客户端随后发起 ICE 候选交换)
- *   → "SYNC 42\nICE\na=candidate:..."
+ *   → "SYNC 42\nICE\n..."    (bob 离线，缓存到 pending_sync)
+ *   (无 confirm，对端上线后通过 SYNC0 online 转发并触发 SYNC0 confirm)
  *
  * ────────────────────────────────────────────────────────────────────────────
  * FIN — 会话结束（双向：C2S + S2C）
@@ -1371,7 +1506,96 @@ typedef struct {
  *   → "FIN 42"                        (C2S: 客户端主动断开)
  *   ← "FIN 42"                        (S2C: 对端断连通知)
  *
+ * ════════════════════════════════════════════════════════════════════════════
+ * 二进制帧协议（WebSocket binary frame, opcode=0x2）
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * 以下消息使用 WebSocket 二进制帧传输，与上方文本帧信令共享同一 WS 连接。
+ * 二进制帧用于 P2P 数据中继（打洞失败降级）和 MSG RPC（服务器中转请求-应答），
+ * 对应 RELAY 模式的 P2P_RLY_PACKET / P2P_RLY_REQ / P2P_RLY_RESP。
+ *
+ * 公共帧格式: [type(1)][session_id(4)][payload(N)]
+ *   - type: 消息类型（P2P_WS_ICE_BIN_*）
+ *   - session_id: uint32 网络字节序，用于会话路由
+ *   - payload: 类型相关数据
+ *
+ * 与 RELAY 的区别:
+ *   - 无 relay_hdr.size — WebSocket 帧自带长度
+ *   - 无 STATUS 应答 — WebSocket 可靠传输，PACKET 无需 ACK/流控
+ *   - RPC 错误统一使用服务器生成的伪 RESP 返回
+ *
  * ────────────────────────────────────────────────────────────────────────────
+ * PACKET — P2P 数据包中继（双向：客户端 ↔ 服务器 ↔ 客户端）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 帧格式: [0x01][session_id(4)][p2p_hdr(4)][data(N)]
+ *   - session_id: 发送方的 session_id（来自 SYNC0 建会应答）
+ *   - p2p_hdr: P2P 协议头 [type(1)][flags(1)][seq(2)]
+ *   - data: P2P 协议数据
+ *
+ * 功能: P2P 打洞失败时，通过服务器中继转发 P2P 数据包（降级方案）。
+ *       对应 RELAY P2P_RLY_PACKET。
+ *
+ * 服务端处理:
+ *   1. 查找 session_id 对应的会话
+ *   2. 对端在线 → 重写 session_id 为对端的 session_id，原样转发
+ *   3. 对端离线 → 静默丢弃（实时数据不缓存）
+ *   服务器不解析内层 p2p_hdr，仅做路由转发。
+ *
+ * 最小帧长度: P2P_WS_ICE_BIN_PACKET_MIN = 9 字节
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * REQ — RPC 请求（双向：A → 服务器 → B）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 帧格式: [0x02][session_id(4)][sid(2)][msg(1)][data(N)]
+ *   - session_id: 发送方的 session_id
+ *   - sid: 序列号（非零，循环递增，用于请求-响应匹配）
+ *   - msg: 消息类型（0=echo 自动回复，>0=应用自定义）
+ *   - data: 请求数据（最大 P2P_MSG_DATA_MAX 字节）
+ *
+ * 功能: 通过服务器中转实现可靠的请求-应答机制。
+ *       对应 RELAY P2P_RLY_REQ。
+ *
+ * 服务端处理:
+ *   1. 对端离线 → 生成伪 RESP [0x03][ses_id][sid][code=0xFF]
+ *   2. RPC 忙（前一个 REQ 尚未收到 RESP）→ 生成伪 RESP [code=0xFE]
+ *   3. 正常 → 重写 session_id，转发给对端
+ *      记录 rpc_pending_sid，等待 RESP 解锁
+ *
+ * 超时: 服务器每秒检查 RPC 待确认链表，
+ *       超过 MSG_REQ_MAX_RETRY × MSG_RPC_RETRY_INTERVAL_MS 未收到 RESP
+ *       → 生成伪 RESP [code=0xFE (P2P_MSG_ERR_TIMEOUT)]
+ *
+ * 最小帧长度: P2P_WS_ICE_BIN_REQ_MIN = 8 字节
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * RESP — RPC 响应（双向：B → 服务器 → A）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 帧格式: [0x03][session_id(4)][sid(2)][code(1)][data(N)]
+ *   - session_id: 响应方的 session_id
+ *   - sid: 对应请求的序列号
+ *   - code: 响应码（0=成功，应用自定义；服务器错误见下）
+ *   - data: 响应数据
+ *
+ * 功能: 将 RPC 响应通过服务器转发回请求方。
+ *       对应 RELAY P2P_RLY_RESP。
+ *
+ * 服务端处理:
+ *   1. 请求方离线 → 静默丢弃
+ *   2. sid 与请求方 rpc_pending_sid 不匹配 → 静默丢弃
+ *   3. 正常 → 重写 session_id 为请求方的 session_id，转发
+ *      解锁请求方 rpc_pending_sid（RPC 生命周期完成）
+ *
+ * 服务器生成的错误 RESP（客户端 on_response 回调 len=-1）:
+ *   code=0xFF (P2P_MSG_ERR_PEER_OFFLINE): 对端在等待响应期间离线或会话销毁
+ *   code=0xFE (P2P_MSG_ERR_TIMEOUT):      服务器转发超时或 RPC 通道忙
+ *
+ * 最小帧长度: P2P_WS_ICE_BIN_RESP_MIN = 8 字节
+ */
+
+/* ────────────────────────────────────────────────────────────────────────────
  * 协议流程详解
  * ────────────────────────────────────────────────────────────────────────────
  *
@@ -1382,9 +1606,9 @@ typedef struct {
  *   │                                │
  *   ├── WebSocket Connect ─────────►│  HTTP Upgrade → WS
  *   │                                │
- *   ├── "ONLINE alice" ────────────►│  创建 ws_ice_client_t
+ *   ├── "REG alice" ───────────────►│  创建 ws_ice_client_t
  *   │                                │  peer_id="alice", cid=N
- *   │◄── "ONLINE OK" ───────────────┤
+ *   │◄── "REG OK <sync_max>" ───────┤
  *   │                                │
  *   [进入 ONLINE 状态]               │
  *   │                                │
@@ -1395,9 +1619,10 @@ typedef struct {
  *
  *   Alice                         Server                          Bob (离线)
  *   │                                │                                │
- *   ├── "SYNC0 bob" ───────────────►│  build_session("alice","bob")  │
+ *   ├── "SYNC0 bob\nICE\n..." ────►│  build_session("alice","bob")  │
  *   │                                │  pair 创建，side=0             │
  *   │                                │  remote_s=NULL (bob 未注册)    │
+ *   │                                │  缓存 alice 的 payload          │
  *   │◄── "SYNC0 bob 42 offline" ────┤                                │
  *   │                                │                                │
  *   [等待 SYNC0 bob 42 online]       │                                │
@@ -1407,20 +1632,24 @@ typedef struct {
  *
  *   Alice                         Server                             Bob
  *   │                                │                                │
- *   │                                │◄── "ONLINE bob" ──────────────┤
+ *   │                                │◄── "REG bob" ─────────────────┤
  *   │                                │  创建 ws_ice_client_t          │
- *   │                                ├── "ONLINE OK" ───────────────►│
+ *   │                                ├── "REG OK <sync_max>" ───────►│
  *   │                                │                                │
- *   │                                │◄── "SYNC0 alice" ─────────────┤
+ *   │                                │◄── "SYNC0 alice\nICE\n..." ───┤
  *   │                                │  build_session("bob","alice")  │
  *   │                                │  pair 找到，side=1             │
  *   │                                │  remote_s=alice's session      │
- *   │                                │  → 双向配对                   │
+ *   │                                │  → 双向配对 + 交换缓存         │
  *   │                                │                                │
- *   │◄── "SYNC0 bob 42 online" ─────┤  (推送给 alice，携带 alice 的 sid=42)
- *   │                                ├── "SYNC0 alice 43 online" ───►│  (应答给 bob，bob 的 sid=43)
+ *   │◄─ "SYNC0 bob 42 online\n    ──┤  (推送给 alice，携带 bob 的缓存)
+ *   │    ICE\n..."                    │                                │
+ *   │                                ├─ "SYNC0 alice 43 online\n ──►│  (应答给 bob，携带 alice 的缓存)
+ *   │                                │    ICE\n..."                   │
+ *   │◄─ "SYNC0 bob 42 confirm 52" ──┤                                │  (alice 的缓存已转发)
+ *   │                                ├─ "SYNC0 alice 43 confirm 48"►│  (bob 的缓存已转发)
  *   │                                │                                │
- *    [收到 SYNC0，发起 ICE 候选交换] │ [收到 SYNC0，发起 ICE 候选交换]
+ *   [处理 bob 的缓存候选]            │ [处理 alice 的缓存候选]
  *
  * 4. 同步交换 ICE 候选（alice sid=42, bob sid=43）
  * ────────────────────────────────────────────────────────────────────────────
@@ -1428,15 +1657,19 @@ typedef struct {
  *   Alice                         Server                             Bob
  *   │                                │                                │
  *   ├──── "SYNC 42\nICE\n..." ─────►│  sid=42 → 配对 → bob sid=43  │
+ *   │◄──── "SYNC 42 confirm 67" ────┤                                │
  *   │                                ├──── "SYNC 43\nICE\n..." ─────►│
  *   │                                │                                │
  *   │                                │◄──── "SYNC 43\nICE\n..." ─────┤
+ *   │                                ├──── "SYNC 43 confirm 67" ────►│
  *   │◄──── "SYNC 42\nICE\n..." ─────┤ sid=43 → 配对 → alice sid=42 │
  *   │                                │                                │
  *   ├──── "SYNC 42\nICE_DONE" ─────►│                                │
+ *   │◄──── "SYNC 42 confirm 8" ─────┤                                │
  *   │                                ├──── "SYNC 43\nICE_DONE" ─────►│
  *   │                                │                                │
  *   │                                │◄──── "SYNC 43\nICE_DONE" ─────┤
+ *   │                                ├──── "SYNC 43 confirm 8" ─────►│
  *   │◄──── "SYNC 42\nICE_DONE" ─────┤                                │
  *   │                                │                                │
  *   │◄════════════════════════ P2P ICE 打洞 ═══════════════════════►│
@@ -1454,14 +1687,19 @@ typedef struct {
  *   [暂停向 bob 发送 SYNC]           │     ... 网络恢复 ...           │
  *   │                                │                                │
  *   │                                │◄── WebSocket Connect ─────────┤
- *   │                                │◄── "ONLINE bob" ──────────────┤
+ *   │                                │◄── "REG bob" ─────────────────┤
  *   │                                │  复用 ws_ice_client_t          │
  *   │                                │  更新 cid，保留会话            │
- *   │                                ├── "ONLINE OK" ───────────────►│
+ *   │                                ├── "REG OK <sync_max>" ────────►│
  *   │                                │                                │
  *   │                                │  遍历 bob 的已配对会话         │
- *   │◄── "SYNC0 bob 42 online" ─────┤                                │
- *   │                                ├── "SYNC0 alice 43 online" ───►│
+ *   │                                │  转发预缓存负载 + confirm      │
+ *   │◄── "SYNC0 bob 42 online       ┤                                │
+ *   │     [\n<bob 的缓存>]"          │                                │
+ *   │                                ├── "SYNC0 alice 43 online ────►│
+ *   │                                │    [\n<alice 的缓存>]"         │
+ *   │◄── "SYNC0 bob 42 confirm N" ──┤  (alice 的缓存已转发，如有)    │
+ *   │                                ├── "SYNC0 alice 43 confirm M"►│  (bob 的缓存已转发，如有)
  *   │                                │                                │
  *       [重新发起 ICE 候选交换]      │    [重新发起 ICE 候选交换]
  *   ├── "SYNC 42\nICE\n..." ─────►│  ...
@@ -1479,22 +1717,6 @@ typedef struct {
  *   │           │       并标记对端 peer 指针为 -1
  *   │           └── 移除 client (HASH_DELETE + free)
  */
-
-/* WS_ICE 消息类型前缀（纯文本匹配，非二进制编码） */
-#define P2P_WS_ICE_CMD_ONLINE       "ONLINE "       /* + <peer_id>                 注册身份 */
-#define P2P_WS_ICE_CMD_SYNC0        "SYNC0 "        /* + <remote_peer_id>          创建/恢复会话 */
-#define P2P_WS_ICE_CMD_SYNC         "SYNC "         /* + <session_id>\n<payload>   同步数据 (C2S & S2C) */
-
-#define P2P_WS_ICE_RSP_ONLINE_OK    "ONLINE OK"
-#define P2P_WS_ICE_RSP_ONLINE_FAIL  "ONLINE FAIL "  /* + <reason> */
-#define P2P_WS_ICE_RSP_SYNC0        "SYNC0 "        /* + <peer_id> <session_id> online|offline  S2C 应答/推送 */
-#define P2P_WS_ICE_RSP_SYNC0_FAIL   "SYNC0 FAIL "   /* + <reason> */
-#define P2P_WS_ICE_CMD_FIN          "FIN "          /* + <session_id>               会话结束 (C2S & S2C) */
-
-/* SYNC payload 子类型前缀（应用层约定，服务器透传） */
-#define P2P_WS_ICE_PAY_ICE          "ICE\n"     /* + <candidate_line> */
-#define P2P_WS_ICE_PAY_ICE_DONE     "ICE_DONE"
-
 
 #pragma pack(pop)
 #pragma ide diagnostic pop
