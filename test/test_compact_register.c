@@ -229,7 +229,7 @@ static int build_online(uint8_t *buf, int buf_size,
     int n = 0;
     
     // 包头 [type=SIG_PKT_ONLINE][flags=0][seq=0]
-    buf[n++] = SIG_PKT_ONLINE;
+    buf[n++] = SIG_PKT_REG;
     buf[n++] = 0;
     buf[n++] = 0;
     buf[n++] = 0;
@@ -291,7 +291,7 @@ static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
     int n = 0;
     
     // 包头 [type=0x82][flags=0][seq=0]
-    buf[n++] = SIG_PKT_OFFLINE;
+    buf[n++] = SIG_PKT_OFF;
     buf[n++] = 0;
     buf[n++] = 0;
     buf[n++] = 0;
@@ -343,11 +343,11 @@ static int send_online_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_t 
             ack->received = 0;
             return 0;
         }
-        if (recv_buf[0] == SIG_PKT_ONLINE_ACK) break;
+        if (recv_buf[0] == SIG_PKT_REG_ACK) break;
         // 收到其他包（如 SYNC），继续接收
     }
     
-    if (recv_buf[0] != SIG_PKT_ONLINE_ACK) {
+    if (recv_buf[0] != SIG_PKT_REG_ACK) {
         ack->received = 0;
         return -2;
     }
@@ -669,7 +669,7 @@ static void test_register_bad_payload(void) {
     
     // 构造一个太短的 REGISTER 包（只有包头 + 部分 payload）
     uint8_t pkt[20];
-    pkt[0] = SIG_PKT_ONLINE;
+    pkt[0] = SIG_PKT_REG;
     pkt[1] = 0;
     pkt[2] = 0;
     pkt[3] = 0;
@@ -892,7 +892,7 @@ static void test_unregister_bad_payload(void) {
     
 // 构造一个太短的 OFFLINE 包（包头 + 4 字节 payload，小于 auth_key 8 字节）
     uint8_t pkt[8];
-    pkt[0] = SIG_PKT_OFFLINE;
+    pkt[0] = SIG_PKT_OFF;
     pkt[1] = 0;
     pkt[2] = 0;
     pkt[3] = 0;
@@ -969,7 +969,7 @@ static void test_register_addr_change(void) {
     
     P_sock_close(sock2);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
+    if (n <= 0 || recv_buf[0] != SIG_PKT_REG_ACK) {
         TEST_FAIL(TEST_NAME, "REGISTER_ACK not received (second)");
         return;
     }
@@ -1133,7 +1133,7 @@ static void test_register_reconnect_after_disconnect(void) {
     n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                   (struct sockaddr*)&from, &from_len);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
+    if (n <= 0 || recv_buf[0] != SIG_PKT_REG_ACK) {
         P_sock_close(sock_alice); P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "Alice ONLINE_ACK not received");
         return;
@@ -1152,7 +1152,7 @@ static void test_register_reconnect_after_disconnect(void) {
     n = recvfrom(sock_bob, (char*)recv_buf, sizeof(recv_buf), 0,
                   (struct sockaddr*)&from, &from_len);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
+    if (n <= 0 || recv_buf[0] != SIG_PKT_REG_ACK) {
         P_sock_close(sock_alice); P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "Bob ONLINE_ACK not received");
         return;
@@ -1216,14 +1216,14 @@ static void test_register_reconnect_after_disconnect(void) {
         from_len = sizeof(from);
         n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                       (struct sockaddr*)&from, &from_len);
-        if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) break;
+        if (n > 0 && recv_buf[0] == SIG_PKT_REG_ACK) break;
         retry++;
     }
     
     P_sock_close(sock_alice);
     P_sock_close(sock_bob);
     
-    if (n <= 0 || recv_buf[0] != SIG_PKT_ONLINE_ACK) {
+    if (n <= 0 || recv_buf[0] != SIG_PKT_REG_ACK) {
         TEST_FAIL(TEST_NAME, "Alice reconnect ONLINE_ACK not received");
         return;
     }

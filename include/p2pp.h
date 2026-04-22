@@ -95,8 +95,11 @@ typedef struct {
  *   0x80-0xFF: COMPACT 信令协议（本节）
 */
 
-/* 安全的 P2P UDP 负载 */
-#define P2P_MTU         1200              
+/* 安全的 P2P UDP 负载
+ * + 一般各类网关 MTU 约为 1500 字节，扣除 IPv4|IPv6/UDP 头部（20|40+8=48 字节），剩余 1452 字节
+ *   再保留一些给各种网络穿透（VPN）等协议封装的包头空间，1200 字节是一个比较安全的选择（RFC 7914 推荐值）
+ */
+#define P2P_MTU         (1200)
 #define P2P_HDR_SIZE    4                           /* 包头大小 */
 #define P2P_MAX_PAYLOAD (P2P_MTU - P2P_HDR_SIZE)    /* 1196 */
 #define P2P_MSG_DATA_MAX  (P2P_MAX_PAYLOAD - 11)    /* MSG RPC data upper bound: relay path needs [session_id(P2P_SESS_ID_PSZ)+sid(2)+msg(1)] */
@@ -386,9 +389,9 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 
 /* COMPACT 信令协议 (客户端 <-> 信令服务器) - 0x80-0x9F */
-#define SIG_PKT_ONLINE          0x80        // 上线（登录）到信令服务器
-#define SIG_PKT_ONLINE_ACK      0x81        // 上线确认（告知 auth_key、本端缓存能力、公网地址、探测端口、中继支持）
-#define SIG_PKT_OFFLINE         0x82        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
+#define SIG_PKT_REG             0x80        // 上线（登录）到信令服务器
+#define SIG_PKT_REG_ACK         0x81        // 上线确认（告知 auth_key、本端缓存能力、公网地址、探测端口、中继支持）
+#define SIG_PKT_OFF             0x82        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
                                             // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
 #define SIG_PKT_ALIVE           0x83        // 保活包（可选，客户端定期发送以维持注册状态）
 #define SIG_PKT_ALIVE_ACK       0x84        // 保活确认（服务器回复以确认注册状态）
@@ -403,25 +406,25 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_SYNC_FLAG_FIN           0x01    // 候选列表发送完毕
 
 /* MSG RPC 包类型（服务器可选实现，详见协议详细说明节） */
-#define SIG_PKT_MSG_REQ         0x90        // MSG 请求：A→Server；Server→B relay（flags=SIG_FLAG_RELAY）
-#define SIG_PKT_MSG_REQ_ACK     0x91        // MSG 请求确认：Server→A（已缓存并开始中转，或失败状态）
-#define SIG_PKT_MSG_RESP        0x92        // MSG 应答：B→Server；Server→A relay
-#define SIG_PKT_MSG_RESP_ACK    0x93        // MSG 应答确认：Server→B；A→Server
+#define SIG_PKT_REQ             0x90        // MSG 请求：A→Server；Server→B relay（flags=SIG_FLAG_RELAY）
+#define SIG_PKT_REQ_ACK         0x91        // MSG 请求确认：Server→A（已缓存并开始中转，或失败状态）
+#define SIG_PKT_RESP            0x92        // MSG 应答：B→Server；Server→A relay
+#define SIG_PKT_RESP_ACK        0x93        // MSG 应答确认：Server→B；A→Server
 
 /* NAT 探测（服务器可选实现） */
-#define SIG_PKT_NAT_PROBE       0xA0        // NAT 类型探测请求（发往探测端口）
-#define SIG_PKT_NAT_PROBE_ACK   0xA1        // NAT 类型探测响应（返回第二次映射地址）
+#define SIG_PKT_NAT             0xA0        // NAT 类型探测请求（发往探测端口）
+#define SIG_PKT_NAT_ACK         0xA1        // NAT 类型探测响应（返回第二次映射地址）
 
 /* ONLINE_ACK 标志位（p2p_packet_hdr_t.flags） */
-#define SIG_ONACK_FLAG_RELAY        0x01    // 服务器支持数据中继功能（P2P 打洞失败降级）
-#define SIG_ONACK_FLAG_MSG          0x02    // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
+#define SIG_REG_FLAG_RELAY          0x01    // 服务器支持数据中继功能（P2P 打洞失败降级）
+#define SIG_REG_FLAG_MSG            0x02    // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
 
 /* MSG 包标志位（p2p_packet_hdr_t.flags） */
 /* SIG_FLAG_RELAY (0x02) 复用为 MSG_REQ/MSG_RESP relay 标志：标识此包是 Server→B/A 的中转包 */
 
 /* MSG_RESP 包标志位 - 用于标识服务器特殊错误（而非对端返回的正常响应） */
-#define SIG_MSG_FLAG_PEER_OFFLINE   0x02    // B端在 REQ_ACK 之后离线（等待响应期间离线）
-#define SIG_MSG_FLAG_TIMEOUT        0x04    // 服务器向B端转发请求超时
+#define SIG_RPC_FLAG_PEER_OFFLINE   0x02    // B端在 REQ_ACK 之后离线（等待响应期间离线）
+#define SIG_RPC_FLAG_TIMEOUT        0x04    // 服务器向B端转发请求超时
 
 #define SIG_AUTH_KEY_PSZ            (sizeof(uint64_t))          // auth_key 大小（8 字节）
 
@@ -748,7 +751,7 @@ typedef enum {
     P2P_RLY_STATUS = 0,                      // 状态包（仅服务器发送，包含请求类型 + 状态码）
 
     /* 在线管理 */
-    P2P_RLY_ONLINE,                         // 上线: Client -> Server / Server -> Client（双向，上下行 payload 不同）
+    P2P_RLY_REG,                            // 上线: Client -> Server / Server -> Client（双向，上下行 payload 不同）
     P2P_RLY_ALIVE,                          // 心跳: Client -> Server / Server -> Client（双向，空 payload）
 
     /* 会话同步 */
@@ -757,7 +760,7 @@ typedef enum {
     P2P_RLY_FIN,                            // 会话结束: Client -> Server / Server -> Client
 
     /* P2P 数据中继（打洞失败降级） */
-    P2P_RLY_PACKET,                         // 中继 P2P 数据包: Client <-> Server <-> Client (内层 P2P hdr 区分类型)
+    P2P_RLY_PKT,                            // 中继 P2P 数据包: Client <-> Server <-> Client (内层 P2P hdr 区分类型)
 
     /* 消息 RPC（服务器中转的请求-应答机制） */
     P2P_RLY_REQ,                            // 请求: Client -> Server / Server -> Client (双向)
@@ -774,7 +777,7 @@ typedef struct {
 #define P2P_RLY_ERR(c)              (0x80+c)            // 错误码基数，code >= 0x80 表示错误
 #define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(0)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
 #define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(1)      // 协议错误（未登录/非法状态）
-#define P2P_RLY_ERR_NOT_ONLINE      P2P_RLY_ERR(2)      // 未完成 ONLINE 登录
+#define P2P_RLY_ERR_NOT_REG         P2P_RLY_ERR(2)      // 未完成 ONLINE 登录
 #define P2P_RLY_ERR_PEER_OFFLINE    P2P_RLY_ERR(3)      // 对端未连接（session 存在但 peer 为空）
 #define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(4)      // 会话忙（前一个转发尚未完成）
 #define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(5)      // 服务器转发请求超时
@@ -799,7 +802,7 @@ typedef struct {
  *   - status_msg: 可选的状态描述文本（UTF-8 编码）
  */
 #define P2P_RLY_STATUS_PSZ(s, n)    (2 + ((s)==2 ? P2P_SESS_ID_PSZ : ((s) == 1 ? P2P_PEER_ID_MAX : 0)) + (n)) // type(1) + status_code(1) + route_key + status_msg(N)
- /* P2P_RLY_ONLINE（双向，上下行负载格式不同）:
+/* P2P_RLY_REG（双向，上下行负载格式不同）:
  *
  *   上行 Client -> Server:
  *     payload: [name(32)][instance_id(4)]
@@ -810,9 +813,9 @@ typedef struct {
  *     payload: [features(1)][candidate_sync_max(1)]
  *     - features: 0x01=RELAY, 0x02=MSG
  *     - candidate_sync_max: 单包最大候选数（0=客户端用默认）
- */
-#define P2P_RLY_ONLINE_PSZ          (P2P_PEER_ID_MAX + sizeof(uint32_t))
-#define P2P_RLY_ONLINE_S2C_PSZ      2u
+*/
+#define P2P_RLY_REG_PSZ          (P2P_PEER_ID_MAX + sizeof(uint32_t))
+#define P2P_RLY_REG_S2C_PSZ      2u
  /* P2P_RLY_ALIVE（双向）:
  *   payload: 空（仅包头）
  *   - Client -> Server: 心跳保活
@@ -1157,13 +1160,13 @@ typedef struct {
 
 
 /* ============================================================================
- * WS_ICE 模式协议 (WebSocket, 纯文本帧)
+ * WSS 模式协议 (WebSocket, 纯文本帧)
  * ============================================================================
  *
  * 基于 WebSocket 的 ICE 信令通道，为 P2P_SIGNALING_MODE_ICE 模式提供
  * ICE 候选交换。每条 WS text frame 承载一条消息，纯文本格式。
  *
- * 与 COMPACT/RELAY 的二进制协议不同，WS_ICE 采用可读文本协议，
+ * 与 COMPACT/RELAY 的二进制协议不同，WSS 采用可读文本协议，
  * 便于调试和跨语言集成（如浏览器 JavaScript 客户端）。
  *
  * 传输层：WebSocket (RFC 6455)，text frame (opcode=0x1)
@@ -1174,7 +1177,7 @@ typedef struct {
  * 服务端维护 client_t / session_t 体系，提供会话感知的信令服务：
  * - 断线重连保留会话状态（类似 RELAY fd 迁移）
  * - 对端上线主动通知（统一 SYNC0 推送，应答与推送同格式）
- * - 离线客户端超时清理（WS_ICE_CLIENT_TIMEOUT_S = 60s）
+ * - 离线客户端超时清理（WSS_CLIENT_TIMEOUT_S = 60s）
  *
  * 消息格式通用规则：
  * - 第一个空格前为命令关键字（大写）
@@ -1184,27 +1187,27 @@ typedef struct {
  * - session_id: uint32 十进制 ASCII 表示
  */
 
- /* WS_ICE 消息类型前缀（纯文本匹配，非二进制编码） */
-#define P2P_WS_ICE_CMD_REG          "REG "          /* + <peer_id> <instance_id> */          // 注册身份
-#define P2P_WS_ICE_CMD_OFF          "OFF"                                                   // 主动下线（立即释放资源）
-#define P2P_WS_ICE_CMD_SYNC0        "SYNC0 "        /* + <remote_peer_id>[\n<payload>] */   // 创建/恢复会话（可选预缓存负载）
-#define P2P_WS_ICE_CMD_SYNC         "SYNC "         /* + <session_id>\n<payload> */         // 同步数据 (C2S & S2C)
-#define P2P_WS_ICE_CMD_FIN          "FIN "          /* + <session_id> */                    // 会话结束 (C2S & S2C)
+ /* WSS 消息类型前缀（纯文本匹配，非二进制编码） */
+#define P2P_WSS_CMD_REG          "REG "          /* + <peer_id> <instance_id> */          // 注册身份
+#define P2P_WSS_CMD_OFF          "OFF"                                                   // 主动下线（立即释放资源）
+#define P2P_WSS_CMD_SYNC0        "SYNC0 "        /* + <remote_peer_id>[\n<payload>] */   // 创建/恢复会话（可选预缓存负载）
+#define P2P_WSS_CMD_SYNC         "SYNC "         /* + <session_id>\n<payload> */         // 同步数据 (C2S & S2C)
+#define P2P_WSS_CMD_FIN          "FIN "          /* + <session_id> */                    // 会话结束 (C2S & S2C)
 
-#define P2P_WS_ICE_RSP_REG_OK       "REG OK "       /* + <sync_max> <features> */           // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
-#define P2P_WS_ICE_RSP_REG_FAIL     "REG FAIL "     /* + <reason> */
-#define P2P_WS_ICE_RSP_SYNC0        "SYNC0 "        /* + <peer_id> <session_id> online[\n<payload>]|offline|confirm|busy */
-#define P2P_WS_ICE_RSP_SYNC0_FAIL   "SYNC0 FAIL "   /* + <reason> */
-#define P2P_WS_ICE_RSP_SYNC         "SYNC "         /* + <session_id> confirm <bytes>|busy  (S2C 响应) */
+#define P2P_WSS_RSP_REG_OK       "REG OK "       /* + <sync_max> <features> */           // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
+#define P2P_WSS_RSP_REG_FAIL     "REG FAIL "     /* + <reason> */
+#define P2P_WSS_RSP_SYNC0        "SYNC0 "        /* + <peer_id> <session_id> online[\n<payload>]|offline|confirm|busy */
+#define P2P_WSS_RSP_SYNC0_FAIL   "SYNC0 FAIL "   /* + <reason> */
+#define P2P_WSS_RSP_SYNC         "SYNC "         /* + <session_id> confirm <bytes>|busy  (S2C 响应) */
 
 /* SYNC payload 子类型前缀（应用层约定，服务器透传） */
-#define P2P_WS_ICE_PAY_ICE          "ICE\n"         /* + <candidate_line> */
-#define P2P_WS_ICE_PAY_ICE_DONE     "ICE_DONE"
+#define P2P_WSS_PAY_ICE          "ICE\n"         /* + <candidate_line> */
+#define P2P_WSS_PAY_ICE_DONE     "ICE_DONE"
 
-/* WS_ICE 二进制帧类型（WebSocket binary frame, opcode=0x2）
+/* WSS 二进制帧类型（WebSocket binary frame, opcode=0x2）
  *
  * 帧格式: [type(1)][session_id(4)][payload(N)]
- *   - type: 见下方 P2P_WS_ICE_BIN_* 定义
+ *   - type: 见下方 P2P_WSS_BIN_* 定义
  *   - session_id: uint32 网络字节序，路由键
  *   - payload: 类型相关数据（服务器仅重写 session_id，透传 payload）
  *
@@ -1213,17 +1216,17 @@ typedef struct {
  *   - 无需 STATUS 应答（WebSocket 可靠传输，PACKET 无需 ACK/流控）
  *   - RPC 错误统一用伪造 RESP 返回（peer_offline / timeout）
  */
-#define P2P_WS_ICE_BIN_PACKET      0x01    /* [type][ses_id][p2p_hdr(4)][data(N)] */        // 中继 P2P 数据包:
-#define P2P_WS_ICE_BIN_REQ         0x02    /* [type][ses_id][sid(2)][msg(1)][data(N)] */    // RPC 请求
-#define P2P_WS_ICE_BIN_RESP        0x03    /* [type][ses_id][sid(2)][code(1)][data(N)] */   // RPC 响应
+#define P2P_WSS_BIN_PACKET      0x01    /* [type][ses_id][p2p_hdr(4)][data(N)] */        // 中继 P2P 数据包:
+#define P2P_WSS_BIN_REQ         0x02    /* [type][ses_id][sid(2)][msg(1)][data(N)] */    // RPC 请求
+#define P2P_WSS_BIN_RESP        0x03    /* [type][ses_id][sid(2)][code(1)][data(N)] */   // RPC 响应
 
-#define P2P_WS_ICE_BIN_HDR_SIZE    (1u + P2P_SESS_ID_PSZ)                       /* type(1) + session_id(4) = 5 */
-#define P2P_WS_ICE_BIN_PACKET_MIN  (P2P_WS_ICE_BIN_HDR_SIZE + P2P_HDR_SIZE)     /* 9: 最小 PACKET 帧 */
-#define P2P_WS_ICE_BIN_REQ_MIN     (P2P_WS_ICE_BIN_HDR_SIZE + 3u)               /* 8: type+ses_id+sid+msg */
-#define P2P_WS_ICE_BIN_RESP_MIN    (P2P_WS_ICE_BIN_HDR_SIZE + 3u)               /* 8: type+ses_id+sid+code */
+#define P2P_WSS_BIN_HDR_SIZE    (1u + P2P_SESS_ID_PSZ)                       /* type(1) + session_id(4) = 5 */
+#define P2P_WSS_BIN_PACKET_MIN  (P2P_WSS_BIN_HDR_SIZE + P2P_HDR_SIZE)     /* 9: 最小 PACKET 帧 */
+#define P2P_WSS_BIN_REQ_MIN     (P2P_WSS_BIN_HDR_SIZE + 3u)               /* 8: type+ses_id+sid+msg */
+#define P2P_WSS_BIN_RESP_MIN    (P2P_WSS_BIN_HDR_SIZE + 3u)               /* 8: type+ses_id+sid+code */
 
 /* ============================================================================
- * WS_ICE 协议详细定义说明
+ * WSS 协议详细定义说明
  * ============================================================================
  *
  * ────────────────────────────────────────────────────────────────────────────
@@ -1236,23 +1239,23 @@ typedef struct {
  *                  用于服务器区分网络重连（保留会话）和客户端重启（销毁旧会话）
  *
  * 功能: 注册本端身份，建立 peer_id → WS 连接的映射。
- *       类似 RELAY P2P_RLY_ONLINE / COMPACT SIG_PKT_ONLINE。
+ *       类似 RELAY P2P_RLY_REG / COMPACT SIG_PKT_ONLINE。
  *
  * 服务端处理:
  *   1. peer_id 为空 / instance_id 无效 → 返回 "REG FAIL ..."
  *   2. peer_id + instance_id 均匹配（同一 cid）→ 幂等，返回 "REG OK <sync_max>"
  *   3. peer_id 匹配 + instance_id 相同（不同 cid，网络重连）:
  *      - 踢掉旧 WS 连接（ws_server_disconnect, code=1000）
- *      - 复用 ws_ice_client_t，更新 cid，保留所有会话
+ *      - 复用 wss_client_t，更新 cid，保留所有会话
  *      - 遍历已配对会话，向所有在线对端推送 "SYNC0 <peer_id> <peer_session_id> online"
  *      - 向本端推送所有在线对端的 "SYNC0 <remote_peer_id> <session_id> online"
  *      - 返回 "REG OK <sync_max>"
  *   4. peer_id 匹配 + instance_id 不同（客户端重启）:
  *      - 销毁旧 client 及其所有会话（通知对端 FIN）
- *      - 创建新 ws_ice_client_t
+ *      - 创建新 wss_client_t
  *      - 返回 "REG OK <sync_max>"
  *   5. 同一 cid 曾注册其他 peer_id → 清除旧 client 及其会话
- *   6. 全新注册 → 创建 ws_ice_client_t，返回 "REG OK <sync_max>"
+ *   6. 全新注册 → 创建 wss_client_t，返回 "REG OK <sync_max>"
  *
  * 响应:
  *   "REG OK <sync_max> <features>" — 注册成功
@@ -1279,7 +1282,7 @@ typedef struct {
  *       与 REG 配对使用。相比直接断开 WS 连接，OFF 无需等待超时回收。
  *
  * 服务端处理:
- *   1. 已注册 → 调用 ws_ice_invalidate_client(do_free=true)
+ *   1. 已注册 → 调用 wss_invalidate_client(do_free=true)
  *      - 遍历所有会话，通知在线对端 "FIN <peer_session_id>"
  *      - 释放所有会话和 client 结构
  *   2. 未注册 → 静默忽略
@@ -1299,7 +1302,7 @@ typedef struct {
  *       与 REG 配对使用。相比直接断开 WS 连接，OFF 无需等待超时回收。
  *
  * 服务端处理:
- *   1. 已注册 → 调用 ws_ice_invalidate_client(do_free=true)
+ *   1. 已注册 → 调用 wss_invalidate_client(do_free=true)
  *      - 遍历所有会话，通知在线对端 "FIN <peer_session_id>"
  *      - 释放所有会话和 client 结构
  *   2. 未注册 → 静默忽略
@@ -1338,7 +1341,7 @@ typedef struct {
  *      d. 对端离线 → 返回 "SYNC0 <remote_peer_id> <session_id> offline"
  *      e. payload 超出缓存可用空间 → 追加返回 "SYNC0 ... busy"
  *   3. 无已有会话 → 调用 build_session() 创建:
- *      a. 创建 ws_ice_session_t，分配 session_id
+ *      a. 创建 wss_session_t，分配 session_id
  *      b. 查找 session_pair（双向 key），已有则配对
  *      c. 对端已创建会话且未死亡 → 双向配对（peer 指针互指）
  *      d. 追加本端 payload（超出 sync_max 则 busy）
@@ -1504,7 +1507,7 @@ typedef struct {
  * S2C（服务器 → 客户端，对端断连通知）:
  *   1. 对端 WS 连接断开（网络中断/主动关闭）
  *   2. 对端发送 FIN 主动断开（服务器转发）
- *   3. 对端会话被超时清理（ws_ice_free_session）
+ *   3. 对端会话被超时清理（wss_free_session）
  *
  * 客户端处理:
  *   收到 FIN 后应：
@@ -1526,7 +1529,7 @@ typedef struct {
  * 对应 RELAY 模式的 P2P_RLY_PACKET / P2P_RLY_REQ / P2P_RLY_RESP。
  *
  * 公共帧格式: [type(1)][session_id(4)][payload(N)]
- *   - type: 消息类型（P2P_WS_ICE_BIN_*）
+ *   - type: 消息类型（P2P_WSS_BIN_*）
  *   - session_id: uint32 网络字节序，用于会话路由
  *   - payload: 类型相关数据
  *
@@ -1553,7 +1556,7 @@ typedef struct {
  *   3. 对端离线 → 静默丢弃（实时数据不缓存）
  *   服务器不解析内层 p2p_hdr，仅做路由转发。
  *
- * 最小帧长度: P2P_WS_ICE_BIN_PACKET_MIN = 9 字节
+ * 最小帧长度: P2P_WSS_BIN_PACKET_MIN = 9 字节
  *
  * ────────────────────────────────────────────────────────────────────────────
  * REQ — RPC 请求（双向：A → 服务器 → B）
@@ -1578,7 +1581,7 @@ typedef struct {
  *       超过 MSG_REQ_MAX_RETRY × MSG_RPC_RETRY_INTERVAL_MS 未收到 RESP
  *       → 生成伪 RESP [code=0xFE (P2P_MSG_ERR_TIMEOUT)]
  *
- * 最小帧长度: P2P_WS_ICE_BIN_REQ_MIN = 8 字节
+ * 最小帧长度: P2P_WSS_BIN_REQ_MIN = 8 字节
  *
  * ────────────────────────────────────────────────────────────────────────────
  * RESP — RPC 响应（双向：B → 服务器 → A）
@@ -1603,7 +1606,7 @@ typedef struct {
  *   code=0xFF (P2P_MSG_ERR_PEER_OFFLINE): 对端在等待响应期间离线或会话销毁
  *   code=0xFE (P2P_MSG_ERR_TIMEOUT):      服务器转发超时或 RPC 通道忙
  *
- * 最小帧长度: P2P_WS_ICE_BIN_RESP_MIN = 8 字节
+ * 最小帧长度: P2P_WSS_BIN_RESP_MIN = 8 字节
  */
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -1617,7 +1620,7 @@ typedef struct {
  *   │                                │
  *   ├── WebSocket Connect ─────────►│  HTTP Upgrade → WS
  *   │                                │
- *   ├── "REG alice" ───────────────►│  创建 ws_ice_client_t
+ *   ├── "REG alice" ───────────────►│  创建 wss_client_t
  *   │                                │  peer_id="alice", cid=N
  *   │◄── "REG OK <sync_max>" ───────┤
  *   │                                │
@@ -1644,7 +1647,7 @@ typedef struct {
  *   Alice                         Server                             Bob
  *   │                                │                                │
  *   │                                │◄── "REG bob" ─────────────────┤
- *   │                                │  创建 ws_ice_client_t          │
+ *   │                                │  创建 wss_client_t          │
  *   │                                ├── "REG OK <sync_max>" ───────►│
  *   │                                │                                │
  *   │                                │◄── "SYNC0 alice\nICE\n..." ───┤
@@ -1699,7 +1702,7 @@ typedef struct {
  *   │                                │                                │
  *   │                                │◄── WebSocket Connect ─────────┤
  *   │                                │◄── "REG bob" ─────────────────┤
- *   │                                │  复用 ws_ice_client_t          │
+ *   │                                │  复用 wss_client_t          │
  *   │                                │  更新 cid，保留会话            │
  *   │                                ├── "REG OK <sync_max>" ────────►│
  *   │                                │                                │
@@ -1720,10 +1723,10 @@ typedef struct {
  *
  *   Server (每 CLEANUP_INTERVAL_S 秒执行一次):
  *   │
- *   ├── 遍历 g_ws_ice_clients
+ *   ├── 遍历 g_wss_clients
  *   │   └── 对每个离线 client (cid == -1):
- *   │       └── 若 now - last_active > WS_ICE_CLIENT_TIMEOUT_S (60s):
- *   │           ├── 释放所有会话 (ws_ice_free_session)
+ *   │       └── 若 now - last_active > WSS_CLIENT_TIMEOUT_S (60s):
+ *   │           ├── 释放所有会话 (wss_free_session)
  *   │           │   └── 每个有配对的会话 → 通知对端 "FIN <peer_session_id>"
  *   │           │       并标记对端 peer 指针为 -1
  *   │           └── 移除 client (HASH_DELETE + free)

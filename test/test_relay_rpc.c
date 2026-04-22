@@ -240,10 +240,10 @@ static int tcp_recv_relay_packet(sock_t sock, uint8_t *buf, int buf_size,
 
 // 构造 ONLINE 包
 static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_t instance_id) {
-    const uint16_t payload_len = P2P_RLY_ONLINE_PSZ;
+    const uint16_t payload_len = P2P_RLY_REG_PSZ;
     if (buf_size < 3 + (int)payload_len) return -1;
 
-    buf[0] = P2P_RLY_ONLINE;
+    buf[0] = P2P_RLY_REG;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
 
@@ -348,7 +348,7 @@ static int build_relay_data(uint8_t *buf, int buf_size, uint32_t session_id,
     uint16_t payload_len = 4 + 4 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
 
-    buf[0] = P2P_RLY_PACKET;
+    buf[0] = P2P_RLY_PKT;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
 
@@ -407,7 +407,7 @@ static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t insta
         return 0;
     }
 
-    if (type == P2P_RLY_ONLINE && payload_len >= P2P_RLY_ONLINE_S2C_PSZ) {
+    if (type == P2P_RLY_REG && payload_len >= P2P_RLY_REG_S2C_PSZ) {
         ack->received = 1;
         ack->features = recv_buf[3];
         ack->candidate_sync_max = recv_buf[4];
@@ -996,7 +996,7 @@ static void test_msg_rpc_and_data_parallel(void) {
         uint16_t payload_len;
         if (tcp_recv_relay_packet(sb, recv_buf, sizeof(recv_buf), &type, &payload_len) < 0) break;
 
-        if (type == P2P_RLY_PACKET) {
+        if (type == P2P_RLY_PKT) {
             got_data = 1;
         } else if (type == P2P_RLY_REQ) {
             got_req = 1;

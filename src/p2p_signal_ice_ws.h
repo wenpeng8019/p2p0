@@ -4,7 +4,7 @@
  * 当 P2P_SIGNALING_MODE_ICE 且配置了 server_host 时，
  * 通过 WebSocket 连接信令服务器进行 SDP/候选交换。
  *
- * 协议（与 server.c WS_ICE section 对应）：
+ * 协议（与 server.c WSS section 对应）：
  *
  *   客户端 → 服务器：
  *     REG <peer_id> <instance_id>  注册身份（instance_id 区分重连/重启）

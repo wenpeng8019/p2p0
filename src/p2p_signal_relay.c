@@ -68,7 +68,7 @@ static ret_t tcp_send(p2p_relay_ctx_t *ctx, const char* PROTO,
     } else {        
         chunk = (p2p_send_chunk_t *)malloc(sizeof(p2p_send_chunk_t));
         if (!chunk) {
-            print("E:", LA_F("[R] %s%s qsend failed(OOM)\n", LA_F440, 440), type == P2P_RLY_PACKET ? "PKT-" : "" , PROTO);
+            print("E:", LA_F("[R] %s%s qsend failed(OOM)\n", LA_F440, 440), type == P2P_RLY_PKT ? "PKT-" : "" , PROTO);
             return E_OUT_OF_MEMORY;  // 内存分配失败
         }
     }
@@ -99,7 +99,7 @@ static ret_t tcp_send(p2p_relay_ctx_t *ctx, const char* PROTO,
 
     ctx->last_send_time = now;
 
-    printf(LA_F("[R] %s%s qsend(%d), len=%u\n", LA_F441, 441), type == P2P_RLY_PACKET ? "PKT-" : "" , PROTO,
+    printf(LA_F("[R] %s%s qsend(%d), len=%u\n", LA_F441, 441), type == P2P_RLY_PKT ? "PKT-" : "" , PROTO,
            ctx->send_queue_len, sizeof(p2p_relay_hdr_t) + payload_len);
 
 
@@ -210,7 +210,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
 /*
  * 发送 ONLINE 消息
  *
- * 包头: [type(P2P_RLY_ONLINE) | size(2)]
+ * 包头: [type(P2P_RLY_REG) | size(2)]
  * 负载: [name(32)][instance_id(4)]
  */
 static void send_online(struct p2p_instance *inst, uint64_t now) {
@@ -218,12 +218,12 @@ static void send_online(struct p2p_instance *inst, uint64_t now) {
 
     p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
 
-    uint8_t payload[P2P_RLY_ONLINE_PSZ];
+    uint8_t payload[P2P_RLY_REG_PSZ];
     memset(payload, 0, sizeof(payload));
     strncpy((char*)payload, sig_ctx->local_peer_id, P2P_PEER_ID_MAX - 1);
     nwrite_l(payload + P2P_PEER_ID_MAX, sig_ctx->instance_id);
 
-    if (tcp_send(sig_ctx, PROTO, P2P_RLY_ONLINE, payload, sizeof(payload), now) != E_NONE) {
+    if (tcp_send(sig_ctx, PROTO, P2P_RLY_REG, payload, sizeof(payload), now) != E_NONE) {
         return;
     }
 
@@ -438,13 +438,13 @@ static void handle_status(struct p2p_instance *inst, uint8_t type, uint8_t code,
 /*
  * 处理 ONLINE_ACK
  *
- * 包头: [type(P2P_RLY_ONLINE_ACK) | size(2)]
+ * 包头: [type(P2P_RLY_REG_ACK) | size(2)]
  * 负载: [features(1)][candidate_sync_max(1)]
  */
 static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload, int len, uint64_t now) {
     const char *PROTO = "ONLINE_ACK";
 
-    if (len < (int)P2P_RLY_ONLINE_S2C_PSZ) {
+    if (len < (int)P2P_RLY_REG_S2C_PSZ) {
         print("E:", LA_F("%s: bad payload(%d)\n", LA_F117, 117), PROTO, len);
         return;
     }
@@ -458,7 +458,7 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
     uint8_t features = payload[0];
     sig_ctx->feature_relay = (features & P2P_RLY_FEATURE_RELAY) != 0;
     sig_ctx->feature_msg = (features & P2P_RLY_FEATURE_MSG) != 0;
-    sig_ctx->candidate_sync_max = (len >= (int)P2P_RLY_ONLINE_S2C_PSZ) ? payload[1] : 0;
+    sig_ctx->candidate_sync_max = (len >= (int)P2P_RLY_REG_S2C_PSZ) ? payload[1] : 0;
 
     const char* def = "";
     if (!sig_ctx->candidate_sync_max) { def = "(default)";
@@ -553,7 +553,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
             if (sess_ctx->trickle_last_time) sess_ctx->trickle_last_time = P_tick_ms();
             print("V:", LA_F("%s: sync busy, will retry\n", LA_F229, 229), PROTO);
         }
-        else if (type == P2P_RLY_PACKET) {
+        else if (type == P2P_RLY_PKT) {
             // relay 流控：保持等待，延迟重试
             sess_ctx->awaiting_relay_ready = true;
             print("V:", LA_F("%s: relay busy, will retry\n", LA_F201, 201), PROTO);
@@ -562,7 +562,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
     // 服务就绪：解除对应流控
     else if (code == P2P_RLY_CODE_READY) {
 
-        if (type == P2P_RLY_PACKET) {
+        if (type == P2P_RLY_PKT) {
             sess_ctx->awaiting_relay_ready = false;
             print("V:", LA_F("%s: relay ready, flow control released\n", LA_F202, 202), PROTO);
         }
@@ -982,7 +982,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             break;
         }
 
-        if (sig_ctx->hdr.type == P2P_RLY_ONLINE) {
+        if (sig_ctx->hdr.type == P2P_RLY_REG) {
             printf(LA_F("[R] %s recv, len=%d\n", LA_F438, 438), "ONLINE ACK", sig_ctx->hdr.size);
 
             handle_online_ack(inst, sig_ctx->payload, (int)sig_ctx->hdr.size, now);
@@ -1109,7 +1109,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             break;
             case P2P_RLY_FIN:
                 PROTO = "FIN"; payload_min = P2P_RLY_FIN_PSZ; handler = handle_relay_fin; break;
-            case P2P_RLY_PACKET:
+            case P2P_RLY_PKT:
                 PROTO = "PACKET"; payload_min = P2P_RLY_PACKET_PSZ(0); handler = handle_relay_packet; break;
             case P2P_RLY_REQ:
                 PROTO = "REQ"; payload_min = P2P_RLY_REQ_MIN_PSZ; handler = handle_relay_req; break;
@@ -1413,7 +1413,7 @@ ret_t p2p_signal_relay_packet(struct p2p_session *s,
     if (payload_len > 0 && payload)
         memcpy(relay_payload + P2P_SESS_ID_PSZ + P2P_HDR_SIZE, payload, payload_len);
 
-    ret_t ret = tcp_send(sig_ctx, proto, P2P_RLY_PACKET, relay_payload, total_len, P_tick_ms());
+    ret_t ret = tcp_send(sig_ctx, proto, P2P_RLY_PKT, relay_payload, total_len, P_tick_ms());
     if (ret != E_NONE) return ret;
 
     sess_ctx->awaiting_relay_ready = true;

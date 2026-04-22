@@ -232,7 +232,7 @@ static void send_online(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, u
     // instance_id（4 字节大端序）
     nwrite_l(payload + n, sig_ctx->instance_id); n += 4;
 
-    err_t err = udp_send(inst, PROTO, SIG_PKT_ONLINE, 0, 0, payload, n, now);
+    err_t err = udp_send(inst, PROTO, SIG_PKT_REG, 0, 0, payload, n, now);
     if (err != E_NONE) return;
 
     print("V:", LA_F("%s sent, inst_id=%u\n", LA_F63, 63), PROTO, sig_ctx->instance_id);
@@ -461,7 +461,7 @@ static void send_rpc_req(struct p2p_session *s, uint64_t now) {
         n += sess_ctx->req_data_len;
     }
 
-    err_t err = udp_send(s->inst, PROTO, SIG_PKT_MSG_REQ, 0, 0, payload, n, now);
+    err_t err = udp_send(s->inst, PROTO, SIG_PKT_REQ, 0, 0, payload, n, now);
     if (err != E_NONE) return;
 
     print("V:", LA_F("%s sent (ses_id=%u), sid=%u msg=%u size=%d\n", LA_F53, 53),
@@ -492,7 +492,7 @@ static void send_rpc_resp(struct p2p_session *s, uint64_t now) {
         n += sess_ctx->resp_data_len;
     }
 
-    err_t err = udp_send(s->inst, PROTO, SIG_PKT_MSG_RESP, 0, 0, payload, n, now);
+    err_t err = udp_send(s->inst, PROTO, SIG_PKT_RESP, 0, 0, payload, n, now);
     if (err != E_NONE) return;
 
     print("V:", LA_F("%s: sent (ses_id=%u), sid=%u code=%u size=%d\n", LA_F216, 216),
@@ -514,7 +514,7 @@ static void send_nat_probe(struct p2p_instance *inst, uint64_t now) {
     struct sockaddr_in probe_addr = sig_ctx->server_addr;
     probe_addr.sin_port = htons(sig_ctx->probe_port);
 
-    ret_t ret = p2p_udp_send_packet(inst, &probe_addr, SIG_PKT_NAT_PROBE, 0, sig_ctx->nat_probe_retries, NULL, 0);
+    ret_t ret = p2p_udp_send_packet(inst, &probe_addr, SIG_PKT_NAT, 0, sig_ctx->nat_probe_retries, NULL, 0);
     if (ret < 0) {
         print("E:", LA_F("[C] %s send to port:%d failed(%d)\n", LA_F430, 430),
               PROTO, sig_ctx->probe_port, E_EXT_CODE(ret));
@@ -609,8 +609,8 @@ void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flag
     // ONLINE_ACK 下发 auth_key（客户端-服务器认证令牌）
     sig_ctx->auth_key = ack_auth_key;
 
-    sig_ctx->feature_relay = (flags & SIG_ONACK_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
-    sig_ctx->feature_msg   = (flags & SIG_ONACK_FLAG_MSG) != 0;        // 服务器是否支持 MSG RPC
+    sig_ctx->feature_relay = (flags & SIG_REG_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
+    sig_ctx->feature_msg   = (flags & SIG_REG_FLAG_MSG) != 0;        // 服务器是否支持 MSG RPC
     sig_ctx->max_candidates = payload[12];  // payload: [instance_id(4)][auth_key(SIG_AUTH_KEY_PSZ)][max(1)][ip(4)][port(2)][probe(2)]
 
     // 解析自己的公网地址（服务器主端口探测到的 UDP 源地址）
@@ -1268,7 +1268,7 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
         nwrite_l(ack + n, s->id); n += P2P_SESS_ID_PSZ;
         nwrite_s(ack + n, sid); n += 2;
 
-        err_t err = udp_send(s->inst, "RESP_ACK", SIG_PKT_MSG_RESP_ACK, 0, 0, ack, n, now);
+        err_t err = udp_send(s->inst, "RESP_ACK", SIG_PKT_RESP_ACK, 0, 0, ack, n, now);
         if (err == E_NONE) {
             print("V:", LA_F("%s sent (ses_id=%u), sid=%u\n", LA_F54, 54), "RESP_ACK", s->id, sid);
         }
@@ -1293,9 +1293,9 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
     const uint8_t *res_data = NULL;
     int res_size = -1; // -1 表示错误
 
-    if (flags & (SIG_MSG_FLAG_PEER_OFFLINE | SIG_MSG_FLAG_TIMEOUT)) {
+    if (flags & (SIG_RPC_FLAG_PEER_OFFLINE | SIG_RPC_FLAG_TIMEOUT)) {
 
-        res_code = (flags & SIG_MSG_FLAG_PEER_OFFLINE) ? P2P_MSG_ERR_PEER_OFFLINE : P2P_MSG_ERR_TIMEOUT;
+        res_code = (flags & SIG_RPC_FLAG_PEER_OFFLINE) ? P2P_MSG_ERR_PEER_OFFLINE : P2P_MSG_ERR_TIMEOUT;
     }
     else {
 
@@ -1317,10 +1317,10 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
     sess_ctx->req_sid = 0;
 
     /* 根据 flags 输出不同的日志 */
-    if (flags & SIG_MSG_FLAG_PEER_OFFLINE) {
+    if (flags & SIG_RPC_FLAG_PEER_OFFLINE) {
         print("W:", LA_F("%s: RPC fail due to peer offline (sid=%u)\n", LA_F92, 92), PROTO, sid);
     }
-    else if (flags & SIG_MSG_FLAG_TIMEOUT) {
+    else if (flags & SIG_RPC_FLAG_TIMEOUT) {
         print("W:", LA_F("%s: RPC fail due to relay timeout (sid=%u)\n", LA_F93, 93), PROTO, sid);
     }
     else {
@@ -1434,7 +1434,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
 
     do { const char *PROTO;
 
-        if (type == SIG_PKT_ONLINE_ACK) { PROTO = "ONLINE_ACK";
+        if (type == SIG_PKT_REG_ACK) { PROTO = "ONLINE_ACK";
 
             printf(LA_F("[C] %s recv, seq=%u, flags=0x%02x, len=%d\n", LA_F426, 426),
                 PROTO, seq, flags, payload_len);
@@ -1455,7 +1455,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             break;
         }
 
-        if (type == SIG_PKT_NAT_PROBE_ACK) { PROTO = "NAT_PROBE_ACK";
+        if (type == SIG_PKT_NAT_ACK) { PROTO = "NAT_PROBE_ACK";
 
             printf(LA_F("[C] %s recv, seq=%u, len=%d\n", LA_F427, 427),
                 PROTO, seq, payload_len);
@@ -1577,10 +1577,10 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
         case SIG_PKT_SYNC:         PROTO = "SYNC";      payload_min = SIG_PKT_SYNC_PSZ(0);              handler = compact_on_peer_sync; break;
         case SIG_PKT_SYNC_ACK:     PROTO = "SYNC_ACK";  payload_min = SIG_PKT_SYNC_ACK_PSZ;             handler = compact_on_sync_ack; break;
         case SIG_PKT_FIN:          PROTO = "FIN";       payload_min = SIG_PKT_FIN_PSZ;                  handler = compact_on_fin; break;
-        case SIG_PKT_MSG_REQ:      PROTO = "REQ";       payload_min = SIG_PKT_MSG_REQ_MIN_PSZ;          handler = compact_on_request; break;
-        case SIG_PKT_MSG_REQ_ACK:  PROTO = "REQ_ACK";   payload_min = SIG_PKT_MSG_REQ_ACK_PSZ;          handler = compact_on_request_ack; break;
-        case SIG_PKT_MSG_RESP:     PROTO = "RESP";      payload_min = (uint16_t)(P2P_SESS_ID_PSZ + 2u); handler = compact_on_response; break;
-        case SIG_PKT_MSG_RESP_ACK: PROTO = "RESP_ACK";  payload_min = SIG_PKT_MSG_RESP_ACK_PSZ;         handler = compact_on_response_ack; break;
+        case SIG_PKT_REQ:      PROTO = "REQ";       payload_min = SIG_PKT_MSG_REQ_MIN_PSZ;          handler = compact_on_request; break;
+        case SIG_PKT_REQ_ACK:  PROTO = "REQ_ACK";   payload_min = SIG_PKT_MSG_REQ_ACK_PSZ;          handler = compact_on_request_ack; break;
+        case SIG_PKT_RESP:     PROTO = "RESP";      payload_min = (uint16_t)(P2P_SESS_ID_PSZ + 2u); handler = compact_on_response; break;
+        case SIG_PKT_RESP_ACK: PROTO = "RESP_ACK";  payload_min = SIG_PKT_MSG_RESP_ACK_PSZ;         handler = compact_on_response_ack; break;
         default:
             print("W:", LA_F("[C] Unknown pkt type 0x%02x, len=%d\n", LA_F433, 433), type, payload_len);
             return;
@@ -1672,12 +1672,12 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst) {
     uint8_t payload[SIG_PKT_OFFLINE_PSZ];
     nwrite_ll(payload, sig_ctx->auth_key);
 
-    err_t err = udp_send(inst, PROTO, SIG_PKT_OFFLINE, 0, 0, payload, (int) sizeof(payload), 0);
+    err_t err = udp_send(inst, PROTO, SIG_PKT_OFF, 0, 0, payload, (int) sizeof(payload), 0);
     if (err != E_NONE) return err;
 
     for (int n = 2; n--;) { // 最多重试 2 次，确保服务器收到注销请求
         P_usleep(50 * 1000);
-        p2p_udp_send_packet(inst, &sig_ctx->server_addr, SIG_PKT_OFFLINE, 0, 0, payload, (int) sizeof(payload));
+        p2p_udp_send_packet(inst, &sig_ctx->server_addr, SIG_PKT_OFF, 0, 0, payload, (int) sizeof(payload));
     }
 
     print("V:", LA_F("%s sent, inst_id=%u\n", LA_F63, 63), PROTO, sig_ctx->instance_id);
@@ -1754,7 +1754,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     uint8_t payload[SIG_PKT_OFFLINE_PSZ];
     nwrite_ll(payload, sig_ctx->auth_key);
 
-    err_t err = udp_send(s->inst, PROTO, SIG_PKT_OFFLINE, 0, 0, payload, (int) sizeof(payload), P_tick_ms());
+    err_t err = udp_send(s->inst, PROTO, SIG_PKT_OFF, 0, 0, payload, (int) sizeof(payload), P_tick_ms());
     if (err != E_NONE) return err;
 
     print("V:", LA_F("%s sent (ses_id=%u)\n", LA_F56, 56), PROTO, s->id);

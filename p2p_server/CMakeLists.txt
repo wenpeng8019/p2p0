@@ -58,6 +58,15 @@ add_executable(p2p_server
     server.c
     ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
     ${CMAKE_SOURCE_DIR}/i18n/i18n.c
+        p2p_relay.c
+        p2p_relay.h
+        common.h
+        p2p_compact.c
+        p2p_compact.h
+        p2p_wss.c
+        p2p_wss.h
+        ws.c
+        ws.h
 )
 target_include_directories(p2p_server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

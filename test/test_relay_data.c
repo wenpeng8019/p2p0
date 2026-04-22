@@ -240,10 +240,10 @@ static int tcp_recv_relay_packet(sock_t sock, uint8_t *buf, int buf_size,
 
 // 构造 ONLINE 包
 static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_t instance_id) {
-    const uint16_t payload_len = P2P_RLY_ONLINE_PSZ;
+    const uint16_t payload_len = P2P_RLY_REG_PSZ;
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_ONLINE;
+    buf[0] = P2P_RLY_REG;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -288,7 +288,7 @@ static int build_relay_data(uint8_t *buf, int buf_size, uint32_t session_id,
     uint16_t payload_len = 4 + 4 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_PACKET;
+    buf[0] = P2P_RLY_PKT;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -318,7 +318,7 @@ static int build_relay_ack(uint8_t *buf, int buf_size, uint32_t session_id,
     uint16_t payload_len = 4 + 4 + 2 + 4;  // session_id + P2P_hdr + ack_seq + sack
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_PACKET;
+    buf[0] = P2P_RLY_PKT;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -353,7 +353,7 @@ static int build_relay_crypto(uint8_t *buf, int buf_size, uint32_t session_id,
     uint16_t payload_len = 4 + 4 + crypto_len;
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_PACKET;
+    buf[0] = P2P_RLY_PKT;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -423,7 +423,7 @@ static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t insta
         return 0;
     }
     
-    if (type == P2P_RLY_ONLINE && payload_len >= P2P_RLY_ONLINE_S2C_PSZ) {
+    if (type == P2P_RLY_REG && payload_len >= P2P_RLY_REG_S2C_PSZ) {
         ack->received = 1;
         ack->features = recv_buf[3];
         ack->candidate_sync_max = recv_buf[4];
@@ -502,7 +502,7 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt) {
             return 0;
         }
         
-        if (type == P2P_RLY_PACKET && payload_len >= 8) {
+        if (type == P2P_RLY_PKT && payload_len >= 8) {
             // All relay data: [session_id(4)][P2P_hdr(4)][data(N)]
             pkt->received = 1;
             pkt->type = type;
@@ -643,7 +643,7 @@ static void test_relay_data_forwarded(void) {
     }
     
     // 验证数据
-    if (recv_pkt.type != P2P_RLY_PACKET) {
+    if (recv_pkt.type != P2P_RLY_PKT) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "wrong packet type");
@@ -724,7 +724,7 @@ static void test_relay_ack_forwarded(void) {
         return;
     }
     
-    if (recv_pkt.type != P2P_RLY_PACKET) {
+    if (recv_pkt.type != P2P_RLY_PKT) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "wrong packet type");
@@ -794,7 +794,7 @@ static void test_relay_crypto_forwarded(void) {
         return;
     }
     
-    if (recv_pkt.type != P2P_RLY_PACKET) {
+    if (recv_pkt.type != P2P_RLY_PKT) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "wrong packet type");
@@ -1002,7 +1002,7 @@ static void test_relay_data_bad_payload(void) {
     
     // 发送畸形 DATA 包（payload 过短）
     uint8_t bad_pkt[16];
-    bad_pkt[0] = P2P_RLY_PACKET;
+    bad_pkt[0] = P2P_RLY_PKT;
     bad_pkt[1] = 0;
     bad_pkt[2] = 4;  // payload_len = 4（应为 12+）
     memset(bad_pkt + 3, 0, 4);

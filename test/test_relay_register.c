@@ -268,10 +268,10 @@ static int tcp_recv_relay_packet(sock_t sock, uint8_t *buf, int buf_size,
 // 构造 ONLINE 包
 // payload: [name(32)][instance_id(4)]
 static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_t instance_id) {
-    const uint16_t payload_len = P2P_RLY_ONLINE_PSZ;
+    const uint16_t payload_len = P2P_RLY_REG_PSZ;
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_ONLINE;
+    buf[0] = P2P_RLY_REG;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -352,7 +352,7 @@ static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t insta
         return 0;
     }
     
-    if (type == P2P_RLY_ONLINE && payload_len >= P2P_RLY_ONLINE_S2C_PSZ) {
+    if (type == P2P_RLY_REG && payload_len >= P2P_RLY_REG_S2C_PSZ) {
         ack->received = 1;
         ack->features = recv_buf[3];
         ack->candidate_sync_max = recv_buf[4];
@@ -676,7 +676,7 @@ static void test_online_bad_payload(void) {
     
     // 发送过短的 ONLINE 包
     uint8_t bad_pkt[16];
-    bad_pkt[0] = P2P_RLY_ONLINE;
+    bad_pkt[0] = P2P_RLY_REG;
     bad_pkt[1] = 0;
     bad_pkt[2] = 8;  // payload_len = 8（应为 36）
     memset(bad_pkt + 3, 0, 8);
@@ -723,7 +723,7 @@ static void test_sync0_not_online(void) {
     
     P_sock_close(sock);
     
-    if (status.received && status.status_code == P2P_RLY_ERR_NOT_ONLINE) {
+    if (status.received && status.status_code == P2P_RLY_ERR_NOT_REG) {
         TEST_PASS(TEST_NAME);
         return;
     }

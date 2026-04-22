@@ -183,7 +183,7 @@ static int build_online(uint8_t *buf, int buf_size,
                         uint32_t instance_id) {
     if (buf_size < 4 + 32 + 4) return -1;
     int n = 0;
-    buf[n++] = SIG_PKT_ONLINE; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+    buf[n++] = SIG_PKT_REG; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
     memset(buf + n, 0, 32);
     if (local_peer_id) strncpy((char*)(buf + n), local_peer_id, 31);
     n += 32;
@@ -307,7 +307,7 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
     ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                           (struct sockaddr*)&from, &from_len);
     
-    if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) {
+    if (n > 0 && recv_buf[0] == SIG_PKT_REG_ACK) {
         uint64_t auth_key = 0;
         for (int i = 0; i < 8; i++) {
             auth_key = (auth_key << 8) | recv_buf[8 + i];

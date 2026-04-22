@@ -181,7 +181,7 @@ static int build_online(uint8_t *buf, int buf_size,
     if (buf_size < 4 + 32 + 4) return -1;
     
     int n = 0;
-    buf[n++] = SIG_PKT_ONLINE;
+    buf[n++] = SIG_PKT_REG;
     buf[n++] = 0;
     buf[n++] = 0;
     buf[n++] = 0;
@@ -245,7 +245,7 @@ static int build_alive(uint8_t *buf, int buf_size, uint64_t auth_key) {
 static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
     if (buf_size < 4 + 8) return -1;
     
-    buf[0] = SIG_PKT_OFFLINE;
+    buf[0] = SIG_PKT_OFF;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
@@ -280,7 +280,7 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
     ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                           (struct sockaddr*)&from, &from_len);
     
-    if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) {
+    if (n > 0 && recv_buf[0] == SIG_PKT_REG_ACK) {
         uint64_t auth_key = 0;
         for (int i = 0; i < 8; i++) {
             auth_key = (auth_key << 8) | recv_buf[8 + i];
@@ -623,7 +623,7 @@ static void test_unregister_bad_payload(void) {
     
     // 发送 payload 过短的 OFFLINE 包
     uint8_t bad_pkt[16];
-    bad_pkt[0] = SIG_PKT_OFFLINE;
+    bad_pkt[0] = SIG_PKT_OFF;
     bad_pkt[1] = 0;
     bad_pkt[2] = 0;
     bad_pkt[3] = 0;

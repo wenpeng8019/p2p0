@@ -199,7 +199,7 @@ static int build_online(uint8_t *buf, int buf_size,
                         uint32_t instance_id) {
     if (buf_size < 4 + 32 + 4) return -1;
     int n = 0;
-    buf[n++] = SIG_PKT_ONLINE; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+    buf[n++] = SIG_PKT_REG; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
     memset(buf + n, 0, 32);
     if (local_peer_id) strncpy((char*)(buf + n), local_peer_id, 31);
     n += 32;
@@ -241,7 +241,7 @@ static int build_msg_req(uint8_t *buf, int buf_size,
                          uint8_t msg, const uint8_t *data, int data_len) {
     if (buf_size < 4 + 4 + 2 + 1 + data_len) return -1;
     
-    buf[0] = SIG_PKT_MSG_REQ;
+    buf[0] = SIG_PKT_REQ;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
@@ -273,7 +273,7 @@ static int build_msg_resp(uint8_t *buf, int buf_size,
                           uint8_t code, const uint8_t *data, int data_len) {
     if (buf_size < 4 + 4 + 2 + 1 + data_len) return -1;
     
-    buf[0] = SIG_PKT_MSG_RESP;
+    buf[0] = SIG_PKT_RESP;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
@@ -304,7 +304,7 @@ static int build_msg_resp_ack(uint8_t *buf, int buf_size,
                                uint32_t session_id, uint16_t sid) {
     if (buf_size < 4 + 4 + 2) return -1;
     
-    buf[0] = SIG_PKT_MSG_RESP_ACK;
+    buf[0] = SIG_PKT_RESP_ACK;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
@@ -334,7 +334,7 @@ static void parse_msg_req_ack(const uint8_t *buf, int len, msg_req_ack_t *ack) {
     memset(ack, 0, sizeof(*ack));
     
     if (len < 11) return;  // header(4) + session_id(4) + sid(2) + status(1)
-    if (buf[0] != SIG_PKT_MSG_REQ_ACK) return;
+    if (buf[0] != SIG_PKT_REQ_ACK) return;
     
     ack->received = 1;
     
@@ -365,7 +365,7 @@ static void parse_msg_req_relay(const uint8_t *buf, int len, msg_req_relay_t *re
     memset(req, 0, sizeof(*req));
     
     if (len < 11) return;  // header(4) + session_id(4) + sid(2) + msg(1)
-    if (buf[0] != SIG_PKT_MSG_REQ) return;
+    if (buf[0] != SIG_PKT_REQ) return;
     
     req->received = 1;
     req->flags = buf[1];
@@ -403,7 +403,7 @@ static void parse_msg_resp(const uint8_t *buf, int len, msg_resp_t *resp) {
     memset(resp, 0, sizeof(*resp));
     
     if (len < 11) return;  // header(4) + session_id(4) + sid(2) + code(1)
-    if (buf[0] != SIG_PKT_MSG_RESP) return;
+    if (buf[0] != SIG_PKT_RESP) return;
     
     resp->received = 1;
     resp->flags = buf[1];
@@ -448,7 +448,7 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
     ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                           (struct sockaddr*)&from, &from_len);
     
-    if (n > 0 && recv_buf[0] == SIG_PKT_ONLINE_ACK) {
+    if (n > 0 && recv_buf[0] == SIG_PKT_REG_ACK) {
         uint64_t auth_key = 0;
         for (int i = 0; i < 8; i++) {
             auth_key = (auth_key << 8) | recv_buf[8 + i];
@@ -503,7 +503,7 @@ static int send_msg_req_and_wait_ack(sock_t sock, uint32_t session_id, uint16_t 
         return ack_out->received;
     }
     
-    return (n >= 11 && recv_buf[0] == SIG_PKT_MSG_REQ_ACK);
+    return (n >= 11 && recv_buf[0] == SIG_PKT_REQ_ACK);
 }
 
 // 发送 MSG_RESP
@@ -549,7 +549,7 @@ static int wait_msg_req_relay(sock_t sock, msg_req_relay_t *req_out) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         
-        if (n >= 15 && recv_buf[0] == SIG_PKT_MSG_REQ) {
+        if (n >= 15 && recv_buf[0] == SIG_PKT_REQ) {
             if (req_out) {
                 parse_msg_req_relay(recv_buf, (int)n, req_out);
             }
@@ -571,7 +571,7 @@ static int wait_msg_resp(sock_t sock, msg_resp_t *resp_out) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         
-        if (n >= 15 && recv_buf[0] == SIG_PKT_MSG_RESP) {
+        if (n >= 15 && recv_buf[0] == SIG_PKT_RESP) {
             if (resp_out) {
                 parse_msg_resp(recv_buf, (int)n, resp_out);
             }
@@ -963,7 +963,7 @@ static void test_msg_req_bad_payload(void) {
     
     // 发送 payload 过短的 MSG_REQ 包
     uint8_t bad_pkt[16];
-    bad_pkt[0] = SIG_PKT_MSG_REQ;
+    bad_pkt[0] = SIG_PKT_REQ;
     bad_pkt[1] = 0;
     bad_pkt[2] = 0;
     bad_pkt[3] = 0;
