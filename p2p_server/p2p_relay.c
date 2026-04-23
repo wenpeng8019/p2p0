@@ -46,7 +46,7 @@ static uint8_t                      g_relay_fatal[sizeof(buffer_item_t) + sizeof
 // 发送数据 buf 到 client 发送队列
 static void relay_send(relay_client_t *c, buffer_item_t* buf_item) {
 
-    assert(c && c->base.proto == PROTO_RELAY);
+    assert(c->base.proto == PROTO_RELAY);
 
     buf_item->next = NULL;
     if (c->sending_buff_rear) {
@@ -962,7 +962,7 @@ void relay_handle_recv(relay_client_t *client) {
         uint16_t payload_len = nget_s(ptr);
         if (payload_len > P2P_MAX_PAYLOAD) {
             print("E:", LA_F("bad payload(len=%u)\n", LA_F139, 139), payload_len);
-            goto error_proto;;
+            goto error_proto;
         }
 
         // 读取完整 payload
@@ -982,7 +982,7 @@ void relay_handle_recv(relay_client_t *client) {
             // 处理 REG 消息：[name(32)][instance_id(4)]
             if (payload_len != P2P_RLY_REG_PSZ) {
                 print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F96, 96), PROTO, payload_len);
-                goto error_proto;;
+                goto error_proto;
             }
 
             // 重复 REG
@@ -1265,7 +1265,7 @@ void relay_retry_pending(uint64_t now) {
     while (g_relay_rpc_pending_head) { relay_session_t *s = g_relay_rpc_pending_head;
 
         // 队列按时间排序，未超时即全部未超时
-        if (tick_diff(now, s->rpc_sent_time) < MSG_REQ_MAX_RETRY * MSG_RPC_RETRY_INTERVAL_MS) return;
+        if (tick_diff(now, s->rpc_sent_time) < REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS) return;
 
         // 移除队头
         g_relay_rpc_pending_head = s->rpc_pending_next;

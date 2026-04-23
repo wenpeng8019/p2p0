@@ -1110,7 +1110,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             case P2P_RLY_FIN:
                 PROTO = "FIN"; payload_min = P2P_RLY_FIN_PSZ; handler = handle_relay_fin; break;
             case P2P_RLY_PKT:
-                PROTO = "PACKET"; payload_min = P2P_RLY_PACKET_PSZ(0); handler = handle_relay_packet; break;
+                PROTO = "PACKET"; payload_min = P2P_RLY_PKT_PSZ(0); handler = handle_relay_packet; break;
             case P2P_RLY_REQ:
                 PROTO = "REQ"; payload_min = P2P_RLY_REQ_MIN_PSZ; handler = handle_relay_req; break;
             case P2P_RLY_RESP:

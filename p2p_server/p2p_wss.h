@@ -87,8 +87,6 @@ void
 wss_on_message(wss_client_t* client, const uint8_t *msg, size_t len);
 void
 wss_on_data(wss_client_t *client, const uint8_t *data, size_t len);
-void
-wss_on_disconnect(ws_server_t *srv, ws_client_id_t cid, void *user_data);
 
 void
 retry_wss_pending(uint64_t now);

@@ -58,9 +58,9 @@ add_executable(p2p_server
     server.c
     ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
     ${CMAKE_SOURCE_DIR}/i18n/i18n.c
+        common.h
         p2p_relay.c
         p2p_relay.h
-        common.h
         p2p_compact.c
         p2p_compact.h
         p2p_wss.c
@@ -89,23 +89,9 @@ if(WIN32)
     target_link_libraries(p2p_server PRIVATE ws2_32)
 endif()
 
-# --- ws_server 可选组件 ---
+# --- wslay WebSocket 可选支持 ---
 if(WITH_WSLAY)
-    add_library(ws_server STATIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/ws_server.c
-    )
-    target_include_directories(ws_server PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/stdc
-        ${WSLAY_INCLUDE_DIRS}
-    )
-    target_compile_options(ws_server PRIVATE
-        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wno-unknown-pragmas>
-    )
-    target_link_libraries(ws_server PRIVATE ${WSLAY_LIBRARIES})
-
-    # 将 ws_server 库及其头文件链接到 p2p_server 可执行文件
-    target_link_libraries(p2p_server PRIVATE ws_server ${WSLAY_LIBRARIES})
+    target_link_libraries(p2p_server PRIVATE ${WSLAY_LIBRARIES})
     target_include_directories(p2p_server PRIVATE ${WSLAY_INCLUDE_DIRS})
     target_compile_definitions(p2p_server PRIVATE WITH_WSLAY)
 

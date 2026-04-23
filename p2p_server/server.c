@@ -69,9 +69,9 @@ static union {
 }                                   g_client_slots[MAX_PEERS];
 static client_t*                    g_clients = NULL;
 
-#define CLIENT(i)       ((client_t*)&g_client_slots[i])
-#define TCP_CLIENT(i)   ((tcp_client_t*)&g_client_slots[i])
-#define WS_CLIENT(i)    ((ws_client_t*)&g_client_slots[i])
+#define as_client(i)       ((client_t*)&g_client_slots[i])
+#define as_tcp_client(i)   ((tcp_client_t*)&g_client_slots[i])
+#define as_ws_client(i)    ((ws_client_t*)&g_client_slots[i])
 
 //-----------------------------------------------------------------------------
 
@@ -131,7 +131,7 @@ static inline void init_client(client_t* c, sock_t fd) {
 client_t*
 alloc_client(int8_t proto, sock_t fd) {
 
-    for (int k = 0; k < MAX_PEERS; k++) { client_t* c = CLIENT(k);
+    for (int k = 0; k < MAX_PEERS; k++) { client_t* c = as_client(k);
         if (c->proto < 0) {
             c->proto = proto;
             init_client(c, fd);
@@ -585,7 +585,13 @@ static void ws_cb_msg(wslay_event_context_ptr ctx, const struct wslay_event_on_m
     }
 
     if (arg->opcode == WSLAY_TEXT_FRAME) {
-        wss_on_message(client, arg->msg, arg->msg_length);
+        /* wslay 分配堆内存，回调返回后立即释放，可安全写入；
+         * 协议要求末尾为 '\n'，就地替换为 '\0' 使 msg 成为合法 C 字符串 */
+        uint8_t *msg = (uint8_t *)arg->msg;
+        if (arg->msg_length > 0 && msg[arg->msg_length - 1] == '\n') {
+            msg[arg->msg_length - 1] = '\0';
+            wss_on_message(client, msg, arg->msg_length - 1);
+        }
     } else if (arg->opcode == WSLAY_BINARY_FRAME) {
         wss_on_data(client, arg->msg, arg->msg_length);
     }
@@ -1041,20 +1047,20 @@ int main(int argc, char *argv[]) {
 
         // 添加有效的 TCP 客户端套接字到监听集合中
         if (tick_diff(now, last_cleanup) >= CLEANUP_INTERVAL_S * 1000) { last_cleanup = now;
-            for (int i = 0; i < MAX_PEERS; i++) { int8_t m = CLIENT(i)->proto;
+            for (int i = 0; i < MAX_PEERS; i++) { int8_t m = as_client(i)->proto;
                 if (m < 0) continue;
 
                 // client 超时淘汰检测
-                if (tick_diff(now, CLIENT(i)->last_active) >= CLIENT_TIMEOUT_S * 1000) {
+                if (tick_diff(now, as_client(i)->last_active) >= CLIENT_TIMEOUT_S * 1000) {
                     print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F73, 73),
-                           CLIENT(i)->local_peer_id, tick_diff(now, CLIENT(i)->last_active) / 1000.0);
+                           as_client(i)->local_peer_id, tick_diff(now, as_client(i)->last_active) / 1000.0);
                     if (m == PROTO_COMPACT) compact_free_client(&g_client_slots[i].compact);
                     else if (m == PROTO_RELAY) relay_free_client(&g_client_slots[i].relay);
                     else if (m == PROTO_WSS) wss_term_client(&g_client_slots[i].wss, true);
                     else if (m == 127) {
-                        P_sock_close(CLIENT(i)->fd);
-                        CLIENT(i)->fd = P_INVALID_SOCKET;
-                        CLIENT(i)->proto = -1;
+                        P_sock_close(as_client(i)->fd);
+                        as_client(i)->fd = P_INVALID_SOCKET;
+                        as_client(i)->proto = -1;
                     }
                 }
                 else if (m != PROTO_COMPACT) {
@@ -1065,30 +1071,30 @@ int main(int argc, char *argv[]) {
                     *   前两种情况可以通过写入 api 封装、读取完成后检测来同步拦截，但第三种情况就很难进行同步拦截
                     * + 所以最好的方案，就是在每次访问 io 状态前，进行同步置位；然后在 io 操作完成后，检测并取消置位
                     */
-                    if (m == PROTO_WSS && !WS_CLIENT(i)->ws_handshake) {
-                        if (wslay_event_want_write(WS_CLIENT(i)->ws_ctx)) TCP_CLIENT(i)->io |= TCP_IO_FLAG_WANT_WRITE;
-                        else TCP_CLIENT(i)->io &= ~TCP_IO_FLAG_WANT_WRITE;
+                    if (m == PROTO_WSS && !as_ws_client(i)->ws_handshake) {
+                        if (wslay_event_want_write(as_ws_client(i)->ws_ctx)) as_tcp_client(i)->io |= TCP_IO_FLAG_WANT_WRITE;
+                        else as_tcp_client(i)->io &= ~TCP_IO_FLAG_WANT_WRITE;
                     }
-                    if (TCP_CLIENT(i)->io) {
-                        assert(CLIENT(i)->fd != P_INVALID_SOCKET);
-                        if (TCP_CLIENT(i)->io & TCP_IO_FLAG_WANT_READ) FD_SET(CLIENT(i)->fd, &read_fds);
-                        if (TCP_CLIENT(i)->io & TCP_IO_FLAG_WANT_WRITE) FD_SET(CLIENT(i)->fd, &write_fds);
-                        P_FD_MAX(max_fd, CLIENT(i)->fd);
+                    if (as_tcp_client(i)->io) {
+                        assert(as_client(i)->fd != P_INVALID_SOCKET);
+                        if (as_tcp_client(i)->io & TCP_IO_FLAG_WANT_READ) FD_SET(as_client(i)->fd, &read_fds);
+                        if (as_tcp_client(i)->io & TCP_IO_FLAG_WANT_WRITE) FD_SET(as_client(i)->fd, &write_fds);
+                        P_FD_MAX(max_fd, as_client(i)->fd);
                     }
                 }
             }
         } else {
             for (int i = 0; i < MAX_PEERS; i++) {
-                if (CLIENT(i)->proto <= 0) continue;
-                if (CLIENT(i)->proto == PROTO_WSS && !WS_CLIENT(i)->ws_handshake) {
-                    if (wslay_event_want_write(WS_CLIENT(i)->ws_ctx)) TCP_CLIENT(i)->io |= TCP_IO_FLAG_WANT_WRITE;
-                    else TCP_CLIENT(i)->io &= ~TCP_IO_FLAG_WANT_WRITE;
+                if (as_client(i)->proto <= 0) continue;
+                if (as_client(i)->proto == PROTO_WSS && !as_ws_client(i)->ws_handshake) {
+                    if (wslay_event_want_write(as_ws_client(i)->ws_ctx)) as_tcp_client(i)->io |= TCP_IO_FLAG_WANT_WRITE;
+                    else as_tcp_client(i)->io &= ~TCP_IO_FLAG_WANT_WRITE;
                 }
-                if (TCP_CLIENT(i)->io) {
-                    assert(CLIENT(i)->fd != P_INVALID_SOCKET);
-                    if (TCP_CLIENT(i)->io & TCP_IO_FLAG_WANT_READ) FD_SET(CLIENT(i)->fd, &read_fds);
-                    if (TCP_CLIENT(i)->io & TCP_IO_FLAG_WANT_WRITE) FD_SET(CLIENT(i)->fd, &write_fds);
-                    P_FD_MAX(max_fd, CLIENT(i)->fd);
+                if (as_tcp_client(i)->io) {
+                    assert(as_client(i)->fd != P_INVALID_SOCKET);
+                    if (as_tcp_client(i)->io & TCP_IO_FLAG_WANT_READ) FD_SET(as_client(i)->fd, &read_fds);
+                    if (as_tcp_client(i)->io & TCP_IO_FLAG_WANT_WRITE) FD_SET(as_client(i)->fd, &write_fds);
+                    P_FD_MAX(max_fd, as_client(i)->fd);
                 }
             }
         }
@@ -1120,33 +1126,33 @@ int main(int argc, char *argv[]) {
             // 查找一个空闲槽位来存储这个新的连接
             int k = 0;
             for (; k < MAX_PEERS; k++) {
-                if (CLIENT(k)->proto < 0) {
+                if (as_client(k)->proto < 0) {
 
                     // WebSocket 监听端口
                     if (i == 1) {
 
-                        assert(!WS_CLIENT(k)->ws_ctx && !WS_CLIENT(k)->buf);
-                        WS_CLIENT(k)->buf = alloc_buffer(BUF_FLAG_2048(0));
-                        if (!WS_CLIENT(k)->buf) {
+                        assert(!as_ws_client(k)->ws_ctx && !as_ws_client(k)->buf);
+                        as_ws_client(k)->buf = alloc_buffer(BUF_FLAG_2048(0));
+                        if (!as_ws_client(k)->buf) {
                             print("E:", LA_F("Failed to allocate buffer for new WebSocket client\n", 0, 0));
                             P_sock_close(client_fd);
                             break;
                         }
-                        WS_CLIENT(k)->pos = WS_CLIENT(k)->len = 0;
-                        WS_CLIENT(k)->ws_handshake = 1;  // 标记为握手阶段
+                        as_ws_client(k)->pos = as_ws_client(k)->len = 0;
+                        as_ws_client(k)->ws_handshake = 1;  // 标记为握手阶段
 
                         if (!wss_init_client(&g_client_slots[k].wss)) {
                             print("E:", LA_F("Failed to initialize %s client\n", 0, 0), "WS/ICE");
-                            free_buffer(WS_CLIENT(k)->buf); WS_CLIENT(k)->buf = NULL;
+                            free_buffer(as_ws_client(k)->buf); as_ws_client(k)->buf = NULL;
                             P_sock_close(client_fd);
                             break;
                         }
-                        CLIENT(k)->proto = PROTO_WSS;
+                        as_client(k)->proto = PROTO_WSS;
                         print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", 0, 0),
                                 "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
                     }
                     // 如果是多模态混合端口
-                    else if (ARGS_ws.i64) CLIENT(k)->proto = 127;  // 标记为"暂定"模式的客户端
+                    else if (ARGS_ws.i64) as_client(k)->proto = 127;  // 标记为"暂定"模式的客户端
                     // TCP/Relay 监听端口
                     else {
                         if (!relay_init_client(&g_client_slots[k].relay)) {
@@ -1154,12 +1160,12 @@ int main(int argc, char *argv[]) {
                             P_sock_close(client_fd);
                             break;
                         }
-                        CLIENT(k)->proto = PROTO_RELAY;
+                        as_client(k)->proto = PROTO_RELAY;
                         print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", 0, 0),
                                 "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
                     }
-                    init_client(CLIENT(k), client_fd);
-                    TCP_CLIENT(k)->io = TCP_IO_FLAG_WANT_READ;  /* 新连接默认进入读取状态，等待客户端发送数据 */
+                    init_client(as_client(k), client_fd);
+                    as_tcp_client(k)->io = TCP_IO_FLAG_WANT_READ;  /* 新连接默认进入读取状态，等待客户端发送数据 */
                     break;
                 }
             }
@@ -1194,64 +1200,64 @@ int main(int argc, char *argv[]) {
         }
 
         // 处理 TCP/IO（先发送后接收，单次遍历）
-        for (int i = 0; i < MAX_PEERS; i++) { int8_t m = CLIENT(i)->proto;
-            if (m <= 0 || CLIENT(i)->fd == P_INVALID_SOCKET) continue;
-            ws_client_t* ws_client = (m == PROTO_WSS) ? WS_CLIENT(i) : NULL;
+        for (int i = 0; i < MAX_PEERS; i++) { int8_t m = as_client(i)->proto;
+            if (m <= 0 || as_client(i)->fd == P_INVALID_SOCKET) continue;
+            ws_client_t* ws_client = (m == PROTO_WSS) ? as_ws_client(i) : NULL;
 
             // 处理数据接收
-            if ((TCP_CLIENT(i)->io & TCP_IO_FLAG_WANT_READ) 
-                && FD_ISSET(CLIENT(i)->fd, &read_fds)) {
+            if ((as_tcp_client(i)->io & TCP_IO_FLAG_WANT_READ)
+                && FD_ISSET(as_client(i)->fd, &read_fds)) {
 
                 // 对于多模态混合端口，需要先根据数据包内容判断协议类型
                 if (m == 127) {
 #ifdef WITH_WSLAY
-                    uint8_t buf[1]; ssize_t n = recv(CLIENT(i)->fd, (char *)buf, sizeof(buf), MSG_PEEK);
+                    uint8_t buf[1]; ssize_t n = recv(as_client(i)->fd, (char *)buf, sizeof(buf), MSG_PEEK);
                     if (n > 0) {
                         // WebSocket 握手请求的特征。即 HTTP GET 请求行，也就是以 "GET " 开头
                         if (buf[0] == 'G') {
                             print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", 0, 0),
                                   "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
                             if (!wss_init_client(&g_client_slots[i].wss)) {
-                                P_sock_close(CLIENT(i)->fd);
-                                CLIENT(i)->fd = P_INVALID_SOCKET;
-                                CLIENT(i)->proto = -1;
+                                P_sock_close(as_client(i)->fd);
+                                as_client(i)->fd = P_INVALID_SOCKET;
+                                as_client(i)->proto = -1;
                                 print("E:", LA_F("Failed to initialize WS/ICE client for slot %d\n", LA_F0, 0), i);
                                 continue;
                             }
-                            ws_client = WS_CLIENT(i);
+                            ws_client = as_ws_client(i);
                             assert(!ws_client->ws_ctx && !ws_client->buf);
                             ws_client->buf = alloc_buffer(BUF_FLAG_2048(0));
                             if (!ws_client->buf) {
                                 print("E:", LA_F("Failed to allocate buffer for new WebSocket client\n", 0, 0));
-                                P_sock_close(CLIENT(i)->fd);
-                                CLIENT(i)->fd = P_INVALID_SOCKET;
-                                CLIENT(i)->proto = -1;
+                                P_sock_close(as_client(i)->fd);
+                                as_client(i)->fd = P_INVALID_SOCKET;
+                                as_client(i)->proto = -1;
                                 continue;
                             }
                             ws_client->pos = ws_client->len = 0;
                             ws_client->ws_handshake = 1;  // 标记为握手阶段
-                            CLIENT(i)->proto = m = PROTO_WSS;
+                            as_client(i)->proto = m = PROTO_WSS;
 
                         } else { 
                             print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", 0, 0),
                                   "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
                             if (!relay_init_client(&g_client_slots[i].relay)) {
-                                P_sock_close(CLIENT(i)->fd);
-                                CLIENT(i)->fd = P_INVALID_SOCKET;
-                                CLIENT(i)->proto = -1;
+                                P_sock_close(as_client(i)->fd);
+                                as_client(i)->fd = P_INVALID_SOCKET;
+                                as_client(i)->proto = -1;
                                 print("E:", LA_F("Failed to initialize TCP/RELAY client for slot %d\n", LA_F0, 0), i);
                                 continue;
                             }
-                            CLIENT(i)->proto = m = PROTO_RELAY;
+                            as_client(i)->proto = m = PROTO_RELAY;
                         }
                     } else {
                         if (n == 0)
                             print("I:", LA_F("Client closed during protocol detection (slot %d)\n", 0, 0), i);
                         else
                             print("E:", LA_F("Failed to peek client data for protocol detection (slot %d)\n", 0, 0), i);
-                        P_sock_close(CLIENT(i)->fd);
-                        CLIENT(i)->fd = P_INVALID_SOCKET;
-                        CLIENT(i)->proto = -1;   // 释放槽位
+                        P_sock_close(as_client(i)->fd);
+                        as_client(i)->fd = P_INVALID_SOCKET;
+                        as_client(i)->proto = -1;   // 释放槽位
                         continue;
                     }
 #else
@@ -1301,8 +1307,8 @@ int main(int argc, char *argv[]) {
             }
 
             // 处理数据发送
-            if ((TCP_CLIENT(i)->io & TCP_IO_FLAG_WANT_WRITE) 
-                && FD_ISSET(CLIENT(i)->fd, &write_fds)) {
+            if ((as_tcp_client(i)->io & TCP_IO_FLAG_WANT_WRITE)
+                && FD_ISSET(as_client(i)->fd, &write_fds)) {
 
                 if (m == PROTO_RELAY) relay_handle_send(&g_client_slots[i].relay);
 #ifdef WITH_WSLAY
@@ -1396,16 +1402,16 @@ int main(int argc, char *argv[]) {
     
     // 关闭所有客户端连接
     for (int i = 0; i < MAX_PEERS; i++) {
-        if (CLIENT(i)->proto > 0) {
-            if (CLIENT(i)->fd != P_INVALID_SOCKET) {
-                P_sock_close(CLIENT(i)->fd);
-                CLIENT(i)->fd = P_INVALID_SOCKET;
+        if (as_client(i)->proto > 0) {
+            if (as_client(i)->fd != P_INVALID_SOCKET) {
+                P_sock_close(as_client(i)->fd);
+                as_client(i)->fd = P_INVALID_SOCKET;
             }
-            if (CLIENT(i)->proto == PROTO_RELAY) relay_free_client(&g_client_slots[i].relay);
+            if (as_client(i)->proto == PROTO_RELAY) relay_free_client(&g_client_slots[i].relay);
 #ifdef WITH_WSLAY
-            else if (CLIENT(i)->proto == PROTO_WSS) wss_term_client(&g_client_slots[i].wss, true);
+            else if (as_client(i)->proto == PROTO_WSS) wss_term_client(&g_client_slots[i].wss, true);
 #endif
-        } else if (CLIENT(i)->proto == PROTO_COMPACT) {
+        } else if (as_client(i)->proto == PROTO_COMPACT) {
             compact_free_client(&g_client_slots[i].compact);
         }
     }
