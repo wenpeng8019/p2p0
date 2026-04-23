@@ -104,6 +104,123 @@ void free_buffer(buffer_item_t *buf_item) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+client_t*
+find_client(const char *local_peer_id) {
+    client_t *client = NULL;
+    HASH_FIND_STR(g_clients, local_peer_id, client);
+    return client;
+}
+
+bool
+identify_client(client_t* c) {
+    assert(c && c->proto >= 0);
+    if (c->local_peer_id[0] == '\0') return false;
+    assert(!find_client(c->local_peer_id));  // 注册前必须确保 local_peer_id 不存在
+    HASH_ADD_STR(g_clients, local_peer_id, c);
+    return true;
+}
+
+static inline void init_client(client_t* c, sock_t fd) {
+    c->local_peer_id[0] = '\0';
+    c->instance_id = 0;
+    c->last_active = P_tick_ms();
+    c->fd = fd;
+    assert(!c->sessions);
+}
+
+client_t*
+alloc_client(int8_t proto, sock_t fd) {
+
+    for (int k = 0; k < MAX_PEERS; k++) { client_t* c = CLIENT(k);
+        if (c->proto < 0) {
+            c->proto = proto;
+            init_client(c, fd);
+            return c;
+        }
+    }
+    return NULL;
+}
+
+void
+free_client_base(client_t *c, void(*free_session)(session_t *s)) {
+
+    while (c->sessions) free_session(c->sessions);
+
+    if (c->hh.tbl) HASH_DELETE(hh, g_clients, c);
+
+    // > PROTO_COMPACT 说明是 TCP 连接
+    if (c->proto > PROTO_COMPACT) {
+
+        if (c->proto == PROTO_WSS) {
+            if (((ws_client_t*)c)->buf) {
+                free_buffer(((ws_client_t*)c)->buf);
+                ((ws_client_t*)c)->buf = NULL;
+            }
+            if (((ws_client_t*)c)->ws_ctx) {
+                wslay_event_context_free(((ws_client_t*)c)->ws_ctx);
+                ((ws_client_t*)c)->ws_ctx = NULL;
+            }
+        }
+
+        if (c->fd != P_INVALID_SOCKET) {
+            P_sock_close(c->fd);
+            c->fd = P_INVALID_SOCKET;
+        }
+    }
+    c->proto = -1;
+}
+
+void
+free_client(client_t *c) {
+    assert(c && c->proto >= 0);
+    if (c->proto == PROTO_COMPACT) compact_free_client((compact_client_t*)c);
+    else if (c->proto == PROTO_RELAY) relay_free_client((relay_client_t*)c);
+    else if (c->proto == PROTO_WSS) wss_term_client((wss_client_t*)c, true);
+    else assert(0 && "Invalid client proto");
+}
+
+bool
+resident_client(client_t* client, int8_t proto, uint32_t instance_id, client_t* from) {
+
+    assert(client != from);
+
+    assert(!from || !from->sessions);
+
+    // 此时说明之前的 client 连接已经断开，客户端发起新的连接，但状态保留
+    if (client->proto == proto && client->instance_id == instance_id) {
+
+        // 如果存在新分配的 from client，迁移 fd 和 last_active 到旧的 client
+        if (from) {
+
+            // 同实例重连：迁移 fd 到旧槽位，保留会话状态
+            print("I:", LA_F("REG: '%s' reconnected (inst=%u), migrating\n", LA_F95, 95),
+                   client->local_peer_id, instance_id);
+
+            if (client->fd != P_INVALID_SOCKET) P_sock_close(client->fd);
+            client->fd = from->fd;
+            from->fd = P_INVALID_SOCKET;
+
+            client->last_active = from->last_active;
+
+            free_client(from);
+        }
+        else client->last_active = P_tick_ms();
+
+        return true;
+    }
+
+    free_client(client);
+
+    if (!from) {
+        client->proto = proto;
+        client->instance_id = instance_id;
+        client->last_active = P_tick_ms();
+    }
+
+    return false;
+}
+
+
 // 生成安全的随机 session_id（32位，加密安全，防止跨会话注入攻击）
 static uint32_t
 generate_session_id(void) {
@@ -180,36 +297,40 @@ pair_session(client_t *client, const char *remote_peer_id,
         // 如果当前已经完成配对，重复执行 sync0
         if (pair->sessions[1]) return E_DUPLICATE;
 
-        // 如果是本端重复发起连接，拒绝并返回错误
+        // 如果对端存在（本端之前已经脱离）
         if (pair->sessions[0]->client != client) {
-            *remote_s = pair->sessions[0]; side = 1; // 本端位于 sess pair 的 right side
-        } else if ((s = pair->sessions[0])->pair == (void*)-1) {
+            *remote_s = pair->sessions[0]; side = 1;    // 本端位于 sess pair 的 right side
+        }
+        // 如果本端存在，对端已脱离
+        else if ((s = pair->sessions[0])->peer == (void*)-1) {
             *local_s = s; side = 0;
-        } else {
+        }
+        // 如果是本端重复发起连接，拒绝并返回错误
+        else {
             print("E:", LA_F("Duplicate session create blocked: '%s' -> '%s'\n", LA_F81, 81),
-                    client->local_peer_id, remote_peer_id);
+                  client->local_peer_id, remote_peer_id);
             return E_DUPLICATE;
         }
     }
     else { assert(pair->sessions[1]);
 
-        // 如果是本端重复发起连接，拒绝并返回错误
         if (pair->sessions[1]->client != client) {
-            *remote_s = pair->sessions[1]; side = 0; // 本端位于 sess pair 的 left side
-        } else if ((s = pair->sessions[1])->pair == (void*)-1) {
+            *remote_s = pair->sessions[1]; side = 0;    // 本端位于 sess pair 的 left side
+        } else if ((s = pair->sessions[1])->peer == (void*)-1) {
             *local_s = s; side = 1;
         } else {
             print("E:", LA_F("Duplicate session create blocked: '%s' -> '%s'\n", LA_F81, 81),
-                    client->local_peer_id, remote_peer_id);
+                  client->local_peer_id, remote_peer_id);
             return E_DUPLICATE;
         }
     }
 
-    // 如果对端主动断开连接后，本端重新发起新的连接
+    // 如果对端已脱离，本端重新发起新的连接
+    // + 对顿脱离时，会将本端的 pear 置位 -1
     // + 此时对端不存在，本端执行自身重置
-    if (side < 0) {
+    if (*local_s) {
 
-        s->pair = NULL;
+        s->peer = NULL;
 
         // 重新分配 sess id，并重建索引
         s->session_id = generate_session_id();
@@ -225,20 +346,21 @@ pair_session(client_t *client, const char *remote_peer_id,
     }
 
     // 如果本端主动断开后，又重新发起新的连接
-    // + 不同信令模式下，对端此时的状态可能不同。
+    // + 主动断开时，会将对端的 peer 置位 -1
+    // + 不同信令模式下，对端此时的状态可能不同
     //   > TCP 连接模式下，可能对方还没收到 FIN 通知，也就是上次会话的下行发送队列可能还没空。
     //     此时，新的会话 sync0 也会排队。所以会话数据是完整的。
     //   > UDP 连接模式下，会话数据完整性是应用层来维护的，所以之前在发送 FIN 时，会话发送的数据肯定已经完整。
     //     此时，新的会话 sync0 可以立即发送
     // ! 注意，上次主动断开对端时，必须将对端的（派生）会话中的数据状态重置
-    if (*remote_s && remote_s[0]->pair == (void*)-1) {
+    if (*remote_s && remote_s[0]->peer == (void*)-1) {
 
-        remote_s[0]->pair = NULL;
+        remote_s[0]->peer = NULL;
 
         // 重新分配 sess id，并重建索引
         remote_s[0]->session_id = generate_session_id();
-        HASH_DELETE(hh, g_sessions, remote_s[0]);
-        HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), remote_s[0]);
+        HASH_DELETE(hh, g_sessions, *remote_s);
+        HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), *remote_s);
     }
 
     // 将 sess 和 pair 绑定
@@ -291,127 +413,11 @@ free_session_base(session_t *s) {
     free(s);
 }
 
-client_t*
-find_client(const char *local_peer_id) {
-    client_t *client = NULL;
-    HASH_FIND_STR(g_clients, local_peer_id, client);
-    return client;
-}
-
-bool
-identified_client(client_t* c) {
-    assert(c && c->proto >= 0);
-    if (c->local_peer_id[0] == '\0') return false;
-    assert(!find_client(c->local_peer_id));  // 注册前必须确保 local_peer_id 不存在
-    HASH_ADD_STR(g_clients, local_peer_id, c);
-    return true;
-}
-
-static inline void init_client(client_t* c, sock_t fd) {
-    c->local_peer_id[0] = '\0';
-    c->instance_id = 0;
-    c->last_active = P_tick_ms();
-    c->fd = fd;
-    assert(!c->sessions);
-}
-
-void
-free_client_base(client_t *c, void(*free_session)(session_t *s)) {
-
-    while (c->sessions) free_session(c->sessions);
-
-    if (c->hh.tbl) HASH_DELETE(hh, g_clients, c);
-
-    // > PROTO_COMPACT 说明是 TCP 连接
-    if (c->proto > PROTO_COMPACT) {
-
-        if (c->proto == PROTO_WSS) {
-            if (((ws_client_t*)c)->buf) {
-                free_buffer(((ws_client_t*)c)->buf);
-                ((ws_client_t*)c)->buf = NULL;
-            }
-            if (((ws_client_t*)c)->ws_ctx) {
-                wslay_event_context_free(((ws_client_t*)c)->ws_ctx);
-                ((ws_client_t*)c)->ws_ctx = NULL;
-            }
-        }
-
-        if (c->fd != P_INVALID_SOCKET) {
-            P_sock_close(c->fd);
-            c->fd = P_INVALID_SOCKET;
-        }
-    }
-    c->proto = -1;
-}
-
-client_t*
-alloc_client(int8_t proto, sock_t fd) {
-
-    for (int k = 0; k < MAX_PEERS; k++) { client_t* c = CLIENT(k);
-        if (c->proto < 0) {
-            c->proto = proto;
-            init_client(c, fd);
-            return c;
-        }
-    }
-    return NULL;
-}
-
-void
-free_client(client_t *c) {
-    assert(c && c->proto >= 0);
-    if (c->proto == PROTO_COMPACT) compact_free_client((compact_client_t*)c);
-    else if (c->proto == PROTO_RELAY) relay_free_client((relay_client_t*)c);
-    else if (c->proto == PROTO_WSS) wss_term_client((wss_client_t*)c, true);
-    else assert(0 && "Invalid client proto");
-}
-
-bool
-resident_client(client_t* client, int8_t proto, uint32_t instance_id, client_t* from) {
-
-    assert(client != from);
-
-    assert(!from || !from->sessions);
-
-    // 此时说明之前的 client 连接已经断开，客户端发起新的连接，但状态保留
-    if (client->proto == proto && client->instance_id == instance_id) {
-
-        // 如果存在新分配的 from client，迁移 fd 和 last_active 到旧的 client
-        if (from) {
-
-            // 同实例重连：迁移 fd 到旧槽位，保留会话状态
-            print("I:", LA_F("REG: '%s' reconnected (inst=%u), migrating\n", LA_F95, 95),
-                   client->local_peer_id, instance_id);
-
-            if (client->fd != P_INVALID_SOCKET) P_sock_close(client->fd);
-            client->fd = from->fd;
-            from->fd = P_INVALID_SOCKET;
-
-            client->last_active = from->last_active;
-
-            free_client(from);
-        }
-        else client->last_active = P_tick_ms();
-
-        return true;
-    }
-
-    free_client(client);
-
-    if (!from) {
-        client->proto = proto;
-        client->instance_id = instance_id;
-        client->last_active = P_tick_ms();
-    }
-
-    return false;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 // UDP 发送 + 统一日志
 ssize_t
-udp_send(sock_t udp_fd, const char *PROTO, const void *buf, int len, const struct sockaddr_in *to) {
+udp_send(sock_t udp_fd, const void *buf, int len, const struct sockaddr_in *to, const char *PROTO) {
     ssize_t sent = sendto(udp_fd, (const char *)buf, len, 0,
                           (const struct sockaddr *)to, sizeof(*to));
     if (sent == (ssize_t)len)
@@ -758,7 +764,7 @@ static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct socka
     print("V:", LA_F("Send %s: mapped=%s:%d\n", LA_F111, 111),
           PROTO_ACK, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
-    udp_send(probe_fd, PROTO_ACK, buf, 4 + SIG_PKT_NAT_PROBE_ACK_PSZ, from);
+    udp_send(probe_fd, buf, 4 + SIG_PKT_NAT_PROBE_ACK_PSZ, from, PROTO_ACK);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

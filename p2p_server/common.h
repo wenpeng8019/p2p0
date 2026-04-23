@@ -38,9 +38,9 @@
 #define MAX_CANDIDATES                  ((MAX_CANDIDATES_CONFIG) < (MAX_CANDIDATES_BY_PAYLOAD) ? (MAX_CANDIDATES_CONFIG) : (MAX_CANDIDATES_BY_PAYLOAD))
 
 // COMPACT 模式 MSG RPC 重传参数
-#define MSG_RPC_RETRY_INTERVAL_MS       1000    // MSG RPC 统一重传间隔（毫秒）
-#define MSG_REQ_MAX_RETRY               5       // MSG_REQ 最大重传次数
-#define MSG_RESP_MAX_RETRY              10      // MSG_RESP 最大重传次数（比 REQ 更多，确保 A 端收到）
+#define RPC_RETRY_INTERVAL_MS           1000    // MSG RPC 统一重传间隔（毫秒）
+#define REQ_MAX_RETRY                   5       // MSG_REQ 最大重传次数
+#define RSP_MAX_RETRY                   10      // MSG_RSP 最大重传次数（比 REQ 更多，确保 A 端收到）
 
 //-----------------------------------------------------------------------------
 
@@ -84,6 +84,8 @@ typedef struct client {
     session_t*                      sessions;
     UT_hash_handle                  hh;
 } client_t;
+
+static inline bool client_identified(client_t* c) { return c->hh.tbl != NULL; }
 
 #define TCP_CLIENT  \
     uint8_t                         io;                 // bit 0: 当前是否需要读取；bit 1: 当前是否需要写入
@@ -136,38 +138,53 @@ struct session {
 
 #define PEER_ONLINE(s)      ((s)->peer && (void*)(s)->peer != (void*)-1)  // 判断对端是否在线（peer 指针为 (void*)-1 表示已断开）
 
-ret_t
-pair_session(client_t *client, const char *remote_peer_id,
-             session_t **local_s, session_t **remote_s,
-             size_t session_type_size);
-session_t*
-find_session(uint32_t session_id);
-
-void
-free_session_base(session_t *s);
-
-bool
-identified_client(client_t* c);
 
 client_t*
 find_client(const char *local_peer_id);
 
-void
-free_client_base(client_t *c, void(*free_session)(session_t *s));
-
+// 分配一个指定派生协议类型的 client 对象
+// + 主要用于 UDP/COMPACT 协议调用，因为 TCP/xxx 协议在 accept 建链时就已经自动分配了 client 对象
 client_t*
 alloc_client(int8_t proto, sock_t fd);
 
+// 由派生协议 client 调用，基类会根据协议类型自动执行不同派生协议类型的释放操作
 void
 free_client(client_t *c);
 
+// 由派生协议 client 调用，用于实现基类的释放
+void
+free_client_base(client_t *c, void(*free_session)(session_t *s));
+
+// 将同一个客户端的两个槽合并，确保 client 为单一实例
+// + client 为之前存在的，而 from 则会根据 UDP/TCP 的不同特性而选择是否为 NULL
+//   > TCP 每个连接都对应一个 client，所以 from 为新连接分配的 client 对象，这里要将新的 client 归并到之前的 client
+//   > UDP 没有独立连接的概念，所以协议会自行根据一个 AUTH KEY 来维持唯一性
 bool
-resident_client(client_t* client, int8_t proto, uint32_t instance_id, client_t* from);
+resident_client(client_t* client, int8_t proto, uint32_t instance_id, client_t* from/* nullable */);
+
+// 唯一标识客户端（注册 local_peer_id，并加入全局索引哈希表）
+bool
+identify_client(client_t* c);
+
+
+
+session_t*
+find_session(uint32_t session_id);
+
+// 进行本端和远程的会话配对
+ret_t
+pair_session(client_t *client, const char *remote_peer_id,
+             session_t **local_s, session_t **remote_s,
+             size_t session_type_size);
+
+// 由派生协议 session 调用，用于实现基类的释放
+void
+free_session_base(session_t *s);
 
 //-----------------------------------------------------------------------------
 
 ssize_t
-udp_send(sock_t udp_fd, const char *PROTO, const void *buf, int len, const struct sockaddr_in *to);
+udp_send(sock_t udp_fd, const void *buf, int len, const struct sockaddr_in *to, const char *PROTO);
 
 int
 tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *reason);

@@ -24,7 +24,7 @@ static compact_client_t*            g_clients_by_auth = NULL;
 static compact_session_t*           g_sync0_pending_head = NULL;
 static compact_session_t*           g_sync0_pending_rear = NULL;
 
-// MSG RPC 待确认链表（统一管理 REQ 和 RESP 阶段，通过 rpc_responding 区分）
+// MSG RPC 待确认链表（统一管理 REQ 和 RSP 阶段，通过 rpc_responding 区分）
 static compact_session_t*           g_rpc_pending_head = NULL;
 static compact_session_t*           g_rpc_pending_rear = NULL;
 
@@ -159,7 +159,7 @@ static void compact_send_reg_ack(client_t* client, const struct sockaddr_in *to,
         print("V:", LA_F("Send %s: rejected (no slot available)\n", LA_F114, 114), PROTO);
     }
 
-    udp_send(client->fd, PROTO, ack, (int)sizeof(ack), to);
+    udp_send(client->fd, ack, (int)sizeof(ack), to, PROTO);
 }
 
 // 发送 SYNC0_ACK: [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
@@ -180,7 +180,7 @@ static void compact_send_sync0_ack(compact_session_t *s, const char *remote_peer
     print("V:", LA_F("Send %s: ses_id=%u, peer=%s\n", LA_F115, 115),
           PROTO, s->base.session_id, online ? "online" : "offline");
 
-    udp_send(s->base.client->fd, PROTO, ack, ofz, &COMPACT_CLIENT(s)->addr);
+    udp_send(s->base.client->fd, ack, ofz, &COMPACT_CLIENT(s)->addr, PROTO);
 }
 
 // 发送 FIN 通知给 session
@@ -198,7 +198,7 @@ static void compact_session_send_fin(compact_session_t *s, const char *reason) {
           PROTO, client->base.local_peer_id, reason, s->base.session_id);
 
 
-    udp_send(s->base.client->fd, PROTO, pkt, (int)sizeof(pkt), &client->addr);
+    udp_send(s->base.client->fd, pkt, (int)sizeof(pkt), &client->addr, PROTO);
 }
 
 // 发送首次对端候选推送（base_index=0）或地址变更通知（base_index != 0 为循环通知序号）
@@ -267,7 +267,7 @@ static void compact_session_send_sync0(compact_session_t *c, uint8_t base_index)
               PROTO, base_index, cand_cnt, c->base.session_id, client->base.local_peer_id);
     }
 
-    udp_send(client->base.fd, PROTO, pkt, ofz, &client->addr);
+    udp_send(client->base.fd, pkt, ofz, &client->addr, PROTO);
 }
 
 // 发送 MSG_REQ_ACK
@@ -288,7 +288,7 @@ static void compact_session_send_req_ack(compact_session_t *sender, uint16_t sid
     print("V:", LA_F("Send %s: ses_id=%u, sid=%u, status=%u\n", LA_F119, 119),
           PROTO, sender->base.session_id, sid, status);
 
-    udp_send(sender->base.client->fd, PROTO, ack, ofz, &COMPACT_CLIENT(sender)->addr);
+    udp_send(sender->base.client->fd, ack, ofz, &COMPACT_CLIENT(sender)->addr, PROTO);
 }
 
 // 发送 MSG_REQ 给对端（Server→对端 relay）
@@ -320,16 +320,16 @@ static void compact_session_send_req_to_peer(compact_session_t *sender) {
           PROTO, peer->base.session_id, sender->rpc_last_sid, sender->rpc_code, sender->rpc_data_len,
           peer_c->base.local_peer_id, sender->rpc_retry);
 
-    udp_send(peer_c->base.fd, PROTO, pkt, ofz, &peer_c->addr);
+    udp_send(peer_c->base.fd, pkt, ofz, &peer_c->addr, PROTO);
 }
 
-// 发送 MSG_RESP_ACK 给 B 端（Server→B）
+// 发送 MSG_RSP_ACK 给 B 端（Server→B）
 static void compact_session_send_resp_ack(compact_session_t *responder, uint16_t sid) {
-    const char* PROTO = "MSG_RESP_ACK";
+    const char* PROTO = "MSG_RSP_ACK";
 
-    uint8_t pkt[sizeof(p2p_packet_hdr_t) + SIG_PKT_MSG_RESP_ACK_PSZ];
+    uint8_t pkt[sizeof(p2p_packet_hdr_t) + SIG_PKT_MSG_RSP_ACK_PSZ];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
-    hdr->type = SIG_PKT_RESP_ACK;
+    hdr->type = SIG_PKT_RSP_ACK;
     hdr->flags = 0;
     hdr->seq = 0;
 
@@ -340,19 +340,19 @@ static void compact_session_send_resp_ack(compact_session_t *responder, uint16_t
     print("V:", LA_F("Send %s: ses_id=%u, sid=%u, peer='%s'\n", LA_F118, 118),
           PROTO, responder->base.session_id, sid, COMPACT_PEER(responder)->base.client->local_peer_id);
 
-    udp_send(responder->base.client->fd, PROTO, pkt, ofz, &COMPACT_CLIENT(responder)->addr);
+    udp_send(responder->base.client->fd, pkt, ofz, &COMPACT_CLIENT(responder)->addr, PROTO);
 }
 
-// 发送 MSG_RESP 给请求方（Server→A）
+// 发送 MSG_RSP 给请求方（Server→A）
 static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
-    const char* PROTO = "MSG_RESP";
+    const char* PROTO = "MSG_RSP";
 
     assert(cs && cs->rpc_responding);
 
     compact_client_t *client = COMPACT_CLIENT(cs);
     uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_SESS_ID_PSZ + 2 + 1 + P2P_MSG_DATA_MAX];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
-    hdr->type = SIG_PKT_RESP;
+    hdr->type = SIG_PKT_RSP;
     hdr->flags = cs->rpc_flags;
     hdr->seq = 0;
 
@@ -371,7 +371,7 @@ static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
     print("V:", LA_F("Send %s: ses_id=%u, sid=%u, peer='%s', flags=0x%02x, code=%u, data_len=%d, retries=%d\n", LA_F117, 117),
           PROTO, cs->base.session_id, cs->rpc_last_sid, client->base.local_peer_id, cs->rpc_flags, cs->rpc_code, cs->rpc_data_len, cs->rpc_retry);
 
-    udp_send(client->base.fd, PROTO, pkt, ofz, &client->addr);
+    udp_send(client->base.fd, pkt, ofz, &client->addr, PROTO);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -440,7 +440,7 @@ void compact_free_client(compact_client_t *c) {
 }
 
 
-// 缓存响应数据并从 REQ 阶段转换到 RESP 阶段
+// 缓存响应数据并从 REQ 阶段转换到 RSP 阶段
 static void compact_transition_to_resp_pending(compact_session_t *requester, uint64_t now,
                                                uint8_t flags, uint8_t code, const uint8_t *data, int len) {
 
@@ -558,7 +558,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         // 初始化客户端槽位
         memcpy(client->local_peer_id, local_peer_id, P2P_PEER_ID_MAX);
         compact_init_client((compact_client_t*)client, from);
-        identified_client(client);
+        identify_client(client);
 
         compact_send_reg_ack(client, from, ((compact_client_t*)client)->auth_key, instance_id);
         print("V:", LA_F("%s: auth_key=%" PRIu64 " assigned for '%.*s'\n", LA_F36, 36),
@@ -624,7 +624,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
                 print("V:", LA_F("Send %s: auth_key=%" PRIu64 ", peer='%s'\n", LA_F108, 108),
                       ACK_PROTO, auth_key, client->base.local_peer_id);
 
-                udp_send(client->base.fd, ACK_PROTO, ack, (int)sizeof(ack), from);
+                udp_send(client->base.fd, ack, (int)sizeof(ack), from, ACK_PROTO);
             }
         } else {
             print("W:", LA_F("%s: unknown auth_key=%" PRIu64 " from %s\n", LA_F70, 70), PROTO, auth_key, from_str);
@@ -1004,7 +1004,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
                           PROTO, sid, requester->base.session_id);
                 }
                 else {
-                    print("V:", LA_F("%s retransmit during RESP phase, ignoring, sid=%u (ses_id=%u)\n", LA_F21, 21),
+                    print("V:", LA_F("%s retransmit during RSP phase, ignoring, sid=%u (ses_id=%u)\n", LA_F21, 21),
                           PROTO, sid, requester->base.session_id);
                 }
                 return;
@@ -1047,18 +1047,18 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
                sid, msg, requester->base.session_id);
     } break;
 
-    // SIG_PKT_MSG_RESP: B→Server
-    case SIG_PKT_RESP: { const char* PROTO = "RESP";
+    // SIG_PKT_MSG_RSP: B→Server
+    case SIG_PKT_RSP: { const char* PROTO = "RSP";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < SIG_PKT_MSG_RESP_MIN_PSZ) {
+        if (payload_len < SIG_PKT_MSG_RSP_MIN_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
 
-        int resp_len = (int)(payload_len - SIG_PKT_MSG_RESP_MIN_PSZ);
+        int resp_len = (int)(payload_len - SIG_PKT_MSG_RSP_MIN_PSZ);
         if (resp_len > P2P_MSG_DATA_MAX) {
             print("E:", LA_F("%s: data too large (len=%d)\n", LA_F47, 47), PROTO, resp_len);
             return;
@@ -1111,13 +1111,13 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
               sid, requester->base.session_id);
     } break;
 
-    // SIG_PKT_MSG_RESP_ACK: A→Server（A 确认收到 MSG_RESP）
-    case SIG_PKT_RESP_ACK: { const char* PROTO = "RESP_ACK";
+    // SIG_PKT_MSG_RSP_ACK: A→Server（A 确认收到 MSG_RSP）
+    case SIG_PKT_RSP_ACK: { const char* PROTO = "RSP_ACK";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < SIG_PKT_MSG_RESP_ACK_PSZ) {
+        if (payload_len < SIG_PKT_MSG_RSP_ACK_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
@@ -1159,7 +1159,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
     } // switch
 }
 
-// 检查并重传 RPC（统一处理 REQ 和 RESP 阶段）
+// 检查并重传 RPC（统一处理 REQ 和 RSP 阶段）
 void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
 
     while (g_sync0_pending_head) {
@@ -1230,7 +1230,7 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
 
     while (g_rpc_pending_head) {
 
-        if (tick_diff(now, g_rpc_pending_head->rpc_sent_time) < MSG_RPC_RETRY_INTERVAL_MS) {
+        if (tick_diff(now, g_rpc_pending_head->rpc_sent_time) < RPC_RETRY_INTERVAL_MS) {
             return;
         }
 
@@ -1249,7 +1249,7 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
 
                 compact_transition_to_resp_pending(q, now, SIG_RPC_FLAG_PEER_OFFLINE, 0, NULL, 0);
             }
-            else if (q->rpc_retry >= MSG_REQ_MAX_RETRY) {
+            else if (q->rpc_retry >= REQ_MAX_RETRY) {
                 print("W:", LA_F("MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n", LA_F85, 85),
                       q->rpc_retry, COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->base.session_id);
 
@@ -1263,15 +1263,15 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
 
                 print("V:", LA_F("MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n", LA_F87, 87),
                       COMPACT_CLIENT(q)->base.local_peer_id, COMPACT_CLIENT(q->base.peer)->base.local_peer_id,
-                      q->rpc_last_sid, q->rpc_retry, MSG_REQ_MAX_RETRY, q->base.session_id);
+                      q->rpc_last_sid, q->rpc_retry, REQ_MAX_RETRY, q->base.session_id);
 
                 if (g_rpc_pending_head == q) return;
             }
         }
         else {
 
-            if (q->rpc_retry >= MSG_RESP_MAX_RETRY) {
-                print("W:", LA_F("MSG_RESP gave up after %d retries, sid=%u (ses_id=%u)\n", LA_F88, 88),
+            if (q->rpc_retry >= RSP_MAX_RETRY) {
+                print("W:", LA_F("MSG_RSP gave up after %d retries, sid=%u (ses_id=%u)\n", LA_F88, 88),
                       q->rpc_retry, q->rpc_last_sid, q->base.session_id);
 
                 q->rpc_pending_next = NULL;
@@ -1284,8 +1284,8 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
                 q->rpc_sent_time = now;
                 compact_pending_enqueue_rpc(q);
 
-                print("V:", LA_F("MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n", LA_F89, 89),
-                      COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->rpc_retry, MSG_RESP_MAX_RETRY, q->base.session_id);
+                print("V:", LA_F("MSG_RSP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n", LA_F89, 89),
+                      COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->rpc_retry, RSP_MAX_RETRY, q->base.session_id);
 
                 if (g_rpc_pending_head == q) return;
             }

@@ -162,7 +162,7 @@ void retry_wss_pending(uint64_t now) {
     while (g_wss_rpc_pending_head) {
         wss_session_t *s = g_wss_rpc_pending_head;
 
-        if (tick_diff(now, s->rpc_sent_time) < MSG_REQ_MAX_RETRY * MSG_RPC_RETRY_INTERVAL_MS) return;
+        if (tick_diff(now, s->rpc_sent_time) < MSG_REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS) return;
 
         /* 移除队头 */
         g_wss_rpc_pending_head = s->rpc_pending_next;
