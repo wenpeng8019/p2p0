@@ -48,8 +48,8 @@
 ARGS_I(false, port,         'p', "port",       LA_CS("Signaling server listen port (TCP+UDP)", LA_S9, 9));
 ARGS_I(false, probe_port,   'P', "probe-port", LA_CS("NAT type detection port (0=disabled)", LA_S6, 6));
 #ifdef WITH_WSLAY
-ARGS_B(false, ws,           'w', "ws",         LA_CS("Enable WebSocket service on same TCP port", 0, 0));
-ARGS_I(false, ws_port,      'W', "ws-port",    LA_CS("WebSocket dedicated port (also enables --ws)", 0, 0));
+ARGS_B(false, ws,           'w', "ws",         LA_CS("Enable WebSocket service on same TCP port", LA_S150, 150));
+ARGS_I(false, ws_port,      'W', "ws-port",    LA_CS("WebSocket dedicated port (also enables --ws)", LA_S151, 151));
 #endif
 ARGS_B(false, relay,        'r', "relay",      LA_CS("Enable data relay support (COMPACT mode fallback)", LA_S4, 4));
 ARGS_B(false, msg,          'm', "msg",        LA_CS("Enable MSG RPC support", LA_S5, 5));
@@ -246,7 +246,7 @@ generate_session_id(void) {
 session_t*
 find_session(uint32_t session_id) {
     session_t *s = NULL;
-    HASH_FIND(hh, g_sessions, &session_id, P2P_SESS_ID_PSZ, s);
+    HASH_FIND(hh, g_sessions, &session_id, P2P_SESS_ID_SZ, s);
     return s;
 }
 
@@ -448,7 +448,7 @@ tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz) {
         if (n < 0) {
             if (P_sock_is_interrupted()) continue;
             if (P_sock_is_wouldblock()) return 1;
-            print("E:", LA_F("[TCP] recv failed(%d)\n", LA_F142, 142), P_sock_errno());
+            print("E:", LA_F("[TCP] recv failed(%d)\n", LA_F183, 183), P_sock_errno());
             return -2;
         }
         *r_sz += (size_t)n;
@@ -474,7 +474,7 @@ tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *reason
     while (*w_sz < len) {
         ssize_t n = send(client->base.fd, (const char *)buf + *w_sz, len - *w_sz, 0);
         if (n == 0) {
-            print("I:", LA_F("[TCP] conn closed (EOF on send, reason=%s)\n", LA_F79, 79), reason);
+            print("I:", LA_F("[TCP] conn closed (EOF on send, reason=%s)\n", LA_F182, 182), reason);
             return -1;
         }
         if (n < 0) {
@@ -498,7 +498,7 @@ ws_send_text(ws_client_t* client, const char *text) {
     msg.msg_length = strlen(text);
     int r = wslay_event_queue_msg(client->ws_ctx, &msg);
     if (r < 0) {
-        print("E:", LA_F("[WS] queue text msg failed(%d)\n", 0, 0), r);
+        print("E:", LA_F("[WS] queue text msg failed(%d)\n", LA_F197, 197), r);
         return -1;
     }
     assert(wslay_event_want_write(client->ws_ctx));
@@ -515,7 +515,7 @@ ws_send_data(ws_client_t* client, const uint8_t *data, size_t len) {
     msg.msg_length = len;
     int r = wslay_event_queue_msg(client->ws_ctx, &msg);
     if (r < 0) {
-        print("E:", LA_F("[WS] queue text data failed(%d)\n", 0, 0), r);
+        print("E:", LA_F("[WS] queue text data failed(%d)\n", LA_F196, 196), r);
         return -1;
     }
     assert(wslay_event_want_write(client->ws_ctx));
@@ -527,7 +527,7 @@ ws_close(ws_client_t *client, uint16_t code) {
 
     int r = wslay_event_queue_close(client->ws_ctx, code, NULL, 0);
     if (r < 0) {
-        print("E:", LA_F("[WS] queue close(%u) proto failed(%d)\n", 0, 0), code, r);
+        print("E:", LA_F("[WS] queue close(%u) proto failed(%d)\n", LA_F195, 195), code, r);
         return -1;
     }
     assert(wslay_event_want_write(client->ws_ctx));
@@ -623,7 +623,7 @@ static int handle_ws_handshake(ws_client_t* client) {
             if (n < 0) {
                 if (P_sock_is_interrupted()) continue;
                 if (P_sock_is_wouldblock()) return 1;
-                print("E:", LA_F("recv failed during handshake: errno=%d\n", 0, 0), P_sock_errno());
+                print("E:", LA_F("recv failed during handshake: errno=%d\n", LA_F200, 200), P_sock_errno());
                 return -2;
             }
             buf[client->len += n] = '\0';
@@ -678,7 +678,7 @@ static int handle_ws_handshake(ws_client_t* client) {
         if (n < 0) {
             if (P_sock_is_interrupted()) continue;
             if (P_sock_is_wouldblock()) return 1;
-            print("E:", LA_F("send failed during handshake: errno=%d\n", 0, 0), P_sock_errno());
+            print("E:", LA_F("send failed during handshake: errno=%d\n", LA_F202, 202), P_sock_errno());
             return -2;
         }
         client->pos += n;
@@ -723,7 +723,7 @@ static int handle_ws_handshake(ws_client_t* client) {
     do {
         r = wslay_event_recv(client->ws_ctx);
         if (r != 0) {
-            print("E:", LA_F("WebSocket recv callback error: errno=%d\n", 0, 0), r);
+            print("E:", LA_F("WebSocket recv callback error: errno=%d\n", LA_F180, 180), r);
             client->io &= ~TCP_IO_FLAG_WANT_READ;
             break;
         }
@@ -963,7 +963,7 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
             listen(listen_fd[1], 10);
-            print("I:", LA_F("WebSocket service listening on port %d\n", LA_F91, 91), (int)ARGS_ws_port.i64);
+            print("I:", LA_F("WebSocket service listening on port %d\n", LA_F181, 181), (int)ARGS_ws_port.i64);
 
             ARGS_ws.i64 = 0; // ARGS_ws 后面的含义变为：是否将 WebSocket 服务嵌入到 P2P 服务端口中
         }
@@ -1103,7 +1103,7 @@ int main(int argc, char *argv[]) {
         int sel_ret = select(max_fd + 1, &read_fds, &write_fds, NULL, &tv);
         if (sel_ret < 0) {
             if (P_sock_is_interrupted()) continue;  // 被信号打断，继续循环
-            print("E:", LA_F("select failed(%d)\n", LA_F143, 143), P_sock_errno());
+            print("E:", LA_F("select failed(%d)\n", LA_F201, 201), P_sock_errno());
             break;
         }
 
@@ -1134,7 +1134,7 @@ int main(int argc, char *argv[]) {
                         assert(!as_ws_client(k)->ws_ctx && !as_ws_client(k)->buf);
                         as_ws_client(k)->buf = alloc_buffer(BUF_FLAG_2048(0));
                         if (!as_ws_client(k)->buf) {
-                            print("E:", LA_F("Failed to allocate buffer for new WebSocket client\n", 0, 0));
+                            print("E:", LA_F("Failed to allocate buffer for new WebSocket client\n", LA_F173, 173));
                             P_sock_close(client_fd);
                             break;
                         }
@@ -1142,13 +1142,13 @@ int main(int argc, char *argv[]) {
                         as_ws_client(k)->ws_handshake = 1;  // 标记为握手阶段
 
                         if (!wss_init_client(&g_client_slots[k].wss)) {
-                            print("E:", LA_F("Failed to initialize %s client\n", 0, 0), "WS/ICE");
+                            print("E:", LA_F("Failed to initialize %s client\n", LA_F174, 174), "WS/ICE");
                             free_buffer(as_ws_client(k)->buf); as_ws_client(k)->buf = NULL;
                             P_sock_close(client_fd);
                             break;
                         }
                         as_client(k)->proto = PROTO_WSS;
-                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", 0, 0),
+                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
                                 "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
                     }
                     // 如果是多模态混合端口
@@ -1156,12 +1156,12 @@ int main(int argc, char *argv[]) {
                     // TCP/Relay 监听端口
                     else {
                         if (!relay_init_client(&g_client_slots[k].relay)) {
-                            print("E:", LA_F("Failed to initialize %s client\n", 0, 0), "TCP/RELAY");
+                            print("E:", LA_F("Failed to initialize %s client\n", LA_F174, 174), "TCP/RELAY");
                             P_sock_close(client_fd);
                             break;
                         }
                         as_client(k)->proto = PROTO_RELAY;
-                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", 0, 0),
+                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
                                 "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
                     }
                     init_client(as_client(k), client_fd);
@@ -1215,20 +1215,20 @@ int main(int argc, char *argv[]) {
                     if (n > 0) {
                         // WebSocket 握手请求的特征。即 HTTP GET 请求行，也就是以 "GET " 开头
                         if (buf[0] == 'G') {
-                            print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", 0, 0),
+                            print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
                                   "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
                             if (!wss_init_client(&g_client_slots[i].wss)) {
                                 P_sock_close(as_client(i)->fd);
                                 as_client(i)->fd = P_INVALID_SOCKET;
                                 as_client(i)->proto = -1;
-                                print("E:", LA_F("Failed to initialize WS/ICE client for slot %d\n", LA_F0, 0), i);
+                                print("E:", LA_F("Failed to initialize WS/ICE client for slot %d\n", LA_F176, 176), i);
                                 continue;
                             }
                             ws_client = as_ws_client(i);
                             assert(!ws_client->ws_ctx && !ws_client->buf);
                             ws_client->buf = alloc_buffer(BUF_FLAG_2048(0));
                             if (!ws_client->buf) {
-                                print("E:", LA_F("Failed to allocate buffer for new WebSocket client\n", 0, 0));
+                                print("E:", LA_F("Failed to allocate buffer for new WebSocket client\n", LA_F173, 173));
                                 P_sock_close(as_client(i)->fd);
                                 as_client(i)->fd = P_INVALID_SOCKET;
                                 as_client(i)->proto = -1;
@@ -1239,22 +1239,22 @@ int main(int argc, char *argv[]) {
                             as_client(i)->proto = m = PROTO_WSS;
 
                         } else { 
-                            print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", 0, 0),
+                            print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
                                   "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
                             if (!relay_init_client(&g_client_slots[i].relay)) {
                                 P_sock_close(as_client(i)->fd);
                                 as_client(i)->fd = P_INVALID_SOCKET;
                                 as_client(i)->proto = -1;
-                                print("E:", LA_F("Failed to initialize TCP/RELAY client for slot %d\n", LA_F0, 0), i);
+                                print("E:", LA_F("Failed to initialize TCP/RELAY client for slot %d\n", LA_F175, 175), i);
                                 continue;
                             }
                             as_client(i)->proto = m = PROTO_RELAY;
                         }
                     } else {
                         if (n == 0)
-                            print("I:", LA_F("Client closed during protocol detection (slot %d)\n", 0, 0), i);
+                            print("I:", LA_F("Client closed during protocol detection (slot %d)\n", LA_F172, 172), i);
                         else
-                            print("E:", LA_F("Failed to peek client data for protocol detection (slot %d)\n", 0, 0), i);
+                            print("E:", LA_F("Failed to peek client data for protocol detection (slot %d)\n", LA_F177, 177), i);
                         P_sock_close(as_client(i)->fd);
                         as_client(i)->fd = P_INVALID_SOCKET;
                         as_client(i)->proto = -1;   // 释放槽位
@@ -1274,7 +1274,7 @@ int main(int argc, char *argv[]) {
 
                         if (handle_ws_handshake(ws_client) < 0) {
 
-                            print("E:", LA_F("[WS] client closed during handshake (slot %d)\n", 0, 0), i);
+                            print("E:", LA_F("[WS] client closed during handshake (slot %d)\n", LA_F193, 193), i);
 
                             P_sock_close(ws_client->base.fd);
                             ws_client->base.fd = P_INVALID_SOCKET;
@@ -1291,7 +1291,7 @@ int main(int argc, char *argv[]) {
                                 // wslay recv 报错会尝试发送错误码，同时将 read_enabled 置为 false，所以这里无需关闭连接
                                 assert(!wslay_event_want_read(ws_client->ws_ctx));
                                 ws_client->io &= ~TCP_IO_FLAG_WANT_READ;
-                                print("E:", LA_F("[WS] recv failed(%d) (slot %d)\n", 0, 0), r, i);
+                                print("E:", LA_F("[WS] recv failed(%d) (slot %d)\n", LA_F198, 198), r, i);
                                 break;
                             }
                             // 此外 wslay 在收到客户端发来的 close 帧时，也会将 read_enabled 置为 false
@@ -1320,7 +1320,7 @@ int main(int argc, char *argv[]) {
                         int r = handle_ws_handshake(ws_client);
                         if (r < 0) {
 
-                            print("I:", LA_F("[WS] client closed during handshake (slot %d)\n", 0, 0), i);
+                            print("I:", LA_F("[WS] client closed during handshake (slot %d)\n", LA_F193, 193), i);
 
                             // 注意，handshake 写入返回报错，只会发生在 ws ctx init 之前，所以这里直接关闭连接，无需发送 close 帧
                             P_sock_close(ws_client->base.fd);
@@ -1345,7 +1345,7 @@ int main(int argc, char *argv[]) {
                     if (r != 0) { assert(!wslay_event_want_write(ws_client->ws_ctx));
 
                         ws_client->io &= ~TCP_IO_FLAG_WANT_WRITE;
-                        print("E:", LA_F("[WS] conn closed during send: errno=%d (slot %d)\n", 0, 0), r, i);
+                        print("E:", LA_F("[WS] conn closed during send: errno=%d (slot %d)\n", LA_F194, 194), r, i);
 
                         // 目前策略是，读取失败会尝试返回错误吗，如果发送失败则直接关闭连接（不再尝试发送 close 帧了）
                         P_sock_close(ws_client->base.fd);
@@ -1373,7 +1373,7 @@ int main(int argc, char *argv[]) {
                     // 如果写关闭，说明已经回复 close 帧（或报错）
                     if (!wslay_event_get_write_enabled(ws_client->ws_ctx)) {
 
-                        print("I:", LA_F("[WS] Client closed (slot %d)\n", 0, 0), i);
+                        print("I:", LA_F("[WS] Client closed (slot %d)\n", LA_F191, 191), i);
 
                         P_sock_close(ws_client->base.fd);
                         ws_client->base.fd = P_INVALID_SOCKET;
@@ -1382,7 +1382,7 @@ int main(int argc, char *argv[]) {
                 } else if (ws_client->io & WSS_IO_FLAG_CLOSING &&
                            tick_diff(now, ws_client->base.last_active) >= CLIENT_TIMEOUT_S * 1000) {
 
-                    print("I:", LA_F("[WS] Closing timeout, force close client (slot %d)\n", 0, 0), i);
+                    print("I:", LA_F("[WS] Closing timeout, force close client (slot %d)\n", LA_F192, 192), i);
 
                     P_sock_close(ws_client->base.fd);
                     ws_client->base.fd = P_INVALID_SOCKET;

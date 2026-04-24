@@ -106,7 +106,7 @@ static void wss_flush_sync(wss_session_t *src_s, wss_session_t *dst_s, wss_clien
     snprintf(confirm, sizeof(confirm), P2P_WSS_RSP_SYNC_CONFIRM_FMT, src_sid, cached);
     ws_send_text((ws_client_t*)src_s->base.client, confirm);
 
-    print("V:", LA_F("%s: sid=%u -> peer_sid=%u (%zu bytes)\n", LA_F35, 35),
+    print("V:", LA_F("%s: sid=%u -> peer_sid=%u (%zu bytes)\n", LA_F167, 167),
           "SYNC", src_sid, dst_sid, cached);
 }
 
@@ -250,12 +250,12 @@ wss_term_client(wss_client_t *client, bool and_free) {
 ///////////////////////////////////////////////////////////////////////////////
 
 // 处理 SYNC0 消息：创建/恢复会话
-static void wss_handle_sync0(wss_client_t *client, const char *remote_peer_id,
-                             uint8_t *payload, size_t payload_len) {
-    const char *PROTO = "SYNC0";
+static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
+                            uint8_t *payload, size_t payload_len) {
+    const char *PROTO = "SYN0";
 
     if (!*remote_peer_id) {
-        print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), "SYNC0");
+        print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), PROTO);
         ws_send_text((ws_client_t*)client, "SYNC0 FAIL invalid remote id");
         return;
     }
@@ -280,7 +280,7 @@ static void wss_handle_sync0(wss_client_t *client, const char *remote_peer_id,
     if (payload_len > WSS_SYNC_PAYLOAD_MAX)
         payload_len = WSS_SYNC_PAYLOAD_MAX;
 
-    print("V:", LA_F("%s: local='%s', remote='%s', online=%d, sync_cache=%u\n", LA_F55, 55),
+    print("V:", LA_F("%s: local='%s', remote='%s', online=%d, sync_cache=%u\n", LA_F162, 162),
           PROTO, client->base.local_peer_id, remote_peer_id, side, remote_s ? 1 : 0, (uint32_t)payload_len);
 
     if (payload_len) {
@@ -321,7 +321,7 @@ static void wss_handle_sync0(wss_client_t *client, const char *remote_peer_id,
 
         //-------
 
-        print("I:", LA_F("%s: '%s' <-> '%s' paired (ses=%u/%u)\n", LA_F48, 48),
+        print("I:", LA_F("%s: '%s' <-> '%s' paired (ses=%u/%u)\n", LA_F152, 152),
               PROTO, client->base.local_peer_id, remote_peer_id,
               local_s->base.session_id, remote_s->base.session_id);
     }
@@ -369,7 +369,7 @@ static void wss_handle_pkt(wss_session_t *session, uint8_t *payload, uint16_t le
     const char *PROTO = "PKT";
 
     if (len < P2P_WSS_BIN_PKT_MIN_SZ) {
-        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F41, 41), PROTO, len);
+        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, len);
         return;
     }
 
@@ -377,7 +377,7 @@ static void wss_handle_pkt(wss_session_t *session, uint8_t *payload, uint16_t le
     wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
     if (!wss_client_online(peer_c)) return;
 
-    print("V:", LA_F("%s: sid=%u -> peer_sid=%u, data_len=%zu\n", LA_F34, 34),
+    print("V:", LA_F("%s: sid=%u -> peer_sid=%u, data_len=%zu\n", LA_F168, 168),
           PROTO, session->base.session_id, peer_s->base.session_id, len - P2P_WSS_BIN_PKT_MIN_SZ);
 
     // 就地重写 session_id 为请求方的 session_id，并转发到请求方
@@ -393,7 +393,7 @@ static void wss_handle_req(wss_session_t *session, uint8_t *payload, uint16_t le
     const char *PROTO = "REQ";
 
     if (len < P2P_WSS_BIN_RPC_MIN_SZ) {
-        print("E:", LA_F("%s: bad frame len=%zu\n", LA_F41, 41), PROTO, len);
+        print("E:", LA_F("%s: bad frame len=%zu\n", LA_F155, 155), PROTO, len);
         return;
     }
 
@@ -501,7 +501,7 @@ void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
 
         char *inst_id = strrchr(remote_id, ' ');
         if (!inst_id || inst_id == remote_id) {
-            print("E:", LA_F("%s: invalid REG format\n", 0, 0), PROTO);
+            print("E:", LA_F("%s: invalid REG format\n", LA_F160, 160), PROTO);
             ws_send_text((ws_client_t*)client, "REG FAIL invalid instance_id");
             goto error_proto;
         }
@@ -528,7 +528,7 @@ void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
                 print("I:", LA_F("%s: '%s' reconnected & reactive (inst=%u)\n", LA_F98, 98),
                       PROTO, client->base.local_peer_id, client->base.instance_id);
             } else {
-                print("I:", LA_F("%s: '%s' reconnected & renew (inst=%u)\n", 0, 0),
+                print("I:", LA_F("%s: '%s' reconnected & renew (inst=%u)\n", LA_F153, 153),
                       PROTO, reg->base.local_peer_id, instance_id);
             }
 
@@ -599,7 +599,7 @@ void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
         uint8_t *payload = (uint8_t*)ln+1;
         ln_trim;
 
-        wss_handle_sync0(client, remote_id, payload, len - (payload - msg));
+        wss_handle_syn0(client, remote_id, payload, len - (payload - msg));
         return;
     }
 
@@ -643,7 +643,7 @@ void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
 
 error_internal:
 error_proto:
-    print("V:", LA_F("unknown msg from '%s': %.32s\n", LA_F72, 72),
+    print("V:", LA_F("unknown msg from '%s': %.32s\n", LA_F203, 203),
           client->base.local_peer_id, msg);
 }
 
@@ -661,13 +661,13 @@ void wss_handle_data(wss_client_t *client, const uint8_t *data, size_t len) {
 
     wss_session_t *ws_s = (wss_session_t*)find_session(session_id);
     if (!ws_s || ws_s->base.client != &client->base) {
-        print("W:", LA_F("BIN: unknown ses_id=%u type=0x%02x from '%s'\n", LA_F148, 148),
+        print("W:", LA_F("BIN: unknown ses_id=%u type=0x%02x from '%s'\n", LA_F171, 171),
               session_id, type, client->base.local_peer_id);
         return;
     }
 
     if (!PEER_ONLINE(&ws_s->base)) {
-        print("W:", LA_F("BIN 0x%02x: ses_id=%u peer not connected\n", LA_F146, 146), type, session_id);
+        print("W:", LA_F("BIN 0x%02x: ses_id=%u peer not connected\n", LA_F170, 170), type, session_id);
         if (type == P2P_WSS_BIN_REQ && len >= P2P_WSS_BIN_RPC_MIN_SZ) {
             ptr = (uint8_t*)data + 1 + P2P_SESS_ID_SZ;
             wss_session_send_rpc_code(ws_s, nget_s(ptr), P2P_MSG_ERR_PEER_OFFLINE);
@@ -740,7 +740,7 @@ void retry_wss_pending(uint64_t now) {
         uint16_t sid = s->rpc_pending_sid;
         s->rpc_pending_sid = 0;
 
-        print("W:", LA_F("[W] RPC timeout: sid=%u (ses_id=%u)\n", 0, 0), sid, s->base.session_id);
+        print("W:", LA_F("[W] RPC timeout: sid=%u (ses_id=%u)\n", LA_F199, 199), sid, s->base.session_id);
         wss_session_send_rpc_code(s, sid, P2P_MSG_ERR_TIMEOUT);
     }
 }
