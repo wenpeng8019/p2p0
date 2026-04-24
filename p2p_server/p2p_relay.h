@@ -55,7 +55,7 @@ relay_init(void);
 bool
 relay_init_client(relay_client_t* c);
 void
-relay_free_client(relay_client_t *c);
+relay_term_client(relay_client_t *c, bool and_free);
 
 void
 relay_handle_recv(relay_client_t *client);

@@ -61,7 +61,7 @@ typedef struct wss_session {
     /* MSG RPC 状态（与 relay_session_t 一致，独立于 SYNC 通道） */
     uint16_t                        rpc_pending_sid;    /* 0=空闲, 非零=等待 RESP 的 REQ sid */
     uint64_t                        rpc_sent_time;      /* REQ 转发时间戳（用于超时检测） */
-    struct wss_session*          rpc_pending_next;   /* RPC 超时链表指针（-1=尾部） */
+    struct wss_session*             rpc_pending_next;   /* RPC 超时链表指针（-1=尾部） */
 } wss_session_t;
 
 typedef struct wss_client {
@@ -81,7 +81,7 @@ wss_init(void);
 bool
 wss_init_client(wss_client_t* c);
 void
-wss_term_client(wss_client_t *client, bool do_free);
+wss_term_client(wss_client_t *client, bool and_free);
 
 void
 wss_on_message(wss_client_t* client, const uint8_t *msg, size_t len);

@@ -1303,7 +1303,6 @@ typedef struct {
  * 示例:
  *   → "OFF\n"
  */
-#define P2P_WSS_CMD_OFF_SZ          (sizeof(P2P_WSS_CMD_OFF) - 1u)      /* "OFF" */
 #define P2P_WSS_CMD_OFF_MSG         P2P_WSS_CMD_OFF "\n"                 /* "OFF\n" */
 /* ────────────────────────────────────────────────────────────────────────────
  * SYNC0 — 创建/恢复会话（客户端 → 服务器）
@@ -1385,17 +1384,7 @@ typedef struct {
  *   → "SYNC0 bob_device_02\nICE\n...\n"       (alice 再次追加，缓存已满)
  *   ← "SYNC0 bob_device_02 42 busy\n"         (超出 sync_max)
  */
-#define P2P_WSS_CMD_SYNC0_SZ            (sizeof(P2P_WSS_CMD_SYNC0) - 1u)            /* "SYNC0 " */
-#define P2P_WSS_CMD_SYNC0_FMT           P2P_WSS_CMD_SYNC0 "%s\n"                    /* "SYNC0 <remote_peer_id>\n" */
 
-#define P2P_WSS_RSP_SYNC0_SZ            (sizeof(P2P_WSS_RSP_SYNC0) - 1u)            /* "SYNC0 " */
-#define P2P_WSS_RSP_SYNC0_ONLINE_FMT    P2P_WSS_RSP_SYNC0 "%s %u online\n"          /* "SYNC0 <peer_id> <session_id> online\n" */
-#define P2P_WSS_RSP_SYNC0_OFFLINE_FMT   P2P_WSS_RSP_SYNC0 "%s %u offline\n"         /* "SYNC0 <peer_id> <session_id> offline\n" */
-#define P2P_WSS_RSP_SYNC0_CONFIRM_FMT   P2P_WSS_RSP_SYNC0 "%s %u confirm %zu\n"     /* "SYNC0 <peer_id> <session_id> confirm <bytes>\n" */
-#define P2P_WSS_RSP_SYNC0_BUSY_FMT      P2P_WSS_RSP_SYNC0 "%s %u busy\n"            /* "SYNC0 <peer_id> <session_id> busy\n" */
-
-#define P2P_WSS_RSP_SYNC0_FAIL_SZ       (sizeof(P2P_WSS_RSP_SYNC0_FAIL) - 1u)       /* "SYNC0 FAIL " */
-#define P2P_WSS_RSP_SYNC0_FAIL_FMT      P2P_WSS_RSP_SYNC0_FAIL "%s\n"               /* "SYNC0 FAIL <reason>\n" */
 /* ────────────────────────────────────────────────────────────────────────────
  * SYNC0 推送 — 对端上线通知（服务器 → 客户端，S2C 方向）
  * ────────────────────────────────────────────────────────────────────────────
@@ -1433,8 +1422,19 @@ typedef struct {
  *
  *   ← "SYNC0 bob_device_02 42 online\nICE\na=candidate:2 1 udp ...\n"
  *   (客户端先处理 bob 的预缓存候选，再发送自己的候选)
- *
- * ────────────────────────────────────────────────────────────────────────────
+ */
+#define P2P_WSS_CMD_SYNC0_SZ            (sizeof(P2P_WSS_CMD_SYNC0) - 1u)            /* "SYNC0 " */
+#define P2P_WSS_CMD_SYNC0_FMT           P2P_WSS_CMD_SYNC0 "%s\n"                    /* "SYNC0 <remote_peer_id>\n" */
+
+#define P2P_WSS_RSP_SYNC0_SZ            (sizeof(P2P_WSS_RSP_SYNC0) - 1u)            /* "SYNC0 " */
+#define P2P_WSS_RSP_SYNC0_ONLINE_FMT    P2P_WSS_RSP_SYNC0 "%s %u online\n"          /* "SYNC0 <peer_id> <session_id> online\n" */
+#define P2P_WSS_RSP_SYNC0_OFFLINE_FMT   P2P_WSS_RSP_SYNC0 "%s %u offline\n"         /* "SYNC0 <peer_id> <session_id> offline\n" */
+#define P2P_WSS_RSP_SYNC0_CONFIRM_FMT   P2P_WSS_RSP_SYNC0 "%s %u confirm %zu\n"     /* "SYNC0 <peer_id> <session_id> confirm <bytes>\n" */
+#define P2P_WSS_RSP_SYNC0_BUSY_FMT      P2P_WSS_RSP_SYNC0 "%s %u busy\n"            /* "SYNC0 <peer_id> <session_id> busy\n" */
+
+#define P2P_WSS_RSP_SYNC0_FAIL_SZ       (sizeof(P2P_WSS_RSP_SYNC0_FAIL) - 1u)       /* "SYNC0 FAIL " */
+#define P2P_WSS_RSP_SYNC0_FAIL_FMT      P2P_WSS_RSP_SYNC0_FAIL "%s\n"               /* "SYNC0 FAIL <reason>\n" */
+/* ────────────────────────────────────────────────────────────────────────────
  * SYNC — 同步数据交换（双向：客户端 ↔ 服务器）
  * ────────────────────────────────────────────────────────────────────────────
  *

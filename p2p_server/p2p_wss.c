@@ -214,9 +214,9 @@ wss_init_client(wss_client_t *c) {
 // do_free=false: 标记离线（等重连）+ 通知对端，有会话则保留
 // do_free=true:  硬销毁（清除所有会话 + 移除注册 + 释放）
 void
-wss_term_client(wss_client_t *client, bool do_free) {
+wss_term_client(wss_client_t *client, bool and_free) {
 
-    if (!do_free) {
+    if (!and_free) {
         client->base.last_active = P_tick_ms();
 
         // 通知所有配对对端
@@ -548,35 +548,45 @@ void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
 
     client->base.last_active = P_tick_ms();
 
-    /* 调用方已将末尾 '\n' 替换为 '\0'（见 ws_cb_msg），直接按 C 字符串处理 */
-    char *m = (char*)msg;
+    char* ln = (char*)strnstr((const char*)msg, "\n", len), *p;
+    if (!ln) goto error_proto;
+    *ln = '\0';
+    #define ln_trim while (ln[-1] == '\n' || ln[-1] == '\r') *--ln = '\0'
 
-    // PROTO: REG <peer_id> <instance_id>
-    if (strncmp(m, P2P_WSS_CMD_REG, P2P_WSS_CMD_REG_SZ) == 0) { const char *PROTO = "REG";
+        // PROTO: REG <peer_id> <instance_id>
+    if (strncmp((char*)msg, P2P_WSS_CMD_REG, P2P_WSS_CMD_REG_SZ) == 0) { const char *PROTO = "REG";
 
-        char *peer_id = m + P2P_WSS_CMD_REG_SZ;
+        // 重复 REG
+        if (client->base.local_peer_id[0]) {
+            print("E:", LA_F("%s: duplicate from '%s'\n", LA_F97, 97), PROTO, client->base.local_peer_id);
+            ws_send_text((ws_client_t*)client, "REG FAIL duplicate reg");
+            goto error_proto;
+        }
 
-        char *inst_id = strrchr(peer_id, ' ');
-        if (!inst_id || inst_id == peer_id) {
+        char *remote_id = (char*)msg + P2P_WSS_CMD_REG_SZ;
+
+        char *inst_id = strrchr(remote_id, ' ');
+        if (!inst_id || inst_id == remote_id) {
             print("E:", LA_F("%s: invalid REG format\n", 0, 0), PROTO);
             ws_send_text((ws_client_t*)client, "REG FAIL invalid instance_id");
             goto error_proto;
-            return;
         }
 
+        ln_trim;
         *inst_id++ = '\0';
 
-        if (!peer_id[0]) {
-            ws_send_text((ws_client_t*)client, "REG FAIL empty peer_id");
-            return;
+        if (!remote_id[0] || strlen(remote_id) > P2P_PEER_ID_MAX) {
+             print("E:", LA_F("%s: invalid peer id\n", LA_F96, 96), PROTO);
+                   ws_send_text((ws_client_t*)client, "REG FAIL empty peer id");
+            goto error_proto;
         }
         uint32_t instance_id = (uint32_t)strtoul(inst_id, NULL, 10);
         if (instance_id == 0) {
-            ws_send_text((ws_client_t*)client, "REG FAIL invalid instance_id");
-            return;
+            ws_send_text((ws_client_t*)client, "REG FAIL invalid instance id");
+            goto error_proto;
         }
 
-        wss_client_t *reg = (wss_client_t*)find_client(peer_id);
+        wss_client_t *reg = (wss_client_t*)find_client(remote_id);
         if (reg) { assert(reg != client);
 
             if (resident_client(&reg->base, PROTO_WSS, instance_id, &client->base)) {
@@ -587,120 +597,136 @@ void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
                 print("I:", LA_F("%s: '%s' reconnected & renew (inst=%u)\n", 0, 0),
                       PROTO, reg->base.local_peer_id, instance_id);
             }
-        } else {
-            assert(!client_identified(&client->base));
-            assert(!client->base.local_peer_id[0]);
 
-            size_t peer_len = strnlen(peer_id, P2P_PEER_ID_MAX);
-            memcpy(client->base.local_peer_id, peer_id, peer_len);
-            client->base.local_peer_id[peer_len] = '\0';
-            client->base.instance_id = instance_id;
+        } else {
+            assert(!client->base.sessions);
+            assert(!client_identified(&client->base));
 
             print("I:", LA_F("%s: '%s' new REG (inst=%u)\n", LA_F93, 93),
-                  PROTO, peer_id, instance_id);
+                  PROTO, remote_id, instance_id);
+
+            memcpy(client->base.local_peer_id, remote_id, n + 1);
+            client->base.local_peer_id[P2P_PEER_ID_MAX] = '\0';
+            client->base.instance_id = instance_id;
 
             identify_client(&client->base);
         }
 
-        { char ok[48]; snprintf(ok, sizeof(ok), P2P_WSS_RSP_REG_OK_FMT, (unsigned)WSS_SYNC_PAYLOAD_MAX, (unsigned)wss_features());
-          ws_send_text((ws_client_t*)client, ok); }
-
-        // 通知已配对会话双方 + 转发预缓存负载（重连场景）
-        for (session_t *s = client->base.sessions; s; s = s->next) {
-            wss_session_t *ws_s = (wss_session_t*)s;
-            if (!PEER_ONLINE(s)) continue;
-
-            wss_session_t *peer_s = (wss_session_t*)s->peer;
-            wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
-            if (!wss_client_online(peer_c)) continue;
-
-            int ws_confirmed   = (int)ws_s->sync_len;
-            int peer_confirmed = (int)peer_s->sync_len;
-
-            wss_send_sync0(peer_c, client->base.local_peer_id, peer_s->base.session_id, true, ws_s);
-            ws_s->sync_head = ws_s->sync_len = 0;
-
-            wss_send_sync0(client, peer_c->base.local_peer_id, s->session_id, true, peer_s);
-            peer_s->sync_head = peer_s->sync_len = 0;
-
-            if (ws_confirmed)
-                wss_send_sync0_confirm(client, peer_c->base.local_peer_id, s->session_id, ws_confirmed);
-            if (peer_confirmed)
-                wss_send_sync0_confirm(peer_c, client->base.local_peer_id, peer_s->base.session_id, peer_confirmed);
+        // 回复 REG ACK
+        {
+            char ok[48]; snprintf(ok, sizeof(ok), "REG OK %d %d", WSS_SYNC_PAYLOAD_MAX, wss_features());
+            ws_send_text((ws_client_t*)client, ok);
         }
+
+//        // 通知已配对会话双方 + 转发预缓存负载（重连场景）
+//        for (session_t *s = client->base.sessions; s; s = s->next) {
+//            wss_session_t *ws_s = (wss_session_t*)s;
+//            if (!PEER_ONLINE(s)) continue;
+//
+//            wss_session_t *peer_s = (wss_session_t*)s->peer;
+//            wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
+//            if (!wss_client_online(peer_c)) continue;
+//
+//            int ws_confirmed   = (int)ws_s->sync_len;
+//            int peer_confirmed = (int)peer_s->sync_len;
+//
+//            wss_send_sync0(peer_c, client->base.local_peer_id, peer_s->base.session_id, true, ws_s);
+//            ws_s->sync_head = ws_s->sync_len = 0;
+//
+//            wss_send_sync0(client, peer_c->base.local_peer_id, s->session_id, true, peer_s);
+//            peer_s->sync_head = peer_s->sync_len = 0;
+//
+//            if (ws_confirmed)
+//                wss_send_sync0_confirm(client, peer_c->base.local_peer_id, s->session_id, ws_confirmed);
+//            if (peer_confirmed)
+//                wss_send_sync0_confirm(peer_c, client->base.local_peer_id, peer_s->base.session_id, peer_confirmed);
+//        }
+        return;
+    }
+
+    if (!client->base.local_peer_id[0]) {
+        print("E:", LA_F("%s: rejected for not reg\n", LA_F147, 147), (char*)msg);
+        goto error_proto;
         return;
     }
 
     // PROTO: OFF
     // + 主动下线，立即释放服务器资源
-    if (strncmp(m, P2P_WSS_CMD_OFF, P2P_WSS_CMD_OFF_SZ) == 0 && m[P2P_WSS_CMD_OFF_SZ] == '\0') {
-        if (client->base.local_peer_id[0]) {
-            print("I:", LA_F("OFF: '%s' (fd=%d)\n", LA_F72, 72),
-                  client->base.local_peer_id, client->base.fd);
-            wss_term_client(client, true);
-        }
-        return;
-    }
-
-    if (!client->base.local_peer_id[0]) {
-        ws_send_text((ws_client_t*)client, "REG FAIL not registered\n");
+    if (strcmp((char*)msg, P2P_WSS_CMD_OFF) == 0) {
+        print("I:", LA_F("%s: '%s'\n", LA_F72, 72), "OFF",
+              client->base.local_peer_id);
+        wss_term_client(client, true);
         return;
     }
 
     // SYNC0 <remote_peer_id>[\n<payload>]
-    if (strncmp(m, P2P_WSS_CMD_SYNC0, P2P_WSS_CMD_SYNC0_SZ) == 0) {
-        char *remote = m + P2P_WSS_CMD_SYNC0_SZ;
-        char *nl = strchr(remote, '\n');
-        const char *payload = "";
-        if (nl) { *nl = '\0'; payload = nl + 1; }
-        wss_handle_sync0(client, remote, payload);
-        return;
-    }
+    if (strncmp((char*)msg, P2P_WSS_CMD_SYNC0, P2P_WSS_CMD_SYNC0_SZ) == 0) {
 
-    // SYNC <session_id>[\n<payload>]
-    if (strncmp(m, P2P_WSS_CMD_SYNC, P2P_WSS_CMD_SYNC_SZ) == 0) {
-        char *sid_str = m + P2P_WSS_CMD_SYNC_SZ;
-        char *nl = strchr(sid_str, '\n');
-        const char *payload = "";
-        if (nl) { *nl = '\0'; payload = nl + 1; }
-        uint32_t session_id = (uint32_t)strtoul(sid_str, NULL, 10);
+        char *remote_id = (char*)msg + P2P_WSS_CMD_SYNC0_SZ;
+        char *payload = ln+1;
+        ln_trim;
 
-        wss_session_t *s = (wss_session_t*)find_session(session_id);
-        if (!s || s->base.client != &client->base) {
-            print("W:", LA_F("SYNC: unknown ses_id=%u from '%s'\n", LA_F148, 148),
-                  session_id, client->base.local_peer_id);
-            return;
+        if (*payload) {
+            print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), "SYNC0");
+            ws_send_text((ws_client_t*)client, "SYNC0 FAIL invalid remote id");
+            goto error_proto;
         }
-        if (!PEER_ONLINE(&s->base)) {
-            print("W:", LA_F("SYNC: ses_id=%u peer not connected\n", LA_F146, 146), session_id);
-            return;
-        }
-        wss_handle_sync(s, payload);
+        wss_handle_sync0(client, remote_id, payload);
         return;
     }
 
     // FIN <session_id>
-    if (strncmp(m, P2P_WSS_CMD_FIN, P2P_WSS_CMD_FIN_SZ) == 0) {
-        uint32_t sid = (uint32_t)strtoul(m + P2P_WSS_CMD_FIN_SZ, NULL, 10);
+    if (strncmp((char*)msg, P2P_WSS_CMD_FIN, P2P_WSS_CMD_FIN_SZ) == 0) {
 
-        wss_session_t *s = (wss_session_t*)find_session(sid);
-        if (!s || s->base.client != &client->base) {
-            print("W:", LA_F("FIN: unknown ses_id=%u from '%s'\n", LA_F148, 148),
-                  sid, client->base.local_peer_id);
+        char *sid = (char*)msg + P2P_WSS_CMD_SYNC_SZ;
+        ln_trim;
+
+        uint32_t session_id = (uint32_t)strtoul(sid, NULL, 10);
+        session_t *s = find_session(session_id);
+        if (!s || s->client != &client->base) {
+            print("W:", LA_F("%s: unknown ses_id=%u\n", LA_F148, 148),
+                  "FIN", session_id, client->base.local_peer_id);
             return;
         }
-        wss_handle_fin(s);
+
+        wss_handle_fin((wss_session_t*)s);
         return;
     }
 
+    // SYNC <session_id>\n<payload>
+    if (strncmp((char*)msg, P2P_WSS_CMD_SYNC, P2P_WSS_CMD_SYNC_SZ) == 0) {
+
+        char *sid = (char*)msg + P2P_WSS_CMD_SYNC_SZ;
+        char* payload = ln + 1;
+        ln_trim;
+
+        uint32_t session_id = (uint32_t)strtoul(sid, NULL, 10);
+        session_t *s = find_session(session_id);
+        if (!s || s->client != &client->base) {
+            print("W:", LA_F("%s: unknown ses_id=%u\n", LA_F148, 148),
+                  "SYNC", session_id, client->base.local_peer_id);
+            ws_send_text((ws_client_t*)client, "SYNC FAIL unknown session");
+            return;
+        }
+
+        if (!PEER_ONLINE(s)) {
+            print("W:", LA_F("%: ses_id=%u peer not connected\n", LA_F146, 146), "SYNC", session_id);
+                ws_send_text((ws_client_t*)client, "SYNC FAIL peer not connected");
+            return;
+        }
+        wss_handle_sync((wss_session_t*)s, payload);
+        return;
+    }
+
+error_internal:
 error_proto:
     print("V:", LA_F("unknown msg from '%s': %.32s\n", LA_F72, 72),
-          client->base.local_peer_id, m);
+          client->base.local_peer_id, msg);
 }
 
 // 处理 WSS 模式信令（WebSocket 二进制帧）— PACKET 中继 + MSG RPC
 void wss_on_data(wss_client_t *client, const uint8_t *data, size_t len) {
-    assert(client && client->base.proto == PROTO_WSS);
+    assert(client->base.proto == PROTO_WSS);
 
     if (len < P2P_WSS_BIN_HDR_SIZE) return;
 

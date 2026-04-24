@@ -174,7 +174,7 @@ void
 free_client(client_t *c) {
     assert(c && c->proto >= 0);
     if (c->proto == PROTO_COMPACT) compact_free_client((compact_client_t*)c);
-    else if (c->proto == PROTO_RELAY) relay_free_client((relay_client_t*)c);
+    else if (c->proto == PROTO_RELAY) relay_term_client((relay_client_t *)c, true);
     else if (c->proto == PROTO_WSS) wss_term_client((wss_client_t*)c, true);
     else assert(0 && "Invalid client proto");
 }
@@ -1055,7 +1055,7 @@ int main(int argc, char *argv[]) {
                     print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F73, 73),
                            as_client(i)->local_peer_id, tick_diff(now, as_client(i)->last_active) / 1000.0);
                     if (m == PROTO_COMPACT) compact_free_client(&g_client_slots[i].compact);
-                    else if (m == PROTO_RELAY) relay_free_client(&g_client_slots[i].relay);
+                    else if (m == PROTO_RELAY) relay_term_client(&g_client_slots[i].relay, true);
                     else if (m == PROTO_WSS) wss_term_client(&g_client_slots[i].wss, true);
                     else if (m == 127) {
                         P_sock_close(as_client(i)->fd);
@@ -1407,7 +1407,7 @@ int main(int argc, char *argv[]) {
                 P_sock_close(as_client(i)->fd);
                 as_client(i)->fd = P_INVALID_SOCKET;
             }
-            if (as_client(i)->proto == PROTO_RELAY) relay_free_client(&g_client_slots[i].relay);
+            if (as_client(i)->proto == PROTO_RELAY) relay_term_client(&g_client_slots[i].relay, true);
 #ifdef WITH_WSLAY
             else if (as_client(i)->proto == PROTO_WSS) wss_term_client(&g_client_slots[i].wss, true);
 #endif
