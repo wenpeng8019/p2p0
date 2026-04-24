@@ -20,13 +20,12 @@
  *   服务器 → 客户端：
  *     REG OK <sync_max>             注册成功（sync_max = 预缓存负载上限）
  *     REG FAIL <reason>             注册失败
- *     SYNC0 <peer_id> <session_id> online|offline  应答/推送（统一格式）
- *     SYNC0 <peer_id> <session_id> online\n<payload>  应答 + 对端预缓存负载
- *     SYNC0 <peer_id> <session_id> confirm <bytes>  预缓存负载转发确认
+ *     SYNC0 <peer_id> <session_id> online|offline  应答/推送
  *     SYNC0 <peer_id> <session_id> busy  负载超出缓存可用空间
  *     SYNC0 FAIL <reason>           会话创建失败
- *     SYNC <session_id>\n<payload>  对端同步数据（session_id 已重写）
- *     SYNC <session_id> confirm <bytes>  同步数据转发确认
+ *     SYNC <session_id>\n<line>     对端同步数据（流式，每行一帧）
+ *     SYNC <session_id>\n\n         fin mark，本批次传输结束
+ *     SYNC <session_id> confirm <bytes>  同步数据转发确认（发给发送方）
  *     SYNC <session_id> busy        同步缓存空间不足
  *     FIN <session_id>               会话结束通知 (C2S & S2C)
  *
@@ -44,23 +43,22 @@
 #define P2P_P2P_WSS_H
 
 #include "common.h"
-#include "p2p_relay.h"
-
 
 #define WSS_SYNC_PAYLOAD_MAX        2048        /* SYNC0 预缓存负载上限（字节，不含 NUL） */
 
 typedef struct wss_session {
     session_t                       base;
 
-    /* SYNC0 预缓存 ring buffer */
-    char                            sync_data[WSS_SYNC_PAYLOAD_MAX];
-    uint16_t                        sync_head;   /* 读位置 [0, MAX) */
-    uint16_t                        sync_len;    /* 已存储字节数 */
+    /* SYNC0 预缓存 ring buffer（动态分配，同步完成后释放）*/
+    buffer_item_t*                  sync_buf;               /* NULL=无数据，非NULL=BUF_FLAG_2048 chunk */
+    uint16_t                        sync_head;              /* 读位置 [0, MAX) */
+    uint16_t                        sync_len;               /* 已存储字节数 */
+    bool                            sync_sending;           /* true=有数据已提交 wslay 尚未发完 */
 
     /* MSG RPC 状态（与 relay_session_t 一致，独立于 SYNC 通道） */
-    uint16_t                        rpc_pending_sid;    /* 0=空闲, 非零=等待 RESP 的 REQ sid */
-    uint64_t                        rpc_sent_time;      /* REQ 转发时间戳（用于超时检测） */
-    struct wss_session*             rpc_pending_next;   /* RPC 超时链表指针（-1=尾部） */
+    uint16_t                        rpc_pending_sid;        /* 0=空闲, 非零=等待 RESP 的 REQ sid */
+    uint64_t                        rpc_sent_time;          /* REQ 转发时间戳（用于超时检测） */
+    struct wss_session*             rpc_pending_next;       /* RPC 超时链表指针（-1=尾部） */
 } wss_session_t;
 
 typedef struct wss_client {

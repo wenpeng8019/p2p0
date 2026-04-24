@@ -1,10 +1,6 @@
 //
 // Created by 温朋 on 2026/4/18.
 //
-
-#ifdef MOD_TAG
-#undef MOD_TAG
-#endif
 #define MOD_TAG "RELAY"
 
 #include "p2p_relay.h"
