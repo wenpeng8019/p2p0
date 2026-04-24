@@ -44,6 +44,8 @@ static void relay_send(relay_client_t *c, buffer_item_t* buf_item) {
 
     assert(c->base.proto == PROTO_RELAY);
 
+    // todo 禁止写入检查
+
     buf_item->next = NULL;
     if (c->sending_buff_rear) {
         c->sending_buff_rear->next = buf_item;
@@ -57,6 +59,8 @@ static void relay_send(relay_client_t *c, buffer_item_t* buf_item) {
 static void relay_session_send(relay_session_t *s, buffer_item_t* buf_item) {
 
     assert(s && s->base.client);
+
+    // todo 对端禁止写入检查
 
     // 添加到 session 的本地发送队列
     buf_item->next = NULL;
@@ -123,7 +127,20 @@ static void relay_pending_remove_rpc(relay_session_t *s) {
 
 // 发送 fatal 到 client 发送队列
 // + 将队列中正在发送的数据包以外的其他数据包释放，并将 fatal 作为数据队列的最后一项
-static void relay_send_fatal(relay_client_t *c) {
+static void relay_send_fatal(relay_client_t *c, uint8_t error_code) {
+
+    // todo 应该等价 internal 错误 + 事务中断回滚
+    // + 无需先清空队列 ?
+
+    // 这里 error_code=0 被默认为 OOM 错误
+    if (!error_code)
+        error_code = P2P_RLY_ERR_INTERNAL;
+    c->last_error = error_code;
+    c->io &= ~TCP_IO_FLAG_WANT_READ;                // 立即停止读取（不接受新请求）
+
+    if (error_code == P2P_RLY_ERR_INTERNAL) {
+        // 添加 g_relay_fatal 到队尾
+    }
 
     if (c->sending_buff_head) {
         buffer_item_t *item = c->sending_buff_head;
@@ -181,7 +198,7 @@ static bool relay_send_status(relay_client_t *client, uint8_t req_type, uint8_t 
     buffer_item_t *buf_item = alloc_buffer(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
-        relay_send_fatal(client);
+        relay_send_fatal(client, 0);
         return false;
     }
 
@@ -200,13 +217,13 @@ static bool relay_send_status(relay_client_t *client, uint8_t req_type, uint8_t 
 
 // client/session 临界级的状态应答
 // + SYN0 专用状态，状态包不走 session 队列，直接挂到 client 上。因为此时尚未建立会话，需要通过携带 remote_peer_id 来标识哪个对端连接请求出错
-static bool relay_send_sync0_status(relay_client_t *client, const char *remote_peer_id, uint8_t status_code) {
+static bool relay_send_syn0_status(relay_client_t *client, const char *remote_peer_id, uint8_t status_code) {
 
     uint16_t payload_len = P2P_RLY_STATUS_PSZ(1, 0);
     buffer_item_t *buf_item = alloc_buffer(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
-        relay_send_fatal(client);
+        relay_send_fatal(client, 0);
         return false;
     }
 
@@ -224,7 +241,7 @@ static bool relay_send_sync0_status(relay_client_t *client, const char *remote_p
     return true;
 }
 
-// session级的状态应答
+// session 级的状态应答
 static bool relay_session_send_status(relay_session_t *s, uint8_t req_type, uint8_t status_code) {
 
     assert(s && s->base.client);
@@ -233,7 +250,7 @@ static bool relay_session_send_status(relay_session_t *s, uint8_t req_type, uint
     buffer_item_t *buf_item = alloc_buffer(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
-        relay_send_fatal((relay_client_t*)s->base.client);
+        relay_send_fatal((relay_client_t*)s->base.client, 0);
         return false;
     }
 
@@ -253,7 +270,7 @@ static bool relay_session_send_status(relay_session_t *s, uint8_t req_type, uint
 
 // 发送 sync0 ack
 // payload: [target_name(32)][session_id(P2P_SESS_ID_SZ)][[0xFF]
-static bool relay_session_send_sync0_offline(relay_session_t *s, const char *target_name) {
+static bool relay_session_send_syn0_offline(relay_session_t *s, const char *target_name) {
 
     assert(s && s->base.session_id && s->base.client);
     relay_client_t *client = (relay_client_t*)s->base.client;
@@ -262,7 +279,7 @@ static bool relay_session_send_sync0_offline(relay_session_t *s, const char *tar
     buffer_item_t *buf_item = alloc_buffer(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
-        relay_send_fatal(client);
+        relay_send_fatal(client, 0);
         return false;
     }
 
@@ -291,7 +308,7 @@ static bool relay_session_send_sync_confirm(relay_session_t *s, uint8_t confirme
     buffer_item_t *buf_item = alloc_buffer(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
-        relay_send_fatal(client);
+        relay_send_fatal(client, 0);
         return false;
     }
 
@@ -314,7 +331,7 @@ static bool relay_session_send_rpc_code(relay_session_t *s, uint16_t sid, uint8_
     buffer_item_t *buf_item = alloc_buffer(BUF_FLAG_512(0));
     if (!buf_item) {
         print("E:", LA_F("send failed(OOM)\n", LA_F100, 100));
-        relay_send_fatal((relay_client_t*)s->base.client);
+        relay_send_fatal((relay_client_t*)s->base.client, 0);
         return false;
     }
 
@@ -494,6 +511,8 @@ static void relay_free_session(session_t *s) {
 void
 relay_term_client(relay_client_t *c, bool and_free) {
 
+    // todo and_free
+
     c->reg_ack_pending = false;
     c->recv_len = 0;
     if (c->recv_buf) {
@@ -549,12 +568,12 @@ static void relay_handle_sync0(relay_client_t *client, uint8_t *payload, uint16_
                        sizeof(relay_session_t));
     if (side == E_OUT_OF_MEMORY) {
         print("E:", LA_F("%s: build session to '%s' failed(OOM)", LA_F157, 157), PROTO, (const char *)payload);
-        relay_send_fatal(client);
+        relay_send_fatal(client, 0);
         return;
     }
     if (side < E_NONE) {
         print("E:", LA_F("%s: build session to '%s' failed(%d)\n", LA_F44, 44), PROTO, (const char *)payload, side);
-        relay_send_sync0_status(client, (const char *)payload, P2P_RLY_ERR_PROTOCOL);
+        relay_send_syn0_status(client, (const char *)payload, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -575,7 +594,7 @@ static void relay_handle_sync0(relay_client_t *client, uint8_t *payload, uint16_
         sync0_item = alloc_buffer(BUF_FLAG_MTU(0));
         if (!sync0_item) {
             print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
-            relay_send_fatal(client);
+            relay_send_fatal(client, 0);
             return;
         }
 
@@ -599,7 +618,7 @@ static void relay_handle_sync0(relay_client_t *client, uint8_t *payload, uint16_
         sync0_item = alloc_buffer(BUF_FLAG_512(0));
         if (!sync0_item) {
             print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
-            relay_send_fatal(client);
+            relay_send_fatal(client, 0);
             return;
         }
 
@@ -622,7 +641,7 @@ static void relay_handle_sync0(relay_client_t *client, uint8_t *payload, uint16_
 
         local_s->peer_pending = sync0_item;
 
-        relay_session_send_sync0_offline(local_s, (const char *)payload);
+        relay_session_send_syn0_offline(local_s, (const char *)payload);
 
         print("I:", LA_F("%s: peer '%s' offline, cached cands=%d\n", LA_F163, 163),
               PROTO, (const char *)payload, cand_count);
@@ -720,7 +739,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *s, uint8_
         sync_item = alloc_buffer(BUF_FLAG_MTU(0));
         if (!sync_item) {
             print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
-            relay_send_fatal(client);
+            relay_send_fatal(client, 0);
             return;
         }
 
@@ -735,7 +754,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *s, uint8_
         sync_item = alloc_buffer(BUF_FLAG_512(0));
         if (!sync_item) {
             print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
-            relay_send_fatal(client);
+            relay_send_fatal(client, 0);
             return;
         }
 
@@ -941,7 +960,7 @@ void relay_handle_recv(relay_client_t *client) {
     assert(client->base.proto == PROTO_RELAY);
     assert(client->recv_buf);
 
-    client->base.last_active = P_tick_ms();
+    client->base.last_active = P_tick_ms(); uint8_t type = 0;
     for(;;client->recv_len = 0) {
 
         // 握手阶段，禁止接收新消息（此时应该已经取消了 TCP_IO_FLAG_WANT_READ）
@@ -958,7 +977,7 @@ void relay_handle_recv(relay_client_t *client) {
         }
 
         // 解析 header
-        uint8_t type = client->recv_buf[0];
+        type = client->recv_buf[0];
         uint8_t* ptr = client->recv_buf + 1;
         uint16_t payload_len = nget_s(ptr);
         if (payload_len > P2P_MAX_PAYLOAD) {
@@ -1171,15 +1190,23 @@ void relay_handle_recv(relay_client_t *client) {
         }
     }
 
-error_internal:
-error_proto:
 error_io:
-    if (client->base.local_peer_id[0]) {
-        print("V:", LA_F("'%s' recv closed\n", LA_F169, 169), client->base.local_peer_id);
-    } else {
-        print("V:", LA_F("Client recv closed (not yet reg)\n", LA_F80, 80));
-    }
+    client->last_error = P2P_RLY_ERR_IO;
+    goto close_read;
+error_internal:
+    client->last_error = P2P_RLY_ERR_INTERNAL;
+close_read:
+    // 读取过程出现错误、或服务内部出现错误（例如内存分配失败），此时当前读取的数据是不完整的
+    // > 需要关闭读取标志; 并将正在读取中的数据失效；同时向客户端发送错误码
+    //   此外，需要确保发送队列不再写入新数据，且发送队列全部发送完成时，关闭连接
+    client->recv_len = 0;
+    relay_send_status(client, 0, client->last_error);
     client->io &= ~TCP_IO_FLAG_WANT_READ;
+    return;
+error_proto:
+    // 协议错误，返回错误，但不停止读写
+    // + 此时读取的协议数据信息是完整的，但数据定义不合法
+    relay_send_status(client, type, P2P_RLY_ERR_PROTOCOL);
 }
 
 // 处理 RELAY 模式信令发送（TCP 长连接）- 统一队列发送
@@ -1233,10 +1260,10 @@ void relay_handle_send(relay_client_t *client) {
         int rc = tcp_send((tcp_client_t*)client, (const char *)hdr + send_offset, &send_sz, PROTO_STR(hdr->type));
         if (rc < 0) {
 
-            // 失败后，仅关闭 socket，client 数据状态，等待用户重连，或超时自动清理
-            P_sock_close(client->base.fd);
-            client->base.fd = P_INVALID_SOCKET;
-            client->io &= ~TCP_IO_FLAG_WANT_WRITE;
+            // 写失败：此时无法保证发送的数据是完整的，同时后续数据的时序依赖性也破坏了
+            // > 关闭 sock 连接，清除发送队列，同时关闭读写标志。但需要保留 client 实例，以便客户端重连恢复
+            // > 同时当前正在执行的事务需要中断回滚
+            relay_term_client(client, false);
             return;
         }
 
@@ -1255,7 +1282,7 @@ void relay_handle_send(relay_client_t *client) {
                     // 如果 item 有 refer，说明这是一个需要发送完成回调的包
                     if (item->refer) {
                         if (!relay_session_send_complete((relay_session_t*)item->refer, item))
-                            return;  // OOM → relay_send_fatal 已重构队列，不再操作 item
+                            return;  // OOM → relay_send_fatal 已重构队列，不再操作 item todo chk
                     }
 
                     if (!((sending_session->send_head = item->next))) {
@@ -1275,6 +1302,12 @@ void relay_handle_send(relay_client_t *client) {
                 // 如果全部发送完成
                 if (!client->sending_sess_head && !client->sending_buff_head) {
                     client->io &= ~TCP_IO_FLAG_WANT_WRITE;
+
+                    // 如果读取标志已关闭，则只关闭连接，无需清除数据或事务状态
+                    if (!(client->io & TCP_IO_FLAG_WANT_READ)) {
+                        P_sock_close(client->base.fd);
+                        client->base.fd = P_INVALID_SOCKET;
+                    }
                 }
             }
             else client->send_offset = item==client->sending_buff_head ? -send_offset : send_offset;

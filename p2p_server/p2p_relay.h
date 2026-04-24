@@ -37,10 +37,11 @@ typedef struct relay_client {
     client_t                        base;
     TCP_CLIENT
 
+    uint8_t                         last_error;                 
+    bool                            reg_ack_pending;            // REG ACK 待发送标志（复用 recv_buf）
+
     uint8_t*                        recv_buf;
     uint16_t                        recv_len;
-
-    bool                            reg_ack_pending;            // REG ACK 待发送标志（复用 recv_buf）
 
     buffer_item_t*                  sending_buff_head;
     buffer_item_t*                  sending_buff_rear;

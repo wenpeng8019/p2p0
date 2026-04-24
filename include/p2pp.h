@@ -774,14 +774,15 @@ typedef struct {
     uint16_t            size;
 } p2p_relay_hdr_t;
 
-#define P2P_RLY_CODE_READY           0                  // 服务器就绪，客户端可继续后续操作
+#define P2P_RLY_CODE_READY          0                  // 服务器就绪，客户端可继续后续操作
 #define P2P_RLY_ERR(c)              (0x80+c)            // 错误码基数，code >= 0x80 表示错误
-#define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(0)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
-#define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(1)      // 协议错误（未登录/非法状态）
-#define P2P_RLY_ERR_NOT_REG         P2P_RLY_ERR(2)      // 未完成 ONLINE 登录
-#define P2P_RLY_ERR_PEER_OFFLINE    P2P_RLY_ERR(3)      // 对端未连接（session 存在但 peer 为空）
-#define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(4)      // 会话忙（前一个转发尚未完成）
-#define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(5)      // 服务器转发请求超时
+#define P2P_RLY_ERR_IO              P2P_RLY_ERR(0)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
+#define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(1)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
+#define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(2)      // 协议错误（未登录/非法状态）
+#define P2P_RLY_ERR_NOT_REG         P2P_RLY_ERR(3)      // 未完成 ONLINE 登录
+#define P2P_RLY_ERR_PEER_OFFLINE    P2P_RLY_ERR(4)      // 对端未连接（session 存在但 peer 为空）
+#define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(5)      // 会话忙（前一个转发尚未完成）
+#define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(6)      // 服务器转发请求超时
 
 /* RELAY ONLINE 下行功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
