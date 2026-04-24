@@ -1127,7 +1127,7 @@ p2p_update(p2p_handle_t hdl) {
         /* 包含 session_id：根据 session_id 匹配 session，或验证 */
         if (hdr.flags & P2P_FLAG_SESSION) {
 
-            if (payload_len < (int)P2P_SESS_ID_PSZ) {
+            if (payload_len < (int)P2P_SESS_ID_SZ) {
                 continue;
             }
             uint32_t sess_id = nget_l(payload);
@@ -1155,8 +1155,8 @@ p2p_update(p2p_handle_t hdl) {
                 else { print("W:", LA_F("%s: invalid ses_id=%u\n", LA_F150, 150), "P2P", sess_id); continue; }
             }
 
-            payload     += P2P_SESS_ID_PSZ;
-            payload_len -= (int)P2P_SESS_ID_PSZ;
+            payload     += P2P_SESS_ID_SZ;
+            payload_len -= (int)P2P_SESS_ID_SZ;
 
         } else if (inst->cfg.multi_session) {
             print("W:", LA_F("%s: no ses_id for multi session\n", LA_F159, 159), "P2P");
@@ -1185,14 +1185,14 @@ p2p_update(p2p_handle_t hdl) {
 
         /* 多会话派发 */
         if (hdr.flags & P2P_FLAG_SESSION) {
-            if (payload_len < (int)P2P_SESS_ID_PSZ) continue;
+            if (payload_len < (int)P2P_SESS_ID_SZ) continue;
             uint32_t sess_id = nget_l(payload);
             struct p2p_session *ts = inst->sessions_head;
             for (; ts; ts = ts->next) if (ts->id == sess_id) break;
             if (!ts) continue;
             s = ts;
-            payload     += P2P_SESS_ID_PSZ;
-            payload_len -= (int)P2P_SESS_ID_PSZ;
+            payload     += P2P_SESS_ID_SZ;
+            payload_len -= (int)P2P_SESS_ID_SZ;
         }
 
         nat_proto(s, hdr.type, hdr.flags, hdr.seq, payload, payload_len, &from, now_ms);

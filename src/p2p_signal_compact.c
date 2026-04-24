@@ -53,18 +53,18 @@ static inline err_t udp_send(struct p2p_instance *inst, const char* PROTO,
  * 解析 SYNC 负载，追加到 session 的 remote_cands[]
  * 注意：这里对方的候选列表顺序并未按对方原始顺序排序，而是 FIFO 追加到 remote_cands[] 中
  *
- * 格式: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
+ * 格式: [session_id(P2P_SESS_ID_SZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
  */
 static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *payload, int cand_cnt) {
     char _ab[INET6_ADDRSTRLEN];
 
     assert(cand_cnt && s->remote_cand_cnt + cand_cnt <= s->remote_cand_cap);
 
-    int offset = P2P_SESS_ID_PSZ + 2;  // 第一个 candidates 列表的起始位置
+    int offset = P2P_SESS_ID_SZ + 2;  // 第一个 candidates 列表的起始位置
     p2p_remote_candidate_entry_t*c;
 
     // 对于 sync0, 即由 server 维护的双方握手包
-    if (payload[P2P_SESS_ID_PSZ]/* base_index */ == 0) {
+    if (payload[P2P_SESS_ID_SZ]/* base_index */ == 0) {
 
         unpack_candidate(c = &s->remote_cands[0], payload + offset);
         if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
@@ -151,18 +151,18 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
 }
 
 /* 一个 SYNC 包所承载的候选数量（单位）
- * + 这里 10（字节）表示 SYNC 负载头：[session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)] = 10 字节
+ * + 这里 10（字节）表示 SYNC 负载头：[session_id(P2P_SESS_ID_SZ)][base_index(1)][candidate_count(1)] = 10 字节
  *   负载头后面的剩余空间就是候选列表，通过预定义、和 MTU 上限共同限制计算得出该单位大小
  */
 #define SYNC_CAND_UNIT \
-    (((P2P_MAX_PAYLOAD - P2P_SESS_ID_PSZ - 2) / (int)sizeof(p2p_candidate_t)) < MAX_CANDS_PER_PACKET \
-     ? ((P2P_MAX_PAYLOAD - P2P_SESS_ID_PSZ - 2) / (int)sizeof(p2p_candidate_t)) \
+    (((P2P_MAX_PAYLOAD - P2P_SESS_ID_SZ - 2) / (int)sizeof(p2p_candidate_t)) < MAX_CANDS_PER_PACKET \
+     ? ((P2P_MAX_PAYLOAD - P2P_SESS_ID_SZ - 2) / (int)sizeof(p2p_candidate_t)) \
      : MAX_CANDS_PER_PACKET)
 
 /*
  * 构建 SYNC 的候选队列，返回 payload 总长度
  *
- * 格式: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
+ * 格式: [session_id(P2P_SESS_ID_SZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
  */
 static int pack_local_candidates(struct p2p_session *s, uint16_t seq, uint8_t *payload, uint8_t *r_flags) {
 
@@ -195,10 +195,10 @@ static int pack_local_candidates(struct p2p_session *s, uint16_t seq, uint8_t *p
         *r_flags |= SIG_SYNC_FLAG_FIN;
     }
 
-    payload[P2P_SESS_ID_PSZ] = (uint8_t)base_index;
-    payload[P2P_SESS_ID_PSZ + 1] = (uint8_t)cnt;
+    payload[P2P_SESS_ID_SZ] = (uint8_t)base_index;
+    payload[P2P_SESS_ID_SZ + 1] = (uint8_t)cnt;
 
-    int offset = P2P_SESS_ID_PSZ + 2; // 负载头：[session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)]
+    int offset = P2P_SESS_ID_SZ + 2; // 负载头：[session_id(P2P_SESS_ID_SZ)][base_index(1)][candidate_count(1)]
     for (int i = 0, idx; i < cnt; i++) { idx = base_index + i;
         offset += pack_candidate(&s->local_cands[idx], payload + offset);
     }
@@ -295,7 +295,7 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
  *       也可能是对方发送的 seq!=1 的 SYNC 包（在并发网络状况下，对方的 SYNC 包可能先到达）
  *
  * 包头: [type=SIG_PKT_SYNC | flags=见下 | seq=1-16]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*7)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][base_index(1)][candidate_count(1)][candidates(N*7)]
  *   - session_id: 会话 ID（网络字节序）
  *   - base_index: 本批候选的起始索引
  *   - candidate_count: 本批候选数量
@@ -404,7 +404,7 @@ static void send_trickle_candidates(struct p2p_session *s) {
  * 周期将未确认的 SYNC 包重发给对方
  *
  * 包头: [type=SIG_PKT_SYNC | flags=见下 | seq=1-16]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*7)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][base_index(1)][candidate_count(1)][candidates(N*7)]
  * 说明: 重发所有未收到 ACK 的 SYNC 包
  */
 static void resend_candidates_and_fin(struct p2p_session *s, uint64_t now) {
@@ -441,7 +441,7 @@ static void resend_candidates_and_fin(struct p2p_session *s, uint64_t now) {
  * 通过服务器向对端发送 RPC 消息请求
  *
  * 包头: [type=SIG_PKT_MSG_REQ | flags=0 | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)][msg(1)][data(N)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: 本端会话 ID（来自 REGISTER_ACK）
  *   - sid: 序列号（2字节，网络字节序），用于匹配响应
  *   - msg: 消息 ID（1字节，用户自定义）
@@ -452,8 +452,8 @@ static void send_rpc_req(struct p2p_session *s, uint64_t now) {
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
-    uint8_t payload[P2P_SESS_ID_PSZ + 3 + P2P_MSG_DATA_MAX]; int n = 0;
-    nwrite_l(payload + n, s->id); n += P2P_SESS_ID_PSZ;
+    uint8_t payload[P2P_SESS_ID_SZ + 3 + P2P_MSG_DATA_MAX]; int n = 0;
+    nwrite_l(payload + n, s->id); n += P2P_SESS_ID_SZ;
     nwrite_s(payload + n, sess_ctx->req_sid); n += 2;
     payload[n++] = sess_ctx->req_msg;
     if (sess_ctx->req_data_len > 0) {
@@ -472,7 +472,7 @@ static void send_rpc_req(struct p2p_session *s, uint64_t now) {
  * （对端）通过服务器向源端回复 RPC 消息响应
  *
  * 包头: [type=SIG_PKT_MSG_RESP | flags=0 | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)][code(1)][data(N)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   - session_id: A端的会话 ID（网络字节序）
  *   - sid: 序列号，必顾与 MSG_REQ 中的 sid 一致
  *   - code: 响应码
@@ -483,8 +483,8 @@ static void send_rpc_resp(struct p2p_session *s, uint64_t now) {
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
-    uint8_t payload[P2P_SESS_ID_PSZ + 2 + 1 + P2P_MSG_DATA_MAX]; int n = 0;
-    nwrite_l(payload, sess_ctx->resp_session_id); n = P2P_SESS_ID_PSZ;
+    uint8_t payload[P2P_SESS_ID_SZ + 2 + 1 + P2P_MSG_DATA_MAX]; int n = 0;
+    nwrite_l(payload, sess_ctx->resp_session_id); n = P2P_SESS_ID_SZ;
     nwrite_s(payload + n, sess_ctx->resp_sid); n += 2;
     payload[n++] = sess_ctx->resp_code;
     if (sess_ctx->resp_data_len > 0) {
@@ -707,7 +707,7 @@ void compact_on_alive_ack(struct p2p_instance *inst) {
  * 处理 SYNC0_ACK（即连接应答）, session_id 和首批候选同步提交确认
  *
  * 包头: [type=SIG_PKT_SYNC0_ACK | flags=0 | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][online(1)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][online(1)]
  *   - session_id: 对端配对会话 ID（由服务器在 SYNC0 时分配，标识 client↔peer 会话）
  *   - online: 1=对端已上线（已有配对），0=对端尚未上线
  */
@@ -726,7 +726,7 @@ void compact_on_sync0_ack(struct p2p_session *s, const uint8_t *payload, int len
 
     if (sess_ctx->state != SIG_COMPACT_SESS_WAIT_SYNC0_ACK) return;
 
-    uint8_t online = payload[P2P_SESS_ID_PSZ];
+    uint8_t online = payload[P2P_SESS_ID_SZ];
     print("V:", LA_F("%s: accepted (ses_id=%u), peer=%s\n", LA_F102, 102),
           PROTO, s->id, online ? "online" : "offline");
 
@@ -756,7 +756,7 @@ void compact_on_sync0_ack(struct p2p_session *s, const uint8_t *payload, int len
  * 处理 SYNC_ACK，对端确认已收到自己发过去的候选地址信息
  *
  * 包头: [type=SIG_PKT_SYNC_ACK | flags=0 | seq=确认的 SYNC 序列号]
- * 负载: [session_id(P2P_SESS_ID_PSZ)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)]
  *   - session_id: 会话 ID（网络字节序）
  *   - seq: 确认的 SYNC 序列号（0 表示确认服务器下发的 SYNC(seq=0)）
  */
@@ -804,7 +804,7 @@ void compact_on_sync_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
  * 处理服务器下发的 SYNC0（首次对端候选推送）
  *
  * 包头: [type=SIG_PKT_SYNC0 | flags=0 | seq=0]  （server→client 方向）
- * 负载: [session_id(P2P_SESS_ID_PSZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
  *   - session_id: 服务器分配的对端配对会话 ID（来自对端 SYNC0 触发的配对）
  *   - 0x00: 保留字节（固定为 0，供 unpack_remote_candidates 识别为初始推送）
  *   - candidate_count: 对端候选数量（首个为服务器观察到的公网地址 srflx，必须 >= 1）
@@ -815,7 +815,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
                              uint64_t now) {
     const char* PROTO = "SYNC0";
 
-    int cand_cnt = payload[P2P_SESS_ID_PSZ + 1];
+    int cand_cnt = payload[P2P_SESS_ID_SZ + 1];
     if (len < (int)(SIG_PKT_SYNC0_S2C_PSZ(cand_cnt) - P2P_PEER_ID_MAX)) {
         print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F118, 118), PROTO, len, cand_cnt);
         return;
@@ -890,7 +890,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
 
 /*
  * 包头: [type=SIG_PKT_SYNC | flags=见下 | seq=序列号]
- * 负载: [session_id(P2P_SESS_ID_PSZ) | base_index(1) | candidate_count(1) | candidates(N*7)]
+ * 负载: [session_id(P2P_SESS_ID_SZ) | base_index(1) | candidate_count(1) | candidates(N*7)]
  *   - session_id: 会话 ID（网络字节序）
  *   - base_index: 本批候选的起始索引（0-based）
  *   - candidate_count: 本批候选数量，0 表示结束标识
@@ -909,7 +909,7 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    int cand_cnt = payload[P2P_SESS_ID_PSZ + 1];
+    int cand_cnt = payload[P2P_SESS_ID_SZ + 1];
     if (len < (int)SIG_PKT_SYNC_PSZ(cand_cnt)) {
         print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F118, 118), PROTO, len, cand_cnt);
         return;
@@ -918,7 +918,7 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
     // seq>0 时 base_index 为候选起始索引；seq=0 时 base_index 为循环通知序号（1..255）
-    uint8_t base_index = payload[P2P_SESS_ID_PSZ];
+    uint8_t base_index = payload[P2P_SESS_ID_SZ];
 
     // SYNCING 通常由 compact_on_sync0_ack 或 compact_on_peer_sync0 触发
     // 但在 UDP 网络中 sync0/sync 包是并发的，先后无法确定。
@@ -945,9 +945,9 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
             }
 
             // 维护分配远端候选列表的空间
-            // + 这里 payload[P2P_SESS_ID_PSZ](base_index) + cand_cnt，表示该包至少需要的远端候选数量; 1 为至少包含一个对方的公网地址
-            if (p2p_remote_cands_reserve(s, 1 + payload[P2P_SESS_ID_PSZ] + cand_cnt) != E_NONE) {
-                print("E:", LA_F("Failed to reserve remote candidates (base=%u cnt=%d)\n", LA_F287, 287), payload[P2P_SESS_ID_PSZ], cand_cnt);
+            // + 这里 payload[P2P_SESS_ID_SZ](base_index) + cand_cnt，表示该包至少需要的远端候选数量; 1 为至少包含一个对方的公网地址
+            if (p2p_remote_cands_reserve(s, 1 + payload[P2P_SESS_ID_SZ] + cand_cnt) != E_NONE) {
+                print("E:", LA_F("Failed to reserve remote candidates (base=%u cnt=%d)\n", LA_F287, 287), payload[P2P_SESS_ID_SZ], cand_cnt);
                 return;
             }
 
@@ -981,11 +981,11 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
         }
 
         p2p_remote_candidate_entry_t *c = &s->remote_cands[0];
-        c->type = (p2p_cand_type_t)payload[P2P_SESS_ID_PSZ+2];
+        c->type = (p2p_cand_type_t)payload[P2P_SESS_ID_SZ + 2];
         c->priority = 0;
         c->addr.family = AF_INET;
-        sockaddr_init_with_net(&c->addr.addr.v4, (uint32_t *) (payload + P2P_SESS_ID_PSZ + 3),
-                               (uint16_t *) (payload + P2P_SESS_ID_PSZ + 7));
+        sockaddr_init_with_net(&c->addr.addr.v4, (uint32_t *) (payload + P2P_SESS_ID_SZ + 3),
+                               (uint16_t *) (payload + P2P_SESS_ID_SZ + 7));
         c->last_punch_send_ms = 0;
         if (s->remote_cand_cnt == 0) s->remote_cand_cnt = 1;
 
@@ -1046,12 +1046,12 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
      * 说明: 确认收到对方的候选地址包
      *
      * 包头: [type=SIG_PKT_SYNC_ACK | flags=0 | seq=被确认的SYNC包序号]
-     * 负载: [session_id(P2P_SESS_ID_PSZ)]
+     * 负载: [session_id(P2P_SESS_ID_SZ)]
      *   - session_id: 会话 ID（网络字节序）
      *   - seq: 被确认的 SYNC 包的序列号
      */
     {
-        uint8_t ack_payload[P2P_SESS_ID_PSZ];
+        uint8_t ack_payload[P2P_SESS_ID_SZ];
         nwrite_l(ack_payload, s->id);
 
         err_t err = udp_send(s->inst, PROTO, SIG_PKT_SYNC_ACK, seq, 0, ack_payload, sizeof(ack_payload), now);
@@ -1065,7 +1065,7 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
  * 处理 FIN，对端离线通知
  *
  * 包头: [type=SIG_PKT_FIN | flags=0 | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)]
  *   - session_id: 已断开的会话 ID（网络字节序）
  */
 void compact_on_fin(struct p2p_session *s, uint16_t seq, uint8_t flags,
@@ -1102,7 +1102,7 @@ void compact_on_fin(struct p2p_session *s, uint16_t seq, uint8_t flags,
  * 说明: B端收到服务器转发的消息请求，A端发出的原始请求(flags=0)不会到达客户端
  *
  * 包头: [type=SIG_PKT_MSG_REQ | flags=SIG_FLAG_RELAY | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)][msg(1)][data(N)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: A端的会话 ID（网络字节序，64位）
  *   - sid: 序列号（2字节，网络字节序）
  *   - msg: 消息 ID（1字节）
@@ -1123,9 +1123,9 @@ void compact_on_request(struct p2p_session *s, uint16_t seq, uint8_t flags,
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
     uint32_t session_id = nget_l(payload);
-    uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
-    uint8_t msg = payload[P2P_SESS_ID_PSZ + 2];
-    const uint8_t *req_data = payload + P2P_SESS_ID_PSZ + 3;
+    uint16_t sid = nget_s(payload + P2P_SESS_ID_SZ);
+    uint8_t msg = payload[P2P_SESS_ID_SZ + 2];
+    const uint8_t *req_data = payload + P2P_SESS_ID_SZ + 3;
     int req_len = len - (int)SIG_PKT_MSG_REQ_MIN_PSZ;
 
     /* 判断是否是新请求（使用循环序列号比较）：
@@ -1173,7 +1173,7 @@ void compact_on_request(struct p2p_session *s, uint16_t seq, uint8_t flags,
  * 所以收到该消息后，自己就可以停止重发请求了，接下来只需要等待 MSG_RESP 即可知道请求的最终结果
  *
  * 包头: [type=SIG_PKT_MSG_REQ_ACK | flags=0 | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)][status(1)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][status(1)]
  *   - session_id: A端的会话 ID（用于验证响应合法性）
  *   - sid: 序列号，与 MSG_REQ 中的 sid 对应
  *   - status: 0=已缓存开始中转, 1=B不在线（失败）
@@ -1185,8 +1185,8 @@ void compact_on_request_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
-    uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
-    uint8_t status = payload[P2P_SESS_ID_PSZ + 2];
+    uint16_t sid = nget_s(payload + P2P_SESS_ID_SZ);
+    uint8_t status = payload[P2P_SESS_ID_SZ + 2];
 
     if (sess_ctx->req_sid != sid) {
         print("V:", LA_F("%s: ignored for sid=%u (current sid=%u)\n", LA_F140, 140), PROTO, sid, sess_ctx->req_sid);
@@ -1234,8 +1234,8 @@ void compact_on_request_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
  *
  * 包头: [type=SIG_PKT_MSG_RESP | flags=见下 | seq=0]
  * 负载:
- * > [session_id(P2P_SESS_ID_PSZ)][sid(2)][code(1)][data(N)] （正常响应）
- * > [session_id(P2P_SESS_ID_PSZ)][sid(2)]（错误响应）
+ * > [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)] （正常响应）
+ * > [session_id(P2P_SESS_ID_SZ)][sid(2)]（错误响应）
  *   - session_id: A端的会话 ID（用于验证响应合法性）
  *   - sid: 序列号，与 MSG_REQ 中的 sid 对应
  *   - code: 响应消息 ID（正常响应时）
@@ -1251,21 +1251,21 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
-    uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
+    uint16_t sid = nget_s(payload + P2P_SESS_ID_SZ);
 
     /*
      * 发送 MSG_RESP_ACK 确认包
      * 服务器收到该确认后，将会停止重发该响应到本地，即结束整个请求-响应流程
      *
      * 包头: [type=SIG_PKT_MSG_RESP_ACK | flags=0 | seq=0]
-     * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)]
+     * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)]
      *   - session_id: A端的会话 ID（用于 O(1) 哈希查找）
      *   - sid: 序列号，与 MSG_RESP 中的 sid 一致
      * 说明: A端确认收到B端的响应，幂等操作，即使已处理过也补发
      */
     {
         uint8_t ack[SIG_PKT_MSG_RESP_ACK_PSZ]; int n = 0;
-        nwrite_l(ack + n, s->id); n += P2P_SESS_ID_PSZ;
+        nwrite_l(ack + n, s->id); n += P2P_SESS_ID_SZ;
         nwrite_s(ack + n, sid); n += 2;
 
         err_t err = udp_send(s->inst, "RESP_ACK", SIG_PKT_RESP_ACK, 0, 0, ack, n, now);
@@ -1300,13 +1300,13 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
     else {
 
         // 正常响应：需要包含 code 和可选的 data
-        // 最小长度：session_id(P2P_SESS_ID_PSZ) + sid(2) + code(1) = 11
+        // 最小长度：session_id(P2P_SESS_ID_SZ) + sid(2) + code(1) = 11
         if (len < (int)SIG_PKT_MSG_RESP_MIN_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F119, 119), PROTO, len);
             return;
         }
-        res_code = payload[P2P_SESS_ID_PSZ + 2];
-        res_data = payload + P2P_SESS_ID_PSZ + 3;
+        res_code = payload[P2P_SESS_ID_SZ + 2];
+        res_data = payload + P2P_SESS_ID_SZ + 3;
         res_size = len - (int)SIG_PKT_MSG_RESP_MIN_PSZ;
     }
 
@@ -1336,7 +1336,7 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
  * 收到该确认后，自己就不会再重发 response 了，且可以记录该 sid 已完成
  *
  * 包头: [type=SIG_PKT_MSG_RESP_ACK | flags=0 | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)]
  *   - session_id: B端的会话 ID（用于 O(1) 哈希查找）
  *   - sid: 序列号，与 MSG_RESP 中的 sid 对应
  */
@@ -1347,7 +1347,7 @@ void compact_on_response_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
-    uint16_t sid = nget_s(payload + P2P_SESS_ID_PSZ);
+    uint16_t sid = nget_s(payload + P2P_SESS_ID_SZ);
     if (sess_ctx->resp_sid != sid) {
         print("V:", LA_F("%s: ignored for sid=%u (current sid=%u)\n", LA_F140, 140), PROTO, sid, sess_ctx->resp_sid);
         return;
@@ -1579,7 +1579,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
         case SIG_PKT_FIN:          PROTO = "FIN";       payload_min = SIG_PKT_FIN_PSZ;                  handler = compact_on_fin; break;
         case SIG_PKT_REQ:      PROTO = "REQ";       payload_min = SIG_PKT_MSG_REQ_MIN_PSZ;          handler = compact_on_request; break;
         case SIG_PKT_REQ_ACK:  PROTO = "REQ_ACK";   payload_min = SIG_PKT_MSG_REQ_ACK_PSZ;          handler = compact_on_request_ack; break;
-        case SIG_PKT_RESP:     PROTO = "RESP";      payload_min = (uint16_t)(P2P_SESS_ID_PSZ + 2u); handler = compact_on_response; break;
+        case SIG_PKT_RESP:     PROTO = "RESP";      payload_min = (uint16_t)(P2P_SESS_ID_SZ + 2u); handler = compact_on_response; break;
         case SIG_PKT_RESP_ACK: PROTO = "RESP_ACK";  payload_min = SIG_PKT_MSG_RESP_ACK_PSZ;         handler = compact_on_response_ack; break;
         default:
             print("W:", LA_F("[C] Unknown pkt type 0x%02x, len=%d\n", LA_F433, 433), type, payload_len);
@@ -1771,7 +1771,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
  * 本地候选异步补发（Trickle candidates，发送 SYNC 包追加 STUN/TURN 候选）
  *
  * 包头: [type=SIG_PKT_SYNC | flags=SIG_SYNC_FLAG_FIN | seq=1-16]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
  *   - session_id:    会话 ID（SYNC0_ACK 中分配）
  *   - base_index:   本批候选在本端候选列表中的起始索引
  *   - candidates:   本批候选（最多 SYNC_CAND_UNIT 个）
@@ -1807,7 +1807,7 @@ void p2p_signal_compact_trickle_candidate(struct p2p_session *s) {
  * 通过 COMPACT 信令中转发送数据包（通用接口）
  *
  * 包头：[type=P2P_PKT_DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK | flags|=P2P_FLAG_SESSION|SIG_FLAG_RELAY | seq]
- * 负载：[session_id(P2P_SESS_ID_PSZ)][原始 payload]
+ * 负载：[session_id(P2P_SESS_ID_SZ)][原始 payload]
  */
 ret_t p2p_signal_compact_relay(struct p2p_session *s,
                                uint8_t type, uint8_t flags, uint16_t seq,
@@ -1818,20 +1818,20 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
     P_check(sig_ctx->feature_relay, return E_NO_SUPPORT;)
     P_check(s->id, return E_NONE_CONTEXT;)
 
-    // 构造完整负载：[session_id(P2P_SESS_ID_PSZ)][原始 payload]
+    // 构造完整负载：[session_id(P2P_SESS_ID_SZ)][原始 payload]
     uint8_t relay_payload[P2P_MAX_PAYLOAD];
-    if (payload_len + (int)P2P_SESS_ID_PSZ > P2P_MAX_PAYLOAD) {
+    if (payload_len + (int)P2P_SESS_ID_SZ > P2P_MAX_PAYLOAD) {
         print("E:", LA_F("[C] relay payload too large: %d", LA_F434, 434), payload_len);
         return E_OUT_OF_CAPACITY;
     }
 
     nwrite_l(relay_payload, s->id);
     if (payload_len > 0 && payload)
-        memcpy(relay_payload + P2P_SESS_ID_PSZ, payload, payload_len);
+        memcpy(relay_payload + P2P_SESS_ID_SZ, payload, payload_len);
 
     err_t err = udp_send(s->inst, "RELAY", type, seq,
                         flags | P2P_FLAG_SESSION | SIG_FLAG_RELAY,
-                        relay_payload, (int)P2P_SESS_ID_PSZ + payload_len, P_tick_ms());
+                         relay_payload, (int)P2P_SESS_ID_SZ + payload_len, P_tick_ms());
     if (err != E_NONE) return err;
 
     print("V:", LA_F("RELAY sent (ses_id=%u), type=0x%02x seq=%u flags=0x%02x", LA_F347, 347),
@@ -1844,7 +1844,7 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
  * 通过信令服务器向对端发起 RPC 消息请求（A 端）
  *
  * 包头: [type=SIG_PKT_MSG_REQ | flags=0 | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)][msg(1)][data(N)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: 本端会话 ID（SYNC0_ACK 中分配，用于服务器路由到对端）
  *   - sid:        RPC 序列号（非零，循环自增，用于匹配响应）
  *   - msg:        应用层消息类型（1 字节，应用自定义）
@@ -1886,7 +1886,7 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
  * 通过信令服务器向请求端回复 RPC 消息响应（B 端）
  *
  * 包头: [type=SIG_PKT_MSG_RESP | flags=0 | seq=0]
- * 负载: [session_id(P2P_SESS_ID_PSZ)][sid(2)][code(1)][data(N)]
+ * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   - session_id: A 端会话 ID（来自 MSG_REQ 的 relay 包，用于服务器路由回 A 端）
  *   - sid:        RPC 序列号，必须与对应 MSG_REQ 的 sid 一致
  *   - code:       响应码（1 字节，应用自定义）

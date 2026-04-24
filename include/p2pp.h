@@ -23,7 +23,7 @@
 #define P2P_PEER_ID_MAX     32
 
 /* Session ID 字节长度 */
-#define P2P_SESS_ID_PSZ     (sizeof(uint32_t))
+#define P2P_SESS_ID_SZ      (sizeof(uint32_t))
 
 /* ============================================================================
  * 可交换的候选地址定义
@@ -102,7 +102,7 @@ typedef struct {
 #define P2P_MTU         (1200)
 #define P2P_HDR_SIZE    4                           /* 包头大小 */
 #define P2P_MAX_PAYLOAD (P2P_MTU - P2P_HDR_SIZE)    /* 1196 */
-#define P2P_MSG_DATA_MAX  (P2P_MAX_PAYLOAD - 11)    /* MSG RPC data upper bound: relay path needs [session_id(P2P_SESS_ID_PSZ)+sid(2)+msg(1)] */
+#define P2P_MSG_DATA_MAX  (P2P_MAX_PAYLOAD - 11)    /* MSG RPC data upper bound: relay path needs [session_id(P2P_SESS_ID_SZ)+sid(2)+msg(1)] */
 
 typedef struct {
     uint8_t             type;               // 包类型（0x01-0x7F: P2P协议, 0x80-0xFF: 信令协议）
@@ -325,7 +325,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * ACK:    [hdr(4)][ack_seq(2)][sack(4)]    // 累积确认 + 选择性确认位图
  * CRYPTO: [hdr(4)][crypto_data(N)]         // DTLS 握手或加密数据
  *
- * 当 flags & P2P_FLAG_SESSION 时，所有包在 hdr(4) 之后前置 session_id(P2P_SESS_ID_PSZ)，
+ * 当 flags & P2P_FLAG_SESSION 时，所有包在 hdr(4) 之后前置 session_id(P2P_SESS_ID_SZ)，
  * 详见下方 P2P_FLAG_SESSION 说明。
  */
 #define P2P_PKT_DATA            0x20        // 数据包
@@ -333,12 +333,12 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define P2P_PKT_CRYPTO          0x22        // DTLS 加密包（握手/密文数据）
 
 #define P2P_PKT_ACK_PSZ             6u                          // ack_seq(2) + sack(4)（无 session_id）
-#define P2P_PKT_ACK_SESSION_PSZ     (P2P_SESS_ID_PSZ + 6u)      // session_id(P2P_SESS_ID_PSZ) + ack_seq(2) + sack(4)
+#define P2P_PKT_ACK_SESSION_PSZ     (P2P_SESS_ID_SZ + 6u)      // session_id(P2P_SESS_ID_SZ) + ack_seq(2) + sack(4)
 
 /* 
  * P2P_FLAG_SESSION / SIG_FLAG_RELAY 说明：
  *
- *   P2P_FLAG_SESSION (0x01): 包头后携带 session_id(P2P_SESS_ID_PSZ)
+ *   P2P_FLAG_SESSION (0x01): 包头后携带 session_id(P2P_SESS_ID_SZ)
  *     - 多会话模式下（p2p_config_t.multi_session=true）由发送方设置，接收方据此路由到正确 session
  *     - 信令服务器中转（relay）路径上同时设置此位（接收方用于会话隔离验证）
  *     适用包类型: PUNCH / DATA / ACK / CRYPTO / REACH / CONN / CONN_ACK / FIN
@@ -360,14 +360,14 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *     FIN:      [hdr(4)]
  *
  *   P2P_FLAG_SESSION 已设（多会话直连 或 信令中转）:
- *     PUNCH:    [hdr(4)][session_id(P2P_SESS_ID_PSZ)][target_addr(6)]
- *     DATA:     [hdr(4)][session_id(P2P_SESS_ID_PSZ)][data(N)]
- *     ACK:      [hdr(4)][session_id(P2P_SESS_ID_PSZ)][ack_seq(2)][sack(4)]
- *     CRYPTO:   [hdr(4)][session_id(P2P_SESS_ID_PSZ)][crypto_data(N)]
- *     REACH:    [hdr(4)][session_id(P2P_SESS_ID_PSZ)][target_addr(6)]
- *     CONN:     [hdr(4)][session_id(P2P_SESS_ID_PSZ)]
- *     CONN_ACK: [hdr(4)][session_id(P2P_SESS_ID_PSZ)]
- *     FIN:      [hdr(4)][session_id(P2P_SESS_ID_PSZ)]
+ *     PUNCH:    [hdr(4)][session_id(P2P_SESS_ID_SZ)][target_addr(6)]
+ *     DATA:     [hdr(4)][session_id(P2P_SESS_ID_SZ)][data(N)]
+ *     ACK:      [hdr(4)][session_id(P2P_SESS_ID_SZ)][ack_seq(2)][sack(4)]
+ *     CRYPTO:   [hdr(4)][session_id(P2P_SESS_ID_SZ)][crypto_data(N)]
+ *     REACH:    [hdr(4)][session_id(P2P_SESS_ID_SZ)][target_addr(6)]
+ *     CONN:     [hdr(4)][session_id(P2P_SESS_ID_SZ)]
+ *     CONN_ACK: [hdr(4)][session_id(P2P_SESS_ID_SZ)]
+ *     FIN:      [hdr(4)][session_id(P2P_SESS_ID_SZ)]
  *
  *   session_id 用于:
  *     1. 多会话派发: 接收方使用 session_id 路由到对应 p2p_session（multi_session 模式）
@@ -397,7 +397,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_ALIVE_ACK       0x84        // 保活确认（服务器回复以确认注册状态）
 
 #define SIG_PKT_SYNC0           0x85        // 首次候选同步（双向）：client→server 提交首批候选；server→client 下发对端候选（详见 COMPACT 模式协议详细说明）
-#define SIG_PKT_SYNC0_ACK       0x86        // 首批候选确认（server→client）：[session_id(P2P_SESS_ID_PSZ)][online(1)]，session_id = 对端配对会话 ID
+#define SIG_PKT_SYNC0_ACK       0x86        // 首批候选确认（server→client）：[session_id(P2P_SESS_ID_SZ)][online(1)]，session_id = 对端配对会话 ID
 #define SIG_PKT_SYNC            0x87        // 候选列表同步包（序列化传输）
 #define SIG_PKT_SYNC_ACK        0x88        // 候选列表确认（确认指定序列号）
 #define SIG_PKT_FIN             0x89        // 对端已离线/断开
@@ -494,7 +494,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *     2. 指定 remote_peer_id，建立与对端的配对关系
  *
  * 方向 2: server → client（对端已配对后触发，下发对端候选地址）
- *   payload: [remote_peer_id(P2P_PEER_ID_MAX)][session_id(P2P_SESS_ID_PSZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
+ *   payload: [remote_peer_id(P2P_PEER_ID_MAX)][session_id(P2P_SESS_ID_SZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
  *   - remote_peer_id: 对端 ID（32字节，不足补零），用于客户端多会话派发定位目标 session
  *   - session_id: 对端配对会话 ID（network byte order，由服务器在配对成功时分配）
  *   - 0x00: 保留字节（固定为 0，供 unpack_remote_candidates 识别为初始推送）
@@ -503,11 +503,11 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   客户端收到后以 SIG_PKT_SYNC0_ACK（client→server 方向）确认
  */
 #define SIG_PKT_SYNC0_PSZ(n)        (SIG_AUTH_KEY_PSZ + P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t)) // client→server: auth_key(SIG_AUTH_KEY_PSZ) + peer_id(32) + count(1) + cands(n*23)
-#define SIG_PKT_SYNC0_S2C_PSZ(n)    (P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ + 2u + (n)*sizeof(p2p_candidate_t)) // server→client: remote_peer_id(32) + session_id(P2P_SESS_ID_PSZ) + reserved(1) + count(1) + cands(n*23)
+#define SIG_PKT_SYNC0_S2C_PSZ(n)    (P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 2u + (n)*sizeof(p2p_candidate_t)) // server→client: remote_peer_id(32) + session_id(P2P_SESS_ID_SZ) + reserved(1) + count(1) + cands(n*23)
 /* SYNC0_ACK（双向，两端 payload 格式不同）:
  *
  * 方向 1: server → client（对 client SYNC0 的回复）
- *   payload: [remote_peer_id(P2P_PEER_ID_MAX)][session_id(P2P_SESS_ID_PSZ)][online(1)]
+ *   payload: [remote_peer_id(P2P_PEER_ID_MAX)][session_id(P2P_SESS_ID_SZ)][online(1)]
  *   - remote_peer_id: 对端 ID（32字节，不足补零），用于客户端多会话派发定位目标 session
  *   - session_id: 对端配对会话 ID（network byte order, 64-bit），标识 client↔peer 会话
  *     · 语义不同于 auth_key（auth_key 标识 client↔server）
@@ -516,22 +516,22 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   服务器收到 client SYNC0 后回复，通知客户端候选已缓存以及对端是否已上线
  *
  * 方向 2: client → server（对 server SYNC0_ACK 的二次回复）
- *   payload: [session_id(P2P_SESS_ID_PSZ)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)]
  *   客户端收到 server 的 SYNC0_ACK 后，再次回复 SYNC0_ACK。
  *   而服务器在收到二次确认前，会确保不会将对端的 SYNC0 包提前转发过来，以确保 session id 的先后一致性。
  *
  * 方向 3: client → server（对 server SYNC0 的回复）
- *   payload: [session_id(P2P_SESS_ID_PSZ)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)]
  *   - session_id: 来自 server SYNC0 中的会话 ID，用于服务器确认对应配对
  *   客户端收到 server SYNC0（首次对端候选推送）后立即回复
  */
-#define SIG_PKT_SYNC0_ACK_PSZ       (P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ + 1u)                             // server→client: remote_peer_id(32) + session_id(P2P_SESS_ID_PSZ) + online(1)
-#define SIG_PKT_SYNC0_ACK_C2S_PSZ   (P2P_SESS_ID_PSZ)                                                   // client→server: session_id(P2P_SESS_ID_PSZ)
+#define SIG_PKT_SYNC0_ACK_PSZ       (P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 1u)                             // server→client: remote_peer_id(32) + session_id(P2P_SESS_ID_SZ) + online(1)
+#define SIG_PKT_SYNC0_ACK_C2S_PSZ   (P2P_SESS_ID_SZ)                                                   // client→server: session_id(P2P_SESS_ID_SZ)
 /* SYNC:
- *   payload: [session_id(P2P_SESS_ID_PSZ)][notify_seq_or_base(1)][candidate_count(1)][candidates(N*23)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][notify_seq_or_base(1)][candidate_count(1)][candidates(N*23)]
  *   包头: type=0x87, flags=见下, seq=序列号
  *   - session_id: 会话 ID（网络字节序，64位，来自 SYNC0_ACK）
- *   - 字段[P2P_SESS_ID_PSZ]: 语义随 seq 分两种（内容不同，位置相同）
+ *   - 字段[P2P_SESS_ID_SZ]: 语义随 seq 分两种（内容不同，位置相同）
  *       seq=0: 循环通知序号 notify_seq（1..255 循环），接收端据此排重
  *       seq>0: 候选起始索引 base_index（0-based）
  *   - candidate_count: 本批候选数量，0 表示结束标识（配合 FIN 标志）
@@ -544,9 +544,9 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - seq 窗口: 0..16（1..16 为客户端候选批次，0 为地址变更通知）
  *   - 乱序处理: 允许 seq>0 先于 SYNC0 到达；接收端按序号位图去重，重复包仅 ACK 不重复入表
  */
-#define SIG_PKT_SYNC_PSZ(n)         (P2P_SESS_ID_PSZ + 2u + (n)*sizeof(p2p_candidate_t))                // session_id(P2P_SESS_ID_PSZ) + base(1) + count(1) + cands(n*23)
+#define SIG_PKT_SYNC_PSZ(n)         (P2P_SESS_ID_SZ + 2u + (n)*sizeof(p2p_candidate_t))                // session_id(P2P_SESS_ID_SZ) + base(1) + count(1) + cands(n*23)
 /* SYNC_ACK:
- *   payload: [session_id(P2P_SESS_ID_PSZ)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)]
  *   包头: type=0x88, flags=0, seq=确认的序列号
  *   - session_id: 会话 ID（网络字节序，64位）
  *   - seq=0: 客户端→服务器，确认地址变更通知（SYNC seq=0）
@@ -554,18 +554,18 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - seq>0: 服务器→客户端，确认客户端发送的 SYNC(seq>0) 候选批次；或客户端→服务器 relay 转发
  *   - seq 窗口: 0..16
  */
-#define SIG_PKT_SYNC_ACK_PSZ        (P2P_SESS_ID_PSZ)                                                   // session_id(P2P_SESS_ID_PSZ)
+#define SIG_PKT_SYNC_ACK_PSZ        (P2P_SESS_ID_SZ)                                                   // session_id(P2P_SESS_ID_SZ)
 /* FIN:
- *   payload: [session_id(P2P_SESS_ID_PSZ)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)]
  *   包头: type=0x89, flags=0, seq=0
  *   服务器下行通知：对端已离线/断开连接
  *   - session_id: 已断开的会话 ID（网络字节序，64位）
  *   客户端收到此包后应停止该会话的所有传输和重传
  */
-#define SIG_PKT_FIN_PSZ             (P2P_SESS_ID_PSZ)                                                   // session_id(P2P_SESS_ID_PSZ)
+#define SIG_PKT_FIN_PSZ             (P2P_SESS_ID_SZ)                                                   // session_id(P2P_SESS_ID_SZ)
 
 /* MSG_REQ (A → Server):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)][msg(1)][data(N)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   包头: type=0x90, flags=0, seq=0
  *   - session_id: A 的会话 ID（来自 SYNC0_ACK）
  *   - sid: A 生成的 16 位序列号（每次 connect() 范围内唯一，用于匹配应答）
@@ -573,29 +573,29 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - A 重发此包直到收到 MSG_REQ_ACK
  *
  * MSG_REQ (Server → B, relay):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)][msg(1)][data(N)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   包头: type=0x90, flags=SIG_MSG_FLAG_RELAY(0x01), seq=0
  *   - session_id: A 的会话 ID（B 用此字段构造 MSG_RSP）
  *   - Server 重发此包直到收到 MSG_RSP
  */
-#define SIG_PKT_MSG_REQ_MIN_PSZ     (P2P_SESS_ID_PSZ + 3u)                                              // session_id(P2P_SESS_ID_PSZ) + sid(2) + msg(1)
+#define SIG_PKT_MSG_REQ_MIN_PSZ     (P2P_SESS_ID_SZ + 3u)                                              // session_id(P2P_SESS_ID_SZ) + sid(2) + msg(1)
 /* MSG_REQ_ACK (Server → A):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)][status(1)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][status(1)]
  *   包头: type=0x91, flags=0, seq=0
  *   - session_id: A 的会话 ID（用于 A 端验证响应合法性）
  *   - sid: 对应的 MSG_REQ 序列号
  *   - status: 0=已缓存并开始向 B 中转；1=目标 B 不在线
  *   - A 收到此包后停止重发
  */
-#define SIG_PKT_MSG_REQ_ACK_PSZ     (P2P_SESS_ID_PSZ + 3u)                                              // session_id(P2P_SESS_ID_PSZ) + sid(2) + status(1)
+#define SIG_PKT_MSG_REQ_ACK_PSZ     (P2P_SESS_ID_SZ + 3u)                                              // session_id(P2P_SESS_ID_SZ) + sid(2) + status(1)
 /* MSG_RSP (B → Server):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)][code(1)][data(N)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   包头: type=0x92, flags=0, seq=0
  *   - session_id: 从 MSG_REQ relay 中取得的 A 的会话 ID
  *   - B 重发此包直到收到 Server → B 的 MSG_RSP_ACK
  * 
  * MSG_RSP (Server → A, relay):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)][code(1)][data(N)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   包头: type=0x92, flags=0, seq=0
  *   - session_id: A 的会话 ID（用于 A 端验证响应合法性）
  *   - sid: 对应的 MSG_REQ 序列号
@@ -603,22 +603,22 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - data: 响应数据
  *   - Server 重发此包直到收到 A → Server 的 MSG_RSP_ACK
  */
-#define SIG_PKT_MSG_RSP_MIN_PSZ    (P2P_SESS_ID_PSZ + 3u)                                              // session_id(P2P_SESS_ID_PSZ) + sid(2) + code(1)
+#define SIG_PKT_MSG_RSP_MIN_PSZ    (P2P_SESS_ID_SZ + 3u)                                              // session_id(P2P_SESS_ID_SZ) + sid(2) + code(1)
 /* MSG_RSP_ACK (Server → B):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)]
  *   包头: type=0x93, flags=0, seq=0
  *   - session_id: B 的会话 ID（用于 O(1) 哈希查找）
  *   - sid: 对应的 MSG_REQ 序列号
  *   - Server 确认收到 B 的 MSG_RSP，B 停止重发
  *
  * MSG_RSP_ACK (A → Server):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)]
  *   包头: type=0x93, flags=0, seq=0
  *   - session_id: A 的会话 ID（用于 O(1) 哈希查找）
  *   - sid: 对应的 MSG_REQ 序列号
  *   - A 收到 Server 转发的 MSG_RSP 后发送，流程完成
  */
-#define SIG_PKT_MSG_RSP_ACK_PSZ    (P2P_SESS_ID_PSZ + 2u)                                              // session_id(P2P_SESS_ID_PSZ) + sid(2)
+#define SIG_PKT_MSG_RSP_ACK_PSZ    (P2P_SESS_ID_SZ + 2u)                                              // session_id(P2P_SESS_ID_SZ) + sid(2)
 /* NAT_PROBE:
  *   payload: 空（无需额外字段）
  *   包头: type=0xA0, flags=0, seq=客户端分配的请求号
@@ -795,14 +795,14 @@ typedef struct {
  * 所有消息：[p2p_relay_hdr_t: 3B][payload: N bytes]
  *
  * P2P_RLY_STATUS:
- *   payload: [type(1)][status_code(1)][[session_id(P2P_SESS_ID_PSZ)]|remote_peer_id(P2P_PEER_ID_MAX)][status_msg(N)]
+ *   payload: [type(1)][status_code(1)][[session_id(P2P_SESS_ID_SZ)]|remote_peer_id(P2P_PEER_ID_MAX)][status_msg(N)]
  *   - type: 请求的 p2p_relay_type_t 类型（例如 P2P_RLY_SYNC0），用于指示哪个请求出错
  *   - status_code: 见 P2P_RLY_CODE_* 定义
  *   - session_id: 会话 ID，对于会话相关的请求（如 SYNC）存在时携带，用于客户端识别对应会话；对于非会话请求（如 ONLINE）则不携带
  *                 注意：P2P_RLY_SYNC0 请求尚未建立会话，因此返回的 STATUS 不携带 session_id，但会携带 remote_peer_id 以指示哪个对端的连接请求出错
  *   - status_msg: 可选的状态描述文本（UTF-8 编码）
  */
-#define P2P_RLY_STATUS_PSZ(s, n)        (2 + ((s)==2 ? P2P_SESS_ID_PSZ : ((s) == 1 ? P2P_PEER_ID_MAX : 0)) + (n)) // type(1) + status_code(1) + route_key + status_msg(N)
+#define P2P_RLY_STATUS_PSZ(s, n)        (2 + ((s)==2 ? P2P_SESS_ID_SZ : ((s) == 1 ? P2P_PEER_ID_MAX : 0)) + (n)) // type(1) + status_code(1) + route_key + status_msg(N)
 /* P2P_RLY_REG（双向，上下行负载格式不同）:
  *
  *   上行 Client -> Server:
@@ -833,48 +833,48 @@ typedef struct {
  *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *
  *   状态 2: Server -> Client（会话创建应答，对方不在线，立即返回）
- *     payload: [target_name(32)][session_id(P2P_SESS_ID_PSZ)][0xFF(1)]
+ *     payload: [target_name(32)][session_id(P2P_SESS_ID_SZ)][0xFF(1)]
  *     - target_name: 目标 peer 名称，定长 32 字节，0 填充
  *     - session_id: 64 位会话 ID（网络字节序）
  *     - 0xFF(1): 常量，表示对端离线
  *
  *   状态 3: Server -> Client（转发对端同步数据，也就是首批候选集合，同时表示对端在线/或上线）
- *     payload: [source_name(32)][session_id(P2P_SESS_ID_PSZ)][candidate_count(1)][candidates(N*23)]
+ *     payload: [source_name(32)][session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)]
  *     - 格式同 P2P_RLY_SYNC，但不包括 fin_marker 字段
  *     - candidate_count < 0xFF，0xFF 保留给状态 2 的离线标识
  */
 #define P2P_RLY_SYNC0_PSZ(n)            (P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t))
-#define P2P_RLY_SYNC0_S2C_PSZ(n)        (P2P_SESS_ID_PSZ + P2P_RLY_SYNC0_PSZ(n))
-#define P2P_RLY_IS_SYNC0_OFFLINE(p)     (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ] == 0xFF)
+#define P2P_RLY_SYNC0_S2C_PSZ(n)        (P2P_SESS_ID_SZ + P2P_RLY_SYNC0_PSZ(n))
+#define P2P_RLY_IS_SYNC0_OFFLINE(p)     (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ] == 0xFF)
 /* P2P_RLY_SYNC（三态，上下行负载格式不同）:
  *
  *   状态 1: Client -> Server（上传本端后续候选）
- *     payload: [session_id(P2P_SESS_ID_PSZ)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ *     payload: [session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *     - session_id: 64 位会话 ID（网络字节序）
  *     - candidate_count: 本包候选数量
  *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *     - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
  *
  *   状态 2: Server -> Client（确认候选处理数量）
- *     payload: [session_id(P2P_SESS_ID_PSZ)][confirmed_count(1)]
+ *     payload: [session_id(P2P_SESS_ID_SZ)][confirmed_count(1)]
  *     - session_id: 64 位会话 ID（网络字节序）
  *     - confirmed_count: 实际确认处理的候选数（转发或缓存），0=全部完成（仅 FIN 后）
  *     ! 下行的 SYNC 并非是上行 SYNC 的应答。例如，上行 2 个 SYNC，返回 1 SYNC，confirmed_count 是上行两个 SYNC 中累计确认的候选数量
  * 
  *   状态 3: Server -> Client（下发/转发对端候选）
- *     payload: [session_id(P2P_SESS_ID_PSZ)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ *     payload: [session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *     - 与状态 1 同格式，session_id 由服务器重写为接收方本地会话 ID
  */
-#define P2P_RLY_SYNC_PSZ(n, mk)         (P2P_SESS_ID_PSZ + 1u + (n)*sizeof(p2p_candidate_t) + ((mk) ? 1u : 0u))
+#define P2P_RLY_SYNC_PSZ(n, mk)         (P2P_SESS_ID_SZ + 1u + (n)*sizeof(p2p_candidate_t) + ((mk) ? 1u : 0u))
 #define P2P_RLY_IS_SYNC_CONFIRM(hdr)    (((p2p_relay_hdr_t*)(hdr))->size == P2P_RLY_SYNC_PSZ(0, 0))
 /* P2P_RLY_FIN:
- *   payload: [session_id(P2P_SESS_ID_PSZ)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)]
  *   - session_id: 要结束的会话 ID（网络字节序）
 */
-#define P2P_RLY_FIN_PSZ                 (P2P_SESS_ID_PSZ)
+#define P2P_RLY_FIN_PSZ                 (P2P_SESS_ID_SZ)
 
 /* P2P_RLY_PACKET:
- *   所有 TCP relay 数据包 payload 统一格式: [session_id(P2P_SESS_ID_PSZ)][P2P hdr(4)][data]
+ *   所有 TCP relay 数据包 payload 统一格式: [session_id(P2P_SESS_ID_SZ)][P2P hdr(4)][data]
  *   P2P hdr = [type(1)][flags(1)][seq(2)]，内层 type 区分实际包类型
  *   (DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK 等均通过 P2P_RLY_PACKET 隧道传输)
  *
@@ -882,11 +882,10 @@ typedef struct {
  *   - session_id 用于会话隔离与服务器路由（转发到配对会话）。
  *   - 服务器零拷贝转发，仅重写 session_id，不解析内层 P2P hdr。
  */
-#define P2P_RLY_PKT_PSZ(n)              (P2P_SESS_ID_PSZ + P2P_HDR_SIZE + (n))
+#define P2P_RLY_PKT_PSZ(n)              (P2P_SESS_ID_SZ + P2P_HDR_SIZE + (n))
 
 /* P2P_RLY_REQ / P2P_RLY_RSP 最小负载长度（session_id + sid + msg/code = 11 字节） */
-#define P2P_RLY_REQ_MIN_PSZ             (P2P_SESS_ID_PSZ + 3)
-#define P2P_RLY_RSP_MIN_PSZ             (P2P_SESS_ID_PSZ + 3)
+#define P2P_RLY_RPC_MIN_PSZ             (P2P_SESS_ID_SZ + 3)
 
 /* P2P_RLY_REQ / P2P_RLY_RSP — 基于会话的 MSG RPC
  *
@@ -894,14 +893,14 @@ typedef struct {
  * 使用 session_id 路由（与 SYNC/DATA 一致），服务器零拷贝转发时仅重写 session_id。
  *
  * P2P_RLY_REQ (双向，A→Server, Server→B):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)][msg(1)][data(N)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: 发送方的会话 ID（来自初次下行 SYNC0 建会应答；服务器转发时重写为接收方的 session_id）
  *   - sid: 序列号（非零，循环递增）
  *   - msg: 消息类型（0=echo 自动回复，>0=应用自定义）
  *   - data: 请求数据（最大 P2P_MSG_DATA_MAX 字节）
  *
  * P2P_RLY_RSP (双向，B→Server, Server→A):
- *   payload: [session_id(P2P_SESS_ID_PSZ)][sid(2)][code(1)][data(N)]
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   - session_id: 本端会话 ID（服务器转发时重写为请求方的 session_id）
  *   - sid: 对应请求的序列号
  *   - code: 响应码（0=成功，应用自定义；0xFE/0xFF=错误，见下）
@@ -1069,7 +1068,7 @@ typedef struct {
  * 功能：P2P 打洞失败时，通过服务器转发 P2P 包（降级方案）
  *
  * Client → Server:
- *   P2P_RLY_PACKET: [session_id(P2P_SESS_ID_PSZ)][P2P hdr(4)][payload(N)]
+ *   P2P_RLY_PACKET: [session_id(P2P_SESS_ID_SZ)][P2P hdr(4)][payload(N)]
  *   - 内层 P2P hdr.type 区分: DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK
  *   - 服务器零拷贝转发，仅重写 session_id。
  *
@@ -1208,7 +1207,7 @@ typedef struct {
 
 /* WSS 二进制帧类型（WebSocket binary frame, opcode=0x2）
  *
- * 帧格式: [type(1)][session_id(4)][payload(N)]
+ * 帧格式: [type(1)][session_id(P2P_SESS_ID_SZ4)][payload(N)]
  *   - type: 见下方 P2P_WSS_BIN_* 定义
  *   - session_id: uint32 网络字节序，路由键
  *   - payload: 类型相关数据（服务器仅重写 session_id，透传 payload）
@@ -1221,11 +1220,6 @@ typedef struct {
 #define P2P_WSS_BIN_PKT        0x01    /* [type][ses_id][p2p_hdr(4)][data(N)] */        // 中继 P2P 数据包:
 #define P2P_WSS_BIN_REQ        0x02    /* [type][ses_id][sid(2)][msg(1)][data(N)] */    // RPC 请求
 #define P2P_WSS_BIN_RSP        0x03    /* [type][ses_id][sid(2)][code(1)][data(N)] */   // RPC 响应
-
-#define P2P_WSS_BIN_HDR_SIZE    (1u + P2P_SESS_ID_PSZ)                       /* type(1) + session_id(4) = 5 */
-#define P2P_WSS_BIN_PKT_MIN     (P2P_WSS_BIN_HDR_SIZE + P2P_HDR_SIZE)     /* 9: 最小 PACKET 帧 */
-#define P2P_WSS_BIN_REQ_MIN     (P2P_WSS_BIN_HDR_SIZE + 3u)               /* 8: type+ses_id+sid+msg */
-#define P2P_WSS_BIN_RSP_MIN     (P2P_WSS_BIN_HDR_SIZE + 3u)               /* 8: type+ses_id+sid+code */
 
 /* ============================================================================
  * WSS 协议详细定义说明
@@ -1541,7 +1535,7 @@ typedef struct {
  * 二进制帧用于 P2P 数据中继（打洞失败降级）和 MSG RPC（服务器中转请求-应答），
  * 对应 RELAY 模式的 P2P_RLY_PACKET / P2P_RLY_REQ / P2P_RLY_RSP。
  *
- * 公共帧格式: [type(1)][session_id(4)][payload(N)]
+ * 公共帧格式: [type(1)][session_id(P2P_SESS_ID_SZ)][payload(N)]
  *   - type: 消息类型（P2P_WSS_BIN_*）
  *   - session_id: uint32 网络字节序，用于会话路由
  *   - payload: 类型相关数据
@@ -1552,10 +1546,10 @@ typedef struct {
  *   - RPC 错误统一使用服务器生成的伪 RSP 返回
  *
  * ────────────────────────────────────────────────────────────────────────────
- * PACKET — P2P 数据包中继（双向：客户端 ↔ 服务器 ↔ 客户端）
+ * PKT — P2P 数据包中继（双向：客户端 ↔ 服务器 ↔ 客户端）
  * ────────────────────────────────────────────────────────────────────────────
  *
- * 帧格式: [0x01][session_id(4)][p2p_hdr(4)][data(N)]
+ * 帧格式: [0x01][session_id(P2P_SESS_ID_SZ)][p2p_hdr(4)][data(N)]
  *   - session_id: 发送方的 session_id（来自 SYNC0 建会应答）
  *   - p2p_hdr: P2P 协议头 [type(1)][flags(1)][seq(2)]
  *   - data: P2P 协议数据
@@ -1570,12 +1564,13 @@ typedef struct {
  *   服务器不解析内层 p2p_hdr，仅做路由转发。
  *
  * 最小帧长度: P2P_WSS_BIN_PACKET_MIN = 9 字节
- *
- * ────────────────────────────────────────────────────────────────────────────
+ */
+#define P2P_WSS_BIN_PKT_MIN_SZ             (1 + P2P_SESS_ID_SZ + P2P_HDR_SIZE)
+/* ────────────────────────────────────────────────────────────────────────────
  * REQ — RPC 请求（双向：A → 服务器 → B）
  * ────────────────────────────────────────────────────────────────────────────
  *
- * 帧格式: [0x02][session_id(4)][sid(2)][msg(1)][data(N)]
+ * 帧格式: [0x02][session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: 发送方的 session_id
  *   - sid: 序列号（非零，循环递增，用于请求-响应匹配）
  *   - msg: 消息类型（0=echo 自动回复，>0=应用自定义）
@@ -1594,13 +1589,11 @@ typedef struct {
  *       超过 MSG_REQ_MAX_RETRY × MSG_RPC_RETRY_INTERVAL_MS 未收到 RSP
  *       → 生成伪 RSP [code=0xFE (P2P_MSG_ERR_TIMEOUT)]
  *
- * 最小帧长度: P2P_WSS_BIN_REQ_MIN = 8 字节
- *
  * ────────────────────────────────────────────────────────────────────────────
  * RSP — RPC 响应（双向：B → 服务器 → A）
  * ────────────────────────────────────────────────────────────────────────────
  *
- * 帧格式: [0x03][session_id(4)][sid(2)][code(1)][data(N)]
+ * 帧格式: [0x03][session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   - session_id: 响应方的 session_id
  *   - sid: 对应请求的序列号
  *   - code: 响应码（0=成功，应用自定义；服务器错误见下）
@@ -1621,6 +1614,7 @@ typedef struct {
  *
  * 最小帧长度: P2P_WSS_BIN_RSP_MIN = 8 字节
  */
+#define P2P_WSS_BIN_RPC_MIN_SZ          (1 + P2P_SESS_ID_SZ + 3)
 
 /* ────────────────────────────────────────────────────────────────────────────
  * 协议流程详解

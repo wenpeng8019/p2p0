@@ -112,18 +112,18 @@ static void cand_send_packet(struct p2p_session *s, int cand_idx, uint8_t type, 
 
     /* 多会话模式：在所有 P2P 包前添加 local_id 头部 */
     uint8_t flags = 0;
-    uint8_t ms_buf[P2P_SESS_ID_PSZ + P2P_MAX_PAYLOAD];
+    uint8_t ms_buf[P2P_SESS_ID_SZ + P2P_MAX_PAYLOAD];
     if (s->inst->cfg.multi_session) {
-        if (P2P_SESS_ID_PSZ + payload_len > P2P_MAX_PAYLOAD) {
+        if (P2P_SESS_ID_SZ + payload_len > P2P_MAX_PAYLOAD) {
             print("E:", LA_F("%s: cand[%d] payload too large for multi_session (%d)", LA_F123, 123),
                   TASK_NAT, cand_idx, payload_len);
             return;
         }
         nwrite_l(ms_buf, s->id);
         if (payload_len > 0 && payload)
-            memcpy(ms_buf + P2P_SESS_ID_PSZ, payload, payload_len);
+            memcpy(ms_buf + P2P_SESS_ID_SZ, payload, payload_len);
         payload     = ms_buf;
-        payload_len += (int)P2P_SESS_ID_PSZ;
+        payload_len += (int)P2P_SESS_ID_SZ;
         flags       = P2P_FLAG_SESSION;
     }
 
@@ -256,10 +256,10 @@ static void nat_send_conn(struct p2p_session *s, uint64_t now) {
 
     /* 多会话模式且非信令中转路径：携带 local_id */
     if (s->inst->cfg.multi_session && s->path_type != P2P_PATH_SIGNALING) {
-        uint8_t sid_buf[P2P_SESS_ID_PSZ];
+        uint8_t sid_buf[P2P_SESS_ID_SZ];
         nwrite_l(sid_buf, s->id);
         p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, P2P_FLAG_SESSION, 0,
-                        sid_buf, (int)P2P_SESS_ID_PSZ, now);
+                        sid_buf, (int)P2P_SESS_ID_SZ, now);
     } else {
         p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN, 0, 0, NULL, 0, now);
     }
@@ -282,10 +282,10 @@ static void nat_send_conn_ack(struct p2p_session *s, uint64_t now) {
 
     /* 多会话模式且非信令中转路径：携带 local_id */
     if (s->inst->cfg.multi_session && s->path_type != P2P_PATH_SIGNALING) {
-        uint8_t sid_buf[P2P_SESS_ID_PSZ];
+        uint8_t sid_buf[P2P_SESS_ID_SZ];
         nwrite_l(sid_buf, s->id);
         p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, P2P_FLAG_SESSION, 0,
-                        sid_buf, (int)P2P_SESS_ID_PSZ, now);
+                        sid_buf, (int)P2P_SESS_ID_SZ, now);
     } else {
         p2p_send_packet(s, &s->active_addr, P2P_PKT_CONN_ACK, 0, 0, NULL, 0, now);
     }

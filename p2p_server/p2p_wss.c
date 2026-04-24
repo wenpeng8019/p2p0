@@ -19,7 +19,7 @@ static wss_session_t*               g_wss_rpc_pending_rear = NULL;
 ///////////////////////////////////////////////////////////////////////////////
 
 /* 写入 n 字节（可绕回），返回 0=成功, -1=空间不足 */
-static inline int wss_sync_write(wss_session_t *s, const char *src, size_t n) {
+static inline int wss_sync_write(wss_session_t *s, const uint8_t *src, size_t n) {
     if (n > WSS_SYNC_PAYLOAD_MAX - s->sync_len) return -1;
     size_t tail = (s->sync_head + s->sync_len) % WSS_SYNC_PAYLOAD_MAX;
     size_t to_end = WSS_SYNC_PAYLOAD_MAX - tail;
@@ -136,8 +136,8 @@ static void wss_send_sync0(wss_client_t *c, const char *peer_id, uint32_t sessio
 
 // 发送 SYNC0 confirm 通知：告知发送方预缓存负载已转发至对端
 // 格式：SYNC0 <peer_id> <session_id> confirm <bytes>
-static void wss_send_sync0_confirm(wss_client_t *c, const char *peer_id, uint32_t session_id,
-                                   int confirmed) {
+static void wss_session_send_sync0_confirm(wss_client_t *c, const char *peer_id, uint32_t session_id,
+                                           int confirmed) {
     char buf[8 + P2P_PEER_ID_MAX + 12 + 16 + 12];
     snprintf(buf, sizeof(buf), "SYNC0 %s %u confirm %d", peer_id, session_id, confirmed);
     ws_send_text((ws_client_t*)c, buf);
@@ -149,11 +149,11 @@ static void wss_session_send_rpc_code(wss_session_t *s, uint16_t sid, uint8_t co
     wss_client_t *c = (wss_client_t*)s->base.client;
     if (!wss_client_online(c)) return;
 
-    uint8_t buf[P2P_WSS_BIN_RSP_MIN];
+    uint8_t buf[P2P_WSS_BIN_RPC_MIN_SZ];
     buf[0] = P2P_WSS_BIN_RSP;
     nwrite_l(buf + 1, s->base.session_id);
-    nwrite_s(buf + 1 + P2P_SESS_ID_PSZ, sid);
-    buf[1 + P2P_SESS_ID_PSZ + 2] = code;
+    nwrite_s(buf + 1 + P2P_SESS_ID_SZ, sid);
+    buf[1 + P2P_SESS_ID_SZ + 2] = code;
     ws_send_data((ws_client_t*)c, buf, sizeof(buf));
 }
 
@@ -238,20 +238,16 @@ wss_term_client(wss_client_t *client, bool and_free) {
     free_client(&client->base);
 }
 
-//-----------------------------------------------------------------------------
+///////////////////////////////////////////////////////////////////////////////
 
 // 处理 SYNC0 消息：创建/恢复会话
-static void wss_handle_sync0(wss_client_t *client, const char *remote_peer_id, const char *payload) {
+static void wss_handle_sync0(wss_client_t *client, const char *remote_peer_id,
+                             uint8_t *payload, size_t payload_len) {
     const char *PROTO = "SYNC0";
 
-    if (!remote_peer_id || remote_peer_id[0] == '\0') {
-        ws_send_text((ws_client_t*)client, "SYNC0 FAIL empty peer_id");
-        return;
-    }
-
-    size_t pay_len = (payload && payload[0]) ? strlen(payload) : 0;
-    if (pay_len > WSS_SYNC_PAYLOAD_MAX) {
-        ws_send_text((ws_client_t*)client, "SYNC0 FAIL payload too large");
+    if (!*remote_peer_id) {
+        print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), "SYNC0");
+        ws_send_text((ws_client_t*)client, "SYNC0 FAIL invalid remote id");
         return;
     }
 
@@ -266,253 +262,207 @@ static void wss_handle_sync0(wss_client_t *client, const char *remote_peer_id, c
         ws_send_text((ws_client_t*)client, "SYNC0 FAIL OOM");
         return;
     }
-
-    // 重复 SYNC0：幂等返回已有会话状态（WSS 特有）
-    if (side == E_DUPLICATE) {
-        for (session_t *s = client->base.sessions; s; s = s->next) {
-            session_pair_t *pair = s->pair;
-            if (!pair) continue;
-            int my_side = (pair->sessions[0] == s) ? 0 : 1;
-            if (strcmp(pair->peer_id[1 - my_side], remote_peer_id) != 0) continue;
-
-            wss_session_t *ws_s = (wss_session_t*)s;
-
-            // 对端标记已死亡，尝试重新配对
-            if (ws_s->base.peer == (session_t*)(void*)-1) {
-                ws_s->base.peer = NULL;
-                session_t *other = pair->sessions[1 - my_side];
-                if (other) {
-                    wss_session_t *other_ws = (wss_session_t*)other;
-                    if (!other_ws->base.peer || other_ws->base.peer == (session_t*)(void*)-1) {
-                        ws_s->base.peer = &other_ws->base;
-                        other_ws->base.peer = &ws_s->base;
-                        print("I:", LA_F("%s: re-paired '%s' <-> '%s'\n", LA_F48, 48),
-                              PROTO, client->base.local_peer_id, remote_peer_id);
-                    }
-                }
-            }
-
-            bool payload_busy = (wss_sync_cat(ws_s, payload) != 0);
-
-            bool peer_online = PEER_ONLINE(s)
-                && wss_client_online((wss_client_t*)ws_s->base.peer->client);
-
-            if (peer_online) {
-                wss_session_t *peer_s = (wss_session_t*)ws_s->base.peer;
-                wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
-
-                int local_confirmed = (int)ws_s->sync_len;
-                int peer_confirmed  = (int)peer_s->sync_len;
-
-                wss_send_sync0(client, remote_peer_id, s->session_id, true, peer_s);
-                peer_s->sync_head = peer_s->sync_len = 0;
-
-                wss_send_sync0(peer_c, client->base.local_peer_id, peer_s->base.session_id, true, ws_s);
-                ws_s->sync_head = ws_s->sync_len = 0;
-
-                if (local_confirmed)
-                    wss_send_sync0_confirm(client, remote_peer_id, s->session_id, local_confirmed);
-                if (peer_confirmed)
-                    wss_send_sync0_confirm(peer_c, client->base.local_peer_id, peer_s->base.session_id, peer_confirmed);
-            } else {
-                wss_send_sync0(client, remote_peer_id, s->session_id, false, NULL);
-            }
-
-            if (payload_busy) {
-                char busy[8 + P2P_PEER_ID_MAX + 12 + 8];
-                snprintf(busy, sizeof(busy), "SYNC0 %s %u busy", remote_peer_id, s->session_id);
-                ws_send_text((ws_client_t*)client, busy);
-            }
-            return;
-        }
-        return;
-    }
-
     if (side < E_NONE) {
-        print("E:", LA_F("%s: build session failed '%s' -> '%s' (err=%d)\n", LA_F44, 44),
-              PROTO, client->base.local_peer_id, remote_peer_id, side);
+        print("E:", LA_F("%s: build session to '%s' failed(%d)\n", LA_F44, 44), PROTO, (const char *)payload, side);
         ws_send_text((ws_client_t*)client, "SYNC0 FAIL internal");
         return;
     }
 
-    print("V:", LA_F("%s: local='%s', remote='%s', side=%d, peer_online=%d\n", LA_F55, 55),
-          PROTO, client->base.local_peer_id, remote_peer_id, side, remote_s ? 1 : 0);
+    if (payload_len > WSS_SYNC_PAYLOAD_MAX)
+        payload_len = WSS_SYNC_PAYLOAD_MAX;
 
-    if (pay_len) wss_sync_write(local_s, payload, pay_len);
+    print("V:", LA_F("%s: local='%s', remote='%s', online=%d, sync_cache=%u\n", LA_F55, 55),
+          PROTO, client->base.local_peer_id, remote_peer_id, side, remote_s ? 1 : 0, (uint32_t)payload_len);
 
-    if (remote_s) {
+    if (payload_len) {
+        wss_sync_write(local_s, payload, payload_len);
+    }
+
+    // 如果对方不在线，立刻返回 sync0 offline
+    // + 否则如果对端在线，则后面会直接启动双方 sync0 同步
+    if (!remote_s) {
+
+        wss_send_sync0(client, remote_peer_id, local_s->base.session_id, false, NULL);
+
+        print("I:", LA_F("%s: '%s' -> '%s' created (id=%u, peer_zombie)\n", LA_F63, 63),
+              PROTO, client->base.local_peer_id, remote_peer_id, local_s->base.session_id);
+
+    }
+    // 对端已在线，启动双方 sync0 同步
+    else {
+
+        // 建立双向引用关系
         if (!local_s->base.peer) local_s->base.peer = &remote_s->base;
-        if (!remote_s->base.peer || remote_s->base.peer == (session_t*)(void*)-1)
-            remote_s->base.peer = &local_s->base;
+        if (!remote_s->base.peer) remote_s->base.peer = &local_s->base;
+
+        //-------
+
+        wss_send_sync0(client, remote_peer_id, local_s->base.session_id, true, remote_s);
+
+        //-------
 
         wss_client_t *remote_c = (wss_client_t*)remote_s->base.client;
+        wss_send_sync0(remote_c, client->base.local_peer_id, remote_s->base.session_id, true, local_s);
 
-        if (wss_client_online(remote_c)) {
-            int local_confirmed = (int)local_s->sync_len;
-            int peer_confirmed  = (int)remote_s->sync_len;
-
-            wss_send_sync0(client, remote_peer_id, local_s->base.session_id, true, remote_s);
+        if (remote_s->sync_len) {
+            wss_session_send_sync0_confirm(remote_c, client->base.local_peer_id, remote_s->base.session_id,
+                                           remote_s->sync_len);
             remote_s->sync_head = remote_s->sync_len = 0;
-
-            wss_send_sync0(remote_c, client->base.local_peer_id, remote_s->base.session_id, true, local_s);
-            local_s->sync_head = local_s->sync_len = 0;
-
-            if (local_confirmed)
-                wss_send_sync0_confirm(client, remote_peer_id, local_s->base.session_id, local_confirmed);
-            if (peer_confirmed)
-                wss_send_sync0_confirm(remote_c, client->base.local_peer_id, remote_s->base.session_id, peer_confirmed);
-
-            print("I:", LA_F("%s: '%s' <-> '%s' paired (ses=%u/%u)\n", LA_F48, 48),
-                  PROTO, client->base.local_peer_id, remote_peer_id,
-                  local_s->base.session_id, remote_s->base.session_id);
-        } else {
-            wss_send_sync0(client, remote_peer_id, local_s->base.session_id, false, NULL);
-            print("I:", LA_F("%s: '%s' -> '%s' created (id=%u, peer_zombie)\n", LA_F63, 63),
-                  PROTO, client->base.local_peer_id, remote_peer_id, local_s->base.session_id);
         }
-    } else {
-        wss_send_sync0(client, remote_peer_id, local_s->base.session_id, false, NULL);
-        print("I:", LA_F("%s: '%s' -> '%s' created (id=%u, peer_absent)\n", LA_F63, 63),
-              PROTO, client->base.local_peer_id, remote_peer_id, local_s->base.session_id);
+
+        //-------
+
+        if (local_s->sync_len) {
+            wss_session_send_sync0_confirm(client, remote_peer_id, local_s->base.session_id, local_s->sync_len);
+            local_s->sync_head = local_s->sync_len = 0;
+        }
+
+        //-------
+
+        print("I:", LA_F("%s: '%s' <-> '%s' paired (ses=%u/%u)\n", LA_F48, 48),
+              PROTO, client->base.local_peer_id, remote_peer_id,
+              local_s->base.session_id, remote_s->base.session_id);
     }
 }
 
 // 处理 SYNC 消息：按 session_id 路由转发
-static void wss_handle_sync(wss_session_t *ws_s, const char *payload) {
-    const char *PROTO = "SYNC";
+static void wss_handle_sync(wss_session_t *session, const char *payload) {
 
-    wss_client_t *client = (wss_client_t*)ws_s->base.client;
-    uint32_t session_id = ws_s->base.session_id;
+    wss_client_t *client = (wss_client_t*)session->base.client;
+    uint32_t session_id = session->base.session_id;
 
-    size_t pay_len = payload ? strlen(payload) : 0;
-    if (!pay_len) return;
+    // 先写入本端缓存（无论对端是否在线）
+    if (wss_sync_cat(session, payload) != 0) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), P2P_WSS_RSP_SYNC_BUSY_FMT, session_id);
+        ws_send_text((ws_client_t*)client, buf);
+        return;
+    }
 
-    wss_session_t *peer_s = (wss_session_t*)ws_s->base.peer;
+    // 对端不在线：静默，等 SYNC0 online 时转发
+    if (!PEER_ONLINE(&session->base)) return;
+
+    wss_session_t *peer_s = (wss_session_t*)session->base.peer;
     wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
-    if (wss_client_online(peer_c)) {
-        size_t buf_len = 5 + 12 + 1 + pay_len;
-        char *msg = (char*)malloc(buf_len + 1);
-        if (msg) {
-            int n = snprintf(msg, buf_len + 1, "SYNC %u\n", peer_s->base.session_id);
-            memcpy(msg + n, payload, pay_len + 1);
-            ws_send_text((ws_client_t*)peer_c, msg);
-            free(msg);
-        }
-        char confirm[48];
-        snprintf(confirm, sizeof(confirm), "SYNC %u confirm %d", session_id, (int)pay_len);
-        ws_send_text((ws_client_t*)client, confirm);
+    if (!wss_client_online(peer_c)) return;
 
-        print("V:", LA_F("%s: sid=%u -> peer_sid=%u (%zu bytes)\n", LA_F35, 35),
-              PROTO, session_id, peer_s->base.session_id, pay_len);
-        return;
-    }
+    // 对端在线：立即转发 ring buffer 全部内容
+    size_t cached = session->sync_len;
+    size_t buf_sz = P2P_WSS_CMD_SYNC_SZ + 12 + 1 + cached;
+    char *buf = (char*)malloc(buf_sz + 1);
+    if (!buf) return;   /* OOM：数据留在缓存，对端重连后通过 SYNC0 online 转发 */
 
-    if (wss_sync_cat(ws_s, payload) != 0) {
-        char busy[48];
-        snprintf(busy, sizeof(busy), "SYNC %u busy", session_id);
-        ws_send_text((ws_client_t*)client, busy);
-        return;
-    }
+    int hdr = snprintf(buf, buf_sz + 1, P2P_WSS_CMD_SYNC_FMT, peer_s->base.session_id);
+    wss_sync_copy_out(session, buf + hdr);
+    buf[hdr + cached] = '\0';
+    ws_send_text((ws_client_t*)peer_c, buf);
+    free(buf);
 
-    print("V:", LA_F("%s: sid=%u cached (%zu bytes, peer offline)\n", LA_F34, 34),
-          PROTO, session_id, pay_len);
+    session->sync_head = session->sync_len = 0;
+
+    char confirm[48];
+    snprintf(confirm, sizeof(confirm), P2P_WSS_RSP_SYNC_CONFIRM_FMT, session_id, cached);
+    ws_send_text((ws_client_t*)client, confirm);
+
+    print("V:", LA_F("%s: sid=%u -> peer_sid=%u (%zu bytes)\n", LA_F35, 35),
+          "SYNC", session_id, peer_s->base.session_id, cached);
 }
 
 // 处理 FIN 消息：客户端主动断开会话
-static void wss_handle_fin(wss_session_t *ws_s) {
+static void wss_handle_fin(wss_session_t *session) {
     const char *PROTO = "FIN";
 
     print("I:", LA_F("%s: '%s' ses_id=%u\n", LA_F45, 45),
-          PROTO, ws_s->base.client->local_peer_id, ws_s->base.session_id);
+          PROTO, session->base.client->local_peer_id, session->base.session_id);
 
-    wss_free_session(&ws_s->base);
+    wss_free_session(&session->base);
 }
 
-// 处理 PACKET — P2P 数据包中继（重写 session_id，透传 payload）
-static void wss_handle_packet(wss_session_t *ws_s, const uint8_t *data, size_t len) {
-    const char *PROTO = "PACKET";
+// 处理 PKT — P2P 数据包中继（重写 session_id，透传 payload）
+// payload: [P2P_WSS_BIN_PKT][session_id(P2P_SESS_ID_SZ)][P2P hdr(4)][payload(N)]
+static void wss_handle_pkt(wss_session_t *session, uint8_t *payload, uint16_t len) {
+    const char *PROTO = "PKT";
 
-    if (len < P2P_WSS_BIN_PKT_MIN) {
-        print("E:", LA_F("%s: bad frame len=%zu\n", LA_F41, 41), PROTO, len);
+    if (len < P2P_WSS_BIN_PKT_MIN_SZ) {
+        print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F41, 41), PROTO, len);
         return;
     }
 
-    wss_session_t *peer_s = (wss_session_t*)ws_s->base.peer;
+    wss_session_t *peer_s = (wss_session_t*)session->base.peer;
     wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
     if (!wss_client_online(peer_c)) return;
 
     print("V:", LA_F("%s: sid=%u -> peer_sid=%u, data_len=%zu\n", LA_F34, 34),
-          PROTO, ws_s->base.session_id, peer_s->base.session_id, len - P2P_WSS_BIN_HDR_SIZE);
+          PROTO, session->base.session_id, peer_s->base.session_id, len - P2P_WSS_BIN_PKT_MIN_SZ);
 
-    // todo: 优化避免 malloc
-    uint8_t *fwd = (uint8_t*)malloc(len);
-    if (!fwd) return;
-    memcpy(fwd, data, len);
-    nwrite_l(fwd + 1, peer_s->base.session_id);
-    ws_send_data((ws_client_t*)peer_c, fwd, len);
-    free(fwd);
+    // 就地重写 session_id 为请求方的 session_id，并转发到请求方
+    // + ws 内部会将 payload 数据进行 copy-out
+    uint8_t* ptr = payload + 1;
+    nwrite_l(ptr, peer_s->base.session_id);
+    ws_send_data((ws_client_t*)peer_c, payload, len);
 }
 
 // 处理 REQ — RPC 请求转发
-static void wss_handle_req(wss_session_t *ws_s, const uint8_t *data, size_t len) {
-    const char *PROTO = "MSG_REQ";
+// payload: [P2P_WSS_BIN_REQ][session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][payload(N)]
+static void wss_handle_req(wss_session_t *session, uint8_t *payload, uint16_t len) {
+    const char *PROTO = "REQ";
 
-    if (len < P2P_WSS_BIN_REQ_MIN) {
+    if (len < P2P_WSS_BIN_RPC_MIN_SZ) {
         print("E:", LA_F("%s: bad frame len=%zu\n", LA_F41, 41), PROTO, len);
         return;
     }
 
-    uint16_t sid = nget_s(data + 1 + P2P_SESS_ID_PSZ);
-    uint8_t  msg = data[1 + P2P_SESS_ID_PSZ + 2];
-    int data_len = (int)len - (int)P2P_WSS_BIN_REQ_MIN;
+    uint8_t* ptr = payload + 1 + P2P_SESS_ID_SZ;
+    uint16_t sid = nget_s(ptr);
+    uint8_t  msg = payload[P2P_WSS_BIN_RPC_MIN_SZ-1];
+    int data_len = (int)len - (int)P2P_WSS_BIN_RPC_MIN_SZ;
 
     print("V:", LA_F("%s: '%s' sid=%u msg=%u data_len=%d\n", LA_F25, 25),
-          PROTO, ws_s->base.client->local_peer_id, sid, msg, data_len);
+          PROTO, session->base.client->local_peer_id, sid, msg, data_len);
 
-    wss_session_t *peer_s = (wss_session_t*)ws_s->base.peer;
+    wss_session_t *peer_s = (wss_session_t*)session->base.peer;
     wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
     if (!wss_client_online(peer_c)) {
         print("W:", LA_F("%s: peer offline, sending error resp\n", LA_F64, 64), PROTO);
-        wss_session_send_rpc_code(ws_s, sid, P2P_MSG_ERR_PEER_OFFLINE);
+        wss_session_send_rpc_code(session, sid, P2P_MSG_ERR_PEER_OFFLINE);
         return;
     }
 
-    if (ws_s->rpc_pending_sid) {
-        print("W:", LA_F("%s: rpc busy (pending sid=%u)\n", LA_F67, 67), PROTO, ws_s->rpc_pending_sid);
-        wss_session_send_rpc_code(ws_s, sid, P2P_MSG_ERR_TIMEOUT);
+    if (session->rpc_pending_sid) {
+        print("W:", LA_F("%s: rpc busy (pending sid=%u)\n", LA_F67, 67), PROTO, session->rpc_pending_sid);
+        wss_session_send_rpc_code(session, sid, P2P_MSG_ERR_TIMEOUT);
         return;
     }
 
-    // todo: 优化避免 malloc
-    uint8_t *fwd = (uint8_t*)malloc(len);
-    if (!fwd) return;
-    memcpy(fwd, data, len);
-    nwrite_l(fwd + 1, peer_s->base.session_id);
-    ws_send_data((ws_client_t*)peer_c, fwd, len);
-    free(fwd);
+    ptr = payload + 1;
+    nwrite_l(ptr, peer_s->base.session_id);
+    ws_send_data((ws_client_t*)peer_c, payload, len);
 
-    ws_s->rpc_pending_sid = sid;
-    ws_s->rpc_sent_time   = P_tick_ms();
-    wss_pending_enqueue_rpc(ws_s);
+    // 转发 REQ 到对端，记录 pending sid（等 RSP 回来才解锁）
+    session->rpc_pending_sid = sid;
+    session->rpc_sent_time   = P_tick_ms();
+    wss_pending_enqueue_rpc(session);
 }
 
 // 处理 RESP — RPC 响应转发
-static void wss_handle_resp(wss_session_t *ws_s, const uint8_t *data, size_t len) {
+// payload: [P2P_WSS_BIN_RSP][session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][payload(N)]
+static void wss_handle_rsp(wss_session_t *session, uint8_t *payload, uint16_t len) {
     const char *PROTO = "RSP";
 
-    if (len < P2P_WSS_BIN_RSP_MIN) {
-        print("E:", LA_F("%s: bad frame len=%zu\n", LA_F41, 41), PROTO, len);
+    if (len < P2P_WSS_BIN_RPC_MIN_SZ) {
+        print("E:", LA_F("%s: bad frame len=%u\n", LA_F41, 41), PROTO, len);
         return;
     }
 
-    uint16_t sid  = nget_s(data + 1 + P2P_SESS_ID_PSZ);
-    uint8_t  code = data[1 + P2P_SESS_ID_PSZ + 2];
-    int data_len  = (int)len - (int)P2P_WSS_BIN_RSP_MIN;
+    uint8_t* ptr = payload + 1 + P2P_SESS_ID_SZ;
+    uint16_t sid  = nget_s(ptr);
+    uint8_t  code = payload[P2P_WSS_BIN_RPC_MIN_SZ-1];
+    int data_len  = (int)len - (int)P2P_WSS_BIN_RPC_MIN_SZ;
 
     print("V:", LA_F("%s: '%s' sid=%u code=%u data_len=%d\n", LA_F24, 24),
-          PROTO, ws_s->base.client->local_peer_id, sid, code, data_len);
+          PROTO, session->base.client->local_peer_id, sid, code, data_len);
 
-    wss_session_t *peer_s = (wss_session_t*)ws_s->base.peer;
+    wss_session_t *peer_s = (wss_session_t*)session->base.peer;
     wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
     if (!wss_client_online(peer_c)) {
         print("W:", LA_F("%s: requester offline, discarding\n", LA_F66, 66), PROTO);
@@ -525,14 +475,13 @@ static void wss_handle_resp(wss_session_t *ws_s, const uint8_t *data, size_t len
         return;
     }
 
-    // todo: 优化避免 malloc
-    uint8_t *fwd = (uint8_t*)malloc(len);
-    if (!fwd) return;
-    memcpy(fwd, data, len);
-    nwrite_l(fwd + 1, peer_s->base.session_id);
-    ws_send_data((ws_client_t*)peer_c, fwd, len);
-    free(fwd);
+    // 就地重写 session_id 为请求方的 session_id，并转发到请求方
+    // + ws 内部会将 payload 数据进行 copy-out
+    ptr = payload + 1;
+    nwrite_l(ptr, peer_s->base.session_id);
+    ws_send_data((ws_client_t*)peer_c, payload, len);
 
+    // 解锁 rpc_pending_sid（RPC 生命周期完成），释放 pending 状态
     wss_pending_remove_rpc(peer_s);
     peer_s->rpc_pending_sid = 0;
 }
@@ -541,14 +490,14 @@ static void wss_handle_resp(wss_session_t *ws_s, const uint8_t *data, size_t len
 
 // 处理 WSS 模式信令（WebSocket 文本帧）
 // !! wslay 并未确保 msg 以 \0 结尾
-void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
+void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
     assert(client->base.proto == PROTO_WSS);
 
     if (len == 0) return;
 
     client->base.last_active = P_tick_ms();
 
-    char* ln = (char*)strnstr((const char*)msg, "\n", len), *p;
+    char* ln = (char*)strnstr((const char*)msg, "\n", len);
     if (!ln) goto error_proto;
     *ln = '\0';
     #define ln_trim while (ln[-1] == '\n' || ln[-1] == '\r') *--ln = '\0'
@@ -605,8 +554,7 @@ void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
             print("I:", LA_F("%s: '%s' new REG (inst=%u)\n", LA_F93, 93),
                   PROTO, remote_id, instance_id);
 
-            memcpy(client->base.local_peer_id, remote_id, n + 1);
-            client->base.local_peer_id[P2P_PEER_ID_MAX] = '\0';
+            strcpy(client->base.local_peer_id, remote_id);
             client->base.instance_id = instance_id;
 
             identify_client(&client->base);
@@ -637,9 +585,9 @@ void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
 //            peer_s->sync_head = peer_s->sync_len = 0;
 //
 //            if (ws_confirmed)
-//                wss_send_sync0_confirm(client, peer_c->base.local_peer_id, s->session_id, ws_confirmed);
+//                wss_session_send_sync0_confirm(client, peer_c->base.local_peer_id, s->session_id, ws_confirmed);
 //            if (peer_confirmed)
-//                wss_send_sync0_confirm(peer_c, client->base.local_peer_id, peer_s->base.session_id, peer_confirmed);
+//                wss_session_send_sync0_confirm(peer_c, client->base.local_peer_id, peer_s->base.session_id, peer_confirmed);
 //        }
         return;
     }
@@ -647,7 +595,6 @@ void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
     if (!client->base.local_peer_id[0]) {
         print("E:", LA_F("%s: rejected for not reg\n", LA_F147, 147), (char*)msg);
         goto error_proto;
-        return;
     }
 
     // PROTO: OFF
@@ -663,15 +610,10 @@ void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
     if (strncmp((char*)msg, P2P_WSS_CMD_SYNC0, P2P_WSS_CMD_SYNC0_SZ) == 0) {
 
         char *remote_id = (char*)msg + P2P_WSS_CMD_SYNC0_SZ;
-        char *payload = ln+1;
+        uint8_t *payload = (uint8_t*)ln+1;
         ln_trim;
 
-        if (*payload) {
-            print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), "SYNC0");
-            ws_send_text((ws_client_t*)client, "SYNC0 FAIL invalid remote id");
-            goto error_proto;
-        }
-        wss_handle_sync0(client, remote_id, payload);
+        wss_handle_sync0(client, remote_id, payload, len - (payload - msg));
         return;
     }
 
@@ -697,7 +639,7 @@ void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
     if (strncmp((char*)msg, P2P_WSS_CMD_SYNC, P2P_WSS_CMD_SYNC_SZ) == 0) {
 
         char *sid = (char*)msg + P2P_WSS_CMD_SYNC_SZ;
-        char* payload = ln + 1;
+        uint8_t *payload = (uint8_t*)ln+1;
         ln_trim;
 
         uint32_t session_id = (uint32_t)strtoul(sid, NULL, 10);
@@ -709,12 +651,7 @@ void wss_on_message(wss_client_t *client, const uint8_t *msg, size_t len) {
             return;
         }
 
-        if (!PEER_ONLINE(s)) {
-            print("W:", LA_F("%: ses_id=%u peer not connected\n", LA_F146, 146), "SYNC", session_id);
-                ws_send_text((ws_client_t*)client, "SYNC FAIL peer not connected");
-            return;
-        }
-        wss_handle_sync((wss_session_t*)s, payload);
+        wss_handle_sync((wss_session_t*)s, (const char*)payload);
         return;
     }
 
@@ -724,16 +661,17 @@ error_proto:
           client->base.local_peer_id, msg);
 }
 
-// 处理 WSS 模式信令（WebSocket 二进制帧）— PACKET 中继 + MSG RPC
-void wss_on_data(wss_client_t *client, const uint8_t *data, size_t len) {
+// 处理 WSS 模式信令（WebSocket 二进制帧）— PKT 中继 + RPC
+void wss_handle_data(wss_client_t *client, const uint8_t *data, size_t len) {
     assert(client->base.proto == PROTO_WSS);
 
-    if (len < P2P_WSS_BIN_HDR_SIZE) return;
+    if (len < 1 + P2P_SESS_ID_SZ) return;
 
     client->base.last_active = P_tick_ms();
 
     uint8_t  type       = data[0];
-    uint32_t session_id = nget_l(data + 1);
+    uint8_t* ptr        = (uint8_t*)data + 1;
+    uint32_t session_id = nget_l(ptr);
 
     wss_session_t *ws_s = (wss_session_t*)find_session(session_id);
     if (!ws_s || ws_s->base.client != &client->base) {
@@ -744,22 +682,30 @@ void wss_on_data(wss_client_t *client, const uint8_t *data, size_t len) {
 
     if (!PEER_ONLINE(&ws_s->base)) {
         print("W:", LA_F("BIN 0x%02x: ses_id=%u peer not connected\n", LA_F146, 146), type, session_id);
-        if (type == P2P_WSS_BIN_REQ && len >= P2P_WSS_BIN_REQ_MIN) {
-            uint16_t sid = nget_s(data + 1 + P2P_SESS_ID_PSZ);
-            wss_session_send_rpc_code(ws_s, sid, P2P_MSG_ERR_PEER_OFFLINE);
+        if (type == P2P_WSS_BIN_REQ && len >= P2P_WSS_BIN_RPC_MIN_SZ) {
+            ptr = (uint8_t*)data + 1 + P2P_SESS_ID_SZ;
+            wss_session_send_rpc_code(ws_s, nget_s(ptr), P2P_MSG_ERR_PEER_OFFLINE);
         }
         return;
     }
 
     switch (type) {
-    case P2P_WSS_BIN_PKT: wss_handle_packet(ws_s, data, len); break;
-    case P2P_WSS_BIN_REQ:    wss_handle_req(ws_s, data, len);    break;
-    case P2P_WSS_BIN_RSP:    wss_handle_resp(ws_s, data, len);   break;
+    case P2P_WSS_BIN_PKT:
+        wss_handle_pkt(ws_s, (uint8_t*)data, len); break;
+    case P2P_WSS_BIN_REQ:
+        wss_handle_req(ws_s, (uint8_t*)data, len); break;
+    case P2P_WSS_BIN_RSP:
+        wss_handle_rsp(ws_s, (uint8_t*)data, len); break;
     default:
         print("W:", LA_F("BIN: unknown type=0x%02x from '%s'\n", LA_F149, 149),
               type, client->base.local_peer_id);
         break;
     }
+}
+
+bool
+wss_handle_send_complete(ws_client_t *client) {
+
 }
 
 //-----------------------------------------------------------------------------

@@ -590,10 +590,10 @@ static void ws_cb_msg(wslay_event_context_ptr ctx, const struct wslay_event_on_m
         uint8_t *msg = (uint8_t *)arg->msg;
         if (arg->msg_length > 0 && msg[arg->msg_length - 1] == '\n') {
             msg[arg->msg_length - 1] = '\0';
-            wss_on_message(client, msg, arg->msg_length - 1);
+            wss_handle_message(client, msg, arg->msg_length - 1);
         }
     } else if (arg->opcode == WSLAY_BINARY_FRAME) {
-        wss_on_data(client, arg->msg, arg->msg_length);
+        wss_handle_data(client, arg->msg, arg->msg_length);
     }
 }
 
@@ -1355,7 +1355,8 @@ int main(int argc, char *argv[]) {
                         wss_term_client((wss_client_t*)ws_client, false);
                     }
                     // 全部发送完成。注意，当发送完 close 协议字后，write_enabled 会被自动置为 false
-                    else if (!wslay_event_want_write(ws_client->ws_ctx)) {
+                    else if (!wslay_event_want_write(ws_client->ws_ctx)
+                             && wss_handle_send_complete(ws_client)) {
                         ws_client->io &= ~TCP_IO_FLAG_WANT_WRITE;
                     }
                 }

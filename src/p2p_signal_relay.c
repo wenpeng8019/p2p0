@@ -37,8 +37,8 @@
 
 /* 一个 SYNC 包所承载的候选数量（单位）*/
 #define SYNC_CAND_UNIT \
-    (((P2P_MAX_PAYLOAD - P2P_SESS_ID_PSZ - 1) / (int)sizeof(p2p_candidate_t)) < P2P_RELAY_MAX_CANDS_PER_PACKET \
-     ? ((P2P_MAX_PAYLOAD - P2P_SESS_ID_PSZ - 1) / (int)sizeof(p2p_candidate_t)) \
+    (((P2P_MAX_PAYLOAD - P2P_SESS_ID_SZ - 1) / (int)sizeof(p2p_candidate_t)) < P2P_RELAY_MAX_CANDS_PER_PACKET \
+     ? ((P2P_MAX_PAYLOAD - P2P_SESS_ID_SZ - 1) / (int)sizeof(p2p_candidate_t)) \
      : P2P_RELAY_MAX_CANDS_PER_PACKET)
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -343,7 +343,7 @@ static void send_sync(struct p2p_session *s, uint64_t now) {
             else { sess_ctx->trickle_last_time = now; sig_ctx->trickle_sessions++; }
         }
 
-        payload[P2P_SESS_ID_PSZ] = (uint8_t)cand_cnt;
+        payload[P2P_SESS_ID_SZ] = (uint8_t)cand_cnt;
 
         payload_len = (int)P2P_RLY_SYNC_PSZ(0, false);
         for (int i = 0; i < cand_cnt; i++) { int idx = start_idx + i;
@@ -358,8 +358,8 @@ static void send_sync(struct p2p_session *s, uint64_t now) {
         remaining = cand_cnt = 0;
 
         // 发送 FIN（追加 fin_marker = 0xFF）
-        payload[P2P_SESS_ID_PSZ] = 0;
-        payload[P2P_SESS_ID_PSZ + 1] = P2P_RLY_SYNC_FIN_MARKER;
+        payload[P2P_SESS_ID_SZ] = 0;
+        payload[P2P_SESS_ID_SZ + 1] = P2P_RLY_SYNC_FIN_MARKER;
         payload_len = (int)P2P_RLY_SYNC_PSZ(0, true);
     }
 
@@ -740,7 +740,7 @@ static void handle_peer_sync(struct p2p_session *s, const uint8_t *payload, int 
         return;
     }
 
-    uint8_t cand_cnt = payload[0]; uint32_t base_len = P2P_RLY_SYNC_PSZ(cand_cnt, false) - P2P_SESS_ID_PSZ;
+    uint8_t cand_cnt = payload[0]; uint32_t base_len = P2P_RLY_SYNC_PSZ(cand_cnt, false) - P2P_SESS_ID_SZ;
     bool has_fin = false;
     if ((uint32_t)len == base_len + 1u) {
         has_fin = true;
@@ -1027,7 +1027,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 s->id = session_id;
                 if (s->inst->cfg.use_ice) p2p_ice_set_ufrag_from_id(s);
 
-                handle_sync0_ack(s, ptr + P2P_SESS_ID_PSZ, now);
+                handle_sync0_ack(s, ptr + P2P_SESS_ID_SZ, now);
 
                 return;
             }
@@ -1095,8 +1095,8 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             }
 
             // 如果存在首批同步的数据
-            if (ptr[P2P_SESS_ID_PSZ/* candidate_count */] || sig_ctx->hdr.size > P2P_RLY_SYNC0_S2C_PSZ(0))
-                handle_peer_sync(s, ptr+P2P_SESS_ID_PSZ, (int)(sig_ctx->hdr.size-P2P_PEER_ID_MAX-P2P_SESS_ID_PSZ), now);
+            if (ptr[P2P_SESS_ID_SZ/* candidate_count */] || sig_ctx->hdr.size > P2P_RLY_SYNC0_S2C_PSZ(0))
+                handle_peer_sync(s, ptr + P2P_SESS_ID_SZ, (int)(sig_ctx->hdr.size - P2P_PEER_ID_MAX - P2P_SESS_ID_SZ), now);
 
             break;
         }
@@ -1136,7 +1136,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
         struct p2p_session* s = inst->sessions_head;
         for(; s; s = s->next) {
             if (s->id == session_id) {
-                handler(s, sig_ctx->payload + P2P_SESS_ID_PSZ, (int)(sig_ctx->hdr.size - P2P_SESS_ID_PSZ), now);
+                handler(s, sig_ctx->payload + P2P_SESS_ID_SZ, (int)(sig_ctx->hdr.size - P2P_SESS_ID_SZ), now);
                 break;
             }
         }
@@ -1402,16 +1402,16 @@ ret_t p2p_signal_relay_packet(struct p2p_session *s,
 
     // 构造负载: [session_id(4)][P2P hdr(4)][payload]
     uint8_t relay_payload[P2P_MAX_PAYLOAD];
-    int total_len = P2P_SESS_ID_PSZ + P2P_HDR_SIZE + payload_len;
+    int total_len = P2P_SESS_ID_SZ + P2P_HDR_SIZE + payload_len;
     if (total_len > P2P_MAX_PAYLOAD) {
         print("E:", LA_F("%s: pkt payload exceeds limit (%d > %d)\n", LA_F179, 179), TASK_RELAY, proto, total_len, P2P_MAX_PAYLOAD);
         return E_OUT_OF_CAPACITY;
     }
 
     nwrite_l(relay_payload, s->id);
-    p2p_pkt_hdr_encode(relay_payload + P2P_SESS_ID_PSZ, type, flags, seq);
+    p2p_pkt_hdr_encode(relay_payload + P2P_SESS_ID_SZ, type, flags, seq);
     if (payload_len > 0 && payload)
-        memcpy(relay_payload + P2P_SESS_ID_PSZ + P2P_HDR_SIZE, payload, payload_len);
+        memcpy(relay_payload + P2P_SESS_ID_SZ + P2P_HDR_SIZE, payload, payload_len);
 
     ret_t ret = tcp_send(sig_ctx, proto, P2P_RLY_PKT, relay_payload, total_len, P_tick_ms());
     if (ret != E_NONE) return ret;
@@ -1454,7 +1454,7 @@ ret_t p2p_signal_relay_request(struct p2p_session *s,
     sess_ctx->req_msg   = msg;
 
     uint8_t payload[P2P_MAX_PAYLOAD]; int n = 0;
-    nwrite_l(payload + n, s->id); n += P2P_SESS_ID_PSZ;
+    nwrite_l(payload + n, s->id); n += P2P_SESS_ID_SZ;
     nwrite_s(payload + n, sid); n += 2;
     payload[n++] = msg;
     if (len > 0 && data) {
@@ -1492,7 +1492,7 @@ ret_t p2p_signal_relay_response(struct p2p_session *s,
 
     // 构造
     uint8_t payload[P2P_MAX_PAYLOAD]; int n = 0;
-    nwrite_l(payload + n, s->id); n += P2P_SESS_ID_PSZ;
+    nwrite_l(payload + n, s->id); n += P2P_SESS_ID_SZ;
     nwrite_s(payload + n, sess_ctx->resp_sid); n += 2;
     payload[n++] = code;
     if (len > 0 && data) {

@@ -44,19 +44,18 @@
 #define P2P_P2P_WSS_H
 
 #include "common.h"
+#include "p2p_relay.h"
 
 
-#define WS_RECV_BUF                 65536
-
-#define WSS_SYNC_PAYLOAD_MAX     2048        /* SYNC0 预缓存负载上限（字节，不含 NUL） */
+#define WSS_SYNC_PAYLOAD_MAX        2048        /* SYNC0 预缓存负载上限（字节，不含 NUL） */
 
 typedef struct wss_session {
     session_t                       base;
 
     /* SYNC0 预缓存 ring buffer */
     char                            sync_data[WSS_SYNC_PAYLOAD_MAX];
-    size_t                          sync_head;   /* 读位置 [0, MAX) */
-    size_t                          sync_len;    /* 已存储字节数 */
+    uint16_t                        sync_head;   /* 读位置 [0, MAX) */
+    uint16_t                        sync_len;    /* 已存储字节数 */
 
     /* MSG RPC 状态（与 relay_session_t 一致，独立于 SYNC 通道） */
     uint16_t                        rpc_pending_sid;    /* 0=空闲, 非零=等待 RESP 的 REQ sid */
@@ -84,10 +83,11 @@ void
 wss_term_client(wss_client_t *client, bool and_free);
 
 void
-wss_on_message(wss_client_t* client, const uint8_t *msg, size_t len);
+wss_handle_message(wss_client_t* client, const uint8_t *msg, size_t len);
 void
-wss_on_data(wss_client_t *client, const uint8_t *data, size_t len);
-
+wss_handle_data(wss_client_t *client, const uint8_t *data, size_t len);
+bool
+wss_handle_send_complete(ws_client_t *client);
 void
 retry_wss_pending(uint64_t now);
 

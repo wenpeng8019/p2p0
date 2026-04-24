@@ -174,7 +174,7 @@ static void compact_send_sync0_ack(compact_session_t *s, const char *remote_peer
 
     int ofz = sizeof(p2p_packet_hdr_t);
     memcpy(ack + ofz, remote_peer_id, P2P_PEER_ID_MAX); ofz += P2P_PEER_ID_MAX;
-    nwrite_l(ack + ofz, s->base.session_id); ofz += P2P_SESS_ID_PSZ;
+    nwrite_l(ack + ofz, s->base.session_id); ofz += P2P_SESS_ID_SZ;
     ack[ofz++] = online;
 
     print("V:", LA_F("Send %s: ses_id=%u, peer=%s\n", LA_F115, 115),
@@ -213,14 +213,14 @@ static void compact_session_send_sync0(compact_session_t *c, uint8_t base_index)
     compact_session_t *peer     = (compact_session_t*)c->base.peer;
     compact_client_t  *peer_cli = COMPACT_CLIENT(peer);
 
-    uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_PEER_ID_MAX + P2P_SESS_ID_PSZ + 2 + MAX_CANDIDATES * sizeof(p2p_candidate_t)];
+    uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 2 + MAX_CANDIDATES * sizeof(p2p_candidate_t)];
     p2p_packet_hdr_t *resp_hdr = (p2p_packet_hdr_t *)pkt;
     resp_hdr->flags = 0;
     resp_hdr->seq = htons(0);
 
     int ofz = sizeof(p2p_packet_hdr_t);
     memcpy(pkt + ofz, peer_cli->base.local_peer_id, P2P_PEER_ID_MAX); ofz += P2P_PEER_ID_MAX;
-    nwrite_l(pkt + ofz, c->base.session_id); ofz += P2P_SESS_ID_PSZ;
+    nwrite_l(pkt + ofz, c->base.session_id); ofz += P2P_SESS_ID_SZ;
 
     int cand_cnt;
 
@@ -281,7 +281,7 @@ static void compact_session_send_req_ack(compact_session_t *sender, uint16_t sid
     hdr->seq = 0;
 
     int ofz = sizeof(p2p_packet_hdr_t);
-    nwrite_l(ack + ofz, sender->base.session_id); ofz += P2P_SESS_ID_PSZ;
+    nwrite_l(ack + ofz, sender->base.session_id); ofz += P2P_SESS_ID_SZ;
     nwrite_s(ack + ofz, sid); ofz += 2;
     ack[ofz++] = status;
 
@@ -301,14 +301,14 @@ static void compact_session_send_req_to_peer(compact_session_t *sender) {
     compact_session_t *peer   = (compact_session_t*)sender->base.peer;
     compact_client_t  *peer_c = COMPACT_CLIENT(peer);
 
-    uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_SESS_ID_PSZ + 2 + 1 + P2P_MSG_DATA_MAX];
+    uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_SESS_ID_SZ + 2 + 1 + P2P_MSG_DATA_MAX];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
     hdr->type = SIG_PKT_REQ;
     hdr->flags = SIG_FLAG_RELAY;
     hdr->seq = 0;
 
     int ofz = sizeof(p2p_packet_hdr_t);
-    nwrite_l(pkt + ofz, peer->base.session_id); ofz += P2P_SESS_ID_PSZ;
+    nwrite_l(pkt + ofz, peer->base.session_id); ofz += P2P_SESS_ID_SZ;
     nwrite_s(pkt + ofz, sender->rpc_last_sid); ofz += 2;
     pkt[ofz++] = sender->rpc_code;
     if (sender->rpc_data_len > 0) {
@@ -334,7 +334,7 @@ static void compact_session_send_resp_ack(compact_session_t *responder, uint16_t
     hdr->seq = 0;
 
     int ofz = sizeof(p2p_packet_hdr_t);
-    nwrite_l(pkt + ofz, responder->base.session_id); ofz += P2P_SESS_ID_PSZ;
+    nwrite_l(pkt + ofz, responder->base.session_id); ofz += P2P_SESS_ID_SZ;
     nwrite_s(pkt + ofz, sid); ofz += 2;
 
     print("V:", LA_F("Send %s: ses_id=%u, sid=%u, peer='%s'\n", LA_F118, 118),
@@ -350,14 +350,14 @@ static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
     assert(cs && cs->rpc_responding);
 
     compact_client_t *client = COMPACT_CLIENT(cs);
-    uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_SESS_ID_PSZ + 2 + 1 + P2P_MSG_DATA_MAX];
+    uint8_t pkt[sizeof(p2p_packet_hdr_t) + P2P_SESS_ID_SZ + 2 + 1 + P2P_MSG_DATA_MAX];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
     hdr->type = SIG_PKT_RSP;
     hdr->flags = cs->rpc_flags;
     hdr->seq = 0;
 
     int ofz = sizeof(p2p_packet_hdr_t);
-    nwrite_l(pkt + ofz, cs->base.session_id); ofz += P2P_SESS_ID_PSZ;
+    nwrite_l(pkt + ofz, cs->base.session_id); ofz += P2P_SESS_ID_SZ;
     nwrite_s(pkt + ofz, cs->rpc_last_sid); ofz += 2;
 
     if (!(cs->rpc_flags & (SIG_RPC_FLAG_PEER_OFFLINE | SIG_RPC_FLAG_TIMEOUT))) {
@@ -893,7 +893,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < (int)P2P_SESS_ID_PSZ) {
+        if (payload_len < (int)P2P_SESS_ID_SZ) {
             print("E:", LA_F("[Relay] %s: bad payload(len=%zu)\n", LA_F128, 128), PROTO, payload_len);
             return;
         }
