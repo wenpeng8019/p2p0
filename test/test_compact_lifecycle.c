@@ -207,7 +207,7 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
                        int candidate_count, p2p_candidate_t *candidates) {
     if (buf_size < 4 + 8 + 32 + 1) return -1;
     int n = 0;
-    buf[n++] = SIG_PKT_SYNC0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+    buf[n++] = SIG_PKT_SYN0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
     for (int i = 0; i < 8; i++) buf[n++] = (auth_key >> (56 - i * 8)) & 0xFF;
     memset(buf + n, 0, 32);
     if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
@@ -297,7 +297,7 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
             ssize_t drain_n = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
                      (struct sockaddr*)&drain_from, &drain_len);
             // 从 SYNC0_ACK 提取 session_id: [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
-            if (drain_n >= (ssize_t)(4 + SIG_PKT_SYNC0_ACK_PSZ) && drain_buf[0] == SIG_PKT_SYNC0_ACK && session_id_out) {
+            if (drain_n >= (ssize_t)(4 + SIG_PKT_SYN0_ACK_PSZ) && drain_buf[0] == SIG_PKT_SYN0_ACK && session_id_out) {
                 int off = 4 + P2P_PEER_ID_MAX;
                 *session_id_out = ((uint32_t)drain_buf[off] << 24) | ((uint32_t)drain_buf[off+1] << 16) |
                                   ((uint32_t)drain_buf[off+2] << 8)  | (uint32_t)drain_buf[off+3];

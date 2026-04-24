@@ -205,7 +205,7 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
                        int candidate_count, p2p_candidate_t *candidates) {
     if (buf_size < 4 + 8 + 32 + 1) return -1;
     int n = 0;
-    buf[n++] = SIG_PKT_SYNC0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+    buf[n++] = SIG_PKT_SYN0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
     for (int i = 0; i < 8; i++) buf[n++] = (auth_key >> (56 - i * 8)) & 0xFF;
     memset(buf + n, 0, 32);
     if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
@@ -401,7 +401,7 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
         P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
         n = recvfrom(sock, (char*)sync_ack, sizeof(sync_ack), 0,
                      (struct sockaddr*)&sync_from, &sync_len);
-        if (n >= (ssize_t)(4 + SIG_PKT_SYNC0_ACK_PSZ) && sync_ack[0] == SIG_PKT_SYNC0_ACK) {
+        if (n >= (ssize_t)(4 + SIG_PKT_SYN0_ACK_PSZ) && sync_ack[0] == SIG_PKT_SYN0_ACK) {
             int off = 4 + P2P_PEER_ID_MAX;
             uint32_t session_id = 0;
             for (int i = 0; i < 4; i++) {

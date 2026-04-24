@@ -219,7 +219,7 @@ static void send_online(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, u
 
     assert(sig_ctx->state == SIG_COMPACT_WAIT_ONLINE_ACK);
 
-    uint8_t payload[SIG_PKT_ONLINE_PSZ];
+    uint8_t payload[SIG_PKT_REG_PSZ];
 
     // local_peer_id（32 字节，超过部分截断，不足部分补零）
     int n = (int)strlen(sig_ctx->local_peer_id);
@@ -241,7 +241,7 @@ static void send_online(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, u
 /*
  * 向信令服务器提交 SYNC0（首批候选 + 指定对端）
  *
- * 包头: [type=SIG_PKT_SYNC0 | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_SYN0 | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
  *   - auth_key: 坥自 ONLINE_ACK 的客户端-服务器认证令牌
  *   - remote_peer_id: 目标对端 ID
@@ -280,7 +280,7 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
         n += pack_candidate(&s->local_cands[i], payload + n);
     }
 
-    err_t err = udp_send(inst, PROTO, SIG_PKT_SYNC0, 0, 0, payload, n, now);
+    err_t err = udp_send(inst, PROTO, SIG_PKT_SYN0, 0, 0, payload, n, now);
     if (err != E_NONE) return;
 
     print("V:", LA_F("%s sent, auth_key=%" PRIu64 ", remote='%.32s', cands=%d\n", LA_F62, 62),
@@ -706,7 +706,7 @@ void compact_on_alive_ack(struct p2p_instance *inst) {
 /*
  * 处理 SYNC0_ACK（即连接应答）, session_id 和首批候选同步提交确认
  *
- * 包头: [type=SIG_PKT_SYNC0_ACK | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_SYN0_ACK | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][online(1)]
  *   - session_id: 对端配对会话 ID（由服务器在 SYNC0 时分配，标识 client↔peer 会话）
  *   - online: 1=对端已上线（已有配对），0=对端尚未上线
@@ -719,9 +719,9 @@ void compact_on_sync0_ack(struct p2p_session *s, const uint8_t *payload, int len
 
     // 发送 SYNC0_ACK（方向 2：二次确认，告知服务器已收到 session_id）
     {
-        uint8_t ack_payload[SIG_PKT_SYNC0_ACK_C2S_PSZ];
+        uint8_t ack_payload[SIG_PKT_SYN0_ACK_C2S_PSZ];
         nwrite_l(ack_payload, s->id);
-        udp_send(s->inst, PROTO, SIG_PKT_SYNC0_ACK, 0, 0, ack_payload, sizeof(ack_payload), P_tick_ms());
+        udp_send(s->inst, PROTO, SIG_PKT_SYN0_ACK, 0, 0, ack_payload, sizeof(ack_payload), P_tick_ms());
     }
 
     if (sess_ctx->state != SIG_COMPACT_SESS_WAIT_SYNC0_ACK) return;
@@ -803,7 +803,7 @@ void compact_on_sync_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 /*
  * 处理服务器下发的 SYNC0（首次对端候选推送）
  *
- * 包头: [type=SIG_PKT_SYNC0 | flags=0 | seq=0]  （server→client 方向）
+ * 包头: [type=SIG_PKT_SYN0 | flags=0 | seq=0]  （server→client 方向）
  * 负载: [session_id(P2P_SESS_ID_SZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
  *   - session_id: 服务器分配的对端配对会话 ID（来自对端 SYNC0 触发的配对）
  *   - 0x00: 保留字节（固定为 0，供 unpack_remote_candidates 识别为初始推送）
@@ -816,7 +816,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
     const char* PROTO = "SYNC0";
 
     int cand_cnt = payload[P2P_SESS_ID_SZ + 1];
-    if (len < (int)(SIG_PKT_SYNC0_S2C_PSZ(cand_cnt) - P2P_PEER_ID_MAX)) {
+    if (len < (int)(SIG_PKT_SYN0_S2C_PSZ(cand_cnt) - P2P_PEER_ID_MAX)) {
         print("E:", LA_F("%s: bad payload(len=%d cand_cnt=%d)\n", LA_F118, 118), PROTO, len, cand_cnt);
         return;
     }
@@ -877,10 +877,10 @@ void compact_on_peer_sync0(struct p2p_session *s,
 
     // 发送 SYNC0_ACK（client→server 方向）确认收到服务器 SYNC0
     {
-        uint8_t ack_payload[SIG_PKT_SYNC0_ACK_C2S_PSZ];
+        uint8_t ack_payload[SIG_PKT_SYN0_ACK_C2S_PSZ];
         nwrite_l(ack_payload, s->id);
 
-        err_t err = udp_send(s->inst, PROTO, SIG_PKT_SYNC0_ACK, 0, 0, ack_payload, sizeof(ack_payload), now);
+        err_t err = udp_send(s->inst, PROTO, SIG_PKT_SYN0_ACK, 0, 0, ack_payload, sizeof(ack_payload), now);
         if (err != E_NONE) return;
 
         print("V:", LA_F("%s sent (ses_id=%u)\n", LA_F56, 56), "SYNC0_ACK", s->id);
@@ -894,7 +894,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
  *   - session_id: 会话 ID（网络字节序）
  *   - base_index: 本批候选的起始索引（0-based）
  *   - candidate_count: 本批候选数量，0 表示结束标识
- *   - seq=0: 服务器发送，base_index!=0，对端公网地址变更通知（首次推送已改用 SIG_PKT_SYNC0）
+ *   - seq=0: 服务器发送，base_index!=0，对端公网地址变更通知（首次推送已改用 SIG_PKT_SYN0）
  *   - seq>0: 客户端发送，继续同步剩余候选
  *   - flags: SIG_SYNC_FLAG_FIN (0x01) 表示候选列表发送完毕
  */
@@ -1126,7 +1126,7 @@ void compact_on_request(struct p2p_session *s, uint16_t seq, uint8_t flags,
     uint16_t sid = nget_s(payload + P2P_SESS_ID_SZ);
     uint8_t msg = payload[P2P_SESS_ID_SZ + 2];
     const uint8_t *req_data = payload + P2P_SESS_ID_SZ + 3;
-    int req_len = len - (int)SIG_PKT_MSG_REQ_MIN_PSZ;
+    int req_len = len - (int)SIG_PKT_REQ_MIN_PSZ;
 
     /* 判断是否是新请求（使用循环序列号比较）：
      * 1. 如果正在处理请求且 sid 相同 → 忽略重复包
@@ -1439,7 +1439,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             printf(LA_F("[C] %s recv, seq=%u, flags=0x%02x, len=%d\n", LA_F426, 426),
                 PROTO, seq, flags, payload_len);
 
-            if (payload_len < (int)SIG_PKT_ONLINE_ACK_PSZ) {
+            if (payload_len < (int)SIG_PKT_REG_ACK_PSZ) {
                 print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F119, 119), PROTO, payload_len);
                 break;
             }
@@ -1460,7 +1460,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             printf(LA_F("[C] %s recv, seq=%u, len=%d\n", LA_F427, 427),
                 PROTO, seq, payload_len);
 
-            if (payload_len < (int)SIG_PKT_NAT_PROBE_ACK_PSZ) {
+            if (payload_len < (int)SIG_PKT_NAT_ACK_PSZ) {
                 print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F119, 119), PROTO, payload_len);
                 break;
             }
@@ -1468,11 +1468,11 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             break;
         }
 
-        if (type == SIG_PKT_SYNC0_ACK) { PROTO = "SYNC0_ACK";
+        if (type == SIG_PKT_SYN0_ACK) { PROTO = "SYNC0_ACK";
 
             printf(LA_F("[C] %s recv, len=%d\n", LA_F425, 425), PROTO, payload_len);
 
-            if (payload_len < (int)SIG_PKT_SYNC0_ACK_PSZ) {
+            if (payload_len < (int)SIG_PKT_SYN0_ACK_PSZ) {
                 print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F119, 119), PROTO, payload_len);
                 break;
             }
@@ -1510,11 +1510,11 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             break;
         }
 
-        if (type == SIG_PKT_SYNC0) { PROTO = "SYNC0";
+        if (type == SIG_PKT_SYN0) { PROTO = "SYNC0";
 
             printf(LA_F("[C] %s recv, len=%d\n", LA_F425, 425), PROTO, payload_len);
 
-            if (payload_len < (int)SIG_PKT_SYNC0_S2C_PSZ(0)) {
+            if (payload_len < (int)SIG_PKT_SYN0_S2C_PSZ(0)) {
                 print("E:", LA_F("%s: bad payload(len=%d)\n", LA_F119, 119), PROTO, payload_len);
                 break;
             }
@@ -1577,8 +1577,8 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
         case SIG_PKT_SYNC:         PROTO = "SYNC";      payload_min = SIG_PKT_SYNC_PSZ(0);              handler = compact_on_peer_sync; break;
         case SIG_PKT_SYNC_ACK:     PROTO = "SYNC_ACK";  payload_min = SIG_PKT_SYNC_ACK_PSZ;             handler = compact_on_sync_ack; break;
         case SIG_PKT_FIN:          PROTO = "FIN";       payload_min = SIG_PKT_FIN_PSZ;                  handler = compact_on_fin; break;
-        case SIG_PKT_REQ:      PROTO = "REQ";       payload_min = SIG_PKT_MSG_REQ_MIN_PSZ;          handler = compact_on_request; break;
-        case SIG_PKT_REQ_ACK:  PROTO = "REQ_ACK";   payload_min = SIG_PKT_MSG_REQ_ACK_PSZ;          handler = compact_on_request_ack; break;
+        case SIG_PKT_REQ:      PROTO = "REQ";       payload_min = SIG_PKT_REQ_MIN_PSZ; handler = compact_on_request; break;
+        case SIG_PKT_REQ_ACK:  PROTO = "REQ_ACK";   payload_min = SIG_PKT_REQ_ACK_PSZ; handler = compact_on_request_ack; break;
         case SIG_PKT_RESP:     PROTO = "RESP";      payload_min = (uint16_t)(P2P_SESS_ID_SZ + 2u); handler = compact_on_response; break;
         case SIG_PKT_RESP_ACK: PROTO = "RESP_ACK";  payload_min = SIG_PKT_MSG_RESP_ACK_PSZ;         handler = compact_on_response_ack; break;
         default:
@@ -1669,7 +1669,7 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst) {
     // fixme: 这需要异步等待，如果直接用 remote peer_id 则可以避免异步等待
     if (!sig_ctx->auth_key) return E_NONE_CONTEXT;          // 尚未完成上线（auth_key 未分配）
 
-    uint8_t payload[SIG_PKT_OFFLINE_PSZ];
+    uint8_t payload[SIG_PKT_OFF_PSZ];
     nwrite_ll(payload, sig_ctx->auth_key);
 
     err_t err = udp_send(inst, PROTO, SIG_PKT_OFF, 0, 0, payload, (int) sizeof(payload), 0);
@@ -1689,7 +1689,7 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst) {
 /*
  * 建立与对端的会话（发送 SYNC0，建立 client↔peer 关系，获取 session_id）
  *
- * 包头: [type=SIG_PKT_SYNC0 | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_SYN0 | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
  *   - auth_key:        ONLINE_ACK 中分配的客户端令牌
  *   - remote_peer_id:  目标对端 ID（32 字节，不足补零）
@@ -1751,7 +1751,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
 
     p2p_compact_ctx_t *sig_ctx = &s->inst->sig_ctx.compact;
 
-    uint8_t payload[SIG_PKT_OFFLINE_PSZ];
+    uint8_t payload[SIG_PKT_OFF_PSZ];
     nwrite_ll(payload, sig_ctx->auth_key);
 
     err_t err = udp_send(s->inst, PROTO, SIG_PKT_OFF, 0, 0, payload, (int) sizeof(payload), P_tick_ms());

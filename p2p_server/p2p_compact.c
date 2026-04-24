@@ -126,7 +126,7 @@ static void compact_send_reg_ack(client_t* client, const struct sockaddr_in *to,
                                  uint64_t auth_key, uint32_t instance_id) {
     const char* PROTO = "REG_ACK";
 
-    uint8_t ack[sizeof(p2p_packet_hdr_t) + SIG_PKT_ONLINE_ACK_PSZ];
+    uint8_t ack[sizeof(p2p_packet_hdr_t) + SIG_PKT_REG_ACK_PSZ];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)ack;
     hdr->type = SIG_PKT_REG_ACK;
     hdr->flags = 0;
@@ -151,7 +151,7 @@ static void compact_send_reg_ack(client_t* client, const struct sockaddr_in *to,
               inet_ntoa(to->sin_addr), ntohs(to->sin_port),
               (int)ARGS_probe_port.i64, auth_key, instance_id);
     } else {
-        memset(ack + sizeof(p2p_packet_hdr_t), 0, SIG_PKT_ONLINE_ACK_PSZ);
+        memset(ack + sizeof(p2p_packet_hdr_t), 0, SIG_PKT_REG_ACK_PSZ);
         print("V:", LA_F("Send %s: rejected (no slot available)\n", LA_F114, 114), PROTO);
     }
 
@@ -162,9 +162,9 @@ static void compact_send_reg_ack(client_t* client, const struct sockaddr_in *to,
 static void compact_send_sync0_ack(compact_session_t *s, const char *remote_peer_id, uint8_t online) {
     const char* PROTO = "SYNC0_ACK";
 
-    uint8_t ack[sizeof(p2p_packet_hdr_t) + SIG_PKT_SYNC0_ACK_PSZ];
+    uint8_t ack[sizeof(p2p_packet_hdr_t) + SIG_PKT_SYN0_ACK_PSZ];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)ack;
-    hdr->type = SIG_PKT_SYNC0_ACK;
+    hdr->type = SIG_PKT_SYN0_ACK;
     hdr->flags = 0;
     hdr->seq = 0;
 
@@ -198,7 +198,7 @@ static void compact_session_send_fin(compact_session_t *s, const char *reason) {
 }
 
 // 发送首次对端候选推送（base_index=0）或地址变更通知（base_index != 0 为循环通知序号）
-// base_index=0: SIG_PKT_SYNC0，payload: [session_id(4)][0x00(1)][cand_cnt(1)][candidates]
+// base_index=0: SIG_PKT_SYN0，payload: [session_id(4)][0x00(1)][cand_cnt(1)][candidates]
 // base_index!=0: SIG_PKT_SYNC（seq=0），payload: [session_id(4)][notify_seq(1)][1][candidate]
 static void compact_session_send_sync0(compact_session_t *c, uint8_t base_index) {
     const char* PROTO = base_index == 0 ? "SYNC0" : "SYNC";
@@ -222,7 +222,7 @@ static void compact_session_send_sync0(compact_session_t *c, uint8_t base_index)
 
     if (base_index == 0) {
 
-        resp_hdr->type = SIG_PKT_SYNC0;
+        resp_hdr->type = SIG_PKT_SYN0;
 
         cand_cnt = 1 + peer->candidate_count;
         pkt[ofz++] = 0;
@@ -270,7 +270,7 @@ static void compact_session_send_sync0(compact_session_t *c, uint8_t base_index)
 static void compact_session_send_req_ack(compact_session_t *sender, uint16_t sid, uint8_t status) {
     const char* PROTO = "REQ_ACK";
 
-    uint8_t ack[sizeof(p2p_packet_hdr_t) + SIG_PKT_MSG_REQ_ACK_PSZ];
+    uint8_t ack[sizeof(p2p_packet_hdr_t) + SIG_PKT_REQ_ACK_PSZ];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)ack;
     hdr->type = SIG_PKT_REQ_ACK;
     hdr->flags = 0;
@@ -323,7 +323,7 @@ static void compact_session_send_req_to_peer(compact_session_t *sender) {
 static void compact_session_send_resp_ack(compact_session_t *responder, uint16_t sid) {
     const char* PROTO = "MSG_RSP_ACK";
 
-    uint8_t pkt[sizeof(p2p_packet_hdr_t) + SIG_PKT_MSG_RSP_ACK_PSZ];
+    uint8_t pkt[sizeof(p2p_packet_hdr_t) + SIG_PKT_RSP_ACK_PSZ];
     p2p_packet_hdr_t *hdr = (p2p_packet_hdr_t *)pkt;
     hdr->type = SIG_PKT_RSP_ACK;
     hdr->flags = 0;
@@ -513,7 +513,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < SIG_PKT_ONLINE_PSZ) {
+        if (payload_len < SIG_PKT_REG_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
@@ -567,7 +567,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < (int)SIG_PKT_OFFLINE_PSZ) {
+        if (payload_len < (int)SIG_PKT_OFF_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
@@ -627,14 +627,14 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         }
     } break;
 
-    // SIG_PKT_SYNC0: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*sizeof(p2p_candidate_t))]
+    // SIG_PKT_SYN0: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*sizeof(p2p_candidate_t))]
     // + 客户端请求连接对方
-    case SIG_PKT_SYNC0: { const char* PROTO = "SYNC0";
+    case SIG_PKT_SYN0: { const char* PROTO = "SYNC0";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < SIG_PKT_SYNC0_PSZ(0)) {
+        if (payload_len < SIG_PKT_SYN0_PSZ(0)) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
@@ -725,15 +725,15 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
 
     } break;
 
-    // SIG_PKT_SYNC0_ACK（client→server）
+    // SIG_PKT_SYN0_ACK（client→server）
     // + 方向 2：客户端二次确认收到 SYNC0_ACK（session_id 已建立）
     // + 方向 3：客户端确认收到服务器 SYNC0，停止可靠性重传机制
-    case SIG_PKT_SYNC0_ACK: { const char* PROTO = "SYNC0_ACK";
+    case SIG_PKT_SYN0_ACK: { const char* PROTO = "SYNC0_ACK";
 
         printf(LA_F("[UDP] %s recv from %s, len=%zu\n", LA_F134, 134),
                PROTO, from_str, len);
 
-        if (payload_len < SIG_PKT_SYNC0_ACK_C2S_PSZ) {
+        if (payload_len < SIG_PKT_SYN0_ACK_C2S_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
@@ -940,7 +940,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < SIG_PKT_MSG_REQ_MIN_PSZ) {
+        if (payload_len < SIG_PKT_REQ_MIN_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
@@ -950,7 +950,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
             return;
         }
 
-        int msg_data_len = (int)(payload_len - SIG_PKT_MSG_REQ_MIN_PSZ);
+        int msg_data_len = (int)(payload_len - SIG_PKT_REQ_MIN_PSZ);
         if (msg_data_len > P2P_MSG_DATA_MAX) {
             print("E:", LA_F("%s: data too large (len=%d)\n", LA_F47, 47), PROTO, msg_data_len);
             return;
@@ -1049,12 +1049,12 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < SIG_PKT_MSG_RSP_MIN_PSZ) {
+        if (payload_len < SIG_PKT_RSP_MIN_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
 
-        int resp_len = (int)(payload_len - SIG_PKT_MSG_RSP_MIN_PSZ);
+        int resp_len = (int)(payload_len - SIG_PKT_RSP_MIN_PSZ);
         if (resp_len > P2P_MSG_DATA_MAX) {
             print("E:", LA_F("%s: data too large (len=%d)\n", LA_F47, 47), PROTO, resp_len);
             return;
@@ -1113,7 +1113,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < SIG_PKT_MSG_RSP_ACK_PSZ) {
+        if (payload_len < SIG_PKT_RSP_ACK_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }

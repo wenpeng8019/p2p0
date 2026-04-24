@@ -252,7 +252,7 @@ static void send_alive(struct p2p_instance *inst, uint64_t now) {
 /*
  * 发送 SYNC0 请求建立会话
  *
- * 包头: [type(P2P_RLY_SYNC0) | size(2)]
+ * 包头: [type(P2P_RLY_SYN0) | size(2)]
  * 负载: [target_name(32)][candidate_count(1)][candidates(N*23)]
  */
 static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_t now) {
@@ -280,7 +280,7 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
 
         payload[P2P_PEER_ID_MAX] = (uint8_t)cand_cnt;
 
-        payload_len = (int)P2P_RLY_SYNC0_PSZ(0);
+        payload_len = (int)P2P_RLY_SYN0_PSZ(0);
         for (int i = 0; i < cand_cnt; i++) {
             pack_candidate(&s->local_cands[i], payload + payload_len);
             payload_len += (int)sizeof(p2p_candidate_t);
@@ -289,7 +289,7 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
 
     int cand_sent = payload[P2P_PEER_ID_MAX];
 
-    if (tcp_send(sig_ctx, PROTO, P2P_RLY_SYNC0, payload, payload_len, now) != E_NONE) {
+    if (tcp_send(sig_ctx, PROTO, P2P_RLY_SYN0, payload, payload_len, now) != E_NONE) {
         return;
     }
 
@@ -418,7 +418,7 @@ static void reset_peer(p2p_relay_session_t *sess_ctx, p2p_relay_ctx_t *sig_ctx) 
 /*
  * 处理 STATUS（实例级，非会话相关的状态）
  *
- * 由 dispatch_proto 解析后调用，仅处理 req_type < P2P_RLY_SYNC0 的情况
+ * 由 dispatch_proto 解析后调用，仅处理 req_type < P2P_RLY_SYN0 的情况
  */
 static void handle_status(struct p2p_instance *inst, uint8_t type, uint8_t code, const char *msg) {
     const char *PROTO = "STATUS";
@@ -549,7 +549,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
     // 会话忙：服务器转发缓冲区满，稍后重试
     if (code == P2P_RLY_ERR_BUSY) {
 
-        if (type == P2P_RLY_SYNC || type == P2P_RLY_SYNC0) {
+        if (type == P2P_RLY_SYNC || type == P2P_RLY_SYN0) {
             if (sess_ctx->trickle_last_time) sess_ctx->trickle_last_time = P_tick_ms();
             print("V:", LA_F("%s: sync busy, will retry\n", LA_F229, 229), PROTO);
         }
@@ -923,7 +923,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             uint8_t req_type = sig_ctx->payload[0], status_code = sig_ctx->payload[1];
 
             // 对于 client 级别的状态，直接处理；对于 session 级别的状态，根据 req_type 定位对应 session 后再处理
-            if (req_type < P2P_RLY_SYNC0) {
+            if (req_type < P2P_RLY_SYN0) {
 
                 if (sig_ctx->hdr.size > st_sz) { sig_ctx->payload[sizeof(sig_ctx->payload)-1] = 0;
                     handle_status(inst, req_type, status_code, (const char*)sig_ctx->payload + st_sz);
@@ -932,7 +932,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             }
 
             // 对于 client/session 临界级别的状态
-            if (req_type == P2P_RLY_SYNC0) {
+            if (req_type == P2P_RLY_SYN0) {
 
                 if (sig_ctx->hdr.size < P2P_RLY_STATUS_PSZ(1, 0)) {
                     print("E:", LA_F("%s: bad payload(%d, type=%u)\n", 0, 0), PROTO, sig_ctx->hdr.size, req_type);
@@ -995,11 +995,11 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             break;
         }
 
-        if (sig_ctx->hdr.type == P2P_RLY_SYNC0) { PROTO = "SYNC0";
+        if (sig_ctx->hdr.type == P2P_RLY_SYN0) { PROTO = "SYNC0";
 
             printf(LA_F("[R] %s recv, len=%d\n", LA_F438, 438), PROTO, sig_ctx->hdr.size);
 
-            if (sig_ctx->hdr.size < (int)P2P_RLY_SYNC0_S2C_PSZ(0)) {
+            if (sig_ctx->hdr.size < (int)P2P_RLY_SYN0_S2C_PSZ(0)) {
                 print("E:", LA_F("%s: bad payload(%d)\n", LA_F117, 117), PROTO, sig_ctx->hdr.size);
                 return;
             }
@@ -1032,7 +1032,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 return;
             }
 
-            if (sess_ctx->state != SIG_RELAY_SESS_WAIT_PEER || P2P_RLY_IS_SYNC0_OFFLINE(sig_ctx->payload)) {
+            if (sess_ctx->state != SIG_RELAY_SESS_WAIT_PEER || P2P_RLY_IS_SYN0_OFFLINE(sig_ctx->payload)) {
                 print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sess_ctx->state);
                 return;
             }
@@ -1095,7 +1095,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             }
 
             // 如果存在首批同步的数据
-            if (ptr[P2P_SESS_ID_SZ/* candidate_count */] || sig_ctx->hdr.size > P2P_RLY_SYNC0_S2C_PSZ(0))
+            if (ptr[P2P_SESS_ID_SZ/* candidate_count */] || sig_ctx->hdr.size > P2P_RLY_SYN0_S2C_PSZ(0))
                 handle_peer_sync(s, ptr + P2P_SESS_ID_SZ, (int)(sig_ctx->hdr.size - P2P_PEER_ID_MAX - P2P_SESS_ID_SZ), now);
 
             break;

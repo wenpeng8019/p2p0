@@ -770,7 +770,7 @@ static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct socka
     print("V:", LA_F("Send %s: mapped=%s:%d\n", LA_F111, 111),
           PROTO_ACK, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
-    udp_send(probe_fd, buf, 4 + SIG_PKT_NAT_PROBE_ACK_PSZ, from, PROTO_ACK);
+    udp_send(probe_fd, buf, 4 + SIG_PKT_NAT_ACK_PSZ, from, PROTO_ACK);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

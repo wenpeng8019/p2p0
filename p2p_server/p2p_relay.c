@@ -14,9 +14,9 @@ static const char* s_PROTO_STR[] = {
 
     "REG",
     "OFF",
-    "ALIVE",
+    "ALV",
 
-    "SYNC0",
+    "SYN0",
     "SYNC",
     "FIN",
 
@@ -215,7 +215,7 @@ static bool relay_send_sync0_status(relay_client_t *client, const char *remote_p
     hdr->size = htons(payload_len);
 
     uint8_t *p = (uint8_t *)(hdr + 1);
-    p[0] = P2P_RLY_SYNC0;
+    p[0] = P2P_RLY_SYN0;
     p[1] = status_code;
     memset(p + 2, 0, P2P_PEER_ID_MAX);
     if (remote_peer_id) strncpy((char*)(p + 2), remote_peer_id, P2P_PEER_ID_MAX);
@@ -258,7 +258,7 @@ static bool relay_session_send_sync0_offline(relay_session_t *s, const char *tar
     assert(s && s->base.session_id && s->base.client);
     relay_client_t *client = (relay_client_t*)s->base.client;
 
-    uint16_t payload_len = P2P_RLY_SYNC0_S2C_PSZ(0);
+    uint16_t payload_len = P2P_RLY_SYN0_S2C_PSZ(0);
     buffer_item_t *buf_item = alloc_buffer(sizeof(p2p_relay_hdr_t) + payload_len);
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
@@ -267,7 +267,7 @@ static bool relay_session_send_sync0_offline(relay_session_t *s, const char *tar
     }
 
     p2p_relay_hdr_t *hdr = (p2p_relay_hdr_t *)ITEM2BUF(buf_item);
-    hdr->type = P2P_RLY_SYNC0;
+    hdr->type = P2P_RLY_SYN0;
     hdr->size = htons(payload_len);
     uint8_t *payload = (uint8_t*)(hdr + 1);
     memset(payload, 0, P2P_PEER_ID_MAX);
@@ -356,7 +356,7 @@ static bool relay_session_send_complete(relay_session_t *s, buffer_item_t* buf_i
         s->peer_pending = (buffer_item_t*)(void*)-1;    // 标记对端正在发送最后一个数据包
 
         p2p_relay_hdr_t *p_hdr = (p2p_relay_hdr_t *)ITEM2BUF(pending);
-        assert(p_hdr->type != P2P_RLY_SYNC0);           // pending 为 SYNC0 的情况，会两端首次握手（handle_relay_sync0）时处理
+        assert(p_hdr->type != P2P_RLY_SYN0);           // pending 为 SYNC0 的情况，会两端首次握手（handle_relay_sync0）时处理
 
         // 如果是 P2P_RLY_SYNC，则回复 P2P_RLY_SYNC confirm
         if (p_hdr->type == P2P_RLY_SYNC) {
@@ -525,7 +525,7 @@ relay_term_client(relay_client_t *c, bool and_free) {
 static void relay_handle_sync0(relay_client_t *client, uint8_t *payload, uint16_t len) {
     const char *PROTO = "SYNC0";
 
-    if (len < P2P_RLY_SYNC0_PSZ(0)) {
+    if (len < P2P_RLY_SYN0_PSZ(0)) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F41, 41), PROTO, len);
         return;
     }
@@ -534,7 +534,7 @@ static void relay_handle_sync0(relay_client_t *client, uint8_t *payload, uint16_
         return;
     }
     uint8_t cand_count = payload[P2P_PEER_ID_MAX];
-    uint32_t expect_len = P2P_RLY_SYNC0_PSZ(cand_count);
+    uint32_t expect_len = P2P_RLY_SYN0_PSZ(cand_count);
     if (len != expect_len) {
         print("E:", LA_F("%s: bad payload(cnt=%d, len=%u, expected=%u)\n", LA_F39, 39),
                PROTO, cand_count, len, expect_len);
@@ -587,7 +587,7 @@ static void relay_handle_sync0(relay_client_t *client, uint8_t *payload, uint16_
         strncpy((char*)payload, client->base.local_peer_id, P2P_PEER_ID_MAX - 1);
 
         hdr = (p2p_relay_hdr_t *)client->recv_buf;
-        hdr->size = htons(P2P_RLY_SYNC0_S2C_PSZ(cand_count));
+        hdr->size = htons(P2P_RLY_SYN0_S2C_PSZ(cand_count));
 
         buffer_item_t* item = BUF2ITEM(client->recv_buf);
         client->recv_buf = ITEM2BUF(sync0_item);
@@ -609,9 +609,9 @@ static void relay_handle_sync0(relay_client_t *client, uint8_t *payload, uint16_
         strncpy((char*)p, client->base.local_peer_id, P2P_PEER_ID_MAX - 1);
         // session_id 由后续 nwrite_l 写入
         p[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ] = 0; // cand_count = 0
-        hdr->size = htons(P2P_RLY_SYNC0_S2C_PSZ(0));
+        hdr->size = htons(P2P_RLY_SYN0_S2C_PSZ(0));
     }
-    hdr->type = P2P_RLY_SYNC0;
+    hdr->type = P2P_RLY_SYN0;
 
     // 如果对方不在线，立刻返回 sync0 offline
     // + 并将 sync0 包缓存到 local_s->peer_pending，后面会直接启动双方 sync0 同步
@@ -1103,7 +1103,7 @@ void relay_handle_recv(relay_client_t *client) {
             hdr->size = 0;
             relay_send(client, item);
         }
-        else if (type == P2P_RLY_SYNC0) {
+        else if (type == P2P_RLY_SYN0) {
             if (*payload) {
                 print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), "SYNC0");
                 goto error_proto;

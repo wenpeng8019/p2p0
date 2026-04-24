@@ -39,16 +39,75 @@ static inline int wss_sync_write(wss_session_t *s, const uint8_t *src, size_t n)
     return 0;
 }
 
-/* 追加 payload 到 sync ring buffer，多次追加以 \n 分隔
- * 返回: 0=成功, -1=空间不足（busy） */
-static int wss_sync_cat(wss_session_t *s, const char *payload) {
-    if (!payload || !payload[0]) return 0;
-    size_t new_len = strlen(payload);
-    size_t sep = (s->sync_len > 0) ? 1 : 0;        /* \n 分隔追加部分 */
-    if (sep + new_len > WSS_SYNC_PAYLOAD_MAX - s->sync_len) return -1;
-    if (sep) wss_sync_write(s, "\n", 1);
-    wss_sync_write(s, payload, new_len);
-    return 0;
+// 将 src_s 的 ring buffer 内容转发到 dst_c（经由 dst_s），并向 src_s 的 client 回复 confirm
+//
+// 协议约定（流式传输，无需 heap 分配）：
+//   SYNC <dst_sid>\n<line>   — 发送一行 sync 数据（\n 作为行分隔）
+//   SYNC <dst_sid>\n\n       — fin mark，表示本批次 sync 数据发送完毕
+//
+// 调用前提：dst_c 在线且 wslay 队列空闲
+static void wss_flush_sync(wss_session_t *src_s, wss_session_t *dst_s, wss_client_t *dst_c) {
+    size_t cached = src_s->sync_len;
+    if (!cached) return;
+
+    uint32_t dst_sid = dst_s->base.session_id;
+    uint32_t src_sid = src_s->base.session_id;
+
+    // 固定栈帧：帧头 "SYNC <dst_sid>\n" + 最多一行内容 + NUL
+    char frame[P2P_WSS_CMD_SYNC_SZ + 12 + 1 + WSS_SYNC_PAYLOAD_MAX + 1];
+    int hdr_len = snprintf(frame, sizeof(frame), P2P_WSS_CMD_SYNC_FMT, dst_sid);
+
+    // 逐行扫描 ring buffer，每行发送一个 WebSocket text frame
+    size_t remaining = cached;
+    size_t pos       = src_s->sync_head;    /* pos 始终 < WSS_SYNC_PAYLOAD_MAX */
+    const char *data = (const char*)ITEM2BUF(src_s->sync_buf);
+
+    while (remaining > 0) {
+        // 在 ring buffer 中查找下一个 \n（行分隔符）
+        size_t line_len = 0;
+        size_t scan     = pos;
+        bool   has_nl   = false;
+
+        for (size_t i = 0; i < remaining; i++) {
+            if (data[scan] == '\n') { has_nl = true; break; }
+            line_len++;
+            scan = (scan + 1) % WSS_SYNC_PAYLOAD_MAX;
+        }
+        if (!has_nl) line_len = remaining;
+
+        // 将行内容（可能绕回）拷贝到帧头后面
+        size_t to_end = WSS_SYNC_PAYLOAD_MAX - pos;
+        if (to_end >= line_len) {
+            memcpy(frame + hdr_len, data + pos, line_len);
+        } else {
+            memcpy(frame + hdr_len,          data + pos, to_end);
+            memcpy(frame + hdr_len + to_end, data,       line_len - to_end);
+        }
+        frame[hdr_len + line_len] = '\0';
+        ws_send_text((ws_client_t*)dst_c, frame);
+
+        size_t advance = line_len + (has_nl ? 1u : 0u);
+        pos        = (pos + advance) % WSS_SYNC_PAYLOAD_MAX;
+        remaining -= advance;
+    }
+
+    // 发送 fin mark: "SYNC <dst_sid>\n\n"
+    frame[hdr_len]     = '\n';
+    frame[hdr_len + 1] = '\0';
+    ws_send_text((ws_client_t*)dst_c, frame);
+
+    // 清空 ring buffer，释放动态内存
+    free_buffer(src_s->sync_buf);
+    src_s->sync_buf  = NULL;
+    src_s->sync_head = src_s->sync_len = 0;
+
+    // 通知 src 端已转发确认
+    char confirm[48];
+    snprintf(confirm, sizeof(confirm), P2P_WSS_RSP_SYNC_CONFIRM_FMT, src_sid, cached);
+    ws_send_text((ws_client_t*)src_s->base.client, confirm);
+
+    print("V:", LA_F("%s: sid=%u -> peer_sid=%u (%zu bytes)\n", LA_F35, 35),
+          "SYNC", src_sid, dst_sid, cached);
 }
 
 // 将 session 加到 RPC 待确认链表尾部
@@ -268,84 +327,13 @@ static void wss_handle_sync0(wss_client_t *client, const char *remote_peer_id,
     }
 }
 
-// 将 src_s 的 ring buffer 内容转发到 dst_c（经由 dst_s），并向 src_s 的 client 回复 confirm
-//
-// 协议约定（流式传输，无需 heap 分配）：
-//   SYNC <dst_sid>\n<line>   — 发送一行 sync 数据（\n 作为行分隔）
-//   SYNC <dst_sid>\n\n       — fin mark，表示本批次 sync 数据发送完毕
-//
-// 调用前提：dst_c 在线且 wslay 队列空闲
-static void wss_flush_sync(wss_session_t *src_s, wss_session_t *dst_s, wss_client_t *dst_c) {
-    size_t cached = src_s->sync_len;
-    if (!cached) return;
-
-    uint32_t dst_sid = dst_s->base.session_id;
-    uint32_t src_sid = src_s->base.session_id;
-
-    // 固定栈帧：帧头 "SYNC <dst_sid>\n" + 最多一行内容 + NUL
-    char frame[P2P_WSS_CMD_SYNC_SZ + 12 + 1 + WSS_SYNC_PAYLOAD_MAX + 1];
-    int hdr_len = snprintf(frame, sizeof(frame), P2P_WSS_CMD_SYNC_FMT, dst_sid);
-
-    // 逐行扫描 ring buffer，每行发送一个 WebSocket text frame
-    size_t remaining = cached;
-    size_t pos       = src_s->sync_head;    /* pos 始终 < WSS_SYNC_PAYLOAD_MAX */
-    const char *data = (const char*)ITEM2BUF(src_s->sync_buf);
-
-    while (remaining > 0) {
-        // 在 ring buffer 中查找下一个 \n（行分隔符）
-        size_t line_len = 0;
-        size_t scan     = pos;
-        bool   has_nl   = false;
-
-        for (size_t i = 0; i < remaining; i++) {
-            if (data[scan] == '\n') { has_nl = true; break; }
-            line_len++;
-            scan = (scan + 1) % WSS_SYNC_PAYLOAD_MAX;
-        }
-        if (!has_nl) line_len = remaining;
-
-        // 将行内容（可能绕回）拷贝到帧头后面
-        size_t to_end = WSS_SYNC_PAYLOAD_MAX - pos;
-        if (to_end >= line_len) {
-            memcpy(frame + hdr_len, data + pos, line_len);
-        } else {
-            memcpy(frame + hdr_len,          data + pos, to_end);
-            memcpy(frame + hdr_len + to_end, data,       line_len - to_end);
-        }
-        frame[hdr_len + line_len] = '\0';
-        ws_send_text((ws_client_t*)dst_c, frame);
-
-        size_t advance = line_len + (has_nl ? 1u : 0u);
-        pos        = (pos + advance) % WSS_SYNC_PAYLOAD_MAX;
-        remaining -= advance;
-    }
-
-    // 发送 fin mark: "SYNC <dst_sid>\n\n"
-    frame[hdr_len]     = '\n';
-    frame[hdr_len + 1] = '\0';
-    ws_send_text((ws_client_t*)dst_c, frame);
-
-    // 清空 ring buffer，释放动态内存
-    free_buffer(src_s->sync_buf);
-    src_s->sync_buf  = NULL;
-    src_s->sync_head = src_s->sync_len = 0;
-
-    // 通知 src 端已转发确认
-    char confirm[48];
-    snprintf(confirm, sizeof(confirm), P2P_WSS_RSP_SYNC_CONFIRM_FMT, src_sid, cached);
-    ws_send_text((ws_client_t*)src_s->base.client, confirm);
-
-    print("V:", LA_F("%s: sid=%u -> peer_sid=%u (%zu bytes)\n", LA_F35, 35),
-          "SYNC", src_sid, dst_sid, cached);
-}
-
 // 处理 SYNC 消息：按 session_id 路由转发
-static void wss_handle_sync(wss_session_t *session, const char *payload) {
+static void wss_handle_sync(wss_session_t *session, const uint8_t *payload, size_t payload_len) {
     wss_client_t *client = (wss_client_t*)session->base.client;
     uint32_t session_id = session->base.session_id;
 
     // 写入缓存（无论对端状态）
-    if (wss_sync_cat(session, payload) != 0) {
+    if (!payload_len || wss_sync_write(session, payload, payload_len) != 0) {
         char buf[48];
         snprintf(buf, sizeof(buf), P2P_WSS_RSP_SYNC_BUSY_FMT, session_id);
         ws_send_text((ws_client_t*)client, buf);
@@ -605,9 +593,9 @@ void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
     }
 
     // SYNC0 <remote_peer_id>[\n<payload>]
-    if (strncmp((char*)msg, P2P_WSS_CMD_SYNC0, P2P_WSS_CMD_SYNC0_SZ) == 0) {
+    if (strncmp((char*)msg, P2P_WSS_CMD_SYN0, P2P_WSS_CMD_SYN0_SZ) == 0) {
 
-        char *remote_id = (char*)msg + P2P_WSS_CMD_SYNC0_SZ;
+        char *remote_id = (char*)msg + P2P_WSS_CMD_SYN0_SZ;
         uint8_t *payload = (uint8_t*)ln+1;
         ln_trim;
 
@@ -649,7 +637,7 @@ void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
             return;
         }
 
-        wss_handle_sync((wss_session_t*)s, (const char*)payload);
+        wss_handle_sync((wss_session_t*)s, payload, len - (size_t)(payload - msg));
         return;
     }
 

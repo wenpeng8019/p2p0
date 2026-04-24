@@ -203,7 +203,7 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
                        int candidate_count, p2p_candidate_t *candidates) {
     if (buf_size < 4 + 8 + 32 + 1) return -1;
     int n = 0;
-    buf[n++] = SIG_PKT_SYNC0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
+    buf[n++] = SIG_PKT_SYN0; buf[n++] = 0; buf[n++] = 0; buf[n++] = 0;
     for (int i = 0; i < 8; i++) buf[n++] = (auth_key >> (56 - i * 8)) & 0xFF;
     memset(buf + n, 0, 32);
     if (remote_peer_id) strncpy((char*)(buf + n), remote_peer_id, 31);
@@ -247,19 +247,19 @@ typedef struct {
 
 // 判断是否为首次候选推送包（SYNC0 s2c 或 SYNC seq=0）
 static int is_sync_packet(uint8_t type) {
-    return type == SIG_PKT_SYNC || type == SIG_PKT_SYNC0;
+    return type == SIG_PKT_SYNC || type == SIG_PKT_SYN0;
 }
 
 // 解析 SYNC / SYNC0(s2c) 包
 static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
     memset(info, 0, sizeof(*info));
     
-    if (buf[0] != SIG_PKT_SYNC && buf[0] != SIG_PKT_SYNC0) return;
+    if (buf[0] != SIG_PKT_SYNC && buf[0] != SIG_PKT_SYN0) return;
     
     // SYNC:  [hdr(4)][session_id(4)][base_index(1)][count(1)][cands]
     // SYNC0: [hdr(4)][remote_peer_id(32)][session_id(4)][0x00(1)][count(1)][cands]
     int off = 4;  // skip hdr
-    if (buf[0] == SIG_PKT_SYNC0) {
+    if (buf[0] == SIG_PKT_SYN0) {
         if (len < 4 + (int)P2P_PEER_ID_MAX + 4 + 1 + 1) return;
         off += P2P_PEER_ID_MAX;  // skip remote_peer_id
     } else {
@@ -323,13 +323,13 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
         P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
         ssize_t drain_n = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
                  (struct sockaddr*)&drain_from, &drain_len);
-        if (drain_n >= (ssize_t)(4 + SIG_PKT_SYNC0_ACK_PSZ) && drain_buf[0] == SIG_PKT_SYNC0_ACK) {
+        if (drain_n >= (ssize_t)(4 + SIG_PKT_SYN0_ACK_PSZ) && drain_buf[0] == SIG_PKT_SYN0_ACK) {
             int off = 4 + P2P_PEER_ID_MAX;
             uint32_t ses = ((uint32_t)drain_buf[off] << 24) | ((uint32_t)drain_buf[off+1] << 16) |
                            ((uint32_t)drain_buf[off+2] << 8)  | (uint32_t)drain_buf[off+3];
             // 发送 C2S SYNC0_ACK 二次确认，触发服务器 SYNC0 推送
             uint8_t ack2[8];
-            ack2[0] = SIG_PKT_SYNC0_ACK;
+            ack2[0] = SIG_PKT_SYN0_ACK;
             ack2[1] = 0; ack2[2] = 0; ack2[3] = 0;
             for (int i = 0; i < 4; i++) ack2[4 + i] = (uint8_t)(ses >> (24 - i * 8));
             sendto(sock, (const char*)ack2, 8, 0,
@@ -343,7 +343,7 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
 // 发送 SYNC0_ACK（client→server，确认服务器首次候选推送）
 static void send_sync0_ack(sock_t sock, uint32_t session_id) {
     uint8_t pkt[16];
-    pkt[0] = SIG_PKT_SYNC0_ACK;
+    pkt[0] = SIG_PKT_SYN0_ACK;
     pkt[1] = 0; pkt[2] = 0; pkt[3] = 0;
     for (int i = 0; i < 4; i++) pkt[4 + i] = (uint8_t)(session_id >> (24 - i * 8));
 

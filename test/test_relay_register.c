@@ -292,10 +292,10 @@ static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_
 // payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
 static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
-    uint16_t payload_len = P2P_RLY_SYNC0_PSZ(candidate_count);
+    uint16_t payload_len = P2P_RLY_SYN0_PSZ(candidate_count);
     if (buf_size < 3 + (int)payload_len) return -1;
     
-    buf[0] = P2P_RLY_SYNC0;
+    buf[0] = P2P_RLY_SYN0;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
     
@@ -383,7 +383,7 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
             return 0;
         }
         
-        if (type == P2P_RLY_SYNC0 && payload_len >= P2P_RLY_SYNC0_S2C_PSZ(0)) {
+        if (type == P2P_RLY_SYN0 && payload_len >= P2P_RLY_SYN0_S2C_PSZ(0)) {
             ack->received = 1;
             // [relay_hdr(3)][target_name(32)][session_id(P2P_SESS_ID_SZ)][state(1)]
             int off = 3 + P2P_PEER_ID_MAX;
@@ -756,7 +756,7 @@ static void test_sync0_bad_payload(void) {
     
     // 发送畸形 SYNC0 包（payload 长度声明与实际不符）
     uint8_t bad_pkt[16];
-    bad_pkt[0] = P2P_RLY_SYNC0;
+    bad_pkt[0] = P2P_RLY_SYN0;
     bad_pkt[1] = 0;
     bad_pkt[2] = 8;  // payload_len = 8（应为 33+）
     memset(bad_pkt + 3, 0, 8);
