@@ -12,18 +12,19 @@
 typedef struct relay_session {
     session_t                       base;
 
-    /* 向对端发送的待处理队列 */
-    buffer_item_t*                  peer_pending;               // 由对端主动来取，用于控制发送节奏
-                                                                // + 即对端的发送队列最多只有来自本端的一个发送项
-                                                                //   当对端发送完来自本端的项后，会来此继续取下一项
-                                                                // ! 该值可以为 -1, 表示最后一个数据包正在对端的发送队列中
+    bool                            synced;                    // SYNC 是否完成（sess 初始默认为 syncing 状态，即相当于 sess 的 handshake）
 
-    /* MSG RPC 忙标志（独立于 peer_pending 的并行通道）*/
+    /* RPC 忙标志（独立于 peer_send 的并行通道）*/
+    uint16_t                        rpc_last_sid;
     uint16_t                        rpc_pending_sid;            // RPC 生命周期锁：0=空闲，非0=进行中的 RPC sid
                                                                 // 全程：REQ→转发→RESP→转发回来才解锁
                                                                 // RESP 返回时验证 sid 一致性
     uint64_t                        rpc_sent_time;              // RPC 发起时间戳（毫秒，用于超时检测）
     struct relay_session*           rpc_pending_next;           // RPC 待确认链表指针（NULL=不在链表中，-1=链表尾）
+
+    /* 向对端发送的待处理队列 */
+    buffer_item_t*                  peer_send;                  // 发给对端的数据队列（由对端主动来取，用于控制发送节奏）
+    buffer_item_t*                  peer_sending;
 
     /* 本地发送队列 */
     buffer_item_t*                  send_head;
@@ -43,11 +44,12 @@ typedef struct relay_client {
     uint8_t*                        recv_buf;
     uint16_t                        recv_len;
 
-    buffer_item_t*                  sending_buff_head;
-    buffer_item_t*                  sending_buff_rear;
-    relay_session_t*                sending_sess_head;
-    relay_session_t*                sending_sess_rear;
-    int                             send_offset;                // <0 表示当前正在发送的是 buff; >=0 表示正在发送 sess，值为已发送字节数
+    buffer_item_t*                  send_buff_head;
+    buffer_item_t*                  send_buff_rear;
+    relay_session_t*                send_sess_head;
+    relay_session_t*                send_sess_rear;
+    relay_session_t*                sending_sess;               // 当前正在发送的 session; =NULL 表示正在发送 buff
+    uint16_t                        sending_offset;
 } relay_client_t;
 
 void
@@ -56,7 +58,7 @@ relay_init(void);
 bool
 relay_init_client(relay_client_t* c);
 void
-relay_term_client(relay_client_t *c, bool and_free);
+relay_term_client(relay_client_t *client, int mode);                 // 0: free; -1:break; 1:stop
 
 void
 relay_handle_recv(relay_client_t *client);
