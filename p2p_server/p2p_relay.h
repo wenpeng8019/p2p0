@@ -12,7 +12,7 @@
 typedef struct relay_session {
     session_t                       base;
 
-    bool                            synced;                    // SYNC 是否完成（sess 初始默认为 syncing 状态，即相当于 sess 的 handshake）
+    uint8_t                         last_sid;                   // 会话同步的最后一个 sid
 
     /* RPC 忙标志（独立于 peer_send 的并行通道）*/
     uint16_t                        rpc_last_sid;
@@ -39,7 +39,6 @@ typedef struct relay_client {
     TCP_CLIENT
 
     uint8_t                         last_error;                 
-    bool                            reg_ack_pending;            // REG ACK 待发送标志（复用 recv_buf）
 
     uint8_t*                        recv_buf;
     uint16_t                        recv_len;
@@ -58,7 +57,7 @@ relay_init(void);
 bool
 relay_init_client(relay_client_t* c);
 void
-relay_term_client(relay_client_t *client, int mode);                 // 0: free; -1:break; 1:stop
+relay_term_client(relay_client_t *client);
 
 void
 relay_handle_recv(relay_client_t *client);
