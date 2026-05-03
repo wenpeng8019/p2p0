@@ -57,7 +57,7 @@ relay_init(void);
 bool
 relay_init_client(relay_client_t* c);
 void
-relay_term_client(relay_client_t *client);
+relay_free_client(relay_client_t *client);
 
 void
 relay_handle_recv(relay_client_t *client);
@@ -65,5 +65,6 @@ void
 relay_handle_send(relay_client_t *client);
 void
 relay_retry_pending(uint64_t now);
+
 
 #endif //P2P_P2P_RELAY_H
