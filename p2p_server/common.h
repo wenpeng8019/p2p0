@@ -169,11 +169,19 @@ free_session_base(session_t *s);
     uint8_t                         io;         \
     int8_t                          handshake;
 
+// 该标记用于设定 TCP 是否对该 sock 进行相应的 I/O 操作
 #define TCP_IO_FLAG_WANT_READ       (1<<0)
 #define TCP_IO_FLAG_WANT_WRITE      (1<<1)
+// 该标记用于监听 ws 等第三方协议库 I/O 操作后的 sock 状态
 #define TCP_IO_FLAG_READ_BREAK      (1<<2)  /* sock 出错或 would block，停止继续读取  */
 #define TCP_IO_FLAG_WRITE_BREAK     (1<<3)  /* sock 出错或 would block，停止继续写入  */
+// 自定义 flag 的 bit 起始位
 #define TCP_IO_FLAG_CUSTOM_BIT      4
+
+#define TCP_HS_FLAG_HANDSHAKING     (1)
+#define TCP_HS_FLAG_CLOSING         (-1)
+#define TCP_HS_IS_HANDSHAKING(c)    (((tcp_client_t*)c)->handshake > 0)
+#define TCP_HS_IS_CLOSING(c)        (((tcp_client_t*)c)->handshake < 0)
 
 typedef struct tcp_client
 {
