@@ -1459,16 +1459,19 @@ void relay_handle_send(relay_client_t *client) {
         if (client->handshake) return;
     }
 
-    // todo 优化对 session 进行均衡轮询发送策略
     relay_session_t *sending_session = client->send_sess_head; buffer_item_t *item = client->send_buff_head;
     if (sending_session || item) { assert(client->io & TCP_IO_FLAG_WANT_WRITE);
 
-        // 除非当前正在发送 session 级别的包，否则优先发送 client 级别的包
-        if (client->sending_sess) { assert(sending_session);
+        // 如果正在发送 session 数据包（mid-packet），继续发送当前 session
+        if (client->sending_sess && client->sending_offset) { assert(sending_session);
+            sending_session = client->sending_sess;
             item = sending_session->send_head;
-        } else if (!item) { assert(sending_session);
+        }
+        // 否则优先发送 client 级别的包；没有 client 包时，从游标 session 发送
+        else if (!item) { assert(sending_session);
+            if (!client->sending_sess) client->sending_sess = sending_session;
+            else sending_session = client->sending_sess;
             item = sending_session->send_head;
-            client->sending_sess = sending_session;
         }
 
         const p2p_relay_hdr_t *hdr = (const p2p_relay_hdr_t *)ITEM2BUF(item);
@@ -1528,21 +1531,31 @@ void relay_handle_send(relay_client_t *client) {
             // 对于 session 级的 item
             else { assert(item==sending_session->send_head && item != (buffer_item_t*)g_relay_fatal);
 
-                client->sending_sess = NULL;
-
                 // 如果发送的是对端发过来的数据
                 if (item->refer) {
                     relay_peer_sent((relay_session_t*)item->refer, item);
                 }
 
-                // 发送 session sending 队列的下一项，且当 session sending 队列为空时，从 client 中移除该 sending sess
-                if (!((sending_session->send_head = item->next))) {
-                    sending_session->send_rear = NULL;
+                // 发送 session sending 队列的下一项
+                if ((sending_session->send_head = item->next)) {
 
-                    // 如果 session 发送队列已空，发送下一条待发送 session
-                    client->send_sess_head = sending_session->send_next;
-                    if (client->send_sess_head) client->send_sess_head->send_prev = NULL;
-                    else client->send_sess_rear = NULL;
+                    // session 还有数据，游标轮转到下一个 session（无需修改链表结构）
+                    client->sending_sess = sending_session->send_next ? sending_session->send_next : client->send_sess_head;
+                }
+                // session 发送队列已空，从 client 中移除该 session
+                else { sending_session->send_rear = NULL;
+
+                    relay_session_t *next = sending_session->send_next;
+                    if (sending_session->send_prev) sending_session->send_prev->send_next = next;
+                    else client->send_sess_head = next;
+                    if (next) {
+                        next->send_prev = sending_session->send_prev;
+                        client->sending_sess = next;
+                    }
+                    else {
+                        client->send_sess_rear = sending_session->send_prev;
+                        client->sending_sess = client->send_sess_head;
+                    }
                     sending_session->send_next = NULL;
                     sending_session->send_prev = NULL;
                 }
