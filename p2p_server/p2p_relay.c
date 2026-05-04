@@ -40,7 +40,7 @@ static uint8_t                      g_relay_fatal[sizeof(buffer_item_t) + sizeof
 static inline bool is_client_online(const relay_client_t *client) {
     // 已完成握手、且没有关闭、或（因错误而）正在关闭
     if (client->base.local_peer_id[0] && (client->io & TCP_IO_FLAG_WANT_READ)) {
-        assert(client->base.fd != P_INVALID_SOCKET && !client->last_error);
+        assert(client->base.fd != P_INVALID_SOCKET);
         return true;
     } return false;
 }
@@ -431,10 +431,12 @@ static void relay_peer_send(relay_session_t *session) {
     // 如果是 P2P_RLY_SYNC，则回复 P2P_RLY_SYNC confirm
     if (p_hdr->type == P2P_RLY_SYNC) {
         uint8_t candidate_count = ((uint8_t *)(p_hdr + 1))[P2P_SESS_ID_SZ];
-        if (candidate_count) relay_session_send_sync_confirm(session, candidate_count);
+        if (candidate_count && is_client_online(RELAY_CLIENT(session)))
+            relay_session_send_sync_confirm(session, candidate_count);
     }
     else if (p_hdr->type == P2P_RLY_PKT) {
-        relay_session_send_status(session, p_hdr->type, P2P_RLY_CODE_READY);
+        if (is_client_online(RELAY_CLIENT(session)))
+            relay_session_send_status(session, p_hdr->type, P2P_RLY_CODE_READY);
     }
 
     relay_session_send(RELAY_PEER(session), session->peer_sending);
@@ -447,10 +449,7 @@ static void relay_peer_sent(relay_session_t *session, buffer_item_t* buf_item) {
     session->peer_sending = NULL;
 
     if (buf_item->flags & RELAY_BUF_FLAGS_SYNC_FIN) {
-
-        if (!relay_session_send_sync_confirm(session, 0)) {
-            // todo
-        }
+        relay_session_send_sync_confirm(session, 0);
     }
 
     // 如果没有待发送数据（全部发送完成），或者对端已离线（停止发送），则直接返回
@@ -462,6 +461,9 @@ static void relay_peer_sent(relay_session_t *session, buffer_item_t* buf_item) {
 
 // 停止/终止会话
 static void relay_break_session(relay_session_t *session, relay_session_t *peer, break_mode_e break_mode) {
+
+    // 调用方保证 peer 在线：relay_close_session 检查了 PEER_ONLINE，client_unreachable 检查了 TCP_REACHABLE
+    assert(is_client_online(RELAY_CLIENT(peer)));
 
     // 存在对端发起的 req
     if (peer->rpc_pending_sid) {
@@ -491,6 +493,7 @@ static void relay_break_session(relay_session_t *session, relay_session_t *peer,
         session->peer_sending->refer = NULL;
         session->peer_sending = NULL;
     }
+
     // 如果存在待发送给对端的数据包，则直接发送给对端（且不添加 refer 引用关系）
     if (session->peer_send) {
         relay_session_send(peer, session->peer_send);
@@ -514,7 +517,10 @@ static void relay_break_session(relay_session_t *session, relay_session_t *peer,
     }
     else {
 
-        peer->peer_sending = NULL;
+        if (peer->peer_sending) {
+            peer->peer_sending->refer = NULL;
+            peer->peer_sending = NULL;
+        }
         if (peer->peer_send) {
             free_buffer(peer->peer_send);
             peer->peer_send = NULL;
@@ -585,6 +591,7 @@ relay_free_client(relay_client_t *client) {
     client->sending_offset = 0;     // 确保正在发送中的数据包也被清除
     clear_client_sending(client);
 
+    if (client->recv_buf) { free_buffer(BUF2ITEM(client->recv_buf)); client->recv_buf = NULL; }
     free_client_base(&client->base);
 }
 
@@ -1056,30 +1063,6 @@ static void relay_handle_rsp(relay_client_t *client, relay_session_t *session, u
 
 //-----------------------------------------------------------------------------
 
-// 检查 RELAY RPC 超时（队列按时间排序，未超时即短路返回）
-void relay_retry_pending(uint64_t now) {
-
-    while (g_relay_rpc_pending_head) { relay_session_t *s = g_relay_rpc_pending_head;
-
-        // 队列按时间排序，未超时即全部未超时
-        if (tick_diff(now, s->rpc_sent_time) < REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS) return;
-
-        // 移除队头
-        g_relay_rpc_pending_head = s->rpc_pending_next;
-        if (g_relay_rpc_pending_head == (void*)-1) {
-            g_relay_rpc_pending_head = g_relay_rpc_pending_rear = NULL;
-        }
-        s->rpc_pending_next = NULL;
-
-        // 向请求方发送超时错误 RSP
-        uint16_t sid = s->rpc_pending_sid;
-        s->rpc_pending_sid = 0;
-
-        print("W:", "[R] RPC timeout: sid=%u (ses_id=%u)\n", sid, s->base.session_id);
-        relay_session_send_rpc_code(s, sid, P2P_RPC_ERR_TIMEOUT);
-    }
-}
-
 // 处理 RELAY 模式信令（TCP 长连接）- 统一接收+分发架构
 void relay_handle_recv(relay_client_t *client) {
     assert(client->base.proto == PROTO_RELAY);
@@ -1181,7 +1164,11 @@ void relay_handle_recv(relay_client_t *client) {
 
                 // 如果 instance_id 一致（断网重连）
                 if (resident_client(&reg->base, PROTO_RELAY, instance_id, &client->base)) {
+                    
                     client = reg;
+                    client->last_error = 0;                 // 重置错误状态
+                    client->io |= TCP_IO_FLAG_WANT_READ;    // 重新激活读取（之前断网时会被关闭）
+
                     print("I:", LA_F("%s: '%s' reconnected & reactive (inst=%u)\n", LA_F98, 98), PROTO,
                            client->base.local_peer_id, client->base.instance_id);
                 }
@@ -1243,7 +1230,6 @@ void relay_handle_recv(relay_client_t *client) {
         }
         else if (type == P2P_RLY_OFF) {
             print("I:", LA_F("%s: '%s'\n", LA_F72, 72), PROTO_STR(type), client->base.local_peer_id);
-            client->io &= ~TCP_IO_FLAG_WANT_READ;
             client_off(client);
             return;
         }
@@ -1337,6 +1323,7 @@ error:
     client_unreachable(client);
     relay_send_status(client, type, client->last_error);
     client->io &= ~TCP_IO_FLAG_WANT_READ;
+    client->base.last_active = P_tick_ms();
     return;
 // 大多数 Internal(例如 OOM) 错误，它们会导致（之前或之后的）数据完整性被破坏，或无法再继续安全的运行
 // + 此时会清除所有发送队列（因为数据完整性已破坏，即使发送过去也没有意义），
@@ -1360,7 +1347,7 @@ error_handshake:
     size_t len = sizeof(p2p_relay_hdr_t);
     client->recv_buf[len] = P2P_RLY_REG;
     client->recv_buf[len+1] = client->last_error;
-    len += hdr->size; hdr->size = htons(len);
+    len += hdr->size; hdr->size = htons(P2P_RLY_STATUS_PSZ(0, 0));
 
     ssize_t r = tcp_send((tcp_client_t*)client, client->recv_buf, &len, "REG_ACK");
     if (r > 0) {
@@ -1416,12 +1403,16 @@ void relay_handle_send(relay_client_t *client) {
         if (client->handshake) return;
     }
 
+    // todo 优化对 session 进行均衡轮询发送策略
     relay_session_t *sending_session = client->send_sess_head; buffer_item_t *item = client->send_buff_head;
     if (sending_session || item) { assert(client->io & TCP_IO_FLAG_WANT_WRITE);
 
         // 除非当前正在发送 session 级别的包，否则优先发送 client 级别的包
-        if (!item || client->sending_sess) { assert(sending_session);
+        if (client->sending_sess) { assert(sending_session);
             item = sending_session->send_head;
+        } else if (!item) { assert(sending_session);
+            item = sending_session->send_head;
+            client->sending_sess = sending_session;
         }
 
         const p2p_relay_hdr_t *hdr = (const p2p_relay_hdr_t *)ITEM2BUF(item);
@@ -1437,6 +1428,7 @@ void relay_handle_send(relay_client_t *client) {
             client->sending_offset = 0;
             client_unreachable(client);
             client->io &= ~(TCP_IO_FLAG_WANT_READ|TCP_IO_FLAG_WANT_WRITE);
+            client->base.last_active = P_tick_ms();
             return;
         }
 
@@ -1447,6 +1439,8 @@ void relay_handle_send(relay_client_t *client) {
             if (item==client->send_buff_head) {
                 if (!((client->send_buff_head = item->next))) client->send_buff_rear = NULL;
             } else { assert(item==sending_session->send_head);
+
+                client->sending_sess = NULL;
 
                 if (item->refer) {
                     relay_peer_sent((relay_session_t*)item->refer, item);
@@ -1460,11 +1454,13 @@ void relay_handle_send(relay_client_t *client) {
                     if (client->send_sess_head) client->send_sess_head->send_prev = NULL;
                     else client->send_sess_rear = NULL;
                     sending_session->send_next = NULL;
+                    sending_session->send_prev = NULL;
                 }
             }
 
-            // 删除已发送完成的 item
-            free_buffer(item);
+            // 删除已发送完成的 item（g_relay_fatal 是静态缓冲区，不可 free）
+            if ((buffer_item_t*)item != (buffer_item_t*)g_relay_fatal)
+                free_buffer(item);
 
             // 如果全部发送完成
             if (!client->send_sess_head && !client->send_buff_head) {
@@ -1477,6 +1473,33 @@ void relay_handle_send(relay_client_t *client) {
                 }
             }
         }
+    }
+}
+
+// 检查 RELAY RPC 超时（队列按时间排序，未超时即短路返回）
+void relay_retry_pending(uint64_t now) {
+
+    while (g_relay_rpc_pending_head) { relay_session_t *s = g_relay_rpc_pending_head;
+
+        // 队列按时间排序，未超时即全部未超时
+        if (tick_diff(now, s->rpc_sent_time) < REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS) return;
+
+        // 移除队头
+        g_relay_rpc_pending_head = s->rpc_pending_next;
+        if (g_relay_rpc_pending_head == (void*)-1) {
+            g_relay_rpc_pending_head = g_relay_rpc_pending_rear = NULL;
+        }
+        s->rpc_pending_next = NULL;
+
+        // 向请求方发送超时错误 RSP
+        uint16_t sid = s->rpc_pending_sid;
+        s->rpc_pending_sid = 0;
+
+        // 若 client 已不可达（如 TCP 断连），跳过发送，状态已清除
+        if (!is_client_online((relay_client_t*)s->base.client)) continue;
+
+        print("W:", "[R] RPC timeout: sid=%u (ses_id=%u)\n", sid, s->base.session_id);
+        relay_session_send_rpc_code(s, sid, P2P_RPC_ERR_TIMEOUT);
     }
 }
 
