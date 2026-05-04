@@ -703,9 +703,9 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 错误处理：
  *   1. REQ_ACK 阶段 B 不在线：Server → A 返回 status=1，A 调用 on_response(len=-1, code=原始请求msg)
  *   2. B 在等待响应期间离线：Server → A 发送 MSG_RSP(flags=SIG_MSG_FLAG_PEER_OFFLINE)，
- *      A 调用 on_response(len=-1, code=P2P_MSG_ERR_PEER_OFFLINE)
+ *      A 调用 on_response(len=-1, code=P2P_RPC_ERR_PEER_OFF)
  *   3. Server 转发请求超时：Server → A 发送 MSG_RSP(flags=SIG_MSG_FLAG_TIMEOUT)，
- *      A 调用 on_response(len=-1, code=P2P_MSG_ERR_TIMEOUT)
+ *      A 调用 on_response(len=-1, code=P2P_RPC_ERR_TIMEOUT)
  *
  * 流程（7 次传输）：
  *
@@ -748,16 +748,16 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 
 /* RELAY 模式消息类型 */
 typedef enum {
-    P2P_RLY_STATUS = 0,                      // 状态包（仅服务器发送，包含请求类型 + 状态码）
+    P2P_RLY_STA = 0,                        // 状态包（仅服务器发送，包含请求类型 + 状态码）
 
     /* 在线管理 */
     P2P_RLY_REG,                            // 上线: Client -> Server / Server -> Client（双向，上下行 payload 不同）
     P2P_RLY_OFF,                            //
-    P2P_RLY_ALIVE,                          // 心跳: Client -> Server / Server -> Client（双向，空 payload）
+    P2P_RLY_ALV,                            // 心跳: Client -> Server / Server -> Client（双向，空 payload）
 
     /* 会话同步 */
-    P2P_RLY_SYN0,                           // 首次同步: 三态 (Client -> Server 发起建会; Server -> Client 建会应答; Server -> Client 转发对端首批候选)
-    P2P_RLY_SYNC,                           // 后续同步: 三态 (Client -> Server 上传; Server -> Client 下发; Server -> Client 确认处理数量)
+    P2P_RLY_SYN0,                           // 首次同步: 三态 (Client -> Server 发起创建会话; Server -> Client 会话创建应答; Server -> Client 转发对端 SYN0 请求)
+    P2P_RLY_SYNC,                           // 后续同步: 双向对等、四态 (Client -> Server 上传; Server -> Client 应答确认; Server -> Client 下发; Server -> Client 应答确认)
     P2P_RLY_FIN,                            // 会话结束: Client -> Server / Server -> Client
 
     /* P2P 数据中继（打洞失败降级） */
@@ -774,15 +774,20 @@ typedef struct {
     uint16_t            size;
 } p2p_relay_hdr_t;
 
-#define P2P_RLY_CODE_READY          0                  // 服务器就绪，客户端可继续后续操作
+#define P2P_RLY_CODE_READY          0                   // 请求操作成功，服务器就绪，客户端可继续后续操作
+                                                        // + 作为 TCP 协议，都是基于 REQ/RSP 的请求应答模式，也就是每个请求，都会对应一个应答码
+                                                        //   READY 表示请求成功。此外，它也代表客户端可以继续请求后续操作，
+                                                        //   对应的，如果服务器想让客户端延迟后续操作，可以通过延迟返回该状态码来实现。
 #define P2P_RLY_ERR(c)              (0x80+c)            // 错误码基数，code >= 0x80 表示错误
-#define P2P_RLY_ERR_IO              P2P_RLY_ERR(0)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
-#define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(1)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
-#define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(2)      // 协议错误（未登录/非法状态）
-#define P2P_RLY_ERR_NOT_REG         P2P_RLY_ERR(3)      // 未完成 ONLINE 登录
-#define P2P_RLY_ERR_PEER_OFFLINE    P2P_RLY_ERR(4)      // 对端未连接（session 存在但 peer 为空）
-#define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(5)      // 会话忙（前一个转发尚未完成）
-#define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(6)      // 服务器转发请求超时
+#define P2P_RLY_ERR_IO              P2P_RLY_ERR(0)      // 网络 I/O 错误（连接异常/读写失败）
+#define P2P_RLY_ERR_OVERFLOW        P2P_RLY_ERR(1)      // 请求协议包数据过大（size 超出限制）
+#define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(2)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
+#define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(3)      // 协议错误（未登录/非法状态）
+#define P2P_RLY_ERR_PEER_OFF        P2P_RLY_ERR(4)      // 对端未完成 REG（未登录）或已 OFF（离线）
+#define P2P_RLY_ERR_UNREACHABLE     P2P_RLY_ERR(5)      // 对方暂时不可达（对方已经 REG 但可能网络闪断或异常）
+#define P2P_RLY_ERR_INVALID         P2P_RLY_ERR(6)      // 无效的参数或操作
+#define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(7)      // 服务器转发请求超时
+#define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(8)      // 会话忙（前一个转发尚未完成）
 
 /* RELAY ONLINE 下行功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
@@ -795,7 +800,7 @@ typedef struct {
  *
  * 所有消息：[p2p_relay_hdr_t: 3B][payload: N bytes]
  *
- * P2P_RLY_STATUS:
+ * P2P_RLY_STA:
  *   payload: [type(1)][status_code(1)][[session_id(P2P_SESS_ID_SZ)]|remote_peer_id(P2P_PEER_ID_MAX)][status_msg(N)]
  *   - type: 请求的 p2p_relay_type_t 类型（例如 P2P_RLY_SYN0），用于指示哪个请求出错
  *   - status_code: 见 P2P_RLY_CODE_* 定义
@@ -818,7 +823,7 @@ typedef struct {
 */
 #define P2P_RLY_REG_PSZ                 (P2P_PEER_ID_MAX + sizeof(uint32_t))
 #define P2P_RLY_REG_S2C_PSZ             2u
- /* P2P_RLY_ALIVE（双向）:
+ /* P2P_RLY_ALV（双向）:
  *   payload: 空（仅包头）
  *   - Client -> Server: 心跳保活
  *   - Server -> Client: 心跳确认
@@ -828,45 +833,51 @@ typedef struct {
  * + 注意一个细节，SYN0 的候选肯定不带有 FIN 标识，也就是 SYN0 肯定不是最后一个 SYNC 包
  *
  *   状态 1: Client -> Server（发起会话创建，并提交首批候选）
- *     payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
+ *     payload: [target_name(32)][sid(1)][candidate_count(1)][candidates(N*23)]
  *     - target_name: 目标 peer 名称，定长 32 字节，0 填充
+ *     - sid: 本次 SYN0 的序列号（循环递增，用于服务端去重/排序）
  *     - candidate_count: 本端首批候选数量（可以为 0）
  *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *
  *   状态 2: Server -> Client（会话创建应答，对方不在线，立即返回）
- *     payload: [target_name(32)][session_id(P2P_SESS_ID_SZ)][0xFF(1)]
+ *     payload: [target_name(32)][session_id(P2P_SESS_ID_SZ)][sid(1)][0xFF(1)]
  *     - target_name: 目标 peer 名称，定长 32 字节，0 填充
- *     - session_id: 64 位会话 ID（网络字节序）
+ *     - session_id: 会话 ID（网络字节序）
+ *     - sid: 回显客户端 SYN0 的序列号
  *     - 0xFF(1): 常量，表示对端离线
  *
  *   状态 3: Server -> Client（转发对端同步数据，也就是首批候选集合，同时表示对端在线/或上线）
- *     payload: [source_name(32)][session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)]
+ *     payload: [source_name(32)][session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)]
  *     - 格式同 P2P_RLY_SYNC，但不包括 fin_marker 字段
+ *     - sid: 对端 SYN0 的序列号（服务端透传，用于客户端去重）
  *     - candidate_count < 0xFF，0xFF 保留给状态 2 的离线标识
  */
-#define P2P_RLY_SYN0_PSZ(n)             (P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t))
+#define P2P_RLY_SYN0_PSZ(n)             (P2P_PEER_ID_MAX + 2u + (n)*sizeof(p2p_candidate_t))
 #define P2P_RLY_SYN0_S2C_PSZ(n)         (P2P_SESS_ID_SZ + P2P_RLY_SYN0_PSZ(n))
-#define P2P_RLY_IS_SYN0_OFFLINE(p)      (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ] == 0xFF)
+#define P2P_RLY_IS_SYN0_OFFLINE(p)      (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 1u] == 0xFF)
 /* P2P_RLY_SYNC（三态，上下行负载格式不同）:
  *
  *   状态 1: Client -> Server（上传本端后续候选）
- *     payload: [session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
- *     - session_id: 64 位会话 ID（网络字节序）
+ *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ *     - session_id: 会话 ID（网络字节序）
+ *     - sid: 本包序列号（循环递增，用于服务端去重/排序）
  *     - candidate_count: 本包候选数量
  *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *     - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
  *
  *   状态 2: Server -> Client（确认候选处理数量）
- *     payload: [session_id(P2P_SESS_ID_SZ)][confirmed_count(1)]
- *     - session_id: 64 位会话 ID（网络字节序）
+ *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][confirmed_count(1)]
+ *     - session_id: 会话 ID（网络字节序）
+ *     - sid: 回显对应上行 SYNC 的序列号
  *     - confirmed_count: 实际确认处理的候选数（转发或缓存），0=全部完成（仅 FIN 后）
  *     ! 下行的 SYNC 并非是上行 SYNC 的应答。例如，上行 2 个 SYNC，返回 1 SYNC，confirmed_count 是上行两个 SYNC 中累计确认的候选数量
  * 
  *   状态 3: Server -> Client（下发/转发对端候选）
- *     payload: [session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *     - 与状态 1 同格式，session_id 由服务器重写为接收方本地会话 ID
+ *     - sid: 对端 SYNC 的序列号（服务端透传，用于客户端去重）
  */
-#define P2P_RLY_SYNC_PSZ(n, mk)         (P2P_SESS_ID_SZ + 1u + (n)*sizeof(p2p_candidate_t) + ((mk) ? 1u : 0u))
+#define P2P_RLY_SYNC_PSZ(n, mk)         (P2P_SESS_ID_SZ + 2u + (n)*sizeof(p2p_candidate_t) + ((mk) ? 1u : 0u))
 #define P2P_RLY_IS_SYNC_CONFIRM(hdr)    (((p2p_relay_hdr_t*)(hdr))->size == P2P_RLY_SYNC_PSZ(0, 0))
 /* P2P_RLY_FIN:
  *   payload: [session_id(P2P_SESS_ID_SZ)]
@@ -874,10 +885,10 @@ typedef struct {
 */
 #define P2P_RLY_FIN_PSZ                 (P2P_SESS_ID_SZ)
 
-/* P2P_RLY_PACKET:
+/* P2P_RLY_PKT:
  *   所有 TCP relay 数据包 payload 统一格式: [session_id(P2P_SESS_ID_SZ)][P2P hdr(4)][data]
  *   P2P hdr = [type(1)][flags(1)][seq(2)]，内层 type 区分实际包类型
- *   (DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK 等均通过 P2P_RLY_PACKET 隧道传输)
+ *   (DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK 等均通过 P2P_RLY_PKT 隧道传输)
  *
  *   说明：
  *   - session_id 用于会话隔离与服务器路由（转发到配对会话）。
@@ -908,10 +919,10 @@ typedef struct {
  *   - data: 响应数据
  *
  * 特殊错误码（服务器生成的错误响应，on_response 回调 len=-1）：
- *   0xFF (P2P_MSG_ERR_PEER_OFFLINE): 对端在等待响应期间离线
- *   0xFE (P2P_MSG_ERR_TIMEOUT): 服务器转发超时
+ *   0xFF (P2P_RPC_ERR_PEER_OFF): 对端在等待响应期间离线
+ *   0xFE (P2P_RPC_ERR_TIMEOUT): 服务器转发超时
  *
- * 流控：使用 rpc_pending 通道（独立于 SYNC/DATA 的 peer_pending），
+ * 流控：使用 rpc_pending 通道（独立于 SYNC/DATA 的 peer_send），
  *      每个方向同时最多一个 RPC 消息在传输中。
  *
  * ============================================================================
@@ -1063,13 +1074,13 @@ typedef struct {
  *   │<======================== P2P ICE 打洞 ======================>│
  *
  *
- * 5. P2P_RLY_PACKET - P2P 包中继
+ * 5. P2P_RLY_PKT - P2P 包中继
  * ============================================================================
  *
  * 功能：P2P 打洞失败时，通过服务器转发 P2P 包（降级方案）
  *
  * Client → Server:
- *   P2P_RLY_PACKET: [session_id(P2P_SESS_ID_SZ)][P2P hdr(4)][payload(N)]
+ *   P2P_RLY_PKT: [session_id(P2P_SESS_ID_SZ)][P2P hdr(4)][payload(N)]
  *   - 内层 P2P hdr.type 区分: DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK
  *   - 服务器零拷贝转发，仅重写 session_id。
  *
@@ -1085,12 +1096,12 @@ typedef struct {
  *   - msg=0: Echo 测试，B端自动回复相同数据，无需应用层介入
  *   - msg>0: 应用层自定义消息类型，需 on_request 回调处理
  *
- * 流控：使用 rpc_pending 通道（独立于 SYNC/DATA 的 peer_pending），
+ * 流控：使用 rpc_pending 通道（独立于 SYNC/DATA 的 peer_send），
  *       每个方向同时最多一个 RPC 消息在传输中。
  *
  * 错误处理（服务器生成错误 RSP 返回给 A）：
- *   - 对端离线: code=0xFE (P2P_MSG_ERR_PEER_OFFLINE)
- *   - 转发超时: code=0xFF (P2P_MSG_ERR_TIMEOUT)
+ *   - 对端离线: code=0xFE (P2P_RPC_ERR_PEER_OFF)
+ *   - 转发超时: code=0xFF (P2P_RPC_ERR_TIMEOUT)
  *
  * 流程（4 步）：
  *
@@ -1311,7 +1322,7 @@ typedef struct {
  *
  * 功能: 创建与指定对端的信令会话，建立 session_pair_t 双向配对。
  *       类似 RELAY P2P_RLY_SYN0 / COMPACT SIG_PKT_SYN0。
- *       可选携带首批 ICE 候选作为预缓存负载（类似 RELAY SYN0 的 peer_pending）。
+ *       可选携带首批 ICE 候选作为预缓存负载（类似 RELAY SYN0 的 peer_send）。
  *
  * 前置条件: 发送方必须已 REG 注册，否则返回 "REG FAIL not registered\n"
  *
@@ -1547,7 +1558,7 @@ typedef struct {
  *
  * 以下消息使用 WebSocket 二进制帧传输，与上方文本帧信令共享同一 WS 连接。
  * 二进制帧用于 P2P 数据中继（打洞失败降级）和 MSG RPC（服务器中转请求-应答），
- * 对应 RELAY 模式的 P2P_RLY_PACKET / P2P_RLY_REQ / P2P_RLY_RSP。
+ * 对应 RELAY 模式的 P2P_RLY_PKT / P2P_RLY_REQ / P2P_RLY_RSP。
  *
  * 公共帧格式: [type(1)][session_id(P2P_SESS_ID_SZ)][payload(N)]
  *   - type: 消息类型（P2P_WSS_BIN_*）
@@ -1569,7 +1580,7 @@ typedef struct {
  *   - data: P2P 协议数据
  *
  * 功能: P2P 打洞失败时，通过服务器中继转发 P2P 数据包（降级方案）。
- *       对应 RELAY P2P_RLY_PACKET。
+ *       对应 RELAY P2P_RLY_PKT。
  *
  * 服务端处理:
  *   1. 查找 session_id 对应的会话
@@ -1601,7 +1612,7 @@ typedef struct {
  *
  * 超时: 服务器每秒检查 RPC 待确认链表，
  *       超过 MSG_REQ_MAX_RETRY × MSG_RPC_RETRY_INTERVAL_MS 未收到 RSP
- *       → 生成伪 RSP [code=0xFE (P2P_MSG_ERR_TIMEOUT)]
+ *       → 生成伪 RSP [code=0xFE (P2P_RPC_ERR_TIMEOUT)]
  *
  * ────────────────────────────────────────────────────────────────────────────
  * RSP — RPC 响应（双向：B → 服务器 → A）
@@ -1623,8 +1634,8 @@ typedef struct {
  *      解锁请求方 rpc_pending_sid（RPC 生命周期完成）
  *
  * 服务器生成的错误 RSP（客户端 on_response 回调 len=-1）:
- *   code=0xFF (P2P_MSG_ERR_PEER_OFFLINE): 对端在等待响应期间离线或会话销毁
- *   code=0xFE (P2P_MSG_ERR_TIMEOUT):      服务器转发超时或 RPC 通道忙
+ *   code=0xFF (P2P_RPC_ERR_PEER_OFF): 对端在等待响应期间离线或会话销毁
+ *   code=0xFE (P2P_RPC_ERR_TIMEOUT):      服务器转发超时或 RPC 通道忙
  *
  * 最小帧长度: P2P_WSS_BIN_RSP_MIN = 8 字节
  */

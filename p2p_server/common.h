@@ -87,35 +87,9 @@ typedef struct client {
 
 static inline bool client_identified(client_t* c) { return c->hh.tbl != NULL; }
 
-#define TCP_CLIENT  \
-    uint8_t                         io;                 // bit 0: 当前是否需要读取；bit 1: 当前是否需要写入
-
-typedef struct tcp_client
-{
-    client_t                        base;
-    TCP_CLIENT
-} tcp_client_t;
-
-/*
- * @prame ws_handshake: 1:handshake recv; -1:handshake send; 0:handshake done
-*/
-#define WS_CLIENT  \
-    wslay_event_context_ptr         ws_ctx; \
-    int8_t                          ws_handshake; \
-    buffer_item_t*                  buf; \
-    uint16_t                        len; \
-    uint16_t                        pos;
-
-typedef struct ws_client
-{
-    client_t                        base;
-    TCP_CLIENT
-    WS_CLIENT
-} ws_client_t;
-
 typedef struct session_pair {
     bool                            valid;
-    char                            peer_id[2][P2P_PEER_ID_MAX+1];    // hh_peer 复合 key 起始（与 remote_peer_id 连续）
+    char                            peer_id[2][P2P_PEER_ID_MAX+1];  // hh_peer 复合 key 起始（与 remote_peer_id 连续）
     session_t*                      sessions[2];                    // 双端会话指针
     UT_hash_handle                  hh;
 } session_pair_t;
@@ -130,22 +104,23 @@ struct session {
     UT_hash_handle                  hh;
 };
 
-#define TCP_IO_FLAG_WANT_READ       (1<<0)
-#define TCP_IO_FLAG_WANT_WRITE      (1<<1)
-#define TCP_IO_FLAG_READ_BREAK      (1<<2)  /* sock 出错或 would block，停止继续读取  */
-#define TCP_IO_FLAG_WRITE_BREAK     (1<<3)  /* sock 出错或 would block，停止继续写入  */
-#define TCP_IO_FLAG_CUSTOM_BIT      4
+#define CLIENT(s)                   ((session_t*)(s))->client
+#define PEER(s)                     ((session_t*)(s))->peer
+#define PEER_VALID(p)               ((p) && (void*)(p) != (void*)-1)
+#define PEER_ONLINE(s)              PEER_VALID(PEER(s))
 
-#define PEER_ONLINE(s)      ((s)->peer && (void*)(s)->peer != (void*)-1)  // 判断对端是否在线（peer 指针为 (void*)-1 表示已断开）
+#define TCP_PEER_REACHABLE(s)       TCP_REACHABLE(PEER(s)->client)
 
+typedef enum break_mode {
+    SESS_BREAK_STOP,                // 会话及其连接关系会保留，核心场景为 client 变为 unreachable
+    SESS_BREAK_CLOSE,               // 会话会被销毁，但允许向 client 返回状态数据信息，核心场景是 client（延迟）软退出
+    SESS_BREAK_TERM,                // 会话会被销毁，且不会再向 client 返回状态数据信息，核心场景是 client/session （立刻）硬退出
+} break_mode_e;
+
+//-----------------------------------------------------------------------------
 
 client_t*
 find_client(const char *local_peer_id);
-
-// 分配一个指定派生协议类型的 client 对象
-// + 主要用于 UDP/COMPACT 协议调用，因为 TCP/xxx 协议在 accept 建链时就已经自动分配了 client 对象
-client_t*
-alloc_client(int8_t proto, sock_t fd);
 
 // 由派生协议 client 调用，基类会根据协议类型自动执行不同派生协议类型的释放操作
 void
@@ -153,7 +128,13 @@ free_client(client_t *c);
 
 // 由派生协议 client 调用，用于实现基类的释放
 void
-free_client_base(client_t *c, void(*free_session)(session_t *s));
+free_client_base(client_t *c);
+
+
+// 分配一个指定派生协议类型的 client 对象
+// + 主要用于 UDP/COMPACT 协议调用，因为 TCP/xxx 协议在 accept 建链时就已经自动分配了 client 对象
+client_t*
+alloc_client(int8_t proto, sock_t fd);
 
 // 将同一个客户端的两个槽合并，确保 client 为单一实例
 // + client 为之前存在的，而 from 则会根据 UDP/TCP 的不同特性而选择是否为 NULL
@@ -183,11 +164,46 @@ free_session_base(session_t *s);
 
 //-----------------------------------------------------------------------------
 
+// TCP 握手状态：0:握手完成; >0:握手中; <0:closing;
+#define TCP_CLIENT  \
+    uint8_t                         io;         \
+    int8_t                          handshake;
+
+#define TCP_IO_FLAG_WANT_READ       (1<<0)
+#define TCP_IO_FLAG_WANT_WRITE      (1<<1)
+#define TCP_IO_FLAG_READ_BREAK      (1<<2)  /* sock 出错或 would block，停止继续读取  */
+#define TCP_IO_FLAG_WRITE_BREAK     (1<<3)  /* sock 出错或 would block，停止继续写入  */
+#define TCP_IO_FLAG_CUSTOM_BIT      4
+
+typedef struct tcp_client
+{
+    client_t                        base;
+    TCP_CLIENT
+} tcp_client_t;
+
+#define TCP_REACHABLE(c)            (((tcp_client_t*)c)->io & TCP_IO_FLAG_WANT_READ)
+
+// WS 握手状态：1=recv 握手请求，-1=send 握手响应，0=握手完成
+#define WS_CLIENT  \
+    wslay_event_context_ptr         ws_ctx; \
+    buffer_item_t*                  buf; \
+    uint16_t                        len; \
+    uint16_t                        pos;
+
+typedef struct ws_client
+{
+    client_t                        base;
+    TCP_CLIENT
+    WS_CLIENT
+} ws_client_t;
+
+//-----------------------------------------------------------------------------
+
 ssize_t
 udp_send(sock_t udp_fd, const void *buf, int len, const struct sockaddr_in *to, const char *PROTO);
 
 int
-tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *reason);
+tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *PROTO);
 int
 tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz);
 

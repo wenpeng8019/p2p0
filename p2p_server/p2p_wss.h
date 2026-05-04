@@ -35,8 +35,8 @@
  *     REQ    (0x02): [0x02][ses_id(4)][sid(2)][msg(1)][data(N)]  RPC 请求
  *     RESP   (0x03): [0x03][ses_id(4)][sid(2)][code(1)][data(N)] RPC 响应
  *   错误（服务器生成伪 RESP）:
- *     code=0xFF: 对端离线 (P2P_MSG_ERR_PEER_OFFLINE)
- *     code=0xFE: 转发超时 (P2P_MSG_ERR_TIMEOUT)
+ *     code=0xFF: 对端离线 (P2P_RPC_ERR_PEER_OFF)
+ *     code=0xFE: 转发超时 (P2P_RPC_ERR_TIMEOUT)
  */
 
 #ifndef P2P_P2P_WSS_H
@@ -78,7 +78,7 @@ wss_init(void);
 bool
 wss_init_client(wss_client_t* c);
 void
-wss_term_client(wss_client_t *client, bool and_free);
+wss_free_client(wss_client_t *client);
 
 void
 wss_handle_message(wss_client_t* client, const uint8_t *msg, size_t len);

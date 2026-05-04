@@ -272,7 +272,7 @@ static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
 static int build_alive(uint8_t *buf, int buf_size) {
     if (buf_size < 3) return -1;
     
-    buf[0] = P2P_RLY_ALIVE;
+    buf[0] = P2P_RLY_ALV;
     buf[1] = 0;
     buf[2] = 0;  // payload_len = 0
     

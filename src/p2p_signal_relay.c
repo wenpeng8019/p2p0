@@ -234,7 +234,7 @@ static void send_online(struct p2p_instance *inst, uint64_t now) {
 /*
  * 发送 ALIVE 心跳
  *
- * 包头: [type(P2P_RLY_ALIVE) | size(2)]
+ * 包头: [type(P2P_RLY_ALV) | size(2)]
  * 负载: 无
  */
 static void send_alive(struct p2p_instance *inst, uint64_t now) {
@@ -242,7 +242,7 @@ static void send_alive(struct p2p_instance *inst, uint64_t now) {
 
     p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
 
-    if (tcp_send(sig_ctx, PROTO, P2P_RLY_ALIVE, NULL, 0, now) != E_NONE) {
+    if (tcp_send(sig_ctx, PROTO, P2P_RLY_ALV, NULL, 0, now) != E_NONE) {
         return;
     }
 
@@ -568,7 +568,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
         }
     }
     // todo 执行 fin by peer
-    else if (code == P2P_RLY_ERR_PEER_OFFLINE) {
+    else if (code == P2P_RLY_ERR_PEER_OFF) {
 
         print("W:", LA_F("%s: peer offline\n", LA_F176, 176), PROTO);
 
@@ -880,8 +880,8 @@ static void handle_relay_resp(struct p2p_session *s, const uint8_t *payload, int
     }
 
     // 错误响应
-    if (code >= P2P_MSG_ERR_PEER_OFFLINE) {
-        if (code == P2P_MSG_ERR_PEER_OFFLINE)
+    if (code >= P2P_RPC_ERR_PEER_OFF) {
+        if (code == P2P_RPC_ERR_PEER_OFF)
             print("W:", LA_F("%s: peer offline (sid=%u)\n", LA_F174, 174), TASK_RPC, sid);
         else
             print("W:", LA_F("%s: timeout (sid=%u)\n", LA_F238, 238), TASK_RPC, sid);
@@ -912,7 +912,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
 
     do { const char *PROTO;
 
-        if (sig_ctx->hdr.type == P2P_RLY_STATUS) { PROTO = "STATUS";
+        if (sig_ctx->hdr.type == P2P_RLY_STA) { PROTO = "STATUS";
             printf(LA_F("[R] %s recv, len=%d\n", LA_F438, 438), PROTO, sig_ctx->hdr.size);
 
             const int st_sz = P2P_RLY_STATUS_PSZ(0, 0);
@@ -988,7 +988,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             handle_online_ack(inst, sig_ctx->payload, (int)sig_ctx->hdr.size, now);
             break;
         }
-        if (sig_ctx->hdr.type == P2P_RLY_ALIVE) {
+        if (sig_ctx->hdr.type == P2P_RLY_ALV) {
             printf(LA_F("[R] %s recv, len=%d\n", LA_F438, 438), "ALIVE ACK", sig_ctx->hdr.size);
 
             handle_alive_ack(inst, now);

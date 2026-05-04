@@ -64,7 +64,7 @@
  *   目标：验证对端离线时 DATA 被拒绝
  *   方法：Alice 单独建立会话 → 发送 DATA
  *   预期：
- *     - 收到 STATUS(P2P_RLY_ERR_PEER_OFFLINE)
+ *     - 收到 STATUS(P2P_RLY_ERR_PEER_OFF)
  *
  * 测试 7: relay_data_bad_payload
  *   目标：验证畸形 DATA 包被丢弃
@@ -479,7 +479,7 @@ static int wait_status(sock_t sock, status_t *status) {
             return 0;
         }
         
-        if (type == P2P_RLY_STATUS && payload_len >= P2P_RLY_STATUS_PSZ(2, 0)) {
+        if (type == P2P_RLY_STA && payload_len >= P2P_RLY_STATUS_PSZ(2, 0)) {
             // [relay_hdr(3)][req_type(1)][status_code(1)][session_id(P2P_SESS_ID_SZ)]
             status->received = 1;
             status->req_type = recv_buf[3];
@@ -962,10 +962,10 @@ static void test_relay_data_peer_offline(void) {
                                    P2P_PKT_DATA, 0, 1, test_data, sizeof(test_data));
     tcp_send_all(sock, pkt, pkt_len);
     
-    // 应收到 STATUS(P2P_RLY_ERR_PEER_OFFLINE)
+    // 应收到 STATUS(P2P_RLY_ERR_PEER_OFF)
     status_t status;
     if (wait_status(sock, &status) && status.received) {
-        if (status.status_code == P2P_RLY_ERR_PEER_OFFLINE) {
+        if (status.status_code == P2P_RLY_ERR_PEER_OFF) {
             P_sock_close(sock);
             TEST_PASS(TEST_NAME);
             return;

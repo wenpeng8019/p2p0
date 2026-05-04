@@ -7,7 +7,7 @@
  * 验证 p2p_server 对 RELAY 协议 MSG RPC 机制的处理逻辑：
  * - P2P_RLY_REQ: A→Server→B 请求转发
  * - P2P_RLY_RESP: B→Server→A 响应转发
- * - rpc_pending: 独立于 peer_pending 的并行流控通道
+ * - rpc_pending: 独立于 peer_send 的并行流控通道
  *
  * ============================================================================
  * 测试方法
@@ -54,7 +54,7 @@
  *   目标：验证对端离线时服务器回复错误 RESP
  *   方法：A 单独配对（B 未上线）→ 发送 REQ
  *   预期：
- *     - A 收到 RESP(code=P2P_MSG_ERR_PEER_OFFLINE)
+ *     - A 收到 RESP(code=P2P_RPC_ERR_PEER_OFF)
  *
  * 测试 6: msg_req_bad_payload
  *   目标：验证畸形 MSG_REQ 包被拒绝
@@ -76,14 +76,14 @@
  *   方法：发送接近上限大小的 REQ/RESP
  *
  * 测试 9: msg_rpc_and_data_parallel
- *   目标：验证 RPC（rpc_pending）与 DATA（peer_pending）互不干扰
+ *   目标：验证 RPC（rpc_pending）与 DATA（peer_send）互不干扰
  *   方法：同时发送 DATA 和 REQ，验证两者都正确转发
  *
  * 测试 10: msg_rpc_timeout
- *   目标：验证 RPC 超时后服务器回复 P2P_MSG_ERR_TIMEOUT
+ *   目标：验证 RPC 超时后服务器回复 P2P_RPC_ERR_TIMEOUT
  *   方法：A 发送 REQ → B 收到但不回复 RESP → 等待超时
  *   预期：
- *     - A 收到 RESP(code=P2P_MSG_ERR_TIMEOUT)
+ *     - A 收到 RESP(code=P2P_RPC_ERR_TIMEOUT)
  *
  * ============================================================================
  * 依赖与用法
@@ -798,16 +798,16 @@ static void test_msg_req_peer_offline(void) {
     int len = build_rly_req(pkt, sizeof(pkt), ses_a, 1, 0x50, req_data, sizeof(req_data) - 1);
     tcp_send_all(sa, pkt, len);
 
-    // 应收到 RESP(code=P2P_MSG_ERR_PEER_OFFLINE)
+    // 应收到 RESP(code=P2P_RPC_ERR_PEER_OFF)
     rly_rpc_pkt_t resp;
     int got = wait_rly_rpc(sa, P2P_RLY_RESP, &resp);
 
     P_sock_close(sa);
 
     if (!got) { TEST_FAIL(TEST_NAME, "no error RESP received"); return; }
-    if (resp.msg_or_code != P2P_MSG_ERR_PEER_OFFLINE) {
+    if (resp.msg_or_code != P2P_RPC_ERR_PEER_OFF) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", P2P_MSG_ERR_PEER_OFFLINE, resp.msg_or_code);
+        snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", P2P_RPC_ERR_PEER_OFF, resp.msg_or_code);
         TEST_FAIL(TEST_NAME, msg); return;
     }
 
@@ -955,7 +955,7 @@ static void test_msg_large_data(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 9: RPC 与 DATA 并行（rpc_pending 与 peer_pending 互不干扰）
+// 测试 9: RPC 与 DATA 并行（rpc_pending 与 peer_send 互不干扰）
 static void test_msg_rpc_and_data_parallel(void) {
     const char *TEST_NAME = "msg_rpc_and_data_parallel";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -1058,9 +1058,9 @@ static void test_msg_rpc_timeout(void) {
     P_sock_close(sa); P_sock_close(sb);
 
     if (!got) { TEST_FAIL(TEST_NAME, "no timeout RESP received"); return; }
-    if (resp.msg_or_code != P2P_MSG_ERR_TIMEOUT) {
+    if (resp.msg_or_code != P2P_RPC_ERR_TIMEOUT) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", P2P_MSG_ERR_TIMEOUT, resp.msg_or_code);
+        snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", P2P_RPC_ERR_TIMEOUT, resp.msg_or_code);
         TEST_FAIL(TEST_NAME, msg); return;
     }
     if (resp.sid != 1) { TEST_FAIL(TEST_NAME, "sid mismatch"); return; }

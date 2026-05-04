@@ -187,7 +187,7 @@ static void wss_free_session(session_t *s) {
 
         // 对端有等待本端的 RESP → 返回 peer_offline 错误
         if (peer_s->rpc_pending_sid) {
-            wss_session_send_rpc_code(peer_s, peer_s->rpc_pending_sid, P2P_MSG_ERR_PEER_OFFLINE);
+            wss_session_send_rpc_code(peer_s, peer_s->rpc_pending_sid, P2P_RPC_ERR_PEER_OFF);
             wss_pending_remove_rpc(peer_s);
             peer_s->rpc_pending_sid = 0;
         }
@@ -223,26 +223,26 @@ wss_init_client(wss_client_t *c) {
 // do_free=false: 标记离线（等重连）+ 通知对端，有会话则保留
 // do_free=true:  硬销毁（清除所有会话 + 移除注册 + 释放）
 void
-wss_term_client(wss_client_t *client, bool and_free) {
+wss_free_client(wss_client_t *client) {
 
-    if (!and_free) {
-        client->base.last_active = P_tick_ms();
-
-        // 通知所有配对对端
-        for (session_t *s = client->base.sessions; s; s = s->next) {
-            if (!PEER_ONLINE(s)) continue;
-
-            wss_session_t *peer_s = (wss_session_t*)s->peer;
-            wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
-            if (wss_client_online(peer_c)) {
-                char buf[16];
-                snprintf(buf, sizeof(buf), "FIN %u", peer_s->base.session_id);
-                ws_send_text((ws_client_t*)peer_c, buf);
-            }
-        }
-
-        if (client->base.sessions) return;     /* 有会话，保留等重连 */
-    }
+    // if (!and_free) {
+    //     client->base.last_active = P_tick_ms();
+    //
+    //     // 通知所有配对对端
+    //     for (session_t *s = client->base.sessions; s; s = s->next) {
+    //         if (!PEER_ONLINE(s)) continue;
+    //
+    //         wss_session_t *peer_s = (wss_session_t*)s->peer;
+    //         wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
+    //         if (wss_client_online(peer_c)) {
+    //             char buf[16];
+    //             snprintf(buf, sizeof(buf), "FIN %u", peer_s->base.session_id);
+    //             ws_send_text((ws_client_t*)peer_c, buf);
+    //         }
+    //     }
+    //
+    //     if (client->base.sessions) return;     /* 有会话，保留等重连 */
+    // }
 
     free_client(&client->base);
 }
@@ -409,13 +409,13 @@ static void wss_handle_req(wss_session_t *session, uint8_t *payload, uint16_t le
     wss_client_t  *peer_c = (wss_client_t*)peer_s->base.client;
     if (!wss_client_online(peer_c)) {
         print("W:", LA_F("%s: peer offline, sending error resp\n", LA_F64, 64), PROTO);
-        wss_session_send_rpc_code(session, sid, P2P_MSG_ERR_PEER_OFFLINE);
+        wss_session_send_rpc_code(session, sid, P2P_RPC_ERR_PEER_OFF);
         return;
     }
 
     if (session->rpc_pending_sid) {
         print("W:", LA_F("%s: rpc busy (pending sid=%u)\n", LA_F67, 67), PROTO, session->rpc_pending_sid);
-        wss_session_send_rpc_code(session, sid, P2P_MSG_ERR_TIMEOUT);
+        wss_session_send_rpc_code(session, sid, P2P_RPC_ERR_TIMEOUT);
         return;
     }
 
@@ -588,7 +588,7 @@ void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
     if (strcmp((char*)msg, P2P_WSS_CMD_OFF) == 0) {
         print("I:", LA_F("%s: '%s'\n", LA_F72, 72), "OFF",
               client->base.local_peer_id);
-        wss_term_client(client, true);
+        wss_free_client(client, true);
         return;
     }
 
@@ -670,7 +670,7 @@ void wss_handle_data(wss_client_t *client, const uint8_t *data, size_t len) {
         print("W:", LA_F("BIN 0x%02x: ses_id=%u peer not connected\n", LA_F170, 170), type, session_id);
         if (type == P2P_WSS_BIN_REQ && len >= P2P_WSS_BIN_RPC_MIN_SZ) {
             ptr = (uint8_t*)data + 1 + P2P_SESS_ID_SZ;
-            wss_session_send_rpc_code(ws_s, nget_s(ptr), P2P_MSG_ERR_PEER_OFFLINE);
+            wss_session_send_rpc_code(ws_s, nget_s(ptr), P2P_RPC_ERR_PEER_OFF);
         }
         return;
     }
@@ -741,7 +741,7 @@ void retry_wss_pending(uint64_t now) {
         s->rpc_pending_sid = 0;
 
         print("W:", LA_F("[W] RPC timeout: sid=%u (ses_id=%u)\n", LA_F199, 199), sid, s->base.session_id);
-        wss_session_send_rpc_code(s, sid, P2P_MSG_ERR_TIMEOUT);
+        wss_session_send_rpc_code(s, sid, P2P_RPC_ERR_TIMEOUT);
     }
 }
 

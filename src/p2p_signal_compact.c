@@ -1295,7 +1295,7 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     if (flags & (SIG_RPC_FLAG_PEER_OFFLINE | SIG_RPC_FLAG_TIMEOUT)) {
 
-        res_code = (flags & SIG_RPC_FLAG_PEER_OFFLINE) ? P2P_MSG_ERR_PEER_OFFLINE : P2P_MSG_ERR_TIMEOUT;
+        res_code = (flags & SIG_RPC_FLAG_PEER_OFFLINE) ? P2P_RPC_ERR_PEER_OFF : P2P_RPC_ERR_TIMEOUT;
     }
     else {
 
