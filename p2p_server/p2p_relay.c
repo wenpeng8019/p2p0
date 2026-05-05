@@ -34,6 +34,7 @@ const char* PROTO_STR(uint8_t proto) {
 // refer=ITEM_REF_ACK_PENDING  → TCP 写完、等待应用层 ACK（ACK 到达后由业务逻辑释放）
 #define ITEM_REF_ACK_PENDING        ((void*)(uintptr_t)1)
 #define ITEM_REF_CLIENT_ERROR       ((void*)(uintptr_t)-1)
+#define ITEM_REF_ALV_ACK            ((void*)(uintptr_t)2)  // ALV ACK 包正在发送队列中（内嵌缓冲，不可 free）
 
 // RELAY RPC 待确认链表（按 rpc_sent_time 排序，队头最早超时）
 static relay_session_t*             g_relay_rpc_pending_head = NULL;
@@ -173,7 +174,9 @@ static void clear_client_sending(relay_client_t *client) {
         else client->send_buff_head = client->send_buff_rear = NULL;
         while (item) {
             buffer_item_t *next = item->next;
-            free_buffer(item);
+            // ALV ACK 使用内嵌缓冲，只重置 refer，不 free
+            if (item->refer == ITEM_REF_ALV_ACK) item->refer = NULL;
+            else free_buffer(item);
             item = next;
         }
     }
@@ -567,6 +570,14 @@ relay_init_client(relay_client_t* c) {
     c->send_sess_rear = NULL;
     c->sending_sess = NULL;
     c->sending_offset = 0;
+
+    // 预初始化内嵌 ALV ACK 缓冲
+    buffer_item_t *alv_item = (buffer_item_t*)c->alv_ack_buf;
+    alv_item->refer = NULL;
+    alv_item->next  = NULL;
+    p2p_relay_hdr_t *alv_hdr = (p2p_relay_hdr_t*)ITEM2BUF(alv_item);
+    alv_hdr->type = P2P_RLY_ALV;
+    alv_hdr->size = 0;
 
     return true;
 }
@@ -1350,19 +1361,26 @@ void relay_handle_recv(relay_client_t *client) {
             client_off(client);
             return;
         }
-        // 心跳包：last_active 已在循环入口更新，就地改写 recv_buf 为 ALIVE_ACK 回复
-        // ! 这里直接发送 ACK（3 bytes 数据），理论上不应出现 WOULDBLOCK，如果发生了也无妨，等下次心跳再回复即可
+        // 心跳包：使用预分配内嵌缓冲，高优先级插队，去重（上一个未发完则忽略）
         else if (type == P2P_RLY_ALV) {
-            buffer_item_t *item = alloc_buffer(BUF_FLAG_512(0));
-            if (!item) {
-                print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), "ALV");
-                client->last_error = P2P_RLY_ERR_INTERNAL;
-                goto error_fatal;
+            buffer_item_t *alv_item = (buffer_item_t*)client->alv_ack_buf;
+            if (alv_item->refer == ITEM_REF_ALV_ACK) {
+                print("V:", LA_F("%s: prev ALV ACK still pending, skip\n", LA_F166, 166), "ALV");
+            } else {
+                alv_item->refer = ITEM_REF_ALV_ACK;
+                alv_item->next  = NULL;
+                // 高优先级：插到当前正在发送包之后（如有），否则插到队头
+                if (client->sending_offset && !client->sending_sess) { assert(client->send_buff_head);
+                    alv_item->next = client->send_buff_head->next;
+                    client->send_buff_head->next = alv_item;
+                    if (!alv_item->next) client->send_buff_rear = alv_item;
+                } else {
+                    alv_item->next = client->send_buff_head;
+                    client->send_buff_head = alv_item;
+                    if (!client->send_buff_rear) client->send_buff_rear = alv_item;
+                    client->io |= TCP_IO_FLAG_WANT_WRITE;
+                }
             }
-            p2p_relay_hdr_t* hdr = (p2p_relay_hdr_t*)ITEM2BUF(item);
-            hdr->type = P2P_RLY_ALV;
-            hdr->size = 0;
-            relay_client_send(client, item);
         }
         else if (type == P2P_RLY_SYN0) {
             relay_handle_syn0(client, payload, payload_len);
@@ -1568,9 +1586,11 @@ void relay_handle_send(relay_client_t *client) {
                 }
 
                 bool is_error_item = (item->refer == ITEM_REF_CLIENT_ERROR);
+                bool is_alv_item   = (item->refer == ITEM_REF_ALV_ACK);
 
-                // 删除发送完成的 item
-                free_buffer(item);
+                // ALV ACK 使用内嵌缓冲，不 free；其余正常释放
+                if (is_alv_item) item->refer = NULL;
+                else free_buffer(item);
 
                 // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端重连或超时回收）
                 if (is_error_item) { assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));
