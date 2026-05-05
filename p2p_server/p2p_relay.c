@@ -45,34 +45,42 @@ static uint8_t                      g_relay_fatal[sizeof(buffer_item_t) + sizeof
 ///////////////////////////////////////////////////////////////////////////////
 
 // 发送数据 buf 到 client 发送队列
-static void relay_client_send(relay_client_t *client, buffer_item_t* buf_item, bool high_priority) {
+static void relay_client_send(relay_client_t *client, buffer_item_t* buf_item, bool immediate) {
 
     // 前提是不能处于握手/closing 阶段
     assert(client->handshake == 0);
 
     // 高优先级：插到当前正在发送包之后（若有），否则插到队头
-    if (high_priority) {
+    if (immediate) {
+
+        // 如果存在正在发送的包，则将新包插入到正在发送的包之后
         if (client->sending_offset && !client->sending_sess) { assert(client->send_buff_head);
             buf_item->next = client->send_buff_head->next;
             client->send_buff_head->next = buf_item;
             if (!buf_item->next) client->send_buff_rear = buf_item;
-        } else {
-            buf_item->next = client->send_buff_head;
-            client->send_buff_head = buf_item;
-            if (!client->send_buff_rear) client->send_buff_rear = buf_item;
-            client->io |= TCP_IO_FLAG_WANT_WRITE;
+            return;
         }
+
+        // 添加到队列的最前面
+        buf_item->next = client->send_buff_head;
+        client->send_buff_head = buf_item;
+        if (client->send_buff_rear) return;     // 如果队列之前不空，直接返回
+
     } else {
+
         buf_item->next = NULL;
         if (client->send_buff_rear) {
             client->send_buff_rear->next = buf_item;
             client->send_buff_rear = buf_item;
-        } else {
-            client->send_buff_head = client->send_buff_rear = buf_item;
+            return;
         }
-        if (client->base.fd != P_INVALID_SOCKET && client->last_error == 0)
-            client->io |= TCP_IO_FLAG_WANT_WRITE;
+
+        client->send_buff_head = buf_item;
     }
+    client->send_buff_rear = buf_item;
+
+    if (client->base.fd != P_INVALID_SOCKET && client->last_error == 0)
+        client->io |= TCP_IO_FLAG_WANT_WRITE;
 }
 
 // 发送数据 buf 到 session 发送队列
@@ -1562,19 +1570,17 @@ void relay_handle_send(relay_client_t *client) {
                     return;
                 }
 
-                bool is_error_item = (item->refer == ITEM_REF_CLIENT_ERROR);
-                bool is_alv_item   = (item->refer == ITEM_REF_ALV_ACK);
-
                 // ALV ACK 使用内嵌缓冲，不 free；其余正常释放
-                if (is_alv_item) item->refer = NULL;
-                else free_buffer(item);
+                if (item->refer == ITEM_REF_ALV_ACK) item->refer = NULL;
+                else { free_buffer(item);
 
-                // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端重连或超时回收）
-                if (is_error_item) { assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));
-                    P_sock_close(client->base.fd);
-                    client->base.fd = P_INVALID_SOCKET;
-                    client->io &= ~TCP_IO_FLAG_WANT_WRITE;
-                    return;
+                    // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端重连或超时回收）
+                    if (item->refer == ITEM_REF_CLIENT_ERROR) { assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));
+                        P_sock_close(client->base.fd);
+                        client->base.fd = P_INVALID_SOCKET;
+                        client->io &= ~TCP_IO_FLAG_WANT_WRITE;
+                        return;
+                    }
                 }
             }
             // 对于 session 级的 item
