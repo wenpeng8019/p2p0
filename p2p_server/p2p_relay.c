@@ -892,9 +892,6 @@ static void relay_handle_fin(relay_session_t *session) {
 static void relay_handle_sync(relay_client_t *client, relay_session_t *session, uint8_t *payload, uint16_t len) {
     const char *PROTO = "SYNC";
 
-    // 外层调用前已验证
-    assert(session->sync_peer_send_cnt < RELAY_PEER_Q_MAX);
-
     if (len < P2P_RLY_SYNC_CONFIRM_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, len);
         relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_PROTOCOL);
@@ -972,6 +969,15 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_PROTOCOL);
         return;
     }
+
+    // 忙检查（控速）
+    if (session->sync_peer_send_cnt >= RELAY_PEER_Q_MAX) {
+        print("W:", LA_F("%s: ses_id=%u busy (pending %s)\n", LA_F145, 145),
+              PROTO, session->base.session_id, "sync");
+        relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_BUSY);
+        return;
+    }
+
     session->last_sid = sid;
 
     // SYN0 隐式 ACK：本端首个 SYNC 上行视为对服务器下发 SYN0 的确认
@@ -1050,13 +1056,18 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
 static void relay_handle_pkt(relay_client_t *client, relay_session_t *session, uint8_t *payload, uint16_t len) {
     const char *PROTO = "PKT";
 
-    // 外层调用前已验证
-    assert(session->pkt_peer_send_cnt < RELAY_PEER_Q_MAX);
-
     if (!PEER_ONLINE(session)) {
         print("E:", LA_F("%s: ses_id=%u, peer offline, drop pkt\n", 0, 0),
               PROTO, session->base.session_id);
         relay_session_send_status(session, P2P_RLY_PKT, P2P_RLY_ERR_PEER_OFF);
+        return;
+    }
+
+    // 忙检查（控速）
+    if (session->pkt_peer_send_cnt >= RELAY_PEER_Q_MAX) {
+        print("W:", LA_F("%s: ses_id=%u busy (pending %s)\n", LA_F145, 145),
+              PROTO, session->base.session_id, "pkt");
+        relay_session_send_status(session, P2P_RLY_PKT, P2P_RLY_ERR_BUSY);
         return;
     }
 
@@ -1123,7 +1134,7 @@ static void relay_handle_req(relay_client_t *client, relay_session_t *session, u
         return;
     }
 
-    // rpc_pending_sid 忙检查
+    // 忙检查（控速）
     if (session->rpc_pending_sid) {
         print("E:", LA_F("%s: rpc busy (pending sid=%u)\n", LA_F67, 67), PROTO, session->rpc_pending_sid);
         relay_session_send_status(session, P2P_RLY_REQ, P2P_RLY_ERR_BUSY);
@@ -1454,20 +1465,14 @@ void relay_handle_recv(relay_client_t *client) {
 
             relay_session_t *session = (relay_session_t*)s;
             switch (type) {
-            case  P2P_RLY_FIN:  // FIN 不需要对端在线（单边关闭），后面的请求都要求对端在线
+            case  P2P_RLY_FIN:  // FIN 不需要对端在线（这里的 session 是 pair 机制，FIN 用于删除本端 session）
                 relay_handle_fin(session); 
                 break;
-            case P2P_RLY_SYNC:  // SYNC 这里会优先控速
-                if (session->sync_peer_send_cnt >= RELAY_PEER_Q_MAX) {
-                    print("W:", LA_F("%s: ses_id=%u busy (pending %s)\n", LA_F145, 145), PROTO_STR(type), session_id, "sync");
-                    relay_session_send_status(session, type, P2P_RLY_ERR_BUSY);
-                } else relay_handle_sync(client, session, payload, payload_len);
+            case P2P_RLY_SYNC:
+                relay_handle_sync(client, session, payload, payload_len);
                 break;
-            case P2P_RLY_PKT:   // PKT 这里会优先控速
-                if (type == P2P_RLY_PKT && session->pkt_peer_send_cnt >= RELAY_PEER_Q_MAX) {
-                    print("W:", LA_F("%s: ses_id=%u busy (pending %s)\n", LA_F145, 145), PROTO_STR(type), session_id, "pkt");
-                    relay_session_send_status(session, type, P2P_RLY_ERR_BUSY);
-                } else relay_handle_pkt(client, session, payload, payload_len);
+            case P2P_RLY_PKT:
+                relay_handle_pkt(client, session, payload, payload_len);
                 break;
             case P2P_RLY_REQ:
                 relay_handle_req(client, session, payload, payload_len);
