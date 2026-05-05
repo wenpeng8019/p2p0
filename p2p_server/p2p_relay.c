@@ -713,10 +713,12 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
 
     if (len < P2P_RLY_SYN0_PSZ(0)) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, len);
+        relay_send_status(client, P2P_RLY_REG, P2P_RLY_ERR_PROTOCOL);
         return;
     }
     if (!*payload) {
         print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), PROTO);
+        relay_send_status(client, P2P_RLY_REG, P2P_RLY_ERR_PROTOCOL);
         return;
     }
     uint8_t cand_count = payload[P2P_PEER_ID_MAX];
@@ -724,6 +726,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     if (len != expect_len) {
         print("E:", LA_F("%s: bad payload(cnt=%d, len=%u, expected=%u)\n", LA_F39, 39),
                PROTO, cand_count, len, expect_len);
+        relay_send_status(client, P2P_RLY_REG, P2P_RLY_ERR_PROTOCOL);
         return;
     }
     payload[P2P_PEER_ID_MAX] = '\0';
@@ -740,6 +743,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     }
     if (side < E_NONE) {
         print("E:", LA_F("%s: build session to '%s' failed(%d)\n", LA_F44, 44), PROTO, (const char *)payload, side);
+        // todo syn0 status 必要性
         relay_send_syn0_status(client, (const char *)payload, P2P_RLY_ERR_PROTOCOL);
         return;
     }
@@ -770,9 +774,10 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
                 payload + P2P_PEER_ID_MAX,
                 1 + cand_count * (int)sizeof(p2p_candidate_t));
         memset(payload, 0, P2P_PEER_ID_MAX);
-        strncpy((char*)payload, client->base.local_peer_id, P2P_PEER_ID_MAX - 1);
+        strncpy((char*)payload, client->base.local_peer_id, P2P_PEER_ID_MAX);
 
         hdr = (p2p_relay_hdr_t *)client->recv_buf;
+        assert(hdr->type == P2P_RLY_SYN0);
         hdr->size = htons(P2P_RLY_SYN0_S2C_PSZ(cand_count));
 
         buffer_item_t* item = BUF2ITEM(client->recv_buf);
@@ -790,14 +795,13 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
         }
 
         hdr = (p2p_relay_hdr_t *)(ITEM2BUF(syn0_item));
+        hdr->type = P2P_RLY_SYN0;
+        hdr->size = htons(P2P_RLY_SYN0_S2C_PSZ(0));
         uint8_t *p = (uint8_t*)(hdr + 1);
         memset(p, 0, P2P_PEER_ID_MAX);
-        strncpy((char*)p, client->base.local_peer_id, P2P_PEER_ID_MAX - 1);
-        // session_id 由后续 nwrite_l 写入
+        strncpy((char*)p, client->base.local_peer_id, P2P_PEER_ID_MAX);
         p[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ] = 0; // cand_count = 0
-        hdr->size = htons(P2P_RLY_SYN0_S2C_PSZ(0));
     }
-    hdr->type = P2P_RLY_SYN0;
 
     // 如果对方不在线，立刻返回 syn0 offline
     // + 并将 syn0 包缓存到 local_s->sync_peer_send[0]，后面会直接启动双方 syn0 同步
@@ -852,7 +856,8 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
         // 添加到本端发送队列，也要设置 refer
         remote_syn0_item->refer = remote_s;
         relay_session_send(local_s, remote_syn0_item);
-        // remote_s->sync_peer_send[0] 已是 remote_syn0_item，无需再赋值
+
+        //-------
 
         // 双方 SYN0 互相转发完成；各自收到对方的 SYN0 即为隐式 ACK，无需单独发 confirm
 
@@ -1186,8 +1191,8 @@ void relay_handle_recv(relay_client_t *client) {
             int rc = tcp_recv((tcp_client_t*)client, client->recv_buf + client->recv_len, &need);
             if (rc > 0) return;
             if (rc < 0) {
-                if (!client->base.local_peer_id[0]) goto error_handshake;
                 client->last_error = P2P_RLY_ERR_IO;
+                if (TCP_HS_IS_HANDSHAKING(client)) goto error_handshake;
                 goto error;
             }
             client->recv_len += (uint16_t)need;
@@ -1200,7 +1205,7 @@ void relay_handle_recv(relay_client_t *client) {
         if (payload_len > P2P_MAX_PAYLOAD) {
             print("E:", LA_F("bad payload(len=%u)\n", LA_F139, 139), payload_len);
             client->last_error = P2P_RLY_ERR_OVERFLOW;
-            if (!client->base.local_peer_id[0]) goto error_handshake;
+            if (TCP_HS_IS_HANDSHAKING(client)) goto error_handshake;
             goto error;
         }
 
@@ -1211,8 +1216,8 @@ void relay_handle_recv(relay_client_t *client) {
             int rc = tcp_recv((tcp_client_t*)client, client->recv_buf + client->recv_len, &need);
             if (rc > 0) return;
             if (rc < 0) {
-                if (!client->base.local_peer_id[0]) goto error_handshake;
                 client->last_error = P2P_RLY_ERR_IO;
+                if (TCP_HS_IS_HANDSHAKING(client)) goto error_handshake;
                 goto error;
             }
             client->recv_len += (uint16_t)need;
@@ -1264,6 +1269,12 @@ void relay_handle_recv(relay_client_t *client) {
             relay_client_t *reg = (relay_client_t*)find_client((char*)payload);
             if (reg) { assert(reg != client);
 
+                if (TCP_HS_IS_HANDSHAKING(reg)) {
+                    client->last_error = P2P_RLY_ERR_INVALID;
+                    print("E:", LA_F("%s: request simultaneously for '%s'\n", 0, 0), PROTO, reg->base.local_peer_id);
+                    goto error_handshake;
+                }
+
                 uint8_t* recv_buf = client->recv_buf; uint16_t recv_len = client->recv_len;
                 client->recv_buf = NULL; client->recv_len = 0;
 
@@ -1294,6 +1305,9 @@ void relay_handle_recv(relay_client_t *client) {
                 client->base.instance_id = instance_id;
                 memcpy(client->base.local_peer_id, payload, P2P_PEER_ID_MAX);
                 client->base.local_peer_id[P2P_PEER_ID_MAX] = '\0';
+
+                // 添加到索引（激活 client 身份）
+                identify_client(&client->base);
             }
 
             // 回复 REG ACK
@@ -1316,8 +1330,7 @@ void relay_handle_recv(relay_client_t *client) {
                     return;
                 }
 
-                // 如果 would block，则标记为 reg_ack_pending
-                // + 注意：此时不加入索引表，等 ACK 发送完成后再加入
+                // 如果 would block，则标记进入握手写入阶段
                 if (r > 0) {
                     // 进入握手写阶段，同时暂停接收数据，等握手（ACK 发送）完成后再继续
                     client->io &= ~TCP_IO_FLAG_WANT_READ;
@@ -1326,9 +1339,6 @@ void relay_handle_recv(relay_client_t *client) {
                     return;
                 }
             }
-
-            // 添加到索引表（握手完成）
-            identify_client(&client->base);
         }
         // 除 REG 外，所有请求都要求当前已经完成握手
         else if (client->handshake != 0) { assert(TCP_HS_IS_HANDSHAKING(client));   // closing 已经禁止接收了
@@ -1345,7 +1355,7 @@ void relay_handle_recv(relay_client_t *client) {
         else if (type == P2P_RLY_ALV) {
             buffer_item_t *item = alloc_buffer(BUF_FLAG_512(0));
             if (!item) {
-                print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), "ALIVE");
+                print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), "ALV");
                 client->last_error = P2P_RLY_ERR_INTERNAL;
                 goto error_fatal;
             }
@@ -1355,11 +1365,7 @@ void relay_handle_recv(relay_client_t *client) {
             relay_client_send(client, item);
         }
         else if (type == P2P_RLY_SYN0) {
-            if (*payload) {
-                print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), "SYN0");
-                relay_send_status(client, type, P2P_RLY_ERR_PROTOCOL);
-            }
-            else relay_handle_syn0(client, payload, payload_len);
+            relay_handle_syn0(client, payload, payload_len);
         }
         else {
             if (payload_len < P2P_SESS_ID_SZ) {
@@ -1495,9 +1501,6 @@ void relay_handle_send(relay_client_t *client) {
                 relay_free_client(client);
                 return;
             }
-
-            // 将 client 添加到索引表（激活 client 的身份），fixme 应该握手请求就激活，避免重复。否则并发 reg 会在这里冲突
-            identify_client(&client->base);
 
             // 启动正常读写（握手完成）
             client->io |= TCP_IO_FLAG_WANT_READ;
