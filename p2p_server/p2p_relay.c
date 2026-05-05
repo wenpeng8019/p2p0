@@ -30,10 +30,10 @@ const char* PROTO_STR(uint8_t proto) {
 #define RELAY_CLIENT(s)             ((relay_client_t*)CLIENT(s))
 
 // refer 哨兵值：TCP 写入已完成，但尚未收到对端应用层 ACK，item 暂不释放
-// refer=NULL        → 空闲/可释放
-// refer=session     → TCP 写入中（sent callback 触发时处理）
-// refer=REFER_ACK_PENDING → TCP 写完、等待应用层 ACK（ACK 到达后由业务逻辑释放）
-#define REFER_ACK_PENDING            ((void*)(uintptr_t)1)
+// refer=session            → TCP 写入中（sent callback 触发时处理）
+// refer=ITEM_REF_ACK_PENDING  → TCP 写完、等待应用层 ACK（ACK 到达后由业务逻辑释放）
+#define ITEM_REF_ACK_PENDING        ((void*)(uintptr_t)1)
+#define ITEM_REF_CLIENT_ERROR       ((void*)(uintptr_t)-1)
 
 // RELAY RPC 待确认链表（按 rpc_sent_time 排序，队头最早超时）
 static relay_session_t*             g_relay_rpc_pending_head = NULL;
@@ -447,7 +447,7 @@ static void relay_peer_sent(relay_session_t *session, buffer_item_t *buf_item) {
     } else {
         // SYNC/SYN0：TCP 写入完成，但队头继续持有 item 等待应用层 ACK
         assert(session->sync_peer_send_cnt > 0 && session->sync_peer_send[0] == buf_item);
-        buf_item->refer = REFER_ACK_PENDING;
+        buf_item->refer = ITEM_REF_ACK_PENDING;
     }
 }
 
@@ -457,7 +457,7 @@ static void relay_peer_sent(relay_session_t *session, buffer_item_t *buf_item) {
 static void relay_ch_break_forward(buffer_item_t **arr, uint8_t *cnt, relay_session_t *dst) {
     for (uint8_t i = 0; i < *cnt; i++) {
         buffer_item_t *it = arr[i]; arr[i] = NULL;
-        if (it->refer != NULL && it->refer != REFER_ACK_PENDING) it->refer = NULL;
+        if (it->refer != NULL && it->refer != ITEM_REF_ACK_PENDING) it->refer = NULL;
         else relay_session_send(dst, it);
     }
     *cnt = 0;
@@ -467,7 +467,7 @@ static void relay_ch_break_forward(buffer_item_t **arr, uint8_t *cnt, relay_sess
 static void relay_ch_break_free(buffer_item_t **arr, uint8_t *cnt) {
     for (uint8_t i = 0; i < *cnt; i++) {
         buffer_item_t *it = arr[i]; arr[i] = NULL;
-        if (it->refer != NULL && it->refer != REFER_ACK_PENDING) it->refer = NULL;
+        if (it->refer != NULL && it->refer != ITEM_REF_ACK_PENDING) it->refer = NULL;
         else free_buffer(it);
     }
     *cnt = 0;
@@ -680,7 +680,7 @@ static void client_error(relay_client_t *client, uint8_t req_type) {
     p[1] = client->last_error;
 
     // 标记该 buf_item 是 error 包
-    err_item->refer = (void*)-1;
+    err_item->refer = ITEM_REF_CLIENT_ERROR;
 
     // 如果当前正在发送 client 队列的数据包，将 err_item 作为正在发送的数据包的下一项
     if (client->sending_offset && !client->sending_sess) { assert(client->send_buff_head);
@@ -882,7 +882,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         // 对端（B）应用层 ACK：释放暂存缓冲区，并将 confirm 转发给原发送方（A）
         if (PEER_ONLINE(session)) {
             relay_session_t *peer = RELAY_PEER(session);  // peer = A（原始发送方）
-            if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == REFER_ACK_PENDING) {
+            if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
                 relay_session_send_sync_confirm(peer, sid);
                 free_buffer(peer->sync_peer_send[0]);
                 peer->sync_peer_send[0] = peer->sync_peer_send[1];
@@ -924,7 +924,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
     // SYN0 隐式 ACK：本端首个 SYNC 上行视为对服务器下发 SYN0 的确认
     if (PEER_ONLINE(session)) {
         relay_session_t *peer = RELAY_PEER(session);
-        if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == REFER_ACK_PENDING) {
+        if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
             p2p_relay_hdr_t *sent_hdr = (p2p_relay_hdr_t*)ITEM2BUF(peer->sync_peer_send[0]);
             if (sent_hdr->type == P2P_RLY_SYN0) {
                 free_buffer(peer->sync_peer_send[0]);
@@ -1431,7 +1431,7 @@ void relay_handle_recv(relay_client_t *client) {
 error:
     client->recv_len = 0;           // 清除已读取的部分
     client_unreachable(client);     // 执行 unreachable 处理
-    client_error(client, type);     // 执行 error 处理（会根据 last_error 进行相应的日志记录）
+    client_error(client, type);     // 执行 error 处理（会根据 last_error 进行相应处理）
     return;
 // 大多数 Internal(例如 OOM) 错误，它们会导致（之前或之后的）数据完整性被破坏，或无法再继续安全的运行
 // + 此时会清除所有发送队列（因为数据完整性已破坏，即使发送过去也没有意义），
@@ -1472,7 +1472,7 @@ error_handshake:
 void relay_handle_send(relay_client_t *client) {
 
     // 如果当前处于握手阶段
-    // + 此时还没有 session，复用 recv_buf 作为 send_buf，recv_len 作为已发送长度
+    // + 此时会复用 recv_buf 作为 send_buf，recv_len 作为已发送长度
     if (TCP_HS_IS_HANDSHAKING(client)) {
 
         size_t ack_sz = sizeof(p2p_relay_hdr_t) + P2P_RLY_REG_S2C_PSZ;
@@ -1483,28 +1483,25 @@ void relay_handle_send(relay_client_t *client) {
             return;
         }
 
-        if (len > 0) { client->recv_len += len;
+        // 握手应答发送完成
+        if (len > 0 && (client->recv_len += len) >= ack_sz) { client->recv_len = 0;
 
-            // REG_ACK 发送完成
-            if (client->recv_len >= ack_sz) { client->recv_len = 0;
+            // 握手完成
+            client->handshake = 0;
+            print("V:", LA_F("%s sent to '%s'\n", LA_F179, 179), "REG_ACK", client->base.local_peer_id);
 
-                // 握手完成
-                client->handshake = 0;
-                print("V:", LA_F("REG_ACK sent to '%s'\n", LA_F179, 179), client->base.local_peer_id);
-
-                // 如果（发送完成的是）握手阶段的错误应答，直接释放 client
-                if (client->last_error) {
-                    relay_free_client(client);
-                    return;
-                }
-
-                // 启动正常读写（握手完成）
-                client->io |= TCP_IO_FLAG_WANT_READ;
-                client->io &= ~TCP_IO_FLAG_WANT_WRITE;
-
-                // 添加到索引表
-                identify_client(&client->base);
+            // 如果（发送的是）握手阶段的错误应答，直接释放 client
+            if (client->last_error) {
+                relay_free_client(client);
+                return;
             }
+
+            // 将 client 添加到索引表（激活 client 的身份），fixme 应该握手请求就激活，避免重复。否则并发 reg 会在这里冲突
+            identify_client(&client->base);
+
+            // 启动正常读写（握手完成）
+            client->io |= TCP_IO_FLAG_WANT_READ;
+            client->io &= ~TCP_IO_FLAG_WANT_WRITE;      // 初始时还没有要写入的数据
         }
 
         // REG_ACK 未完成时，跳过其他处理
@@ -1567,13 +1564,13 @@ void relay_handle_send(relay_client_t *client) {
                     return;
                 }
 
-                bool is_error_item = (item->refer == (void*)-1);
+                bool is_error_item = (item->refer == ITEM_REF_CLIENT_ERROR);
 
                 // 删除发送完成的 item
                 free_buffer(item);
 
-                // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端处理或超时回收）
-                if (is_error_item) { assert(client->last_error);
+                // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端重连或超时回收）
+                if (is_error_item) { assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));
                     P_sock_close(client->base.fd);
                     client->base.fd = P_INVALID_SOCKET;
                     client->io &= ~TCP_IO_FLAG_WANT_WRITE;
@@ -1584,18 +1581,18 @@ void relay_handle_send(relay_client_t *client) {
             else { assert(item==sending_session->send_head && item != (buffer_item_t*)g_relay_fatal);
 
                 // 如果发送的是对端发过来的数据
-                void *ref = item->refer;
-                if (ref && ref != REFER_ACK_PENDING) {
-                    relay_peer_sent((relay_session_t*)ref, item);
+                if (item->refer) { assert(item->refer != ITEM_REF_ACK_PENDING && item->refer != ITEM_REF_CLIENT_ERROR);
+                    relay_peer_sent((relay_session_t*)item->refer, item);
                 }
 
-                // 发送 session sending 队列的下一项
+                // 将当前 session 的 sending 队列切换到下一项，如果发送队列不为空
                 if ((sending_session->send_head = item->next)) {
 
-                    // session 还有数据，游标轮转到下一个 session（无需修改链表结构）
+                    // 轮询下一个（session sending 队列不为空的）session
                     client->sending_sess = sending_session->send_next ? sending_session->send_next : client->send_sess_head;
                 }
-                // session 发送队列已空，从 client 中移除该 session
+                // 如果当前 session 发送队列已空，从 client 中移除该 session
+                // + 同时切换到下一个（session sending 队列不为空的）session
                 else { sending_session->send_rear = NULL;
 
                     relay_session_t *next = sending_session->send_next;
@@ -1613,7 +1610,8 @@ void relay_handle_send(relay_client_t *client) {
                     sending_session->send_prev = NULL;
                 }
 
-                if (!item->refer) free_buffer(item);  // refer=NULL(PKT)释放；refer=REFER_ACK_PENDING(SYNC)保留
+                // 如果 item 没有被（relay_peer_sent）标记为待 ACK 状态，则直接释放
+                if (item->refer != ITEM_REF_ACK_PENDING) free_buffer(item);
             }
 
             // 如果全部发送完成
