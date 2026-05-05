@@ -633,14 +633,12 @@ static void handle_sync0_ack(struct p2p_session *s, const uint8_t *payload, uint
         print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", 0, 0),
               TASK_TOUCH, "SYNCING", "online", LA_S("sync candidates", LA_S34, 34));
 
-        // SYNC0 携带的候选可能尚未被 SYNC confirm 确认（TCP 保序：SYNC0_ACK 先于 SYNC confirm 到达）
-        // 如果 SYNC0 候选已确认（或未携带候选），立即发送后续候选
-        if (sess_ctx->candidate_synced_count == sess_ctx->candidate_syncing_base) {
-            if (sess_ctx->candidate_syncing_base < (uint16_t)s->local_cand_cnt || !P2P_CAND_PENDING(s->inst))
-                send_sync(s, now);
-            else { sess_ctx->trickle_last_time = now; s->inst->sig_ctx.relay.trickle_sessions++; }
-        }
-        // 否则等待 SYNC confirm 确认后再由 handle_sync_confirm 触发后续发送
+        // 收到对端 SYN0 隐含确认了本端 SYN0 候选已被转发，直接推进确认计数
+        sess_ctx->candidate_synced_count = sess_ctx->candidate_syncing_base;
+
+        if (sess_ctx->candidate_syncing_base < (uint16_t)s->local_cand_cnt || !P2P_CAND_PENDING(s->inst))
+            send_sync(s, now);
+        else { sess_ctx->trickle_last_time = now; s->inst->sig_ctx.relay.trickle_sessions++; }
     }
 
     // todo 支持候选列表
@@ -1104,7 +1102,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
         uint16_t payload_min; void (*handler)(struct p2p_session*, const uint8_t*, int, uint64_t);
         switch (sig_ctx->hdr.type) {
             case P2P_RLY_SYNC:
-                PROTO = "SYNC"; payload_min = P2P_RLY_SYNC_PSZ(0, false);
+                PROTO = "SYNC"; payload_min = P2P_RLY_SYNC_CONFIRM_PSZ;
                 handler = P2P_RLY_IS_SYNC_CONFIRM(&sig_ctx->hdr) ? handle_sync_confirm : handle_peer_sync;
             break;
             case P2P_RLY_FIN:
@@ -1113,8 +1111,8 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 PROTO = "PACKET"; payload_min = P2P_RLY_PKT_PSZ(0); handler = handle_relay_packet; break;
             case P2P_RLY_REQ:
                 PROTO = "REQ"; payload_min = P2P_RLY_REQ_MIN_PSZ; handler = handle_relay_req; break;
-            case P2P_RLY_RESP:
-                PROTO = "RESP"; payload_min = P2P_RLY_RESP_MIN_PSZ; handler = handle_relay_resp; break;
+            case P2P_RLY_RSP:
+                PROTO = "RESP"; payload_min = P2P_RLY_RSP_MIN_PSZ; handler = handle_relay_resp; break;
             default:
                 print("W:", LA_F("[R] Unknown proto type %d\n", LA_F454, 454), sig_ctx->hdr.type);
                 return;
@@ -1501,7 +1499,7 @@ ret_t p2p_signal_relay_response(struct p2p_session *s,
     }
 
     p2p_relay_ctx_t *sig_ctx = &s->inst->sig_ctx.relay;
-    ret_t ret = tcp_send(sig_ctx, "RESP", P2P_RLY_RESP, payload, n, P_tick_ms());
+    ret_t ret = tcp_send(sig_ctx, "RESP", P2P_RLY_RSP, payload, n, P_tick_ms());
     if (ret != E_NONE) return ret;
 
     print("I:", LA_F("%s resp (ses_id=%u), sid=%u code=%u len=%d\n", LA_F51, 51), TASK_RPC,

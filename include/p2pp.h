@@ -851,6 +851,11 @@ typedef struct {
  *     - 格式同 P2P_RLY_SYNC，但不包括 fin_marker 字段
  *     - sid: 对端 SYN0 的序列号（服务端透传，用于客户端去重）
  *     - candidate_count < 0xFF，0xFF 保留给状态 2 的离线标识
+ *
+ * SYN0 隐式 ACK 机制：
+ *   服务器向对端转发 SYN0（状态 3）后，对端无独立的 SYN0 ACK 消息。
+ *   协议规定：对端收到 SYN0 后，必然随后发送首个 SYNC 上行包；该首个 SYNC 即视为隐式 SYN0 ACK。
+ *   服务器收到对端首个 SYNC 上行时，释放对应的 SYN0 转发缓冲区（sync_peer_sent）。
  */
 #define P2P_RLY_SYN0_PSZ(n)             (P2P_PEER_ID_MAX + 2u + (n)*sizeof(p2p_candidate_t))
 #define P2P_RLY_SYN0_S2C_PSZ(n)         (P2P_SESS_ID_SZ + P2P_RLY_SYN0_PSZ(n))
@@ -865,20 +870,20 @@ typedef struct {
  *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *     - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
  *
- *   状态 2: Server -> Client（确认候选处理数量）
- *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][confirmed_count(1)]
+ *   状态 2: Server -> Client（ACK，确认本批次全部候选已转发到对端）
+ *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)]
  *     - session_id: 会话 ID（网络字节序）
  *     - sid: 回显对应上行 SYNC 的序列号
- *     - confirmed_count: 实际确认处理的候选数（转发或缓存），0=全部完成（仅 FIN 后）
- *     ! 下行的 SYNC 并非是上行 SYNC 的应答。例如，上行 2 个 SYNC，返回 1 SYNC，confirmed_count 是上行两个 SYNC 中累计确认的候选数量
+ *     ! 一个 confirm 表示该批次全部候选已转发；客户端收到后可立即发送下一批 
  * 
  *   状态 3: Server -> Client（下发/转发对端候选）
  *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *     - 与状态 1 同格式，session_id 由服务器重写为接收方本地会话 ID
  *     - sid: 对端 SYNC 的序列号（服务端透传，用于客户端去重）
  */
+#define P2P_RLY_SYNC_CONFIRM_PSZ        (P2P_SESS_ID_SZ + 1u)
 #define P2P_RLY_SYNC_PSZ(n, mk)         (P2P_SESS_ID_SZ + 2u + (n)*sizeof(p2p_candidate_t) + ((mk) ? 1u : 0u))
-#define P2P_RLY_IS_SYNC_CONFIRM(hdr)    (((p2p_relay_hdr_t*)(hdr))->size == P2P_RLY_SYNC_PSZ(0, 0))
+#define P2P_RLY_IS_SYNC_CONFIRM(hdr)    (((p2p_relay_hdr_t*)(hdr))->size == P2P_RLY_SYNC_CONFIRM_PSZ)
 /* P2P_RLY_FIN:
  *   payload: [session_id(P2P_SESS_ID_SZ)]
  *   - session_id: 要结束的会话 ID（网络字节序）
