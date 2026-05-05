@@ -479,7 +479,7 @@ static int wait_status(sock_t sock, status_t *status) {
             return 0;
         }
         
-        if (type == P2P_RLY_STA && payload_len >= P2P_RLY_STATUS_PSZ(2, 0)) {
+        if (type == P2P_RLY_STA && payload_len >= P2P_RLY_STA_PSZ(2, 0)) {
             // [relay_hdr(3)][req_type(1)][status_code(1)][session_id(P2P_SESS_ID_SZ)]
             status->received = 1;
             status->req_type = recv_buf[3];

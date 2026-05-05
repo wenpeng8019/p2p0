@@ -789,7 +789,7 @@ typedef struct {
 #define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(7)      // 服务器转发请求超时
 #define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(8)      // 会话忙（前一个转发尚未完成）
 
-/* RELAY ONLINE 下行功能标志 */
+/* RELAY REG 下行功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
 #define P2P_RLY_FEATURE_MSG         0x02    // 支持 MSG RPC 机制
 #define P2P_RLY_SYNC_FIN_MARKER     0xFF    // SYNC 负载尾部 FIN 标记字节
@@ -804,17 +804,17 @@ typedef struct {
  *   payload: [type(1)][status_code(1)][[session_id(P2P_SESS_ID_SZ)]|remote_peer_id(P2P_PEER_ID_MAX)][status_msg(N)]
  *   - type: 请求的 p2p_relay_type_t 类型（例如 P2P_RLY_SYN0），用于指示哪个请求出错
  *   - status_code: 见 P2P_RLY_CODE_* 定义
- *   - session_id: 会话 ID，对于会话相关的请求（如 SYNC）存在时携带，用于客户端识别对应会话；对于非会话请求（如 ONLINE）则不携带
+ *   - session_id: 会话 ID，对于会话相关的请求（如 SYNC）存在时携带，用于客户端识别对应会话；对于非会话请求（如 REG）则不携带
  *                 注意：P2P_RLY_SYN0 请求尚未建立会话，因此返回的 STATUS 不携带 session_id，但会携带 remote_peer_id 以指示哪个对端的连接请求出错
  *   - status_msg: 可选的状态描述文本（UTF-8 编码）
  */
-#define P2P_RLY_STATUS_PSZ(s, n)        (2 + ((s)==2 ? P2P_SESS_ID_SZ : ((s) == 1 ? P2P_PEER_ID_MAX : 0)) + (n)) // type(1) + status_code(1) + route_key + status_msg(N)
+#define P2P_RLY_STA_PSZ(s, n)        (2 + ((s)==2 ? P2P_SESS_ID_SZ : ((s) == 1 ? P2P_PEER_ID_MAX : 0)) + (n)) // type(1) + status_code(1) + route_key + status_msg(N)
 /* P2P_RLY_REG（双向，上下行负载格式不同）:
  *
  *   上行 Client -> Server:
  *     payload: [name(32)][instance_id(4)]
  *     - name: 本地 peer 名称，定长 32 字节，0 填充
- *     - instance_id: 客户端每次 online() 生成的 32 位随机数（网络字节序）
+ *     - instance_id: 客户端每次 register() 生成的 32 位随机数（网络字节序）
  *
  *   下行 Server -> Client:
  *     payload: [features(1)][candidate_sync_max(1)]
@@ -828,7 +828,7 @@ typedef struct {
  *   - Client -> Server: 心跳保活
  *   - Server -> Client: 心跳确认
  */
-#define P2P_RLY_ALIVE_PSZ           0u
+#define P2P_RLY_ALV_PSZ                 0u
 /* P2P_RLY_SYN0（三态，上下行负载格式不同）:
  * + 注意一个细节，SYN0 的候选肯定不带有 FIN 标识，也就是 SYN0 肯定不是最后一个 SYNC 包
  *
@@ -859,7 +859,7 @@ typedef struct {
  */
 #define P2P_RLY_SYN0_PSZ(n)             (P2P_PEER_ID_MAX + 2u + (n)*sizeof(p2p_candidate_t))
 #define P2P_RLY_SYN0_S2C_PSZ(n)         (P2P_SESS_ID_SZ + P2P_RLY_SYN0_PSZ(n))
-#define P2P_RLY_IS_SYN0_OFFLINE(p)      (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 1u] == 0xFF)
+#define P2P_RLY_IS_SYN0_PEER_OFF(p)     (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 1u] == 0xFF)
 /* P2P_RLY_SYNC（三态，上下行负载格式不同）:
  *
  *   状态 1: Client -> Server（上传本端后续候选）
@@ -943,16 +943,16 @@ typedef struct {
  *   │                            │
  *   ├── TCP Connect ───────────►│
  *   │                            │
- *   ├── ONLINE ────────────────►│  [name][instance_id]
+ *   ├──── REG ─────────────────►│  [name][instance_id]
  *   │                            │
- *   │◄── ONLINE ────────────────┤  [features][candidate_sync_max]
+ *   │◄── REG ───────────────────┤  [features][candidate_sync_max]
  *   │   (features: RELAY|MSG)    │  告知服务器功能与候选批量上限
  *   │                            │
- *   [进入 ONLINE 状态]           │
+ *   [进入 REG 状态]              │
  *   │                            │
- *   ├── ALIVE ─────────────────►│  (每 20 秒心跳)
+ *   ├──── ALV ─────────────────►│  (每 20 秒心跳)
  *   │                            │
- *   │◄── ALIVE ─────────────────┤  (空 payload 确认)
+ *   │◄── ALV ───────────────────┤  (空 payload 确认)
  *   │                            │
  *
  * 2. 初始化会话同步（建立会话 + 首批候选同步）
@@ -960,10 +960,10 @@ typedef struct {
  *
  *   Client A                  Server
  *   │                            │
- *   ├── SYN0 ─────────────────►│  [target][cnt=5][cands]
+ *   ├──── SYN0 ────────────────►│  [target][cnt=5][cands]
  *   │                            │  查找 B 的状态
  *   │                            │  分配 session_id
- *   │◄── SYN0 ─────────────────┤  [target][sid][state=0x00]
+ *   │◄── SYN0 ──────────────────┤  [target][sid][state=0x00]
  *   │   (状态 2: 建会应答)       │
  *   │                            │
  *   │◄── SYNC ──────────────────┤  [sid][fwd=5]
@@ -976,9 +976,9 @@ typedef struct {
  *
  *   Client A                     Server                         Client B
  *   │                               │                              │
- *   ├───── SYN0 ─────────────────►│  [target=B][cnt=5]           │
+ *   ├────── SYN0 ─────────────────►│  [target=B][cnt=5]           │
  *   │                               │  B 在线，分配 sid=123        │
- *   │◄──── SYN0 ──────────────────┤ [target=B][sid=123][state=0x00]│
+ *   │◄──── SYN0 ───────────────────┤ [target=B][sid=123][state=0x00]│
  *   │   (状态 2: 建会应答)          │                              │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
@@ -986,9 +986,9 @@ typedef struct {
  *   │                               │   (A 的 5 个候选)            │
  *   │                               │                              │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=5]            │
- *   │   (状态 3: SYN0 首批候选确认)│                              │
+ *   │   (状态 3: SYN0 首批候选确认) │                              │
  *   │                               │                              │
- *   ├───── SYNC ──────────────────►│  [sid=123][cnt=5]            │
+ *   ├────── SYNC ─────────────────►│  [sid=123][cnt=5]            │
  *   │   (上传剩余 5 个候选)         │  立即转发给 B                │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
@@ -998,7 +998,7 @@ typedef struct {
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=5]            │
  *   │   (状态 3: 已转发 5 个)       │  缓冲区有空间才回            │
  *   │                               │                              │
- *   ├───── SYNC ──────────────────►│  [sid=123][cnt=3]            │
+ *   ├────── SYNC ─────────────────►│  [sid=123][cnt=3]            │
  *   │   (再上传 3 个)               │                              │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
@@ -1006,7 +1006,7 @@ typedef struct {
  *   │                               │                              │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=3]            │
  *   │                               │                              │
- *   ├───── SYNC ──────────────────►│  [sid=123][cnt=0][fin=0xFF]  │
+ *   ├────── SYNC ─────────────────►│  [sid=123][cnt=0][fin=0xFF]  │
  *   │   (上传完成，FIN 标记)        │                              │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
@@ -1014,7 +1014,7 @@ typedef struct {
  *   │                               │   (A 候选传输完成)           │
  *   │                               │                              │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=0]            │
- *   │   (状态 3: fwd=0 表示全部完成)│  FIN 确认                    │
+ *   │  (状态 3: fwd=0 表示全部完成) │  FIN 确认                    │
  *   │                               │                              │
  *   │<======================== P2P ICE 打洞 ======================>│
  *
@@ -1023,58 +1023,58 @@ typedef struct {
  *
  *   Client A (在线)           Server                         Client B (离线)
  *   │                               │                              │
- *   ├──── ONLINE ─────────────────►│                              │
- *   │◄──── ONLINE ─────────────────┤                              │
+ *   ├────── REG ──────────────────►│                              │
+ *   │◄──── REG ────────────────────┤                              │
  *   │                               │                              │
- *   ├───── SYN0 ─────────────────►│  [target=B][cnt=5]           │
+ *   ├────── SYN0 ─────────────────►│  [target=B][cnt=5]           │
  *   │                               │  B 离线                      │
- *   │◄──── SYN0 ──────────────────┤ [target=B][sid=123][state=0xFF]|
+ *   │◄──── SYN0 ───────────────────┤ [target=B][sid=123][state=0xFF]|
  *   │ (状态 2: 建会应答，B 当前离线)│                              │
  *   │                               │                              │
- *   ├───── SYNC ──────────────────►│  [sid=123][cnt=5]            │
+ *   ├────── SYNC ─────────────────►│  [sid=123][cnt=5]            │
  *   │   (上传 5 个候选)             │  尝试缓存                    │
  *   │                               │  [缓冲区空间有限]            │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=3]            │
  *   │   (状态 3: 仅缓存了 3 个)     │  有空间才回确认              │
  *   │                               │                              │
- *   ├───── SYNC ──────────────────►│  [sid=123][cnt=2]            │
+ *   ├────── SYNC ─────────────────►│  [sid=123][cnt=2]            │
  *   │   (从第 4 个重传)             │  继续缓存                    │
  *   │                               │                              │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=2]            │
- *   │   (状态 3: 再缓存 2 个，空间满)│  暂不确认，等空间           │
+ *   │ (状态 3: 再缓存 2 个，空间满) │  暂不确认，等空间            │
  *   │   [buffer full, no confirm]   │                              │
  *   │                               │                              │
  *   [等待对端上线...]               │                              │
  *   │                               │                              │
  *   │    ... B 上线 ...             │                              │
- *   │                               │◄────── ONLINE ──────────────┤
- *   │                               ├────── ONLINE ──────────────►│
+ *   │                               │◄────── REG ─────────────────┤
+ *   │                               ├──────── REG ───────────────►│
  *   │                               │                              │
- *   │                               │◄────── SYN0 ───────────────┤  [target=A][cnt=3]
- *   │                               ├────── SYN0 ───────────────►│  [target=A][sid=456][state=0x00]
+ *   │                               │◄────── SYN0 ────────────────┤  [target=A][cnt=3]
+ *   │                               ├──────── SYN0 ──────────────►│  [target=A][sid=456][state=0x00]
  *   │                               │                              │
- *   │                               ├────── SYNC ────────────────►│
+ *   │                               ├──────── SYNC ──────────────►│
  *   │                               │   [sid=456][cnt=3]           │
  *   │                               │   (推送 A 其余候选)          │
  *   │                               │                              │
- *   │                               ├───────── SYNC ─────────────►│
- *   │                               │   [sid=456][cnt=0][fin=0xFF] │
- *   │                               │   (A 候选推送完成)           │
+ *   │                               ├──────── SYNC ──────────────►│
+ *   │                               │  [sid=456][cnt=0][fin=0xFF]  │
+ *   │                               │  (A 候选推送完成)            │
  *   │                               │                              │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=5]            │
  *   │ (状态 3: 对端上线后补回首批)  │  有空间才回确认              │
  *   │                               │                              │
- *   ├───── SYNC ──────────────────►│  [sid=123][cnt=2]            │
+ *   ├────── SYNC ─────────────────►│  [sid=123][cnt=2]            │
  *   │   (继续上传剩余候选)          │  B 在线，实时转发            │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
- *   │                               │   [sid=456][cnt=2]           │
+ *   │                               │  [sid=456][cnt=2]            │
  *   │                               │                              │
- *   ├──────── SYNC ───────────────►│  [sid=123][cnt=0][fin=0xFF]  │
+ *   ├────── SYNC ─────────────────►│  [sid=123][cnt=0][fin=0xFF]  │
  *   │   (上传完成，FIN 标记)        │                              │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
- *   │                               │   [sid=456][cnt=0][fin=0xFF] │
+ *   │                               │  [sid=456][cnt=0][fin=0xFF]  │
  *   │                               │                              │
  *   │<======================== P2P ICE 打洞 ======================>│
  *
@@ -1112,17 +1112,17 @@ typedef struct {
  *
  *   A (requester)         Server                    B (responder)
  *   │                        │                        │
- *   ├── RLY_REQ ───────────►│                        │
+ *   ├─── RLY_REQ ──────────►│                        │
  *   │  [ses_id_A][sid][msg]  │                        │
  *   │  [data]                │                        │
- *   │                        ├── RLY_REQ ───────────►│
+ *   │                        ├──── RLY_REQ ─────────►│
  *   │                        │  [ses_id_B][sid][msg]  │
  *   │                        │  [data]                │
  *   │                        │                        │
- *   │                        │◄── RLY_RSP ──────────┤
+ *   │                        │◄── RLY_RSP ───────────┤
  *   │                        │  [ses_id_B][sid][code] │
  *   │                        │  [data]                │
- *   │◄── RLY_RSP ──────────┤                        │
+ *   │◄── RLY_RSP ───────────┤                        │
  *   │  [ses_id_A][sid][code] │                        │
  *   │  [data]                │
  *

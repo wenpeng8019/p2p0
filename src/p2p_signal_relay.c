@@ -913,7 +913,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
         if (sig_ctx->hdr.type == P2P_RLY_STA) { PROTO = "STATUS";
             printf(LA_F("[R] %s recv, len=%d\n", LA_F438, 438), PROTO, sig_ctx->hdr.size);
 
-            const int st_sz = P2P_RLY_STATUS_PSZ(0, 0);
+            const int st_sz = P2P_RLY_STA_PSZ(0, 0);
             if (sig_ctx->hdr.size < st_sz) {
                 print("E:", LA_F("%s: bad payload(%d)\n", LA_F117, 117), PROTO, sig_ctx->hdr.size);
             }
@@ -932,7 +932,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             // 对于 client/session 临界级别的状态
             if (req_type == P2P_RLY_SYN0) {
 
-                if (sig_ctx->hdr.size < P2P_RLY_STATUS_PSZ(1, 0)) {
+                if (sig_ctx->hdr.size < P2P_RLY_STA_PSZ(1, 0)) {
                     print("E:", LA_F("%s: bad payload(%d, type=%u)\n", 0, 0), PROTO, sig_ctx->hdr.size, req_type);
                     return;
                 }
@@ -941,8 +941,8 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 for(; s; s = s->next) {
                     if (strncmp(s->sig_sess.relay.remote_peer_id, (char*)sig_ctx->payload + st_sz, P2P_PEER_ID_MAX-1) == 0) {
 
-                        if (sig_ctx->hdr.size > P2P_RLY_STATUS_PSZ(1, 0)) { sig_ctx->payload[sizeof(sig_ctx->payload)-1] = 0;
-                            handle_session_status(s, req_type, status_code, (const char*)sig_ctx->payload + P2P_RLY_STATUS_PSZ(1, 0));
+                        if (sig_ctx->hdr.size > P2P_RLY_STA_PSZ(1, 0)) { sig_ctx->payload[sizeof(sig_ctx->payload)-1] = 0;
+                            handle_session_status(s, req_type, status_code, (const char*)sig_ctx->payload + P2P_RLY_STA_PSZ(1, 0));
                         } else handle_session_status(s, req_type, status_code, NULL);
                         break;
                     }
@@ -956,7 +956,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
 
             // 对于 session 级别的状态
 
-            if (sig_ctx->hdr.size < P2P_RLY_STATUS_PSZ(2, 0)) {
+            if (sig_ctx->hdr.size < P2P_RLY_STA_PSZ(2, 0)) {
                 print("E:", LA_F("%s: bad payload(%d, type=%u)\n", 0, 0), PROTO, sig_ctx->hdr.size, req_type);
                 return;
             }
@@ -967,8 +967,8 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             for(; s; s = s->next) {
                 if (session_id == s->id) {
 
-                    if (sig_ctx->hdr.size > P2P_RLY_STATUS_PSZ(2, 0)) { sig_ctx->payload[sizeof(sig_ctx->payload)-1] = 0;
-                        handle_session_status(s, req_type, status_code, (const char*)sig_ctx->payload + P2P_RLY_STATUS_PSZ(2, 0));
+                    if (sig_ctx->hdr.size > P2P_RLY_STA_PSZ(2, 0)) { sig_ctx->payload[sizeof(sig_ctx->payload)-1] = 0;
+                        handle_session_status(s, req_type, status_code, (const char*)sig_ctx->payload + P2P_RLY_STA_PSZ(2, 0));
                     } else handle_session_status(s, req_type, status_code, NULL);
                     break;
                 }
@@ -1030,7 +1030,7 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
                 return;
             }
 
-            if (sess_ctx->state != SIG_RELAY_SESS_WAIT_PEER || P2P_RLY_IS_SYN0_OFFLINE(sig_ctx->payload)) {
+            if (sess_ctx->state != SIG_RELAY_SESS_WAIT_PEER || P2P_RLY_IS_SYN0_PEER_OFF(sig_ctx->payload)) {
                 print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sess_ctx->state);
                 return;
             }
