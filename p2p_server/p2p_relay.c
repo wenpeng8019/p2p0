@@ -723,6 +723,7 @@ static void client_error(relay_client_t *client, uint8_t req_type) {
 
 // 处理 SYN0 消息（首次同步）
 // payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
+// 注：SYN0 的 sid=0 固定，省略传输；后续 SYNC 从 sid=1 起始
 static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t len) {
     const char *PROTO = "SYN0";
 
@@ -1248,6 +1249,7 @@ static void relay_handle_rsp(relay_client_t *client, relay_session_t *session, u
     // 解锁 rpc_pending_sid（RPC 生命周期完成），释放 pending 状态
     relay_pending_remove_rpc(peer);
     peer->rpc_pending_sid = 0;
+    peer->rpc_sent_time = 0;
 }
 
 //-----------------------------------------------------------------------------

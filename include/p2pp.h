@@ -831,41 +831,41 @@ typedef struct {
 #define P2P_RLY_ALV_PSZ                 0u
 /* P2P_RLY_SYN0（三态，上下行负载格式不同）:
  * + 注意一个细节，SYN0 的候选肯定不带有 FIN 标识，也就是 SYN0 肯定不是最后一个 SYNC 包
+ * + SYN0 是序列号为 0 的首包，sid 字段固定为 0，因此省略传输；
+ *   后续 SYNC 包的 sid 从 1 起始，循环递增。
  *
  *   状态 1: Client -> Server（发起会话创建，并提交首批候选）
- *     payload: [target_name(32)][sid(1)][candidate_count(1)][candidates(N*23)]
+ *     payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
  *     - target_name: 目标 peer 名称，定长 32 字节，0 填充
- *     - sid: 本次 SYN0 的序列号（循环递增，用于服务端去重/排序）
  *     - candidate_count: 本端首批候选数量（可以为 0）
  *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
+ *     注：SYN0 的 sid=0 固定，省略传输；服务端不需要去重，直接转发。
  *
  *   状态 2: Server -> Client（会话创建应答，对方不在线，立即返回）
- *     payload: [target_name(32)][session_id(P2P_SESS_ID_SZ)][sid(1)][0xFF(1)]
+ *     payload: [target_name(32)][session_id(P2P_SESS_ID_SZ)][0xFF(1)]
  *     - target_name: 目标 peer 名称，定长 32 字节，0 填充
  *     - session_id: 会话 ID（网络字节序）
- *     - sid: 回显客户端 SYN0 的序列号
- *     - 0xFF(1): 常量，表示对端离线
+ *     - 0xFF(1): 常量，表示对端离线（客户端通过此字节判断是离线应答还是状态 3）
  *
  *   状态 3: Server -> Client（转发对端同步数据，也就是首批候选集合，同时表示对端在线/或上线）
- *     payload: [source_name(32)][session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)]
- *     - 格式同 P2P_RLY_SYNC，但不包括 fin_marker 字段
- *     - sid: 对端 SYN0 的序列号（服务端透传，用于客户端去重）
+ *     payload: [source_name(32)][session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)]
+ *     - 格式同 P2P_RLY_SYNC，但不包括 sid 和 fin_marker 字段
  *     - candidate_count < 0xFF，0xFF 保留给状态 2 的离线标识
  *
  * SYN0 隐式 ACK 机制：
  *   服务器向对端转发 SYN0（状态 3）后，对端无独立的 SYN0 ACK 消息。
- *   协议规定：对端收到 SYN0 后，必然随后发送首个 SYNC 上行包；该首个 SYNC 即视为隐式 SYN0 ACK。
+ *   协议规定：对端收到 SYN0 后，必然随后发送首个 SYNC 上行包（sid=1）；该首个 SYNC 即视为隐式 SYN0 ACK。
  *   服务器收到对端首个 SYNC 上行时，释放对应的 SYN0 转发缓冲区（sync_peer_sent）。
  */
-#define P2P_RLY_SYN0_PSZ(n)             (P2P_PEER_ID_MAX + 2u + (n)*sizeof(p2p_candidate_t))
+#define P2P_RLY_SYN0_PSZ(n)             (P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t))
 #define P2P_RLY_SYN0_S2C_PSZ(n)         (P2P_SESS_ID_SZ + P2P_RLY_SYN0_PSZ(n))
-#define P2P_RLY_IS_SYN0_PEER_OFF(p)     (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 1u] == 0xFF)
+#define P2P_RLY_IS_SYN0_PEER_OFF(p)     (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ] == 0xFF)
 /* P2P_RLY_SYNC（三态，上下行负载格式不同）:
  *
  *   状态 1: Client -> Server（上传本端后续候选）
  *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
  *     - session_id: 会话 ID（网络字节序）
- *     - sid: 本包序列号（循环递增，用于服务端去重/排序）
+ *     - sid: 本包序列号（从 1 起始循环递增；0 保留给 SYN0，但 SYN0 的 sid 省略传输）
  *     - candidate_count: 本包候选数量
  *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
  *     - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
