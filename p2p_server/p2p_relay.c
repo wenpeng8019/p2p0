@@ -31,25 +31,14 @@ const char* PROTO_STR(uint8_t proto) {
 #define RELAY_PEER(s)               ((relay_session_t*)PEER(s))
 #define RELAY_CLIENT(s)             ((relay_client_t*)CLIENT(s))
 
-#define CT_ERR_PROTOCOL             (CUSTOM_TCP_ERR_CUSTOM+0)      // 协议错误（未登录/非法状态）
-#define CT_ERR_PEER_OFF             (CUSTOM_TCP_ERR_CUSTOM+1)      // 对端未完成 REG（未登录）或已 OFF（离线）
-#define CT_ERR_UNREACHABLE          (CUSTOM_TCP_ERR_CUSTOM+2)      // 对方暂时不可达（对方已经 REG 但可能网络闪断或异常）
-#define CT_ERR_INVALID              (CUSTOM_TCP_ERR_CUSTOM+3)      // 无效的参数或操作
-#define CT_ERR_TIMEOUT              (CUSTOM_TCP_ERR_CUSTOM+4)      // 服务器转发请求超时
-#define CT_ERR_BUSY                 (CUSTOM_TCP_ERR_CUSTOM+5)      // 会话忙（前一个转发尚未完成）
-
-// 将内部 custom_tcp 错误码映射为线上协议状态码
-// + CUSTOM_TCP_ERR_* 和 P2P_RLY_ERR_* 通过 ERR(N-1) 对齐；非错误码（< CUSTOM_TCP_ERR_DISCONNECTED）直接透传
-#define CT_CODE(c)  ((uint8_t)(c) >= CUSTOM_TCP_ERR_DISCONNECTED \
-                     ? P2P_RLY_ERR((uint8_t)(c) - CUSTOM_TCP_ERR_DISCONNECTED) \
-                     : (uint8_t)(c))
-
 // RELAY RPC 待确认链表（按 rpc_sent_time 排序，队头最早超时）
 static relay_session_t*             g_relay_rpc_pending_head = NULL;
 static relay_session_t*             g_relay_rpc_pending_rear = NULL;
 
 static uint8_t                      g_relay_fatal[sizeof(buffer_item_t) + sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0)];
 static custom_tcp_ctx_t             g_ctx;
+
+#define RLY_ERR_2_CT_ERR(err)       (CUSTOM_TCP_ERR_DISCONNECTED + (err) - P2P_RLY_ERR_DISCONNECTED)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -112,7 +101,7 @@ static bool relay_send_status(relay_client_t *client, uint8_t req_type, uint8_t 
 
     uint8_t *p = (uint8_t *)(hdr + 1);
     p[0] = req_type;
-    p[1] = CT_CODE(status_code);
+    p[1] = status_code;
 
     // 借用一个临时空 session 结构是不合适的，这里直接用 tcp_send 尝试发送
     ct_client_send((ct_client_t*)client, buf_item, false);
@@ -138,7 +127,7 @@ static bool relay_send_syn0_status(relay_client_t *client, const char *remote_pe
 
     uint8_t *p = (uint8_t *)(hdr + 1);
     p[0] = P2P_RLY_SYN0;
-    p[1] = CT_CODE(status_code);
+    p[1] = status_code;
     memset(p + 2, 0, P2P_PEER_ID_MAX);
     if (remote_peer_id) strncpy((char*)(p + 2), remote_peer_id, P2P_PEER_ID_MAX);
 
@@ -166,7 +155,7 @@ static bool relay_session_send_status(relay_session_t *session, uint8_t req_type
 
     uint8_t *payload = (uint8_t *)(hdr + 1);
     payload[0] = req_type;
-    payload[1] = CT_CODE(status_code);
+    payload[1] = status_code;
     nwrite_l(payload + 2, session->base.session_id);
 
     ct_session_send((ct_session_t*)session, buf_item);
@@ -406,7 +395,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
 
     if (len < P2P_RLY_SYN0_PSZ(0)) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, len);
-        relay_send_syn0_status(client, (const char *)payload, CT_ERR_PROTOCOL);
+        relay_send_syn0_status(client, (const char *)payload, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -414,7 +403,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     uint32_t expect_len = P2P_RLY_SYN0_PSZ(cand_count);
     if (len != expect_len) {
         print("E:", LA_F("%s: bad payload(cnt=%d, len=%u, expected=%u)\n", LA_F39, 39), PROTO, cand_count, len, expect_len);
-        relay_send_syn0_status(client, (const char *)payload, CT_ERR_PROTOCOL);
+        relay_send_syn0_status(client, (const char *)payload, P2P_RLY_ERR_PROTOCOL);
         return;
     }
     payload[P2P_PEER_ID_MAX] = '\0';
@@ -431,7 +420,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     }
     if (side < E_NONE) {
         print("E:", LA_F("%s: build session to '%s' failed(%d)\n", LA_F44, 44), PROTO, (const char *)payload, side);
-        relay_send_syn0_status(client, (const char *)payload, CT_ERR_PROTOCOL);
+        relay_send_syn0_status(client, (const char *)payload, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -575,21 +564,21 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
 
     if (len < P2P_RLY_SYNC_CONFIRM_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, len);
-        relay_session_send_status(session, P2P_RLY_SYNC, CT_ERR_PROTOCOL);
+        relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
     uint8_t sid = payload[P2P_SESS_ID_SZ];
     if (!sid) {
         print("E:", LA_F("%s: bad payload(sid=0)\n", LA_F156, 156), PROTO);
-        relay_session_send_status(session, P2P_RLY_SYNC, CT_ERR_PROTOCOL);
+        relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
     if (!PEER_ONLINE(session)) {
         print("E:", LA_F("%s: ses_id=%u, peer offline, drop sid=%u\n", LA_F145, 145),
               PROTO, session->base.session_id, sid);
-        relay_session_send_status(session, P2P_RLY_SYNC, CT_ERR_PEER_OFF);
+        relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_PEER_OFF);
         return;
     }
 
@@ -629,14 +618,14 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
 
         if (payload[payload_sz] != P2P_RLY_SYNC_FIN_MARKER) {
             print("E:", LA_F("%s: bad FIN marker=0x%02x\n", LA_F38, 38), PROTO, payload[payload_sz]);
-            relay_session_send_status(session, P2P_RLY_SYNC, CT_ERR_PROTOCOL);
+            relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_PROTOCOL);
             return;
         }
     }
     else if (len != payload_sz) {
         print("E:", LA_F("%s: bad payload(sid=%u, cnt=%u, len=%u, expected=%u+1fin)\n", LA_F40, 40),
                PROTO, sid, (unsigned)cand_count, len, payload_sz);
-        relay_session_send_status(session, P2P_RLY_SYNC, CT_ERR_PROTOCOL);
+        relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -652,7 +641,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
     if (!uint16_circle_newer(sid, session->last_sid)) {
         print("W:", LA_F("%s: ses_id=%u, stale sid=%u (last=%u), drop\n", LA_F145, 145),
             PROTO, session->base.session_id, sid, session->last_sid);
-        relay_session_send_status(session, P2P_RLY_SYNC, CT_ERR_PROTOCOL);
+        relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -660,7 +649,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
     if (session->sync_peer_send_cnt >= RELAY_PEER_Q_MAX) {
         print("W:", LA_F("%s: ses_id=%u busy (pending %s)\n", LA_F145, 145),
               PROTO, session->base.session_id, "sync");
-        relay_session_send_status(session, P2P_RLY_SYNC, CT_ERR_BUSY);
+        relay_session_send_status(session, P2P_RLY_SYNC, P2P_RLY_ERR_BUSY);
         return;
     }
 
@@ -748,7 +737,7 @@ static void relay_handle_pkt(relay_client_t *client, relay_session_t *session, u
     if (!PEER_ONLINE(session)) {
         print("E:", LA_F("%s: ses_id=%u, peer offline, drop pkt\n", 0, 0),
               PROTO, session->base.session_id);
-        relay_session_send_status(session, P2P_RLY_PKT, CT_ERR_PEER_OFF);
+        relay_session_send_status(session, P2P_RLY_PKT, P2P_RLY_ERR_PEER_OFF);
         return;
     }
 
@@ -756,7 +745,7 @@ static void relay_handle_pkt(relay_client_t *client, relay_session_t *session, u
     if (session->pkt_peer_send_cnt >= RELAY_PEER_Q_MAX) {
         print("W:", LA_F("%s: ses_id=%u busy (pending %s)\n", LA_F145, 145),
               PROTO, session->base.session_id, "pkt");
-        relay_session_send_status(session, P2P_RLY_PKT, CT_ERR_BUSY);
+        relay_session_send_status(session, P2P_RLY_PKT, P2P_RLY_ERR_BUSY);
         return;
     }
 
@@ -798,7 +787,7 @@ static void relay_handle_req(relay_client_t *client, relay_session_t *session, u
 
     if (len < P2P_RLY_RPC_MIN_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, len);
-        relay_session_send_status(session, P2P_RLY_REQ, CT_ERR_PROTOCOL);
+        relay_session_send_status(session, P2P_RLY_REQ, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -812,21 +801,21 @@ static void relay_handle_req(relay_client_t *client, relay_session_t *session, u
 
     if (!sid) {
         print("E:", LA_F("%s: invalid sid=0\n", 0, 0), PROTO);
-        relay_session_send_status(session, P2P_RLY_REQ, CT_ERR_INVALID);
+        relay_session_send_status(session, P2P_RLY_REQ, P2P_RLY_ERR_INVALID);
         return;
     }
 
     if (session->rpc_last_sid && !uint16_circle_newer(sid, session->rpc_last_sid)) {
         print("E:", LA_F("%s: sid too old (got=%u, pending=%u), discarding\n", 0, 0),
               PROTO, sid, session->rpc_pending_sid);
-        relay_session_send_status(session, P2P_RLY_REQ, CT_ERR_INVALID);
+        relay_session_send_status(session, P2P_RLY_REQ, P2P_RLY_ERR_INVALID);
         return;
     }
 
     // 忙检查（控速）
     if (session->rpc_pending_sid) {
         print("E:", LA_F("%s: rpc busy (pending sid=%u)\n", LA_F67, 67), PROTO, session->rpc_pending_sid);
-        relay_session_send_status(session, P2P_RLY_REQ, CT_ERR_BUSY);
+        relay_session_send_status(session, P2P_RLY_REQ, P2P_RLY_ERR_BUSY);
         return;
     }
 
@@ -871,7 +860,7 @@ static void relay_handle_rsp(relay_client_t *client, relay_session_t *session, u
 
     if (len < P2P_RLY_RPC_MIN_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, len);
-        relay_session_send_status(session, P2P_RLY_RSP, CT_ERR_PROTOCOL);
+        relay_session_send_status(session, P2P_RLY_RSP, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -885,7 +874,7 @@ static void relay_handle_rsp(relay_client_t *client, relay_session_t *session, u
 
     if (!sid) {
         print("W:", LA_F("%s: invalid sid=0\n", 0, 0), PROTO);
-        relay_session_send_status(session, P2P_RLY_RSP, CT_ERR_INVALID);
+        relay_session_send_status(session, P2P_RLY_RSP, P2P_RLY_ERR_INVALID);
         return;
     }
 
@@ -946,7 +935,7 @@ static int relay_handle_handshake(ct_client_t *client, uint8_t* hdr_buf, uint16_
     // 握手阶段只支持 REG 请求（REG 本质就是握手请求）
     if (((p2p_relay_hdr_t*)hdr_buf)->type != P2P_RLY_REG) {
         print("E:", LA_F("%s: rejected for not reg\n", LA_F147, 147), PROTO_STR(((p2p_relay_hdr_t*)hdr_buf)->type));
-        return CT_ERR_PROTOCOL;
+        return RLY_ERR_2_CT_ERR(P2P_RLY_ERR_PROTOCOL);
     }
 
     const char* PROTO = "REG";
@@ -954,19 +943,19 @@ static int relay_handle_handshake(ct_client_t *client, uint8_t* hdr_buf, uint16_
     // 处理 REG 消息：[name(32)][instance_id(4)]
     if (payload_len != P2P_RLY_REG_PSZ) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, payload_len);
-        return CT_ERR_PROTOCOL;
+        return RLY_ERR_2_CT_ERR(P2P_RLY_ERR_PROTOCOL);
     }
 
     if (!*payload) {
         print("E:", LA_F("%s: invalid peer id\n", LA_F96, 96), PROTO);
-        return CT_ERR_PROTOCOL;
+        return RLY_ERR_2_CT_ERR(P2P_RLY_ERR_PROTOCOL);
     }
 
     uint8_t* ptr = payload + P2P_PEER_ID_MAX;
     uint32_t instance_id = nget_l(ptr);
     if (instance_id == 0) {
         print("E:", LA_F("%s: invalid instance id\n", LA_F94, 94), PROTO);
-        return CT_ERR_PROTOCOL;
+        return RLY_ERR_2_CT_ERR(P2P_RLY_ERR_PROTOCOL);
     }
 
     // 查找是否存在同名的已登录 client（断网重连场景）
@@ -974,9 +963,8 @@ static int relay_handle_handshake(ct_client_t *client, uint8_t* hdr_buf, uint16_
     if (reg) { assert((ct_client_t*)reg != client);
 
         if (TCP_HS_IS_HANDSHAKING(reg)) {
-            client->last_error = CT_ERR_INVALID;
             print("E:", LA_F("%s: request simultaneously for '%s'\n", 0, 0), PROTO, reg->base.local_peer_id);
-            return CT_ERR_PROTOCOL;
+            return RLY_ERR_2_CT_ERR(P2P_RLY_ERR_INVALID);
         }
 
         uint8_t* recv_buf = client->recv_buf; uint16_t recv_len = client->recv_len;
@@ -1045,7 +1033,7 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
     switch (type) {
     case  P2P_RLY_REG:
         print("E:", LA_F("%s: duplicate from '%s'\n", LA_F97, 97), "REG", client->base.local_peer_id);
-        relay_send_status((relay_client_t*)client, type, CT_ERR_PROTOCOL);
+        relay_send_status((relay_client_t*)client, type, P2P_RLY_ERR_PROTOCOL);
         return;
 
     case P2P_RLY_OFF:
@@ -1069,12 +1057,12 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
         // 注：下面的两个验证错误，由于无法解析出正确 remote id，所以只能按 client 级（而非 syn0 级）状态码进行回复
         if (payload_len < P2P_PEER_ID_MAX) {
             print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), "SYN0", payload_len);
-            relay_send_status((relay_client_t*)client, P2P_RLY_SYN0, CT_ERR_PROTOCOL);
+            relay_send_status((relay_client_t*)client, P2P_RLY_SYN0, P2P_RLY_ERR_PROTOCOL);
             return;
         }
         if (!*payload) {
             print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), "SYN0");
-            relay_send_status((relay_client_t*)client, P2P_RLY_SYN0, CT_ERR_PROTOCOL);
+            relay_send_status((relay_client_t*)client, P2P_RLY_SYN0, P2P_RLY_ERR_PROTOCOL);
             return;
         }
 
@@ -1087,7 +1075,7 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
     // 注：下面的两个验证错误，由于无法解析出正确 session_id/session，所以只能按 client 级（而非 session 级）状态码进行回复
     if (payload_len < P2P_SESS_ID_SZ) {
         print("E:", LA_F("%s: bad payload(%u)\n", LA_F138, 138), PROTO_STR(type), payload_len);
-        relay_send_status((relay_client_t*)client, type, CT_ERR_PROTOCOL);
+        relay_send_status((relay_client_t*)client, type, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -1096,7 +1084,7 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
     session_t *s = session_id ? find_session(session_id) : NULL;
     if (!s || s->client != &client->base) {
         print("W:", LA_F("%s: unknown ses_id=%u\n", LA_F148, 148), PROTO_STR(type), session_id);
-        relay_send_status((relay_client_t*)client, type, CT_ERR_PROTOCOL);
+        relay_send_status((relay_client_t*)client, type, P2P_RLY_ERR_PROTOCOL);
         return;
     }
 
@@ -1120,7 +1108,7 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
     default:
         print("E:", LA_F("unsupported type=%u (ses_id=%u)\n", LA_F204, 204),
               (unsigned)type, session_id);
-        relay_send_status((relay_client_t*)client, type, CT_ERR_PROTOCOL);
+        relay_send_status((relay_client_t*)client, type, P2P_RLY_ERR_PROTOCOL);
     }
 }
 
@@ -1136,7 +1124,7 @@ void relay_error_item(ct_client_t *client, buffer_item_t* buffer_item) {
     buffer_item->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0));
     uint8_t* payload = (uint8_t*)(hdr + 1);
     payload[0] = orig_type;
-    payload[1] = CT_CODE(client->last_error);
+    payload[1] = P2P_RLY_ERR(client->last_error-1);
 }
 
 custom_tcp_ctx_t*
