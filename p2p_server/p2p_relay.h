@@ -47,11 +47,6 @@ typedef struct relay_client {
     client_t                        base;
     TCP_CLIENT
 
-    uint8_t                         last_error;                 
-
-    // 预分配的 ALV ACK 缓冲（内嵌，避免每次动态分配）
-    uint8_t                         alv_ack_buf[sizeof(buffer_item_t) + sizeof(p2p_relay_hdr_t)];
-
     uint8_t*                        recv_buf;
     uint16_t                        recv_len;
 
@@ -61,6 +56,11 @@ typedef struct relay_client {
     relay_session_t*                send_sess_rear;
     relay_session_t*                sending_sess;                       // 当前正在发送的 session; =NULL 表示正在发送 buff
     uint16_t                        sending_offset;
+
+    // 预分配的 ALV ACK 缓冲（内嵌，避免每次动态分配）
+    uint8_t                         alv_ack_buf[sizeof(buffer_item_t) + sizeof(p2p_relay_hdr_t)];
+
+    uint8_t                         last_error;
 } relay_client_t;
 
 void

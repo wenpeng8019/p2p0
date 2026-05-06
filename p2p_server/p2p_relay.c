@@ -1573,8 +1573,21 @@ void relay_handle_send(relay_client_t *client) {
         if (client->handshake) return;
     }
 
-    relay_session_t *sending_session = client->send_sess_head; buffer_item_t *item = client->send_buff_head;
-    if (sending_session || item) { assert(client->io & TCP_IO_FLAG_WANT_WRITE);
+    for (;;) {
+        relay_session_t *sending_session = client->send_sess_head; buffer_item_t *item = client->send_buff_head;
+
+        // 全部发送完成
+        if (!sending_session && !item) {
+            client->io &= ~TCP_IO_FLAG_WANT_WRITE;
+            if (!(client->io & TCP_IO_FLAG_WANT_READ)) {
+                if (TCP_HS_IS_CLOSING(client)) relay_free_client(client);
+                else { P_sock_close(client->base.fd);
+                    client->base.fd = P_INVALID_SOCKET;
+                }
+            }
+            return;
+        }
+        assert(client->io & TCP_IO_FLAG_WANT_WRITE);
 
         // 如果正在发送 session 数据包（mid-packet），继续发送当前 session
         if (client->sending_sess && client->sending_offset) { assert(sending_session);
@@ -1612,83 +1625,75 @@ void relay_handle_send(relay_client_t *client) {
             client->io &= ~(TCP_IO_FLAG_WANT_READ|TCP_IO_FLAG_WANT_WRITE);
             return;
         }
+        if (rc > 0) return;     // would block，等待下次可写事件
 
-        // 当前 item 发送完成
-        if (send_sz > 0 && (client->sending_offset += (int)send_sz) >= len) { client->sending_offset = 0;
+        // 部分发送：更新偏移量，等下次可写事件继续
+        if ((client->sending_offset += (int)send_sz) < len) return;
+        client->sending_offset = 0;
 
-            // 如果是 client 级的 item
-            if (item==client->send_buff_head) {
+        // 当前 item 发送完成，推进发送队列
 
-                // 发送 client sending 队列的下一项
-                if (!((client->send_buff_head = item->next)))
-                    client->send_buff_rear = NULL;
+        // 如果是 client 级的 item
+        if (item==client->send_buff_head) {
 
-                // 如果发送的是 fatal 错误包，发送完成后直接销毁 client
-                if (item == (buffer_item_t*)g_relay_fatal) {
-                    relay_free_client(client);
+            // 发送 client sending 队列的下一项
+            if (!((client->send_buff_head = item->next)))
+                client->send_buff_rear = NULL;
+
+            // 如果发送的是 fatal 错误包，发送完成后直接销毁 client
+            if (item == (buffer_item_t*)g_relay_fatal) {
+                relay_free_client(client);
+                return;
+            }
+
+            // ALV ACK 使用内嵌缓冲，不 free；其余正常释放
+            if (item->refer == ITEM_REF_ALV_ACK) item->refer = NULL;
+            else { free_buffer(item);
+
+                // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端重连或超时回收）
+                if (item->refer == ITEM_REF_CLIENT_ERROR) { assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));
+                    P_sock_close(client->base.fd);
+                    client->base.fd = P_INVALID_SOCKET;
+                    client->io &= ~TCP_IO_FLAG_WANT_WRITE;
                     return;
                 }
-
-                // ALV ACK 使用内嵌缓冲，不 free；其余正常释放
-                if (item->refer == ITEM_REF_ALV_ACK) item->refer = NULL;
-                else { free_buffer(item);
-
-                    // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端重连或超时回收）
-                    if (item->refer == ITEM_REF_CLIENT_ERROR) { assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));
-                        P_sock_close(client->base.fd);
-                        client->base.fd = P_INVALID_SOCKET;
-                        client->io &= ~TCP_IO_FLAG_WANT_WRITE;
-                        return;
-                    }
-                }
             }
-            // 对于 session 级的 item
-            else { assert(item==sending_session->send_head && item != (buffer_item_t*)g_relay_fatal);
+        }
+        // 对于 session 级的 item
+        else { assert(item==sending_session->send_head && item != (buffer_item_t*)g_relay_fatal);
 
-                // 如果发送的是对端发过来的数据
-                if (item->refer) { assert(item->refer != ITEM_REF_ACK_PENDING && item->refer != ITEM_REF_CLIENT_ERROR);
-                    relay_peer_sent((relay_session_t*)item->refer, item);
-                }
-
-                // 将当前 session 的 sending 队列切换到下一项，如果发送队列不为空
-                if ((sending_session->send_head = item->next)) {
-
-                    // 轮询下一个（session sending 队列不为空的）session
-                    client->sending_sess = sending_session->send_next ? sending_session->send_next : client->send_sess_head;
-                }
-                // 如果当前 session 发送队列已空，从 client 中移除该 session
-                // + 同时切换到下一个（session sending 队列不为空的）session
-                else { sending_session->send_rear = NULL;
-
-                    relay_session_t *next = sending_session->send_next;
-                    if (sending_session->send_prev) sending_session->send_prev->send_next = next;
-                    else client->send_sess_head = next;
-                    if (next) {
-                        next->send_prev = sending_session->send_prev;
-                        client->sending_sess = next;
-                    }
-                    else {
-                        client->send_sess_rear = sending_session->send_prev;
-                        client->sending_sess = client->send_sess_head;
-                    }
-                    sending_session->send_next = NULL;
-                    sending_session->send_prev = NULL;
-                }
-
-                // 如果 item 没有被（relay_peer_sent）标记为待 ACK 状态，则直接释放
-                if (item->refer != ITEM_REF_ACK_PENDING) free_buffer(item);
+            // 如果发送的是对端发过来的数据
+            if (item->refer) { assert(item->refer != ITEM_REF_ACK_PENDING && item->refer != ITEM_REF_CLIENT_ERROR);
+                relay_peer_sent((relay_session_t*)item->refer, item);
             }
 
-            // 如果全部发送完成
-            if (!client->send_sess_head && !client->send_buff_head) {
-                client->io &= ~TCP_IO_FLAG_WANT_WRITE;
-                if (!(client->io & TCP_IO_FLAG_WANT_READ)) {
-                    if (TCP_HS_IS_CLOSING(client)) relay_free_client(client);
-                    else { P_sock_close(client->base.fd);
-                        client->base.fd = P_INVALID_SOCKET;
-                    }
-                }
+            // 将当前 session 的 sending 队列切换到下一项，如果发送队列不为空
+            if ((sending_session->send_head = item->next)) {
+
+                // 轮询下一个（session sending 队列不为空的）session
+                client->sending_sess = sending_session->send_next ? sending_session->send_next : client->send_sess_head;
             }
+            // 如果当前 session 发送队列已空，从 client 中移除该 session
+            // + 同时切换到下一个（session sending 队列不为空的）session
+            else { sending_session->send_rear = NULL;
+
+                relay_session_t *next = sending_session->send_next;
+                if (sending_session->send_prev) sending_session->send_prev->send_next = next;
+                else client->send_sess_head = next;
+                if (next) {
+                    next->send_prev = sending_session->send_prev;
+                    client->sending_sess = next;
+                }
+                else {
+                    client->send_sess_rear = sending_session->send_prev;
+                    client->sending_sess = client->send_sess_head;
+                }
+                sending_session->send_next = NULL;
+                sending_session->send_prev = NULL;
+            }
+
+            // 如果 item 没有被（relay_peer_sent）标记为待 ACK 状态，则直接释放
+            if (item->refer != ITEM_REF_ACK_PENDING) free_buffer(item);
         }
     }
 }
