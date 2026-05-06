@@ -2,10 +2,11 @@
 // Created by 温朋 on 2026/4/18.
 //
 
-#ifndef P2P_P2P_RELAY_H
-#define P2P_P2P_RELAY_H
+#ifndef P2P_RELAY_H
+#define P2P_RELAY_H
 
 #include "common.h"
+#include "custom_tcp.h"
 
 // 每个通道（SYNC / PKT）向对端发送的最大深度（队列容量）
 // 超过此深度时向上游返回 BUSY，由上游控速
@@ -13,6 +14,7 @@
 
 typedef struct relay_session {
     session_t                       base;
+    CUSTOM_TCP_SESSION
 
     /* SYNC 同步服务相关字段 */
     uint8_t                         last_sid;                           // 会话同步的最后一个 sid
@@ -35,39 +37,24 @@ typedef struct relay_session {
     uint64_t                        rpc_sent_time;                      // RPC 发起时间戳（毫秒，用于超时检测）
     struct relay_session*           rpc_pending_next;                   // RPC 待确认链表指针（NULL=不在链表中，-1=链表尾）
 
-    /* 本地发送队列 */
-    buffer_item_t*                  send_head;
-    buffer_item_t*                  send_rear;
-    struct relay_session*           send_prev;
-    struct relay_session*           send_next;
 } relay_session_t;
 
 // RELAY 模式客户端（TCP 长连接）- 统一接收通道
 typedef struct relay_client {
     client_t                        base;
     TCP_CLIENT
-
-    uint8_t*                        recv_buf;
-    uint16_t                        recv_len;
-
-    buffer_item_t*                  send_buff_head;
-    buffer_item_t*                  send_buff_rear;
-    relay_session_t*                send_sess_head;
-    relay_session_t*                send_sess_rear;
-    relay_session_t*                sending_sess;                       // 当前正在发送的 session; =NULL 表示正在发送 buff
-    uint16_t                        sending_offset;
+    CUSTOM_TCP_CLIENT
 
     // 预分配的 ALV ACK 缓冲（内嵌，避免每次动态分配）
     uint8_t                         alv_ack_buf[sizeof(buffer_item_t) + sizeof(p2p_relay_hdr_t)];
 
-    uint8_t                         last_error;
 } relay_client_t;
 
-void
+custom_tcp_ctx_t*
 relay_init(void);
 
 bool
-relay_init_client(relay_client_t* c);
+relay_init_client(relay_client_t* client);
 void
 relay_free_client(relay_client_t *client);
 
@@ -75,8 +62,9 @@ void
 relay_handle_recv(relay_client_t *client);
 void
 relay_handle_send(relay_client_t *client);
+
 void
 relay_retry_pending(uint64_t now);
 
 
-#endif //P2P_P2P_RELAY_H
+#endif //P2P_RELAY_H

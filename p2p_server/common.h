@@ -49,6 +49,7 @@ typedef struct buffer_item {
     struct buffer_item*             next;
     void*                           refer;
     uint8_t                         flags;  // 低 5 bit，表示自定义意义标识; 高 3 bit 表示内存 chunk 大小。即 512 * 2^(flags >> 5)
+    uint16_t                        len;    // buf 中有效数据长度（字节）   
 } buffer_item_t;
 #pragma pack(pop)
 #define ITEM2BUF(item)              ((uint8_t*)(item + 1))

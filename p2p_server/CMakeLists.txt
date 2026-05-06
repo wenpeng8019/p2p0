@@ -59,6 +59,8 @@ add_executable(p2p_server
     ${CMAKE_CURRENT_SOURCE_DIR}/.LANG.c
     ${CMAKE_SOURCE_DIR}/i18n/i18n.c
         common.h
+        custom_tcp.c
+        custom_tcp.h
         p2p_relay.c
         p2p_relay.h
         p2p_compact.c

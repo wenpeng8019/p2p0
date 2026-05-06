@@ -432,7 +432,8 @@ void compact_free_client(compact_client_t *c) {
         c->auth_key = 0;
     }
 
-    free_client_base(&c->base, compact_free_session);
+    while (c->base.sessions) compact_free_session(c->base.sessions);
+    free_client_base(&c->base);
 }
 
 

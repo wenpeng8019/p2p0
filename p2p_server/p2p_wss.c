@@ -588,7 +588,7 @@ void wss_handle_message(wss_client_t *client, const uint8_t *msg, size_t len) {
     if (strcmp((char*)msg, P2P_WSS_CMD_OFF) == 0) {
         print("I:", LA_F("%s: '%s'\n", LA_F72, 72), "OFF",
               client->base.local_peer_id);
-        wss_free_client(client, true);
+        wss_free_client(client);
         return;
     }
 
