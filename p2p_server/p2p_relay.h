@@ -59,11 +59,6 @@ void
 relay_free_client(relay_client_t *client);
 
 void
-relay_handle_recv(relay_client_t *client);
-void
-relay_handle_send(relay_client_t *client);
-
-void
 relay_retry_pending(uint64_t now);
 
 

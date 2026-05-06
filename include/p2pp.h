@@ -778,16 +778,17 @@ typedef struct {
                                                         // + 作为 TCP 协议，都是基于 REQ/RSP 的请求应答模式，也就是每个请求，都会对应一个应答码
                                                         //   READY 表示请求成功。此外，它也代表客户端可以继续请求后续操作，
                                                         //   对应的，如果服务器想让客户端延迟后续操作，可以通过延迟返回该状态码来实现。
-#define P2P_RLY_ERR(c)              (0x80+c)            // 错误码基数，code >= 0x80 表示错误
-#define P2P_RLY_ERR_IO              P2P_RLY_ERR(0)      // 网络 I/O 错误（连接异常/读写失败）
-#define P2P_RLY_ERR_OVERFLOW        P2P_RLY_ERR(1)      // 请求协议包数据过大（size 超出限制）
-#define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(2)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
-#define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(3)      // 协议错误（未登录/非法状态）
-#define P2P_RLY_ERR_PEER_OFF        P2P_RLY_ERR(4)      // 对端未完成 REG（未登录）或已 OFF（离线）
-#define P2P_RLY_ERR_UNREACHABLE     P2P_RLY_ERR(5)      // 对方暂时不可达（对方已经 REG 但可能网络闪断或异常）
-#define P2P_RLY_ERR_INVALID         P2P_RLY_ERR(6)      // 无效的参数或操作
-#define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(7)      // 服务器转发请求超时
-#define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(8)      // 会话忙（前一个转发尚未完成）
+#define P2P_RLY_ERR(c)              (0x80+(uint8_t)(c)) // 错误码基数，code >= 0x80 表示错误
+#define P2P_RLY_ERR_DISCONNECTED    P2P_RLY_ERR(0)      // 网络 I/O 错误（连接异常/读写失败）
+#define P2P_RLY_ERR_IO              P2P_RLY_ERR(1)      // 网络 I/O 错误（连接异常/读写失败）
+#define P2P_RLY_ERR_OVERFLOW        P2P_RLY_ERR(2)      // 请求协议包数据过大（size 超出限制）
+#define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(3)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
+#define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(4)      // 协议错误（未登录/非法状态）
+#define P2P_RLY_ERR_PEER_OFF        P2P_RLY_ERR(5)      // 对端未完成 REG（未登录）或已 OFF（离线）
+#define P2P_RLY_ERR_UNREACHABLE     P2P_RLY_ERR(6)      // 对方暂时不可达（对方已经 REG 但可能网络闪断或异常）
+#define P2P_RLY_ERR_INVALID         P2P_RLY_ERR(7)      // 无效的参数或操作
+#define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(8)      // 服务器转发请求超时
+#define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(9)      // 会话忙（前一个转发尚未完成）
 
 /* RELAY REG 下行功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继

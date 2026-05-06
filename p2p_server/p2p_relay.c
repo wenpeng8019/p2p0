@@ -38,6 +38,12 @@ const char* PROTO_STR(uint8_t proto) {
 #define CT_ERR_TIMEOUT              (CUSTOM_TCP_ERR_CUSTOM+4)      // 服务器转发请求超时
 #define CT_ERR_BUSY                 (CUSTOM_TCP_ERR_CUSTOM+5)      // 会话忙（前一个转发尚未完成）
 
+// 将内部 custom_tcp 错误码映射为线上协议状态码
+// + CUSTOM_TCP_ERR_* 和 P2P_RLY_ERR_* 通过 ERR(N-1) 对齐；非错误码（< CUSTOM_TCP_ERR_DISCONNECTED）直接透传
+#define CT_CODE(c)  ((uint8_t)(c) >= CUSTOM_TCP_ERR_DISCONNECTED \
+                     ? P2P_RLY_ERR((uint8_t)(c) - CUSTOM_TCP_ERR_DISCONNECTED) \
+                     : (uint8_t)(c))
+
 // RELAY RPC 待确认链表（按 rpc_sent_time 排序，队头最早超时）
 static relay_session_t*             g_relay_rpc_pending_head = NULL;
 static relay_session_t*             g_relay_rpc_pending_rear = NULL;
@@ -106,7 +112,7 @@ static bool relay_send_status(relay_client_t *client, uint8_t req_type, uint8_t 
 
     uint8_t *p = (uint8_t *)(hdr + 1);
     p[0] = req_type;
-    p[1] = status_code;
+    p[1] = CT_CODE(status_code);
 
     // 借用一个临时空 session 结构是不合适的，这里直接用 tcp_send 尝试发送
     ct_client_send((ct_client_t*)client, buf_item, false);
@@ -132,7 +138,7 @@ static bool relay_send_syn0_status(relay_client_t *client, const char *remote_pe
 
     uint8_t *p = (uint8_t *)(hdr + 1);
     p[0] = P2P_RLY_SYN0;
-    p[1] = status_code;
+    p[1] = CT_CODE(status_code);
     memset(p + 2, 0, P2P_PEER_ID_MAX);
     if (remote_peer_id) strncpy((char*)(p + 2), remote_peer_id, P2P_PEER_ID_MAX);
 
@@ -160,7 +166,7 @@ static bool relay_session_send_status(relay_session_t *session, uint8_t req_type
 
     uint8_t *payload = (uint8_t *)(hdr + 1);
     payload[0] = req_type;
-    payload[1] = status_code;
+    payload[1] = CT_CODE(status_code);
     nwrite_l(payload + 2, session->base.session_id);
 
     ct_session_send((ct_session_t*)session, buf_item);
@@ -1130,9 +1136,7 @@ void relay_error_item(ct_client_t *client, buffer_item_t* buffer_item) {
     buffer_item->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0));
     uint8_t* payload = (uint8_t*)(hdr + 1);
     payload[0] = orig_type;
-    payload[1] = (uint8_t)client->last_error < CUSTOM_TCP_ERR_IO
-                 ? P2P_RLY_ERR_IO
-                 : P2P_RLY_ERR(client->last_error - CUSTOM_TCP_ERR_IO);
+    payload[1] = CT_CODE(client->last_error);
 }
 
 custom_tcp_ctx_t*
@@ -1203,13 +1207,6 @@ void relay_retry_pending(uint64_t now) {
         print("W:", "[R] RPC timeout: sid=%u (ses_id=%u)\n", sid, s->base.session_id);
         relay_session_send_rpc_code(s, sid, P2P_RPC_ERR_TIMEOUT);
     }
-}
-
-void relay_handle_recv(relay_client_t *client) {
-    ct_handle_recv(&g_ctx, (ct_client_t*)client);
-}
-void relay_handle_send(relay_client_t *client) {
-    ct_handle_send(&g_ctx, (ct_client_t*)client);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

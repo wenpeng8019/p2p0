@@ -73,6 +73,8 @@ static client_t*                    g_clients = NULL;
 #define TCP_CLIENTS(i)              ((tcp_client_t*)&g_client_slots[i])
 #define WS_CLIENTS(i)               ((ws_client_t*)&g_client_slots[i])
 
+custom_tcp_ctx_t*                   g_relay_ctx;
+
 //-----------------------------------------------------------------------------
 
 static buffer_item_t*               g_recycle[8];
@@ -871,7 +873,7 @@ int main(int argc, char *argv[]) {
 
     // 初始化信令服务模块
     compact_init();
-    relay_init();
+    g_relay_ctx = relay_init();
     wss_init();
 
     // 打印服务器配置信息
@@ -1265,7 +1267,7 @@ int main(int argc, char *argv[]) {
 #endif
                 }
 
-                if (m == PROTO_RELAY) relay_handle_recv(&g_client_slots[i].relay);
+                if (m == PROTO_RELAY) ct_handle_recv(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay);
 #ifdef WITH_WSLAY
                 else if (ws_client) {
 
@@ -1310,7 +1312,7 @@ int main(int argc, char *argv[]) {
             if ((TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_WRITE)
                 && FD_ISSET(CLIENTS(i)->fd, &write_fds)) {
 
-                if (m == PROTO_RELAY) relay_handle_send(&g_client_slots[i].relay);
+                if (m == PROTO_RELAY) ct_handle_send(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay);
 #ifdef WITH_WSLAY
                 else if (ws_client) {
 
