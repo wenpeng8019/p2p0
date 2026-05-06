@@ -29,11 +29,8 @@ const char* PROTO_STR(uint8_t proto) {
 #define RELAY_PEER(s)               ((relay_session_t*)PEER(s))
 #define RELAY_CLIENT(s)             ((relay_client_t*)CLIENT(s))
 
-// refer 哨兵值：TCP 写入已完成，但尚未收到对端应用层 ACK，item 暂不释放
-// refer=session            → TCP 写入中（sent callback 触发时处理）
-// refer=ITEM_REF_ACK_PENDING  → TCP 写完、等待应用层 ACK（ACK 到达后由业务逻辑释放）
-#define ITEM_REF_ACK_PENDING        ((void*)(uintptr_t)1)
 #define ITEM_REF_CLIENT_ERROR       ((void*)(uintptr_t)-1)
+#define ITEM_REF_ACK_PENDING        ((void*)(uintptr_t)1)
 #define ITEM_REF_ALV_ACK            ((void*)(uintptr_t)2)  // ALV ACK 包正在发送队列中（内嵌缓冲，不可 free）
 
 // RELAY RPC 待确认链表（按 rpc_sent_time 排序，队头最早超时）
@@ -653,6 +650,20 @@ static void client_unreachable(relay_client_t *client) {
     client->base.last_active = P_tick_ms();
 }
 
+static void client_reactive(relay_client_t *client) {
+
+    // SYNC/SYN0 的 ACK_PENDING 项：TCP 已写出但客户端未确认（连接已断无法确保到达）
+    // 重置 refer 并重新入队，让新连接重新投递
+    for (session_t *sess = client->base.sessions; sess; sess = sess->next) {
+        relay_session_t *peer = RELAY_PEER(sess); 
+        if (PEER_VALID(peer) && peer->sync_peer_send_cnt > 0 &&
+            peer->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
+            peer->sync_peer_send[0]->refer = peer;
+            relay_session_send((relay_session_t*)sess, peer->sync_peer_send[0]);
+        }
+    }
+}
+
 static void client_fatal(relay_client_t *client) {
 
     while (client->base.sessions)
@@ -912,8 +923,6 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         relay_session_t *peer = RELAY_PEER(session);
         if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
 
-            relay_session_send_sync_confirm(peer, sid); // todo 这个 confirm 的 sid 不应该是对端返回的吧
-
             free_buffer(peer->sync_peer_send[0]);
             peer->sync_peer_send[0] = peer->sync_peer_send[1];
             peer->sync_peer_send[1] = NULL;
@@ -923,6 +932,12 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
             if (peer->sync_peer_send_cnt > 0) {
                 peer->sync_peer_send[0]->refer = peer;
                 relay_session_send(session, peer->sync_peer_send[0]);
+            }
+            // 队列从满→非满：B 之前因队满未收到 confirm，现在补发
+            // sid 取队头项的 sid（B 发送的、当时因队满被推迟 confirm 的那一项）
+            if (peer->sync_peer_send_cnt == RELAY_PEER_Q_MAX - 1) {
+                uint8_t pending_sid = ((uint8_t*)ITEM2BUF(peer->sync_peer_send[0]))[sizeof(p2p_relay_hdr_t) + P2P_SESS_ID_SZ];
+                relay_session_send_sync_confirm(peer, pending_sid);
             }
         }
         return;
@@ -970,8 +985,6 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
     }
 
     session->last_sid = sid;
-
-    // todo 重新上线，应该将 ITEM_REF_ACK_PENDING 去除并重新添加到发送队列
 
     // SYN0 隐式 ACK：本端首个 SYNC 上行视为是对服务器下发的 SYN0 的确认
     relay_session_t *peer = RELAY_PEER(session);
@@ -1041,9 +1054,9 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         sync_item->refer = session;
         relay_session_send(peer, sync_item);
     }
-    // fixme 应该在这里 confirm
-    // if (session->sync_peer_send_cnt < RELAY_PEER_Q_MAX)
-    //     relay_session_send_status(session, P2P_RLY_PKT, P2P_RLY_CODE_READY);
+    // 队列未满时立即 confirm；队满时等 A 的 confirm 释放槽后补发（流控）
+    if (session->sync_peer_send_cnt < RELAY_PEER_Q_MAX)
+        relay_session_send_sync_confirm(session, sid);
 }
 
 // 处理 PKT 消息（零拷贝转发）
@@ -1346,10 +1359,11 @@ void relay_handle_recv(relay_client_t *client) {
 
                 // 如果 instance_id 一致（断网重连）
                 if (resident_client(&reg->base, PROTO_RELAY, instance_id, &client->base)) {
-                    
+
                     client = reg;
                     client->last_error = 0;                     // 重置错误状态
                     client->io |= TCP_IO_FLAG_WANT_READ;        // 重新激活读取（之前断网时会被关闭）
+                    client_reactive(client);
                     if (client->send_buff_head || client->send_sess_head)
                         client->io |= TCP_IO_FLAG_WANT_WRITE;   // 如果存在未完成的发送，重新激活写入
 
