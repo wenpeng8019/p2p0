@@ -232,6 +232,7 @@ ct_init_client(ct_client_t* client) {
     client->sending_sess = NULL;
     client->sending_offset = 0;
 
+    TCP_CLIENT_INIT(client);
     return true;
 }
 
@@ -239,7 +240,8 @@ ct_init_client(ct_client_t* client) {
 void
 ct_free_client(custom_tcp_ctx_t* ctx, ct_client_t *client) {
 
-    custom_close_all_sessions(ctx, client, true);
+    if (client->base.sessions)
+        custom_close_all_sessions(ctx, client, true);
 
     // 释放 recv buf
     if (client->recv_buf) {
@@ -258,7 +260,8 @@ void
 ct_client_off(custom_tcp_ctx_t* ctx, ct_client_t *client) {
 
     // 中断所有 session
-    custom_close_all_sessions(ctx, client, false);
+    if (client->base.sessions)
+        custom_close_all_sessions(ctx, client, false);
 
     // 释放 recv buf
     if (client->recv_buf) {
@@ -297,7 +300,8 @@ ct_client_error(custom_tcp_ctx_t* ctx, ct_client_t *client, int error, bool fata
     }
 
     // 终止所有 session
-    custom_close_all_sessions(ctx, client, true);
+    if (client->base.sessions)
+        custom_close_all_sessions(ctx, client, true);
 
     // 清除除了正在发送的包以外的所有待发送数据
     clear_client_sending(client);
@@ -351,10 +355,10 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client) {
             hdr_len = ctx->hdr_len;
             while (client->recv_len < ctx->hdr_len) {
                 size_t need = ctx->hdr_len - client->recv_len;
-                int rc = tcp_recv((tcp_client_t*)client, client->recv_buf + client->recv_len, &need);
-                if (rc > 0) return;
-                if (rc < 0) {
-                    error = rc < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
+                int r = tcp_recv((tcp_client_t*)client, client->recv_buf + client->recv_len, &need, NULL);
+                if (r > 0) return;
+                if (r < 0) {
+                    error = r < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
                 }
@@ -374,10 +378,10 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client) {
         size_t size = hdr_len + payload_size;
         while (client->recv_len < size) {
             size_t n = size - client->recv_len;
-            int rc = tcp_recv((tcp_client_t*)client, client->recv_buf + client->recv_len, &n);
-            if (rc > 0) return;
-            if (rc < 0) {
-                error = rc < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
+            int r = tcp_recv((tcp_client_t*)client, client->recv_buf + client->recv_len, &n, NULL);
+            if (r > 0) return;
+            if (r < 0) {
+                error = r < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
                 if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                 goto error;
             }
@@ -387,11 +391,13 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client) {
 
         if (TCP_HS_IS_HANDSHAKING(client)) {
 
-            assert(!client->base.sessions);
-            assert(!client_identified(&client->base));
+            error = ctx->handle_handshake(client, client->recv_buf, hdr_len, payload, payload_size);
 
-            // 由于这里维护了单一实例，所以此时的 client 肯定是新分配的
-            assert(!client->recv_len);
+        handshake:  // 握手阶段可以直接接入，而无需再次等待 writable 周期判定
+
+            assert(!client_identified(&client->base) && !client->base.sessions);
+
+            // 握手阶段的 send_buf 应该直接复用 recv_buf
             assert(!client->send_buff_head);
             assert(!client->send_buff_rear);
             assert(!client->send_sess_head);
@@ -399,60 +405,73 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client) {
             assert(!client->sending_sess);
             assert(!client->sending_offset);
 
-            error = ctx->handle_handshake(client, client->recv_buf, hdr_len, payload, payload_size);
-            goto handshake;
+            if (error) {
+                client->last_error = error;
+                ctx->error_item(client, BUF2ITEM(client->recv_buf));
+            }
+
+            size_t sz = BUF2ITEM(client->recv_buf)->len;
+            int r = tcp_send((tcp_client_t*)client, client->recv_buf, &sz, "");
+            if (r < 0) {
+                ct_free_client(ctx, client);    // 握手阶段发送失败，直接释放 client
+                return;
+            }
+
+            // 如果 would block，则标记进入握手写入阶段
+            if (r > 0) {
+                client->recv_len = sz;
+
+                // 进入握手写阶段，同时暂停接收数据，等握手（ACK 发送）完成后再继续
+                client->io &= ~TCP_IO_FLAG_WANT_READ;
+                client->io |= TCP_IO_FLAG_WANT_WRITE;
+                return;
+            }
+
+            // 握手阶段存在失败，直接释放 client
+            if (error) {
+                ct_free_client(ctx, client);
+                return;
+            }
+
+            client->recv_len = 0;
+
+            // 握手（应答发送）完成（注意，这里完成后，可以继续执行 recv 处理）
+            client->handshake = 0;
+            print("V:", LA_F("%s sent to '%s'\n", LA_F179, 179), "", client->base.local_peer_id);
         }
-        
-        BUF2ITEM(client->recv_buf)->len = (uint16_t)size;
-        ctx->handle_proto(client, client->recv_buf, hdr_len, payload, payload_size);
-    }
+        else {
+
+            BUF2ITEM(client->recv_buf)->len = (uint16_t)size;
+            ctx->handle_proto(client, client->recv_buf, hdr_len, payload, payload_size);
+        }
+
+    }   // for(;;client->recv_len = 0)
 
 // 网络 I/O 等非致命错误，也就是不破坏（之前/已发生的）数据完整性的错误
 // + 此时会清除 recv_buf 中的数据、关闭读取，同时（最后）发送一个错误状态码，并等发送完成后会自动关闭连接
 error:
-    client->recv_len = 0;           // 清除已读取的部分
 
-    // 执行 unreachable 处理
-    for(session_t *sess = client->base.sessions, *peer; sess; sess = sess->next) { peer = sess->peer;
-        if (PEER_VALID(peer) && TCP_REACHABLE(peer->client)) {
-            ctx->session_break((ct_session_t*)sess, (ct_session_t*)peer, SESS_BREAK_STOP);
+    // 清除已读取的部分
+    client->recv_len = 0;
+
+    // session 执行 stop 处理
+    if (client->base.sessions) {
+        for(session_t *sess = client->base.sessions, *peer; sess; sess = sess->next) { peer = sess->peer;
+            if (PEER_VALID(peer) && TCP_REACHABLE(peer->client)) {
+                ctx->session_break((ct_session_t*)sess, (ct_session_t*)peer, SESS_BREAK_STOP);
+            }
         }
     }
+
+    // client 执行 unreachable 处理
     if (ctx->client_unreachable)
         ctx->client_unreachable(client, true);
-    client->base.last_active = P_tick_ms();                     // 重新计时，通过超时机制来释放 client
 
-    // 执行 error 处理
-    assert(error);
+    // 报错处理（这会停止接收新的请求数据）
     ct_client_error(ctx, client, error, false);
-    return;
 
-handshake:
-
-    if (error) {
-        client->last_error = error;
-        ctx->error_item(client, BUF2ITEM(client->recv_buf));
-    }
-
-    size_t sz = BUF2ITEM(client->recv_buf)->len;
-    ssize_t r = tcp_send((tcp_client_t*)client, client->recv_buf, &sz, "");
-    if (r < 0) {
-        ct_free_client(ctx, client);    // 握手阶段发送失败，直接释放 client
-        return;
-    }
-
-    // 如果 would block，则标记进入握手写入阶段
-    if (r > 0) {
-        // 进入握手写阶段，同时暂停接收数据，等握手（ACK 发送）完成后再继续
-        client->io &= ~TCP_IO_FLAG_WANT_READ;
-        client->io |= TCP_IO_FLAG_WANT_WRITE;
-        client->recv_len = sz;
-        return;
-    }
-
-    // 握手阶段处理失败，直接释放 client
-    if (error) ct_free_client(ctx, client);
-    else client->recv_len = 0;  // 重置 recv_len，避免下次 ct_handle_recv 以残留偏移读包头
+    // 重新计时，等待客户端（重置）处理，并通过超时机制来释放 client
+    client->base.last_active = P_tick_ms();
 }
 
 // 处理 RELAY 模式信令发送（TCP 长连接）- 统一队列发送
@@ -464,32 +483,27 @@ ct_handle_send(custom_tcp_ctx_t* ctx, ct_client_t *client) {
     if (TCP_HS_IS_HANDSHAKING(client)) {
 
         size_t sz = BUF2ITEM(client->recv_buf)->len, len = sz - client->recv_len;
-        int rc = tcp_send((tcp_client_t*)client, client->recv_buf + client->recv_len, &len, "");
-        if (rc < 0) {
+        int r = tcp_send((tcp_client_t*)client, client->recv_buf + client->recv_len, &len, "");
+        if (r < 0) {
             ct_free_client(ctx, client);    // 握手阶段发送失败，直接释放 client
             return;
         }
 
-        // 握手应答发送完成
-        if (len > 0 && (client->recv_len += len) >= sz) { client->recv_len = 0;
+        if (!len || (client->recv_len += len) < sz) return;
 
-            // 握手完成
-            client->handshake = 0;
-            print("V:", LA_F("%s sent to '%s'\n", LA_F179, 179), "", client->base.local_peer_id);
+        // 握手（应答发送）完成
+        client->handshake = 0;
+        print("V:", LA_F("%s sent to '%s'\n", LA_F179, 179), "", client->base.local_peer_id);
 
-            // 如果（发送的是）握手阶段的错误应答，直接释放 client
-            if (client->last_error) {
-                ct_free_client(ctx, client);
-                return;
-            }
-
-            // 启动正常读写（握手完成）
-            client->io |= TCP_IO_FLAG_WANT_READ;
-            client->io &= ~TCP_IO_FLAG_WANT_WRITE;      // 初始时还没有要写入的数据
+        // 如果（发送的是）握手阶段的错误应答，直接释放 client
+        if (client->last_error) {
+            ct_free_client(ctx, client);
+            return;
         }
 
-        // REG_ACK 未完成时，跳过其他处理
-        if (client->handshake) return;
+        // 启动正常读写（握手完成）
+        client->io |= TCP_IO_FLAG_WANT_READ;
+        client->io &= ~TCP_IO_FLAG_WANT_WRITE;      // 初始时还没有要写入的数据
     }
 
     for (;;) {
