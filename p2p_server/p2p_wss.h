@@ -43,6 +43,7 @@
 #define P2P_P2P_WSS_H
 
 #include "common.h"
+#include "custom_ws.h"
 
 #define WSS_SYNC_PAYLOAD_MAX        2048        /* SYNC0 预缓存负载上限（字节，不含 NUL） */
 
@@ -64,15 +65,14 @@ typedef struct wss_session {
 typedef struct wss_client {
     client_t                        base;
     TCP_CLIENT
-    WS_CLIENT
+    CUSTOM_WS_CLIENT
 
     UT_hash_handle                  hh;          /* g_wss_clients，按 base.local_peer_id 索引 */
 } wss_client_t;
 
-#define WSS_IO_FLAG_CLOSING      (1<<TCP_IO_FLAG_CUSTOM_BIT)
-#define WSS_IO_FLAG_PEER_CLOSING (1<<(TCP_IO_FLAG_CUSTOM_BIT+1))
+#define WSS_IO_FLAG_CLOSING         CW_IO_FLAG_CLOSING
 
-void
+custom_ws_ctx_t*
 wss_init(void);
 
 bool
@@ -84,8 +84,6 @@ void
 wss_handle_message(wss_client_t* client, const uint8_t *msg, size_t len);
 void
 wss_handle_data(wss_client_t *client, const uint8_t *data, size_t len);
-bool
-wss_handle_send_complete(ws_client_t *client);
 void
 retry_wss_pending(uint64_t now);
 

@@ -190,21 +190,11 @@ typedef struct tcp_client
     TCP_CLIENT
 } tcp_client_t;
 
+#define TCP_CLIENT_INIT(c) \
+    (c)->io = TCP_IO_FLAG_WANT_READ; \
+    (c)->handshake = TCP_HS_FLAG_HANDSHAKING
+
 #define TCP_REACHABLE(c)            (((tcp_client_t*)c)->io & TCP_IO_FLAG_WANT_READ)
-
-// WS 握手状态：1=recv 握手请求，-1=send 握手响应，0=握手完成
-#define WS_CLIENT  \
-    wslay_event_context_ptr         ws_ctx; \
-    buffer_item_t*                  buf; \
-    uint16_t                        len; \
-    uint16_t                        pos;
-
-typedef struct ws_client
-{
-    client_t                        base;
-    TCP_CLIENT
-    WS_CLIENT
-} ws_client_t;
 
 //-----------------------------------------------------------------------------
 
@@ -213,15 +203,10 @@ udp_send(sock_t udp_fd, const void *buf, int len, const struct sockaddr_in *to, 
 
 int
 tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *PROTO);
-int
-tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz);
 
-ret_t
-ws_send_text(ws_client_t* client, const char *text);
-ret_t
-ws_send_data(ws_client_t* client, const uint8_t *data, size_t len);
-ret_t
-ws_close(ws_client_t *client, uint16_t code);
+// SP（SUB PROTOCOL）为 NULL 时，默认为 "TCP"
+int
+tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz, const char * SP);
 
 ///////////////////////////////////////////////////////////////////////////////
 
