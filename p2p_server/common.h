@@ -14,7 +14,7 @@
 
 #include "LANG.h"
 
-///////////////////////////////////////////////////////////////////////////////
+//-----------------------------------------------------------------------------
 
 #define DEFAULT_PORT                    9333
 
@@ -42,31 +42,112 @@
 #define REQ_MAX_RETRY                   5       // MSG_REQ 最大重传次数
 #define RSP_MAX_RETRY                   10      // MSG_RSP 最大重传次数（比 REQ 更多，确保 A 端收到）
 
-//-----------------------------------------------------------------------------
+///////////////////////////////////////////////////////////////////////////////
 
 #pragma pack(push, 1)
 typedef struct buffer_item {
     struct buffer_item*             next;
     void*                           refer;
+    uint16_t                        len;    // buf 中有效数据长度（字节）
     uint8_t                         flags;  // 低 5 bit，表示自定义意义标识; 高 3 bit 表示内存 chunk 大小。即 512 * 2^(flags >> 5)
-    uint16_t                        len;    // buf 中有效数据长度（字节）   
 } buffer_item_t;
 #pragma pack(pop)
 #define ITEM2BUF(item)              ((uint8_t*)(item + 1))
 #define BUF2ITEM(buf)               (((buffer_item_t*)(buf)) - 1)
 
-#define BUF_SIZE(flags)             (((flags) & 0xE0) == 0x20 ? P2P_MTU : 512 * (1 << ((flags) >> 5)))
-#define BUF_FLAG_512(flags)         (0x00 | ((flags) & 0x1F))
-#define BUF_FLAG_MTU(flags)         (0x20 | ((flags) & 0x1F))
-#define BUF_FLAG_2048(flags)        (0x40 | ((flags) & 0x1F))
-#define BUF_FLAG_4096(flags)        (0x60 | ((flags) & 0x1F))
-#define BUF_FLAG_8192(flags)        (0x80 | ((flags) & 0x1F))
-#define BUF_FLAG_16384(flags)       (0xA0 | ((flags) & 0x1F))
-#define BUF_FLAG_32768(flags)       (0xC0 | ((flags) & 0x1F))
-#define BUF_FLAG_65536(flags)       (0xE0 | ((flags) & 0x1F))
+#define BUF_FLAGS(sz_flag, flags)   ((sz_flag) | ((flags) & 0x1F))
+#define BUF_FLAG_128(flags)         BUF_FLAGS(0<<5, flags)
+#define BUF_FLAG_MTU(flags)         BUF_FLAGS(1<<5, flags)
+#define BUF_FLAG_2048(flags)        BUF_FLAGS(2<<5, flags)
+#define BUF_FLAG_4096(flags)        BUF_FLAGS(3<<5, flags)
+#define BUF_FLAG_8192(flags)        BUF_FLAGS(4<<5, flags)
+#define BUF_FLAG_16384(flags)       BUF_FLAGS(5<<5, flags)
+#define BUF_FLAG_32768(flags)       BUF_FLAGS(6<<5, flags)
+#define BUF_FLAG_65536(flags)       BUF_FLAGS(7<<5, flags)
+
+static inline uint16_t buffer_size(uint16_t flags) { flags>>=5; return flags>1?(1 << flags)*512:flags?P2P_MTU:128; }
+static inline uint16_t buffer_sz_flag(uint16_t size) {
+    if (size <= 128u) return BUF_FLAG_128(0);
+    if (size <= P2P_MTU) return BUF_FLAG_MTU(0);
+    // 其余映射到 2048..65536 桶；注意避免 __builtin_clz(0) 的情况（前面已排除）
+    unsigned exp = (32u - 9u) - (unsigned)__builtin_clz((unsigned)size - 1u);   // ceil(log2(size))
+#if P2P_MTU <= 1024
+    if (exp < 2u) exp = 2u;    // P2P_MTU+1..2048 统一归入 2048 桶
+#endif
+    return (uint16_t)(exp << 5);
+}
 
 buffer_item_t* alloc_buffer(uint8_t flags);
 void free_buffer(buffer_item_t *buf_item);
+
+typedef struct buffer_queue {
+    buffer_item_t*                  head;
+    buffer_item_t*                  rear;
+} buffer_queue_t;
+
+#define BUF_Q_APPEND(q, item) (item)->next = NULL;                      \
+    if ((q)->rear) (q)->rear->next = item; else (q)->head = item; (q)->rear = item;
+#define BUF_Q_AFTER(q, p, item)                                         \
+    if (!(((item)->next = p->next))) (q)->rear = item; (p)->next = item;
+#define BUF_Q_PUSH(q, item)                                             \
+    (item)->next = (q)->head; (q)->head = item; if (!(q)->rear) (q)->rear = item;
+
+// ! 注意, 下面三个移除操作都不会清理 item->next，调用方如有需要应自行处理
+#define BUF_Q_POP(q, item) assert((q)->head == (item));                 \
+    if (!(((q)->head = (item)->next))) (q)->rear = NULL;
+#define BUF_Q_POP_TO(item, q)                                           \
+    if ((item = (q)->head) && !(((q)->head = (item)->next))) (q)->rear = NULL;
+#define BUF_Q_RM(q, p, item)                                            \
+    if (!p) { assert((q)->head == (item));                              \
+        (q)->head = (item)->next; if (!(q)->head) (q)->rear = NULL;     \
+    } else { assert(p->next == (item));                                 \
+        p->next = (item)->next; if ((q)->rear == (item)) (q)->rear = p; \
+    }
+
+// 这里将 from_q 追加到 to_q 的后面，等价于 to_q 插入到 from_q 的前面
+#define BUF_Q_MV(to_q, from_q)                                          \
+    if ((to_q)->rear) (to_q)->rear->next = (from_q)->head; else (to_q)->head = (from_q)->head;      \
+    if ((from_q)->rear) { (to_q)->rear = (from_q)->rear; (from_q)->head = (from_q)->rear = NULL; }
+
+#define BUF_Q_FOR(q, it, ...)                                           \
+    for (buffer_item_t *it = (q)->head; it; it = it->next) {            \
+        __VA_ARGS__                                                     \
+    }
+#define BUF_Q_CLEAR(q, it, ...)                                         \
+    for (buffer_item_t *it = (q)->head; it; it = (q)->head) {           \
+        (q)->head = it->next; __VA_ARGS__                               \
+    } (q)->rear = NULL;
+
+#define BUF_Q_JOIN(q, u8to)                         \
+    for (buffer_item_t* item = (q)->head; item; item = item->next) {  \
+        memcpy(u8to, ITEM2BUF(item), item->len);    \
+        u8to += item->len;                          \
+    }
+
+typedef struct buffer_stream {
+    buffer_queue_t*                 queue;
+    buffer_item_t*                  current;
+    uint32_t                        cur;
+} buffer_stream_t;
+
+#define BUF_S_RESET(s, q)                           \
+    s->queue = q;                                   \
+    s->current = (q) ? (q)->head : NULL;            \
+    s->cur = 0
+
+static inline uint32_t BUF_S_read(buffer_stream_t* s, uint8_t* buf, uint32_t len) {
+    if (!s->current) return 0;
+    uint32_t read = 0;
+    while (read < len) {
+        uint32_t r = s->current->len - s->cur, n = (len-read); n = r < n ? r : n;
+        if (buf) { memcpy(buf+read, ITEM2BUF(s->current) + s->cur, n); buf += n; } read += n;
+        if ((s->cur += n) >= s->current->len) {
+            if (!((s->current = s->current->next))) break;
+            s->cur = 0;
+        }
+    }
+    return read;
+}
 
 //-----------------------------------------------------------------------------
 

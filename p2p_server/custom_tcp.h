@@ -8,8 +8,7 @@
 #include "common.h"
 
 #define CUSTOM_TCP_SESSION   \
-    buffer_item_t*                  send_head; \
-    buffer_item_t*                  send_rear; \
+    buffer_queue_t*                 send_queue; \
     struct ct_session*              send_prev; \
     struct ct_session*              send_next;
 
@@ -22,15 +21,16 @@ typedef struct ct_session {
 #define CT_PEER(s)                  ((ct_session_t*)PEER(s))
 
 #define CUSTOM_TCP_CLIENT   \
-    int                             last_error;     \
-    uint8_t*                        recv_buf;       \
-    uint16_t                        recv_len;       \
-    buffer_item_t*                  send_buff_head; \
-    buffer_item_t*                  send_buff_rear; \
-    ct_session_t*                   send_sess_head; \
-    ct_session_t*                   send_sess_rear; \
-    ct_session_t*                   sending_sess;   \
-    uint16_t                        sending_offset;
+    int16_t                         last_error;      \
+    uint8_t*                        hdr_def;         \
+    uint16_t                        hdr_sz;          \
+    uint8_t*                        recv_buf;        \
+    uint16_t                        recv_cur;        \
+    buffer_queue_t                  send_buff_queue; \
+    ct_session_t*                   send_sess_head;  \
+    ct_session_t*                   send_sess_rear;  \
+    ct_session_t*                   sending_sess;    \
+    uint16_t                        sending_cur;
 
 // RELAY 模式客户端（TCP 长连接）- 统一接收通道
 typedef struct ct_client {
@@ -59,8 +59,6 @@ typedef void (*ct_client_unreachable_cb)(ct_client_t *client, bool readOrWrite);
 typedef void (*ct_error_item_cb)(ct_client_t *client, buffer_item_t* buffer_item);
 
 typedef struct custom_tcp_ctx {
-    uint8_t*                        hdr_ends/* nullable */;
-    uint16_t                        hdr_len;
     uint32_t                        max_payload_len;
     ct_resolve_payload_len_cb       resolve_payload_len;
     ct_handle_handshake_cb          handle_handshake;
@@ -80,7 +78,7 @@ void
 ct_reactive_client(custom_tcp_ctx_t* ctx, ct_client_t *client);
 
 void
-ct_client_error(custom_tcp_ctx_t* ctx, ct_client_t *client, int error, bool fatal);
+ct_client_error(custom_tcp_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal);
 void
 ct_client_off(custom_tcp_ctx_t* ctx, ct_client_t *client);
 
