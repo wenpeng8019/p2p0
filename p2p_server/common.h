@@ -45,44 +45,74 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #pragma pack(push, 1)
-typedef struct buffer_item {
-    struct buffer_item*             next;
+typedef struct buf16_item {
+    struct buf16_item*              next;
     void*                           refer;
-    uint16_t                        len;    // buf 中有效数据长度（字节）
-    uint8_t                         flags;  // 低 5 bit，表示自定义意义标识; 高 3 bit 表示内存 chunk 大小。即 512 * 2^(flags >> 5)
-} buffer_item_t;
+    uint16_t                        len;        // buf 中有效数据长度（字节）
+    uint16_t                        pos;        // buf 中有效数据的起始偏移位置
+    uint8_t                         flags;      // 低 4 bit，表示自定义意义标识; 高 4 bit 表示内存 chunk 大小。即 512 * 2^(flags >> 4)
+} buf16_item_t;
+typedef struct buf32_item {
+    struct buf16_item*              next;
+    void*                           refer;
+    uint32_t                        len;        // buf 中有效数据长度（字节）
+    uint8_t                         flags;      // 低 4 bit，表示自定义意义标识; 高 4 bit 表示内存 chunk 大小。即 512 * 2^(flags >> 4)
+    uint8_t                         reserved;   // 保留字节，确保 pos 属性内存对齐
+    uint16_t                        pos;        // buf 中有效数据的起始偏移位置
+} buf32_item_t;
 #pragma pack(pop)
-#define ITEM2BUF(item)              ((uint8_t*)(item + 1))
-#define BUF2ITEM(buf)               (((buffer_item_t*)(buf)) - 1)
+#define ITEM2BUF(item)              ((uint8_t*)((item) + 1))
 
-#define BUF_FLAGS(sz_flag, flags)   ((sz_flag) | ((flags) & 0x1F))
-#define BUF_FLAG_128(flags)         BUF_FLAGS(0<<5, flags)
-#define BUF_FLAG_MTU(flags)         BUF_FLAGS(1<<5, flags)
-#define BUF_FLAG_2048(flags)        BUF_FLAGS(2<<5, flags)
-#define BUF_FLAG_4096(flags)        BUF_FLAGS(3<<5, flags)
-#define BUF_FLAG_8192(flags)        BUF_FLAGS(4<<5, flags)
-#define BUF_FLAG_16384(flags)       BUF_FLAGS(5<<5, flags)
-#define BUF_FLAG_32768(flags)       BUF_FLAGS(6<<5, flags)
-#define BUF_FLAG_65536(flags)       BUF_FLAGS(7<<5, flags)
+#define BUF_FLAGS(sz_flag, flags)   ((uint8_t)(sz_flag) | ((flags) & (uint8_t)0xFu))
+#define BUF_FLAG_128(flags)         BUF_FLAGS(0<<4, flags)
+#define BUF_FLAG_256(flags)         BUF_FLAGS(1<<4, flags)
+#define BUF_FLAG_512(flags)         BUF_FLAGS(2<<4, flags)
+#define BUF_FLAG_MTU(flags)         BUF_FLAGS(3<<4, flags)
+#define BUF_FLAG_2048(flags)        BUF_FLAGS(4<<4, flags)
+#define BUF_FLAG_4096(flags)        BUF_FLAGS(5<<4, flags)
+#define BUF_FLAG_8192(flags)        BUF_FLAGS(6<<4, flags)
+#define BUF_FLAG_16384(flags)       BUF_FLAGS(7<<4, flags)
+#define BUF_FLAG_32768(flags)       BUF_FLAGS(8<<4, flags)
+#define BUF_FLAG_65536(flags)       BUF_FLAGS(9<<4, flags)
 
-static inline uint16_t buffer_size(uint16_t flags) { flags>>=5; return flags>1?(1 << flags)*512:flags?P2P_MTU:128; }
+#define BUF_FLAG_32BIT(flags)       BUF_FLAGS(0xF, flags)
+#define BUF_IS_32BIT(flags)         ((uint8_t)flags >> 4 == 0xF)
+#define BUF32(item)                 ((buf32_item_t*)(item))
+
+static inline uint16_t buffer_size(uint16_t flags) { flags>>=4; return flags==3?P2P_MTU:(1 << flags)*128; }
 static inline uint16_t buffer_sz_flag(uint16_t size) {
-    if (size <= 128u) return BUF_FLAG_128(0);
-    if (size <= P2P_MTU) return BUF_FLAG_MTU(0);
-    // 其余映射到 2048..65536 桶；注意避免 __builtin_clz(0) 的情况（前面已排除）
-    unsigned exp = (32u - 9u) - (unsigned)__builtin_clz((unsigned)size - 1u);   // ceil(log2(size))
-#if P2P_MTU <= 1024
-    if (exp < 2u) exp = 2u;    // P2P_MTU+1..2048 统一归入 2048 桶
+    unsigned exp = (32u - 7u) - (unsigned)__builtin_clz((unsigned)size - 1u);   // ceil(log2(size))
+#if P2P_MTU > 1024
+    if (exp == 4 && size <= P2P_MTU) exp = 3;
+#else
+    if (exp == 3 && size > P2P_MTU) exp = 4;
 #endif
-    return (uint16_t)(exp << 5);
+    return (uint16_t)(exp << 4);
 }
 
-buffer_item_t* alloc_buffer(uint8_t flags);
-void free_buffer(buffer_item_t *buf_item);
+buf16_item_t* alloc_buf16(uint8_t flags);
+void free_buf16(buf16_item_t *buf_item);
+
+static inline buf32_item_t* alloc_buf32(uint8_t flags, uint32_t size) {
+    buf32_item_t *buf_item = (buf32_item_t*)malloc(sizeof(buf32_item_t) + size);
+    if (!buf_item) return NULL;
+    buf_item->next = NULL;
+    buf_item->flags = BUF_FLAG_32BIT(flags);
+    buf_item->refer = NULL;
+    buf_item->len = size;
+    buf_item->pos = 0;
+    return buf_item;
+}
+
+static inline buf16_item_t* alloc_buffer(uint8_t flags, uint32_t size) {
+    if (size > 65536) return (buf16_item_t*)alloc_buf32(flags, size);
+    return alloc_buf16(BUF_FLAGS(buffer_sz_flag((uint16_t)size), flags));
+}
+#define free_buffer(item) if (BUF_IS_32BIT(item->flags)) free(item); else free_buf16(item)
 
 typedef struct buffer_queue {
-    buffer_item_t*                  head;
-    buffer_item_t*                  rear;
+    buf16_item_t*                  head;
+    buf16_item_t*                  rear;
 } buffer_queue_t;
 
 #define BUF_Q_APPEND(q, item) (item)->next = NULL;                      \
@@ -110,23 +140,28 @@ typedef struct buffer_queue {
     if ((from_q)->rear) { (to_q)->rear = (from_q)->rear; (from_q)->head = (from_q)->rear = NULL; }
 
 #define BUF_Q_FOR(q, it, ...)                                           \
-    for (buffer_item_t *it = (q)->head; it; it = it->next) {            \
+    for (buf16_item_t *it = (q)->head; it; it = it->next) {             \
         __VA_ARGS__                                                     \
     }
 #define BUF_Q_CLEAR(q, it, ...)                                         \
-    for (buffer_item_t *it = (q)->head; it; it = (q)->head) {           \
+    for (buf16_item_t *it = (q)->head; it; it = (q)->head) {            \
         (q)->head = it->next; __VA_ARGS__                               \
     } (q)->rear = NULL;
 
-#define BUF_Q_JOIN(q, u8to)                         \
-    for (buffer_item_t* item = (q)->head; item; item = item->next) {  \
-        memcpy(u8to, ITEM2BUF(item), item->len);    \
-        u8to += item->len;                          \
+#define BUF_Q_JOIN(q, u8to)                                             \
+    for (buf16_item_t* item = (q)->head; item; item = item->next) {     \
+        if (BUF_IS_32BIT(item->flags)) {                                \
+            memcpy(u8to, ITEM2BUF((buf32_item_t*)item), ((buf32_item_t*)item)->len);    \
+            u8to += ((buf32_item_t*)item)->len;                                         \
+        } else {                                                        \
+            memcpy(u8to, ITEM2BUF(item), item->len);                    \
+            u8to += item->len;                                          \
+        }                                                               \
     }
 
 typedef struct buffer_stream {
     buffer_queue_t*                 queue;
-    buffer_item_t*                  current;
+    buf16_item_t*                   current;
     uint32_t                        cur;
 } buffer_stream_t;
 

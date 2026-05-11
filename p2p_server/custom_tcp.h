@@ -21,16 +21,18 @@ typedef struct ct_session {
 #define CT_PEER(s)                  ((ct_session_t*)PEER(s))
 
 #define CUSTOM_TCP_CLIENT   \
-    int16_t                         last_error;      \
-    uint8_t*                        hdr_def;         \
-    uint16_t                        hdr_sz;          \
-    uint8_t*                        recv_buf;        \
-    uint16_t                        recv_cur;        \
-    buffer_queue_t                  send_buff_queue; \
-    ct_session_t*                   send_sess_head;  \
-    ct_session_t*                   send_sess_rear;  \
-    ct_session_t*                   sending_sess;    \
-    uint16_t                        sending_cur;
+    int16_t                         last_error;         \
+    uint8_t*                        hdr_rs;             \
+    uint16_t                        hdr_sz;             \
+    buf16_item_t*                   recv_buf;           \
+    uint16_t                        recv_cur;           \
+    buf16_item_t*                   payload_buf;        \
+    uint32_t                        payload_cur;        \
+    buffer_queue_t                  send_buff_queue;    \
+    ct_session_t*                   send_sess_head;     \
+    ct_session_t*                   send_sess_rear;     \
+    ct_session_t*                   sending_sess;       \
+    uint32_t                        sending_cur;
 
 // RELAY 模式客户端（TCP 长连接）- 统一接收通道
 typedef struct ct_client {
@@ -43,30 +45,36 @@ typedef struct ct_client {
 #define CUSTOM_TCP_ERR_IO           2      // 网络 I/O 错误（连接异常/读写失败）
 #define CUSTOM_TCP_ERR_OVERFLOW     3      // 请求协议包数据过大（size 超出限制）
 #define CUSTOM_TCP_ERR_INTERNAL     4      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
-#define CUSTOM_TCP_ERR_CUSTOM       5
+#define CUSTOM_TCP_ERR_PROTOCOL     5
+#define CUSTOM_TCP_ERR_CUSTOM       6
 
 #define ITEM_REF_ACK_PENDING        ((void*)(uintptr_t)1)
 #define ITEM_REF_STATIC             ((void*)(uintptr_t)2)
 
-typedef uint32_t (*ct_resolve_payload_len_cb)(uint8_t* hdr_buf, uint16_t hdr_len);
-typedef int (*ct_handle_handshake_cb)(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len, uint8_t *payload, uint16_t payload_len);
-typedef void (*ct_handle_proto_cb)(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len, uint8_t *payload, uint16_t payload_len);
+typedef bool (*ct_resolve_payload_len_cb)(uint8_t* hdr_buf, uint16_t hdr_len,
+                                          uint32_t* payload_len, uint16_t* payload_offset);
+typedef buf16_item_t* (*ct_handle_handshake_cb)(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
+                                                buf16_item_t* payload0, buf16_item_t* payload1);
+typedef buf16_item_t* (*ct_handshake_finish_cb)(ct_client_t *client);
+typedef void (*ct_handle_proto_cb)(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
+                                   buf16_item_t* payload0, buf16_item_t* payload1);
 
-typedef void (*ct_handle_peer_sent_cb)(ct_session_t *session, buffer_item_t *buf_item);
+typedef void (*ct_handle_peer_sent_cb)(ct_session_t *session, buf16_item_t *buf_item);
 typedef void (*ct_session_break_cb)(ct_session_t *session, ct_session_t *peer, break_mode_e break_mode);
 
 typedef void (*ct_client_unreachable_cb)(ct_client_t *client, bool readOrWrite);
-typedef void (*ct_error_item_cb)(ct_client_t *client, buffer_item_t* buffer_item);
+typedef buf16_item_t* (*ct_error_item_cb)(ct_client_t *client, bool handshake);
 
 typedef struct custom_tcp_ctx {
     uint32_t                        max_payload_len;
     ct_resolve_payload_len_cb       resolve_payload_len;
     ct_handle_handshake_cb          handle_handshake;
+    ct_handshake_finish_cb          handshake_finish/* nullable */;
     ct_handle_proto_cb              handle_proto;
     ct_handle_peer_sent_cb          handle_peer_sent;
     ct_session_break_cb             session_break;
     ct_client_unreachable_cb        client_unreachable/* nullable */;
-    buffer_item_t*                  fatal_item;
+    buf16_item_t*                   fatal_item;
     ct_error_item_cb                error_item;
 } custom_tcp_ctx_t;
 
@@ -86,13 +94,13 @@ void
 ct_close_session(custom_tcp_ctx_t* ctx, ct_session_t *session, bool terminate);
 
 void
-ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client);
+ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP);
 void
-ct_handle_send(custom_tcp_ctx_t* ctx, ct_client_t *client);
+ct_handle_send(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP);
 
 void
-ct_client_send(ct_client_t *client, buffer_item_t* buf_item, bool immediate);
+ct_client_send(ct_client_t *client, buf16_item_t* buf_item, bool immediate);
 void 
-ct_session_send(ct_session_t *session, buffer_item_t* buf_item);
+ct_session_send(ct_session_t *session, buf16_item_t* buf_item);
 
 #endif //P2P_CUSTOM_TCP_H
