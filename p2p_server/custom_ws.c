@@ -30,6 +30,41 @@
 // WS GUID（RFC 6455）
 #define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
+///////////////////////////////////////////////////////////////////////////////
+// UTF-8 验证（RFC 6455 §8.1：文本帧 payload 必须是合法 UTF-8）
+// 使用 Bjoern Hoehrmann 的 DFA（https://bjoern.hoehrmann.de/utf-8/decoder/dfa/）
+// state=0（WS_UTF8_ACCEPT）表示已完成一个合法序列，state=12 表示非法，其余为中间态
+#define WS_UTF8_ACCEPT 0u
+#define WS_UTF8_REJECT 12u
+
+static const uint8_t g_ws_utf8d[364] = {
+    /* byte → char-class（0‥11） */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
+    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7, 7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
+    /* state × char-class → next-state */
+    0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
+    12,0,12,12,12,12,12,0,12,0,12,12,  12,24,12,12,12,12,12,24,12,24,12,12,
+    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
+    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
+    12,36,12,12,12,12,12,12,12,12,12,12,
+};
+
+// 逐字节推进 DFA；返回 false 表示遇到非法 UTF-8（state 已变为 REJECT）
+static bool cw_utf8_check(uint32_t *state, const uint8_t *data, uint32_t len) {
+    for (uint32_t i = 0; i < len; i++) {
+        uint32_t type = g_ws_utf8d[data[i]];
+        *state = g_ws_utf8d[256 + *state + type];
+        if (*state == WS_UTF8_REJECT) return false;
+    }
+    return true;
+}
+
 static ret_t cw_http_accept(const char *req, char *resp_buf, size_t resp_buf_len, const char *sub_protocol);
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -87,6 +122,15 @@ static bool cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint16
     *payload_len    = plen;
     *payload_offset = 0;    // 默认不预留；上层子协议可在自己的 resolve 中覆盖
     return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// 控制帧辅助
+
+// RFC 6455 §7.4.1: close 状态码合法性（1000-1011 不含 1004/1005/1006，或 3000-4999）
+static bool cw_valid_close_code(uint16_t c) {
+    return (c >= 1000 && c <= 1011 && c != 1004 && c != 1005 && c != 1006) ||
+           (c >= 3000 && c <= 4999);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -223,6 +267,13 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
     // 重置帧模式 hdr_sz 为 2（下一帧）
     client->hdr_sz = 2;
 
+    // RFC 6455 §5.2: RSV1/2/3 必须为 0（未协商任何扩展时）
+    if (hdr_buf[0] & 0x70) {
+        cw_send_close(cwc, 1002);
+        client->handshake = TCP_HS_FLAG_CLOSING;
+        return;
+    }
+
     // 服务端要求客户端帧必须有 mask（RFC 6455 §5.3）
     if (!masked) {
         ct_client_error(&wctx->base, client, CUSTOM_TCP_ERR_PROTOCOL, false);
@@ -251,13 +302,34 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
         cw_unmask(p1buf, p1len, mask);
     }
 
-    // 控制帧处理（control frames: close/ping/pong，payload <= 125 字节，不分片）
+    // 控制帧处理（control frames: close/ping/pong）
     if (opcode >= WS_OP_CLOSE) {
-        // 控制帧 payload 在 payload0（payload <= 125 字节，不会跨段）
+        // RFC 6455 §5.5: 控制帧必须 FIN，且 payload ≤ 125 字节
+        uint32_t ctrl_total = plen0 + (payload1 ? (payload1->len - payload1->pos) : 0u);
+        if (!fin || ctrl_total > 125) {
+            cw_send_close(cwc, 1002);
+            client->handshake = TCP_HS_FLAG_CLOSING;
+            return;
+        }
         uint8_t *ctrl_data = payload0 ? ITEM2BUF(payload0) + payload0->pos : NULL;
-        uint8_t  ctrl_len  = payload0 ? (uint8_t)plen0 : 0;
+        uint8_t  ctrl_len  = (uint8_t)ctrl_total;
         if (opcode == WS_OP_CLOSE) {
             uint16_t code = (ctrl_len >= 2) ? (uint16_t)((ctrl_data[0]<<8)|ctrl_data[1]) : 1000;
+            // RFC 6455 §7.4.1: 状态码必须合法
+            if (ctrl_len >= 2 && !cw_valid_close_code(code)) {
+                cw_send_close(cwc, 1002);
+                client->handshake = TCP_HS_FLAG_CLOSING;
+                return;
+            }
+            // RFC 6455 §5.5.1: close frame reason string（第 2 字节起）必须是合法 UTF-8
+            if (ctrl_len > 2) {
+                uint32_t tmp = WS_UTF8_ACCEPT;
+                if (!cw_utf8_check(&tmp, ctrl_data + 2, ctrl_len - 2) || tmp != WS_UTF8_ACCEPT) {
+                    cw_send_close(cwc, 1007);
+                    client->handshake = TCP_HS_FLAG_CLOSING;
+                    return;
+                }
+            }
             if (wctx->handle_close) wctx->handle_close(cwc, code);
             // 自动回复 close
             cw_send_close(cwc, code);
@@ -278,6 +350,48 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
         }
         // WS_OP_PONG：无需处理
         return;
+    }
+
+    // RFC 6455 §5.2: 保留 opcode（0x3-0x7 数据帧、0xB-0xF 控制帧）必须拒绝
+    if ((opcode >= 0x3 && opcode <= 0x7) || opcode >= 0xB) {
+        cw_send_close(cwc, 1002);
+        client->handshake = TCP_HS_FLAG_CLOSING;
+        return;
+    }
+
+    // RFC 6455 §5.4: 分片状态机一致性
+    // + CONTINUATION 帧必须在 TEXT/BINARY 分片序列进行中（ws_opcode != 0）
+    // + 新 TEXT/BINARY 帧不可在已有分片序列进行中出现
+    bool in_frag = (cwc->ws_opcode != 0);
+    if (opcode == WS_OP_CONTINUATION && !in_frag) {
+        cw_send_close(cwc, 1002);
+        client->handshake = TCP_HS_FLAG_CLOSING;
+        return;
+    }
+    if ((opcode == WS_OP_TEXT || opcode == WS_OP_BINARY) && in_frag) {
+        cw_send_close(cwc, 1002);
+        client->handshake = TCP_HS_FLAG_CLOSING;
+        return;
+    }
+
+    // RFC 6455 §8.1：TEXT 帧（含分片）payload 必须是合法 UTF-8，逐片增量验证
+    // opcode==TEXT 时重置 DFA（新消息），CONTINUATION 时沿用上片状态跨片累积
+    bool is_text = (opcode == WS_OP_TEXT) ||
+                   (opcode == WS_OP_CONTINUATION && cwc->ws_opcode == WS_OP_TEXT);
+    if (is_text) {
+        if (opcode == WS_OP_TEXT) cwc->ws_utf8state = WS_UTF8_ACCEPT;  // 新消息重置
+        uint32_t *st = &cwc->ws_utf8state;
+        bool ok = (plen0 == 0) || cw_utf8_check(st, ITEM2BUF(payload0) + payload0->pos, plen0);
+        if (ok && payload1) {
+            uint32_t p1len = payload1->len - payload1->pos;
+            ok = cw_utf8_check(st, ITEM2BUF(payload1) + payload1->pos, p1len);
+        }
+        if (ok && fin && *st != WS_UTF8_ACCEPT) ok = false;  // FIN 时截断于多字节序列中间
+        if (!ok) {
+            cw_send_close(cwc, 1007);
+            client->handshake = TCP_HS_FLAG_CLOSING;
+            return;
+        }
     }
 
     // 数据帧（text/binary/continuation）
@@ -314,6 +428,7 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
         }
         cwc->ws_frag_q.head = cwc->ws_frag_q.rear = NULL;
         cwc->ws_frag_len = 0;
+        cwc->ws_opcode = 0;   // 分片序列结束，重置状态（下一帧 CONTINUATION 视为协议错误）
         return;
     }
 
@@ -374,6 +489,7 @@ bool cw_init_client(cw_client_t *client, custom_ws_ctx_t *ctx) {
     client->ws_opcode = 0;
     client->ws_frag_q.head = client->ws_frag_q.rear = NULL;
     client->ws_frag_len = 0;
+    client->ws_utf8state = WS_UTF8_ACCEPT;
 
     TCP_CLIENT_INIT(client);
     return true;

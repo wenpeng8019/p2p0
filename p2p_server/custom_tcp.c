@@ -456,6 +456,8 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 }
 
                 // 安全检查：payload 过大溢出
+                // TODO(WS): RFC 6455 §7.4.1 要求发送 close(1009 Message Too Big) 而非直接断 TCP
+                //           当前底层无法感知上层是否为 WS 协议，暂用 CUSTOM_TCP_ERR_OVERFLOW 统一处理
                 if (payload_len > ctx->max_payload_len) {
                     client->last_error = CUSTOM_TCP_ERR_OVERFLOW;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;

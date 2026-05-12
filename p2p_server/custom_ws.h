@@ -35,17 +35,19 @@
 //-----------------------------------------------------------------------------
 // WS client 扩展字段（内联宏，供派生结构体使用）
 //
-// + ws_ctx:     指向所属的 custom_ws_ctx_t（init 时保存，回调中用于访问 ws 级配置）
-// + ws_hdr_buf:  14 字节静态缓冲，帧模式下作为 hdr_rs 使用（存放 WS 帧头字节）
-// + ws_opcode:   当前帧的 opcode（FIN bit 在 bit7：0x80 | opcode）
-// + ws_frag_q:   分片帧的聚合队列（收到非 FIN 帧时追加，head==NULL 表示无分片进行中）
-// + ws_frag_len: ws_frag_q 中已聚合的总字节数
+// + ws_ctx:       指向所属的 custom_ws_ctx_t（init 时保存，回调中用于访问 ws 级配置）
+// + ws_hdr_buf:    14 字节静态缓冲，帧模式下作为 hdr_rs 使用（存放 WS 帧头字节）
+// + ws_opcode:     当前帧的 opcode（FIN bit 在 bit7：0x80 | opcode）
+// + ws_frag_q:     分片帧的聚合队列（收到非 FIN 帧时追加，head==NULL 表示无分片进行中）
+// + ws_frag_len:   ws_frag_q 中已聚合的总字节数
+// + ws_utf8state:  TEXT 帧 UTF-8 DFA 当前状态（0=ACCEPT；跨分片保持；RFC 6455 §8.1）
 #define CUSTOM_WS_CLIENT \
     struct custom_ws_ctx*           ws_ctx;         \
     uint8_t                         ws_hdr_buf[14]; \
     uint8_t                         ws_opcode;      \
     buffer_queue_t                  ws_frag_q;      \
-    uint32_t                        ws_frag_len;
+    uint32_t                        ws_frag_len;    \
+    uint32_t                        ws_utf8state;
 
 // 基础 WS client 类型（可通过 CUSTOM_WS_CLIENT 内联到派生结构体）
 typedef struct cw_client {
@@ -115,9 +117,6 @@ cw_init_client(cw_client_t *client, custom_ws_ctx_t *ctx);
 // 强制释放 WS client（关闭所有 session，释放所有缓冲）
 void
 cw_free_client(custom_ws_ctx_t *ctx, cw_client_t *client);
-
-// 接收/发送处理：直接调用 ct_handle_recv(&ctx->base, (ct_client_t*)client, SP)
-//              和 ct_handle_send(&ctx->base, (ct_client_t*)client, SP)
 
 // 发送 WS 帧
 // + opcode: WS_OP_TEXT / WS_OP_BINARY
