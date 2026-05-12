@@ -13,10 +13,10 @@
  *   5. 消息经 ws_server 广播到浏览器页面显示
  *   6. 按 Enter 结束
  *
- * 注意：需要编译时开启 WITH_WSLAY
+ * 注意：需要编译时开启 WITH_WS
  */
 
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
 
 #include "../src/ws_client.h"
 
@@ -359,12 +359,12 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-#else  /* !WITH_WSLAY */
+#else  /* !WITH_WS */
 
 #include <stdio.h>
 int main(void) {
-    fprintf(stderr, "该演示需要 WITH_WSLAY 支持，请用 -DWITH_WSLAY=ON 重新编译。\n");
+    fprintf(stderr, "该演示需要 WITH_WS 支持，请用 -DWITH_WS=ON 重新编译。\n");
     return 1;
 }
 
-#endif /* WITH_WSLAY */
+#endif /* WITH_WS */

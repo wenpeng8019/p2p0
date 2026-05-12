@@ -51,7 +51,7 @@ typedef struct wss_session {
     session_t                       base;
 
     /* SYNC0 预缓存 ring buffer（动态分配，同步完成后释放）*/
-    buffer_item_t*                  sync_buf;               /* NULL=无数据，非NULL=BUF_FLAG_2048 chunk */
+    buf16_item_t*                  sync_buf;               /* NULL=无数据，非NULL=BUF_FLAG_2048 chunk */
     uint16_t                        sync_head;              /* 读位置 [0, MAX) */
     uint16_t                        sync_len;               /* 已存储字节数 */
     bool                            sync_sending;           /* true=有数据已提交 wslay 尚未发完 */

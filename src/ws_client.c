@@ -9,7 +9,7 @@
 #include "predefine.h"   /* stdc.h 已通过 predefine.h 引入，提供 sock_t / P_INVALID_SOCKET /
                         P_sock_close / P_sock_nonblock / P_sock_is_wouldblock 等 */
 
-#ifndef WITH_WSLAY
+#ifndef WITH_WS
 void ws_client_dummy(void) {}
 #else
 
@@ -586,4 +586,4 @@ int ws_client_send_binary(ws_client_t *c,
     return wslay_event_queue_msg(c->ws_ctx, &msg) == 0 ? 0 : -1;
 }
 
-#endif /* WITH_WSLAY */
+#endif /* WITH_WS */

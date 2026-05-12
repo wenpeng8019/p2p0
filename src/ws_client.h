@@ -23,7 +23,7 @@
 #ifndef WS_CLIENT_H
 #define WS_CLIENT_H
 
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
 
 #include <stdint.h>
 #include <stddef.h>
@@ -154,6 +154,6 @@ ws_client_state_t ws_client_state(const ws_client_t *c);
 }
 #endif
 
-#endif /* WITH_WSLAY */
+#endif /* WITH_WS */
 
 #endif /* WS_CLIENT_H */

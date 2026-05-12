@@ -29,7 +29,7 @@
 #ifndef P2P_SIGNAL_ICE_WS_H
 #define P2P_SIGNAL_ICE_WS_H
 
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -91,5 +91,5 @@ int  p2p_signal_ice_ws_connect(struct p2p_session *s, const char *remote_peer_id
 /* 信令 tick（在 p2p_update 阶段 2 调用） */
 void p2p_signal_ice_ws_tick(struct p2p_instance *inst, uint64_t now_ms);
 
-#endif /* WITH_WSLAY */
+#endif /* WITH_WS */
 #endif /* P2P_SIGNAL_ICE_WS_H */

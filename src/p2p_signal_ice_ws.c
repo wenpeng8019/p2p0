@@ -5,7 +5,7 @@
  * 协议详见 p2p_signal_ice_ws.h
  */
 
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
 
 #include "p2p_signal_ice_ws.h"
 #include "p2p_internal.h"
@@ -366,4 +366,4 @@ void p2p_signal_ice_ws_tick(struct p2p_instance *inst, uint64_t now_ms) {
     }
 }
 
-#endif /* WITH_WSLAY */
+#endif /* WITH_WS */

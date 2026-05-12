@@ -268,9 +268,8 @@ ct_client_error(custom_tcp_ctx_t* ctx, ct_client_t *client, int16_t error, bool 
 
     if (!fatal) {
 
-        buf16_item_t *err_item = alloc_buf16(BUF_FLAG_128(0));
+        buf16_item_t *err_item = ctx->error_item(client, false);
         if (err_item) {
-            ctx->error_item(client, err_item);
             err_item->refer = ITEM_REF_CLIENT_ERROR;    // 标记该 buf_item 是 error 包
             ct_client_send(client, err_item, true);
             return;
@@ -450,7 +449,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 // 解析 payload len, payload offset
                 // + 这里允许应用层给 payload 留出一个 offset 前置空间，以便实现将上行的 payload 包直接作为下行的应答包、或中继转发包
                 // ! 作为流模式的 header 协议，此时获得的 header 应该是完整的，所以要求必须解析出有效的 payload_len 值
-                if (!ctx->resolve_payload_len(buf, sz, &payload_len, &payload_offset)) {
+                if (!ctx->resolve_payload_len(client, buf, sz, &payload_len, &payload_offset)) {
                     client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
@@ -568,7 +567,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                 // 解析 payload size, payload offset
                 // + 作为帧模式的 header 协议，允许根据对已有的 hdr 部分的解析来动态调整后续的 hdr 类型尺寸
-                if (!ctx->resolve_payload_len(client->hdr_rs, client->hdr_sz, &payload_len, &payload_offset)) {
+                if (!ctx->resolve_payload_len(client, client->hdr_rs, client->hdr_sz, &payload_len, &payload_offset)) {
                     assert(client->recv_cur < client->hdr_sz);
                     goto ext_hdr;
                 }
@@ -593,7 +592,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     // 解析 payload size, payload offset
                     // + 如果动态扩展需要读取更多的 hdr size，则继续重新读取 hdr
                     len = client->hdr_sz;
-                    if (!ctx->resolve_payload_len(buf, client->hdr_sz, &payload_len, &payload_offset)) {
+                    if (!ctx->resolve_payload_len(client, buf, client->hdr_sz, &payload_len, &payload_offset)) {
                         assert(client->hdr_sz > len);
                         continue;
                     }
@@ -740,8 +739,10 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
             ack_item = ctx->handle_handshake(client, buf, sz, buf_item, payload_item);
             assert(bak_item == client->recv_buf);                       // handle_handshake 期间不应调整（下一次请求的）recv_buf
 
-            free_buffer(payload_item);
-            client->payload_buf = NULL;
+            if (client->payload_buf) {
+                free_buffer(payload_item);
+                client->payload_buf = NULL;
+            }
             client->payload_cur = 0;
 
             client->recv_cur = 0;
@@ -750,8 +751,10 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
         }
         ctx->handle_proto(client, buf, sz, buf_item, payload_item);
 
-        free_buffer(payload_item);
-        client->payload_buf = NULL;
+        if (client->payload_buf) {
+            free_buffer(payload_item);            // 若回调置 payload_buf=NULL 表示已接管所有权，跳过释放
+            client->payload_buf = NULL;
+        }
         client->payload_cur = 0;
 
         client->recv_cur = 0;

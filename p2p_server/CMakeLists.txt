@@ -61,14 +61,14 @@ add_executable(p2p_server
         common.h
         custom_tcp.c
         custom_tcp.h
-        custom_ws.c
-        custom_ws.h
         p2p_relay.c
         p2p_relay.h
         p2p_compact.c
         p2p_compact.h
         p2p_wss.c
         p2p_wss.h
+        custom_ws.c
+        custom_ws.h
 )
 target_include_directories(p2p_server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -89,13 +89,4 @@ endif()
 target_link_libraries(p2p_server PRIVATE stdc ${PLATFORM_LIBS})
 if(WIN32)
     target_link_libraries(p2p_server PRIVATE ws2_32)
-endif()
-
-# --- wslay WebSocket 可选支持 ---
-if(WITH_WSLAY)
-    target_link_libraries(p2p_server PRIVATE ${WSLAY_LIBRARIES})
-    target_include_directories(p2p_server PRIVATE ${WSLAY_INCLUDE_DIRS})
-    target_compile_definitions(p2p_server PRIVATE WITH_WSLAY)
-
-    message(STATUS "p2p_server: ws_server WebSocket 服务器已启用")
 endif()

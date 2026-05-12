@@ -1,337 +1,465 @@
-/*
- * custom_ws.c — 通用 WebSocket 服务端基础设施实现（对应 custom_tcp.c）
- *
- * 关于 WSLAY 协议处理的关键机制
- *
- *    - write_enabled（即 wslay_event_get_write_enabled）。该值会在 init 是置为 true，然后在以下时机被置为 false：
- *      > wslay_event_send 过程中出现错误
- *      > close opcode 写入完成后
- *      > 主动执行 wslay_event_shutdown_write
- *    - wslay_event_want_write() == true
- *      > write_enabled 为 true，且发送缓冲队列不为空
- *      + 注意，wslay_event_send 写入报错，不会清除发送缓冲队列，只会将 write_enabled 设置为 false
- *        此外，wslay_event_send 写入报错，也不会导致 read_enabled 变为 false
- *
- *    - read_enabled（即 wslay_event_get_read_enabled）。该值会在 init 是置为 true，然后在以下时机被置为 false：
- *      > wslay_event_recv 过程中出现报错（入队 OOM、协议、数据过大溢出、负载无效等）
- *      > 触发 recv 执行接口设置了 would block 以为的错误，即网络 IO 错误。
- *      + 注意，wslay_event_recv 报错后，会自动发送一个 close 帧到发送队列。
- *        此外，recv 报错也不会导致 write_enabled 变为 false
- *      > 收到了 close 请求帧
- *      > 主动执行 wslay_event_shutdown_read
- *    - wslay_event_want_read() 等价于 read_enabled
- *
- *    + 关于关闭握手协议的处理：ws 协议要求一端在发送 close 协议字后，需等待对端返回 close 协议字，即双向确认关闭。
- *      > wslay 在收到对端的 WSLAY_CONNECTION_CLOSE 后会自动构造一个 close 命令到发送队列，并将 read_enabled 置为 false
- *      > wslay 在将 close 命令（收到 close 自动回复、或服务器主动发的）实际发送完成后会自动将 write_enabled 置为 false
- *      > 注意, 发送完 close 命令后，wslay 不会自动关闭 socket；主动发 close 也不会自动将 read_enabled 置为 false
- *        因为协议上允许在发送 close 后继续读取对端数据，直到收到对端 close 后才真正关闭连接。
- *        同样的，在主动发送 close 后，wslay 也不会为对方返回的 close 命令设置超时处理。
-*/
+//
+// custom_ws.c — 基于 custom_tcp 的 WebSocket 服务端基础封装实现
+//
+// 握手阶段：流模式，以 "\r\n\r\n" 为边界扫描完整 HTTP header
+// 正常阶段：帧模式，14 字节静态缓冲，动态扩展解析 WS 帧头（RFC 6455）
+//
+// WS 帧头布局（服务端接收）：
+//   byte0:  FIN(1) RSV(3) opcode(4)
+//   byte1:  MASK(1) payload_len(7)   — 服务端接收时 MASK 必须为 1
+//   [2..3]:  扩展 payload_len=126 时的 16bit 长度
+//   [2..9]:  扩展 payload_len=127 时的 64bit 长度
+//   [2..5] 或 [4..7] 或 [10..13]: mask key (4 bytes)
+//
+// 服务端发送帧头布局（无 mask）：
+//   byte0:  FIN(1) RSV(3) opcode(4)
+//   byte1:  0 payload_len(7)
+//   [2..3]:  扩展 payload_len=126 时
+//   [2..9]:  扩展 payload_len=127 时
+//
 #define MOD_TAG "CUSTOM_WS"
 
 #include "custom_ws.h"
 
-#ifdef WITH_WSLAY
+// HTTP 握手 recv 缓冲大小（存放 HTTP 请求 header，流模式 recv_buf 使用 8K）
+#define CW_HTTP_BUF_FLAGS   BUF_FLAG_8192(0)
+// HTTP 应答最大长度（需容纳 101 Switching Protocols 响应）
+#define CW_HTTP_RESP_MAX    512
+// WS 帧头最大字节数
+#define CW_WS_HDR_MAX       14
+// WS GUID（RFC 6455）
+#define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-#define BUF_FLAGS       BUF_FLAG_2048(0)
-#define RESP_BUF_SZ     512
+static ret_t cw_http_accept(const char *req, char *resp_buf, size_t resp_buf_len, const char *sub_protocol);
 
 ///////////////////////////////////////////////////////////////////////////////
-// wslay 回调
+// WS 帧头解析（帧模式 resolve_payload_len）
+//
+// hdr_buf: 指向 client->ws_hdr_buf（即 hdr_rs）
+// hdr_len: 当前已读取字节数（等于 client->hdr_sz，框架在读满后调用）
+//
+// 动态扩展规则：
+//   初始 hdr_sz=2 → 读完 2 字节后调用：
+//     payload_len7 == 126 → 需要再读 2 字节扩展长度 + 4 字节 mask → hdr_sz=8，返回 false
+//     payload_len7 == 127 → 需要再读 8 字节扩展长度 + 4 字节 mask → hdr_sz=14，返回 false
+//     其他              → 需要再读 4 字节 mask → hdr_sz=6，返回 false
+//   下次调用（hdr_len=6/8/14）时已有 mask key，返回 true
 
-static ssize_t ws_recv(wslay_event_context_ptr wsctx, uint8_t *buf, size_t len, int flags, void *ud) {
-    (void)flags; if (!len) return 0;
-    cw_client_t *client = (cw_client_t *)ud;
+// 根据 hdr_len==2 时的 len7 字段，返回完整帧头所需字节数（含 mask key）
+static uint16_t cw_hdr_full_sz(uint8_t len7) {
+    if (len7 == 126) return 8;   // 2 + 2(ext) + 4(mask)
+    if (len7 == 127) return 14;  // 2 + 8(ext) + 4(mask)
+    return 6;                    // 2 + 4(mask)
+}
 
-    // 若握手阶段已缓存了 WebSocket 帧数据，先从缓存回放
-    if (client->buf) { uint8_t *buf0 = ITEM2BUF(client->buf);
-        size_t n = client->len - client->pos;
-        if (len < n) {
-            memcpy(buf, buf0 + client->pos, len);
-            client->pos += (uint16_t)len;
-            return (ssize_t)len;
+static bool cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint16_t hdr_len,
+                                   uint32_t *payload_len, uint16_t *payload_offset) {
+    uint8_t len7 = hdr_buf[1] & 0x7F;
+
+    // 第一次调用：2 字节 base header，解析扩展需求
+    if (hdr_len == 2) {
+        if (!(hdr_buf[1] & 0x80)) {
+            // 未携带 mask，当作 payload_len=0 返回 true，在 handle_proto 中检查拒绝
+            *payload_len = 0;
+            *payload_offset = 0;
+            return true;
         }
-        memcpy(buf, buf0 + client->pos, n);
-        free_buffer(client->buf); client->buf = NULL;
-        client->pos = client->len = 0;
-        return (ssize_t)n;
+        // 更新 hdr_sz 为完整帧头大小（含扩展长度和 mask key）
+        client->hdr_sz = cw_hdr_full_sz(len7);
+        return false;  // 需要继续读取
     }
 
-    ssize_t n;
-    do n = recv(client->base.fd, (char *)buf, (int)len, 0); while (n < 0 && P_sock_is_interrupted());
-    if (n > 0) return n;
-    wslay_event_set_error(wsctx, n < 0 && P_sock_is_wouldblock() ? WSLAY_ERR_WOULDBLOCK : WSLAY_ERR_CALLBACK_FAILURE);
-    client->io |= TCP_IO_FLAG_READ_BREAK;
-    return -1;
-}
+    // 第二次调用：已读完 mask key 和扩展长度
+    uint32_t plen; uint8_t mask_off;
+    if      (len7 == 127) { plen = (uint32_t)nget_ll(hdr_buf + 2); mask_off = 10; }
+    else if (len7 == 126) { plen = nget_s(hdr_buf + 2);            mask_off = 4;  }
+    else                  { plen = len7;                           mask_off = 2;  }
 
-static ssize_t ws_send(wslay_event_context_ptr wsctx, const uint8_t *data, size_t len, int flags, void *ud) {
-    (void)flags; if (!len) return 0;
-    cw_client_t *client = (cw_client_t *)ud;
-    ssize_t n;
-    do n = send(client->base.fd, (const char *)data, (int)len, 0); while (n < 0 && P_sock_is_interrupted());
-    if (n > 0) return n;
-    wslay_event_set_error(wsctx, (n < 0 && P_sock_is_wouldblock()) ? WSLAY_ERR_WOULDBLOCK : WSLAY_ERR_CALLBACK_FAILURE);
-    return -1;
-}
-
-static void cw_cb_msg(wslay_event_context_ptr wsctx, const struct wslay_event_on_msg_recv_arg *arg, void *ud) {
-    (void)wsctx;
-    cw_client_t *client = (cw_client_t *)ud;
-
-    // 客户端发起关闭请求；wslay 会自动入队 close 回复，并将 read_enabled 置为 false
-    if (arg->opcode == WSLAY_CONNECTION_CLOSE) {
-        client->handshake = TCP_HS_FLAG_CLOSING;   // = -1，与 custom_tcp 语义对齐
-        return;
+    // 保存 mask key 到固定位置（hdr_buf[10..13] 作为 mask key 暂存区，统一从此读取）
+    // 将 mask_key 复制到 hdr_buf 末尾固定偏移（offset 10），方便 handle_proto 统一读取
+    if (mask_off != 10) {
+        hdr_buf[10] = hdr_buf[mask_off];
+        hdr_buf[11] = hdr_buf[mask_off+1];
+        hdr_buf[12] = hdr_buf[mask_off+2];
+        hdr_buf[13] = hdr_buf[mask_off+3];
     }
 
-    if (arg->opcode == WSLAY_TEXT_FRAME) {
-        if (client->ctx->handle_text)
-            client->ctx->handle_text(client, arg->msg, arg->msg_length);
-    } else if (arg->opcode == WSLAY_BINARY_FRAME) {
-        if (client->ctx->handle_data)
-            client->ctx->handle_data(client, arg->msg, arg->msg_length);
-    }
-}
-
-static const struct wslay_event_callbacks s_wslay_cbs = {
-    ws_recv, ws_send,
-    NULL, NULL, NULL, NULL,
-    cw_cb_msg
-};
-
-static bool ws_handshake_done(cw_client_t *client) {
-
-    // 若握手期间积压了 WS 帧数据，恢复 buf 缓存状态（供 cw_cb_recv 回放）
-    if (client->base.instance_id) {
-        client->pos = ((uint16_t *)&client->base.instance_id)[0];
-        client->len = ((uint16_t *)&client->base.instance_id)[1];
-        client->base.instance_id = 0;
-    } else {
-        free_buffer(client->buf);
-        client->buf = NULL;
-        client->len = client->pos = 0;
-    }
-
-    if (wslay_event_context_server_init(&client->ws_ctx, &s_wslay_cbs, client) != 0) {
-        print("E:", LA_F("wslay context init failed\n", LA_F133, 133));
-        return false;
-    }
-
-    // HTTP 握手完成，进入正常 WS 收发阶段，这里会直接进入应用层的握手阶段处理
-    client->handshake = 2;
-
+    *payload_len    = plen;
+    *payload_offset = 0;    // 默认不预留；上层子协议可在自己的 resolve 中覆盖
     return true;
 }
 
-static ret_t ws_accept(char* req, char* resp_buf, size_t resp_buf_len, const char* sub_protocol);
+///////////////////////////////////////////////////////////////////////////////
+// 掩码解除（客户端发来的帧 payload 必须用 mask key XOR 还原）
+
+static void cw_unmask(uint8_t *data, uint32_t len, const uint8_t mask[4]) {
+    uint32_t i;
+    for (i = 0; i + 4 <= len; i += 4) {
+        data[i]   ^= mask[0];
+        data[i+1] ^= mask[1];
+        data[i+2] ^= mask[2];
+        data[i+3] ^= mask[3];
+    }
+    for (; i < len; i++) data[i] ^= mask[i & 3];
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// custom_tcp 回调实现
+
+// 握手阶段（HTTP Upgrade 请求）处理
+// + hdr_buf: recv_buf 中 HTTP 请求文本（不含 "\r\n\r\n" 尾）
+// + hdr_len: HTTP header 文本长度
+// + payload0/payload1: HTTP header 之后不应有 payload（WS 协议握手阶段不携带 body）
+static buf16_item_t *cw_tcp_handle_handshake(ct_client_t *client,
+                                              uint8_t *hdr_buf, uint16_t hdr_len,
+                                              buf16_item_t *payload0, buf16_item_t *payload1) {
+    (void)payload0; (void)payload1;
+    cw_client_t *cwc = (cw_client_t*)client;
+    custom_ws_ctx_t *wctx = cwc->ws_ctx;
+
+    // hdr_buf 指向流模式 recv_buf 内部，内容是不含 "\r\n\r\n" 的 HTTP 请求文本
+    // 需要 NUL 结尾才能用 strstr；hdr_buf 后紧跟 recv_buf 中剩余数据，
+    // 此时 recv_buf->pos = header 起始，recv_cur = header 结束（\r\n\r\n 之前）
+    // 框架传入的 hdr_buf 本身没有 \0，但 recv_buf 里 recv_cur 之后的字节是 \r\n\r\n，
+    // 可以暂时覆写（此时 hdr_buf[hdr_len] 指向 '\r'），用完即恢复
+    uint8_t saved = hdr_buf[hdr_len];
+    hdr_buf[hdr_len] = '\0';
+
+    // 利用 recv_buf 前置空间（pos 之前）写入 HTTP 应答（最多 CW_HTTP_RESP_MAX 字节）
+    // recv_buf->pos 是本次 header 起始偏移，前面的空间在流模式中是已消费区域，可以复用
+    buf16_item_t *recv_buf = client->recv_buf;
+    uint8_t *resp_buf;
+    size_t resp_buf_sz;
+    if (recv_buf->pos >= CW_HTTP_RESP_MAX) {
+        // pos 之前有足够空间，直接用
+        resp_buf = ITEM2BUF(recv_buf);
+        resp_buf_sz = CW_HTTP_RESP_MAX;
+    } else {
+        // 空间不足，分配一个临时缓冲（正常不应发生，HTTP 请求一般不会在 recv_buf 起始处）
+        // 分配 128 字节足够容纳 101 响应
+        buf16_item_t *resp_item = alloc_buf16(BUF_FLAG_512(0));
+        if (!resp_item) {
+            hdr_buf[hdr_len] = saved;
+            client->last_error = CUSTOM_TCP_ERR_INTERNAL;
+            return NULL;
+        }
+        resp_buf = ITEM2BUF(resp_item);
+        resp_buf_sz = 512;
+        // 将 resp_item 挂到 recv_buf->next 作为应答缓冲（框架不会使用 next，安全）
+        // 但这样生命期管理复杂；更简单：直接在应答 buf_item 里构造整个应答
+        ret_t r = cw_http_accept((const char*)hdr_buf, (char*)resp_buf, resp_buf_sz, wctx->sub_protocol);
+        hdr_buf[hdr_len] = saved;
+        if (r < E_NONE) {
+            print("E:", LA_F("[WS] HTTP handshake rejected\n", LA_F143, 143));
+            free_buf16(resp_item);
+            client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+            return NULL;
+        }
+        // 可选回调：上层鉴权
+        if (wctx->handshake_done && !wctx->handshake_done(cwc)) {
+            free_buf16(resp_item);
+            client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+            return NULL;
+        }
+        resp_item->len = (uint16_t)r;
+        resp_item->pos = 0;
+        return resp_item;
+    }
+
+    ret_t r = cw_http_accept((const char*)hdr_buf, (char*)resp_buf, resp_buf_sz, wctx->sub_protocol);
+    hdr_buf[hdr_len] = saved;
+    if (r < E_NONE) {
+        print("E:", LA_F("[WS] HTTP handshake rejected\n", LA_F143, 143));
+        client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+        return NULL;
+    }
+
+    // 可选回调：上层鉴权
+    if (wctx->handshake_done && !wctx->handshake_done(cwc)) {
+        client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+        return NULL;
+    }
+
+    // 将应答存入 recv_buf 前置空间，构造一个引用它的 buf_item
+    // 注意：recv_buf 自身不能直接作为 ack_item 返回（框架 handshake 后会继续复用 recv_buf 读数据）
+    // 正确做法：分配一个独立的 ack buf_item（不依赖 recv_buf）
+    buf16_item_t *ack = alloc_buf16(BUF_FLAG_512(0));
+    if (!ack) {
+        client->last_error = CUSTOM_TCP_ERR_INTERNAL;
+        return NULL;
+    }
+    memcpy(ITEM2BUF(ack), resp_buf, (size_t)r);
+    ack->len = (uint16_t)r;
+    ack->pos = 0;
+    return ack;
+}
+
+static void cw_tcp_handshake_finish(ct_client_t *client) {
+    cw_client_t *cwc = (cw_client_t*)client;
+    // 切换到帧模式：释放 HTTP recv_buf，设置 hdr_rs 指向静态帧头缓冲
+    if (client->recv_buf) {
+        // handshake_finish 中修改 recv_buf → NULL 触发框架切换到帧模式
+        // 注意：框架在 handshake_finish 返回后会调用 prepare_next_recv(client, old_recv_buf)
+        // 所以这里直接将 recv_buf 置 NULL，框架会处理好帧模式的切换
+        if (client->recv_buf->next) { free_buf16(client->recv_buf->next); client->recv_buf->next = NULL; }
+        // 不在此 free，让框架的 prepare_next_recv 处理（它会检测 recv_buf 变化并释放）
+        client->recv_buf = NULL;
+    }
+    // 设置帧模式参数
+    client->hdr_rs = cwc->ws_hdr_buf;  // 14 字节静态缓冲
+    client->hdr_sz = 2;                // 初始读取 2 字节
+}
+
+static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t hdr_len,
+                                buf16_item_t *payload0, buf16_item_t *payload1) {
+    (void)hdr_len;
+    cw_client_t *cwc = (cw_client_t*)client;
+    custom_ws_ctx_t *wctx = cwc->ws_ctx;
+
+    uint8_t opcode = hdr_buf[0] & 0x0F;
+    uint8_t fin    = (hdr_buf[0] >> 7) & 1;
+    uint8_t masked = hdr_buf[1] & 0x80;
+
+    // 重置帧模式 hdr_sz 为 2（下一帧）
+    client->hdr_sz = 2;
+
+    // 服务端要求客户端帧必须有 mask（RFC 6455 §5.3）
+    if (!masked) {
+        ct_client_error(&wctx->base, client, CUSTOM_TCP_ERR_PROTOCOL, false);
+        return;
+    }
+
+    // mask key 已被 cw_resolve_payload_len 统一复制到 hdr_buf[10..13]
+    const uint8_t *mask = hdr_buf + 10;
+
+    // 解除 payload mask（in-place）
+    // payload0 是 recv_buf 内的切片（零拷贝），payload1 是独立缓冲
+    // 两段在逻辑上连续，mask 偏移需要跨段衔接
+    uint32_t plen0 = 0;
+    if (payload0) {
+        plen0 = payload0->len - payload0->pos;
+        cw_unmask(ITEM2BUF(payload0) + payload0->pos, plen0, mask);
+        if (payload1) {
+            uint8_t *p1buf = ITEM2BUF(payload1) + payload1->pos;
+            uint32_t p1len = payload1->len - payload1->pos;
+            for (uint32_t i = 0; i < p1len; i++)
+                p1buf[i] ^= mask[(plen0 + i) & 3];
+        }
+    } else if (payload1) {
+        uint8_t *p1buf = ITEM2BUF(payload1) + payload1->pos;
+        uint32_t p1len = payload1->len - payload1->pos;
+        cw_unmask(p1buf, p1len, mask);
+    }
+
+    // 控制帧处理（control frames: close/ping/pong，payload <= 125 字节，不分片）
+    if (opcode >= WS_OP_CLOSE) {
+        // 控制帧 payload 在 payload0（payload <= 125 字节，不会跨段）
+        uint8_t *ctrl_data = payload0 ? ITEM2BUF(payload0) + payload0->pos : NULL;
+        uint8_t  ctrl_len  = payload0 ? (uint8_t)plen0 : 0;
+        if (opcode == WS_OP_CLOSE) {
+            uint16_t code = (ctrl_len >= 2) ? (uint16_t)((ctrl_data[0]<<8)|ctrl_data[1]) : 1000;
+            if (wctx->handle_close) wctx->handle_close(cwc, code);
+            // 自动回复 close
+            cw_send_close(cwc, code);
+            client->handshake = TCP_HS_FLAG_CLOSING;
+        } else if (opcode == WS_OP_PING) {
+            if (wctx->handle_ping) wctx->handle_ping(cwc, ctrl_data, ctrl_len);
+            // 自动回复 pong，携带相同 payload
+            buf16_item_t *pong = alloc_buf16(BUF_FLAG_128(0));
+            if (pong) {
+                uint8_t *pb = ITEM2BUF(pong);
+                pb[0] = 0x8A;  // FIN | PONG
+                pb[1] = ctrl_len;
+                if (ctrl_len) memcpy(pb + 2, ctrl_data, ctrl_len);
+                pong->len = (uint16_t)(2 + ctrl_len);
+                pong->pos = 0;
+                ct_client_send(client, pong, true);  // 高优先级发送
+            }
+        }
+        // WS_OP_PONG：无需处理
+        return;
+    }
+
+    // 数据帧（text/binary/continuation）
+    if (opcode == WS_OP_CONTINUATION || !fin) {
+        // 分片帧：聚合到 ws_frag_q
+        // 第一个分片：opcode 非 0，后续 continuation: opcode == 0
+        if (opcode != WS_OP_CONTINUATION) cwc->ws_opcode = opcode;  // 记录起始帧 opcode
+
+        uint32_t add_len = plen0 + (payload1 ? (payload1->len - payload1->pos) : 0);
+
+        // payload0 是 recv_buf 内的零拷贝切片，必须复制一份再入队
+        if (plen0) {
+            buf16_item_t *p0copy = alloc_buf16(BUF_FLAGS(buffer_sz_flag(plen0 ? plen0 : 1), 0));
+            if (!p0copy) goto oom;
+            memcpy(ITEM2BUF(p0copy), ITEM2BUF(payload0) + payload0->pos, plen0);
+            p0copy->len = (uint16_t)plen0;
+            p0copy->pos = 0;
+            BUF_Q_APPEND(&cwc->ws_frag_q, p0copy);
+        }
+        // payload1 是框架独立分配的缓冲，直接接管所有权追加入队（零拷贝）
+        if (payload1) {
+            BUF_Q_APPEND(&cwc->ws_frag_q, payload1);
+            client->payload_buf = NULL;  // 所有权已转移，通知框架跳过释放
+        }
+        cwc->ws_frag_len += add_len;
+
+        if (!fin) return;   // 还有后续分片
+
+        // 最后一个分片：组装完成，回调上层（以链表头作为 payload0 交付）
+        if (wctx->handle_frame) {
+            wctx->handle_frame(cwc, cwc->ws_opcode, cwc->ws_frag_q.head, NULL);
+        } else {
+            BUF_Q_CLEAR(&cwc->ws_frag_q, it, free_buf16(it););
+        }
+        cwc->ws_frag_q.head = cwc->ws_frag_q.rear = NULL;
+        cwc->ws_frag_len = 0;
+        return;
+    }
+
+    // 完整帧（非分片）：直接回调
+    if (wctx->handle_frame)
+        wctx->handle_frame(cwc, opcode, payload0, payload1);
+    return;
+
+oom:
+    print("E:", LA_F("[WS] OOM in fragment reassembly\n", LA_F133, 133));
+    if (cwc->ws_frag_q.head) {
+        BUF_Q_CLEAR(&cwc->ws_frag_q, it, free_buf16(it););
+        cwc->ws_frag_len = 0;
+    }
+    ct_client_error(&wctx->base, client, CUSTOM_TCP_ERR_INTERNAL, true);
+}
+
+static buf16_item_t *cw_tcp_error_item(ct_client_t *client, bool handshake) {
+    (void)client; (void)handshake;
+    // WS 协议错误直接关闭 TCP，不发应答（握手失败已在 handle_handshake 中单独处理）
+    return NULL;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Public API
 
-bool
-cw_init_client(cw_client_t *client) {
+bool cw_init_client(cw_client_t *client, custom_ws_ctx_t *ctx) {
+    (void)ctx;
 
-    client->buf = alloc_buffer(BUF_FLAGS);
-    if (!client->buf) {
-        print("E:", LA_F("[WS] OOM: cannot allocate handshake buffer\n", LA_F133, 133));
+    // 分配 HTTP 握手接收缓冲（流模式）
+    buf16_item_t *buf = alloc_buf16(CW_HTTP_BUF_FLAGS);
+    if (!buf) {
+        print("E:", LA_F("[WS] OOM: cannot allocate HTTP recv buffer\n", LA_F133, 133));
         return false;
     }
 
-    client->ws_ctx = NULL;
+    // 初始化 custom_tcp 字段（流模式，hdr_rs="\r\n\r\n"，hdr_sz=4）
+    // 注意：recv_buf 由 ct_init_client 分配，这里替换为更大的 HTTP 缓冲
+    ct_client_t *ctc = (ct_client_t*)client;
+    ctc->recv_buf = buf;
+    ctc->recv_cur = 0;
+    ctc->send_buff_queue.head = ctc->send_buff_queue.rear = NULL;
+    ctc->send_sess_head = ctc->send_sess_rear = NULL;
+    ctc->sending_sess = NULL;
+    ctc->sending_cur = 0;
+    ctc->last_error = 0;
+    ctc->payload_buf = NULL;
+    ctc->payload_cur = 0;
 
-    // 初始化 buf 头部 RESP_BUF_SZ(512) 字节保留作为响应缓冲，后部接收 HTTP 请求
-    client->len = client->pos = RESP_BUF_SZ;
+    // 握手阶段：流模式，以 "\r\n\r\n" 为边界
+    static const uint8_t CRLF2[4] = {'\r','\n','\r','\n'};
+    ctc->hdr_rs = (uint8_t*)CRLF2;
+    ctc->hdr_sz = 4;
+
+    // 初始化 WS 专有字段
+    client->ws_ctx = ctx;
+    memset(client->ws_hdr_buf, 0, sizeof(client->ws_hdr_buf));
+    client->ws_opcode = 0;
+    client->ws_frag_q.head = client->ws_frag_q.rear = NULL;
+    client->ws_frag_len = 0;
 
     TCP_CLIENT_INIT(client);
     return true;
 }
 
-void
-cw_free_client(custom_ws_ctx_t *ctx, cw_client_t *client) {
-
-    if (client->ws_ctx) {
-        wslay_event_context_free(client->ws_ctx);
-        client->ws_ctx = NULL;
+void cw_free_client(custom_ws_ctx_t *ctx, cw_client_t *client) {
+    if (client->ws_frag_q.head) {
+        BUF_Q_CLEAR(&client->ws_frag_q, it, free_buf16(it););
+        client->ws_frag_len = 0;
     }
-
-    if (client->buf) {
-        free_buffer(client->buf);
-        client->buf = NULL;
-    }
-
-    free_client_base(&client->base);
+    ct_free_client(&ctx->base, (ct_client_t*)client);
 }
 
-void
-cw_handle_recv(custom_ws_ctx_t *ctx, cw_client_t *client) {
+// 构造并发送 WS 帧头（服务端，无 mask）
+// + buf_item: 上层分配的缓冲，[0, payload_pos) 为预留空间，[payload_pos, len) 为 payload
+// + payload_pos 必须 >= 实际帧头长度（由 payload 大小决定）
+ret_t cw_send_frame(cw_client_t *client, uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_pos) {
 
-    // 如果处于 WS 协议的 handshake 阶段
-    if (client->handshake == TCP_HS_FLAG_HANDSHAKING) {
+    assert(!client->handshake);
 
-        char *buf = (char *)ITEM2BUF(client->buf);
-        size_t buf_sz = BUF_SIZE(client->buf->flags) - 1; // 这里保留一个字节用于追加 \0
-        while (client->len < buf_sz - 1) {
-
-            size_t sz = buf_sz - client->len;
-            int r = tcp_recv((tcp_client_t*)client, buf + client->len, &sz, "WS");
-            if (r > 0) return;
-            if (r < 0) {
-                cw_free_client(ctx, client);
-                return;
-            }
-            buf[client->len += (uint16_t)sz] = '\0';
-
-            // 扫描 \r\n\r\n（HTTP 头结束标志）
-            if (buf[client->pos] != '\r') {
-                char *p = strchr(buf + client->pos, '\r');
-                if (!p) { client->pos = client->len; continue; }
-                client->pos = (uint16_t)(p - buf);
-            }
-            LOOP_RN:
-            if (client->pos + 4 > client->len) continue;
-            if (memcmp(buf + client->pos, "\r\n\r\n", 4) == 0) break;
-            char *p = strchr(buf + client->pos + 1, '\r');
-            if (p) { client->pos = (uint16_t)(p - buf); goto LOOP_RN; }
-            client->pos = client->len;
-        }
-        buf[client->pos] = '\0';
-
-        // 注: 初始 HTTP 请求数据被读取到 buf + RESP_BUF_SZ 之后的部分，而 buf 的前 RESP_BUF_SZ 字节被保留作为这里的握手应答缓冲
-        ret_t resp = ws_accept(buf + RESP_BUF_SZ, buf, RESP_BUF_SZ, ctx->sub_protocol);
-        if (resp < E_NONE) {
-            print("E:", LA_F("[WS] handshake failed: invalid HTTP request\n", LA_F143, 143));
-            cw_free_client(ctx, client);
-            return;
-        }
-
-        // 返回握手应答响应
-        // + 握手阶段可以直接接入，而无需再次等待 writable 周期判定
-        size_t sz = resp;
-        int r = tcp_send((tcp_client_t*)client, buf, &sz, "");
-        if (r < 0) {
-            cw_free_client(ctx, client);
-            return;
-        }
-
-        // 如果 would block，则标记进入握手写入阶段
-        if (r > 0) {
-
-            // 如果 recv 的数据流中还包含了 HTTP 请求之后的 WS 帧数据
-            // + 由于写入阶段会复用 len/pos 属性，所以这里使用一个技巧，将它们暂存到 instance_id 中，以便在 handshake_done 恢复状态
-            client->pos += 4; // 跳过 "\r\n\r\n"
-            if (client->len > client->pos) {
-                ((uint16_t *)&client->base.instance_id)[0] = client->pos;
-                ((uint16_t *)&client->base.instance_id)[1] = client->len;
-            } else client->base.instance_id = 0;    // instance_id = 0 代表没有积压数据
-
-            client->len = (uint16_t)resp;
-            client->pos = (uint16_t)sz;
-
-            // 进入握手写阶段，同时暂停接收数据，等握手（ACK 发送）完成后再继续
-            client->io &= ~TCP_IO_FLAG_WANT_READ;
-            client->io |= TCP_IO_FLAG_WANT_WRITE;
-            return;
-        }
-
-        // ws 握手（应答发送）完成（注意，这里完成后，可以继续执行 recv 处理）
-        if (!ws_handshake_done(client)) {
-            cw_free_client(ctx, client);
-            return;
-        }
-
-        assert(wslay_event_want_read(client->ws_ctx));
+    uint32_t plen; uint8_t hdr[10]; uint8_t hdr_sz;
+    if (BUF_IS_32BIT(buf_item->flags)) {
+        plen = BUF32(buf_item)->len - payload_pos;
+    } else {
+        plen = buf_item->len - payload_pos;
     }
 
-    // 正常 WS 帧接收
-    // + wslay_event_want_read 默认只会读取一个有效帧，所以这里需要循环处理
-    assert(!(client->io & TCP_IO_FLAG_READ_BREAK));     // 用于 hook wslay 内部的 recv would block
-    do {
-        int r = wslay_event_recv(client->ws_ctx);
+    hdr[0] = 0x80 | (opcode & 0x0F);   // FIN=1, RSV=0, opcode
+    if (plen <= 125) {
+        hdr[1] = (uint8_t)plen;
+        hdr_sz = 2;
+    } else if (plen <= 65535) {
+        hdr[1] = 126;
+        hdr[2] = (uint8_t)(plen >> 8);
+        hdr[3] = (uint8_t)(plen);
+        hdr_sz = 4;
+    } else {
+        hdr[1] = 127;
+        hdr[2] = 0; hdr[3] = 0; hdr[4] = 0; hdr[5] = 0;
+        hdr[6] = (uint8_t)(plen >> 24);
+        hdr[7] = (uint8_t)(plen >> 16);
+        hdr[8] = (uint8_t)(plen >> 8);
+        hdr[9] = (uint8_t)(plen);
+        hdr_sz = 10;
+    }
 
-        // 如果 wslay 内部 recv 出错
-        // + 此时 wslay 内部会尝试入队 close 帧并将 read_enabled 置为 false
-        if (r != 0) {
-            print("E:", LA_F("[WS] recv failed(%d)\n", LA_F198, 198), r);
-            assert(!wslay_event_want_read(client->ws_ctx));
-        }
+    if (payload_pos < hdr_sz) {
+        print("E:", LA_F("[WS] send_frame: payload_pos(%u) < hdr_sz(%u)\n", 0, 0), payload_pos, hdr_sz);
+        free_buffer(buf_item);
+        return E_INVALID;
+    }
 
-        // 如果 recv 处理之后，read_enabled 被置为 false
-        if (!wslay_event_want_read(client->ws_ctx)) {
+    // 将帧头写入 payload 前的预留空间末尾（紧靠 payload）
+    uint8_t *buf_start;
+    if (BUF_IS_32BIT(buf_item->flags)) {
+        buf_start = ITEM2BUF(BUF32(buf_item));
+        BUF32(buf_item)->pos = payload_pos - hdr_sz;
+    } else {
+        buf_start = ITEM2BUF(buf_item);
+        buf_item->pos = payload_pos - hdr_sz;
+    }
+    memcpy(buf_start + (payload_pos - hdr_sz), hdr, hdr_sz);
 
-            // 如果写入已经被关闭
-            if (!wslay_event_want_write(client->ws_ctx)) {
-                print("I:", LA_F("[WS] connection closed by peer\n", 0, 0));
-                cw_free_client(ctx, client);
-                return;
-            }
-
-            // 同步 io 标志
-            client->io &= ~TCP_IO_FLAG_WANT_READ;
-            break;
-        }
-    } while (!(client->io & TCP_IO_FLAG_READ_BREAK));
-    client->io &= ~TCP_IO_FLAG_READ_BREAK;
+    ct_client_send((ct_client_t*)client, buf_item, false);
+    return E_NONE;
 }
 
-void
-cw_handle_send(custom_ws_ctx_t *ctx, cw_client_t *client) {
-
-    // 如果处于 WS 协议的 handshake 应答写入阶段
-    if (client->handshake == TCP_HS_FLAG_HANDSHAKING) {
-
-        size_t sz = client->len - client->pos;
-        int r = tcp_send((tcp_client_t*)client, ITEM2BUF(client->buf) + client->pos, &sz, "");
-        if (r < 0) {
-            cw_free_client(ctx, client);
-            return;
-        }
-
-        if (!sz || (client->pos += sz) < sz) return;
-
-        // ws 握手（应答发送）完成
-        if (!ws_handshake_done(client)) {
-            cw_free_client(ctx, client);
-            return;
-        }
-
-        assert(wslay_event_want_read(client->ws_ctx));
-        client->io |= TCP_IO_FLAG_WANT_READ;
-        client->io &= ~TCP_IO_FLAG_WANT_WRITE;
-
-        // 握手应答写入完成后，可以继续处理 recv（写入期间可能积压了新的请求数据）
-        cw_handle_recv(ctx, client);
-        if (!wslay_event_want_write(client->ws_ctx)) return;
-    }
-
-    // 正常 WS 帧发送
-    // + 注: wslay_event_send 默认会一次性发送所有数据，直到 would block 或报错
-    assert(wslay_event_want_write(client->ws_ctx));
-    int r = wslay_event_send(client->ws_ctx);
-    if (r != 0) {
-        print("E:", LA_F("[WS] send failed(code=%d)\n", LA_F194, 194), r);
-        return;
-    }
-
-    // 全部数据发送完成
-    if (!wslay_event_want_write(client->ws_ctx)) {
-
-        // 如果已经停止读取
-        if (!wslay_event_want_read(client->ws_ctx)) {
-            print("I:", LA_F("[WS] connection closed & done\n", 0, 0));
-            cw_free_client(ctx, client);
-            return;
-        }
-        // 触发发送完成回调
-        if (ctx->handle_send_complete) ctx->handle_send_complete(client);
-    }
+ret_t cw_send_close(cw_client_t *client, uint16_t code) {
+    buf16_item_t *item = alloc_buf16(BUF_FLAG_128(0));
+    if (!item) return E_OUT_OF_MEMORY;
+    uint8_t *buf = ITEM2BUF(item);
+    // WS close 帧：FIN=1, opcode=0x8, payload=2字节状态码
+    buf[0] = 0x88;   // FIN | CLOSE
+    buf[1] = 2;      // payload len = 2
+    buf[2] = (uint8_t)(code >> 8);
+    buf[3] = (uint8_t)(code);
+    item->len = 4;
+    item->pos = 0;
+    client->io |= CW_IO_FLAG_CLOSING;
+    client->base.last_active = P_tick_ms();
+    ct_client_send((ct_client_t*)client, item, true);
+    return E_NONE;
 }
 
-void
-cw_retry_closing(custom_ws_ctx_t *ctx, cw_client_t *client, uint64_t now) {
-
-    if (client->ws_ctx && (client->io & CW_IO_FLAG_CLOSING) &&
+void cw_retry_closing(custom_ws_ctx_t *ctx, cw_client_t *client, uint64_t now) {
+    if ((client->io & CW_IO_FLAG_CLOSING) &&
         tick_diff(now, client->base.last_active) >= CLIENT_TIMEOUT_S * 1000) {
         print("I:", LA_F("[WS] close timeout, force closing\n", LA_F192, 192));
         cw_free_client(ctx, client);
@@ -339,113 +467,58 @@ cw_retry_closing(custom_ws_ctx_t *ctx, cw_client_t *client, uint64_t now) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// 发送接口
+// custom_tcp_ctx_t 初始化助手
+// + 将 WS 回调绑定到 tcp ctx，供 cw_init_client 调用方使用（一次性初始化）
 
-ret_t
-cw_send_text(cw_client_t *client, const char *text) {
-    assert(!client->handshake);
-
-    struct wslay_event_msg msg;
-    msg.opcode     = WSLAY_TEXT_FRAME;
-    msg.msg        = (const uint8_t *)text;
-    msg.msg_length = strlen(text);
-    int r = wslay_event_queue_msg(client->ws_ctx, &msg);
-    if (r < 0) {
-        print("E:", LA_F("[WS] queue text msg failed(%d)\n", LA_F197, 197), r);
-        return -1;
-    }
-    assert(wslay_event_want_write(client->ws_ctx));
-    return 0;
-}
-
-ret_t
-cw_send_data(cw_client_t *client, const uint8_t *data, size_t len) {
-    assert(!client->handshake);
-
-    struct wslay_event_msg msg;
-    msg.opcode     = WSLAY_BINARY_FRAME;
-    msg.msg        = data;
-    msg.msg_length = len;
-    int r = wslay_event_queue_msg(client->ws_ctx, &msg);
-    if (r < 0) {
-        print("E:", LA_F("[WS] queue binary msg failed(%d)\n", LA_F196, 196), r);
-        return -1;
-    }
-    assert(wslay_event_want_write(client->ws_ctx));
-    return 0;
-}
-
-ret_t
-cw_close(cw_client_t *client, uint16_t code) {
-
-    int r = wslay_event_queue_close(client->ws_ctx, code, NULL, 0);
-    if (r < 0) {
-        print("E:", LA_F("[WS] queue close(%u) failed(%d)\n", LA_F195, 195), code, r);
-        return -1;
-    }
-    assert(wslay_event_want_write(client->ws_ctx));
-    client->io |= CW_IO_FLAG_CLOSING;
-    client->base.last_active = P_tick_ms();
-    return 0;
+void cw_ctx_init(custom_ws_ctx_t *ctx) {
+    ctx->base.resolve_payload_len    = cw_resolve_payload_len;
+    ctx->base.handle_handshake       = cw_tcp_handle_handshake;
+    ctx->base.handshake_finish       = cw_tcp_handshake_finish;
+    ctx->base.handle_proto           = cw_tcp_handle_proto;
+    ctx->base.error_item             = cw_tcp_error_item;
+    // handle_peer_sent, session_break, client_unreachable 由上层填充
+    // fatal_item 由上层填充
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// SHA-1 + Base64（自包含，不依赖外部库）
 
 #define WS_SHA1_LEN 20
-
-typedef struct {
-    uint32_t h[5];
-    uint8_t  buf[64];
-    uint32_t buf_len;
-    uint64_t total;
-} ws_sha1_ctx_t;
-
+typedef struct { uint32_t h[5]; uint8_t buf[64]; uint32_t buf_len; uint64_t total; } ws_sha1_ctx_t;
 static uint32_t ws_sha1_rot(uint32_t x, int n) { return (x<<n)|(x>>(32-n)); }
-
 static void ws_sha1_block(ws_sha1_ctx_t *ctx, const uint8_t *blk) {
-    uint32_t w[80], a,b,c,d,e,f,k,tmp; int i;
-    for (i=0;i<16;i++) w[i]=((uint32_t)blk[i*4]<<24)|((uint32_t)blk[i*4+1]<<16)
-                            |((uint32_t)blk[i*4+2]<<8)|(uint32_t)blk[i*4+3];
-    for (i=16;i<80;i++) w[i]=ws_sha1_rot(w[i-3]^w[i-8]^w[i-14]^w[i-16],1);
+    uint32_t w[80],a,b,c,d,e,f,k,tmp; int i;
+    for(i=0;i<16;i++) w[i]=((uint32_t)blk[i*4]<<24)|((uint32_t)blk[i*4+1]<<16)|((uint32_t)blk[i*4+2]<<8)|blk[i*4+3];
+    for(i=16;i<80;i++) w[i]=ws_sha1_rot(w[i-3]^w[i-8]^w[i-14]^w[i-16],1);
     a=ctx->h[0];b=ctx->h[1];c=ctx->h[2];d=ctx->h[3];e=ctx->h[4];
-    for (i=0;i<80;i++) {
-        if      (i<20){f=(b&c)|(~b&d);          k=0x5A827999u;}
-        else if (i<40){f=b^c^d;                 k=0x6ED9EBA1u;}
-        else if (i<60){f=(b&c)|(b&d)|(c&d);     k=0x8F1BBCDCu;}
-        else          {f=b^c^d;                 k=0xCA62C1D6u;}
-        tmp=ws_sha1_rot(a,5)+f+e+k+w[i];
-        e=d;d=c;c=ws_sha1_rot(b,30);b=a;a=tmp;
+    for(i=0;i<80;i++){
+        if(i<20){f=(b&c)|(~b&d);k=0x5A827999u;}
+        else if(i<40){f=b^c^d;k=0x6ED9EBA1u;}
+        else if(i<60){f=(b&c)|(b&d)|(c&d);k=0x8F1BBCDCu;}
+        else{f=b^c^d;k=0xCA62C1D6u;}
+        tmp=ws_sha1_rot(a,5)+f+e+k+w[i]; e=d;d=c;c=ws_sha1_rot(b,30);b=a;a=tmp;
     }
     ctx->h[0]+=a;ctx->h[1]+=b;ctx->h[2]+=c;ctx->h[3]+=d;ctx->h[4]+=e;
 }
-
 static void ws_sha1_init(ws_sha1_ctx_t *ctx) {
     ctx->h[0]=0x67452301u;ctx->h[1]=0xEFCDAB89u;ctx->h[2]=0x98BADCFEu;
-    ctx->h[3]=0x10325476u;ctx->h[4]=0xC3D2E1F0u;
-    ctx->buf_len=0;ctx->total=0;
+    ctx->h[3]=0x10325476u;ctx->h[4]=0xC3D2E1F0u; ctx->buf_len=0;ctx->total=0;
 }
-
 static void ws_sha1_update(ws_sha1_ctx_t *ctx, const uint8_t *data, size_t len) {
     ctx->total+=len;
-    while (len>0) {
-        size_t cp=64-ctx->buf_len; if(cp>len)cp=len;
-        memcpy(ctx->buf+ctx->buf_len,data,cp);
-        ctx->buf_len+=(uint32_t)cp; data+=cp; len-=cp;
-        if(ctx->buf_len==64){ws_sha1_block(ctx,ctx->buf);ctx->buf_len=0;}
-    }
+    while(len>0){ size_t cp=64-ctx->buf_len; if(cp>len)cp=len;
+        memcpy(ctx->buf+ctx->buf_len,data,cp); ctx->buf_len+=(uint32_t)cp; data+=cp; len-=cp;
+        if(ctx->buf_len==64){ws_sha1_block(ctx,ctx->buf);ctx->buf_len=0;} }
 }
-
 static void ws_sha1_final(ws_sha1_ctx_t *ctx, uint8_t d[WS_SHA1_LEN]) {
     uint64_t bl=ctx->total*8; uint8_t p=0x80;
     ws_sha1_update(ctx,&p,1); p=0;
-    while(ctx->buf_len!=56)ws_sha1_update(ctx,&p,1);
+    while(ctx->buf_len!=56) ws_sha1_update(ctx,&p,1);
     uint8_t lb[8]; for(int i=7;i>=0;i--){lb[i]=(uint8_t)(bl&0xFF);bl>>=8;}
     ws_sha1_update(ctx,lb,8);
     for(int i=0;i<5;i++){d[i*4]=(uint8_t)(ctx->h[i]>>24);d[i*4+1]=(uint8_t)(ctx->h[i]>>16);
-                          d[i*4+2]=(uint8_t)(ctx->h[i]>>8);d[i*4+3]=(uint8_t)(ctx->h[i]);}
+                         d[i*4+2]=(uint8_t)(ctx->h[i]>>8);d[i*4+3]=(uint8_t)(ctx->h[i]);}
 }
-
-/* 将 20 字节 SHA-1 摘要编码为 28+1 字节 base64 字符串 */
 static void ws_b64_sha1(const uint8_t src[20], char dst[29]) {
     static const char t[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     int i,j;
@@ -458,34 +531,27 @@ static void ws_b64_sha1(const uint8_t src[20], char dst[29]) {
     dst[28]='\0';
 }
 
-#define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-
-ret_t ws_accept(char* req, char* resp_buf, size_t resp_buf_len, const char* sub_protocol) {
-
+// 处理 HTTP 升级请求，构造 101 应答
+// + req:        HTTP 请求文本（\0 结尾，内容从 \r\n\r\n 之前截断）
+// + resp_buf:   应答写入缓冲
+// + resp_buf_len: 缓冲长度
+// + sub_protocol: 子协议名（NULL 或空串表示不协商）
+// + 返回应答长度（>0），或 E_INVALID / E_OUT_OF_CAPACITY
+static ret_t cw_http_accept(const char *req, char *resp_buf, size_t resp_buf_len, const char *sub_protocol) {
     int n = 0;
-
-    // 解析 Sec-WebSocket-Key
     const char *key_field = strstr(req, "Sec-WebSocket-Key:");
     if (!key_field) return E_INVALID;
     key_field += 18; while (*key_field == ' ') key_field++;
     char ws_key[32] = {0};
     while (*key_field && *key_field != '\r' && *key_field != '\n' && n < 31)
         ws_key[n++] = *key_field++;
-
     if (sub_protocol && !*sub_protocol) sub_protocol = NULL;
-
-    // 计算 Sec-WebSocket-Accept
     char combined[64];
     snprintf(combined, sizeof(combined), "%s" WS_GUID, ws_key);
-    ws_sha1_ctx_t sha;
-    ws_sha1_init(&sha);
+    ws_sha1_ctx_t sha; ws_sha1_init(&sha);
     ws_sha1_update(&sha, (const uint8_t*)combined, strlen(combined));
-    uint8_t digest[WS_SHA1_LEN];
-    ws_sha1_final(&sha, digest);
-    char accept[29];
-    ws_b64_sha1(digest, accept);
-
-    // 构造 101 响应
+    uint8_t digest[WS_SHA1_LEN]; ws_sha1_final(&sha, digest);
+    char accept[29]; ws_b64_sha1(digest, accept);
     n = snprintf(resp_buf, resp_buf_len,
         "HTTP/1.1 101 Switching Protocols\r\n"
         "Upgrade: websocket\r\n"
@@ -497,8 +563,6 @@ ret_t ws_accept(char* req, char* resp_buf, size_t resp_buf_len, const char* sub_
         sub_protocol ? "Sec-WebSocket-Protocol: " : "",
         sub_protocol ? sub_protocol               : "",
         sub_protocol ? "\r\n"                     : "");
-
-    return n < (int)resp_buf_len ? n : E_OUT_OF_CAPACITY;
+    return n < (int)resp_buf_len ? (ret_t)n : E_OUT_OF_CAPACITY;
 }
-
-#endif // WITH_WSLAY
+///////////////////////////////////////////////////////////////////////////////

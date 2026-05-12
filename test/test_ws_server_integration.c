@@ -16,7 +16,7 @@
  *                              （connect 超时或握手失败，不崩溃）
  */
 
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
 
 #include "../test/test_framework.h"
 #include "../src/ws_client.h"
@@ -309,12 +309,12 @@ int main(void) {
     return test_failed ? 1 : 0;
 }
 
-#else /* !WITH_WSLAY */
+#else /* !WITH_WS */
 
 int main(void) {
     printf("=== test_ws_server_integration ===\n");
-    printf("  Skipped: built without WITH_WSLAY\n");
+    printf("  Skipped: built without WITH_WS\n");
     return 0;
 }
 
-#endif /* WITH_WSLAY */
+#endif /* WITH_WS */

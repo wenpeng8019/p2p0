@@ -453,7 +453,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
         p2p_signal_pubsub_init(&inst->sig_ctx.pubsub);
     }
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_ICE && cfg->server_host) {
         p2p_signal_ice_ws_init(inst);
     }
@@ -650,7 +650,7 @@ p2p_destroy(p2p_handle_t hdl) {
              inst->sig_ctx.pubsub.state != SIG_PUBSUB_INIT) {
         p2p_signal_pubsub_offline(inst);
     }
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
     else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
         p2p_signal_ice_ws_destroy(inst);
     }
@@ -876,7 +876,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
 
         // ICE 模式（应用层自定义信令）
         case P2P_SIGNALING_MODE_ICE: {
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
             if (inst->cfg.server_host) {
                 p2p_signal_ice_ws_connect(s, remote_peer_id);
                 s->state = P2P_STATE_SIGNALING;
@@ -1211,7 +1211,7 @@ p2p_update(p2p_handle_t hdl) {
     else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
         p2p_signal_pubsub_tick_recv(inst, now_ms);
     }
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
     else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
         p2p_signal_ice_ws_tick(inst, now_ms);
     }

@@ -8,9 +8,6 @@
 #include "../src/p2p_common.h"
 #include <p2p.h>
 #include "uthash.h"
-#ifdef WITH_WSLAY
-#include <wslay/wslay.h>
-#endif
 
 #include "LANG.h"
 

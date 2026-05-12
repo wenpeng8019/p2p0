@@ -35,7 +35,7 @@ const char* PROTO_STR(uint8_t proto) {
 static relay_session_t*             g_relay_rpc_pending_head = NULL;
 static relay_session_t*             g_relay_rpc_pending_rear = NULL;
 
-static uint8_t                      g_relay_fatal[sizeof(buffer_item_t) + sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0)];
+static uint8_t                      g_relay_fatal[sizeof(buf16_item_t) + sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0)];
 static custom_tcp_ctx_t             g_ctx;
 
 #define RLY_ERR_2_CT_ERR(err)       (CUSTOM_TCP_ERR_DISCONNECTED + (err) - P2P_RLY_ERR_DISCONNECTED)
@@ -86,7 +86,7 @@ static void relay_pending_remove_rpc(relay_session_t *session) {
 // + STATUS 包不走 session 队列，直接挂到 client 上
 static bool relay_send_status(relay_client_t *client, uint8_t req_type, uint8_t status_code) {
 
-    buffer_item_t *buf_item = alloc_buffer(BUF_FLAG_512(0));
+    buf16_item_t *buf_item = alloc_buf16(BUF_FLAG_512(0));
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
         ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -112,7 +112,7 @@ static bool relay_send_status(relay_client_t *client, uint8_t req_type, uint8_t 
 // + SYN0 专用状态，状态包不走 session 队列，直接挂到 client 上。因为此时尚未建立会话，需要通过携带 remote_peer_id 来标识哪个对端连接请求出错
 static bool relay_send_syn0_status(relay_client_t *client, const char *remote_peer_id, uint8_t status_code) {
 
-    buffer_item_t *buf_item = alloc_buffer(BUF_FLAG_512(0));
+    buf16_item_t *buf_item = alloc_buf16(BUF_FLAG_512(0));
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
         ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -140,7 +140,7 @@ static bool relay_session_send_status(relay_session_t *session, uint8_t req_type
 
     assert(session && session->base.client);
 
-    buffer_item_t *buf_item = alloc_buffer(BUF_FLAG_512(0));
+    buf16_item_t *buf_item = alloc_buf16(BUF_FLAG_512(0));
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
         ct_client_error(&g_ctx, CT_CLIENT(session), CUSTOM_TCP_ERR_INTERNAL, true);
@@ -170,7 +170,7 @@ static bool relay_session_send_syn0_off(relay_session_t *session, const char *ta
     assert(session && session->base.session_id && session->base.client);
     relay_client_t *client = (relay_client_t*)session->base.client;
 
-    buffer_item_t *buf_item = alloc_buffer(BUF_FLAG_512(0));
+    buf16_item_t *buf_item = alloc_buf16(BUF_FLAG_512(0));
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
         ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -200,7 +200,7 @@ static bool relay_session_send_sync_confirm(relay_session_t *session, uint8_t si
     assert(session && session->base.session_id && session->base.client);
     relay_client_t *client = (relay_client_t*)session->base.client;
 
-    buffer_item_t *buf_item = alloc_buffer(BUF_FLAG_512(0));
+    buf16_item_t *buf_item = alloc_buf16(BUF_FLAG_512(0));
     if (!buf_item) {
         print("F:", LA_F("send failed(OOM)\n", LA_F100, 100));
         ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -227,7 +227,7 @@ static bool relay_session_send_fin(relay_session_t *session) {
     assert(session && session->base.session_id && session->base.client);
     relay_client_t *client = (relay_client_t*)session->base.client;
 
-    buffer_item_t *buf_item = alloc_buffer(BUF_FLAG_512(0));
+    buf16_item_t *buf_item = alloc_buf16(BUF_FLAG_512(0));
     if (!buf_item) {
         print("E:", LA_F("%session: alloc buffer failed(OOM)\n", LA_F28, 28), "FIN");
         ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -249,7 +249,7 @@ static bool relay_session_send_fin(relay_session_t *session) {
 // payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)]
 static bool relay_session_send_rpc_code(relay_session_t *session, uint16_t sid, uint8_t code) {
 
-    buffer_item_t *buf_item = alloc_buffer(BUF_FLAG_512(0));
+    buf16_item_t *buf_item = alloc_buf16(BUF_FLAG_512(0));
     if (!buf_item) {
         print("E:", LA_F("send failed(OOM)\n", LA_F100, 100));
         ct_client_error(&g_ctx, CT_CLIENT(session), CUSTOM_TCP_ERR_INTERNAL, true);
@@ -276,7 +276,7 @@ static bool relay_session_send_rpc_code(relay_session_t *session, uint16_t sid, 
 // 对端 TCP 写入完成后的回调（通用，SYNC/PKT 通道均使用）
 // PKT：移出队头，队满→写完才发 READY，启动下一项
 // SYNC：TCP 写完但保留队头，将 refer 改为 REFER_ACK_PENDING 等待应用层 ACK
-static void relay_handle_peer_sent(ct_session_t *ct_session, buffer_item_t *buf_item) {
+static void relay_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_item) {
 
     assert(PEER_ONLINE(ct_session));
 
@@ -313,9 +313,9 @@ static void relay_handle_peer_sent(ct_session_t *ct_session, buffer_item_t *buf_
 // 清理一个通道的所有队列项，并将存活项转发给 dst
 // arr[0] 若 TCP 写入中（refer!=NULL 且非 REFER_ACK_PENDING）：设 refer=NULL 让 sent-callback 释放
 // 其余（REFER_ACK_PENDING 或 refer==NULL）：直接 relay_session_send(dst, ...)
-static void relay_ch_break_forward(buffer_item_t **arr, uint8_t *cnt, relay_session_t *dst) {
+static void relay_ch_break_forward(buf16_item_t **arr, uint8_t *cnt, relay_session_t *dst) {
     for (uint8_t i = 0; i < *cnt; i++) {
-        buffer_item_t *it = arr[i]; arr[i] = NULL;
+        buf16_item_t *it = arr[i]; arr[i] = NULL;
         if (it->refer != NULL && it->refer != ITEM_REF_ACK_PENDING) it->refer = NULL;
         else ct_session_send((ct_session_t*)dst, it);
     }
@@ -323,11 +323,11 @@ static void relay_ch_break_forward(buffer_item_t **arr, uint8_t *cnt, relay_sess
 }
 
 // 清理一个通道的所有队列项并释放
-static void relay_ch_break_free(buffer_item_t **arr, uint8_t *cnt) {
+static void relay_ch_break_free(buf16_item_t **arr, uint8_t *cnt) {
     for (uint8_t i = 0; i < *cnt; i++) {
-        buffer_item_t *it = arr[i]; arr[i] = NULL;
+        buf16_item_t *it = arr[i]; arr[i] = NULL;
         if (it->refer != NULL && it->refer != ITEM_REF_ACK_PENDING) it->refer = NULL;
-        else free_buffer(it);
+        else free_buf16(it);
     }
     *cnt = 0;
 }
@@ -435,10 +435,10 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
 
     // 构造 syn0 协议包
     // + 如果存在初始 sync 数据，则优先使用零拷贝 forward 方案（即直接转发客户端的 recv_buf）
-    buffer_item_t *syn0_item; p2p_relay_hdr_t *hdr;
+    buf16_item_t *syn0_item; p2p_relay_hdr_t *hdr;
     if (cand_count) {
 
-        syn0_item = alloc_buffer(BUF_FLAG_MTU(0));
+        syn0_item = alloc_buf16(BUF_FLAG_MTU(0));
         if (!syn0_item) {
             print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
             ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -457,14 +457,14 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
         hdr->size = htons(P2P_RLY_SYN0_S2C_PSZ(cand_count));
         BUF2ITEM(client->recv_buf)->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_SYN0_S2C_PSZ(cand_count));
 
-        buffer_item_t* item = BUF2ITEM(client->recv_buf);
+        buf16_item_t* item = BUF2ITEM(client->recv_buf);
         client->recv_buf = ITEM2BUF(syn0_item);
         client->recv_len = 0;
         syn0_item = item;
     }
     else {
 
-        syn0_item = alloc_buffer(BUF_FLAG_512(0));
+        syn0_item = alloc_buf16(BUF_FLAG_512(0));
         if (!syn0_item) {
             print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
             ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -486,7 +486,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     if (!remote_s) {
 
         if (local_s->sync_peer_send_cnt > 0) {
-            free_buffer(local_s->sync_peer_send[0]);
+            free_buf16(local_s->sync_peer_send[0]);
             local_s->sync_peer_send[0] = NULL;
             local_s->sync_peer_send_cnt = 0;
         }
@@ -524,7 +524,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
 
         assert(remote_s->sync_peer_send_cnt == 1 && remote_s->sync_peer_send[0]->refer == NULL); // 对端肯定存在缓存的 SYN0
 
-        buffer_item_t *remote_syn0_item = remote_s->sync_peer_send[0];
+        buf16_item_t *remote_syn0_item = remote_s->sync_peer_send[0];
         hdr = (p2p_relay_hdr_t *)ITEM2BUF(remote_syn0_item);
 
         // 对端 SYN0 转发给本端前，需要写入本端 session_id（位于 source_name 之后）
@@ -592,7 +592,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         relay_session_t *peer = RELAY_PEER(session);
         if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
 
-            free_buffer(peer->sync_peer_send[0]);
+            free_buf16(peer->sync_peer_send[0]);
             peer->sync_peer_send[0] = peer->sync_peer_send[1];
             peer->sync_peer_send[1] = NULL;
             peer->sync_peer_send_cnt--;
@@ -660,7 +660,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
     if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
         if (((p2p_relay_hdr_t*)ITEM2BUF(peer->sync_peer_send[0]))->type == P2P_RLY_SYN0) {
 
-            free_buffer(peer->sync_peer_send[0]);
+            free_buf16(peer->sync_peer_send[0]);
             peer->sync_peer_send[0] = peer->sync_peer_send[1];
             peer->sync_peer_send[1] = NULL;
             peer->sync_peer_send_cnt--;
@@ -678,10 +678,10 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
 
     assert(client->recv_buf && payload == client->recv_buf + sizeof(p2p_relay_hdr_t));
 
-    buffer_item_t *sync_item; p2p_relay_hdr_t *hdr;
+    buf16_item_t *sync_item; p2p_relay_hdr_t *hdr;
     if (cand_count) {
 
-        sync_item = alloc_buffer(BUF_FLAG_MTU(0));
+        sync_item = alloc_buf16(BUF_FLAG_MTU(0));
         if (!sync_item) {
             print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
             ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -689,14 +689,14 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         }
 
         hdr = (p2p_relay_hdr_t *)client->recv_buf;
-        buffer_item_t* item = BUF2ITEM(client->recv_buf);
+        buf16_item_t* item = BUF2ITEM(client->recv_buf);
         client->recv_buf = ITEM2BUF(sync_item);
         client->recv_len = 0;
         sync_item = item;
     }
     else {
         // cand_count==0 的 FIN 包，构造新转发包（保留 sid）
-        sync_item = alloc_buffer(BUF_FLAG_512(0));
+        sync_item = alloc_buf16(BUF_FLAG_512(0));
         if (!sync_item) {
             print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
             ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -755,14 +755,14 @@ static void relay_handle_pkt(relay_client_t *client, relay_session_t *session, u
     assert(client->recv_buf && payload == client->recv_buf + sizeof(p2p_relay_hdr_t));
 
     // 零拷贝转发：分配新 recv_buf，将当前 recv_buf 直接作为转发包
-    buffer_item_t *new_recv = alloc_buffer(BUF_FLAG_MTU(0));
+    buf16_item_t *new_recv = alloc_buf16(BUF_FLAG_MTU(0));
     if (!new_recv) {
         print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
         ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
 
-    buffer_item_t *buf_item = BUF2ITEM(client->recv_buf);
+    buf16_item_t *buf_item = BUF2ITEM(client->recv_buf);
     client->recv_buf = ITEM2BUF(new_recv);
     client->recv_len = 0;
 
@@ -829,7 +829,7 @@ static void relay_handle_req(relay_client_t *client, relay_session_t *session, u
     assert(client->recv_buf && payload == client->recv_buf + sizeof(p2p_relay_hdr_t));
 
     // 零拷贝转发：分配新 recv_buf，将当前 recv_buf 直接作为转发包
-    buffer_item_t *new_recv = alloc_buffer(BUF_FLAG_MTU(0));
+    buf16_item_t *new_recv = alloc_buf16(BUF_FLAG_MTU(0));
     if (!new_recv) {
         print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
         ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
@@ -838,7 +838,7 @@ static void relay_handle_req(relay_client_t *client, relay_session_t *session, u
 
     session->rpc_last_sid = sid;
 
-    buffer_item_t *buf_item = BUF2ITEM(client->recv_buf);
+    buf16_item_t *buf_item = BUF2ITEM(client->recv_buf);
     client->recv_buf = ITEM2BUF(new_recv);
     client->recv_len = 0;
 
@@ -899,14 +899,14 @@ static void relay_handle_rsp(relay_client_t *client, relay_session_t *session, u
     assert(client->recv_buf && payload == client->recv_buf + sizeof(p2p_relay_hdr_t));
 
     // 零拷贝转发
-    buffer_item_t *new_recv = alloc_buffer(BUF_FLAG_MTU(0));
+    buf16_item_t *new_recv = alloc_buf16(BUF_FLAG_MTU(0));
     if (!new_recv) {
         print("E:", LA_F("%s: alloc buffer failed(OOM)\n", LA_F28, 28), PROTO);
         ct_client_error(&g_ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
 
-    buffer_item_t *buf_item = BUF2ITEM(client->recv_buf);
+    buf16_item_t *buf_item = BUF2ITEM(client->recv_buf);
     client->recv_buf = ITEM2BUF(new_recv);
     client->recv_len = 0;
 
@@ -1043,7 +1043,7 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
 
     case P2P_RLY_ALV: {
         // 心跳包：使用预分配静态缓冲，高优先级插队，去重（上一个未发完则忽略）
-        buffer_item_t *alv_item = (buffer_item_t*)((relay_client_t*)client)->alv_ack_buf;
+        buf16_item_t *alv_item = (buf16_item_t*)((relay_client_t*)client)->alv_ack_buf;
         if (alv_item->refer == ITEM_REF_STATIC) {
             print("V:", LA_F("%s: prev ALV ACK still pending, skip\n", 0, 0), "ALV");
         } else {
@@ -1114,7 +1114,7 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void relay_error_item(ct_client_t *client, buffer_item_t* buffer_item) {
+void relay_error_item(ct_client_t *client, buf16_item_t* buffer_item) {
 
     p2p_relay_hdr_t *hdr = (p2p_relay_hdr_t*)ITEM2BUF(buffer_item);
     // 握手错误时复用 recv_buf（类型字段已含请求类型）；其他情况用 P2P_RLY_STA
@@ -1130,7 +1130,7 @@ void relay_error_item(ct_client_t *client, buffer_item_t* buffer_item) {
 custom_tcp_ctx_t*
 relay_init(void) {
 
-    buffer_item_t *fatal_item = (buffer_item_t*)g_relay_fatal;
+    buf16_item_t *fatal_item = (buf16_item_t*)g_relay_fatal;
     p2p_relay_hdr_t *fatal_hdr = (p2p_relay_hdr_t*)ITEM2BUF(fatal_item);
     fatal_hdr->type = P2P_RLY_STA;
     fatal_hdr->size = htons(P2P_RLY_STA_PSZ(0, 0));
@@ -1144,7 +1144,7 @@ relay_init(void) {
     g_ctx.handle_proto = relay_handle_proto;
     g_ctx.handle_peer_sent = relay_handle_peer_sent;
     g_ctx.session_break = relay_session_break;
-    g_ctx.fatal_item = (buffer_item_t*)&g_relay_fatal;
+    g_ctx.fatal_item = (buf16_item_t*)&g_relay_fatal;
     g_ctx.error_item = relay_error_item;
     return &g_ctx;
 }
@@ -1155,7 +1155,7 @@ relay_init_client(relay_client_t* client) {
     if (!ct_init_client((ct_client_t*)client)) return false;
 
     // 预初始化内嵌 ALV ACK 缓冲
-    buffer_item_t *alv_item = (buffer_item_t*)client->alv_ack_buf;
+    buf16_item_t *alv_item = (buf16_item_t*)client->alv_ack_buf;
     alv_item->refer = NULL;
     alv_item->next  = NULL;
     p2p_relay_hdr_t *alv_hdr = (p2p_relay_hdr_t*)ITEM2BUF(alv_item);

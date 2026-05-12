@@ -141,7 +141,7 @@ struct p2p_instance {
         p2p_compact_ctx_t       compact;                // COMPACT 模式信令上下文（实例级别：与服务器的关系）
         p2p_relay_ctx_t         relay;                  // RELAY 模式信令上下文（实例级别：与服务器的 TCP 连接）
         p2p_signal_pubsub_ctx_t pubsub;                 // PUB/SUB 模式信令上下文
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
         p2p_ice_ws_ctx_t        ice_ws;                 // ICE WebSocket 信令上下文
 #endif
     }                               sig_ctx;            // 实例级别信令上下文（同时只有一种模式激活）
@@ -224,7 +224,7 @@ struct p2p_session {
         p2p_compact_session_t   compact;                // COMPACT 模式信令上下文（会话级别：与对端的关系）
         p2p_relay_session_t     relay;                  // RELAY 模式信令上下文（会话级别：与对端的关系）
         p2p_pubsub_session_t    pubsub;                 // PUBSUB 模式信令上下文（会话级别：与对端的关系）
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
         p2p_ice_ws_session_t    ice_ws;                 // ICE WebSocket 信令上下文（会话级别）
 #endif
     }                               sig_sess;

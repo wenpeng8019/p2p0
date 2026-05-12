@@ -34,7 +34,7 @@ static inline bool wss_client_online(const wss_client_t *c) {
 static inline int wss_sync_write(wss_session_t *s, const uint8_t *src, size_t n) {
     if (n > WSS_SYNC_PAYLOAD_MAX - s->sync_len) return -1;
     if (!s->sync_buf) {
-        s->sync_buf = alloc_buffer(BUF_FLAG_2048(0));
+        s->sync_buf = alloc_buf16(BUF_FLAG_2048(0));
         if (!s->sync_buf) return -1;
     }
     char *data = (char*)ITEM2BUF(s->sync_buf);
@@ -108,7 +108,7 @@ static void wss_flush_sync(wss_session_t *src_s, wss_session_t *dst_s, wss_clien
     cw_send_text((cw_client_t*)dst_c, frame);
 
     // 清空 ring buffer，释放动态内存
-    free_buffer(src_s->sync_buf);
+    free_buf16(src_s->sync_buf);
     src_s->sync_buf  = NULL;
     src_s->sync_head = src_s->sync_len = 0;
 
@@ -182,7 +182,7 @@ static void wss_free_session(session_t *s) {
     if (!s) return;
 
     wss_session_t *ws_s = (wss_session_t*)s;
-    if (ws_s->sync_buf) { free_buffer(ws_s->sync_buf); ws_s->sync_buf = NULL; }
+    if (ws_s->sync_buf) { free_buf16(ws_s->sync_buf); ws_s->sync_buf = NULL; }
     ws_s->sync_head = ws_s->sync_len = 0;
     ws_s->sync_sending = false;
 

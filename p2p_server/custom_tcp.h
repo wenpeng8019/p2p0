@@ -110,7 +110,7 @@ typedef struct ct_client {
 // + 返回 false 表示需要更多 header 数据（帧模式专用，用于动态扩展 header size）
 //   此时需将 client->hdr_sz 更新为新的期望读取长度，框架会继续读取后再次调用
 // + 流模式下 header 已完整，必须返回 true
-typedef bool (*ct_resolve_payload_len_cb)(uint8_t* hdr_buf, uint16_t hdr_len,
+typedef bool (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf, uint16_t hdr_len,
                                           uint32_t* payload_len, uint16_t* payload_offset);
 
 // 握手阶段收到完整消息时调用

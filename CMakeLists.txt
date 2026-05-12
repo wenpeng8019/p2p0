@@ -5,7 +5,7 @@ project(p2p VERSION 0.1.0 LANGUAGES C)
 option(WITH_DTLS    "启用 MbedTLS DTLS 支持" OFF)
 option(WITH_OPENSSL "启用 OpenSSL DTLS 支持" OFF)
 option(WITH_SCTP    "启用 usrsctp 支持" OFF)
-option(WITH_WSLAY   "启用 wslay WebSocket 支持" ON)
+option(WITH_WS   "启用 wslay WebSocket 支持" ON)
 option(THREADED     "启用内部线程" ON)
 option(I18N_ENABLED "启用 i18n 多语言支持" ON)
 option(I18N_CN      "生成中文翻译头文件 (LANG.cn.h)" ON)
@@ -219,13 +219,13 @@ endif()
 
 # --- wslay 集成 ---
 # 直接嵌入 wslay 源文件，避免 wslay 自身 CMakeLists 的 -Werror 影响
-if(WITH_WSLAY)
+if(WITH_WS)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/wslay/lib/wslay_event.c")
         message(FATAL_ERROR
             "wslay submodule not found. Please run:\n"
             "  git submodule update --init third_party/wslay")
     endif()
-    add_definitions(-DWITH_WSLAY)
+    add_definitions(-DWITH_WS)
     set(WSLAY_SRCS
         third_party/wslay/lib/wslay_event.c
         third_party/wslay/lib/wslay_frame.c
@@ -300,7 +300,7 @@ target_link_libraries(p2p_static stdc ${PLATFORM_LIBS})
 if(WITH_SCTP)
     target_link_libraries(p2p_static ${SCTP_LIBRARIES})
 endif()
-if(WITH_WSLAY)
+if(WITH_WS)
     target_include_directories(p2p_static PRIVATE ${WSLAY_INCLUDE_DIRS})
     target_link_libraries(p2p_static ${WSLAY_LIBRARIES})
 endif()

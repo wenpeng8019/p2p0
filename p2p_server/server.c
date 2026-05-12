@@ -19,7 +19,7 @@
 
 #include "p2p_compact.h"
 #include "p2p_relay.h"
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
 #include "p2p_wss.h"
 #endif
 
@@ -30,7 +30,7 @@
 // 命令行参数定义
 ARGS_I(false, port,         'p', "port",       LA_CS("Signaling server listen port (TCP+UDP)", LA_S9, 9));
 ARGS_I(false, probe_port,   'P', "probe-port", LA_CS("NAT type detection port (0=disabled)", LA_S6, 6));
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
 ARGS_B(false, ws,           'w', "ws",         LA_CS("Enable WebSocket service on same TCP port", LA_S150, 150));
 ARGS_I(false, ws_port,      'W', "ws-port",    LA_CS("WebSocket dedicated port (also enables --ws)", LA_S151, 151));
 #endif
@@ -61,29 +61,32 @@ custom_ws_ctx_t*                    g_wss_ctx;
 
 //-----------------------------------------------------------------------------
 
-static buffer_item_t*               g_recycle[8];
+static buf16_item_t*               g_recycle[10];
 
 // 全局运行状态标志（用于信号处理）
 static volatile sig_atomic_t        g_running = 1;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#define CHUNK_BASE_SIZE  512
-
 // 分配 frame buf
-buffer_item_t* alloc_buffer(uint8_t flags) {
-    int idx = flags >> 5;
-    buffer_item_t *item = g_recycle[idx];
+// + 注: malloc 分配的内存默认肯定都是至少 8 字节对齐的，而 buffer_item_t 的成员排列满足连续内存对齐原则
+//   所以强转 buffer_item_t* 后可以直接访问 buffer_item_t 的成员
+buf16_item_t* alloc_buf16(uint8_t flags) {
+    int idx = flags >> 4; if (idx > 9) return NULL;
+    buf16_item_t *item = g_recycle[idx];
     if (item) g_recycle[idx] = item->next;
-    else if (!((item = (buffer_item_t*)malloc(sizeof(buffer_item_t) + CHUNK_BASE_SIZE*(1<<idx))))) return NULL;
+    else if (!((item = (buf16_item_t*)malloc(sizeof(buf16_item_t) + idx==3?P2P_MTU:(1 << idx)*128)))) return NULL;
+    item->next = NULL;
     item->flags = flags;
     item->refer = NULL;
+    item->len = 0;
+    item->pos = 0;
     return item;
 }
 
 // 释放 frame buf
-void free_buffer(buffer_item_t *buf_item) {
-    int idx = buf_item->flags >> 5;
+void free_buf16(buf16_item_t *buf_item) {
+    int idx = buf_item->flags >> 4;
     buf_item->next = g_recycle[idx];
     g_recycle[idx] = buf_item;
 }
@@ -609,7 +612,7 @@ int main(int argc, char *argv[]) {
           (int)ARGS_probe_port.i64);
     print("I:", LA_F("Relay support: %s\n", LA_F102, 102), 
           ARGS_relay.i64 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
     if (!ARGS_ws.i64) {
         print("I:", "WebSocket service: disabled\n");
     } else if (ARGS_ws_port.i64 > 0) {
@@ -642,7 +645,7 @@ int main(int argc, char *argv[]) {
     }
     setsockopt(listen_fd[0], SOL_SOCKET, SO_REUSEADDR, (const char *)&sock_opt_on, sizeof(sock_opt_on));
 
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
     if (ARGS_ws.i64 && ARGS_ws_port.i64 > 0) {
         listen_fd[1] = socket(AF_INET, SOCK_STREAM, 0); ++listen_n;
         if (listen_fd[1] == P_INVALID_SOCKET) {
@@ -683,7 +686,7 @@ int main(int argc, char *argv[]) {
     print("I:", LA_F("P2P Signaling Server listening on port %d (TCP + UDP)...\n", LA_F99, 99), port);
 
     if (ARGS_ws.i64) {
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
         if (listen_fd[1] != P_INVALID_SOCKET) {
             addr.sin_port = htons((uint16_t)ARGS_ws_port.i64);
             if (bind(listen_fd[1], (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -749,7 +752,7 @@ int main(int argc, char *argv[]) {
         if (tick_diff(now, last_retry) >= RETRY_INTERVAL_MS) { last_retry = now;
             compact_retry_pending(udp_fd, now);
             relay_retry_pending(now);
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
             retry_wss_pending(now);
 #endif
         }
@@ -768,7 +771,7 @@ int main(int argc, char *argv[]) {
 
         FD_SET(udp_fd, &read_fds); max_fd = udp_fd;
         FD_SET(listen_fd[0], &read_fds); P_FD_MAX(max_fd, listen_fd[0]);
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
         if (listen_fd[1] != P_INVALID_SOCKET) { FD_SET(listen_fd[1], &read_fds); P_FD_MAX(max_fd, listen_fd[1]); }
 #endif
         if (probe_fd != P_INVALID_SOCKET) { FD_SET(probe_fd, &read_fds); P_FD_MAX(max_fd, probe_fd); }
@@ -792,7 +795,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
                 else if (m != PROTO_COMPACT) {
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
                     // 最干净的自定义协议模块内部 io 状态的同步方案是在此拦截检测
                     /* + 作为服务端，读取状态往往都是全生命期的，所以主要关注的是写入状态的同步
                     *   写入状态的变更来源主要包括三类：自动响应（在读取解析请求时自动恢复的）；应用层主动触发的写入；以及协议库内部非响应式自动触发（如计时器）
@@ -815,7 +818,7 @@ int main(int argc, char *argv[]) {
         } else {
             for (int i = 0; i < MAX_PEERS; i++) { int8_t m2 = CLIENTS(i)->proto;
                 if (m2 <= 0) continue;
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
                 if (m2 == PROTO_WSS && WS_CLIENTS(i)->ws_ctx) {
                     if (wslay_event_want_write(WS_CLIENTS(i)->ws_ctx)) TCP_CLIENTS(i)->io |= TCP_IO_FLAG_WANT_WRITE;
                     else TCP_CLIENTS(i)->io &= ~TCP_IO_FLAG_WANT_WRITE;
@@ -929,7 +932,7 @@ int main(int argc, char *argv[]) {
 
                 // 对于多模态混合端口，需要先根据数据包内容判断协议类型
                 if (m == 127) {
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
                     uint8_t buf[1]; ssize_t n = recv(CLIENTS(i)->fd, (char *)buf, sizeof(buf), MSG_PEEK);
                     if (n > 0) {
                         // WebSocket 握手请求的特征。即 HTTP GET 请求行，也就是以 "GET " 开头
@@ -972,9 +975,9 @@ int main(int argc, char *argv[]) {
 #endif
                 }
 
-                if (m == PROTO_RELAY) ct_handle_recv(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay);
-#ifdef WITH_WSLAY
-                else if (ws_client) cw_handle_recv(g_wss_ctx, ws_client);
+                if (m == PROTO_RELAY) ct_handle_recv(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay, NULL);
+#ifdef WITH_WS
+                else if (ws_client) cw_handle_recv(g_wss_ctx, ws_client); // fixme 这里的操作可能会导致 client 被销毁，从而无需再执行后面
 #endif
             }
 
@@ -982,15 +985,14 @@ int main(int argc, char *argv[]) {
             if ((TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_WRITE)
                 && FD_ISSET(CLIENTS(i)->fd, &write_fds)) {
 
-                if (m == PROTO_RELAY) ct_handle_send(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay);
-#ifdef WITH_WSLAY
+                if (m == PROTO_RELAY) ct_handle_send(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay, NULL);
+#ifdef WITH_WS
                 else if (ws_client) cw_handle_send(g_wss_ctx, ws_client);
 #endif
             }
 
-#ifdef WITH_WSLAY
-            if (ws_client && ws_client->base.fd != P_INVALID_SOCKET)
-                cw_retry_closing(g_wss_ctx, ws_client, now);
+#ifdef WITH_WS
+            if (ws_client) cw_retry_closing(g_wss_ctx, ws_client, now);
 #endif
         }
 
@@ -1011,7 +1013,7 @@ int main(int argc, char *argv[]) {
                 CLIENTS(i)->fd = P_INVALID_SOCKET;
             }
             if (CLIENTS(i)->proto == PROTO_RELAY) relay_free_client(&g_client_slots[i].relay);
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
             else if (CLIENTS(i)->proto == PROTO_WSS) wss_free_client(&g_client_slots[i].wss);
 #endif
         } else if (CLIENTS(i)->proto == PROTO_COMPACT) {

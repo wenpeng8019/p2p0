@@ -247,7 +247,7 @@ target_include_directories(test_ping_g_reconnect PRIVATE
 )
 target_link_libraries(test_ping_g_reconnect stdc ${TEST_PLATFORM_LIBS})
 # WebSocket server + client 集成测试
-if(WITH_WSLAY)
+if(WITH_WS)
     add_executable(test_ws
         test_ws.c
     )
@@ -262,7 +262,7 @@ if(WITH_WSLAY)
         p2p_static
         ${TEST_PLATFORM_LIBS}
     )
-    target_compile_definitions(test_ws PRIVATE WITH_WSLAY)
+    target_compile_definitions(test_ws PRIVATE WITH_WS)
 
     # p2p_server --ws 集成测试（启动真实 server 子进程）
     add_executable(test_ws_server_integration
@@ -279,7 +279,7 @@ if(WITH_WSLAY)
         p2p_static
         ${TEST_PLATFORM_LIBS}
     )
-    target_compile_definitions(test_ws_server_integration PRIVATE WITH_WSLAY)
+    target_compile_definitions(test_ws_server_integration PRIVATE WITH_WS)
     # register_* 是测试框架的占位函数，从不被调用，抑制 -Wunused-function 警告
     target_compile_options(test_ws_server_integration PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
@@ -301,7 +301,7 @@ if(WITH_WSLAY)
         p2p_static
         ${TEST_PLATFORM_LIBS}
     )
-    target_compile_definitions(test_ws_browser PRIVATE WITH_WSLAY)
+    target_compile_definitions(test_ws_browser PRIVATE WITH_WS)
 endif()
 
 # 添加测试
@@ -309,7 +309,7 @@ enable_testing()
 
 # --- 独立单元测试（无外部依赖） ---
 add_test(NAME test_transport     COMMAND test_transport)
-if(WITH_WSLAY)
+if(WITH_WS)
     add_test(NAME test_ws                    COMMAND test_ws)
     add_test(NAME test_ws_server_integration COMMAND test_ws_server_integration)
 endif()
@@ -352,7 +352,7 @@ add_test(NAME test_ping_g_reconnect  COMMAND test_ping_g_reconnect  ${PING_PATH}
 
 # --- 测试标签（用于分组运行：ctest -L unit / ctest -L protocol / ctest -L e2e） ---
 set_tests_properties(test_transport PROPERTIES LABELS "unit")
-if(WITH_WSLAY)
+if(WITH_WS)
     set_tests_properties(test_ws test_ws_server_integration PROPERTIES LABELS "unit")
 endif()
 

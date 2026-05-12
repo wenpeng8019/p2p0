@@ -18,7 +18,7 @@
  *   8. client_close             — client 主动发 Close 帧
  */
 
-#ifdef WITH_WSLAY
+#ifdef WITH_WS
 
 #include "../test/test_framework.h"
 #include "../p2p_server/ws_server.h"
@@ -450,12 +450,12 @@ int main(void) {
     return test_failed ? 1 : 0;
 }
 
-#else /* WITH_WSLAY */
+#else /* WITH_WS */
 
 #include <stdio.h>
 int main(void) {
-    printf("test_ws: WITH_WSLAY not enabled, skipping.\n");
+    printf("test_ws: WITH_WS not enabled, skipping.\n");
     return 0;
 }
 
-#endif /* WITH_WSLAY */
+#endif /* WITH_WS */
