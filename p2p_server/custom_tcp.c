@@ -5,8 +5,6 @@
 
 #include "custom_tcp.h"
 
-#include "../../../../../../opt/homebrew/include/openssl/buffer.h"
-
 #define ITEM_REF_CLIENT_ERROR       ((void*)(uintptr_t)-1)
 
 #define STREAM_HEADER_RECV_MAX      128
@@ -51,7 +49,7 @@ void ct_session_send(ct_session_t *session, buf16_item_t* buf_item) {
 
     // 添加到 session 的本地发送队列
     BUF_Q_APPEND(session->send_queue, buf_item)
-    if (client->send_buff_queue.head != buf_item) return;      // 如果队列之前不空，直接返回
+    if (session->send_queue->head != buf_item) return;         // 如果队列之前不空，直接返回
 
     // 如果 session 发送队列之前为空
     assert(!session->send_next && !session->send_prev);
@@ -95,7 +93,7 @@ static void clear_session_sending(ct_session_t *session, bool terminate, bool al
 
         // 如果 session 的数据需要被销毁，即无需继续发送给 client 端
         if (terminate) {
-            BUF_Q_CLEAR(session->send_queue, it, free_buffer(item);)
+            BUF_Q_CLEAR(session->send_queue, it, free_buffer(it);)
         }
         // 如果需要将 session 现有的数据发送给 client 端，则将 session 的发送队列接入 client 的发送队列
         else {
@@ -215,8 +213,15 @@ ct_free_client(custom_tcp_ctx_t* ctx, ct_client_t *client) {
 
     // 释放 recv buf
     if (client->recv_buf) {
+        if (client->recv_buf->next) free_buf16(client->recv_buf->next);
         free_buf16(client->recv_buf);
         client->recv_buf = NULL;
+    }
+    // 释放 payload buf
+    if (client->payload_buf) {
+        if (client->payload_buf->next) free_buf16(client->payload_buf->next);
+        free_buffer(client->payload_buf);
+        client->payload_buf = NULL;
     }
 
     client->sending_cur = 0;     // 确保正在发送中的数据包也被清除
@@ -235,8 +240,14 @@ ct_client_off(custom_tcp_ctx_t* ctx, ct_client_t *client) {
 
     // 释放 recv buf
     if (client->recv_buf) {
+        if (client->recv_buf->next) free_buf16(client->recv_buf->next);
         free_buf16(client->recv_buf);
         client->recv_buf = NULL;
+    }
+    if (client->payload_buf) {
+        if (client->payload_buf->next) free_buf16(client->payload_buf->next);
+        free_buffer(client->payload_buf);
+        client->payload_buf = NULL;
     }
 
     // 如果发送队列不为空，标记为 closing（send 完成后会自动完成 term），否则直接 term
@@ -535,6 +546,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                 client->payload_buf = payload_item;
                 client->payload_cur = payload_offset + (buf_item->len - client->recv_cur);
+                payload_item->pos = client->payload_cur;                // 指向实际读入数据的起始位置；[payload_offset, pos) 为预留空间供应用将 payload0 拷贝至此以获得连续缓冲
             }
         }
         // 以帧模式获取 header，即固定 header 结构 size
@@ -637,7 +649,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
                             goto handshake;
                         }
 
-                        ctx->handle_proto(client, buf, sz, payload_item, NULL);
+                        ctx->handle_proto(client, buf, client->hdr_sz, payload_item, NULL);
                         payload_item->len = len;                            // 恢复 recv_buf 的 len
                         payload_item->pos = client->recv_cur;               // 推进 recv_buf 的 pos（下一次请求的起始位置）
                         if (client->recv_buf) {                             // 重新变成流模式
