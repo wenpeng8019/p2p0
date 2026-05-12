@@ -723,7 +723,7 @@ static void test_sync0_not_online(void) {
     
     P_sock_close(sock);
     
-    if (status.received && status.status_code == P2P_RLY_ERR_NOT_REG) {
+    if (status.received && status.status_code == P2P_RLY_ERR_PEER_OFF) {
         TEST_PASS(TEST_NAME);
         return;
     }

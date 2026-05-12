@@ -258,7 +258,6 @@ if(WITH_WS)
         ${WSLAY_INCLUDE_DIRS}
     )
     target_link_libraries(test_ws
-        ws_server
         p2p_static
         ${TEST_PLATFORM_LIBS}
     )
