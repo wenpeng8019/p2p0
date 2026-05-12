@@ -45,6 +45,9 @@ typedef struct relay_client {
     TCP_CLIENT
     CUSTOM_TCP_CLIENT
 
+    // 帧模式（frame mode）的 header 缓冲（4 字节，用于 hdr_rs 指向）
+    uint8_t                         hdr_buf[sizeof(p2p_relay_hdr_t)];
+
     // 预分配的 ALV ACK 缓冲（内嵌，避免每次动态分配）
     uint8_t                         alv_ack_buf[sizeof(buf16_item_t) + sizeof(p2p_relay_hdr_t)];
 

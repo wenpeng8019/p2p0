@@ -356,7 +356,7 @@ static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
     nwrite_l(pkt + ofz, cs->base.session_id); ofz += P2P_SESS_ID_SZ;
     nwrite_s(pkt + ofz, cs->rpc_last_sid); ofz += 2;
 
-    if (!(cs->rpc_flags & (SIG_RPC_FLAG_PEER_OFFLINE | SIG_RPC_FLAG_TIMEOUT))) {
+    if (!(cs->rpc_flags & (SIG_RPC_FLAG_PEER_OFF | SIG_RPC_FLAG_TIMEOUT))) {
         pkt[ofz++] = cs->rpc_code;
         if (cs->rpc_data_len > 0) {
             memcpy(pkt + ofz, cs->rpc_data, cs->rpc_data_len);
@@ -1097,12 +1097,12 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
     } break;
 
     // SIG_PKT_ALIVE: [auth_key(SIG_AUTH_KEY_PSZ)]
-    case SIG_PKT_ALIVE: { const char* PROTO = "ALIVE";
+    case SIG_PKT_ALV: { const char* PROTO = "ALIVE";
 
         printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
                PROTO, from_str, ntohs(hdr->seq), hdr->flags, len);
 
-        if (payload_len < SIG_PKT_ALIVE_PSZ) {
+        if (payload_len < SIG_PKT_ALV_PSZ) {
             print("E:", LA_F("%s: bad payload(len=%zu)\n", LA_F42, 42), PROTO, payload_len);
             return;
         }
@@ -1122,7 +1122,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
             {   const char* ACK_PROTO = "ALIVE_ACK";
 
                 uint8_t ack[4];
-                p2p_pkt_hdr_encode(ack, SIG_PKT_ALIVE_ACK, 0, 0);
+                p2p_pkt_hdr_encode(ack, SIG_PKT_ALV_ACK, 0, 0);
 
                 print("V:", LA_F("Send %s: auth_key=%" PRIu64 ", peer='%s'\n", LA_F108, 108),
                       ACK_PROTO, alive_auth_key, alive_client->base.local_peer_id);
@@ -1294,7 +1294,7 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
                 print("W:", LA_F("REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n", LA_F86, 86),
                       COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->base.session_id);
 
-                compact_transition_to_resp_pending(q, now, SIG_RPC_FLAG_PEER_OFFLINE, 0, NULL, 0);
+                compact_transition_to_resp_pending(q, now, SIG_RPC_FLAG_PEER_OFF, 0, NULL, 0);
             }
             else if (q->rpc_retry >= REQ_MAX_RETRY) {
                 print("W:", LA_F("REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n", LA_F85, 85),

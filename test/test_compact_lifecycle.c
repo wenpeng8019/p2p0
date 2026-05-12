@@ -227,7 +227,7 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
 static int build_alive(uint8_t *buf, int buf_size, uint64_t auth_key) {
     if (buf_size < 4 + 8) return -1;
     
-    buf[0] = SIG_PKT_ALIVE;
+    buf[0] = SIG_PKT_ALV;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
@@ -331,7 +331,7 @@ static int send_alive_and_wait_ack(sock_t sock, uint64_t auth_key) {
     ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                           (struct sockaddr*)&from, &from_len);
     
-    if (n >= 4 && recv_buf[0] == SIG_PKT_ALIVE_ACK) {
+    if (n >= 4 && recv_buf[0] == SIG_PKT_ALV_ACK) {
         return 1;  // 收到 ACK
     }
     return 0;  // 未收到 ACK

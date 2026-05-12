@@ -393,8 +393,8 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_REG_ACK         0x81        // 上线确认（告知 auth_key、本端缓存能力、公网地址、探测端口、中继支持）
 #define SIG_PKT_OFF             0x82        // 主动注销：客户端关闭时通知服务器立即释放配对槽位
                                             // 【服务端可选实现】服务端不处理此包时，自动降级为 COMPACT_PAIR_TIMEOUT 超时清除机制
-#define SIG_PKT_ALIVE           0x83        // 保活包（可选，客户端定期发送以维持注册状态）
-#define SIG_PKT_ALIVE_ACK       0x84        // 保活确认（服务器回复以确认注册状态）
+#define SIG_PKT_ALV             0x83        // 保活包（可选，客户端定期发送以维持注册状态）
+#define SIG_PKT_ALV_ACK         0x84        // 保活确认（服务器回复以确认注册状态）
 
 #define SIG_PKT_SYN0            0x85        // 首次候选同步（双向）：client→server 提交首批候选；server→client 下发对端候选（详见 COMPACT 模式协议详细说明）
 #define SIG_PKT_SYN0_ACK        0x86        // 首批候选确认（server→client）：[session_id(P2P_SESS_ID_SZ)][online(1)]，session_id = 对端配对会话 ID
@@ -420,10 +420,10 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_REG_FLAG_MSG            0x02    // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
 
 /* RPC 包标志位（p2p_packet_hdr_t.flags） */
-/* SIG_FLAG_RELAY (0x02) 复用为 MSG_REQ/MSG_RSP relay 标志：标识此包是 Server→B/A 的中转包 */
+/* SIG_FLAG_RELAY (0x02) 复用为 REQ/RSP relay 标志：标识此包是 Server→B/A 的中转包 */
 
-/* MSG_RSP 包标志位 - 用于标识服务器特殊错误（而非对端返回的正常响应） */
-#define SIG_RPC_FLAG_PEER_OFFLINE   0x02    // B端在 REQ_ACK 之后离线（等待响应期间离线）
+/* RSP 包标志位 - 用于标识服务器特殊错误（而非对端返回的正常响应） */
+#define SIG_RPC_FLAG_PEER_OFF       0x02    // B端在 REQ_ACK 之后离线（等待响应期间离线）
 #define SIG_RPC_FLAG_TIMEOUT        0x04    // 服务器向B端转发请求超时
 
 #define SIG_AUTH_KEY_PSZ            (sizeof(uint64_t))          // auth_key 大小（8 字节）
@@ -446,7 +446,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 /* ONLINE_ACK:
  *   payload: [instance_id(4)][auth_key(SIG_AUTH_KEY_PSZ)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
  *   包头: type=0x81, flags=见下, seq=0
- *   - auth_key: 客户端-服务器认证令牌（network byte order, 64-bit），用于后续 SYN0 和 ALIVE 包的身份验证
+ *   - auth_key: 客户端-服务器认证令牌（network byte order, 64-bit），用于后续 SYN0 和 ALV 包的身份验证
  *     · auth_key=0 表示服务器拒绝登录（无可用槽位），客户端应停止重试
  *     · 与 session_id（对端配对会话 ID）语义不同：auth_key 标识 client↔server 关系，session_id 标识 client↔peer 关系
  *   - instance_id: 回显客户端 REG 中的 instance_id（网络字节序，32位）
@@ -468,19 +468,19 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   服务器收到后会向对端发送 FIN 通知
  */
  #define SIG_PKT_OFF_PSZ            SIG_AUTH_KEY_PSZ                                                   // auth_key(SIG_AUTH_KEY_PSZ)
-/* ALIVE:
+/* ALV:
  *   payload: [auth_key(SIG_AUTH_KEY_PSZ)]
  *   包头: type=0x83, flags=0, seq=0
  *   - auth_key: 客户端-服务器认证令牌（来自 ONLINE_ACK），用于服务器识别并更新槽位活跃时间
  *   用于客户端在 ONLINE/READY 状态定期发送，保持服务器槽位活跃
  */
- #define SIG_PKT_ALIVE_PSZ           SIG_AUTH_KEY_PSZ                                                   // auth_key(SIG_AUTH_KEY_PSZ)
-/* ALIVE_ACK:
+ #define SIG_PKT_ALV_PSZ            SIG_AUTH_KEY_PSZ                                                   // auth_key(SIG_AUTH_KEY_PSZ)
+/* AALV_ACK:
  *   payload: 空（仅包头）
  *   包头: type=0x84, flags=0, seq=0
  *   服务器回复确认，表示槽位仍然有效
  */
- #define SIG_PKT_ALIVE_ACK_PSZ       0u                                                                 // 无 payload
+ #define SIG_PKT_ALV_ACK_PSZ       0u                                                                 // 无 payload
 /* SYN0（双向首次 sync，两方向 payload 格式不同，由各端角色区分处理）:
  *
  * 方向 1: client → server（建立和对端连接，并提交首批同步候选）
@@ -564,59 +564,59 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  */
 #define SIG_PKT_FIN_PSZ             (P2P_SESS_ID_SZ)                                                   // session_id(P2P_SESS_ID_SZ)
 
-/* MSG_REQ (A → Server):
+/* REQ (A → Server):
  *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   包头: type=0x90, flags=0, seq=0
  *   - session_id: A 的会话 ID（来自 SYN0_ACK）
  *   - sid: A 生成的 16 位序列号（每次 connect() 范围内唯一，用于匹配应答）
  *   - msg: 应用层消息 ID（协议层透传，由应用自定义）
- *   - A 重发此包直到收到 MSG_REQ_ACK
+ *   - A 重发此包直到收到 REQ_ACK
  *
- * MSG_REQ (Server → B, relay):
+ * REQ (Server → B, relay):
  *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   包头: type=0x90, flags=SIG_MSG_FLAG_RELAY(0x01), seq=0
- *   - session_id: A 的会话 ID（B 用此字段构造 MSG_RSP）
- *   - Server 重发此包直到收到 MSG_RSP
+ *   - session_id: A 的会话 ID（B 用此字段构造 RSP）
+ *   - Server 重发此包直到收到 RSP
  */
 #define SIG_PKT_REQ_MIN_PSZ         (P2P_SESS_ID_SZ + 3u)                                               // session_id(P2P_SESS_ID_SZ) + sid(2) + msg(1)
-/* MSG_REQ_ACK (Server → A):
+/* REQ_ACK (Server → A):
  *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][status(1)]
  *   包头: type=0x91, flags=0, seq=0
  *   - session_id: A 的会话 ID（用于 A 端验证响应合法性）
- *   - sid: 对应的 MSG_REQ 序列号
+ *   - sid: 对应的 REQ 序列号
  *   - status: 0=已缓存并开始向 B 中转；1=目标 B 不在线
  *   - A 收到此包后停止重发
  */
 #define SIG_PKT_REQ_ACK_PSZ         (P2P_SESS_ID_SZ + 3u)                                               // session_id(P2P_SESS_ID_SZ) + sid(2) + status(1)
-/* MSG_RSP (B → Server):
+/* RSP (B → Server):
  *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   包头: type=0x92, flags=0, seq=0
- *   - session_id: 从 MSG_REQ relay 中取得的 A 的会话 ID
- *   - B 重发此包直到收到 Server → B 的 MSG_RSP_ACK
+ *   - session_id: 从 REQ relay 中取得的 A 的会话 ID
+ *   - B 重发此包直到收到 Server → B 的 RSP_ACK
  * 
- * MSG_RSP (Server → A, relay):
+ * RSP (Server → A, relay):
  *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   包头: type=0x92, flags=0, seq=0
  *   - session_id: A 的会话 ID（用于 A 端验证响应合法性）
- *   - sid: 对应的 MSG_REQ 序列号
+ *   - sid: 对应的 REQ 序列号
  *   - code: 响应码
  *   - data: 响应数据
- *   - Server 重发此包直到收到 A → Server 的 MSG_RSP_ACK
+ *   - Server 重发此包直到收到 A → Server 的 RSP_ACK
  */
 #define SIG_PKT_RSP_MIN_PSZ         (P2P_SESS_ID_SZ + 3u)                                           // session_id(P2P_SESS_ID_SZ) + sid(2) + code(1)
-/* MSG_RSP_ACK (Server → B):
+/* RSP_ACK (Server → B):
  *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)]
  *   包头: type=0x93, flags=0, seq=0
  *   - session_id: B 的会话 ID（用于 O(1) 哈希查找）
- *   - sid: 对应的 MSG_REQ 序列号
- *   - Server 确认收到 B 的 MSG_RSP，B 停止重发
+ *   - sid: 对应的 REQ 序列号
+ *   - Server 确认收到 B 的 RSP，B 停止重发
  *
- * MSG_RSP_ACK (A → Server):
+ * RSP_ACK (A → Server):
  *   payload: [session_id(P2P_SESS_ID_SZ)][sid(2)]
  *   包头: type=0x93, flags=0, seq=0
  *   - session_id: A 的会话 ID（用于 O(1) 哈希查找）
- *   - sid: 对应的 MSG_REQ 序列号
- *   - A 收到 Server 转发的 MSG_RSP 后发送，流程完成
+ *   - sid: 对应的 REQ 序列号
+ *   - A 收到 Server 转发的 RSP 后发送，流程完成
  */
 #define SIG_PKT_RSP_ACK_PSZ         (P2P_SESS_ID_SZ + 2u)                                               // session_id(P2P_SESS_ID_SZ) + sid(2)
 /* NAT_PROBE:
@@ -647,7 +647,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *      - 客户端发送 ONLINE（含 local_peer_id 与 instance_id）
  *      - 服务器回复 ONLINE_ACK（告知 auth_key、max_candidates、公网地址）
  *        · auth_key=0: 服务器拒绝登录（无可用槽位），客户端停止重试
- *        · auth_key≠0: 登录成功，用于后续 SYN0/ALIVE 身份验证
+ *        · auth_key≠0: 登录成功，用于后续 SYN0/ALV 身份验证
  *      - 收到 ONLINE_ACK 后停止 ONLINE 重发，进入 ONLINE 状态
  *
  *   2. 候选同步阶段（三次握手 + 序列化确认）：
@@ -667,18 +667,18 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        |                       |                          |
  *        |--- ONLINE ----------->|                          |
  *        |<-- ONLINE_ACK --------|  (auth_key + capabilities)
- *        |--- SYN0 ------------>|  (auth_key + 首批候选)   |
- *        |<-- SYN0_ACK ---------|  (session_id, online=0)  |
- *        |--- SYN0_ACK -------->|  (二次确认, session_id)  |
+ *        |--- SYN0 ------------->|  (auth_key + 首批候选)   |
+ *        |<-- SYN0_ACK ----------|  (session_id, online=0)  |
+ *        |--- SYN0_ACK --------->|  (二次确认, session_id)  |
  *        |   [进入 ONLINE]       |  (缓存 Alice 的候选)     |
  *        |    ... Bob 上线 ...                              |
  *        |                       |<-- ONLINE ---------------|
  *        |                       |--- ONLINE_ACK ---------->|  (auth_key + capabilities)
- *        |                       |<-- SYN0 ----------------|  (auth_key + 首批候选)
- *        |                       |--- SYN0_ACK ----------->|  (session_id, online=1)
- *        |                       |<-- SYN0_ACK ------------|  (二次确认, session_id)
- *        |<-- SYN0 -------------|--- SYN0 --------------->|  (缓存候选 + session_id)
- *        |--- SYN0_ACK -------->|<-- SYN0_ACK ------------|  (携带 session_id)
+ *        |                       |<-- SYN0 -----------------|  (auth_key + 首批候选)
+ *        |                       |--- SYN0_ACK ------------>|  (session_id, online=1)
+ *        |                       |<-- SYN0_ACK -------------|  (二次确认, session_id)
+ *        |<-- SYN0 --------------|--- SYN0 ---------------->|  (缓存候选 + session_id)
+ *        |--- SYN0_ACK --------->|<-- SYN0_ACK -------------|  (携带 session_id)
  *        |                       |                          |
  *        |<=============== P2P SYNC 序列化同步 ============>|  (所有包携带 session_id)
  *        |----------- SYNC(seq=1, base=5) ----------------->|  (从第 6 个候选开始)
@@ -702,39 +702,39 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  * 错误处理：
  *   1. REQ_ACK 阶段 B 不在线：Server → A 返回 status=1，A 调用 on_response(len=-1, code=原始请求msg)
- *   2. B 在等待响应期间离线：Server → A 发送 MSG_RSP(flags=SIG_MSG_FLAG_PEER_OFFLINE)，
+ *   2. B 在等待响应期间离线：Server → A 发送 RSP(flags=SIG_MSG_FLAG_PEER_OFFLINE)，
  *      A 调用 on_response(len=-1, code=P2P_RPC_ERR_PEER_OFF)
- *   3. Server 转发请求超时：Server → A 发送 MSG_RSP(flags=SIG_MSG_FLAG_TIMEOUT)，
+ *   3. Server 转发请求超时：Server → A 发送 RSP(flags=SIG_MSG_FLAG_TIMEOUT)，
  *      A 调用 on_response(len=-1, code=P2P_RPC_ERR_TIMEOUT)
  *
  * 流程（7 次传输）：
  *
  *   A                      Server                            B
  *   │                         │                              │
- *   ├── MSG_REQ(sid) ───────►│  A 重发直到收到 REQ_ACK      │
+ *   ├── REQ(sid) ───────────►│  A 重发直到收到 REQ_ACK      │
  *   │   [session_id][sid]     │  Server 查找 A 的会话槽      │
  *   │   [msg][data]           │  msg=消息类型                │
  *   │                         │                              │
- *   │◄── MSG_REQ_ACK ────────┤  status=0 成功/1 B不在线     │
+ *   │◄── REQ_ACK ────────────┤  status=0 成功/1 B不在线     │
  *   │   [session_id][sid]     │  A 停止重发                  │
  *   │   [status]              │                              │
- *   │                         ├────── MSG_REQ ─────────────►│  Server 重发直到收到 RSP
+ *   │                         ├────── REQ ─────────────────►│  Server 重发直到收到 RSP
  *   │                         │   [session_id][sid]          │  (relay 标志位=1)
  *   │                         │   [msg][data]                │  B 循环比较 sid：
  *   │                         │                              │  sid>last_sid → 执行新请求
  *   │                         │                              │  sid≤last_sid → 忽略旧请求
- *   │                         │◄────── MSG_RSP ────────────┤  B 定时重发直到收到 ACK
+ *   │                         │◄──── RSP ───────────────────┤  B 定时重发直到收到 ACK
  *   │                         │   [session_id][sid]          │  Server 收到后停止向 B 发 REQ
  *   │                         │   [code][data]               │  code=响应码
  *   │                         │                              │
- *   │                         ├────── MSG_RSP_ACK ────────►│  Server 每次收到 RSP 都回 ACK
+ *   │                         ├────── RSP_ACK ─────────────►│  Server 每次收到 RSP 都回 ACK
  *   │                         │   [session_id][sid]          │  B 收到 ACK 后停止重发
  *   │                         │                              │
- *   │◄── MSG_RSP ───────────┤  Server 转发第一次 RSP 给 A │
+ *   │◄── RSP ────────────────┤  Server 转发第一次 RSP 给 A  │
  *   │   [session_id][sid]     │  后续重发直到收到 A 的 ACK   │
  *   │   [code][data]          │  (flags 可能标识特殊错误)    │
  *   │                         │                              │
- *   ├── MSG_RSP_ACK ───────►│  流程完成                    │
+ *   ├── RSP_ACK ────────────►│  流程完成                    │
  *   │   [session_id][sid]     │                              │
  * 
  */
@@ -1635,7 +1635,7 @@ typedef struct {
  *      记录 rpc_pending_sid，等待 RSP 解锁
  *
  * 超时: 服务器每秒检查 RPC 待确认链表，
- *       超过 MSG_REQ_MAX_RETRY × MSG_RPC_RETRY_INTERVAL_MS 未收到 RSP
+ *       超过 REQ_MAX_RETRY × MSG_RPC_RETRY_INTERVAL_MS 未收到 RSP
  *       → 生成伪 RSP [code=0xFE (P2P_RPC_ERR_TIMEOUT)]
  *
  * ────────────────────────────────────────────────────────────────────────────
@@ -1676,9 +1676,9 @@ typedef struct {
  *   │                                │
  *   ├── WebSocket Connect ─────────►│  HTTP Upgrade → WS
  *   │                                │
- *   ├── "REG alice\n" ───────────────►│  创建 wss_client_t
+ *   ├── "REG alice\n" ─────────────►│  创建 wss_client_t
  *   │                                │  peer_id="alice", cid=N
- *   │◄── "REG OK <sync_max>\n" ───────┤
+ *   │◄── "REG OK <sync_max>\n" ─────┤
  *   │                                │
  *   [进入 ONLINE 状态]               │
  *   │                                │
@@ -1692,34 +1692,34 @@ typedef struct {
  *   ├── "SYN0 bob\nICE\n...\n" ────►│  build_session("alice","bob")  │
  *   │                                │  pair 创建，side=0             │
  *   │                                │  remote_s=NULL (bob 未注册)    │
- *   │                                │  缓存 alice 的 payload          │
- *   │◄── "SYN0 bob 42 offline\n" ────┤                                │
+ *   │                                │  缓存 alice 的 payload         │
+ *   │◄── "SYN0 bob 42 offline\n" ───┤                                │
  *   │                                │                                │
- *   [等待 SYN0 bob 42 online]       │                                │
+ *   [等待 SYN0 bob 42 online]        │                                │
  *
  * 3. 会话配对（对端上线 + 双向通知）
  * ────────────────────────────────────────────────────────────────────────────
  *
  *   Alice                         Server                             Bob
  *   │                                │                                │
- *   │                                │◄── "REG bob\n" ─────────────────┤
- *   │                                │  创建 wss_client_t          │
- *   │                                ├── "REG OK <sync_max>\n" ───────►│
+ *   │                                │◄── "REG bob\n" ───────────────┤
+ *   │                                │  创建 wss_client_t             │
+ *   │                                ├── "REG OK <sync_max>\n" ─────►│
  *   │                                │                                │
- *   │                                │◄── "SYN0 alice\nICE\n...\n" ───┤
+ *   │                                │◄── "SYN0 alice\nICE\n...\n" ──┤
  *   │                                │  build_session("bob","alice")  │
  *   │                                │  pair 找到，side=1             │
  *   │                                │  remote_s=alice's session      │
- *   │                                │  → 双向配对 + 交换缓存         │
+ *   │                                │  → 双向配对 + 交换缓存        │
  *   │                                │                                │
- *   │◄─ "SYN0 bob 42 online\n" ────┤  (推送给 alice)
- *   │                                ├─ "SYN0 alice 43 online\n" ──►│  (应答给 bob)
- *   │◄─ "SYNC 42\nICE\n...\n" ───────┤  (bob 的缓存 SYNC 流)
- *   │◄─ "SYNC 42\n\n" ────────────────┤  (fin mark)
+ *   │◄─ "SYN0 bob 42 online\n" ─────┤  (推送给 alice)
+ *   │                                ├─ "SYN0 alice 43 online\n" ───►│  (应答给 bob)
+ *   │◄─ "SYNC 42\nICE\n...\n" ──────┤  (bob 的缓存 SYNC 流)
+ *   │◄─ "SYNC 42\n\n" ──────────────┤  (fin mark)
  *   │                                ├─ "SYNC 43\nICE\n...\n" ──────►│  (alice 的缓存 SYNC 流)
- *   │                                ├─ "SYNC 43\n\n" ───────────────►│  (fin mark)
- *   │◄─ "SYNC 42 confirm 52\n" ───────┤                                │  (alice 的缓存已转发)
- *   │                                ├─ "SYNC 43 confirm 48\n" ──────►│  (bob 的缓存已转发)
+ *   │                                ├─ "SYNC 43\n\n" ──────────────►│  (fin mark)
+ *   │◄─ "SYNC 42 confirm 52\n" ─────┤                                │  (alice 的缓存已转发)
+ *   │                                ├─ "SYNC 43 confirm 48\n" ─────►│  (bob 的缓存已转发)
  *   │                                │                                │
  *   [处理 bob 的缓存候选]            │ [处理 alice 的缓存候选]
  *
@@ -1728,21 +1728,21 @@ typedef struct {
  *
  *   Alice                         Server                             Bob
  *   │                                │                                │
- *   ├──── "SYNC 42\nICE\n...\n" ─────►│  sid=42 → 配对 → bob sid=43  │
- *   │◄──── "SYNC 42 confirm 67\n" ────┤                                │
- *   │                                ├──── "SYNC 43\nICE\n...\n" ─────►│
+ *   ├──── "SYNC 42\nICE\n...\n" ───►│  sid=42 → 配对 → bob sid=43  │
+ *   │◄── "SYNC 42 confirm 67\n" ────┤                                │
+ *   │                                ├──── "SYNC 43\nICE\n...\n" ───►│
  *   │                                │                                │
- *   │                                │◄──── "SYNC 43\nICE\n...\n" ─────┤
- *   │                                ├──── "SYNC 43 confirm 67\n" ────►│
- *   │◄──── "SYNC 42\nICE\n...\n" ─────┤ sid=43 → 配对 → alice sid=42 │
+ *   │                                │◄── "SYNC 43\nICE\n...\n" ─────┤
+ *   │                                ├──── "SYNC 43 confirm 67\n" ──►│
+ *   │◄── "SYNC 42\nICE\n...\n" ─────┤ sid=43 → 配对 → alice sid=42 │
  *   │                                │                                │
- *   ├──── "SYNC 42\nICE_DONE\n" ─────►│                                │
- *   │◄──── "SYNC 42 confirm 8\n" ─────┤                                │
- *   │                                ├──── "SYNC 43\nICE_DONE\n" ─────►│
+ *   ├──── "SYNC 42\nICE_DONE\n" ───►│                                │
+ *   │◄── "SYNC 42 confirm 8\n" ─────┤                                │
+ *   │                                ├──── "SYNC 43\nICE_DONE\n" ───►│
  *   │                                │                                │
- *   │                                │◄──── "SYNC 43\nICE_DONE\n" ─────┤
- *   │                                ├──── "SYNC 43 confirm 8\n" ─────►│
- *   │◄──── "SYNC 42\nICE_DONE\n" ─────┤                                │
+ *   │                                │◄── "SYNC 43\nICE_DONE\n" ─────┤
+ *   │                                ├──── "SYNC 43 confirm 8\n" ───►│
+ *   │◄── "SYNC 42\nICE_DONE\n" ─────┤                                │
  *   │                                │                                │
  *   │◄════════════════════════ P2P ICE 打洞 ═══════════════════════►│
  *
@@ -1754,26 +1754,26 @@ typedef struct {
  *   │                                │  Bob WS 断开                   ╳
  *   │                                │  bob.cid = -1 (标记离线)       │
  *   │                                │  bob 会话保留                  │
- *   │◄── "FIN 42\n" ──────────────────┤                                │
+ *   │◄── "FIN 42\n" ────────────────┤                                │
  *   │                                │                                │
  *   [暂停向 bob 发送 SYNC]           │     ... 网络恢复 ...           │
  *   │                                │                                │
  *   │                                │◄── WebSocket Connect ─────────┤
- *   │                                │◄── "REG bob\n" ─────────────────┤
- *   │                                │  复用 wss_client_t          │
+ *   │                                │◄── "REG bob\n" ───────────────┤
+ *   │                                │  复用 wss_client_t             │
  *   │                                │  更新 cid，保留会话            │
- *   │                                ├── "REG OK <sync_max>\n" ────────►│
+ *   │                                ├── "REG OK <sync_max>\n" ─────►│
  *   │                                │                                │
  *   │                                │  遍历 bob 的已配对会话         │
  *   │                                │  推送 online，流式转发预缓存   │
  *   │◄── "SYN0 bob 42 online\n" ────┤                                │
- *   │◄── "SYNC 42\nICE\n...\n" ──────┤  (bob 的缓存，如有)            │
- *   │◄── "SYNC 42\n\n" ──────────────┤  (fin mark)                    │
- *   │                                ├── "SYN0 alice 43 online\n" ───►│
- *   │                                ├── "SYNC 43\nICE\n...\n" ────────►│  (alice 的缓存，如有)
- *   │                                ├── "SYNC 43\n\n" ────────────────►│  (fin mark)
- *   │◄── "SYNC 42 confirm N\n" ───────┤  (alice 的缓存已转发，如有)    │
- *   │                                ├── "SYNC 43 confirm M\n" ────────►│  (bob 的缓存已转发，如有)
+ *   │◄── "SYNC 42\nICE\n...\n" ─────┤  (bob 的缓存，如有)            │
+ *   │◄── "SYNC 42\n\n" ─────────────┤  (fin mark)                    │
+ *   │                                ├── "SYN0 alice 43 online\n" ──►│
+ *   │                                ├── "SYNC 43\nICE\n...\n" ─────►│  (alice 的缓存，如有)
+ *   │                                ├── "SYNC 43\n\n" ─────────────►│  (fin mark)
+ *   │◄── "SYNC 42 confirm N\n" ─────┤  (alice 的缓存已转发，如有)    │
+ *   │                                ├── "SYNC 43 confirm M\n" ─────►│  (bob 的缓存已转发，如有)
  *   │                                │                                │
  *       [重新发起 ICE 候选交换]      │    [重新发起 ICE 候选交换]
  *   ├── "SYNC 42\nICE\n...\n" ─────►│  ...
