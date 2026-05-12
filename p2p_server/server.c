@@ -54,7 +54,7 @@ static client_t*                    g_clients = NULL;
 
 #define CLIENTS(i)                  ((client_t*)&g_client_slots[i])
 #define TCP_CLIENTS(i)              ((tcp_client_t*)&g_client_slots[i])
-#define WS_CLIENTS(i)               ((cw_client_t*)&g_client_slots[i])
+#define CT_CLIENTS(i)               ((ct_client_t*)&g_client_slots[i])
 
 custom_tcp_ctx_t*                   g_relay_ctx;
 custom_ws_ctx_t*                    g_wss_ctx;
@@ -795,7 +795,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
                 else if (m != PROTO_COMPACT) {
-#ifdef WITH_WS
+#ifdef WITH_WSLAY
                     // 最干净的自定义协议模块内部 io 状态的同步方案是在此拦截检测
                     /* + 作为服务端，读取状态往往都是全生命期的，所以主要关注的是写入状态的同步
                     *   写入状态的变更来源主要包括三类：自动响应（在读取解析请求时自动恢复的）；应用层主动触发的写入；以及协议库内部非响应式自动触发（如计时器）
@@ -818,7 +818,7 @@ int main(int argc, char *argv[]) {
         } else {
             for (int i = 0; i < MAX_PEERS; i++) { int8_t m2 = CLIENTS(i)->proto;
                 if (m2 <= 0) continue;
-#ifdef WITH_WS
+#ifdef WITH_WSLAY
                 if (m2 == PROTO_WSS && WS_CLIENTS(i)->ws_ctx) {
                     if (wslay_event_want_write(WS_CLIENTS(i)->ws_ctx)) TCP_CLIENTS(i)->io |= TCP_IO_FLAG_WANT_WRITE;
                     else TCP_CLIENTS(i)->io &= ~TCP_IO_FLAG_WANT_WRITE;
@@ -924,7 +924,7 @@ int main(int argc, char *argv[]) {
         // 处理 TCP/IO（先发送后接收，单次遍历）
         for (int i = 0; i < MAX_PEERS; i++) { int8_t m = CLIENTS(i)->proto;
             if (m <= 0 || CLIENTS(i)->fd == P_INVALID_SOCKET) continue;
-            cw_client_t* ws_client = (m == PROTO_WSS) ? WS_CLIENTS(i) : NULL;
+            ct_client_t* ws_client = (m == PROTO_WSS) ? CT_CLIENTS(i) : NULL;
 
             // 处理数据接收
             if ((TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_READ)
@@ -946,7 +946,7 @@ int main(int argc, char *argv[]) {
                                 print("E:", LA_F("Failed to initialize WS/ICE client for slot %d\n", LA_F176, 176), i);
                                 continue;
                             }
-                            ws_client = WS_CLIENTS(i);
+                            ws_client = CT_CLIENTS(i);
                             CLIENTS(i)->proto = m = PROTO_WSS;
                         } else { 
                             print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
@@ -977,7 +977,7 @@ int main(int argc, char *argv[]) {
 
                 if (m == PROTO_RELAY) ct_handle_recv(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay, NULL);
 #ifdef WITH_WS
-                else if (ws_client) cw_handle_recv(g_wss_ctx, ws_client); // fixme 这里的操作可能会导致 client 被销毁，从而无需再执行后面
+                else if (ws_client) ct_handle_recv(&g_wss_ctx->base, CT_CLIENTS(i), "WS"); // fixme 这里的操作可能会导致 client 被销毁，从而无需再执行后面
 #endif
             }
 
@@ -987,12 +987,12 @@ int main(int argc, char *argv[]) {
 
                 if (m == PROTO_RELAY) ct_handle_send(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay, NULL);
 #ifdef WITH_WS
-                else if (ws_client) cw_handle_send(g_wss_ctx, ws_client);
+                else if (ws_client) ct_handle_send(&g_wss_ctx->base, CT_CLIENTS(i), "WS");
 #endif
             }
 
 #ifdef WITH_WS
-            if (ws_client) cw_retry_closing(g_wss_ctx, ws_client, now);
+            if (ws_client) cw_retry_closing(g_wss_ctx, (cw_client_t*)ws_client, now);
 #endif
         }
 
