@@ -109,6 +109,11 @@ typedef struct custom_ws_ctx {
 //-----------------------------------------------------------------------------
 // Public API
 
+// 初始化 WS 协议上下文（绑定内部回调到 ctx->base）
+// + 必须在设置应用层回调之前调用（或之后调用，不影响，因 base 字段独立）
+void
+cw_ctx_init(custom_ws_ctx_t *ctx);
+
 // 初始化 WS client
 // + 必须在 accept 后、第一次 cw_handle_recv 之前调用
 bool

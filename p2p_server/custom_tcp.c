@@ -309,7 +309,7 @@ ct_reactive_client(custom_tcp_ctx_t* ctx, ct_client_t *client) { (void)ctx;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-inline void prepare_next_recv(ct_client_t *client, buf16_item_t* recv_buf) {
+static inline void prepare_next_recv(ct_client_t *client, buf16_item_t* recv_buf) {
 
     if (recv_buf != client->recv_buf) {
         // 如果之前是帧模式，转为流模式

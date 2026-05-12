@@ -18,7 +18,7 @@ typedef struct relay_session {
 
     /* SYNC 同步服务相关字段 */
     uint8_t                         last_sid;                           // 会话同步的最后一个 sid
-    buf16_item_t*                  sync_peer_send[RELAY_PEER_Q_MAX];   // 发送队列；[0] 为队头
+    buf16_item_t*                   sync_peer_send[RELAY_PEER_Q_MAX];   // 发送队列；[0] 为队头
     uint8_t                         sync_peer_send_cnt;                 // 队列中的 item 数量
                                                                         // 队头 [0] 的发送状态由 refer 判定：
                                                                         //   refer=NULL            → 待发但未启动（对端暂不可达）
@@ -26,7 +26,7 @@ typedef struct relay_session {
                                                                         //   refer=REFER_ACK_PENDING → 等待应用层 ACK
 
     /* PKT 中继服务相关字段 */
-    buf16_item_t*                  pkt_peer_send[RELAY_PEER_Q_MAX];    // 发送队列；[0] 为队头
+    buf16_item_t*                   pkt_peer_send[RELAY_PEER_Q_MAX];    // 发送队列；[0] 为队头
     uint8_t                         pkt_peer_send_cnt;                  // 队列中的 item 数量
 
     /* RPC 服务相关字段 */

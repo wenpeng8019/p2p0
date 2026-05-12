@@ -46,15 +46,27 @@
 #include "custom_ws.h"
 
 #define WSS_SYNC_PAYLOAD_MAX        2048        /* SYNC0 预缓存负载上限（字节，不含 NUL） */
+#define WSS_MAX_PAYLOAD             (WSS_SYNC_PAYLOAD_MAX + 64) /* max_payload_len for custom_tcp */
+
+/* SYNC/PKT 发送队列深度（与 relay 对齐） */
+#define WSS_PEER_Q_MAX              2u
 
 typedef struct wss_session {
     session_t                       base;
+    CUSTOM_TCP_SESSION
 
     /* SYNC0 预缓存 ring buffer（动态分配，同步完成后释放）*/
-    buf16_item_t*                  sync_buf;               /* NULL=无数据，非NULL=BUF_FLAG_2048 chunk */
+    buf16_item_t*                   sync_buf;               /* NULL=无数据，非NULL=BUF_FLAG_2048 chunk */
     uint16_t                        sync_head;              /* 读位置 [0, MAX) */
     uint16_t                        sync_len;               /* 已存储字节数 */
-    bool                            sync_sending;           /* true=有数据已提交 wslay 尚未发完 */
+
+    /* SYNC 发送队列（对标 relay sync_peer_send，含 ACK_PENDING 机制） */
+    buf16_item_t*                   sync_peer_send[WSS_PEER_Q_MAX];
+    uint8_t                         sync_peer_send_cnt;
+
+    /* PKT 发送队列（对标 relay pkt_peer_send） */
+    buf16_item_t*                   pkt_peer_send[WSS_PEER_Q_MAX];
+    uint8_t                         pkt_peer_send_cnt;
 
     /* MSG RPC 状态（与 relay_session_t 一致，独立于 SYNC 通道） */
     uint16_t                        rpc_pending_sid;        /* 0=空闲, 非零=等待 RESP 的 REQ sid */
@@ -65,6 +77,7 @@ typedef struct wss_session {
 typedef struct wss_client {
     client_t                        base;
     TCP_CLIENT
+    CUSTOM_TCP_CLIENT
     CUSTOM_WS_CLIENT
 
     UT_hash_handle                  hh;          /* g_wss_clients，按 base.local_peer_id 索引 */
@@ -80,10 +93,6 @@ wss_init_client(wss_client_t* c);
 void
 wss_free_client(wss_client_t *client);
 
-void
-wss_handle_message(wss_client_t* client, const uint8_t *msg, size_t len);
-void
-wss_handle_data(wss_client_t *client, const uint8_t *data, size_t len);
 void
 retry_wss_pending(uint64_t now);
 

@@ -252,6 +252,8 @@ static void cw_tcp_handshake_finish(ct_client_t *client) {
     // 设置帧模式参数
     client->hdr_rs = cwc->ws_hdr_buf;  // 14 字节静态缓冲
     client->hdr_sz = 2;                // 初始读取 2 字节
+    // 结束握手阶段，进入正常帧收发阶段
+    client->handshake = 0;
 }
 
 static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t hdr_len,
