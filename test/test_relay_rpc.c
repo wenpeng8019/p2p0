@@ -6,7 +6,7 @@
  * ============================================================================
  * 验证 p2p_server 对 RELAY 协议 MSG RPC 机制的处理逻辑：
  * - P2P_RLY_REQ: A→Server→B 请求转发
- * - P2P_RLY_RESP: B→Server→A 响应转发
+ * - P2P_RLY_RSP: B→Server→A 响应转发
  * - rpc_pending: 独立于 peer_send 的并行流控通道
  *
  * ============================================================================
@@ -24,22 +24,22 @@
  * ---------------------------------------------------------------------------
  *
  * 测试 1: msg_req_forwarded
- *   目标：验证 MSG_REQ 被转发给 B 端
- *   方法：配对后 A 发送 MSG_REQ，B 等待接收
+ *   目标：验证 REQ 被转发给 B 端
+ *   方法：配对后 A 发送 REQ，B 等待接收
  *   预期：
  *     - B 收到 P2P_RLY_REQ
  *     - 包含正确的 session_id、sid、msg、data
  *
  * 测试 2: msg_resp_forwarded
- *   目标：验证 MSG_RESP 被转发给 A 端
- *   方法：A 发送 REQ → B 收到 → B 发送 RESP → A 收到
+ *   目标：验证 RSP 被转发给 A 端
+ *   方法：A 发送 REQ → B 收到 → B 发送 RSP → A 收到
  *   预期：
- *     - A 收到 P2P_RLY_RESP
+ *     - A 收到 P2P_RLY_RSP
  *     - 包含 B 发送的 code 和 data
  *
  * 测试 3: msg_rpc_complete
  *   目标：验证完整 RPC 流程（含 data 校验）
- *   方法：A:REQ → B:REQ → B:RESP → A:RESP
+ *   方法：A:REQ → B:REQ → B:RSP → A:RSP
  *   预期：
  *     - 双方数据正确
  *
@@ -51,13 +51,13 @@
  * ---------------------------------------------------------------------------
  *
  * 测试 5: msg_req_peer_offline
- *   目标：验证对端离线时服务器回复错误 RESP
+ *   目标：验证对端离线时服务器回复错误 RSP
  *   方法：A 单独配对（B 未上线）→ 发送 REQ
  *   预期：
- *     - A 收到 RESP(code=P2P_RPC_ERR_PEER_OFF)
+ *     - A 收到 RSP(code=P2P_RPC_ERR_PEER_OFF)
  *
  * 测试 6: msg_req_bad_payload
- *   目标：验证畸形 MSG_REQ 包被拒绝
+ *   目标：验证畸形 REQ 包被拒绝
  *   方法：发送 payload 过短的 REQ 包
  *   预期：
  *     - 不触发异常
@@ -73,7 +73,7 @@
  *
  * 测试 8: msg_large_data
  *   目标：验证大尺寸 RPC 数据转发
- *   方法：发送接近上限大小的 REQ/RESP
+ *   方法：发送接近上限大小的 REQ/RSP
  *
  * 测试 9: msg_rpc_and_data_parallel
  *   目标：验证 RPC（rpc_pending）与 DATA（peer_send）互不干扰
@@ -81,9 +81,9 @@
  *
  * 测试 10: msg_rpc_timeout
  *   目标：验证 RPC 超时后服务器回复 P2P_RPC_ERR_TIMEOUT
- *   方法：A 发送 REQ → B 收到但不回复 RESP → 等待超时
+ *   方法：A 发送 REQ → B 收到但不回复 RSP → 等待超时
  *   预期：
- *     - A 收到 RESP(code=P2P_RPC_ERR_TIMEOUT)
+ *     - A 收到 RSP(code=P2P_RPC_ERR_TIMEOUT)
  *
  * ============================================================================
  * 依赖与用法
@@ -310,7 +310,7 @@ static int build_rly_req(uint8_t *buf, int buf_size,
     return 3 + payload_len;
 }
 
-// 构造 RLY_RESP 包
+// 构造 RLY_RSP 包
 // relay 帧: [type(1)][size(2)][session_id(4)][sid(2)][code(1)][data(N)]
 static int build_rly_resp(uint8_t *buf, int buf_size,
                           uint32_t session_id, uint16_t sid,
@@ -318,7 +318,7 @@ static int build_rly_resp(uint8_t *buf, int buf_size,
     uint16_t payload_len = P2P_SESS_ID_SZ + 2 + 1 + data_len;
     if (buf_size < 3 + (int)payload_len) return -1;
 
-    buf[0] = P2P_RLY_RESP;
+    buf[0] = P2P_RLY_RSP;
     buf[1] = (payload_len >> 8) & 0xFF;
     buf[2] = payload_len & 0xFF;
 
@@ -490,7 +490,7 @@ static int establish_pair(sock_t *sock_a, uint64_t *session_a,
     return 1;
 }
 
-// 等待接收 REQ 或 RESP 包
+// 等待接收 REQ 或 RSP 包
 static int wait_rly_rpc(sock_t sock, uint8_t expect_type, rly_rpc_pkt_t *out) {
     memset(out, 0, sizeof(*out));
 
@@ -502,7 +502,7 @@ static int wait_rly_rpc(sock_t sock, uint8_t expect_type, rly_rpc_pkt_t *out) {
             return 0;
         }
 
-        if (type == expect_type && payload_len >= P2P_RLY_REQ_MIN_PSZ) {
+        if (type == expect_type && payload_len >= P2P_RLY_RPC_MIN_PSZ) {
             out->received = 1;
 
             // session_id (4 bytes)
@@ -516,7 +516,7 @@ static int wait_rly_rpc(sock_t sock, uint8_t expect_type, rly_rpc_pkt_t *out) {
             out->msg_or_code = recv_buf[9];
 
             // data
-            out->data_len = (int)payload_len - P2P_RLY_REQ_MIN_PSZ;
+            out->data_len = (int)payload_len - P2P_RLY_RPC_MIN_PSZ;
             if (out->data_len > 0 && out->data_len <= (int)sizeof(out->data))
                 memcpy(out->data, recv_buf + 10, out->data_len);
 
@@ -531,7 +531,7 @@ static int wait_rly_rpc(sock_t sock, uint8_t expect_type, rly_rpc_pkt_t *out) {
 // 测试用例
 ///////////////////////////////////////////////////////////////////////////////
 
-// 测试 1: MSG_REQ 被转发给 B 端
+// 测试 1: REQ 被转发给 B 端
 static void test_msg_req_forwarded(void) {
     const char *TEST_NAME = "msg_req_forwarded";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -576,7 +576,7 @@ static void test_msg_req_forwarded(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 2: MSG_RESP 被转发给 A 端
+// 测试 2: RSP 被转发给 A 端
 static void test_msg_resp_forwarded(void) {
     const char *TEST_NAME = "msg_resp_forwarded";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -607,18 +607,18 @@ static void test_msg_resp_forwarded(void) {
     rly_rpc_pkt_t req;
     wait_rly_rpc(sb, P2P_RLY_REQ, &req);
 
-    // Bob 发送 RESP
+    // Bob 发送 RSP
     uint8_t resp_data[] = "pong";
     len = build_rly_resp(pkt, sizeof(pkt), ses_b, req.sid, 0x01, resp_data, sizeof(resp_data) - 1);
     tcp_send_all(sb, pkt, len);
 
-    // Alice 接收 RESP
+    // Alice 接收 RSP
     rly_rpc_pkt_t resp;
-    int got = wait_rly_rpc(sa, P2P_RLY_RESP, &resp);
+    int got = wait_rly_rpc(sa, P2P_RLY_RSP, &resp);
 
     P_sock_close(sa); P_sock_close(sb);
 
-    if (!got) { TEST_FAIL(TEST_NAME, "Alice did not receive RESP"); return; }
+    if (!got) { TEST_FAIL(TEST_NAME, "Alice did not receive RSP"); return; }
     if (resp.session_id != ses_a) { TEST_FAIL(TEST_NAME, "session_id mismatch"); return; }
     if (resp.msg_or_code != 0x01) { TEST_FAIL(TEST_NAME, "code mismatch"); return; }
     if (resp.data_len != (int)(sizeof(resp_data) - 1) ||
@@ -671,26 +671,26 @@ static void test_msg_rpc_complete(void) {
         return;
     }
 
-    // 3. Bob 发送 RESP
+    // 3. Bob 发送 RSP
     uint8_t resp_data[] = "response_data_456";
     len = build_rly_resp(pkt, sizeof(pkt), ses_b, req.sid, 0x00, resp_data, sizeof(resp_data) - 1);
     tcp_send_all(sb, pkt, len);
 
-    // 4. Alice 接收 RESP
+    // 4. Alice 接收 RSP
     rly_rpc_pkt_t resp;
-    if (!wait_rly_rpc(sa, P2P_RLY_RESP, &resp)) {
+    if (!wait_rly_rpc(sa, P2P_RLY_RSP, &resp)) {
         P_sock_close(sa); P_sock_close(sb);
-        TEST_FAIL(TEST_NAME, "Alice did not receive RESP");
+        TEST_FAIL(TEST_NAME, "Alice did not receive RSP");
         return;
     }
 
     P_sock_close(sa); P_sock_close(sb);
 
-    if (resp.sid != 100) { TEST_FAIL(TEST_NAME, "RESP sid mismatch"); return; }
-    if (resp.msg_or_code != 0x00) { TEST_FAIL(TEST_NAME, "RESP code mismatch"); return; }
+    if (resp.sid != 100) { TEST_FAIL(TEST_NAME, "RSP sid mismatch"); return; }
+    if (resp.msg_or_code != 0x00) { TEST_FAIL(TEST_NAME, "RSP code mismatch"); return; }
     if (resp.data_len != (int)(sizeof(resp_data) - 1) ||
         memcmp(resp.data, resp_data, resp.data_len) != 0) {
-        TEST_FAIL(TEST_NAME, "RESP data mismatch"); return;
+        TEST_FAIL(TEST_NAME, "RSP data mismatch"); return;
     }
 
     TEST_PASS(TEST_NAME);
@@ -736,9 +736,9 @@ static void test_msg_bidirectional(void) {
     tcp_send_all(sb, pkt, len);
 
     rly_rpc_pkt_t rsp1;
-    if (!wait_rly_rpc(sa, P2P_RLY_RESP, &rsp1)) {
+    if (!wait_rly_rpc(sa, P2P_RLY_RSP, &rsp1)) {
         P_sock_close(sa); P_sock_close(sb);
-        TEST_FAIL(TEST_NAME, "A did not receive RESP"); return;
+        TEST_FAIL(TEST_NAME, "A did not receive RSP"); return;
     }
 
     // --- B → A RPC ---
@@ -757,16 +757,16 @@ static void test_msg_bidirectional(void) {
     tcp_send_all(sa, pkt, len);
 
     rly_rpc_pkt_t rsp2;
-    if (!wait_rly_rpc(sb, P2P_RLY_RESP, &rsp2)) {
+    if (!wait_rly_rpc(sb, P2P_RLY_RSP, &rsp2)) {
         P_sock_close(sa); P_sock_close(sb);
-        TEST_FAIL(TEST_NAME, "B did not receive RESP"); return;
+        TEST_FAIL(TEST_NAME, "B did not receive RSP"); return;
     }
 
     P_sock_close(sa); P_sock_close(sb);
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 5: 对端离线时收到错误 RESP
+// 测试 5: 对端离线时收到错误 RSP
 static void test_msg_req_peer_offline(void) {
     const char *TEST_NAME = "msg_req_peer_offline";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -798,13 +798,13 @@ static void test_msg_req_peer_offline(void) {
     int len = build_rly_req(pkt, sizeof(pkt), ses_a, 1, 0x50, req_data, sizeof(req_data) - 1);
     tcp_send_all(sa, pkt, len);
 
-    // 应收到 RESP(code=P2P_RPC_ERR_PEER_OFF)
+    // 应收到 RSP(code=P2P_RPC_ERR_PEER_OFF)
     rly_rpc_pkt_t resp;
-    int got = wait_rly_rpc(sa, P2P_RLY_RESP, &resp);
+    int got = wait_rly_rpc(sa, P2P_RLY_RSP, &resp);
 
     P_sock_close(sa);
 
-    if (!got) { TEST_FAIL(TEST_NAME, "no error RESP received"); return; }
+    if (!got) { TEST_FAIL(TEST_NAME, "no error RSP received"); return; }
     if (resp.msg_or_code != P2P_RPC_ERR_PEER_OFF) {
         char msg[64];
         snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", P2P_RPC_ERR_PEER_OFF, resp.msg_or_code);
@@ -936,20 +936,20 @@ static void test_msg_large_data(void) {
         TEST_FAIL(TEST_NAME, "large data mismatch"); return;
     }
 
-    // Bob 发送大 RESP
+    // Bob 发送大 RSP
     len = build_rly_resp(pkt, sizeof(pkt), ses_b, req.sid, 0x00, big_data, sizeof(big_data));
     tcp_send_all(sb, pkt, len);
 
     rly_rpc_pkt_t resp;
-    if (!wait_rly_rpc(sa, P2P_RLY_RESP, &resp)) {
+    if (!wait_rly_rpc(sa, P2P_RLY_RSP, &resp)) {
         P_sock_close(sa); P_sock_close(sb);
-        TEST_FAIL(TEST_NAME, "Alice did not receive large RESP"); return;
+        TEST_FAIL(TEST_NAME, "Alice did not receive large RSP"); return;
     }
 
     P_sock_close(sa); P_sock_close(sb);
 
     if (resp.data_len != (int)sizeof(big_data) || memcmp(resp.data, big_data, sizeof(big_data)) != 0) {
-        TEST_FAIL(TEST_NAME, "large RESP data mismatch"); return;
+        TEST_FAIL(TEST_NAME, "large RSP data mismatch"); return;
     }
 
     TEST_PASS(TEST_NAME);
@@ -1040,24 +1040,24 @@ static void test_msg_rpc_timeout(void) {
     int len = build_rly_req(pkt, sizeof(pkt), ses_a, 1, 0x55, req_data, sizeof(req_data) - 1);
     tcp_send_all(sa, pkt, len);
 
-    // Bob 收到 REQ 但故意不回复 RESP
+    // Bob 收到 REQ 但故意不回复 RSP
     rly_rpc_pkt_t req;
     if (!wait_rly_rpc(sb, P2P_RLY_REQ, &req)) {
         P_sock_close(sa); P_sock_close(sb);
         TEST_FAIL(TEST_NAME, "Bob did not receive REQ"); return;
     }
 
-    // 等待服务器超时（MSG_REQ_MAX_RETRY * MSG_RPC_RETRY_INTERVAL_MS = 5000ms）
+    // 等待服务器超时（REQ_MAX_RETRY * MSG_RPC_RETRY_INTERVAL_MS = 5000ms）
     // 加一些余量
     printf("    Waiting for RPC timeout (~6s)...\n");
     P_sock_rcvtimeo(sa, 8000);
 
     rly_rpc_pkt_t resp;
-    int got = wait_rly_rpc(sa, P2P_RLY_RESP, &resp);
+    int got = wait_rly_rpc(sa, P2P_RLY_RSP, &resp);
 
     P_sock_close(sa); P_sock_close(sb);
 
-    if (!got) { TEST_FAIL(TEST_NAME, "no timeout RESP received"); return; }
+    if (!got) { TEST_FAIL(TEST_NAME, "no timeout RSP received"); return; }
     if (resp.msg_or_code != P2P_RPC_ERR_TIMEOUT) {
         char msg[64];
         snprintf(msg, sizeof(msg), "expected code=0x%02x, got 0x%02x", P2P_RPC_ERR_TIMEOUT, resp.msg_or_code);

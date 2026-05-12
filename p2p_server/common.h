@@ -36,7 +36,7 @@
 
 // COMPACT 模式 MSG RPC 重传参数
 #define RPC_RETRY_INTERVAL_MS           1000    // MSG RPC 统一重传间隔（毫秒）
-#define REQ_MAX_RETRY                   5       // MSG_REQ 最大重传次数
+#define REQ_MAX_RETRY                   5       // REQ 最大重传次数
 #define RSP_MAX_RETRY                   10      // MSG_RSP 最大重传次数（比 REQ 更多，确保 A 端收到）
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -203,7 +203,7 @@ static inline bool client_identified(client_t* c) { return c->hh.tbl != NULL; }
 
 typedef struct session_pair {
     bool                            valid;
-    char                            peer_id[2][P2P_PEER_ID_MAX+1];  // hh_peer 复合 key 起始（与 remote_peer_id 连续）
+    char                            peer_id[2][P2P_PEER_ID_MAX];    // hh_peer 复合 key 起始（与 remote_peer_id 连续）
     session_t*                      sessions[2];                    // 双端会话指针
     UT_hash_handle                  hh;
 } session_pair_t;

@@ -25,7 +25,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F17] = "%s forwarded: '%s' -> '%s', sid=%u (ses_id=%u)\n",  /* SID:17 */
     [LA_F18] = "%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%u)\n",  /* SID:18 */
     [LA_F20] = "%s new sid=%u > pending sid=%u (responding=%d), canceling old RPC (ses_id=%u)\n",  /* SID:20 */
-    [LA_F21] = "%s retransmit during RESP phase, ignoring, sid=%u (ses_id=%u)\n",  /* SID:21 */
+    [LA_F21] = "%s retransmit during RSP phase, ignoring, sid=%u (ses_id=%u)\n",  /* SID:21 */
     [LA_F22] = "%s retransmit, resend ACK, sid=%u (ses_id=%u)\n",  /* SID:22 */
     [LA_F48] = "%s: forwarded to peer, cands=%d\n",  /* SID:48 */
     [LA_F63] = "%s: peer '%s' offline, cached cands=%d\n",  /* SID:63 */
@@ -124,11 +124,11 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F82] = "% Goodbye!\n",  /* SID:82 */
     [LA_F83] = "Invalid port number %d (range: 1-65535)\n",  /* SID:83 */
     [LA_F84] = "Invalid probe port %d (range: 0-65535)\n",  /* SID:84 */
-    [LA_F85] = "MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n",  /* SID:85 */
-    [LA_F86] = "MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n",  /* SID:86 */
-    [LA_F87] = "MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:87 */
-    [LA_F88] = "MSG_RESP gave up after %d retries, sid=%u (ses_id=%u)\n",  /* SID:88 */
-    [LA_F89] = "MSG_RESP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:89 */
+    [LA_F85] = "REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n",  /* SID:85 */
+    [LA_F86] = "REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n",  /* SID:86 */
+    [LA_F87] = "REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:87 */
+    [LA_F88] = "RSP gave up after %d retries, sid=%u (ses_id=%u)\n",  /* SID:88 */
+    [LA_F89] = "RSP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:89 */
     [LA_F90] = "% NAT probe disabled (bind failed)\n",  /* SID:90 */
     [LA_F91] = "NAT probe socket listening on port %d\n",  /* SID:91 */
     [LA_F92] = "NAT probe: %s (port %d)\n",  /* SID:92 */

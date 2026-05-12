@@ -170,7 +170,7 @@ typedef void (*p2p_on_state_fn)(p2p_session_t session, p2p_state_t old_state, p2
 typedef void (*p2p_on_data_fn)(p2p_session_t session, const void *data, int len, void *userdata);
 
 /*
- * MSG RPC 请求到达回调（B 端，服务器把 A 的 MSG_REQ 中转给 B 时触发）
+ * MSG RPC 请求到达回调（B 端，服务器把 A 的 REQ 中转给 B 时触发）
  * - sid   : 序列号，B 调用 p2p_response(session, sid, ...) 时传回
  * - msg   : 消息类型（1 字节，由 A 端指定）
  *           msg=0: Echo 请求，已由底层自动回复，不会触发此回调
@@ -182,7 +182,7 @@ typedef void (*p2p_on_request_fn)(p2p_session_t session, uint16_t sid,
                                   void *userdata);
 
 /*
- * MSG RPC 应答到达回调（A 端，服务器把 B 的 MSG_RESP 转回给 A 时触发）
+ * MSG RPC 应答到达回调（A 端，服务器把 B 的 RSP 转回给 A 时触发）
  * - sid   : 对应的原始请求序列号
  * - msg   : 响应码（协议中称为 code，由 B 在 p2p_response 中指定）
  *           正常响应时表示状态码，失败时表示错误类型

@@ -187,6 +187,9 @@ resident_client(client_t* client, int8_t proto, uint32_t instance_id, client_t* 
         return true;
     }
 
+    print("I:", LA_F("REG: '%s' new instance (old=%u, new=%u), resetting session\n", LA_F153, 153),
+           client->local_peer_id, client->instance_id, instance_id);
+
     free_client(client);
 
     if (!from) {
@@ -370,7 +373,7 @@ free_session_base(session_t *s) {
 
     // 如果对端之前在线，则标记对端会话已断开（-1）
     // + 注意，此时需要保留对端的 session id，以及和本端 session id 建立的 pair 关系
-    if (PEER_ONLINE(s->peer)) {
+    if (PEER_VALID(s->peer)) {
         s->peer->peer = (session_t*)-1;
     }
     else if (!pair->sessions[0] && !pair->sessions[1]) {
@@ -599,6 +602,9 @@ int main(int argc, char *argv[]) {
 
     // 初始化随机数生成器（用于生成安全的 session_id）
     P_rand_init();
+
+    // 初始化 client 槽位（全部标记为空闲）
+    for (int i = 0; i < MAX_PEERS; i++) CLIENTS(i)->proto = -1;
 
     // 初始化信令服务模块
     compact_init();

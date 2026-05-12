@@ -32,8 +32,8 @@ typedef struct relay_session {
     /* RPC 服务相关字段 */
     uint16_t                        rpc_last_sid;                       // 最后一个 RPC sid，维护 RPC 序列一致性（sid 循环递增）
     uint16_t                        rpc_pending_sid;                    // RPC 生命周期锁：0=空闲，非0=进行中的 RPC sid
-                                                                        // 全程：REQ→转发→RESP→转发回来才解锁
-                                                                        // RESP 返回时验证 sid 一致性
+                                                                        // 全程：REQ→转发→RSP→转发回来才解锁
+                                                                        // RSP 返回时验证 sid 一致性
     uint64_t                        rpc_sent_time;                      // RPC 发起时间戳（毫秒，用于超时检测）
     struct relay_session*           rpc_pending_next;                   // RPC 待确认链表指针（NULL=不在链表中，-1=链表尾）
 

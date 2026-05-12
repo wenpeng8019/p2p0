@@ -857,7 +857,7 @@ static void test_relay_message(void) {
     if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
         // 检查是否有 relay 相关日志
         int relay_log = find_log("relay");
-        int msg_relay_log = find_log("MSG_REQ") + find_log("MSG_RESP");
+        int msg_relay_log = find_log("REQ") + find_log("RSP");
         printf("    Relay logs: %d, MSG relay logs: %d\n", relay_log >= 0 ? 1 : 0, msg_relay_log);
         
         print_log_summary();

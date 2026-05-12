@@ -1233,12 +1233,12 @@ typedef struct {
 
 #define P2P_WSS_RSP_REG_OK      "REG OK "       /* + <sync_max> <features>\n */           // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
 #define P2P_WSS_RSP_REG_FAIL    "REG FAIL "     /* + <reason>\n */
-#define P2P_WSS_RSP_SYN0        "SYN0 "        /* + <peer_id> <session_id> online\n|offline\n|busy\n */
-#define P2P_WSS_RSP_SYN0_FAIL   "SYN0 FAIL "   /* + <reason>\n */
+#define P2P_WSS_RSP_SYN0        "SYN0 "         /* + <peer_id> <session_id> online\n|offline\n|busy\n */
+#define P2P_WSS_RSP_SYN0_FAIL   "SYN0 FAIL "    /* + <reason>\n */
 #define P2P_WSS_RSP_SYNC        "SYNC "         /* + <session_id> confirm <bytes>\n|busy\n  (S2C 响应) */
 
 /* SYNC payload 子类型前缀（应用层约定，服务器透传） */
-#define P2P_WSS_PAY_ICE          "ICE\n"         /* + <candidate_line> */
+#define P2P_WSS_PAY_ICE          "ICE\n"        /* + <candidate_line> */
 #define P2P_WSS_PAY_ICE_DONE     "ICE_DONE"
 
 /* WSS 二进制帧类型（WebSocket binary frame, opcode=0x2）
@@ -1308,10 +1308,10 @@ typedef struct {
 #define P2P_WSS_CMD_REG_FMT         P2P_WSS_CMD_REG "%s %u\n"           /* "REG <peer_id> <instance_id>\n" */
 
 
-#define P2P_WSS_RSP_REG_OK_SZ       (sizeof(P2P_WSS_RSP_REG_OK) - 1u)      /* "REG OK " */
-#define P2P_WSS_RSP_REG_OK_FMT      P2P_WSS_RSP_REG_OK "%u %u\n"            /* "REG OK <sync_max> <features>\n" */
-#define P2P_WSS_RSP_REG_FAIL_SZ     (sizeof(P2P_WSS_RSP_REG_FAIL) - 1u)     /* "REG FAIL " */
-#define P2P_WSS_RSP_REG_FAIL_FMT    P2P_WSS_RSP_REG_FAIL "%s\n"             /* "REG FAIL <reason>\n" */
+#define P2P_WSS_RSP_REG_OK_SZ       (sizeof(P2P_WSS_RSP_REG_OK) - 1u)   /* "REG OK " */
+#define P2P_WSS_RSP_REG_OK_FMT      P2P_WSS_RSP_REG_OK "%u %u\n"        /* "REG OK <sync_max> <features>\n" */
+#define P2P_WSS_RSP_REG_FAIL_SZ     (sizeof(P2P_WSS_RSP_REG_FAIL) - 1u) /* "REG FAIL " */
+#define P2P_WSS_RSP_REG_FAIL_FMT    P2P_WSS_RSP_REG_FAIL "%s\n"         /* "REG FAIL <reason>\n" */
 
 /* ────────────────────────────────────────────────────────────────────────────
  * OFF — 主动下线（客户端 → 服务器）

@@ -24,7 +24,7 @@
 // HTTP 握手 recv 缓冲大小（存放 HTTP 请求 header，流模式 recv_buf 使用 8K）
 #define CW_HTTP_BUF_FLAGS   BUF_FLAG_8192(0)
 // HTTP 应答最大长度（需容纳 101 Switching Protocols 响应）
-#define CW_HTTP_RESP_MAX    512
+#define CW_HTTP_RSP_MAX    512
 // WS 帧头最大字节数
 #define CW_WS_HDR_MAX       14
 // WS GUID（RFC 6455）
@@ -169,15 +169,15 @@ static buf16_item_t *cw_tcp_handle_handshake(ct_client_t *client,
     uint8_t saved = hdr_buf[hdr_len];
     hdr_buf[hdr_len] = '\0';
 
-    // 利用 recv_buf 前置空间（pos 之前）写入 HTTP 应答（最多 CW_HTTP_RESP_MAX 字节）
+    // 利用 recv_buf 前置空间（pos 之前）写入 HTTP 应答（最多 CW_HTTP_RSP_MAX 字节）
     // recv_buf->pos 是本次 header 起始偏移，前面的空间在流模式中是已消费区域，可以复用
     buf16_item_t *recv_buf = client->recv_buf;
     uint8_t *resp_buf;
     size_t resp_buf_sz;
-    if (recv_buf->pos >= CW_HTTP_RESP_MAX) {
+    if (recv_buf->pos >= CW_HTTP_RSP_MAX) {
         // pos 之前有足够空间，直接用
         resp_buf = ITEM2BUF(recv_buf);
-        resp_buf_sz = CW_HTTP_RESP_MAX;
+        resp_buf_sz = CW_HTTP_RSP_MAX;
     } else {
         // 空间不足，分配一个临时缓冲（正常不应发生，HTTP 请求一般不会在 recv_buf 起始处）
         // 分配 128 字节足够容纳 101 响应

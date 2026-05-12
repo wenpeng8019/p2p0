@@ -126,9 +126,9 @@ enum {
     LA_F82,  /* "Goodbye!\n"  [server.c] */
     LA_F83,  /* "Invalid port number %d (range: 1-65535)\n" (%d)  [server.c] */
     LA_F84,  /* "Invalid probe port %d (range: 0-65535)\n" (%d)  [server.c] */
-    LA_F85,  /* "MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n" (%d,%s,%u,%u)  [p2p_compact.c] */
-    LA_F86,  /* "MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n" (%s,%u,%u)  [p2p_compact.c] */
-    LA_F87,  /* "MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n" (%s,%s,%u,%d,%d,%u)  [p2p_compact.c] */
+    LA_F85,  /* "REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n" (%d,%s,%u,%u)  [p2p_compact.c] */
+    LA_F86,  /* "REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n" (%s,%u,%u)  [p2p_compact.c] */
+    LA_F87,  /* "REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n" (%s,%s,%u,%d,%d,%u)  [p2p_compact.c] */
     LA_F88,  /* "MSG_RSP gave up after %d retries, sid=%u (ses_id=%u)\n" (%d,%u,%u)  [p2p_compact.c] */
     LA_F89,  /* "MSG_RSP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n" (%s,%u,%d,%d,%u)  [p2p_compact.c] */
     LA_F90,  /* "NAT probe disabled (bind failed)\n"  [server.c] */

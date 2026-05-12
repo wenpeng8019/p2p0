@@ -5,10 +5,10 @@
  * 测试目标
  * ============================================================================
  * 验证 p2p_server 对 COMPACT 协议 MSG RPC 机制的处理逻辑：
- * - MSG_REQ: A→Server 请求
- * - MSG_REQ_ACK: Server→A 确认
- * - MSG_RESP: B→Server→A 响应转发
- * - MSG_RESP_ACK: A→Server 完成确认
+ * - REQ: A→Server 请求
+ * - REQ_ACK: Server→A 确认
+ * - RSP: B→Server→A 响应转发
+ * - RSP_ACK: A→Server 完成确认
  *
  * ============================================================================
  * 测试方法
@@ -25,34 +25,34 @@
  * ---------------------------------------------------------------------------
  *
  * 测试 1: msg_req_ack
- *   目标：验证 MSG_REQ 收到 MSG_REQ_ACK(status=0)
- *   方法：配对后 A 发送 MSG_REQ
+ *   目标：验证 REQ 收到 REQ_ACK(status=0)
+ *   方法：配对后 A 发送 REQ
  *   预期：
- *     - 收到 MSG_REQ_ACK(status=0)
- *     - server 日志含 "MSG_REQ: accepted"
+ *     - 收到 REQ_ACK(status=0)
+ *     - server 日志含 "REQ: accepted"
  *
  * 测试 2: msg_req_forwarded
- *   目标：验证 MSG_REQ 被转发给 B 端
- *   方法：配对后 A 发送 MSG_REQ，B 等待接收
+ *   目标：验证 REQ 被转发给 B 端
+ *   方法：配对后 A 发送 REQ，B 等待接收
  *   预期：
- *     - B 收到 MSG_REQ(flags=SIG_FLAG_RELAY)
+ *     - B 收到 REQ(flags=SIG_FLAG_RELAY)
  *     - 包含正确的 session_id、sid、msg、data
  *
  * 测试 3: msg_echo_response
  *   目标：验证 msg=0 自动 echo 响应（如果服务端实现）
- *   方法：A 发送 MSG_REQ(msg=0)，等待 RESP
+ *   方法：A 发送 REQ(msg=0)，等待 RSP
  *   说明：服务端可能不实现自动 echo，此测试可选
  *
  * 测试 4: msg_resp_forwarded
- *   目标：验证 MSG_RESP 被转发给 A 端
- *   方法：A 发送 REQ → B 收到 REQ → B 发送 RESP → A 收到 RESP
+ *   目标：验证 RSP 被转发给 A 端
+ *   方法：A 发送 REQ → B 收到 REQ → B 发送 RSP → A 收到 RSP
  *   预期：
- *     - A 收到 MSG_RESP
+ *     - A 收到 RSP
  *     - 包含 B 发送的 code 和 data
  *
  * 测试 5: msg_rpc_complete
  *   目标：验证完整 RPC 流程
- *   方法：A:REQ → S:REQ_ACK → B:REQ(relay) → B:RESP → A:RESP → A:RESP_ACK
+ *   方法：A:REQ → S:REQ_ACK → B:REQ(relay) → B:RSP → A:RSP → A:RSP_ACK
  *   预期：
  *     - server 日志含 "RPC complete"
  *     - 双方状态正确重置
@@ -62,21 +62,21 @@
  *
  * 测试 6: msg_req_peer_offline
  *   目标：验证对端离线时返回 status=1
- *   方法：A 单独注册（无 B）→ 发送 MSG_REQ
+ *   方法：A 单独注册（无 B）→ 发送 REQ
  *   预期：
- *     - MSG_REQ_ACK(status=1)
+ *     - REQ_ACK(status=1)
  *     - server 日志含 "not online"
  *
  * 测试 7: msg_req_bad_payload
- *   目标：验证 server 对畸形 MSG_REQ 包的防御
- *   方法：发送 payload 过短的 MSG_REQ 包
+ *   目标：验证 server 对畸形 REQ 包的防御
+ *   方法：发送 payload 过短的 REQ 包
  *   预期：
  *     - server 日志含 "bad payload"
  *     - 不影响正常配对
  *
  * 测试 8: msg_req_invalid_session
- *   目标：验证无效 session_id 的 MSG_REQ 处理
- *   方法：发送包含错误 session_id 的 MSG_REQ
+ *   目标：验证无效 session_id 的 REQ 处理
+ *   方法：发送包含错误 session_id 的 REQ
  *   预期：
  *     - 不收到 REQ_ACK
  *     - 不触发异常
@@ -86,7 +86,7 @@
  *
  * 测试 9: msg_req_retransmit
  *   目标：验证重传同一 sid 是幂等的
- *   方法：发送两次相同 sid 的 MSG_REQ
+ *   方法：发送两次相同 sid 的 REQ
  *   预期：
  *     - 两次都返回 REQ_ACK(status=0)
  *     - server 日志含 "retransmit"
@@ -234,7 +234,7 @@ static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
     return n;
 }
 
-// 构造 MSG_REQ 包
+// 构造 REQ 包
 // 协议: [hdr(4)][session_id(4)][sid(2)][msg(1)][data(N)]
 static int build_msg_req(uint8_t *buf, int buf_size, 
                          uint32_t session_id, uint16_t sid, 
@@ -266,14 +266,14 @@ static int build_msg_req(uint8_t *buf, int buf_size,
     return 11 + data_len;
 }
 
-// 构造 MSG_RESP 包
+// 构造 RSP 包
 // 协议: [hdr(4)][session_id(4)][sid(2)][code(1)][data(N)]
 static int build_msg_resp(uint8_t *buf, int buf_size,
                           uint32_t session_id, uint16_t sid,
                           uint8_t code, const uint8_t *data, int data_len) {
     if (buf_size < 4 + 4 + 2 + 1 + data_len) return -1;
     
-    buf[0] = SIG_PKT_RESP;
+    buf[0] = SIG_PKT_RSP;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
@@ -298,13 +298,13 @@ static int build_msg_resp(uint8_t *buf, int buf_size,
     return 11 + data_len;
 }
 
-// 构造 MSG_RESP_ACK 包
+// 构造 RSP_ACK 包
 // 协议: [hdr(4)][session_id(4)][sid(2)]
 static int build_msg_resp_ack(uint8_t *buf, int buf_size,
                                uint32_t session_id, uint16_t sid) {
     if (buf_size < 4 + 4 + 2) return -1;
     
-    buf[0] = SIG_PKT_RESP_ACK;
+    buf[0] = SIG_PKT_RSP_ACK;
     buf[1] = 0;  // flags
     buf[2] = 0;  // seq high
     buf[3] = 0;  // seq low
@@ -321,7 +321,7 @@ static int build_msg_resp_ack(uint8_t *buf, int buf_size,
     return 10;
 }
 
-// MSG_REQ_ACK 解析结果
+// REQ_ACK 解析结果
 typedef struct {
     int received;
     uint32_t session_id;
@@ -329,7 +329,7 @@ typedef struct {
     uint8_t status;
 } msg_req_ack_t;
 
-// 解析 MSG_REQ_ACK 包
+// 解析 REQ_ACK 包
 static void parse_msg_req_ack(const uint8_t *buf, int len, msg_req_ack_t *ack) {
     memset(ack, 0, sizeof(*ack));
     
@@ -349,7 +349,7 @@ static void parse_msg_req_ack(const uint8_t *buf, int len, msg_req_ack_t *ack) {
     ack->status = buf[10];
 }
 
-// MSG_REQ 解析结果 (B 端收到的 relay 包)
+// REQ 解析结果 (B 端收到的 relay 包)
 typedef struct {
     int received;
     uint32_t session_id;
@@ -360,7 +360,7 @@ typedef struct {
     int data_len;
 } msg_req_relay_t;
 
-// 解析 MSG_REQ (relay) 包
+// 解析 REQ (relay) 包
 static void parse_msg_req_relay(const uint8_t *buf, int len, msg_req_relay_t *req) {
     memset(req, 0, sizeof(*req));
     
@@ -387,7 +387,7 @@ static void parse_msg_req_relay(const uint8_t *buf, int len, msg_req_relay_t *re
     }
 }
 
-// MSG_RESP 解析结果 (A 端收到的转发包)
+// RSP 解析结果 (A 端收到的转发包)
 typedef struct {
     int received;
     uint32_t session_id;
@@ -398,12 +398,12 @@ typedef struct {
     int data_len;
 } msg_resp_t;
 
-// 解析 MSG_RESP 包
+// 解析 RSP 包
 static void parse_msg_resp(const uint8_t *buf, int len, msg_resp_t *resp) {
     memset(resp, 0, sizeof(*resp));
     
     if (len < 11) return;  // header(4) + session_id(4) + sid(2) + code(1)
-    if (buf[0] != SIG_PKT_RESP) return;
+    if (buf[0] != SIG_PKT_RSP) return;
     
     resp->received = 1;
     resp->flags = buf[1];
@@ -474,7 +474,7 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
     return 0;
 }
 
-// 发送 MSG_REQ 并等待 MSG_REQ_ACK
+// 发送 REQ 并等待 REQ_ACK
 static int send_msg_req_and_wait_ack(sock_t sock, uint32_t session_id, uint16_t sid,
                                       uint8_t msg, const uint8_t *data, int data_len,
                                       msg_req_ack_t *ack_out) {
@@ -506,7 +506,7 @@ static int send_msg_req_and_wait_ack(sock_t sock, uint32_t session_id, uint16_t 
     return (n >= 11 && recv_buf[0] == SIG_PKT_REQ_ACK);
 }
 
-// 发送 MSG_RESP
+// 发送 RSP
 static void send_msg_resp(sock_t sock, uint32_t session_id, uint16_t sid,
                           uint8_t code, const uint8_t *data, int data_len) {
     uint8_t pkt[512];
@@ -522,7 +522,7 @@ static void send_msg_resp(sock_t sock, uint32_t session_id, uint16_t sid,
            (struct sockaddr*)&server_addr, sizeof(server_addr));
 }
 
-// 发送 MSG_RESP_ACK
+// 发送 RSP_ACK
 static void send_msg_resp_ack(sock_t sock, uint32_t session_id, uint16_t sid) {
     uint8_t pkt[32];
     int len = build_msg_resp_ack(pkt, sizeof(pkt), session_id, sid);
@@ -537,7 +537,7 @@ static void send_msg_resp_ack(sock_t sock, uint32_t session_id, uint16_t sid) {
            (struct sockaddr*)&server_addr, sizeof(server_addr));
 }
 
-// 等待接收 MSG_REQ (relay)
+// 等待接收 REQ (relay)
 static int wait_msg_req_relay(sock_t sock, msg_req_relay_t *req_out) {
     P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
     uint8_t recv_buf[512];
@@ -559,7 +559,7 @@ static int wait_msg_req_relay(sock_t sock, msg_req_relay_t *req_out) {
     return 0;
 }
 
-// 等待接收 MSG_RESP
+// 等待接收 RSP
 static int wait_msg_resp(sock_t sock, msg_resp_t *resp_out) {
     P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
     uint8_t recv_buf[512];
@@ -571,7 +571,7 @@ static int wait_msg_resp(sock_t sock, msg_resp_t *resp_out) {
         ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
                               (struct sockaddr*)&from, &from_len);
         
-        if (n >= 15 && recv_buf[0] == SIG_PKT_RESP) {
+        if (n >= 15 && recv_buf[0] == SIG_PKT_RSP) {
             if (resp_out) {
                 parse_msg_resp(recv_buf, (int)n, resp_out);
             }
@@ -599,7 +599,7 @@ static void drain_pending_packets(sock_t sock) {
 // 测试用例
 ///////////////////////////////////////////////////////////////////////////////
 
-// 测试 1: MSG_REQ 收到 MSG_REQ_ACK(status=0)
+// 测试 1: REQ 收到 REQ_ACK(status=0)
 static void test_msg_req_ack(void) {
     const char *TEST_NAME = "msg_req_ack";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -633,7 +633,7 @@ static void test_msg_req_ack(void) {
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
-    // Alice 发送 MSG_REQ
+    // Alice 发送 REQ
     msg_req_ack_t ack;
     uint8_t req_data[] = "hello";
     int got_ack = send_msg_req_and_wait_ack(sock_alice, session_alice, 1, 
@@ -643,24 +643,24 @@ static void test_msg_req_ack(void) {
     P_sock_close(sock_bob);
     
     if (!got_ack) {
-        TEST_FAIL(TEST_NAME, "no MSG_REQ_ACK received");
+        TEST_FAIL(TEST_NAME, "no REQ_ACK received");
         return;
     }
     
     if (ack.status != 0) {
-        TEST_FAIL(TEST_NAME, "MSG_REQ_ACK status != 0");
+        TEST_FAIL(TEST_NAME, "REQ_ACK status != 0");
         return;
     }
     
     if (ack.session_id != session_alice || ack.sid != 1) {
-        TEST_FAIL(TEST_NAME, "MSG_REQ_ACK session_id or sid mismatch");
+        TEST_FAIL(TEST_NAME, "REQ_ACK session_id or sid mismatch");
         return;
     }
     
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 2: MSG_REQ 被转发给 B 端
+// 测试 2: REQ 被转发给 B 端
 static void test_msg_req_forwarded(void) {
     const char *TEST_NAME = "msg_req_forwarded";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -694,12 +694,12 @@ static void test_msg_req_forwarded(void) {
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
-    // Alice 发送 MSG_REQ
+    // Alice 发送 REQ
     uint8_t req_data[] = "test_message";
     msg_req_ack_t ack;
     send_msg_req_and_wait_ack(sock_alice, session_alice, 1, 0x10, req_data, sizeof(req_data) - 1, &ack);
     
-    // Bob 等待 MSG_REQ relay
+    // Bob 等待 REQ relay
     msg_req_relay_t relay_req;
     int got_relay = wait_msg_req_relay(sock_bob, &relay_req);
     
@@ -707,38 +707,38 @@ static void test_msg_req_forwarded(void) {
     P_sock_close(sock_bob);
     
     if (!got_relay) {
-        TEST_FAIL(TEST_NAME, "Bob did not receive MSG_REQ relay");
+        TEST_FAIL(TEST_NAME, "Bob did not receive REQ relay");
         return;
     }
     
     // 验证 flags 含 RELAY 标志
     if (!(relay_req.flags & SIG_FLAG_RELAY)) {
-        TEST_FAIL(TEST_NAME, "MSG_REQ relay missing RELAY flag");
+        TEST_FAIL(TEST_NAME, "REQ relay missing RELAY flag");
         return;
     }
     
     // 验证 session_id 是 Bob 的
     if (relay_req.session_id != session_bob) {
-        TEST_FAIL(TEST_NAME, "MSG_REQ relay session_id mismatch");
+        TEST_FAIL(TEST_NAME, "REQ relay session_id mismatch");
         return;
     }
     
     // 验证 msg 和 data
     if (relay_req.msg != 0x10) {
-        TEST_FAIL(TEST_NAME, "MSG_REQ relay msg mismatch");
+        TEST_FAIL(TEST_NAME, "REQ relay msg mismatch");
         return;
     }
     
     if (relay_req.data_len != (int)(sizeof(req_data) - 1) || 
         memcmp(relay_req.data, req_data, relay_req.data_len) != 0) {
-        TEST_FAIL(TEST_NAME, "MSG_REQ relay data mismatch");
+        TEST_FAIL(TEST_NAME, "REQ relay data mismatch");
         return;
     }
     
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 3: MSG_RESP 被转发给 A 端
+// 测试 3: RSP 被转发给 A 端
 static void test_msg_resp_forwarded(void) {
     const char *TEST_NAME = "msg_resp_forwarded";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -772,20 +772,20 @@ static void test_msg_resp_forwarded(void) {
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
-    // Alice 发送 MSG_REQ
+    // Alice 发送 REQ
     uint8_t req_data[] = "ping";
     msg_req_ack_t ack;
     send_msg_req_and_wait_ack(sock_alice, session_alice, 1, 0x20, req_data, sizeof(req_data) - 1, &ack);
     
-    // Bob 等待并接收 MSG_REQ relay
+    // Bob 等待并接收 REQ relay
     msg_req_relay_t relay_req;
     wait_msg_req_relay(sock_bob, &relay_req);
     
-    // Bob 发送 MSG_RESP
+    // Bob 发送 RSP
     uint8_t resp_data[] = "pong";
     send_msg_resp(sock_bob, session_bob, relay_req.sid, 0x01, resp_data, sizeof(resp_data) - 1);
     
-    // Alice 等待 MSG_RESP
+    // Alice 等待 RSP
     msg_resp_t resp;
     int got_resp = wait_msg_resp(sock_alice, &resp);
     
@@ -793,25 +793,25 @@ static void test_msg_resp_forwarded(void) {
     P_sock_close(sock_bob);
     
     if (!got_resp) {
-        TEST_FAIL(TEST_NAME, "Alice did not receive MSG_RESP");
+        TEST_FAIL(TEST_NAME, "Alice did not receive RSP");
         return;
     }
     
     // 验证 session_id 是 Alice 的
     if (resp.session_id != session_alice) {
-        TEST_FAIL(TEST_NAME, "MSG_RESP session_id mismatch");
+        TEST_FAIL(TEST_NAME, "RSP session_id mismatch");
         return;
     }
     
     // 验证 code 和 data
     if (resp.code != 0x01) {
-        TEST_FAIL(TEST_NAME, "MSG_RESP code mismatch");
+        TEST_FAIL(TEST_NAME, "RSP code mismatch");
         return;
     }
     
     if (resp.data_len != (int)(sizeof(resp_data) - 1) ||
         memcmp(resp.data, resp_data, resp.data_len) != 0) {
-        TEST_FAIL(TEST_NAME, "MSG_RESP data mismatch");
+        TEST_FAIL(TEST_NAME, "RSP data mismatch");
         return;
     }
     
@@ -852,7 +852,7 @@ static void test_msg_rpc_complete(void) {
     drain_pending_packets(sock_alice);
     drain_pending_packets(sock_bob);
     
-    // 1. Alice 发送 MSG_REQ
+    // 1. Alice 发送 REQ
     uint8_t req_data[] = "request";
     msg_req_ack_t ack;
     int got_ack = send_msg_req_and_wait_ack(sock_alice, session_alice, 1, 
@@ -860,33 +860,33 @@ static void test_msg_rpc_complete(void) {
     if (!got_ack || ack.status != 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "MSG_REQ_ACK failed");
+        TEST_FAIL(TEST_NAME, "REQ_ACK failed");
         return;
     }
     
-    // 2. Bob 收到 MSG_REQ relay
+    // 2. Bob 收到 REQ relay
     msg_req_relay_t relay_req;
     if (!wait_msg_req_relay(sock_bob, &relay_req)) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob did not receive MSG_REQ relay");
+        TEST_FAIL(TEST_NAME, "Bob did not receive REQ relay");
         return;
     }
     
-    // 3. Bob 发送 MSG_RESP
+    // 3. Bob 发送 RSP
     uint8_t resp_data[] = "response";
     send_msg_resp(sock_bob, session_bob, relay_req.sid, 0x00, resp_data, sizeof(resp_data) - 1);
     
-    // 4. Alice 收到 MSG_RESP
+    // 4. Alice 收到 RSP
     msg_resp_t resp;
     if (!wait_msg_resp(sock_alice, &resp)) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Alice did not receive MSG_RESP");
+        TEST_FAIL(TEST_NAME, "Alice did not receive RSP");
         return;
     }
     
-    // 5. Alice 发送 MSG_RESP_ACK
+    // 5. Alice 发送 RSP_ACK
     send_msg_resp_ack(sock_alice, session_alice, resp.sid);
     
     P_usleep(100 * 1000);  // 等待 server 处理
@@ -927,7 +927,7 @@ static void test_msg_req_peer_offline(void) {
         return;
     }
     
-    // Alice 发送 MSG_REQ（对端不在线）
+    // Alice 发送 REQ（对端不在线）
     msg_req_ack_t ack;
     uint8_t req_data[] = "test";
     int got_ack = send_msg_req_and_wait_ack(sock_alice, session_alice, 1, 
@@ -936,20 +936,20 @@ static void test_msg_req_peer_offline(void) {
     P_sock_close(sock_alice);
     
     if (!got_ack) {
-        TEST_FAIL(TEST_NAME, "no MSG_REQ_ACK received");
+        TEST_FAIL(TEST_NAME, "no REQ_ACK received");
         return;
     }
     
     // status 应该是 1（对端不在线）
     if (ack.status != 1) {
-        TEST_FAIL(TEST_NAME, "MSG_REQ_ACK status should be 1 (peer offline)");
+        TEST_FAIL(TEST_NAME, "REQ_ACK status should be 1 (peer offline)");
         return;
     }
     
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 6: 畸形 MSG_REQ 包
+// 测试 6: 畸形 REQ 包
 static void test_msg_req_bad_payload(void) {
     const char *TEST_NAME = "msg_req_bad_payload";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -961,7 +961,7 @@ static void test_msg_req_bad_payload(void) {
         return;
     }
     
-    // 发送 payload 过短的 MSG_REQ 包
+    // 发送 payload 过短的 REQ 包
     uint8_t bad_pkt[16];
     bad_pkt[0] = SIG_PKT_REQ;
     bad_pkt[1] = 0;
@@ -991,7 +991,7 @@ static void test_msg_req_bad_payload(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 7: 无效 session_id 的 MSG_REQ
+// 测试 7: 无效 session_id 的 REQ
 static void test_msg_req_invalid_session(void) {
     const char *TEST_NAME = "msg_req_invalid_session";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -1003,7 +1003,7 @@ static void test_msg_req_invalid_session(void) {
         return;
     }
     
-    // 发送虚假 session_id 的 MSG_REQ
+    // 发送虚假 session_id 的 REQ
     uint64_t fake_session = 0xDEADBEEF12345678ULL;
     msg_req_ack_t ack;
     uint8_t req_data[] = "test";

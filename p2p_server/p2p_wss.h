@@ -33,8 +33,8 @@
  *   帧格式: [type(1)][session_id(4)][payload(N)]，服务器重写 session_id 并透传
  *     PACKET (0x01): [0x01][ses_id(4)][p2p_hdr(4)][data(N)]  中继 P2P 包
  *     REQ    (0x02): [0x02][ses_id(4)][sid(2)][msg(1)][data(N)]  RPC 请求
- *     RESP   (0x03): [0x03][ses_id(4)][sid(2)][code(1)][data(N)] RPC 响应
- *   错误（服务器生成伪 RESP）:
+ *     RSP   (0x03): [0x03][ses_id(4)][sid(2)][code(1)][data(N)] RPC 响应
+ *   错误（服务器生成伪 RSP）:
  *     code=0xFF: 对端离线 (P2P_RPC_ERR_PEER_OFF)
  *     code=0xFE: 转发超时 (P2P_RPC_ERR_TIMEOUT)
  */
@@ -69,7 +69,7 @@ typedef struct wss_session {
     uint8_t                         pkt_peer_send_cnt;
 
     /* MSG RPC 状态（与 relay_session_t 一致，独立于 SYNC 通道） */
-    uint16_t                        rpc_pending_sid;        /* 0=空闲, 非零=等待 RESP 的 REQ sid */
+    uint16_t                        rpc_pending_sid;        /* 0=空闲, 非零=等待 RSP 的 REQ sid */
     uint64_t                        rpc_sent_time;          /* REQ 转发时间戳（用于超时检测） */
     struct wss_session*             rpc_pending_next;       /* RPC 超时链表指针（-1=尾部） */
 } wss_session_t;

@@ -335,15 +335,15 @@ static void on_response(p2p_handle_t hdl, uint16_t sid, uint8_t msg, const void 
         const char *err_msg = "unknown error";
         if (msg == 0xFE) err_msg = "peer offline";
         else if (msg == 0xFF) err_msg = "timeout";
-        snprintf(line, sizeof(line), "[RPC RESP] sid=%u ERROR: %s (code=%u)", sid, err_msg, msg);
+        snprintf(line, sizeof(line), "[RPC RSP] sid=%u ERROR: %s (code=%u)", sid, err_msg, msg);
     } else if (len > 0 && data) {
         char buf[512];
         int copy_len = len < (int)sizeof(buf) - 1 ? len : (int)sizeof(buf) - 1;
         memcpy(buf, data, copy_len);
         buf[copy_len] = '\0';
-        snprintf(line, sizeof(line), "[RPC RESP] sid=%u code=%u: %s", sid, msg, buf);
+        snprintf(line, sizeof(line), "[RPC RSP] sid=%u code=%u: %s", sid, msg, buf);
     } else {
-        snprintf(line, sizeof(line), "[RPC RESP] sid=%u code=%u (no data)", sid, msg);
+        snprintf(line, sizeof(line), "[RPC RSP] sid=%u code=%u (no data)", sid, msg);
     }
     tui_println(P2P_LOG_LEVEL_INFO, line);
 }

@@ -796,8 +796,10 @@ static void compact_handle_req(struct sockaddr_in *from, p2p_packet_hdr_t *hdr,
 
     if (!PEER_ONLINE(&requester->base)) {
 
+        const char *peer_id = PEER_VALID(requester->base.peer)
+            ? requester->base.peer->client->local_peer_id : "N/A";
         print("W:", LA_F("%s: peer '%s' not online, rejecting sid=%u\n", LA_F62, 62),
-               PROTO, requester->base.peer->client->local_peer_id, sid);
+               PROTO, peer_id, sid);
 
         compact_session_send_req_ack(requester, sid, 1);
         return;
@@ -1220,8 +1222,11 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
 
         if (q->sync0_retry >= SYN0_MAX_RETRY) {
 
+            const char *remote_id = PEER_ONLINE(&q->base) ? q->base.peer->client->local_peer_id
+                                    : (q->base.pair->sessions[0] == &q->base ? q->base.pair->peer_id[1]
+                                                                              : q->base.pair->peer_id[0]);
             print("W:", LA_F("SYNC retransmit failed: %s <-> %s (gave up after %d tries)\n", LA_F104, 104),
-                   q->base.client->local_peer_id, q->base.peer->client->local_peer_id, q->sync0_retry);
+                   q->base.client->local_peer_id, remote_id, q->sync0_retry);
 
             q->sync0_pending_next = NULL;
             if (q->sync0_base_index == 0) {
@@ -1238,7 +1243,11 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
 
             // 状态 0：重传 SYN0_ACK，等待客户端二次确认
             if (q->sync0_acked == 0) {
-                compact_send_syn0_ack(q, q->base.peer->client->local_peer_id, PEER_ONLINE(&q->base));
+                // 从 pair 获取 remote_peer_id（避免 peer 为 NULL 时的解引用）
+                const char *remote_id = PEER_ONLINE(&q->base) ? q->base.peer->client->local_peer_id
+                                        : (q->base.pair->sessions[0] == &q->base ? q->base.pair->peer_id[1]
+                                                                                  : q->base.pair->peer_id[0]);
+                compact_send_syn0_ack(q, remote_id, PEER_ONLINE(&q->base));
             }
             // 状态 1：重传 SYN0，等待客户端确认收到该（来自对端的）SYN0
             else {
@@ -1268,7 +1277,10 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
             }
 
             print("V:", LA_F("SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%u)\n", LA_F103, 103),
-                   COMPACT_CLIENT(q)->base.local_peer_id, q->base.peer->client->local_peer_id,
+                   COMPACT_CLIENT(q)->base.local_peer_id,
+                   PEER_ONLINE(&q->base) ? q->base.peer->client->local_peer_id
+                                         : (q->base.pair->sessions[0] == &q->base ? q->base.pair->peer_id[1]
+                                                                                   : q->base.pair->peer_id[0]),
                    q->sync0_retry, SYN0_MAX_RETRY, q->base.session_id);
 
             if (g_sync0_pending_head == q) return;

@@ -528,7 +528,7 @@ void handle_alive_ack(struct p2p_instance *inst, uint64_t now) {
 }
 
 /*
- * 处理 STATUS（会话级，SYNC0/SYNC/DATA/REQ/RESP 等会话相关的状态）
+ * 处理 STATUS（会话级，SYNC0/SYNC/DATA/REQ/RSP 等会话相关的状态）
  *
  * 由 dispatch_proto 解析后调用
  */
@@ -792,7 +792,7 @@ static void handle_relay_fin(struct p2p_session *s, const uint8_t *payload, int 
 /*
  * 处理服务器转发的 DATA/ACK/CRYPTO/... 包
  *
- * 包头: [type(P2P_RLY_PACKET) | size(2)]
+ * 包头: [type(P2P_RLY_PKT) | size(2)]
  * 负载: [session_id(4)][P2P hdr(4)][payload(N)]
  * 注: [session_id(4)] 已剥离
  *
@@ -1108,11 +1108,11 @@ static void dispatch_proto(struct p2p_instance *inst, uint64_t now) {
             case P2P_RLY_FIN:
                 PROTO = "FIN"; payload_min = P2P_RLY_FIN_PSZ; handler = handle_relay_fin; break;
             case P2P_RLY_PKT:
-                PROTO = "PACKET"; payload_min = P2P_RLY_PKT_PSZ(0); handler = handle_relay_packet; break;
+                PROTO = "PKT"; payload_min = P2P_RLY_PKT_PSZ(0); handler = handle_relay_packet; break;
             case P2P_RLY_REQ:
-                PROTO = "REQ"; payload_min = P2P_RLY_REQ_MIN_PSZ; handler = handle_relay_req; break;
+                PROTO = "REQ"; payload_min = P2P_RLY_RPC_MIN_PSZ; handler = handle_relay_req; break;
             case P2P_RLY_RSP:
-                PROTO = "RESP"; payload_min = P2P_RLY_RSP_MIN_PSZ; handler = handle_relay_resp; break;
+                PROTO = "RSP"; payload_min = P2P_RLY_RPC_MIN_PSZ; handler = handle_relay_resp; break;
             default:
                 print("W:", LA_F("[R] Unknown proto type %d\n", LA_F454, 454), sig_ctx->hdr.type);
                 return;
@@ -1362,7 +1362,7 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s) {
 /*
  * 通过 RELAY 服务器转发数据包（DATA/ACK/CRYPTO/REACH/CONN/CONN_ACK）
  *
- * 包头: [type(P2P_RLY_PACKET) | size(2)]
+ * 包头: [type(P2P_RLY_PKT) | size(2)]
  * 负载: [session_id(4)][P2P packet header(4)][payload(N)]
  * 内层 P2P hdr.type 区分实际包类型。
  *
@@ -1384,7 +1384,7 @@ ret_t p2p_signal_relay_packet(struct p2p_session *s,
         return E_BUSY;
     }
 
-    // 所有类型统一使用 P2P_RLY_PACKET 隧道，内层 P2P hdr 保留真实类型
+    // 所有类型统一使用 P2P_RLY_PKT 隧道，内层 P2P hdr 保留真实类型
     const char *proto;
     switch (type) {
         case P2P_PKT_DATA:     proto = "DATA";     break;
@@ -1499,7 +1499,7 @@ ret_t p2p_signal_relay_response(struct p2p_session *s,
     }
 
     p2p_relay_ctx_t *sig_ctx = &s->inst->sig_ctx.relay;
-    ret_t ret = tcp_send(sig_ctx, "RESP", P2P_RLY_RSP, payload, n, P_tick_ms());
+    ret_t ret = tcp_send(sig_ctx, "RSP", P2P_RLY_RSP, payload, n, P_tick_ms());
     if (ret != E_NONE) return ret;
 
     print("I:", LA_F("%s resp (ses_id=%u), sid=%u code=%u len=%d\n", LA_F51, 51), TASK_RPC,

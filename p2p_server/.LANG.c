@@ -126,9 +126,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F82] = "% Goodbye!\n",  /* SID:82 */
     [LA_F83] = "Invalid port number %d (range: 1-65535)\n",  /* SID:83 */
     [LA_F84] = "Invalid probe port %d (range: 0-65535)\n",  /* SID:84 */
-    [LA_F85] = "MSG_REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n",  /* SID:85 */
-    [LA_F86] = "MSG_REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n",  /* SID:86 */
-    [LA_F87] = "MSG_REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:87 */
+    [LA_F85] = "REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n",  /* SID:85 */
+    [LA_F86] = "REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n",  /* SID:86 */
+    [LA_F87] = "REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:87 */
     [LA_F88] = "MSG_RSP gave up after %d retries, sid=%u (ses_id=%u)\n",  /* SID:88 */
     [LA_F89] = "MSG_RSP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:89 */
     [LA_F90] = "% NAT probe disabled (bind failed)\n",  /* SID:90 */

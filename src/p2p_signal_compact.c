@@ -18,8 +18,8 @@
 #define NAT_PROBE_MAX_RETRIES           3       /* NAT_PROBE 最大发送次数 */
 #define NAT_PROBE_INTERVAL_MS           1000    /* NAT_PROBE 重发间隔 */
 
-#define MSG_REQ_INTERVAL_MS             500     /* MSG_REQ 重发间隔 */
-#define MSG_REQ_MAX_RETRIES             5       /* MSG_REQ 最大重发次数，超出后报超时失败 */
+#define REQ_INTERVAL_MS             500     /* REQ 重发间隔 */
+#define REQ_MAX_RETRIES             5       /* REQ 最大重发次数，超出后报超时失败 */
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -440,7 +440,7 @@ static void resend_candidates_and_fin(struct p2p_session *s, uint64_t now) {
 /*
  * 通过服务器向对端发送 RPC 消息请求
  *
- * 包头: [type=SIG_PKT_MSG_REQ | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_REQ | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: 本端会话 ID（来自 REGISTER_ACK）
  *   - sid: 序列号（2字节，网络字节序），用于匹配响应
@@ -448,7 +448,7 @@ static void resend_candidates_and_fin(struct p2p_session *s, uint64_t now) {
  *   - data: 消息数据（可选）
  */
 static void send_rpc_req(struct p2p_session *s, uint64_t now) {
-    const char* PROTO = "MSG_REQ";
+    const char* PROTO = "REQ";
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
@@ -471,15 +471,15 @@ static void send_rpc_req(struct p2p_session *s, uint64_t now) {
 /*
  * （对端）通过服务器向源端回复 RPC 消息响应
  *
- * 包头: [type=SIG_PKT_MSG_RESP | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_RSP | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
  *   - session_id: A端的会话 ID（网络字节序）
- *   - sid: 序列号，必顾与 MSG_REQ 中的 sid 一致
+ *   - sid: 序列号，必顾与 REQ 中的 sid 一致
  *   - code: 响应码
  *   - data: 响应数据
  */
 static void send_rpc_resp(struct p2p_session *s, uint64_t now) {
-    const char* PROTO = "MSG_RESP";
+    const char* PROTO = "RSP";
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
@@ -1098,10 +1098,10 @@ void compact_on_fin(struct p2p_session *s, uint16_t seq, uint8_t flags,
 }
 
 /*
- * 处理 MSG_REQ，（服务器代理转发的）源端消息请求
+ * 处理 REQ，（服务器代理转发的）源端消息请求
  * 说明: B端收到服务器转发的消息请求，A端发出的原始请求(flags=0)不会到达客户端
  *
- * 包头: [type=SIG_PKT_MSG_REQ | flags=SIG_FLAG_RELAY | seq=0]
+ * 包头: [type=SIG_PKT_REQ | flags=SIG_FLAG_RELAY | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: A端的会话 ID（网络字节序，64位）
  *   - sid: 序列号（2字节，网络字节序）
@@ -1112,7 +1112,7 @@ void compact_on_fin(struct p2p_session *s, uint16_t seq, uint8_t flags,
 void compact_on_request(struct p2p_session *s, uint16_t seq, uint8_t flags,
                         const uint8_t *payload, int len, uint64_t now) {
     (void)seq; (void)now;
-    const char* PROTO = "MSG_REQ";
+    const char* PROTO = "REQ";
 
     // 客户端收到 req 肯定都是 Server 转发过来，而不是对方直接发来的原始请求
     if (!(flags & SIG_FLAG_RELAY)) {
@@ -1168,20 +1168,20 @@ void compact_on_request(struct p2p_session *s, uint16_t seq, uint8_t flags,
 }
 
 /*
- * 处理 MSG_REQ_ACK，服务器对自己发起的请求的确认
+ * 处理 REQ_ACK，服务器对自己发起的请求的确认
  * 说明: 该请求已经被服务器代理接管，并确保完成向对端的转发
- * 所以收到该消息后，自己就可以停止重发请求了，接下来只需要等待 MSG_RESP 即可知道请求的最终结果
+ * 所以收到该消息后，自己就可以停止重发请求了，接下来只需要等待 RSP 即可知道请求的最终结果
  *
- * 包头: [type=SIG_PKT_MSG_REQ_ACK | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_REQ_ACK | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][status(1)]
  *   - session_id: A端的会话 ID（用于验证响应合法性）
- *   - sid: 序列号，与 MSG_REQ 中的 sid 对应
+ *   - sid: 序列号，与 REQ 中的 sid 对应
  *   - status: 0=已缓存开始中转, 1=B不在线（失败）
  */
 void compact_on_request_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
                              const uint8_t *payload, int len, uint64_t now) {
     (void)seq; (void)flags; (void)len; (void)now;
-    const char* PROTO = "MSG_REQ_ACK";
+    const char* PROTO = "REQ_ACK";
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
@@ -1201,7 +1201,7 @@ void compact_on_request_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
     if (sess_ctx->req_msg == 0 && sess_ctx->req_data_len == 0) {
         probe_compact_on_req_ack(s, sid, status);
         if (status == 0)
-            sess_ctx->req_state = 2/* waiting RESP */;
+            sess_ctx->req_state = 2/* waiting RSP */;
         else {
             sess_ctx->req_state = 0;
             sess_ctx->req_sid   = 0;
@@ -1209,9 +1209,9 @@ void compact_on_request_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         return;
     }
 
-    // 成功：服务器已收到请求并开始向对端中转，停止重发，等待 MSG_RESP
+    // 成功：服务器已收到请求并开始向对端中转，停止重发，等待 RSP
     if (status == 0) {
-        sess_ctx->req_state = 2/* waiting RESP */;
+        sess_ctx->req_state = 2/* waiting RSP */;
         print("V:", LA_F("%s accepted (ses_id=%u), waiting for response (sid=%u)\n", LA_F45, 45), PROTO, s->id, sess_ctx->req_sid);
     }
     // 对端不在线：请求失败，通知上层
@@ -1230,14 +1230,14 @@ void compact_on_request_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 }
 
 /*
- * 处理 MSG_RESP，服务器代理转发的，对端（对自己向对端请求的）消息响应
+ * 处理 RSP，服务器代理转发的，对端（对自己向对端请求的）消息响应
  *
- * 包头: [type=SIG_PKT_MSG_RESP | flags=见下 | seq=0]
+ * 包头: [type=SIG_PKT_RSP | flags=见下 | seq=0]
  * 负载:
  * > [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)] （正常响应）
  * > [session_id(P2P_SESS_ID_SZ)][sid(2)]（错误响应）
  *   - session_id: A端的会话 ID（用于验证响应合法性）
- *   - sid: 序列号，与 MSG_REQ 中的 sid 对应
+ *   - sid: 序列号，与 REQ 中的 sid 对应
  *   - code: 响应消息 ID（正常响应时）
  *   - data: 响应数据（正常响应时）
  *   - flags: 0=正常响应（B端返回的数据）
@@ -1247,20 +1247,20 @@ void compact_on_request_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
                         const uint8_t *payload, int len, uint64_t now) {
     (void)seq;
-    const char* PROTO = "RESP";
+    const char* PROTO = "RSP";
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
     uint16_t sid = nget_s(payload + P2P_SESS_ID_SZ);
 
     /*
-     * 发送 MSG_RESP_ACK 确认包
+     * 发送 RSP_ACK 确认包
      * 服务器收到该确认后，将会停止重发该响应到本地，即结束整个请求-响应流程
      *
-     * 包头: [type=SIG_PKT_MSG_RESP_ACK | flags=0 | seq=0]
+     * 包头: [type=SIG_PKT_RSP_ACK | flags=0 | seq=0]
      * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)]
      *   - session_id: A端的会话 ID（用于 O(1) 哈希查找）
-     *   - sid: 序列号，与 MSG_RESP 中的 sid 一致
+     *   - sid: 序列号，与 RSP 中的 sid 一致
      * 说明: A端确认收到B端的响应，幂等操作，即使已处理过也补发
      */
     {
@@ -1268,14 +1268,14 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
         nwrite_l(ack + n, s->id); n += P2P_SESS_ID_SZ;
         nwrite_s(ack + n, sid); n += 2;
 
-        err_t err = udp_send(s->inst, "RESP_ACK", SIG_PKT_RSP_ACK, 0, 0, ack, n, now);
+        err_t err = udp_send(s->inst, "RSP_ACK", SIG_PKT_RSP_ACK, 0, 0, ack, n, now);
         if (err == E_NONE) {
-            print("V:", LA_F("%s sent (ses_id=%u), sid=%u\n", LA_F54, 54), "RESP_ACK", s->id, sid);
+            print("V:", LA_F("%s sent (ses_id=%u), sid=%u\n", LA_F54, 54), "RSP_ACK", s->id, sid);
         }
     }
 
     // 仅命中当前挂起请求时，才需要继续解析响应内容
-    if (!(sess_ctx->req_state == 2/* waiting RESP */ && sess_ctx->req_sid == sid)) {
+    if (!(sess_ctx->req_state == 2/* waiting RSP */ && sess_ctx->req_sid == sid)) {
         print("V:", LA_F("%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n", LA_F131, 131),
               PROTO, sid, sess_ctx->req_sid, (int)sess_ctx->req_state);
         return;
@@ -1332,18 +1332,18 @@ void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
 }
 
 /*
- * 处理 MSG_RESP_ACK，服务器对自己（经由服务器代理）向源方发出的请求的响应的确认
+ * 处理 RSP_ACK，服务器对自己（经由服务器代理）向源方发出的请求的响应的确认
  * 收到该确认后，自己就不会再重发 response 了，且可以记录该 sid 已完成
  *
- * 包头: [type=SIG_PKT_MSG_RESP_ACK | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_RSP_ACK | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)]
  *   - session_id: B端的会话 ID（用于 O(1) 哈希查找）
- *   - sid: 序列号，与 MSG_RESP 中的 sid 对应
+ *   - sid: 序列号，与 RSP 中的 sid 对应
  */
 void compact_on_response_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
                              const uint8_t *payload, int len, uint64_t now) {
     (void)seq; (void)flags; (void)len; (void)now;
-    const char* PROTO = "MSG_RESP_ACK";
+    const char* PROTO = "RSP_ACK";
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
@@ -1352,7 +1352,7 @@ void compact_on_response_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
         print("V:", LA_F("%s: ignored for sid=%u (current sid=%u)\n", LA_F140, 140), PROTO, sid, sess_ctx->resp_sid);
         return;
     }
-    if (sess_ctx->resp_state != 1/* waiting RESP_ACK */) {
+    if (sess_ctx->resp_state != 1/* waiting RSP_ACK */) {
         print("V:", LA_F("%s: ignored in invalid state=%d\n", LA_F141, 141), PROTO, (int)sess_ctx->resp_state);
         return;
     }
@@ -1362,7 +1362,7 @@ void compact_on_response_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
     sess_ctx->rpc_last_sid = sess_ctx->resp_sid;
 
-    // 成功：Server 已收到 B 的 MSG_RESP，结束 RESP 重发
+    // 成功：Server 已收到 B 的 RSP，结束 RSP 重发
     sess_ctx->resp_sid = 0;
     sess_ctx->resp_state = 0;
     sess_ctx->resp_session_id = 0;
@@ -1578,8 +1578,8 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
         case SIG_PKT_SYNC_ACK:  PROTO = "SYNC_ACK";  payload_min = SIG_PKT_SYNC_ACK_PSZ;             handler = compact_on_sync_ack; break;
         case SIG_PKT_FIN:       PROTO = "FIN";       payload_min = SIG_PKT_FIN_PSZ;                  handler = compact_on_fin; break;
         case SIG_PKT_REQ:       PROTO = "REQ";       payload_min = SIG_PKT_REQ_MIN_PSZ; handler = compact_on_request; break;
-        case SIG_PKT_RSP:       PROTO = "RESP";      payload_min = (uint16_t)(P2P_SESS_ID_SZ + 2u); handler = compact_on_response; break;
-        case SIG_PKT_RSP_ACK:   PROTO = "RESP_ACK";  payload_min = SIG_PKT_RSP_ACK_PSZ;         handler = compact_on_response_ack; break;
+        case SIG_PKT_RSP:       PROTO = "RSP";      payload_min = (uint16_t)(P2P_SESS_ID_SZ + 2u); handler = compact_on_response; break;
+        case SIG_PKT_RSP_ACK:   PROTO = "RSP_ACK";  payload_min = SIG_PKT_RSP_ACK_PSZ;         handler = compact_on_response_ack; break;
         default:
             print("W:", LA_F("[C] Unknown pkt type 0x%02x, len=%d\n", LA_F433, 433), type, payload_len);
             return;
@@ -1842,7 +1842,7 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
 /*
  * 通过信令服务器向对端发起 RPC 消息请求（A 端）
  *
- * 包头: [type=SIG_PKT_MSG_REQ | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_REQ | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
  *   - session_id: 本端会话 ID（SYNC0_ACK 中分配，用于服务器路由到对端）
  *   - sid:        RPC 序列号（非零，循环自增，用于匹配响应）
@@ -1884,16 +1884,16 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
 /*
  * 通过信令服务器向请求端回复 RPC 消息响应（B 端）
  *
- * 包头: [type=SIG_PKT_MSG_RESP | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_RSP | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][code(1)][data(N)]
- *   - session_id: A 端会话 ID（来自 MSG_REQ 的 relay 包，用于服务器路由回 A 端）
- *   - sid:        RPC 序列号，必须与对应 MSG_REQ 的 sid 一致
+ *   - session_id: A 端会话 ID（来自 REQ 的 relay 包，用于服务器路由回 A 端）
+ *   - sid:        RPC 序列号，必须与对应 REQ 的 sid 一致
  *   - code:       响应码（1 字节，应用自定义）
  *   - data:       响应数据（可选，最多 P2P_MSG_DATA_MAX 字节）
  */
 ret_t p2p_signal_compact_response(struct p2p_session *s,
                                   uint8_t code, const void *data, int len) {
-    const char* PROTO = "MSG_RESP";
+    const char* PROTO = "RSP";
 
     P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
     P_check(len == 0 || data, return E_INVALID;)
@@ -1904,7 +1904,7 @@ ret_t p2p_signal_compact_response(struct p2p_session *s,
     }
 
     // 缓存响应数据用于重发
-    sess_ctx->resp_state    = 1/* waiting RESP_ACK */;
+    sess_ctx->resp_state    = 1/* waiting RSP_ACK */;
     sess_ctx->resp_code     = code;
     sess_ctx->resp_data_len = len;
     if (len > 0) memcpy(sess_ctx->resp_data, data, (size_t)len);
@@ -2007,13 +2007,13 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
         // 当前（请求端）处于等待（服务器返回的）REQ_ACK 的阶段
         if (sess_ctx->req_state == 1/* waiting REQ_ACK */) {
 
-            if (tick_diff(now, sess_ctx->req_send_time) >= MSG_REQ_INTERVAL_MS) {
+            if (tick_diff(now, sess_ctx->req_send_time) >= REQ_INTERVAL_MS) {
 
                 /* 超时失败 */
-                if (sess_ctx->req_retries++ < MSG_REQ_MAX_RETRIES) {
+                if (sess_ctx->req_retries++ < REQ_MAX_RETRIES) {
 
                     print("I:", LA_F("%s: retry(%d/%d) req (sid=%u)\n", LA_F212, 212),
-                          TASK_RPC, sess_ctx->req_retries, MSG_REQ_MAX_RETRIES, sess_ctx->req_sid);
+                          TASK_RPC, sess_ctx->req_retries, REQ_MAX_RETRIES, sess_ctx->req_sid);
 
                     send_rpc_req(s, now);
                 }
@@ -2025,7 +2025,7 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
                     sess_ctx->req_state = 0;
 
                     print("W:", LA_F("%s: %s timeout after %d retries (sid=%u)\n", LA_F74, 74),
-                          TASK_RPC, "req", MSG_REQ_MAX_RETRIES, sid);
+                          TASK_RPC, "req", REQ_MAX_RETRIES, sid);
 
                     if (s->inst->cfg.on_response)
                         s->inst->cfg.on_response((p2p_session_t)s, sid, msg, NULL, -1, s->inst->cfg.userdata);
@@ -2033,16 +2033,16 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
             }
         }
 
-        // 当前（响应端）处于等待（服务器返回的）RESP_ACK 的阶段
-        if (sess_ctx->resp_state == 1/* waiting RESP_ACK */) {
+        // 当前（响应端）处于等待（服务器返回的）RSP_ACK 的阶段
+        if (sess_ctx->resp_state == 1/* waiting RSP_ACK */) {
 
-            if (tick_diff(now, sess_ctx->resp_send_time) >= MSG_REQ_INTERVAL_MS) {
+            if (tick_diff(now, sess_ctx->resp_send_time) >= REQ_INTERVAL_MS) {
 
                 /* 超时失败（与 A 端对称，使用相同的超时配置） */
-                if (sess_ctx->resp_retries++ < MSG_REQ_MAX_RETRIES) {
+                if (sess_ctx->resp_retries++ < REQ_MAX_RETRIES) {
 
                     print("I:", LA_F("%s: retry(%d/%d) resp (sid=%u)\n", LA_F213, 213),
-                          TASK_RPC, sess_ctx->resp_retries, MSG_REQ_MAX_RETRIES, sess_ctx->resp_sid);
+                          TASK_RPC, sess_ctx->resp_retries, REQ_MAX_RETRIES, sess_ctx->resp_sid);
 
                     send_rpc_resp(s, now);
                 }
@@ -2054,7 +2054,7 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
                     sess_ctx->resp_session_id = 0;
 
                     print("W:", LA_F("%s: %s timeout after %d retries (sid=%u)\n", LA_F74, 74),
-                          TASK_RPC, "resp", MSG_REQ_MAX_RETRIES, sid);
+                          TASK_RPC, "resp", REQ_MAX_RETRIES, sid);
                 }
             }
         }
@@ -2141,7 +2141,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_instance *inst, uint64_t now)
     if (sig_ctx->nat_probe_retries++ < NAT_PROBE_MAX_RETRIES) {
 
         print("V:", LA_F("%s: retry(%d/%d) probe\n", LA_F211, 211),
-              TASK_NAT_PROBE, sig_ctx->nat_probe_retries, MSG_REQ_MAX_RETRIES);
+              TASK_NAT_PROBE, sig_ctx->nat_probe_retries, REQ_MAX_RETRIES);
         send_nat_probe(inst, now);
     }
     else {
@@ -2150,7 +2150,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_instance *inst, uint64_t now)
         sig_ctx->nat_probe_retries = -2/* 探测超时 */;
 
         print("W:", LA_F("%s: timeout after %d retries , type unknown\n", LA_F239, 239), 
-              MSG_REQ_MAX_RETRIES, TASK_NAT_PROBE);
+              REQ_MAX_RETRIES, TASK_NAT_PROBE);
     }
 }
 

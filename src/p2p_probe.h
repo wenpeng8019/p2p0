@@ -28,7 +28,7 @@
  * 当 NAT 打洞失败/连接中断时，通过服务器 MSG+echo 探测对端可达性：
  *   - 场景1：自己端口飘移 → 向服务器发包会重新打开映射
  *   - 场景2：端口映射改变 → 服务器转发包触发地址变更通知
- *   - 场景3：对端已离线 → 服务器 MSG_REQ_ACK 返回 status=1
+ *   - 场景3：对端已离线 → 服务器 REQ_ACK 返回 status=1
  *   - 场景4：对端网络故障 → 服务器 MSG 请求超时
  *
  * 目标：在不重新连接的情况下，自动恢复可恢复的网络故障
@@ -68,8 +68,8 @@ struct p2p_session;
 typedef enum {
     PROBE_COMPACT_PHASE_INIT = 0,       // 初始化
     PROBE_COMPACT_PHASE_SENDING,        // 发送 MSG
-    PROBE_COMPACT_PHASE_WAIT_ACK,       // 等待 MSG_REQ_ACK
-    PROBE_COMPACT_PHASE_WAIT_ECHO       // 等待 MSG_RESP echo
+    PROBE_COMPACT_PHASE_WAIT_ACK,       // 等待 REQ_ACK
+    PROBE_COMPACT_PHASE_WAIT_ECHO       // 等待 RSP echo
 } probe_compact_phase_t;
 
 /* RELAY 模式内部步骤（细化 RUNNING 状态）*/
@@ -138,14 +138,14 @@ void probe_trigger(struct p2p_session *s);
  * ============================================================================ */
 
 /*
- * 处理 MSG_REQ_ACK 响应
+ * 处理 REQ_ACK 响应
  * @param sid     MSG 序列号
  * @param status  0=转发成功/对端在线，1=对端离线
  */
 void probe_compact_on_req_ack(struct p2p_session *s, uint16_t sid, uint8_t status);
 
 /*
- * 处理 MSG_RESP echo 回复
+ * 处理 RSP echo 回复
  * @param sid  MSG 序列号
  */
 void probe_compact_on_response(struct p2p_session *s, uint16_t sid);

@@ -239,7 +239,7 @@ typedef struct {
 
     /* MSG RPC 上下文管理 */
     uint16_t            rpc_last_sid;                   /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
-    uint8_t             req_state;                      /* A端: 0=空闲 1=等待 RESP */
+    uint8_t             req_state;                      /* A端: 0=空闲 1=等待 RSP */
     uint16_t            req_sid;                        /* A端: 当前挂起的 RPC 序列号（0=无挂起）*/
     uint8_t             req_msg;                        /* A端: 挂起请求的消息 ID */
     uint16_t            resp_sid;                       /* B端: 待回应的 RPC 序列号（0=无）*/

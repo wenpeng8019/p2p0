@@ -32,9 +32,9 @@ typedef struct compact_session {
     struct compact_session*         rpc_pending_next;           // RPC 待确认链表指针（NULL=空闲，-1=链表尾）
     uint64_t                        rpc_sent_time;              // 最后发送时间（毫秒）
     int                             rpc_retry;                  // 重传次数
-    bool                            rpc_responding;             // RPC 阶段（false=REQ等待对端，true=RESP等待确认）
-    uint8_t                         rpc_code;                   // RPC 消息类型/响应码（REQ阶段=消息类型，RESP阶段=响应码）
-    uint8_t                         rpc_flags;                  // RPC flags（RESP 阶段使用：PEER_OFFLINE/TIMEOUT）
+    bool                            rpc_responding;             // RPC 阶段（false=REQ等待对端，true=RSP等待确认）
+    uint8_t                         rpc_code;                   // RPC 消息类型/响应码（REQ阶段=消息类型，RSP阶段=响应码）
+    uint8_t                         rpc_flags;                  // RPC flags（RSP 阶段使用：PEER_OFFLINE/TIMEOUT）
     uint8_t                         rpc_data[P2P_MSG_DATA_MAX]; // RPC 数据缓冲区
     int                             rpc_data_len;               // RPC 数据长度
 

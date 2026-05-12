@@ -184,8 +184,8 @@ static void wss_pending_remove_rpc(wss_session_t *s) {
 
 //-----------------------------------------------------------------------------
 
-// 服务器生成 RPC 错误 RESP（二进制帧）
-// 格式：[P2P_WSS_BIN_RESP][session_id(4)][sid(2)][code(1)]
+// 服务器生成 RPC 错误 RSP（二进制帧）
+// 格式：[P2P_WSS_BIN_RSP][session_id(4)][sid(2)][code(1)]
 static void wss_session_send_rpc_code(wss_session_t *s, uint16_t sid, uint8_t code) {
     wss_client_t *c = (wss_client_t*)s->base.client;
     if (!wss_client_online(c)) return;
@@ -507,7 +507,7 @@ static void wss_handle_req(wss_session_t *session, buf16_item_t *payload1, uint8
     wss_pending_enqueue_rpc(session);
 }
 
-// 处理 RESP — RPC 响应转发（零拷贝）
+// 处理 RSP — RPC 响应转发（零拷贝）
 static void wss_handle_rsp(wss_session_t *session, buf16_item_t *payload1, uint8_t *payload, uint16_t len) {
     const char *PROTO = "RSP";
 

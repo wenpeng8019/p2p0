@@ -269,16 +269,25 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
     server_addr.sin_port = htons(g_server_port);
     inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
     
-    sendto(sock, (const char*)pkt, len, 0,
-           (struct sockaddr*)&server_addr, sizeof(server_addr));
-    
+    // 先设置超时再发送，避免 sendto 和 rcvtimeo 之间 ACK 已经到达但被丢弃
     P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
+
+    ssize_t sent = sendto(sock, (const char*)pkt, len, 0,
+           (struct sockaddr*)&server_addr, sizeof(server_addr));
+    if (sent <= 0) return 0;
+    
     uint8_t recv_buf[256];
     struct sockaddr_in from;
     socklen_t from_len = sizeof(from);
     
-    ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
-                          (struct sockaddr*)&from, &from_len);
+    // 跳过非 REG_ACK 的残留包（如上次会话的 SYN0_ACK 重传）
+    ssize_t n = 0;
+    for (int retry = 0; retry < 8; retry++) {
+        from_len = sizeof(from);
+        n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
+                              (struct sockaddr*)&from, &from_len);
+        if (n <= 0 || recv_buf[0] == SIG_PKT_REG_ACK) break;
+    }
     
     if (n > 0 && recv_buf[0] == SIG_PKT_REG_ACK) {
         uint64_t auth_key = 0;
@@ -288,8 +297,9 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
         // 发送 SYNC0（携带 auth_key + remote_peer_id）
         if (cand_count > 0 || cands == NULL) {
             len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
-            sendto(sock, (const char*)pkt, len, 0,
+            ssize_t syn0_sent = sendto(sock, (const char*)pkt, len, 0,
                    (struct sockaddr*)&server_addr, sizeof(server_addr));
+            (void)syn0_sent;
             // 消耗 SYNC0_ACK，防止它污染后续操作的 recvfrom
             uint8_t drain_buf[64];
             struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
@@ -485,11 +495,37 @@ static void test_unregister_releases_slot(void) {
     
     // 发送 OFFLINE
     send_unregister(sock, session1);
-    P_usleep(100 * 1000);
+    P_usleep(300 * 1000);  // 等 300ms 确保服务器处理完 OFFLINE
+    
+    // 检查服务器进程是否仍然存活
+    if (kill(g_server_pid, 0) != 0) {
+        P_sock_close(sock);
+        TEST_FAIL(TEST_NAME, "server process died after OFFLINE");
+        return;
+    }
+    printf("    [DBG] server alive after OFFLINE, pid=%d\n", g_server_pid);
+    
+    // 清空 socket 残留包（避免 SYN0_ACK 重传污染下一次 recvfrom）
+    P_sock_rcvtimeo(sock, 200);
+    { uint8_t drain[256]; int drained = 0;
+      ssize_t dn;
+      while ((dn = recvfrom(sock, (char*)drain, sizeof(drain), 0, NULL, NULL)) > 0) {
+          drained++;
+      }
+      (void)drained;
+    }
     
     // 用相同 peer_id 重新注册（应该成功，因为槽位已释放）
     uint32_t inst_id2 = inst_id + 100;
     uint64_t session2 = register_peer(sock, local_id, remote_id, inst_id2, 0, NULL, NULL);
+    
+    // 确认服务器仍在线
+    P_usleep(500 * 1000);  // 等 500ms
+    if (kill(g_server_pid, 0) != 0) {
+        P_sock_close(sock);
+        TEST_FAIL(TEST_NAME, "server process died after second REG");
+        return;
+    }
     
     P_sock_close(sock);
     

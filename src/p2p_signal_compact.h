@@ -183,22 +183,22 @@ typedef struct {
     uint16_t            rpc_last_sid;                       /* 最后完成的 sid（用于判断新旧请求，支持循环）*/
 
     /* MSG RPC（A 端：发送请求） */
-    uint8_t             req_state;                          /* 0=空闲 1=等待 REQ_ACK 2=等待 RESP */
+    uint8_t             req_state;                          /* 0=空闲 1=等待 REQ_ACK 2=等待 RSP */
     uint16_t            req_sid;                            /* 当前挂起的 rpc 序列号（0=无挂起）*/
     uint8_t             req_msg;                            /* 挂起请求的消息 ID */
     uint8_t             req_data[P2P_MSG_DATA_MAX];         /* 挂起请求的数据缓冲区 */
     int                 req_data_len;                       /* 挂起请求的数据长度 */
-    uint64_t            req_send_time;                      /* MSG_REQ 最后发送时间 */
+    uint64_t            req_send_time;                      /* REQ 最后发送时间 */
     int                 req_retries;                        /* 失败重试次数（不包括首次执行）*/
 
     /* MSG RPC（B 端：接收中转的请求，等待用户回应） */
-    uint8_t             resp_state;                         /* 0=空闲 1=等待 RESP_ACK */
+    uint8_t             resp_state;                         /* 0=空闲 1=等待 RSP_ACK */
     uint16_t            resp_sid;                           /* 待回应的 rpc 序列号（0=无）*/
     uint64_t            resp_session_id;                    /* 待回应的 rpc 所属 session id */
     uint8_t             resp_code;                          /* 缓存的响应码 */
     uint8_t             resp_data[P2P_MSG_DATA_MAX];        /* 缓存的响应数据 */
     int                 resp_data_len;                      /* 缓存的响应长度 */
-    uint64_t            resp_send_time;                     /* MSG_RESP 最后发送时间 */
+    uint64_t            resp_send_time;                     /* RSP 最后发送时间 */
     int                 resp_retries;                       /* 失败重试次数（不包括首次执行）*/
 
 } p2p_compact_session_t;
