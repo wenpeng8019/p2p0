@@ -1107,17 +1107,20 @@ int main(int argc, char *argv[]) {
 
         g_server_pid = fork();
         if (g_server_pid < 0) {
-        fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
-        return 1;
-    } else if (g_server_pid == 0) {
-        execl(server_path, server_path, "-p", port_str, "--relay", "--msg", NULL);
-        fprintf(stderr, "Failed to exec: %s\n", strerror(errno));
-        _exit(127);
-    }
-    printf("    Server PID: %d\n", g_server_pid);
+            fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+            return 1;
+        } else if (g_server_pid == 0) {
+            execl(server_path, server_path, "-p", port_str, "--relay", "--msg", NULL);
+            fprintf(stderr, "Failed to exec: %s\n", strerror(errno));
+            _exit(127);
+        }
+        printf("    Server PID: %d\n", g_server_pid);
 
-    // 等待 server 启动
-    P_usleep(500 * 1000);
+        // 等待 server 启动
+        P_usleep(500 * 1000);
+    } else {
+        printf("[*] Connecting to existing server at %s:%d\n", g_server_host, g_server_port);
+    }
 
     // 运行测试用例
     printf("\n[*] Running tests...\n");

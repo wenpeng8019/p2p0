@@ -856,20 +856,23 @@ int main(int argc, char *argv[]) {
         printf("[*] Starting server...\n");
         char port_str[16];
         snprintf(port_str, sizeof(port_str), "%d", g_server_port);
-    
-    g_server_pid = fork();
-    if (g_server_pid < 0) {
-        fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
-        return 1;
-    } else if (g_server_pid == 0) {
-        execl(server_path, server_path, "-p", port_str, NULL);
-        fprintf(stderr, "Failed to exec: %s\n", strerror(errno));
-        _exit(127);
+        
+        g_server_pid = fork();
+        if (g_server_pid < 0) {
+            fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+            return 1;
+        } else if (g_server_pid == 0) {
+            execl(server_path, server_path, "-p", port_str, NULL);
+            fprintf(stderr, "Failed to exec: %s\n", strerror(errno));
+            _exit(127);
+        }
+        printf("    Server PID: %d\n", g_server_pid);
+        
+        // 等待 server 启动
+        P_usleep(500 * 1000);
+    } else {
+        printf("[*] Connecting to existing server at %s:%d\n", g_server_host, g_server_port);
     }
-    printf("    Server PID: %d\n", g_server_pid);
-    
-    // 等待 server 启动
-    P_usleep(500 * 1000);
     
     // 创建测试 socket
     g_sock = socket(AF_INET, SOCK_DGRAM, 0);

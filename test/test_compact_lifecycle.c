@@ -817,9 +817,12 @@ int main(int argc, char *argv[]) {
             _exit(127);
         }
         printf("    Server PID: %d\n", g_server_pid);
-    
-    // 等待 server 启动
-    P_usleep(500 * 1000);
+        
+        // 等待 server 启动
+        P_usleep(500 * 1000);
+    } else {
+        printf("[*] Connecting to existing server at %s:%d\n", g_server_host, g_server_port);
+    }
     
     // 创建测试 socket
     g_sock = socket(AF_INET, SOCK_DGRAM, 0);
