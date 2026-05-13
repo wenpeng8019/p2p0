@@ -39,7 +39,7 @@
 // 配置
 ///////////////////////////////////////////////////////////////////////////////
 
-#define DEFAULT_SERVER_PORT     9436
+#define DEFAULT_SERVER_PORT     9333
 #define DEFAULT_SERVER_HOST     "127.0.0.1"
 #define SYNC_TIMEOUT_MS         10000
 #define CONNECT_TIMEOUT_MS      30000

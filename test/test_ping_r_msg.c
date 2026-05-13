@@ -54,7 +54,7 @@
 // 配置
 ///////////////////////////////////////////////////////////////////////////////
 
-#define DEFAULT_SERVER_PORT     9435        // RELAY 模式使用不同端口
+#define DEFAULT_SERVER_PORT     9333
 #define DEFAULT_SERVER_HOST     "127.0.0.1"
 #define SYNC_TIMEOUT_MS         10000       // 同步超时 10 秒
 #define CONNECT_TIMEOUT_MS      10000       // 连接超时 10 秒（调试用）

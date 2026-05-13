@@ -1229,11 +1229,9 @@ int main(int argc, char *argv[]) {
     
     const char *server_path = NULL;
     
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <server_path> [port]\n", argv[0]);
-        return 1;
+    if (argc >= 2) {
+        server_path = argv[1];
     }
-    server_path = argv[1];
     if (argc > 2) {
         g_server_port = atoi(argv[2]);
         if (g_server_port <= 0 || g_server_port > 65535) {
@@ -1254,10 +1252,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // 启动 server 子进程
-    printf("[*] Starting server...\n");
-    char port_str[16];
-    snprintf(port_str, sizeof(port_str), "%d", g_server_port);
+    // 启动 server 子进程（仅在提供了 server_path 时）
+    if (server_path) {
+        printf("[*] Starting server...\n");
+        char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", g_server_port);
     
     g_server_pid = fork();
     if (g_server_pid < 0) {

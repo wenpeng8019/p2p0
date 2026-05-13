@@ -103,7 +103,7 @@
 #include <sys/wait.h>
 
 // 默认配置
-#define DEFAULT_SERVER_PORT     9444
+#define DEFAULT_SERVER_PORT     9333
 #define DEFAULT_SERVER_HOST     "127.0.0.1"
 #define RECV_TIMEOUT_MS         2000
 
@@ -778,11 +778,9 @@ int main(int argc, char *argv[]) {
     
     const char *server_path = NULL;
     
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <server_path> [port]\n", argv[0]);
-        return 1;
+    if (argc >= 2) {
+        server_path = argv[1];
     }
-    server_path = argv[1];
     if (argc > 2) {
         g_server_port = atoi(argv[2]);
         if (g_server_port <= 0 || g_server_port > 65535) {
@@ -803,21 +801,22 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // 启动 server 子进程
-    printf("[*] Starting server...\n");
-    char port_str[16];
-    snprintf(port_str, sizeof(port_str), "%d", g_server_port);
-    
-    g_server_pid = fork();
-    if (g_server_pid < 0) {
-        fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
-        return 1;
-    } else if (g_server_pid == 0) {
-        execl(server_path, server_path, "-p", port_str, NULL);
-        fprintf(stderr, "Failed to exec: %s\n", strerror(errno));
-        _exit(127);
-    }
-    printf("    Server PID: %d\n", g_server_pid);
+    // 启动 server 子进程（仅在提供了 server_path 时）
+    if (server_path) {
+        printf("[*] Starting server...\n");
+        char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", g_server_port);
+        
+        g_server_pid = fork();
+        if (g_server_pid < 0) {
+            fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+            return 1;
+        } else if (g_server_pid == 0) {
+            execl(server_path, server_path, "-p", port_str, NULL);
+            fprintf(stderr, "Failed to exec: %s\n", strerror(errno));
+            _exit(127);
+        }
+        printf("    Server PID: %d\n", g_server_pid);
     
     // 等待 server 启动
     P_usleep(500 * 1000);

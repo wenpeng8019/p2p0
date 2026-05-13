@@ -5,7 +5,7 @@
  * 测试目标
  * ============================================================================
  * 验证 p2p_server 对 RELAY 协议生命周期相关包的处理逻辑：
- * - ALIVE 心跳机制
+ * - ALV 心跳机制
  * - FIN 会话结束
  * - 连接断开处理
  *
@@ -14,7 +14,7 @@
  * ============================================================================
  * 1. 启动 p2p_server 子进程，监听指定 TCP 端口
  * 2. 通过 instrument 机制收集 server 的实时日志
- * 3. 发送 ALIVE/FIN 包，验证 server 正确处理
+ * 3. 发送 ALV/FIN 包，验证 server 正确处理
  *
  * ============================================================================
  * 测试用例分类
@@ -24,8 +24,8 @@
  * ---------------------------------------------------------------------------
  *
  * 测试 1: alive_keepalive
- *   目标：验证 ALIVE 包正常保活
- *   方法：ONLINE 后发送多次 ALIVE 包
+ *   目标：验证 ALV 包正常保活
+ *   方法：REG 后发送多次 ALV 包
  *   预期：
  *     - 连接保持
  *     - server 更新 last_active
@@ -69,7 +69,7 @@
  *
  * 测试 7: reconnect_after_fin
  *   目标：验证 FIN 后可以重新建立会话
- *   方法：FIN → 重新 SYNC0
+ *   方法：FIN → 重新 SYN0
  *   预期：
  *     - 新会话正常建立
  *     - 新 session_id 不同于旧 session_id
@@ -98,7 +98,7 @@
 #include <sys/wait.h>
 
 // 默认配置
-#define DEFAULT_SERVER_PORT     9778
+#define DEFAULT_SERVER_PORT     9333
 #define DEFAULT_SERVER_HOST     "127.0.0.1"
 #define RECV_TIMEOUT_MS         2000
 
@@ -226,7 +226,7 @@ static int tcp_recv_relay_packet(sock_t sock, uint8_t *buf, int buf_size,
 // 协议构造函数
 ///////////////////////////////////////////////////////////////////////////////
 
-// 构造 ONLINE 包
+// 构造 REG 包
 static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_t instance_id) {
     const uint16_t payload_len = P2P_RLY_REG_PSZ;
     if (buf_size < 3 + (int)payload_len) return -1;
@@ -246,7 +246,7 @@ static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_
     return 3 + payload_len;
 }
 
-// 构造 SYNC0 包
+// 构造 SYN0 包
 static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
     uint16_t payload_len = P2P_RLY_SYN0_PSZ(candidate_count);
@@ -268,7 +268,7 @@ static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
     return 3 + payload_len;
 }
 
-// 构造 ALIVE 包
+// 构造 ALV 包
 static int build_alive(uint8_t *buf, int buf_size) {
     if (buf_size < 3) return -1;
     
@@ -304,14 +304,14 @@ typedef struct {
     uint8_t candidate_sync_max;
 } online_ack_t;
 
-// SYNC0_ACK 解析结果
+// SYN0_ACK 解析结果
 typedef struct {
     int received;
     uint32_t session_id;
     uint8_t online;
 } sync0_ack_t;
 
-// 发送 ONLINE 并接收 REG_ACK
+// 发送 REG 并接收 REG_ACK
 static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t instance_id, online_ack_t *ack) {
     uint8_t pkt[64];
     int pkt_len = build_online(pkt, sizeof(pkt), peer_id, instance_id);
@@ -338,7 +338,7 @@ static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t insta
     return 0;
 }
 
-// 发送 SYNC0 并接收 SYNC0_ACK
+// 发送 SYN0 并接收 SYN0_ACK
 static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id, 
                                 int cand_count, p2p_candidate_t *cands,
                                 sync0_ack_t *ack) {
@@ -372,7 +372,7 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
     return 0;
 }
 
-// 发送 ALIVE
+// 发送 ALV
 static int send_alive(sock_t sock) {
     uint8_t pkt[8];
     int pkt_len = build_alive(pkt, sizeof(pkt));
@@ -411,7 +411,7 @@ static int wait_fin(sock_t sock, uint64_t *session_id_out) {
 // 测试用例
 ///////////////////////////////////////////////////////////////////////////////
 
-// 测试 1: ALIVE 保活
+// 测试 1: ALV 保活
 static void test_alive_keepalive(void) {
     const char *TEST_NAME = "alive_keepalive";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -425,15 +425,15 @@ static void test_alive_keepalive(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 1000;
     
-    // ONLINE
+    // REG
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "alive_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
-    // 发送多次 ALIVE
+    // 发送多次 ALV
     int success_count = 0;
     for (int i = 0; i < 3; i++) {
         P_usleep(200 * 1000);
@@ -443,7 +443,7 @@ static void test_alive_keepalive(void) {
     P_sock_close(sock);
     
     if (success_count < 3) {
-        TEST_FAIL(TEST_NAME, "ALIVE send failed");
+        TEST_FAIL(TEST_NAME, "ALV send failed");
         return;
     }
     
@@ -464,19 +464,19 @@ static void test_fin_closes_session(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 2000;
     
-    // ONLINE
+    // REG
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "fin_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
-    // SYNC0
+    // SYN0
     sync0_ack_t sync_ack;
     if (send_sync0_recv_ack(sock, "fin_bob", 0, NULL, &sync_ack) <= 0 || !sync_ack.received) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
     }
     
@@ -519,12 +519,12 @@ static void test_fin_notifies_peer(void) {
     uint32_t inst_alice = (uint32_t)P_tick_us() + 3000;
     uint32_t inst_bob = (uint32_t)P_tick_us() + 3001;
     
-    // Alice ONLINE + SYNC0
+    // Alice REG + SYN0
     online_ack_t alice_online_ack;
     if (send_online_recv_ack(sock_alice, "notify_alice", inst_alice, &alice_online_ack) <= 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Alice ONLINE failed");
+        TEST_FAIL(TEST_NAME, "Alice REG failed");
         return;
     }
     
@@ -532,16 +532,16 @@ static void test_fin_notifies_peer(void) {
     if (send_sync0_recv_ack(sock_alice, "notify_bob", 0, NULL, &alice_sync_ack) <= 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Alice SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "Alice SYN0 failed");
         return;
     }
     
-    // Bob ONLINE + SYNC0
+    // Bob REG + SYN0
     online_ack_t bob_online_ack;
     if (send_online_recv_ack(sock_bob, "notify_bob", inst_bob, &bob_online_ack) <= 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob ONLINE failed");
+        TEST_FAIL(TEST_NAME, "Bob REG failed");
         return;
     }
     
@@ -549,11 +549,11 @@ static void test_fin_notifies_peer(void) {
     if (send_sync0_recv_ack(sock_bob, "notify_alice", 0, NULL, &bob_sync_ack) <= 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "Bob SYN0 failed");
         return;
     }
     
-    // 消费可能的下行 SYNC0
+    // 消费可能的下行 SYN0
     P_usleep(100 * 1000);
     uint8_t discard[256];
     uint8_t type;
@@ -603,11 +603,11 @@ static void test_fin_bad_session(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 4000;
     
-    // ONLINE
+    // REG
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "bad_fin_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
@@ -617,7 +617,7 @@ static void test_fin_bad_session(void) {
     
     P_usleep(100 * 1000);
     
-    // 验证连接仍然有效（发送 ALIVE）
+    // 验证连接仍然有效（发送 ALV）
     int alive_ok = send_alive(sock);
     
     P_sock_close(sock);
@@ -644,18 +644,18 @@ static void test_fin_peer_offline(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 5000;
     
-    // ONLINE + SYNC0（对端离线）
+    // REG + SYN0（对端离线）
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "offline_fin_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
     sync0_ack_t sync_ack;
     if (send_sync0_recv_ack(sock, "offline_fin_bob", 0, NULL, &sync_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
     }
     
@@ -683,18 +683,18 @@ static void test_fin_idempotent(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 6000;
     
-    // ONLINE + SYNC0
+    // REG + SYN0
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "idem_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
     sync0_ack_t sync_ack;
     if (send_sync0_recv_ack(sock, "idem_bob", 0, NULL, &sync_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
     }
     
@@ -724,18 +724,18 @@ static void test_reconnect_after_fin(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 7000;
     
-    // ONLINE + SYNC0
+    // REG + SYN0
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "reconn_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
     sync0_ack_t sync_ack1;
     if (send_sync0_recv_ack(sock, "reconn_bob", 0, NULL, &sync_ack1) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "first SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "first SYN0 failed");
         return;
     }
     
@@ -743,11 +743,11 @@ static void test_reconnect_after_fin(void) {
     compact_send_fin(sock, sync_ack1.session_id);
     P_usleep(100 * 1000);
     
-    // 重新 SYNC0
+    // 重新 SYN0
     sync0_ack_t sync_ack2;
     if (send_sync0_recv_ack(sock, "reconn_bob", 0, NULL, &sync_ack2) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "second SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "second SYN0 failed");
         return;
     }
     
@@ -770,11 +770,9 @@ int main(int argc, char *argv[]) {
     
     const char *server_path = NULL;
     
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <server_path> [port]\n", argv[0]);
-        return 1;
+    if (argc >= 2) {
+        server_path = argv[1];
     }
-    server_path = argv[1];
     if (argc > 2) {
         g_server_port = atoi(argv[2]);
         if (g_server_port <= 0 || g_server_port > 65535) {
@@ -795,24 +793,28 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // 启动 server 子进程
-    printf("[*] Starting server (RELAY mode)...\n");
-    char port_str[16];
-    snprintf(port_str, sizeof(port_str), "%d", g_server_port);
-    
-    g_server_pid = fork();
-    if (g_server_pid < 0) {
-        fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
-        return 1;
-    } else if (g_server_pid == 0) {
-        execl(server_path, server_path, "-p", port_str, "--relay", NULL);
-        fprintf(stderr, "Failed to exec: %s\n", strerror(errno));
-        _exit(127);
+    // 启动 server 子进程（仅在提供了 server_path 时）
+    if (server_path) {
+        printf("[*] Starting server (RELAY mode)...\n");
+        char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", g_server_port);
+        
+        g_server_pid = fork();
+        if (g_server_pid < 0) {
+            fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+            return 1;
+        } else if (g_server_pid == 0) {
+            execl(server_path, server_path, "-p", port_str, "--relay", NULL);
+            fprintf(stderr, "Failed to exec: %s\n", strerror(errno));
+            _exit(127);
+        }
+        printf("    Server PID: %d\n", g_server_pid);
+        
+        // 等待 server 启动
+        P_usleep(500 * 1000);
+    } else {
+        printf("[*] Connecting to existing server at %s:%d\n", g_server_host, g_server_port);
     }
-    printf("    Server PID: %d\n", g_server_pid);
-    
-    // 等待 server 启动
-    P_usleep(500 * 1000);
     
     // 运行测试用例
     printf("\n[*] Running tests...\n");

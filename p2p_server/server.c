@@ -282,7 +282,7 @@ pair_session(client_t *client, const char *remote_peer_id,
     // 如果 sess pair 左侧被置位
     else if (pair->sessions[0]) {
 
-        // 如果当前已经完成配对，重复执行 sync0
+        // 如果当前已经完成配对，重复配对请求
         if (pair->sessions[1]) {
             // 找到本端的 session
             if (pair->sessions[0]->client == client) { *local_s = pair->sessions[0]; side = 0; *remote_s = pair->sessions[1]; }
@@ -308,7 +308,7 @@ pair_session(client_t *client, const char *remote_peer_id,
     }
 
     // 如果对端已脱离，本端重新发起新的连接
-    // + 对顿脱离时，会将本端的 pear 置位 -1
+    // + 对端脱离时，会将本端的 peer 置位 -1
     // + 此时对端不存在，本端执行自身重置
     if (*local_s) {
 
