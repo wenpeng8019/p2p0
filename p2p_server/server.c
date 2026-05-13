@@ -184,7 +184,7 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
         return true;
     }
 
-    print("I:", LA_F("REG: '%s' new instance (old=%u, new=%u), resetting session\n", LA_F153, 153),
+    print("I:", LA_F("REG: '%s' new instance (old=%u, new=%u), resetting session\n", LA_F223, 223),
            c->local_peer_id, c->instance_id, instance_id);
 
     // 先将之前的释放
@@ -228,6 +228,14 @@ find_session(uint32_t session_id) {
     session_t *s = NULL;
     HASH_FIND(hh, g_sessions, &session_id, P2P_SESS_ID_SZ, s);
     return s;
+}
+
+// 创建一个单端会话
+ret_t
+solo_session(client_t *client, session_t **local_s,
+             size_t session_type_size) {
+
+    return -1;
 }
 
 // 创建新会话对
@@ -275,33 +283,27 @@ pair_session(client_t *client, const char *remote_peer_id,
     else if (pair->sessions[0]) {
 
         // 如果当前已经完成配对，重复执行 sync0
-        if (pair->sessions[1]) return E_DUPLICATE;
+        if (pair->sessions[1]) {
+            // 找到本端的 session
+            if (pair->sessions[0]->client == client) { *local_s = pair->sessions[0]; side = 0; *remote_s = pair->sessions[1]; }
+            else { *local_s = pair->sessions[1]; side = 1; *remote_s = pair->sessions[0]; }
+            return E_DUPLICATE;
+        }
 
         // 如果对端存在（本端之前已经脱离）
         if (pair->sessions[0]->client != client) {
             *remote_s = pair->sessions[0]; side = 1;    // 本端位于 sess pair 的 right side
-        }
-        // 如果本端存在，对端已脱离
-        else if ((s = pair->sessions[0])->peer == (void*)-1) {
-            *local_s = s; side = 0;
-        }
-        // 如果是本端重复发起连接，拒绝并返回错误
-        else {
-            print("E:", LA_F("Duplicate session create blocked: '%s' -> '%s'\n", LA_F81, 81),
-                  client->local_peer_id, remote_peer_id);
-            return E_DUPLICATE;
+        } else { *local_s = s = pair->sessions[0]; side = 0;
+            // 如果是本端重复发起连接（对端不是已脱离状态），返回 E_DUPLICATE（上层协议决定如何处理）
+            if (s->peer != (void*)-1) return E_DUPLICATE;
         }
     }
     else { assert(pair->sessions[1]);
 
         if (pair->sessions[1]->client != client) {
             *remote_s = pair->sessions[1]; side = 0;    // 本端位于 sess pair 的 left side
-        } else if ((s = pair->sessions[1])->peer == (void*)-1) {
-            *local_s = s; side = 1;
-        } else {
-            print("E:", LA_F("Duplicate session create blocked: '%s' -> '%s'\n", LA_F81, 81),
-                  client->local_peer_id, remote_peer_id);
-            return E_DUPLICATE;
+        } else { *local_s = s = pair->sessions[1]; side = 1;
+            if (s->peer != (void*)-1) return E_DUPLICATE;
         }
     }
 
@@ -423,7 +425,7 @@ tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz, const char* SP) {
         ssize_t n = recv(client->base.fd, (char *)buf + *r_sz, len - *r_sz, 0);
         if (n == 0) {
             if (client->handshake)
-                print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on recv)\n", LA_F11, 11),
+                print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on recv)\n", LA_F224, 224),
                       SP?SP:"TCP", (int)client->handshake);
             else print("I:", LA_F("[%s] conn closed (EOF on recv)\n", LA_F11, 11), SP?SP:"TCP");
             return -1;
@@ -434,7 +436,7 @@ tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz, const char* SP) {
             if (client->handshake)
                 print("E:", LA_F("[%s] recv failed(%d) during handshake(%d) \n", LA_F183, 183),
                       SP?SP:"TCP", P_sock_errno(), (int)client->handshake);
-            else print("E:", LA_F("[%s] recv failed(%d)\n", LA_F183, 183), SP?SP:"TCP", P_sock_errno());
+            else print("E:", LA_F("[%s] recv failed(%d)\n", LA_F225, 225), SP?SP:"TCP", P_sock_errno());
             return -2;
         }
         *r_sz += (size_t)n;

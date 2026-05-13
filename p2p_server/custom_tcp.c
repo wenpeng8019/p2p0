@@ -302,7 +302,7 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
             return;
         }
 
-        print("E:", LA_F("make err(%d) resp failed(OOM)\n", 0, 0), client->last_error);
+        print("E:", LA_F("make err(%d) resp failed(OOM)\n", LA_F229, 229), client->last_error);
         client->last_error = CUSTOM_TCP_ERR_INTERNAL;
     }
 

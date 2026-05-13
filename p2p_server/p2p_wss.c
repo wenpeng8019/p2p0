@@ -337,9 +337,26 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
         wss_send_text((cw_client_t*)client, "SYNC0 FAIL OOM");
         return;
     }
-    if (side < E_NONE) {
-        print("E:", LA_F("%s: build session to '%s' failed(%d)\n", LA_F44, 44), PROTO, (const char *)payload, side);
+    if (side < E_NONE && side != E_DUPLICATE) {
+        print("E:", LA_F("%s: build session to '%s' failed(%d)\n", LA_F44, 44), PROTO, remote_peer_id, side);
         wss_send_text((cw_client_t*)client, "SYNC0 FAIL internal");
+        return;
+    }
+
+    // 处理 SYN0 重复请求：幂等返回响应
+    if (side == E_DUPLICATE) {
+        print("V:", LA_F("%s: duplicate SYN0 (ses_id=%u), resend response\n", LA_F211, 211),
+              PROTO, local_s->base.session_id);
+        // 根据对端在线状态返回相应响应
+        if (remote_s) {
+            char _b[8+P2P_PEER_ID_MAX+12+8]; 
+            snprintf(_b, sizeof(_b), "SYNC0 %s %u online", remote_peer_id, local_s->base.session_id); 
+            wss_send_text((cw_client_t*)client, _b);
+        } else {
+            char _b[8+P2P_PEER_ID_MAX+12+8]; 
+            snprintf(_b, sizeof(_b), "SYNC0 %s %u offline", remote_peer_id, local_s->base.session_id); 
+            wss_send_text((cw_client_t*)client, _b);
+        }
         return;
     }
 
@@ -447,7 +464,7 @@ static void wss_handle_pkt(wss_session_t *session, buf16_item_t *payload1, uint8
 
     // 检查 pkt_peer_send 队列是否已满
     if (peer_s->pkt_peer_send_cnt >= WSS_PEER_Q_MAX) {
-        print("W:", LA_F("%s: pkt queue full, dropping\n", 0, 0), PROTO);
+        print("W:", LA_F("%s: pkt queue full, dropping\n", LA_F214, 214), PROTO);
         return;   // payload1 由调用方（handle_frame）释放
     }
 
@@ -515,7 +532,7 @@ static void wss_handle_rsp(wss_session_t *session, buf16_item_t *payload1, uint8
     const char *PROTO = "RSP";
 
     if (len < P2P_WSS_BIN_RPC_MIN_SZ) {
-        print("E:", LA_F("%s: bad frame len=%u\n", LA_F41, 41), PROTO, len);
+        print("E:", LA_F("%s: bad frame len=%u\n", LA_F155, 155), PROTO, len);
         return;
     }
 

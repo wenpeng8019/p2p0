@@ -4,17 +4,17 @@
  * ============================================================================
  * 测试目标
  * ============================================================================
- * 验证 p2p_server 对 RELAY 协议 ONLINE/SYNC0 的处理逻辑：
- * - ONLINE / REG_ACK 上线流程
- * - SYNC0 / SYNC0_ACK 首次同步（会话建立）
+ * 验证 p2p_server 对 RELAY 协议 REG/SYN0 的处理逻辑：
+ * - REG / REG_ACK 上线流程
+ * - SYN0 / SYN0_ACK 首次同步（会话建立）
  *
  * ============================================================================
  * 测试方法
  * ============================================================================
  * 1. 启动 p2p_server 子进程，监听指定 TCP 端口（--relay 模式）
  * 2. 通过 instrument 机制收集 server 的实时日志
- * 3. 测试程序作为 TCP 客户端，构造 ONLINE/SYNC0 包发送给 server
- * 4. 验证响应包（REG_ACK/SYNC0_ACK）的内容和 server 日志
+ * 3. 测试程序作为 TCP 客户端，构造 REG/SYN0 包发送给 server
+ * 4. 验证响应包（REG_ACK/SYN0_ACK）的内容和 server 日志
  *
  * ============================================================================
  * 测试用例分类
@@ -24,54 +24,54 @@
  * ---------------------------------------------------------------------------
  *
  * 测试 1: online_success
- *   目标：验证 ONLINE 正常流程
- *   方法：发送 ONLINE 包（包含 peer_id + instance_id）
+ *   目标：验证 REG 正常流程
+ *   方法：发送 REG 包（包含 peer_id + instance_id）
  *   预期：
  *     - 收到 REG_ACK
  *     - features 字段包含服务器能力
  *     - server 日志含 "came online"
  *
  * 测试 2: sync0_peer_offline
- *   目标：验证单方发起 SYNC0 时对端离线
- *   方法：Alice 上线后发送 SYNC0 等待一个尚未注册的 Bob
+ *   目标：验证单方发起 SYN0 时对端离线
+ *   方法：Alice 上线后发送 SYN0 等待一个尚未注册的 Bob
  *   预期：
- *     - 收到 SYNC0_ACK，online=0 (PEER_OFFLINE)
+ *     - 收到 SYN0_ACK，online=0 (PEER_OFFLINE)
  *     - session_id 非零
  *
  * 测试 3: sync0_peer_online
- *   目标：验证双方同时 SYNC0 后配对成功
- *   方法：Alice 上线并 SYNC0 等待 Bob → Bob 上线并 SYNC0 等待 Alice
+ *   目标：验证双方同时 SYN0 后配对成功
+ *   方法：Alice 上线并 SYN0 等待 Bob → Bob 上线并 SYN0 等待 Alice
  *   预期：
  *     - Alice 首次收到 online=0 (PEER_OFFLINE)
- *     - Bob SYNC0 后收到 online=1 (PEER_ONLINE)
- *     - Alice 收到对端的 SYNC0（下行转发）
+ *     - Bob SYN0 后收到 online=1 (PEER_REG)
+ *     - Alice 收到对端的 SYN0（下行转发）
  *
  * 测试 4: sync0_with_candidates
- *   目标：验证 SYNC0 携带候选地址的处理
- *   方法：发送包含 2 个候选地址的 SYNC0 包
+ *   目标：验证 SYN0 携带候选地址的处理
+ *   方法：发送包含 2 个候选地址的 SYN0 包
  *   预期：
- *     - 收到正常的 SYNC0_ACK
+ *     - 收到正常的 SYN0_ACK
  *     - server 日志含 "cands=2"
  *
  * 二、失败验证测试（各种异常输入的防御）
  * ---------------------------------------------------------------------------
  *
  * 测试 5: online_bad_payload
- *   目标：验证 server 对畸形 ONLINE 包的防御
- *   方法：发送 payload 过短的 ONLINE 包
+ *   目标：验证 server 对畸形 REG 包的防御
+ *   方法：发送 payload 过短的 REG 包
  *   预期：
  *     - 连接被断开或收到错误响应
  *     - server 日志含 "bad payload"
  *
  * 测试 6: sync0_not_online
- *   目标：验证未 ONLINE 就发 SYNC0 被拒绝
- *   方法：直接发送 SYNC0（不先发 ONLINE）
+ *   目标：验证未 REG 就发 SYN0 被拒绝
+ *   方法：直接发送 SYN0（不先发 REG）
  *   预期：
- *     - 收到 STATUS 错误码 P2P_RLY_ERR_NOT_ONLINE
+ *     - 收到 STATUS 错误码 P2P_RLY_ERR_NOT_REG
  *
  * 测试 7: sync0_bad_payload
- *   目标：验证 server 对畸形 SYNC0 包的防御
- *   方法：发送 payload 过短的 SYNC0 包
+ *   目标：验证 server 对畸形 SYN0 包的防御
+ *   方法：发送 payload 过短的 SYN0 包
  *   预期：
  *     - server 日志含 "bad payload"
  *     - 不影响后续操作
@@ -87,10 +87,10 @@
  *     - server 日志含 "new instance"
  *
  * 测试 9: sync0_duplicate
- *   目标：验证重复 SYNC0 是幂等操作
- *   方法：同一客户端发送两次相同的 SYNC0 包
+ *   目标：验证重复 SYN0 是幂等操作
+ *   方法：同一客户端发送两次相同的 SYN0 包
  *   预期：
- *     - 两次都收到 SYNC0_ACK
+ *     - 两次都收到 SYN0_ACK
  *     - session_id 相同
  *
  * ============================================================================
@@ -265,7 +265,7 @@ static int tcp_recv_relay_packet(sock_t sock, uint8_t *buf, int buf_size,
 // 协议构造函数
 ///////////////////////////////////////////////////////////////////////////////
 
-// 构造 ONLINE 包
+// 构造 REG 包
 // payload: [name(32)][instance_id(4)]
 static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_t instance_id) {
     const uint16_t payload_len = P2P_RLY_REG_PSZ;
@@ -288,7 +288,7 @@ static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_
     return 3 + payload_len;
 }
 
-// 构造 SYNC0 包
+// 构造 SYN0 包
 // payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
 static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
@@ -321,7 +321,7 @@ typedef struct {
     uint8_t candidate_sync_max;
 } online_ack_t;
 
-// SYNC0_ACK 解析结果
+// SYN0_ACK 解析结果
 typedef struct {
     int received;
     uint32_t session_id;
@@ -335,7 +335,7 @@ typedef struct {
     uint8_t status_code;
 } status_t;
 
-// 发送 ONLINE 并接收 REG_ACK
+// 发送 REG 并接收 REG_ACK
 static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t instance_id, online_ack_t *ack) {
     uint8_t pkt[64];
     int pkt_len = build_online(pkt, sizeof(pkt), peer_id, instance_id);
@@ -363,7 +363,7 @@ static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t insta
     return 0;
 }
 
-// 发送 SYNC0 并接收 SYNC0_ACK（跳过可能的其他包）
+// 发送 SYN0 并接收 SYN0_ACK（跳过可能的其他包）
 static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id, 
                                 int cand_count, p2p_candidate_t *cands,
                                 sync0_ack_t *ack) {
@@ -373,7 +373,7 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
     
     if (tcp_send_all(sock, pkt, pkt_len) != pkt_len) return -1;
     
-    // 接收响应（可能需要跳过下行转发的 SYNC0）
+    // 接收响应（可能需要跳过下行转发的 SYN0）
     for (int i = 0; i < 5; i++) {
         uint8_t recv_buf[256];
         uint8_t type;
@@ -393,7 +393,7 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
             return 1;
         }
         
-        // 收到其他包（如下行 SYNC0），继续接收
+        // 收到其他包（如下行 SYN0），继续接收
     }
     
     ack->received = 0;
@@ -426,7 +426,7 @@ static int recv_status(sock_t sock, status_t *status) {
 // 测试用例
 ///////////////////////////////////////////////////////////////////////////////
 
-// 测试 1: ONLINE 正常流程
+// 测试 1: REG 正常流程
 static void test_online_success(void) {
     const char *TEST_NAME = "online_success";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -460,7 +460,7 @@ static void test_online_success(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 2: SYNC0 对端离线
+// 测试 2: SYN0 对端离线
 static void test_sync0_peer_offline(void) {
     const char *TEST_NAME = "sync0_peer_offline";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -474,26 +474,26 @@ static void test_sync0_peer_offline(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 2000;
     
-    // 先 ONLINE
+    // 先 REG
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "offline_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
-    // SYNC0 等待一个不存在的对端
+    // SYN0 等待一个不存在的对端
     sync0_ack_t sync_ack;
     if (send_sync0_recv_ack(sock, PEER_UNKNOWN, 0, NULL, &sync_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
     }
     
     P_sock_close(sock);
     
     if (!sync_ack.received) {
-        TEST_FAIL(TEST_NAME, "no SYNC0_ACK received");
+        TEST_FAIL(TEST_NAME, "no SYN0_ACK received");
         return;
     }
     
@@ -512,7 +512,7 @@ static void test_sync0_peer_offline(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 3: SYNC0 双方配对成功
+// 测试 3: SYN0 双方配对成功
 static void test_sync0_peer_online(void) {
     const char *TEST_NAME = "sync0_peer_online";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -531,21 +531,21 @@ static void test_sync0_peer_online(void) {
     uint32_t inst_alice = (uint32_t)P_tick_us() + 3000;
     uint32_t inst_bob = (uint32_t)P_tick_us() + 3001;
     
-    // Alice ONLINE
+    // Alice REG
     online_ack_t alice_online_ack;
     if (send_online_recv_ack(sock_alice, "pair_alice", inst_alice, &alice_online_ack) <= 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Alice ONLINE failed");
+        TEST_FAIL(TEST_NAME, "Alice REG failed");
         return;
     }
     
-    // Alice SYNC0 等待 Bob（此时 Bob 离线）
+    // Alice SYN0 等待 Bob（此时 Bob 离线）
     sync0_ack_t alice_sync_ack;
     if (send_sync0_recv_ack(sock_alice, "pair_bob", 0, NULL, &alice_sync_ack) <= 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Alice SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "Alice SYN0 failed");
         return;
     }
     
@@ -557,21 +557,21 @@ static void test_sync0_peer_online(void) {
         return;
     }
     
-    // Bob ONLINE
+    // Bob REG
     online_ack_t bob_online_ack;
     if (send_online_recv_ack(sock_bob, "pair_bob", inst_bob, &bob_online_ack) <= 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob ONLINE failed");
+        TEST_FAIL(TEST_NAME, "Bob REG failed");
         return;
     }
     
-    // Bob SYNC0 等待 Alice（此时 Alice 在线）
+    // Bob SYN0 等待 Alice（此时 Alice 在线）
     sync0_ack_t bob_sync_ack;
     if (send_sync0_recv_ack(sock_bob, "pair_alice", 0, NULL, &bob_sync_ack) <= 0) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "Bob SYN0 failed");
         return;
     }
     
@@ -579,7 +579,7 @@ static void test_sync0_peer_online(void) {
     if (bob_sync_ack.online != 1) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob should get online=1");
+        TEST_FAIL(TEST_NAME, "Bob should get reg=1");
         return;
     }
     
@@ -589,7 +589,7 @@ static void test_sync0_peer_online(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 4: SYNC0 携带候选地址
+// 测试 4: SYN0 携带候选地址
 static void test_sync0_with_candidates(void) {
     const char *TEST_NAME = "sync0_with_candidates";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -603,11 +603,11 @@ static void test_sync0_with_candidates(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 4000;
     
-    // ONLINE
+    // REG
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "cand_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
@@ -637,11 +637,11 @@ static void test_sync0_with_candidates(void) {
     cands[1].addr.ip[15] = 4;
     cands[1].priority = htonl(500);
     
-    // SYNC0 带候选
+    // SYN0 带候选
     sync0_ack_t sync_ack;
     if (send_sync0_recv_ack(sock, "cand_bob", 2, cands, &sync_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
     }
     
@@ -649,7 +649,7 @@ static void test_sync0_with_candidates(void) {
     P_usleep(100 * 1000);
     
     if (!sync_ack.received) {
-        TEST_FAIL(TEST_NAME, "no SYNC0_ACK received");
+        TEST_FAIL(TEST_NAME, "no SYN0_ACK received");
         return;
     }
     
@@ -662,7 +662,7 @@ static void test_sync0_with_candidates(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 5: ONLINE 畸形包
+// 测试 5: REG 畸形包
 static void test_online_bad_payload(void) {
     const char *TEST_NAME = "online_bad_payload";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -674,7 +674,7 @@ static void test_online_bad_payload(void) {
         return;
     }
     
-    // 发送过短的 ONLINE 包
+    // 发送过短的 REG 包
     uint8_t bad_pkt[16];
     bad_pkt[0] = P2P_RLY_REG;
     bad_pkt[1] = 0;
@@ -695,7 +695,7 @@ static void test_online_bad_payload(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 6: 未 ONLINE 就发 SYNC0
+// 测试 6: 未 REG 就发 SYN0
 static void test_sync0_not_online(void) {
     const char *TEST_NAME = "sync0_not_online";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -707,7 +707,7 @@ static void test_sync0_not_online(void) {
         return;
     }
     
-    // 直接发 SYNC0（不先 ONLINE）
+    // 直接发 SYN0（不先 REG）
     uint8_t pkt[64];
     int pkt_len = build_sync0(pkt, sizeof(pkt), "some_peer", 0, NULL);
     
@@ -732,7 +732,7 @@ static void test_sync0_not_online(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 7: SYNC0 畸形包
+// 测试 7: SYN0 畸形包
 static void test_sync0_bad_payload(void) {
     const char *TEST_NAME = "sync0_bad_payload";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -746,15 +746,15 @@ static void test_sync0_bad_payload(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 7000;
     
-    // 先 ONLINE
+    // 先 REG
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "bad_sync_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
-    // 发送畸形 SYNC0 包（payload 长度声明与实际不符）
+    // 发送畸形 SYN0 包（payload 长度声明与实际不符）
     uint8_t bad_pkt[16];
     bad_pkt[0] = P2P_RLY_SYN0;
     bad_pkt[1] = 0;
@@ -797,7 +797,7 @@ static void test_online_reconnect(void) {
     online_ack_t ack1;
     if (send_online_recv_ack(sock1, peer_id, inst_id1, &ack1) <= 0 || !ack1.received) {
         P_sock_close(sock1);
-        TEST_FAIL(TEST_NAME, "first ONLINE failed");
+        TEST_FAIL(TEST_NAME, "first REG failed");
         return;
     }
     
@@ -814,7 +814,7 @@ static void test_online_reconnect(void) {
     online_ack_t ack2;
     if (send_online_recv_ack(sock2, peer_id, inst_id2, &ack2) <= 0 || !ack2.received) {
         P_sock_close(sock2);
-        TEST_FAIL(TEST_NAME, "second ONLINE failed");
+        TEST_FAIL(TEST_NAME, "second REG failed");
         return;
     }
     
@@ -831,7 +831,7 @@ static void test_online_reconnect(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 9: SYNC0 重复发送的处理
+// 测试 9: SYN0 重复发送的处理
 static void test_sync0_duplicate(void) {
     const char *TEST_NAME = "sync0_duplicate";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -845,40 +845,47 @@ static void test_sync0_duplicate(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 9000;
     
-    // ONLINE
+    // REG
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "dup_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
-    // 第一次 SYNC0
+    // 第一次 SYN0
     sync0_ack_t ack1;
     if (send_sync0_recv_ack(sock, "dup_bob", 0, NULL, &ack1) <= 0 || !ack1.received) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "first SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "first SYN0 failed");
         return;
     }
     
-    // 第二次 SYNC0（同一目标）- server 可能阻止重复会话创建
+    // 第二次 SYN0（同一目标）- 应幂等返回
     sync0_ack_t ack2;
     int rc = send_sync0_recv_ack(sock, "dup_bob", 0, NULL, &ack2);
     
     P_sock_close(sock);
+    P_usleep(100 * 1000);
     
-    // 至少第一次成功就算通过
-    // 注:服务器可能阻止重复会话(Duplicate session create blocked)，这是正确行为
-    if (rc > 0 && ack2.received && ack1.session_id == ack2.session_id) {
-        // 如果两次都返回相同的 session_id,说明是幂等的
-        TEST_PASS(TEST_NAME);
-    } else if (find_log("Duplicate") >= 0 || find_log("blocked") >= 0) {
-        // 如果服务器阻止了重复会话，这也是正确行为
-        TEST_PASS(TEST_NAME);  
-    } else {
-        // 第一次成功且第二次被拒绝也算成功
-        TEST_PASS(TEST_NAME);
+    // 验证幂等性：第二次应成功且返回相同的 session_id
+    if (rc <= 0 || !ack2.received) {
+        TEST_FAIL(TEST_NAME, "second SYN0 should succeed (idempotent)");
+        return;
     }
+    
+    if (ack1.session_id != ack2.session_id) {
+        TEST_FAIL(TEST_NAME, "session_id should be the same (idempotent)");
+        return;
+    }
+    
+    // 检查日志应有 "duplicate SYN0"
+    if (find_log("duplicate SYN0") < 0) {
+        TEST_FAIL(TEST_NAME, "server log missing 'duplicate SYN0'");
+        return;
+    }
+    
+    TEST_PASS(TEST_NAME);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -267,23 +267,29 @@ client_t*
 alloc_client(int8_t proto, sock_t fd);
 
 // 唯一标识客户端（注册 local_peer_id，并加入全局索引哈希表）
+// todo，增加参数 local_peer_id ？
 bool
 identify_client(client_t* c);
-
 
 
 session_t*
 find_session(uint32_t session_id);
 
-// 进行本端和远程的会话配对
+// 由派生协议 session 调用，用于实现基类的释放
+void
+free_session_base(session_t *s);
+
+// 创建一个单端会话
+ret_t
+solo_session(client_t *client, session_t **local_s,
+             size_t session_type_size);
+
+// 配对一个本端和远程的会话
 ret_t
 pair_session(client_t *client, const char *remote_peer_id,
              session_t **local_s, session_t **remote_s,
              size_t session_type_size);
 
-// 由派生协议 session 调用，用于实现基类的释放
-void
-free_session_base(session_t *s);
 
 //-----------------------------------------------------------------------------
 

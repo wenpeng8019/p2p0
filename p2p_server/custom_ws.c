@@ -441,7 +441,7 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
     return;
 
 oom:
-    print("E:", LA_F("[WS] OOM in fragment reassembly\n", LA_F133, 133));
+    print("E:", LA_F("[WS] OOM in fragment reassembly\n", LA_F226, 226));
     if (cwc->ws_frag_q.head) {
         BUF_Q_CLEAR(&cwc->ws_frag_q, it, free_buf16(it););
         cwc->ws_frag_len = 0;
@@ -464,7 +464,7 @@ bool cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx) {
     // 分配 HTTP 握手接收缓冲（流模式）
     buf16_item_t *buf = alloc_buf16(CW_HTTP_BUF_FLAGS);
     if (!buf) {
-        print("E:", LA_F("[WS] OOM: cannot allocate HTTP recv buffer\n", LA_F133, 133));
+        print("E:", LA_F("[WS] OOM: cannot allocate HTTP recv buffer\n", LA_F227, 227));
         return false;
     }
 
@@ -540,7 +540,7 @@ ret_t cw_send_frame(cw_client_t *client, uint8_t opcode, buf16_item_t *buf_item,
     }
 
     if (payload_pos < hdr_sz) {
-        print("E:", LA_F("[WS] send_frame: payload_pos(%u) < hdr_sz(%u)\n", 0, 0), payload_pos, hdr_sz);
+        print("E:", LA_F("[WS] send_frame: payload_pos(%u) < hdr_sz(%u)\n", LA_F228, 228), payload_pos, hdr_sz);
         free_buffer(buf_item);
         return E_INVALID;
     }
