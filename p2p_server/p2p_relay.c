@@ -309,25 +309,19 @@ static void relay_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_i
 }
 
 // 清理一个通道的所有队列项，并将存活项转发给 dst
-// arr[0] 若 TCP 写入中（refer!=NULL 且非 REFER_ACK_PENDING）：设 refer=NULL 让 sent-callback 释放
-// 其余（REFER_ACK_PENDING 或 refer==NULL）：直接 relay_session_send(dst, ...)
-static void relay_ch_break_forward(buf16_item_t **arr, uint8_t *cnt, relay_session_t *dst) {
-    for (uint8_t i = 0; i < *cnt; i++) {
-        buf16_item_t *it = arr[i]; arr[i] = NULL;
-        if (it->refer != NULL && it->refer != ITEM_REF_ACK_PENDING) it->refer = NULL;
-        else ct_session_send((ct_session_t*)dst, it);
+static void relay_ch_break_forward(buf16_item_t **arr, uint8_t* cnt, relay_session_t *dst) { if (!*cnt) return;
+    uint8_t i = 0;
+    if (arr[0]->refer == ITEM_REF_ACK_PENDING) { free_buffer(arr[0]); i = 1; }
+    while (i < *cnt) { buf16_item_t *it = arr[i]; arr[i++] = NULL;
+        if (it->refer) it->refer = NULL;                    // 如果正在发送中，取消 refer（转为由对方发送完成后自动释放）
+        else ct_session_send((ct_session_t*)dst, it);       // 直接发送到对方的发送队列中，且不添加 refer
     }
     *cnt = 0;
 }
 
 // 清理一个通道的所有队列项并释放
-static void relay_ch_break_free(buf16_item_t **arr, uint8_t *cnt) {
-    for (uint8_t i = 0; i < *cnt; i++) {
-        buf16_item_t *it = arr[i]; arr[i] = NULL;
-        if (it->refer != NULL && it->refer != ITEM_REF_ACK_PENDING) it->refer = NULL;
-        else free_buf16(it);
-    }
-    *cnt = 0;
+static void relay_ch_break_free(buf16_item_t **arr, uint8_t* cnt) { if (!*cnt) return;
+    do { --*cnt; free_buffer(arr[*cnt]); arr[*cnt] = NULL; } while (*cnt);
 }
 
 // 停止/终止会话
@@ -368,7 +362,7 @@ static void relay_session_break(ct_session_t *ct_session, ct_session_t *ct_peer,
     // 向对端发送最后一个 FIN 包
     relay_session_send_fin(peer);
 
-    // 如果依然可以向本地发送数据
+    // 如果依然可以向本端发送数据
     if (break_mode == SESS_BREAK_CLOSE) {
         relay_ch_break_forward(peer->sync_peer_send, &peer->sync_peer_send_cnt, session);
         relay_ch_break_forward(peer->pkt_peer_send,  &peer->pkt_peer_send_cnt,  session);
@@ -494,7 +488,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     if (!remote_s) {
 
         if (local_s->sync_peer_send_cnt > 0) {
-            free_buf16(local_s->sync_peer_send[0]);
+            free_buffer(local_s->sync_peer_send[0]);
             local_s->sync_peer_send[0] = NULL;
             local_s->sync_peer_send_cnt = 0;
         }
@@ -600,7 +594,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         relay_session_t *peer = RELAY_PEER(session);
         if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
 
-            free_buf16(peer->sync_peer_send[0]);
+            free_buffer(peer->sync_peer_send[0]);
             peer->sync_peer_send[0] = peer->sync_peer_send[1];
             peer->sync_peer_send[1] = NULL;
             peer->sync_peer_send_cnt--;
@@ -668,7 +662,7 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
     if (peer->sync_peer_send_cnt > 0 && peer->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
         if (((p2p_relay_hdr_t*)ITEM2BUF(peer->sync_peer_send[0]))->type == P2P_RLY_SYN0) {
 
-            free_buf16(peer->sync_peer_send[0]);
+            free_buffer(peer->sync_peer_send[0]);
             peer->sync_peer_send[0] = peer->sync_peer_send[1];
             peer->sync_peer_send[1] = NULL;
             peer->sync_peer_send_cnt--;
@@ -1160,7 +1154,7 @@ relay_init_client(relay_client_t* client) {
 
     // ct_init_client 为流模式分配了 recv_buf；relay 使用帧模式，释放并切换
     if (((ct_client_t*)client)->recv_buf) {
-        free_buf16(((ct_client_t*)client)->recv_buf);
+        free_buffer(((ct_client_t*)client)->recv_buf);
         ((ct_client_t*)client)->recv_buf = NULL;
     }
     ((ct_client_t*)client)->hdr_rs = client->hdr_buf;          // 静态 4 字节帧头缓冲

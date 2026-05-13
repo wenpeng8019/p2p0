@@ -1015,22 +1015,16 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 }
             }
         }
-        // 对于 session 级的 item
+        // 对于 session 级的 item（将 item 从 sess 的 send_queue 中移除
+        // + 同时轮询下一个（session sending 队列不为空的）session，即 sess 平权遍历
         else { assert(item==sending_session->send_queue.head && item != ctx->fatal_item);
 
-            // 如果发送的是对端发过来的数据
-            if (item->refer) { assert(item->refer != ITEM_REF_ACK_PENDING && item->refer != ITEM_REF_CLIENT_ERROR);
-                ctx->handle_peer_sent((ct_session_t*)item->refer, item);
-            }
-
-            // 将当前 session 的 sending 队列切换到下一项，如果发送队列不为空
+            // 将当前 session 的 sending 队列切换到下一项，同时如果发送队列不为空，轮询切换到下一个 sess
             if ((sending_session->send_queue.head = item->next)) {
 
-                // 轮询下一个（session sending 队列不为空的）session
                 client->sending_sess = sending_session->send_next ? sending_session->send_next : client->send_sess_head;
             }
-            // 如果当前 session 发送队列已空，从 client 中移除该 session
-            // + 同时切换到下一个（session sending 队列不为空的）session
+            // 如果当前 session 发送队列已空，从 client 中移除该 session，并直接切换到下一个 sess
             else { sending_session->send_queue.rear = NULL;
 
                 ct_session_t *next = sending_session->send_next;
@@ -1048,7 +1042,14 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 sending_session->send_prev = NULL;
             }
 
-            // 如果 item 没有被（custom_peer_sent）标记为待 ACK 状态，则直接释放
+            // 如果发送的是对端发过来的数据
+            if (item->refer) {
+                if (item->refer == ITEM_REF_ACK_PENDING)
+                assert(item->refer != ITEM_REF_ACK_PENDING && item->refer != ITEM_REF_CLIENT_ERROR);
+                ctx->handle_peer_sent((ct_session_t*)item->refer, item);
+            }
+
+            // 如果 item 没有被（handle_peer_sent）标记为待 ACK 状态，则直接释放
             if (item->refer != ITEM_REF_ACK_PENDING) { free_buffer(item); }
         }
     }
