@@ -158,71 +158,89 @@ typedef struct buffer_queue {
     }
 
 typedef struct buffer_round {
-    buf16_item_t*                   slots;
-    uint16_t                        size;
-    uint16_t                        r;
-    uint16_t                        w;
+    buf16_item_t**                  slots;      // 指针数组
+    int16_t                         size;       // 负数表示空（绝对值为容量），正数表示非空（值为容量）
+    uint16_t                        r;          // 读指针（队头）
+    uint16_t                        w;          // 写指针（队尾）
 } buffer_round_t;
 
 // 初始化循环队列（需要预先分配 slots 数组）
-#define BUF_R_INIT(r, slot_array, capacity)         \
-    (r)->slots = (slot_array);                      \
-    (r)->size = (capacity);                         \
-    (r)->r = 0;                                     \
-    (r)->w = 0
+#define BUF_R_INIT(rq, slot_array, capacity) do {           \
+    (rq)->slots = (slot_array);                             \
+    (rq)->size = -(int16_t)(capacity);                      \
+    (rq)->r = 0;                                            \
+    (rq)->w = 0;                                            \
+} while(0)
 
-// 判断循环队列是否为空
-#define BUF_R_EMPTY(r)                              \
-    ((r)->r == (r)->w)
+// 判断循环队列是否为空（size 为负数表示空）
+#define BUF_R_EMPTY(rq)                                     \
+    ((rq)->size < 0)
 
-// 判断循环队列是否已满（保留一个空位来区分满和空）
-#define BUF_R_FULL(r)                               \
-    (((r)->w + 1) % (r)->size == (r)->r)
+// 获取容量（size 的绝对值）
+#define BUF_R_CAPACITY(rq)                                  \
+    ((uint16_t)((rq)->size < 0 ? -(rq)->size : (rq)->size))
+
+// 判断循环队列是否已满（size 为正且读写指针相遇）
+#define BUF_R_FULL(rq)                                      \
+    ((rq)->size > 0 && (rq)->r == (rq)->w)
 
 // 获取循环队列中的元素数量
-#define BUF_R_COUNT(r)                              \
-    ((r)->w >= (r)->r ? (r)->w - (r)->r : (r)->size - (r)->r + (r)->w)
+#define BUF_R_COUNT(rq)                                     \
+    ((rq)->size < 0 ? 0 : ((rq)->w >= (rq)->r ? (rq)->w - (rq)->r : (rq)->size + (rq)->w - (rq)->r))
 
-// 获取可写入的位置（返回 buf16_item_t 指针，队列满时返回 NULL）
-#define BUF_R_PUSH(r)                               \
-    (BUF_R_FULL(r) ? NULL : &(r)->slots[(r)->w])
+// 获取队首元素 !! 调用者需要确保队列不空
+#define BUF_R_FRONT(rq)                                     \
+    (rq)->slots[(rq)->r]
 
-// 提交写入（在使用 BUF_R_PUSH 填充数据后调用）
-#define BUF_R_COMMIT(r)                             \
-    (r)->w = ((r)->w + 1) % (r)->size
+// 从队首移除（在使用 BUF_R_FRONT 读取数据后调用，移动读指针）
+#define BUF_R_POP(rq) if ((rq)->size>0) do {                \
+    (rq)->r = ((rq)->r + 1) % (rq)->size;                   \
+    if ((rq)->r == (rq)->w) (rq)->size = -(rq)->size;       \
+} while (0)
 
-// 获取队首元素（返回 buf16_item_t 指针，队列空时返回 NULL）
-#define BUF_R_POP(r)                                \
-    (BUF_R_EMPTY(r) ? NULL : &(r)->slots[(r)->r])
+// 从队首出队到变量（读取并自动移动读指针）
+#define BUF_R_POP_TO(item, rq) do {                         \
+    if ((rq)->size < 0) item = NULL;                        \
+    else { item = (rq)->slots[(rq)->r];                     \
+        (rq)->r = ((rq)->r + 1) % (rq)->size;               \
+        if ((rq)->r == (rq)->w) (rq)->size = -(rq)->size;   \
+    }                                                       \
+} while (0)
 
-// 提交读取（在使用 BUF_R_POP 读取数据后调用，移动读指针）
-#define BUF_R_ADVANCE(r)                            \
-    (r)->r = ((r)->r + 1) % (r)->size
+// 获取队尾元素 !! 调用者需要确保队列不空
+#define BUF_R_LAST(rq)                                      \
+    (rq)->slots[(rq)->w ? (rq)->w - 1 : (rq)->size-1]
 
-// 出队到变量（读取并自动移动读指针）
-#define BUF_R_POP_TO(item, r)                       \
-    if (!BUF_R_EMPTY(r)) {                          \
-        item = &(r)->slots[(r)->r];                 \
-        (r)->r = ((r)->r + 1) % (r)->size;          \
-    } else {                                        \
-        item = NULL;                                \
-    }
+// 获取队尾可写入位置（返回 buf16_item_t* 的地址，队列满时返回 NULL）
+#define BUF_R_BACK(rq)                                      \
+    (BUF_R_FULL(rq) ? NULL : &(rq)->slots[(rq)->w])
 
-// 查看队首元素（不移除，不移动读指针）
-#define BUF_R_PEEK(r)                               \
-    (BUF_R_EMPTY(r) ? NULL : &(r)->slots[(r)->r])
+// 提交写入到队尾（在使用 BUF_R_BACK 填充数据后调用）
+#define BUF_R_PUSH(rq, item) do {                           \
+    if ((rq)->r == (rq)->w) {                               \
+        if ((rq)->size < 0) {                               \
+            (rq)->slots[0] = item; item = NULL;             \
+            (rq)->r = 0; (rq)->w = 1;                       \
+            if ((rq)->size < -1) (rq)->size = -(rq)->size;  \
+        }                                                   \
+    } else { (rq)->slots[(rq)->w] = item; item = NULL;      \
+        (rq)->w = ((rq)->w + 1) % (rq)->size;               \
+    }                                                       \
+} while(0)
 
 // 清空循环队列
-#define BUF_R_CLEAR(r)                              \
-    (r)->r = (r)->w = 0
+#define BUF_R_CLEAR(rq) do {                                \
+    if ((rq)->size > 0) (rq)->size = -(rq)->size;           \
+    (rq)->r = (rq)->w = 0;                                  \
+} while(0)
 
 // 遍历循环队列中的所有元素
-#define BUF_R_FOR(r, it, ...)                       \
-    for (uint16_t _i = (r)->r, _cnt = BUF_R_COUNT(r), _idx = 0;     \
-         _idx < _cnt;                               \
-         _i = (_i + 1) % (r)->size, _idx++) {       \
-        buf16_item_t *it = &(r)->slots[_i];         \
-        __VA_ARGS__                                 \
+#define BUF_R_FOR(rq, it, ...)                      \
+    if ((rq)->size > 0) {                           \
+        for (uint16_t _r = (rq)->r; _r != (rq)->w; _r = (_r + 1) % (rq)->size) { \
+            buf16_item_t *it = (rq)->slots[_r];     \
+            __VA_ARGS__                             \
+        }                                           \
     }
 
 
