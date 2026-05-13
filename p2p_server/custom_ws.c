@@ -154,12 +154,13 @@ static void cw_unmask(uint8_t *data, uint32_t len, const uint8_t mask[4]) {
 // + hdr_buf: recv_buf 中 HTTP 请求文本（不含 "\r\n\r\n" 尾）
 // + hdr_len: HTTP header 文本长度
 // + payload0/payload1: HTTP header 之后不应有 payload（WS 协议握手阶段不携带 body）
-static buf16_item_t *cw_tcp_handle_handshake(ct_client_t *client,
+static buf16_item_t *cw_tcp_handle_handshake(ct_client_t **pclient,
                                               uint8_t *hdr_buf, uint16_t hdr_len,
                                               buf16_item_t *payload0, buf16_item_t *payload1) {
     (void)payload0; (void)payload1;
+    ct_client_t *client = *pclient;
     cw_client_t *cwc = (cw_client_t*)client;
-    custom_ws_ctx_t *wctx = cwc->ws_ctx;
+    cw_client_ctx_t *wctx = cwc->ws_ctx;
 
     // hdr_buf 指向流模式 recv_buf 内部，内容是不含 "\r\n\r\n" 的 HTTP 请求文本
     // 需要 NUL 结尾才能用 strstr；hdr_buf 后紧跟 recv_buf 中剩余数据，
@@ -260,7 +261,7 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
                                 buf16_item_t *payload0, buf16_item_t *payload1) {
     (void)hdr_len;
     cw_client_t *cwc = (cw_client_t*)client;
-    custom_ws_ctx_t *wctx = cwc->ws_ctx;
+    cw_client_ctx_t *wctx = cwc->ws_ctx;
 
     uint8_t opcode = hdr_buf[0] & 0x0F;
     uint8_t fin    = (hdr_buf[0] >> 7) & 1;
@@ -457,7 +458,7 @@ static buf16_item_t *cw_tcp_error_item(ct_client_t *client, bool handshake) {
 ///////////////////////////////////////////////////////////////////////////////
 // Public API
 
-bool cw_init_client(cw_client_t *client, custom_ws_ctx_t *ctx) {
+bool cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx) {
     (void)ctx;
 
     // 分配 HTTP 握手接收缓冲（流模式）
@@ -497,7 +498,7 @@ bool cw_init_client(cw_client_t *client, custom_ws_ctx_t *ctx) {
     return true;
 }
 
-void cw_free_client(custom_ws_ctx_t *ctx, cw_client_t *client) {
+void cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client) {
     if (client->ws_frag_q.head) {
         BUF_Q_CLEAR(&client->ws_frag_q, it, free_buf16(it););
         client->ws_frag_len = 0;
@@ -576,7 +577,7 @@ ret_t cw_send_close(cw_client_t *client, uint16_t code) {
     return E_NONE;
 }
 
-void cw_retry_closing(custom_ws_ctx_t *ctx, cw_client_t *client, uint64_t now) {
+void cw_retry_closing(cw_client_ctx_t *ctx, cw_client_t *client, uint64_t now) {
     if ((client->io & CW_IO_FLAG_CLOSING) &&
         tick_diff(now, client->base.last_active) >= CLIENT_TIMEOUT_S * 1000) {
         print("I:", LA_F("[WS] close timeout, force closing\n", LA_F192, 192));
@@ -588,7 +589,7 @@ void cw_retry_closing(custom_ws_ctx_t *ctx, cw_client_t *client, uint64_t now) {
 // custom_tcp_ctx_t 初始化助手
 // + 将 WS 回调绑定到 tcp ctx，供 cw_init_client 调用方使用（一次性初始化）
 
-void cw_ctx_init(custom_ws_ctx_t *ctx) {
+void cw_ctx_init(cw_client_ctx_t *ctx) {
     ctx->base.resolve_payload_len    = cw_resolve_payload_len;
     ctx->base.handle_handshake       = cw_tcp_handle_handshake;
     ctx->base.handshake_finish       = cw_tcp_handshake_finish;

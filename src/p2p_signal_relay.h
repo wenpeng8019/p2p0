@@ -232,6 +232,7 @@ typedef struct {
     /* 候选同步管理 */
     uint16_t            candidate_syncing_base;         /* 下一个要同步发送的候选索引。该值大于 session 的 local_cand_cnt，则说明已经 fin */
     uint16_t            candidate_synced_count;         /* 已确认同步完成的候选数量，该值小于 candidate_syncing_base 说明上批同步的候选还未确认 */
+    uint8_t             sync_sid;                       /* 下一个 SYNC 上行包的序列号（1起始循环递增，SYN0 的 sid=0 已省略传输）*/
     uint64_t            trickle_last_time;              /* 上次 trickle 发送时间（用于攒批窗口控制, 0 表示还未进入 trickle 阶段）*/
 
     /* 数据中继流控 */

@@ -35,14 +35,14 @@
 //-----------------------------------------------------------------------------
 // WS client 扩展字段（内联宏，供派生结构体使用）
 //
-// + ws_ctx:       指向所属的 custom_ws_ctx_t（init 时保存，回调中用于访问 ws 级配置）
+// + ws_ctx:        指向所属的 custom_ws_ctx_t（init 时保存，回调中用于访问 ws 级配置）
 // + ws_hdr_buf:    14 字节静态缓冲，帧模式下作为 hdr_rs 使用（存放 WS 帧头字节）
 // + ws_opcode:     当前帧的 opcode（FIN bit 在 bit7：0x80 | opcode）
 // + ws_frag_q:     分片帧的聚合队列（收到非 FIN 帧时追加，head==NULL 表示无分片进行中）
 // + ws_frag_len:   ws_frag_q 中已聚合的总字节数
 // + ws_utf8state:  TEXT 帧 UTF-8 DFA 当前状态（0=ACCEPT；跨分片保持；RFC 6455 §8.1）
 #define CUSTOM_WS_CLIENT \
-    struct custom_ws_ctx*           ws_ctx;         \
+    struct cw_client_ctx*           ws_ctx;         \
     uint8_t                         ws_hdr_buf[14]; \
     uint8_t                         ws_opcode;      \
     buffer_queue_t                  ws_frag_q;      \
@@ -87,8 +87,8 @@ typedef bool (*cw_handshake_done_cb)(cw_client_t *client);
 //-----------------------------------------------------------------------------
 // 协议上下文（每个 WS 子协议类型共享一个）
 
-typedef struct custom_ws_ctx {
-    custom_tcp_ctx_t                base;
+typedef struct cw_client_ctx {
+    ct_client_ctx_t                 base;
 
     // WS 子协议名（HTTP 握手 Sec-WebSocket-Protocol 字段，NULL 表示不协商）
     const char*                     sub_protocol;
@@ -104,7 +104,7 @@ typedef struct custom_ws_ctx {
 
     // 对端发起 close 时调用（nullable）
     cw_handle_close_cb              handle_close;
-} custom_ws_ctx_t;
+} cw_client_ctx_t;
 
 //-----------------------------------------------------------------------------
 // Public API
@@ -112,16 +112,16 @@ typedef struct custom_ws_ctx {
 // 初始化 WS 协议上下文（绑定内部回调到 ctx->base）
 // + 必须在设置应用层回调之前调用（或之后调用，不影响，因 base 字段独立）
 void
-cw_ctx_init(custom_ws_ctx_t *ctx);
+cw_ctx_init(cw_client_ctx_t *ctx);
 
 // 初始化 WS client
 // + 必须在 accept 后、第一次 cw_handle_recv 之前调用
 bool
-cw_init_client(cw_client_t *client, custom_ws_ctx_t *ctx);
+cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx);
 
 // 强制释放 WS client（关闭所有 session，释放所有缓冲）
 void
-cw_free_client(custom_ws_ctx_t *ctx, cw_client_t *client);
+cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client);
 
 // 发送 WS 帧
 // + opcode: WS_OP_TEXT / WS_OP_BINARY
@@ -137,7 +137,7 @@ cw_send_close(cw_client_t *client, uint16_t code);
 
 // grace close 超时检查（在 server 的定期 cleanup 中调用）
 void
-cw_retry_closing(custom_ws_ctx_t *ctx, cw_client_t *client, uint64_t now);
+cw_retry_closing(cw_client_ctx_t *ctx, cw_client_t *client, uint64_t now);
 
 //-----------------------------------------------------------------------------
 

@@ -52,13 +52,15 @@ typedef struct compact_client {
 #define COMPACT_CLIENT(s)   ((compact_client_t*)((session_t*)(s))->client)
 #define COMPACT_PEER(s)     ((compact_session_t*)((session_t*)(s))->peer)
 
-void
+client_ctx_t*
 compact_init(void);
 
 bool
 compact_init_client(compact_client_t* c, struct sockaddr_in *from);
 void
-compact_free_client(compact_client_t *c);
+compact_free_client(client_t *c);
+
+extern client_ctx_t g_compact_client_ctx;
 
 void
 compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct sockaddr_in *from);

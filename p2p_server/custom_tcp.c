@@ -48,8 +48,8 @@ void ct_session_send(ct_session_t *session, buf16_item_t* buf_item) {
     ct_client_t *client = CT_CLIENT(session);
 
     // 添加到 session 的本地发送队列
-    BUF_Q_APPEND(session->send_queue, buf_item)
-    if (session->send_queue->head != buf_item) return;         // 如果队列之前不空，直接返回
+    BUF_Q_APPEND(&session->send_queue, buf_item)
+    if (session->send_queue.head != buf_item) return;         // 如果队列之前不空，直接返回
 
     // 如果 session 发送队列之前为空
     assert(!session->send_next && !session->send_prev);
@@ -74,9 +74,9 @@ void ct_session_send(ct_session_t *session, buf16_item_t* buf_item) {
 //   true: 直接将当前发送队列中的数据销毁，无需继续发送给 client 端。
 static void clear_session_sending(ct_session_t *session, bool terminate, bool all) {
 
-    buf16_item_t *item = session->send_queue->head;
+    buf16_item_t *item = session->send_queue.head;
     if (!item) {
-        assert(!session->send_queue->rear && !session->send_next && !session->send_prev);
+        assert(!session->send_queue.rear && !session->send_next && !session->send_prev);
         return;
     }
 
@@ -85,19 +85,19 @@ static void clear_session_sending(ct_session_t *session, bool terminate, bool al
     // 如果正在发送当前 session 的数据，需要将它转为 client 级发送队列的第一项
     if (client->sending_sess == session) {
         client->sending_sess = NULL;
-        BUF_Q_POP(session->send_queue, item)
+        BUF_Q_POP(&session->send_queue, item)
         BUF_Q_PUSH(&client->send_buff_queue, item)
     }
 
-    if (session->send_queue->head) {
+    if (session->send_queue.head) {
 
         // 如果 session 的数据需要被销毁，即无需继续发送给 client 端
         if (terminate) {
-            BUF_Q_CLEAR(session->send_queue, it, free_buffer(it);)
+            BUF_Q_CLEAR(&session->send_queue, it, free_buffer(it);)
         }
         // 如果需要将 session 现有的数据发送给 client 端，则将 session 的发送队列接入 client 的发送队列
         else {
-            BUF_Q_MV(&client->send_buff_queue, session->send_queue)
+            BUF_Q_MV(&client->send_buff_queue, &session->send_queue)
         }
     }
 
@@ -140,7 +140,7 @@ static void clear_client_sending(ct_client_t *client) {
 //-----------------------------------------------------------------------------
 
 // 关闭/销毁某个会话
-void ct_close_session(custom_tcp_ctx_t* ctx, ct_session_t *session, bool terminate) {
+void ct_close_session(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate) {
 
     // 如果已和对端 session 建立连接
     if (PEER_ONLINE(session)) {
@@ -155,7 +155,7 @@ void ct_close_session(custom_tcp_ctx_t* ctx, ct_session_t *session, bool termina
 }
 
 // 所有会话
-static void custom_close_all_sessions(custom_tcp_ctx_t* ctx, ct_client_t* client, bool terminate) {
+static void custom_close_all_sessions(ct_client_ctx_t* ctx, ct_client_t* client, bool terminate) {
 
 
     while (client->base.sessions) { ct_session_t* session = (ct_session_t*)client->base.sessions;
@@ -204,9 +204,36 @@ ct_init_client(ct_client_t* client) {
     return true;
 }
 
+void
+ct_migrate_client(client_t *to_base, client_t *from_base) {
+    ct_client_t *to   = (ct_client_t*)to_base;
+    ct_client_t *from = (ct_client_t*)from_base;
+
+    // recv_buf 所有权转移（to 已由 ct_init_client 分配，需先释放）
+    if (to->recv_buf) {
+        if (to->recv_buf->next) free_buf16(to->recv_buf->next);
+        free_buf16(to->recv_buf);
+    }
+    to->recv_buf      = from->recv_buf;  from->recv_buf  = NULL;
+
+    // hdr_rs 已读入内容迁移（帧模式：将 from->hdr_rs 中已读字节拷贝到 to->hdr_rs）
+    // + 拷贝上限取 to->hdr_sz，防止 from->recv_cur 超出 to->hdr_rs 缓冲区大小
+    if (to->hdr_rs && from->hdr_rs && from->recv_cur > 0)
+        memcpy(to->hdr_rs, from->hdr_rs, to->hdr_sz);
+    to->recv_cur      = from->recv_cur;  from->recv_cur  = 0;
+
+    // payload_buf 所有权转移
+    if (to->payload_buf) {
+        if (to->payload_buf->next) free_buf16(to->payload_buf->next);
+        free_buffer(to->payload_buf); 
+    }
+    to->payload_buf  = from->payload_buf; from->payload_buf = NULL;
+    to->payload_cur  = from->payload_cur; from->payload_cur = 0;
+}
+
 // 释放 client
 void
-ct_free_client(custom_tcp_ctx_t* ctx, ct_client_t *client) {
+ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client) {
 
     if (client->base.sessions)
         custom_close_all_sessions(ctx, client, true);
@@ -232,7 +259,7 @@ ct_free_client(custom_tcp_ctx_t* ctx, ct_client_t *client) {
 
 // 优雅的关闭 client
 void 
-ct_client_off(custom_tcp_ctx_t* ctx, ct_client_t *client) {
+ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client) {
 
     // 中断所有 session
     if (client->base.sessions)
@@ -259,7 +286,7 @@ ct_client_off(custom_tcp_ctx_t* ctx, ct_client_t *client) {
 }
 
 void
-ct_client_error(custom_tcp_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal) {
+ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal) {
 
     assert(error);
     client->last_error = error;
@@ -299,7 +326,7 @@ ct_client_error(custom_tcp_ctx_t* ctx, ct_client_t *client, int16_t error, bool 
 }
 
 void
-ct_reactive_client(custom_tcp_ctx_t* ctx, ct_client_t *client) { (void)ctx;
+ct_reactive_client(ct_client_ctx_t* ctx, ct_client_t *client) { (void)ctx;
 
     client->last_error = 0;                     // 重置错误状态
     client->io |= TCP_IO_FLAG_WANT_READ;        // 重新激活读取（之前断网时会被关闭）
@@ -341,7 +368,7 @@ static inline void prepare_next_recv(ct_client_t *client, buf16_item_t* recv_buf
 
 // 处理 RELAY 模式信令（TCP 长连接）- 统一接收+分发架构
 void 
-ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
+ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     assert(client->hdr_rs && client->hdr_sz);
 
@@ -474,7 +501,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     // 触发应用协议层回调处理
                     if (TCP_HS_IS_HANDSHAKING(client)) {
 
-                        ack_item = ctx->handle_handshake(client, buf, sz, NULL, NULL);
+                        ack_item = ctx->handle_handshake(&client, buf, sz, NULL, NULL);
                         assert(buf_item == client->recv_buf);       // handle_handshake 期间不应调整（下一次请求的）recv_buf
                         goto handshake;
                     }
@@ -505,8 +532,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                     // 触发应用协议层回调处理
                     if (TCP_HS_IS_HANDSHAKING(client)) {
-
-                        ack_item = ctx->handle_handshake(client, buf, sz, buf_item, NULL);
+                        ack_item = ctx->handle_handshake(&client, buf, sz, buf_item, NULL);
                         assert(buf_item == client->recv_buf);       // handle_handshake 期间不应调整（下一次请求的）recv_buf
                         if (ack_item) {
                             buf_item->len = len;                    // 恢复 recv_buf 的 len
@@ -615,7 +641,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
                         // 触发应用协议层回调处理
                         if (TCP_HS_IS_HANDSHAKING(client)) {
 
-                            ack_item = ctx->handle_handshake(client, buf, client->hdr_sz, NULL, NULL);
+                            ack_item = ctx->handle_handshake(&client, buf, client->hdr_sz, NULL, NULL);
                             assert(!client->recv_buf);                      // handle_handshake 期间不应调整（下一次请求的）recv_buf
                             goto handshake;
                         }
@@ -640,8 +666,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                         // 触发应用协议层回调处理
                         if (TCP_HS_IS_HANDSHAKING(client)) {
-
-                            ack_item = ctx->handle_handshake(client, buf, client->hdr_sz, payload_item, NULL);
+                            ack_item = ctx->handle_handshake(&client, buf, client->hdr_sz, payload_item, NULL);
                             assert(!client->recv_buf);                      // handle_handshake 期间不应调整（下一次请求的）recv_buf
                             if (ack_item) {
                                 payload_item->len = len;                    // 恢复 recv_buf 的 len
@@ -705,8 +730,8 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 client->payload_cur += sz;                                  // 跳过已加载（复制）的部分
                 memcpy(buf + payload_offset, ITEM2BUF(client->payload_buf) + client->payload_buf->pos, sz);
                 free_buf16(client->payload_buf);
-                client->payload_buf = payload_item;
             }
+            client->payload_buf = payload_item;                             // 始终更新 payload_buf（帧模式首包 payload_buf=NULL 的情况）
 
         } while (0);
 
@@ -738,9 +763,8 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
         else { buf = client->hdr_rs; sz = client->hdr_sz; }
 
         if (TCP_HS_IS_HANDSHAKING(client)) {
-            ack_item = ctx->handle_handshake(client, buf, sz, buf_item, payload_item);
+            ack_item = ctx->handle_handshake(&client, buf, sz, buf_item, payload_item);
             assert(bak_item == client->recv_buf);                       // handle_handshake 期间不应调整（下一次请求的）recv_buf
-
             if (client->payload_buf) {
                 free_buffer(payload_item);
                 client->payload_buf = NULL;
@@ -748,7 +772,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
             client->payload_cur = 0;
 
             client->recv_cur = 0;
-            if (bak_item) bak_item->pos = bak_item->len = 0;            // 此时的 recv_buf（如果存在）肯定已经全部被消费完成
+            if (bak_item) bak_item->pos = bak_item->len = 0;        // 此时的 recv_buf（如果存在）肯定已经全部被消费完成
             goto handshake;
         }
         ctx->handle_proto(client, buf, sz, buf_item, payload_item);
@@ -763,17 +787,7 @@ ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
         if (bak_item) bak_item->pos = bak_item->len = 0;
         goto prepare_next;
 
-    handshake:  // 握手阶段可以直接写入，而无需再次等待 writable 周期判定
-
-        assert(!client_identified(&client->base) && !client->base.sessions);
-
-        // 握手阶段禁止发送数据
-        assert(!client->send_buff_queue.head);
-        assert(!client->send_buff_queue.rear);
-        assert(!client->send_sess_head);
-        assert(!client->send_sess_rear);
-        assert(!client->sending_sess);
-        assert(!client->sending_cur);
+    handshake:  // 握手阶段可以直接写入，而无需再次等待 writable 周期判定。但注意，由于支持重连前移机制，此时 client 可能已不是初始分配的 client
 
         if (!ack_item) {
 
@@ -858,7 +872,7 @@ error: assert(client->last_error);
 
 // 处理 RELAY 模式信令发送（TCP 长连接）- 统一队列发送
 void
-ct_handle_send(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
+ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     // 如果当前处于握手阶段
     // + 此时会复用 recv_buf 作为 send_buf，recv_cur 作为已发送长度
@@ -921,13 +935,13 @@ ct_handle_send(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
         // 如果正在发送 session 数据包（mid-packet），继续发送当前 session
         if (client->sending_sess && client->sending_cur) { assert(sending_session);
             sending_session = client->sending_sess;
-            item = sending_session->send_queue->head;
+            item = sending_session->send_queue.head;
         }
         // 否则优先发送 client 级别的包；没有 client 包时，从游标 session 发送
         else if (!item) { assert(sending_session);
             if (!client->sending_sess) client->sending_sess = sending_session;
             else sending_session = client->sending_sess;
-            item = sending_session->send_queue->head;
+            item = sending_session->send_queue.head;
         }
 
         uint8_t* buf; uint32_t sz;
@@ -1002,7 +1016,7 @@ ct_handle_send(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
             }
         }
         // 对于 session 级的 item
-        else { assert(item==sending_session->send_queue->head && item != ctx->fatal_item);
+        else { assert(item==sending_session->send_queue.head && item != ctx->fatal_item);
 
             // 如果发送的是对端发过来的数据
             if (item->refer) { assert(item->refer != ITEM_REF_ACK_PENDING && item->refer != ITEM_REF_CLIENT_ERROR);
@@ -1010,14 +1024,14 @@ ct_handle_send(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP) {
             }
 
             // 将当前 session 的 sending 队列切换到下一项，如果发送队列不为空
-            if ((sending_session->send_queue->head = item->next)) {
+            if ((sending_session->send_queue.head = item->next)) {
 
                 // 轮询下一个（session sending 队列不为空的）session
                 client->sending_sess = sending_session->send_next ? sending_session->send_next : client->send_sess_head;
             }
             // 如果当前 session 发送队列已空，从 client 中移除该 session
             // + 同时切换到下一个（session sending 队列不为空的）session
-            else { sending_session->send_queue->rear = NULL;
+            else { sending_session->send_queue.rear = NULL;
 
                 ct_session_t *next = sending_session->send_next;
                 if (sending_session->send_prev) sending_session->send_prev->send_next = next;

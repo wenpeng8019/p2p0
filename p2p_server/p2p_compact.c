@@ -372,7 +372,7 @@ static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void
+client_ctx_t*
 compact_init(void) {
 
 }
@@ -424,17 +424,20 @@ static void compact_free_session(session_t *s) {
 }
 
 // 释放 client
-void compact_free_client(compact_client_t *c) {
+void compact_free_client(client_t *c) {
+    compact_client_t *cc = (compact_client_t*)c;
 
     // 从 auth 哈希表移除
-    if (c->auth_key) {
-        HASH_DELETE(hh, g_clients_by_auth, c);
-        c->auth_key = 0;
+    if (cc->auth_key) {
+        HASH_DELETE(hh, g_clients_by_auth, cc);
+        cc->auth_key = 0;
     }
 
-    while (c->base.sessions) compact_free_session(c->base.sessions);
-    free_client_base(&c->base);
+    while (cc->base.sessions) compact_free_session(cc->base.sessions);
+    free_client_base(&cc->base);
 }
+
+client_ctx_t g_compact_client_ctx = { compact_free_client, NULL };
 
 
 // 缓存响应数据并从 REQ 阶段转换到 RSP 阶段
@@ -1094,7 +1097,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         if (off_client) {
             print("V:", LA_F("%s: accepted, releasing slot for '%s'\n", LA_F31, 31),
                    PROTO, off_client->base.local_peer_id);
-            compact_free_client(off_client);
+            compact_free_client((client_t*)off_client);
         }
     } break;
 

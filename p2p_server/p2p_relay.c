@@ -36,7 +36,7 @@ static relay_session_t*             g_relay_rpc_pending_head = NULL;
 static relay_session_t*             g_relay_rpc_pending_rear = NULL;
 
 static uint8_t                      g_relay_fatal[sizeof(buf16_item_t) + sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0)];
-static custom_tcp_ctx_t             g_ctx;
+static ct_client_ctx_t              g_ctx;
 
 #define RLY_ERR_2_CT_ERR(err)       (CUSTOM_TCP_ERR_DISCONNECTED + (err) - P2P_RLY_ERR_DISCONNECTED)
 
@@ -899,9 +899,9 @@ static bool relay_resolve_payload_len(ct_client_t* client, uint8_t* hdr_buf, uin
     return true;
 }
 
-static buf16_item_t* relay_handle_handshake(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
+static buf16_item_t* relay_handle_handshake(ct_client_t **pclient, uint8_t* hdr_buf, uint16_t hdr_len,
                                              buf16_item_t* payload0, buf16_item_t* payload1) {
-    (void)payload0;
+    ct_client_t *client = *pclient;
     assert(hdr_len == sizeof(p2p_relay_hdr_t));
     assert(!client->base.local_peer_id[0]);
 
@@ -913,8 +913,14 @@ static buf16_item_t* relay_handle_handshake(ct_client_t *client, uint8_t* hdr_bu
     }
 
     const char* PROTO = "REG";
-    uint8_t *payload = ITEM2BUF(payload1) + payload1->pos;
-    uint16_t payload_len = payload1->len - payload1->pos;
+    buf16_item_t *payload_item = payload0 ? payload0 : payload1;
+    if (!payload_item) {
+        print("E:", LA_F("%s: missing payload\n", LA_F96, 96), PROTO);
+        client->last_error = RLY_ERR_2_CT_ERR(P2P_RLY_ERR_PROTOCOL);
+        return NULL;
+    }
+    uint8_t *payload = ITEM2BUF(payload_item) + payload_item->pos;
+    uint16_t payload_len = payload_item->len - payload_item->pos;
 
     // 处理 REG 消息：[name(32)][instance_id(4)]
     if (payload_len != P2P_RLY_REG_PSZ) {
@@ -951,7 +957,7 @@ static buf16_item_t* relay_handle_handshake(ct_client_t *client, uint8_t* hdr_bu
         // 如果 instance_id 一致（断网重连）
         if (resident_client(&reg->base, PROTO_RELAY, instance_id, &client->base)) {
 
-            client = (ct_client_t*)reg;
+            *pclient = client = (ct_client_t*)reg;
 
             // SYNC/SYN0 的 ACK_PENDING 项：TCP 已写出但客户端未确认（连接已断无法确保到达）
             // 重置 refer 并重新入队，让新连接重新投递
@@ -980,8 +986,7 @@ static buf16_item_t* relay_handle_handshake(ct_client_t *client, uint8_t* hdr_bu
         memcpy(client->base.local_peer_id, payload, P2P_PEER_ID_MAX);
         client->base.local_peer_id[P2P_PEER_ID_MAX] = '\0';
 
-        // 添加到索引（激活 client 身份）
-        identify_client(&client->base);
+        // 注：identify_client 在 relay_handshake_finish 中调用（custom_tcp 框架要求握手回调返回时 client 尚未入索引）
 
         print("I:", LA_F("%s: '%s' new REG (inst=%u)\n", LA_F93, 93), PROTO,
               client->base.local_peer_id, instance_id);
@@ -1002,14 +1007,22 @@ static buf16_item_t* relay_handle_handshake(ct_client_t *client, uint8_t* hdr_bu
     return ack;
 }
 
+static void relay_handshake_finish(ct_client_t *client) {
+    // 新客户端（尚未入索引）：握手完成后才添加到索引
+    if (!client_identified(&client->base)) {
+        identify_client(&client->base);
+    }
+    client->handshake = 0;
+}
+
 static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
                                buf16_item_t* payload0, buf16_item_t* payload1) {
-    (void)payload0;
     assert(hdr_len == sizeof(p2p_relay_hdr_t));
     assert(client->base.local_peer_id[0]);
 
-    uint8_t *payload = ITEM2BUF(payload1) + payload1->pos;
-    uint16_t payload_len = payload1->len - payload1->pos;
+    buf16_item_t *payload_item = payload0 ? payload0 : payload1;
+    uint8_t *payload = payload_item ? (ITEM2BUF(payload_item) + payload_item->pos) : NULL;
+    uint16_t payload_len = payload_item ? (payload_item->len - payload_item->pos) : 0;
     uint8_t type = ((p2p_relay_hdr_t*)hdr_buf)->type;
     switch (type) {
     case  P2P_RLY_REG:
@@ -1109,7 +1122,7 @@ static buf16_item_t* relay_error_item(ct_client_t *client, bool handshake) {
     return item;
 }
 
-custom_tcp_ctx_t*
+ct_client_ctx_t*
 relay_init(void) {
 
     buf16_item_t *fatal_item = (buf16_item_t*)g_relay_fatal;
@@ -1119,10 +1132,12 @@ relay_init(void) {
     fatal_item->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0));
     ((uint8_t*)(fatal_hdr + 1))[1] = P2P_RLY_ERR_INTERNAL;
 
+    g_ctx.base.free    = relay_free_client;
+    g_ctx.base.migrate = ct_migrate_client;
     g_ctx.max_payload_len = P2P_MAX_PAYLOAD;
     g_ctx.resolve_payload_len = relay_resolve_payload_len;
     g_ctx.handle_handshake = relay_handle_handshake;
-    g_ctx.handshake_finish = NULL;
+    g_ctx.handshake_finish = relay_handshake_finish;
     g_ctx.handle_proto = relay_handle_proto;
     g_ctx.handle_peer_sent = relay_handle_peer_sent;
     g_ctx.session_break = relay_session_break;
@@ -1159,7 +1174,7 @@ relay_init_client(relay_client_t* client) {
 
 // 释放 client
 void
-relay_free_client(relay_client_t *client) {
+relay_free_client(client_t *client) {
 
     ct_free_client(&g_ctx, (ct_client_t*)client);
 }

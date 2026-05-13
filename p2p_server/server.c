@@ -56,12 +56,11 @@ static client_t*                    g_clients = NULL;
 #define TCP_CLIENTS(i)              ((tcp_client_t*)&g_client_slots[i])
 #define CT_CLIENTS(i)               ((ct_client_t*)&g_client_slots[i])
 
-custom_tcp_ctx_t*                   g_relay_ctx;
-custom_ws_ctx_t*                    g_wss_ctx;
+client_ctx_t*                       g_contexts[PROTO_NUM];
 
 //-----------------------------------------------------------------------------
 
-static buf16_item_t*               g_recycle[10];
+static buf16_item_t*                g_recycle[10];
 
 // 全局运行状态标志（用于信号处理）
 static volatile sig_atomic_t        g_running = 1;
@@ -142,60 +141,60 @@ free_client_base(client_t *c) {
 
         if (c->fd != P_INVALID_SOCKET) {
             P_sock_close(c->fd);
-            c->fd = P_INVALID_SOCKET;
         }
     }
+    c->fd = P_INVALID_SOCKET;
     c->proto = -1;
 }
 
 void
 free_client(client_t *c) {
     assert(c && c->proto >= 0);
-    if (c->proto == PROTO_COMPACT) compact_free_client((compact_client_t*)c);
-    else if (c->proto == PROTO_RELAY) relay_free_client((relay_client_t *)c);
-    else if (c->proto == PROTO_WSS) wss_free_client((wss_client_t*)c);
-    else assert(0 && "Invalid client proto");
+    g_contexts[c->proto]->free(c);
 }
 
 bool
-resident_client(client_t* client, int8_t proto, uint32_t instance_id, client_t* from) {
+resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from) {
 
-    assert(client != from);
+    assert(c != from);
+    assert(c->proto >= 0);
+    assert(!from || !*from->local_peer_id);
 
-    assert(!from || !from->sessions);
-
-    // 此时说明之前的 client 连接已经断开，客户端发起新的连接，但状态保留
-    if (client->proto == proto && client->instance_id == instance_id) {
+    // 对于重连的情况，即之前的 client 连接已经断开，客户端发起新的连接，但状态保留
+    if (c->proto == proto && c->instance_id == instance_id) {
 
         // 如果存在新分配的 from client，迁移 fd 和 last_active 到旧的 client
         if (from) {
 
             // 同实例重连：迁移 fd 到旧槽位，保留会话状态
             print("I:", LA_F("REG: '%s' reconnected (inst=%u), migrating\n", LA_F95, 95),
-                   client->local_peer_id, instance_id);
+                   c->local_peer_id, instance_id);
 
-            if (client->fd != P_INVALID_SOCKET) P_sock_close(client->fd);
-            client->fd = from->fd;
+            if (c->fd != P_INVALID_SOCKET) P_sock_close(c->fd);
+            c->fd = from->fd;
             from->fd = P_INVALID_SOCKET;
 
-            client->last_active = from->last_active;
+            c->last_active = from->last_active;
 
-            free_client(from);
+            if (g_contexts[proto]->migrate) g_contexts[proto]->migrate(c, from);
+            g_contexts[c->proto]->free(from);
         }
-        else client->last_active = P_tick_ms();
+        else c->last_active = P_tick_ms();
 
         return true;
     }
 
     print("I:", LA_F("REG: '%s' new instance (old=%u, new=%u), resetting session\n", LA_F153, 153),
-           client->local_peer_id, client->instance_id, instance_id);
+           c->local_peer_id, c->instance_id, instance_id);
 
-    free_client(client);
+    // 先将之前的释放
+    g_contexts[c->proto]->free(c);
 
+    // 如果没有新的 client，即将之前的 client 重新初始化
     if (!from) {
-        client->proto = proto;
-        client->instance_id = instance_id;
-        client->last_active = P_tick_ms();
+        c->proto = proto;
+        c->instance_id = instance_id;
+        c->last_active = P_tick_ms();
     }
 
     return false;
@@ -607,9 +606,9 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < MAX_PEERS; i++) CLIENTS(i)->proto = -1;
 
     // 初始化信令服务模块
-    compact_init();
-    g_relay_ctx = relay_init();
-    g_wss_ctx = wss_init();
+    g_contexts[PROTO_COMPACT] = compact_init();
+    g_contexts[PROTO_RELAY] = (client_ctx_t*)relay_init();
+    g_contexts[PROTO_WSS] = (client_ctx_t*)wss_init();
 
     // 打印服务器配置信息
     print("I:", LA_F("Starting P2P signal server on port %d\n", LA_F120, 120), port);
@@ -791,9 +790,7 @@ int main(int argc, char *argv[]) {
                 if (tick_diff(now, CLIENTS(i)->last_active) >= CLIENT_TIMEOUT_S * 1000) {
                     print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F73, 73),
                           CLIENTS(i)->local_peer_id, tick_diff(now, CLIENTS(i)->last_active) / 1000.0);
-                    if (m == PROTO_COMPACT) compact_free_client(&g_client_slots[i].compact);
-                    else if (m == PROTO_RELAY) relay_free_client(&g_client_slots[i].relay);
-                    else if (m == PROTO_WSS) wss_free_client(&g_client_slots[i].wss);
+                    if (m >= 0 && m < PROTO_NUM) g_contexts[m]->free(CLIENTS(i));
                     else if (m == 127) {
                         P_sock_close(CLIENTS(i)->fd);
                         CLIENTS(i)->fd = P_INVALID_SOCKET;
@@ -981,9 +978,9 @@ int main(int argc, char *argv[]) {
 #endif
                 }
 
-                if (m == PROTO_RELAY) ct_handle_recv(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay, NULL);
+                if (m == PROTO_RELAY) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_RELAY], (ct_client_t*)&g_client_slots[i].relay, NULL);
 #ifdef WITH_WS
-                else if (ws_client) ct_handle_recv(&g_wss_ctx->base, CT_CLIENTS(i), "WS"); // fixme 这里的操作可能会导致 client 被销毁，从而无需再执行后面
+                else if (ws_client) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS"); // fixme 这里的操作可能会导致 client 被销毁，从而无需再执行后面
 #endif
             }
 
@@ -991,14 +988,14 @@ int main(int argc, char *argv[]) {
             if ((TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_WRITE)
                 && FD_ISSET(CLIENTS(i)->fd, &write_fds)) {
 
-                if (m == PROTO_RELAY) ct_handle_send(g_relay_ctx, (ct_client_t*)&g_client_slots[i].relay, NULL);
+                if (m == PROTO_RELAY) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_RELAY], (ct_client_t*)&g_client_slots[i].relay, NULL);
 #ifdef WITH_WS
-                else if (ws_client) ct_handle_send(&g_wss_ctx->base, CT_CLIENTS(i), "WS");
+                else if (ws_client) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS");
 #endif
             }
 
 #ifdef WITH_WS
-            if (ws_client) cw_retry_closing(g_wss_ctx, (cw_client_t*)ws_client, now);
+            if (ws_client) cw_retry_closing((cw_client_ctx_t*)g_contexts[PROTO_WSS], (cw_client_t*)ws_client, now);
 #endif
         }
 
@@ -1013,17 +1010,11 @@ int main(int argc, char *argv[]) {
     
     // 关闭所有客户端连接
     for (int i = 0; i < MAX_PEERS; i++) {
-        if (CLIENTS(i)->proto > 0) {
-            if (CLIENTS(i)->fd != P_INVALID_SOCKET) {
-                P_sock_close(CLIENTS(i)->fd);
-                CLIENTS(i)->fd = P_INVALID_SOCKET;
-            }
-            if (CLIENTS(i)->proto == PROTO_RELAY) relay_free_client(&g_client_slots[i].relay);
-#ifdef WITH_WS
-            else if (CLIENTS(i)->proto == PROTO_WSS) wss_free_client(&g_client_slots[i].wss);
-#endif
-        } else if (CLIENTS(i)->proto == PROTO_COMPACT) {
-            compact_free_client(&g_client_slots[i].compact);
+        if (CLIENTS(i)->proto < 0) continue;
+        if (CLIENTS(i)->proto < PROTO_NUM) g_contexts[CLIENTS(i)->proto]->free(CLIENTS(i));
+        else if (CLIENTS(i)->fd != P_INVALID_SOCKET) {
+            P_sock_close(CLIENTS(i)->fd);
+            CLIENTS(i)->fd = P_INVALID_SOCKET;
         }
     }
     

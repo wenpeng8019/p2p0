@@ -28,10 +28,10 @@
 //-----------------------------------------------------------------------------
 // Session 扩展字段（内联宏，供派生 session 结构体使用）
 
-// + send_queue:  该 session 待发送的 buf_item 队列
+// + send_queue:  该 session 待发送的 buf_item 队列（内联结构体，calloc 后自动为空队列）
 // + send_prev/next: 在 client 的 send_sess_head/rear 双向链表中的位置（队列非空时才挂入）
 #define CUSTOM_TCP_SESSION   \
-    buffer_queue_t*                 send_queue; \
+    buffer_queue_t                  send_queue; \
     struct ct_session*              send_prev; \
     struct ct_session*              send_next;
 
@@ -114,6 +114,7 @@ typedef bool (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf,
                                           uint32_t* payload_len, uint16_t* payload_offset);
 
 // 握手阶段收到完整消息时调用
+// + *client: 当前握手 client 指针的地址。回调可修改 *client 来切换 client 实例（见【client swap 机制】）
 // + hdr_buf/hdr_len: header 数据（流模式指向 recv_buf 内部，帧模式指向 hdr_rs）
 // + payload0: recv_buf 内部的 payload 片段（零拷贝，NULL 表示无）
 //   ⚠️ payload0 禁止加入任何 buf 队列（回调返回后 recv_buf 会被复用）
@@ -121,7 +122,13 @@ typedef bool (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf,
 //   - payload1->pos 指向 socket 读入数据的起始；[pos - len(payload0), pos) 为前置预留空间
 // + 返回非 NULL 的 ack buf_item 表示握手成功；返回 NULL 且 last_error==0 表示协议错误
 // + 注意：回调期间不应调整 recv_buf（框架有 assert 保证）
-typedef buf16_item_t* (*ct_handle_handshake_cb)(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
+//
+// 【client swap 机制】重连握手时，回调可通过修改 *client 将 from→reg 的切换通知框架：
+//   1. 回调内调用 resident_client(reg, proto, inst, from)：迁移 fd 至 reg，free_client(from) 释放当前 client
+//   2. 将 *client 更新为 reg（旧槽位指针）
+//   框架检测到 *client 变化后，跳过对已释放的 from client 的状态访问（payload/recv_buf 均已无效），
+//   改由 ct_client_send 向 reg 直接投递 ACK 并调用 handshake_finish，完成握手流程。
+typedef buf16_item_t* (*ct_handle_handshake_cb)(ct_client_t **client, uint8_t* hdr_buf, uint16_t hdr_len,
                                                 buf16_item_t* payload0, buf16_item_t* payload1);
 
 // 握手 ACK 发送完成后调用（nullable）
@@ -157,19 +164,24 @@ typedef buf16_item_t* (*ct_error_item_cb)(ct_client_t *client, bool handshake);
 //-----------------------------------------------------------------------------
 // 协议上下文（每个协议类型共享一个，所有 client 共用）
 
-typedef struct custom_tcp_ctx {
-    
-    uint32_t                        max_payload_len;            // payload 最大允许字节数（超出触发 CUSTOM_TCP_ERR_OVERFLOW）
-    ct_resolve_payload_len_cb       resolve_payload_len;        // 解析 header，获取 payload_len 和 payload_offset
-    ct_handle_handshake_cb          handle_handshake;           // 握手阶段消息处理
-    ct_handshake_finish_cb          handshake_finish;           // 握手 ACK 发送完成后调用（nullable）
-    ct_handle_proto_cb              handle_proto;               // 正常阶段消息处理
-    ct_handle_peer_sent_cb          handle_peer_sent;           // session 级 buf_item 发送完成通知
-    ct_session_break_cb             session_break;              // session 配对关系被打破通知
-    ct_client_unreachable_cb        client_unreachable;         // client 不可达通知（nullable）
-    buf16_item_t*                   fatal_item;                 // fatal 错误时发送的静态兜底数据包（refer=ITEM_REF_STATIC，框架不会 free）
-    ct_error_item_cb                error_item;                 // 构造错误应答 buf_item
-} custom_tcp_ctx_t;
+// 协议上下文扩展字段（内联宏，供派生协议上下文结构体使用）
+// + 参考 CUSTOM_TCP_CLIENT/ct_client_t 的宏继承模式
+#define CUSTOM_TCP_CTX \
+    uint32_t                        max_payload_len;            \
+    ct_resolve_payload_len_cb       resolve_payload_len;        \
+    ct_handle_handshake_cb          handle_handshake;           \
+    ct_handshake_finish_cb          handshake_finish;           \
+    ct_handle_proto_cb              handle_proto;               \
+    ct_handle_peer_sent_cb          handle_peer_sent;           \
+    ct_session_break_cb             session_break;              \
+    ct_client_unreachable_cb        client_unreachable;         \
+    buf16_item_t*                   fatal_item;                 \
+    ct_error_item_cb                error_item;
+
+typedef struct ct_client_ctx {
+    client_ctx_t                    base;                       // 继承 client_ctx_t（必须为第一个成员）
+    CUSTOM_TCP_CTX
+} ct_client_ctx_t;
 
 //-----------------------------------------------------------------------------
 // Public API
@@ -179,32 +191,39 @@ typedef struct custom_tcp_ctx {
 bool
 ct_init_client(ct_client_t* client);
 
+// 接收状态迁移（resident_client 的 client_ctx_t.migrate 默认实现）
+// + 将 from 的 recv_buf/recv_cur/hdr_rs 内容/payload_buf/payload_cur 转移到 to
+// + 迁移后 from 对应字段清零，确保 free 时不重复释放
+// + relay、wss 等使用 custom_tcp 框架的模块，将此函数注册为其 client_ctx_t.migrate
+void
+ct_migrate_client(client_t *to, client_t *from);
+
 // 强制释放 client：关闭所有 session（TERM），释放 recv/payload buf，清空发送队列，调用 free_client_base
 void
-ct_free_client(custom_tcp_ctx_t* ctx, ct_client_t *client);
+ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client);
 
 // 重连激活：重置 last_error，恢复 WANT_READ，如有未完成发送则恢复 WANT_WRITE
 // + 适用于 TCP 断线重连后，原 client 槽位复用的场景
 void
-ct_reactive_client(custom_tcp_ctx_t* ctx, ct_client_t *client);
+ct_reactive_client(ct_client_ctx_t* ctx, ct_client_t *client);
 
 // 报告错误：
 // + fatal=false（非致命）：清除 WANT_READ，向 client 发送一个错误应答包，发送完成后关闭连接
 // + fatal=true（致命）：终止所有 session，清空发送队列，追加 fatal_item 后关闭连接
 void
-ct_client_error(custom_tcp_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal);
+ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal);
 
 // 优雅关闭 client：中断所有 session（CLOSE），释放 recv buf
 // + 如发送队列非空：标记为 CLOSING，停止读取，等发送完成后自动调用 free_client_base
 // + 如发送队列为空：直接调用 free_client_base
 void
-ct_client_off(custom_tcp_ctx_t* ctx, ct_client_t *client);
+ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client);
 
 // 关闭单个 session
 // + terminate=false：session 的待发数据转移到 client 队列继续发送
 // + terminate=true：session 的待发数据直接丢弃
 void
-ct_close_session(custom_tcp_ctx_t* ctx, ct_session_t *session, bool terminate);
+ct_close_session(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate);
 
 // 向 client 发送队列追加 buf_item（仅在 handshake==0 时调用）
 // + immediate=true：高优先级，插入到当前正在发送的包之后（或队头），确保优先发出
@@ -225,14 +244,14 @@ ct_session_send(ct_session_t *session, buf16_item_t* buf_item);
 // + 内部循环处理握手和正常消息的读取、解析、分发，直到 would block 或出错
 // + SP：子协议名称标签（用于日志，NULL 时默认显示 "TCP"）
 void
-ct_handle_recv(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP);
+ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP);
 
 // 发送处理（WANT_WRITE & select 就绪时调用）
 // + 按优先级发送：client 队列 > session 队列（session 间轮询）
 // + 发送完成后自动清除 WANT_WRITE；若处于 CLOSING 状态则调用 free_client_base
 // + SP：子协议名称标签（用于日志，NULL 时默认显示 "TCP"）
 void
-ct_handle_send(custom_tcp_ctx_t* ctx, ct_client_t *client, const char* SP);
+ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP);
 
 //-----------------------------------------------------------------------------
 

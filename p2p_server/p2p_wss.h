@@ -85,13 +85,13 @@ typedef struct wss_client {
 
 #define WSS_IO_FLAG_CLOSING         CW_IO_FLAG_CLOSING
 
-custom_ws_ctx_t*
+cw_client_ctx_t*
 wss_init(void);
 
 bool
 wss_init_client(wss_client_t* c);
 void
-wss_free_client(wss_client_t *client);
+wss_free_client(client_t *client);
 
 void
 retry_wss_pending(uint64_t now);

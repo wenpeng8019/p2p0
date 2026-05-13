@@ -78,6 +78,7 @@ typedef struct buf32_item {
 
 static inline uint16_t buffer_size(uint16_t flags) { flags>>=4; return flags==3?P2P_MTU:(1 << flags)*128; }
 static inline uint16_t buffer_sz_flag(uint16_t size) {
+    if (size <= 128) return 0;  // 最小分配池：128 字节
     unsigned exp = (32u - 7u) - (unsigned)__builtin_clz((unsigned)size - 1u);   // ceil(log2(size))
 #if P2P_MTU > 1024
     if (exp == 4 && size <= P2P_MTU) exp = 3;
@@ -183,14 +184,17 @@ static inline uint32_t BUF_S_read(buffer_stream_t* s, uint8_t* buf, uint32_t len
 
 //-----------------------------------------------------------------------------
 
-#define PROTO_COMPACT               0
-#define PROTO_RELAY                 1
-#define PROTO_WSS                   2   /* Websocket Session Sync */
+enum {
+    PROTO_COMPACT,
+    PROTO_RELAY,
+    PROTO_WSS,                      /* Websocket Session Sync */
+    PROTO_NUM
+};
 
 typedef struct session session_t;
 
 typedef struct client {
-    int8_t                          proto;              // -1=INV, 0=COMPACT, 1=RELAY, 2=WSS
+    int8_t                          proto;                          // -1=INV, 0=PROTO_COMPACT, 1=PROTO_RELAY, 2=PROTO_WSS
     char                            local_peer_id[P2P_PEER_ID_MAX+1];
     uint32_t                        instance_id;
     sock_t                          fd;
@@ -231,14 +235,26 @@ typedef enum break_mode {
     SESS_BREAK_TERM,                // 会话会被销毁，且不会再向 client 返回状态数据信息，核心场景是 client/session （立刻）硬退出
 } break_mode_e;
 
+typedef struct client_ctx {
+    void (*free)   (struct client *c);                              // 必须实现；用于释放派生的 client 对象，派生实现最终调用 free_client_base
+    void (*migrate)(struct client *to, struct client *from);        // nullable; 实现派生 client 对象状态迁移，被 resident_client 调用
+} client_ctx_t;
+
+// 释放 client
+void
+free_client(client_t *c);
+
+// 将同一个客户端的两个槽合并，确保 client 为单一实例
+// + client 为之前存在的，而 from 则会根据 UDP/TCP 的不同特性而选择是否为 NULL
+//   > TCP 每个连接都对应一个 client，所以 from 为新连接分配的 client 对象，这里要将新的 client 归并到之前的 client
+//   > UDP 没有独立连接的概念，所以协议会自行根据一个 AUTH KEY 来维持唯一性
+bool
+resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from/* nullable */);
+
 //-----------------------------------------------------------------------------
 
 client_t*
 find_client(const char *local_peer_id);
-
-// 由派生协议 client 调用，基类会根据协议类型自动执行不同派生协议类型的释放操作
-void
-free_client(client_t *c);
 
 // 由派生协议 client 调用，用于实现基类的释放
 void
@@ -249,13 +265,6 @@ free_client_base(client_t *c);
 // + 主要用于 UDP/COMPACT 协议调用，因为 TCP/xxx 协议在 accept 建链时就已经自动分配了 client 对象
 client_t*
 alloc_client(int8_t proto, sock_t fd);
-
-// 将同一个客户端的两个槽合并，确保 client 为单一实例
-// + client 为之前存在的，而 from 则会根据 UDP/TCP 的不同特性而选择是否为 NULL
-//   > TCP 每个连接都对应一个 client，所以 from 为新连接分配的 client 对象，这里要将新的 client 归并到之前的 client
-//   > UDP 没有独立连接的概念，所以协议会自行根据一个 AUTH KEY 来维持唯一性
-bool
-resident_client(client_t* client, int8_t proto, uint32_t instance_id, client_t* from/* nullable */);
 
 // 唯一标识客户端（注册 local_peer_id，并加入全局索引哈希表）
 bool
