@@ -24,6 +24,8 @@ static compact_session_t*           g_sync0_pending_rear = NULL;
 static compact_session_t*           g_rpc_pending_head = NULL;
 static compact_session_t*           g_rpc_pending_rear = NULL;
 
+static client_ctx_t                 g_ctx = { compact_free_client, NULL };
+
 ///////////////////////////////////////////////////////////////////////////////
 
 // 从待确认链表移除
@@ -374,7 +376,7 @@ static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
 
 client_ctx_t*
 compact_init(void) {
-
+    return &g_ctx;
 }
 
 bool
@@ -436,8 +438,6 @@ void compact_free_client(client_t *c) {
     while (cc->base.sessions) compact_free_session(cc->base.sessions);
     free_client_base(&cc->base);
 }
-
-client_ctx_t g_compact_client_ctx = { compact_free_client, NULL };
 
 
 // 缓存响应数据并从 REQ 阶段转换到 RSP 阶段
@@ -638,7 +638,7 @@ static void compact_handle_syn0_ack(struct sockaddr_in *from, uint8_t *payload, 
 
 static void compact_handle_sync_ack(sock_t udp_fd, uint8_t *buf, size_t len,
                                      struct sockaddr_in *from, p2p_packet_hdr_t *hdr,
-                                     uint8_t *payload, size_t payload_len) {
+                                     uint8_t *payload, size_t payload_len) { (void)len;
     const char* PROTO = "SYNC_ACK";
 
     if (payload_len < SIG_PKT_SYNC_ACK_PSZ) {
@@ -700,7 +700,7 @@ static void compact_handle_sync_ack(sock_t udp_fd, uint8_t *buf, size_t len,
 // SIG_PKT_SYNC + relay 数据包（P2P_PKT_DATA / ACK / CRYPTO / CONN / CONN_ACK / REACH）
 static void compact_handle_relay(sock_t udp_fd, uint8_t *buf, size_t len,
                                   struct sockaddr_in *from, p2p_packet_hdr_t *hdr,
-                                  uint8_t *payload, size_t payload_len) {
+                                  uint8_t *payload, size_t payload_len) { (void)len;
     const char* PROTO = (hdr->type == P2P_PKT_DATA) ? "RELAY-DATA" :
                        (hdr->type == P2P_PKT_ACK) ? "RELAY-ACK" :
                        (hdr->type == P2P_PKT_CRYPTO) ? "RELAY-CRYPTO" :
