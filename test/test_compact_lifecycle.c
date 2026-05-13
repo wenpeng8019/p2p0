@@ -6,7 +6,7 @@
  * ============================================================================
  * 验证 p2p_server 对 COMPACT 协议生命周期相关包的处理逻辑：
  * - ALIVE / ALIVE_ACK 保活机制
- * - OFFLINE 主动注销
+ * - OFF 主动注销
  * - PEER_OFF 对端离线通知
  *
  * ============================================================================
@@ -14,7 +14,7 @@
  * ============================================================================
  * 1. 启动 p2p_server 子进程，监听指定端口
  * 2. 通过 instrument 机制收集 server 的实时日志
- * 3. 发送 ALIVE/OFFLINE 包，验证 server 正确处理
+ * 3. 发送 ALIVE/OFF 包，验证 server 正确处理
  * 4. 验证 PEER_OFF 通知正确发送给对端
  *
  * ============================================================================
@@ -39,15 +39,15 @@
  *     - 槽位保持活跃状态
  *
  * 测试 3: unregister_releases_slot
- *   目标：验证 OFFLINE 正常释放槽位
- *   方法：注册配对 → 发送 OFFLINE → 重新注册相同配对
+ *   目标：验证 OFF 正常释放槽位
+ *   方法：注册配对 → 发送 OFF → 重新注册相同配对
  *   预期：
- *     - OFFLINE 后槽位被释放
+ *     - OFF 后槽位被释放
  *     - 可以重新注册相同的 peer_id 配对
  *
  * 测试 4: unregister_notifies_peer
- *   目标：验证 OFFLINE 时对端收到 PEER_OFF
- *   方法：Alice 和 Bob 配对 → Alice 发送 OFFLINE
+ *   目标：验证 OFF 时对端收到 PEER_OFF
+ *   方法：Alice 和 Bob 配对 → Alice 发送 OFF
  *   预期：
  *     - Bob 收到 PEER_OFF 包
  *     - PEER_OFF 包含正确的 session_id
@@ -63,8 +63,8 @@
  *     - 不触发异常
  *
  * 测试 6: unregister_bad_payload
- *   目标：验证 server 对畸形 OFFLINE 包的防御
- *   方法：发送 payload 过短的 OFFLINE 包
+ *   目标：验证 server 对畸形 OFF 包的防御
+ *   方法：发送 payload 过短的 OFF 包
  *   预期：
  *     - server 日志含 "bad payload"
  *     - 不影响正常的配对
@@ -174,7 +174,7 @@ static int find_log(const char *pattern) {
 // 协议构造函数
 ///////////////////////////////////////////////////////////////////////////////
 
-// 构造 ONLINE 包
+// 构造 REG 包
 static int build_online(uint8_t *buf, int buf_size,
                         const char *local_peer_id,
                         uint32_t instance_id) {
@@ -201,7 +201,7 @@ static int build_online(uint8_t *buf, int buf_size,
 #define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
     build_online(buf, buf_size, local, inst_id)
 
-// 构造 SYNC0 包
+// 构造 SYN0 包
 static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
                        const char *remote_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
@@ -240,7 +240,7 @@ static int build_alive(uint8_t *buf, int buf_size, uint64_t auth_key) {
     return 12;
 }
 
-// 构造 OFFLINE 包
+// 构造 OFF 包
 // 协议: [hdr(4)][auth_key(SIG_AUTH_KEY_PSZ)]
 static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
     if (buf_size < 4 + 8) return -1;
@@ -255,7 +255,7 @@ static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
     return 12;
 }
 
-// 发送 ONLINE 并接收 REG_ACK，然后发送 SYNC0，返回 session_id
+// 发送 REG 并接收 REG_ACK，然后发送 SYN0，返回 session_id
 static uint64_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands,
                                uint32_t *session_id_out) {
@@ -294,19 +294,19 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
         for (int i = 0; i < 8; i++) {
             auth_key = (auth_key << 8) | recv_buf[8 + i];
         }
-        // 发送 SYNC0（携带 auth_key + remote_peer_id）
+        // 发送 SYN0（携带 auth_key + remote_peer_id）
         if (cand_count > 0 || cands == NULL) {
             len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
             ssize_t syn0_sent = sendto(sock, (const char*)pkt, len, 0,
                    (struct sockaddr*)&server_addr, sizeof(server_addr));
             (void)syn0_sent;
-            // 消耗 SYNC0_ACK，防止它污染后续操作的 recvfrom
+            // 消耗 SYN0_ACK，防止它污染后续操作的 recvfrom
             uint8_t drain_buf[64];
             struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
             P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
             ssize_t drain_n = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
                      (struct sockaddr*)&drain_from, &drain_len);
-            // 从 SYNC0_ACK 提取 session_id: [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
+            // 从 SYN0_ACK 提取 session_id: [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
             if (drain_n >= (ssize_t)(4 + SIG_PKT_SYN0_ACK_PSZ) && drain_buf[0] == SIG_PKT_SYN0_ACK && session_id_out) {
                 int off = 4 + P2P_PEER_ID_MAX;
                 *session_id_out = ((uint32_t)drain_buf[off] << 24) | ((uint32_t)drain_buf[off+1] << 16) |
@@ -347,7 +347,7 @@ static int send_alive_and_wait_ack(sock_t sock, uint64_t auth_key) {
     return 0;  // 未收到 ACK
 }
 
-// 发送 OFFLINE
+// 发送 OFF
 static void send_unregister(sock_t sock, uint64_t auth_key) {
     uint8_t pkt[128];
     int len = build_unregister(pkt, sizeof(pkt), auth_key);
@@ -469,7 +469,7 @@ static void test_alive_updates_activity(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 3: OFFLINE 释放槽位
+// 测试 3: OFF 释放槽位
 static void test_unregister_releases_slot(void) {
     const char *TEST_NAME = "unregister_releases_slot";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -493,17 +493,17 @@ static void test_unregister_releases_slot(void) {
         return;
     }
     
-    // 发送 OFFLINE
+    // 发送 OFF
     send_unregister(sock, session1);
-    P_usleep(300 * 1000);  // 等 300ms 确保服务器处理完 OFFLINE
+    P_usleep(300 * 1000);  // 等 300ms 确保服务器处理完 OFF
     
     // 检查服务器进程是否仍然存活
     if (kill(g_server_pid, 0) != 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "server process died after OFFLINE");
+        TEST_FAIL(TEST_NAME, "server process died after OFF");
         return;
     }
-    printf("    [DBG] server alive after OFFLINE, pid=%d\n", g_server_pid);
+    printf("    [DBG] server alive after OFF, pid=%d\n", g_server_pid);
     
     // 清空 socket 残留包（避免 SYN0_ACK 重传污染下一次 recvfrom）
     P_sock_rcvtimeo(sock, 200);
@@ -543,7 +543,7 @@ static void test_unregister_releases_slot(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 4: OFFLINE 时对端收到 PEER_OFF
+// 测试 4: OFF 时对端收到 PEER_OFF
 static void test_unregister_notifies_peer(void) {
     const char *TEST_NAME = "unregister_notifies_peer";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -593,7 +593,7 @@ static void test_unregister_notifies_peer(void) {
         recvfrom(sock_bob, (char*)discard, sizeof(discard), 0, (struct sockaddr*)&from, &from_len);
     }
     
-    // Alice 发送 OFFLINE
+    // Alice 发送 OFF
     send_unregister(sock_alice, session_alice);
     
     // Bob 应该收到 PEER_OFF
@@ -608,7 +608,7 @@ static void test_unregister_notifies_peer(void) {
         return;
     }
     
-    // PEER_OFF 的 session_id 应该是 Bob 的 session_id（来自 SYNC0_ACK）
+    // PEER_OFF 的 session_id 应该是 Bob 的 session_id（来自 SYN0_ACK）
     if (bob_session_id == 0 || peer_off_session != bob_session_id) {
         TEST_FAIL(TEST_NAME, "PEER_OFF session_id mismatch");
         return;
@@ -645,7 +645,7 @@ static void test_alive_bad_session(void) {
     TEST_PASS(TEST_NAME);
 }
 
-// 测试 6: 畸形 OFFLINE 包
+// 测试 6: 畸形 OFF 包
 static void test_unregister_bad_payload(void) {
     const char *TEST_NAME = "unregister_bad_payload";
     printf("\n--- Test: %s ---\n", TEST_NAME);
@@ -657,7 +657,7 @@ static void test_unregister_bad_payload(void) {
         return;
     }
     
-    // 发送 payload 过短的 OFFLINE 包
+    // 发送 payload 过短的 OFF 包
     uint8_t bad_pkt[16];
     bad_pkt[0] = SIG_PKT_OFF;
     bad_pkt[1] = 0;

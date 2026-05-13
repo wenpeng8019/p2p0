@@ -10,19 +10,19 @@
  * 协议（纯文本帧，每条 WS text frame 一条消息）：
  *
  *   客户端 → 服务器：
- *     REG <peer_id>                 注册身份（类似 RELAY ONLINE）
+ *     REG <peer_id>                 注册身份（类似 RELAY REG）
  *     OFF                           主动下线，立即释放服务器资源（与 REG 配对）
- *     SYNC0 <remote_peer_id>        创建/恢复会话（类似 RELAY SYNC0）
- *     SYNC0 <remote_peer_id>\n<payload>  创建会话 + 携带预缓存负载
+ *     SYN0 <remote_peer_id>        创建/恢复会话（类似 RELAY SYN0）
+ *     SYN0 <remote_peer_id>\n<payload>  创建会话 + 携带预缓存负载
  *     SYNC <session_id>\n<payload>  按 session_id 路由同步数据（类似 RELAY SYNC）
  *     FIN <session_id>              主动断开会话（类似 RELAY FIN）
  *
  *   服务器 → 客户端：
  *     REG OK <sync_max>             注册成功（sync_max = 预缓存负载上限）
  *     REG FAIL <reason>             注册失败
- *     SYNC0 <peer_id> <session_id> online|offline  应答/推送
- *     SYNC0 <peer_id> <session_id> busy  负载超出缓存可用空间
- *     SYNC0 FAIL <reason>           会话创建失败
+ *     SYN0 <peer_id> <session_id> online|offline  应答/推送
+ *     SYN0 <peer_id> <session_id> busy  负载超出缓存可用空间
+ *     SYN0 FAIL <reason>           会话创建失败
  *     SYNC <session_id>\n<line>     对端同步数据（流式，每行一帧）
  *     SYNC <session_id>\n\n         fin mark，本批次传输结束
  *     SYNC <session_id> confirm <bytes>  同步数据转发确认（发给发送方）
@@ -45,7 +45,7 @@
 #include "common.h"
 #include "custom_ws.h"
 
-#define WSS_SYNC_PAYLOAD_MAX        2048        /* SYNC0 预缓存负载上限（字节，不含 NUL） */
+#define WSS_SYNC_PAYLOAD_MAX        2048        /* SYN0 预缓存负载上限（字节，不含 NUL） */
 #define WSS_MAX_PAYLOAD             (WSS_SYNC_PAYLOAD_MAX + 64) /* max_payload_len for custom_tcp */
 
 /* SYNC/PKT 发送队列深度（与 relay 对齐） */
@@ -55,7 +55,7 @@ typedef struct wss_session {
     session_t                       base;
     CUSTOM_TCP_SESSION
 
-    /* SYNC0 预缓存 ring buffer（动态分配，同步完成后释放）*/
+    /* SYN0 预缓存 ring buffer（动态分配，同步完成后释放）*/
     buf16_item_t*                   sync_buf;               /* NULL=无数据，非NULL=BUF_FLAG_2048 chunk */
     uint16_t                        sync_head;              /* 读位置 [0, MAX) */
     uint16_t                        sync_len;               /* 已存储字节数 */

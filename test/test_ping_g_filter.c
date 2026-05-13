@@ -67,7 +67,7 @@
 
 #define SYNC_TIMEOUT_MS         15000       // 同步超时 15 秒（Gist API 较慢）
 #define CONNECT_TIMEOUT_MS      60000       // 连接超时 60 秒（Gist 轮询间隔较大）
-#define GIST_REGISTER_WAIT_MS   5000        // 等待 SUB 在 Gist 上注册心跳
+#define GIST_REG_WAIT_MS   5000        // 等待 SUB 在 Gist 上注册心跳
 
 static const char *g_ping_path = NULL;
 static const char *g_token = NULL;
@@ -349,8 +349,8 @@ static void test_pubsub_host_only(void) {
     sync_client(&g_bob);
 
     // 等待 Bob 在 Gist 上注册心跳
-    printf("[2] Waiting for Bob to register heartbeat on Gist (%d ms)...\n", GIST_REGISTER_WAIT_MS);
-    P_usleep(GIST_REGISTER_WAIT_MS * 1000);
+    printf("[2] Waiting for Bob to register heartbeat on Gist (%d ms)...\n", GIST_REG_WAIT_MS);
+    P_usleep(GIST_REG_WAIT_MS * 1000);
 
     // 启动 Alice (PUB, target=bob)
     printf("[3] Starting Alice (PUB, target=bob, pubsub, --no-srflx --no-relay)...\n");
@@ -421,8 +421,8 @@ static void test_pubsub_ipv4_only(void) {
     sync_client(&g_bob);
 
     // 等待 Bob 在 Gist 上注册心跳
-    printf("[2] Waiting for Bob to register heartbeat on Gist (%d ms)...\n", GIST_REGISTER_WAIT_MS);
-    P_usleep(GIST_REGISTER_WAIT_MS * 1000);
+    printf("[2] Waiting for Bob to register heartbeat on Gist (%d ms)...\n", GIST_REG_WAIT_MS);
+    P_usleep(GIST_REG_WAIT_MS * 1000);
 
     // 启动 Alice (PUB, target=bob)
     printf("[3] Starting Alice (PUB, target=bob, pubsub, --no-ipv6)...\n");
@@ -496,8 +496,8 @@ static void test_pubsub_ipv6_only(void) {
     sync_client(&g_bob);
 
     // 等待 Bob 在 Gist 上注册心跳
-    printf("[2] Waiting for Bob to register heartbeat on Gist (%d ms)...\n", GIST_REGISTER_WAIT_MS);
-    P_usleep(GIST_REGISTER_WAIT_MS * 1000);
+    printf("[2] Waiting for Bob to register heartbeat on Gist (%d ms)...\n", GIST_REG_WAIT_MS);
+    P_usleep(GIST_REG_WAIT_MS * 1000);
 
     // 启动 Alice (PUB, target=bob)
     printf("[3] Starting Alice (PUB, target=bob, pubsub, --no-ipv4)...\n");

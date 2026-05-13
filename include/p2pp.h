@@ -460,7 +460,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   总大小: 4(包头) + 21(payload) = 25 字节
  */
  #define SIG_PKT_REG_ACK_PSZ        (sizeof(uint32_t) + SIG_AUTH_KEY_PSZ + 1u + 4u + 2u + 2u)          // instance_id(4) + auth_key(SIG_AUTH_KEY_PSZ) + max_cands(1) + ip(4) + port(2) + probe(2)
-/* OFFLINE:
+/* OFF:
  *   payload: [auth_key(SIG_AUTH_KEY_PSZ)]
  *   包头: type=0x82, flags=0, seq=0
  *   - auth_key: 来自 REG_ACK 的客户端-服务器认证令牌（network byte order），服务器用于 O(1) 查找并释放配对槽位
@@ -472,7 +472,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   payload: [auth_key(SIG_AUTH_KEY_PSZ)]
  *   包头: type=0x83, flags=0, seq=0
  *   - auth_key: 客户端-服务器认证令牌（来自 REG_ACK），用于服务器识别并更新槽位活跃时间
- *   用于客户端在 ONLINE/READY 状态定期发送，保持服务器槽位活跃
+ *   用于客户端在 REG/READY 状态定期发送，保持服务器槽位活跃
  */
  #define SIG_PKT_ALV_PSZ            SIG_AUTH_KEY_PSZ                                                   // auth_key(SIG_AUTH_KEY_PSZ)
 /* AALV_ACK:
@@ -644,11 +644,11 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 由于 UDP 包大小限制，候选列表需要分批传输。通过序列化的 SYNC 包完成可靠同步：
  *
  *   1. 上线阶段：
- *      - 客户端发送 ONLINE（含 local_peer_id 与 instance_id）
+ *      - 客户端发送 REG（含 local_peer_id 与 instance_id）
  *      - 服务器回复 REG_ACK（告知 auth_key、max_candidates、公网地址）
  *        · auth_key=0: 服务器拒绝登录（无可用槽位），客户端停止重试
  *        · auth_key≠0: 登录成功，用于后续 SYN0/ALV 身份验证
- *      - 收到 REG_ACK 后停止 ONLINE 重发，进入 ONLINE 状态
+ *      - 收到 REG_ACK 后停止 REG 重发，进入 REG 状态
  *
  *   2. 候选同步阶段（三次握手 + 序列化确认）：
  *      - 客户端收到 REG_ACK 后立即发送 SYN0（含 auth_key + remote_peer_id + 首批候选）
@@ -665,14 +665,14 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  *      Alice (在线)           Server                    Bob (离线)
  *        |                       |                          |
- *        |--- ONLINE ----------->|                          |
+ *        |--- REG ----------->|                          |
  *        |<-- REG_ACK --------|  (auth_key + capabilities)
  *        |--- SYN0 ------------->|  (auth_key + 首批候选)   |
  *        |<-- SYN0_ACK ----------|  (session_id, online=0)  |
  *        |--- SYN0_ACK --------->|  (二次确认, session_id)  |
- *        |   [进入 ONLINE]       |  (缓存 Alice 的候选)     |
+ *        |   [进入 REG]       |  (缓存 Alice 的候选)     |
  *        |    ... Bob 上线 ...                              |
- *        |                       |<-- ONLINE ---------------|
+ *        |                       |<-- REG ---------------|
  *        |                       |--- REG_ACK ------------->|  (auth_key + capabilities)
  *        |                       |<-- SYN0 -----------------|  (auth_key + 首批候选)
  *        |                       |--- SYN0_ACK ------------>|  (session_id, online=1)
@@ -688,7 +688,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        |----------- SYNC(seq=3, count=0, FIN) ----------->|  (结束标识)
  *        |<---------- SYNC_ACK(seq=3) ----------------------|
  *
- * 注：ONLINE 仅在上线阶段发送，收到 REG_ACK 后停止（直到重连）；SYN0 在收到 REG_ACK 后发送
+ * 注：REG 仅在上线阶段发送，收到 REG_ACK 后停止（直到重连）；SYN0 在收到 REG_ACK 后发送
  *
  * 2. MSG RPC 机制（服务器可选实现）
  * ============================================================================
@@ -702,7 +702,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  * 错误处理：
  *   1. REQ_ACK 阶段 B 不在线：Server → A 返回 status=1，A 调用 on_response(len=-1, code=原始请求msg)
- *   2. B 在等待响应期间离线：Server → A 发送 RSP(flags=SIG_MSG_FLAG_PEER_OFFLINE)，
+ *   2. B 在等待响应期间离线：Server → A 发送 RSP(flags=SIG_MSG_FLAG_PEER_OFF)，
  *      A 调用 on_response(len=-1, code=P2P_RPC_ERR_PEER_OFF)
  *   3. Server 转发请求超时：Server → A 发送 RSP(flags=SIG_MSG_FLAG_TIMEOUT)，
  *      A 调用 on_response(len=-1, code=P2P_RPC_ERR_TIMEOUT)
@@ -1271,7 +1271,7 @@ typedef struct {
  *                  用于服务器区分网络重连（保留会话）和客户端重启（销毁旧会话）
  *
  * 功能: 注册本端身份，建立 peer_id → WS 连接的映射。
- *       类似 RELAY P2P_RLY_REG / COMPACT SIG_PKT_ONLINE。
+ *       类似 RELAY P2P_RLY_REG / COMPACT SIG_PKT_REG。
  *
  * 服务端处理:
  *   1. peer_id 为空 / instance_id 无效 → 返回 "REG FAIL ...\n"
@@ -1434,7 +1434,7 @@ typedef struct {
  *       若对端此前 SYN0 时携带了 payload 且尚未被消费，则以 SYNC 流式帧转发。
  *
  * 触发时机（服务器主动推送，无需客户端请求）:
- *   1. 对端 ONLINE 注册/重连成功 → 遍历其所有已配对会话，
+ *   1. 对端 REG 注册/重连成功 → 遍历其所有已配对会话，
  *      向每个在线对端推送 "SYN0 <reconnected_peer_id> <my_session_id> online\n"，
  *      同时向重连方推送所有在线对端的 "SYN0 <peer_id> <my_session_id> online\n"
  *      若任一方有预缓存负载被转发，则以 SYNC 流式帧投递，并回复 "SYNC <ses_id> confirm <bytes>\n"
@@ -1456,8 +1456,8 @@ typedef struct {
 #define P2P_WSS_CMD_SYN0_FMT            P2P_WSS_CMD_SYN0 "%s\n"                    /* "SYN0 <remote_peer_id>\n" */
 
 #define P2P_WSS_RSP_SYN0_SZ             (sizeof(P2P_WSS_RSP_SYN0) - 1u)            /* "SYN0 " */
-#define P2P_WSS_RSP_SYN0_ONLINE_FMT     P2P_WSS_RSP_SYN0 "%s %u online\n"          /* "SYN0 <peer_id> <session_id> online\n" */
-#define P2P_WSS_RSP_SYN0_OFFLINE_FMT    P2P_WSS_RSP_SYN0 "%s %u offline\n"         /* "SYN0 <peer_id> <session_id> offline\n" */
+#define P2P_WSS_RSP_SYN0_REG_FMT     P2P_WSS_RSP_SYN0 "%s %u online\n"          /* "SYN0 <peer_id> <session_id> online\n" */
+#define P2P_WSS_RSP_SYN0_OFF_FMT    P2P_WSS_RSP_SYN0 "%s %u offline\n"         /* "SYN0 <peer_id> <session_id> offline\n" */
 #define P2P_WSS_RSP_SYN0_BUSY_FMT       P2P_WSS_RSP_SYN0 "%s %u busy\n"            /* "SYN0 <peer_id> <session_id> busy\n" */
 
 #define P2P_WSS_RSP_SYN0_FAIL_SZ        (sizeof(P2P_WSS_RSP_SYN0_FAIL) - 1u)       /* "SYN0 FAIL " */
@@ -1476,7 +1476,7 @@ typedef struct {
  *       因为服务端自身维护了 session，不需要交换 SDP，只需交换 ICE 候选行。
  *       SYNC 与 SYN0 共享 pending_sync 缓存空间（受 sync_max 限制）。
  *
- * 前置条件: 发送方必须已 ONLINE 注册，且已通过 SYN0 建立会话
+ * 前置条件: 发送方必须已 REG 注册，且已通过 SYN0 建立会话
  *
  * 服务端处理:
  *   1. 发送方未注册 → 返回 "REG FAIL not registered\n"
@@ -1680,7 +1680,7 @@ typedef struct {
  *   │                                │  peer_id="alice", cid=N
  *   │◄── "REG OK <sync_max>\n" ─────┤
  *   │                                │
- *   [进入 ONLINE 状态]               │
+ *   [进入 REG 状态]               │
  *   │                                │
  *   [WebSocket 自身的 PING/PONG]     │  (保活由 WS 协议层处理)
  *

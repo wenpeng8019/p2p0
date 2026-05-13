@@ -39,7 +39,7 @@
  *   │ Gist X / "alice"       │                  │ Gist X / "bob"         │
  *   │ (或 Gist A / "alice")  │                  │ (或 Gist B / "bob")    │
  *   │                        │                  │                        │
- *   │ 阶段1: ONLINE:<ts>     │ ← PUB 读取 ──── │                        │
+ *   │ 阶段1: REG:<ts>     │ ← PUB 读取 ──── │                        │
  *   │ 阶段2: OFFER:gist:bob  │                  │                        │
  *   │ 阶段3: <A 的候选>      │ ← PUB 轮询 ──── │                        │
  *   │                        │                  │ 阶段4: <B 的候选>      │
@@ -52,7 +52,7 @@
  *    |                          |                            |
  *    | 1. 写入心跳到 gist/alice |                            |
  *    |-- PATCH gist/alice ----> |                            |
- *    |   "ONLINE:<timestamp>"   |                            |
+ *    |   "REG:<timestamp>"   |                            |
  *    |                          |                            |
  *    |                          | 2. PUB 读取 gist/alice     |
  *    |                          | <------ GET gist ----------|
@@ -88,7 +88,7 @@
  * ============================================================================
  *
  * 阶段1: 实例级（online）
- *   INIT ──→ ONLINE
+ *   INIT ──→ REG
  *
  * 阶段2: 会话级（connect）
  *
@@ -99,7 +99,7 @@
  *     OFFERING ──→ [WAIT_STUN ──→] SYNCING ──→ READY
  *
  *   - INIT:        未启动
- *   - ONLINE:      已初始化，可以发起 connect
+ *   - REG:      已初始化，可以发起 connect
  *   - WAIT_OFFER:  SUB 心跳模式，写入时间戳并轮询自己的 Gist 等待 offer（5s 间隔）
  *   - OFFERING:    PUB 已投递 offer 到 SUB 的 Gist，等待 SUB 响应（1s 间隔）
  *   - WAIT_STUN:   等待 STUN 收集完成（nat_punch 已启动，stun_ready 回调后 → SYNCING）
@@ -112,7 +112,7 @@
  *
  * Gist 文件内容（p2p_signal.json）在不同阶段承载不同内容：
  *
- *   心跳：        "ONLINE:<unix_timestamp>:<peer_id>"  （SUB 上线标识，每 5 分钟刷新）
+ *   心跳：        "REG:<unix_timestamp>:<peer_id>"  （SUB 上线标识，每 5 分钟刷新）
  *   Offer：      "OFFER:<pub_gist_id>:<pub_peer_id>"  （SUB 据此知道 PUB 的发布板和身份）
  *   候选列表：    Base64(DES(SDP 候选文本))            （加密候选）
  *
@@ -219,7 +219,7 @@ typedef struct {
     int                 offer_sent;                     /* PUB: 0=未发送, 1=已写入(待确认), 2=已确认 */
 
     char                remote_gist_id[128];            /* 对端发布板 Gist ID（PUB: connect 传入; SUB: offer 提取）*/
-    char                remote_peer_id[P2P_PEER_ID_MAX]; /* 对端 peer_id（从 ONLINE/OFFER 协议提取）*/
+    char                remote_peer_id[P2P_PEER_ID_MAX]; /* 对端 peer_id（从 REG/OFFER 协议提取）*/
 
     /* 发布状态 */
     int                 local_sync_ver;                 /* 本端发布版本 (>=1 trickle, 0=final) */

@@ -309,7 +309,7 @@ static void session_deactivate(struct p2p_instance *inst) {
  * 主动断开 — 通过 NAT 层和信令层双通道通知对端
  *
  * NAT FIN:  UDP 直连（不可靠，重复发送提高成功率）
- * 信令 FIN: 通过信令服务器转发（COMPACT: OFFLINE → FIN）
+ * 信令 FIN: 通过信令服务器转发（COMPACT: OFF → FIN）
  *
  * 由 p2p_close 调用；p2p_destroy 作为兜底也会调用
  */
@@ -333,7 +333,7 @@ static void disconnect(struct p2p_session *s) {
         if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, old_state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
     }
 
-    // COMPACT 信令模式：取消与对方在服务器上的注册，OFFLINE
+    // COMPACT 信令模式：取消与对方在服务器上的注册，OFF
     if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
 
         p2p_signal_compact_disconnect(s);
@@ -369,7 +369,7 @@ static void peer_disconnect(struct p2p_session *s) {
     p2p_session_reset(s, true);  // 这会设置 s->state = P2P_STATE_CLOSED
 
     // 信道外探测基于信令服务器 RPC 转发，而对方断开连接，不影响自己和服务器的注册状态
-    if (prev_probe_state != P2P_PROBE_STATE_OFFLINE) {
+    if (prev_probe_state != P2P_PROBE_STATE_OFF) {
         s->probe.state = prev_probe_state == P2P_PROBE_STATE_NO_SUPPORT
                 ? P2P_PROBE_STATE_NO_SUPPORT
                 : P2P_PROBE_STATE_READY;
@@ -638,7 +638,7 @@ p2p_destroy(p2p_handle_t hdl) {
     // 先告知信令服务器下线（信令函数需要 session 指针，必须在释放会话前调用）
     if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT &&
         inst->sig_ctx.compact.state != SIG_COMPACT_INIT) {
-        print("I:", LA_F("Sending OFFLINE packet to COMPACT signaling server", LA_F381, 381));
+        print("I:", LA_F("Sending OFF packet to COMPACT signaling server", LA_F381, 381));
         p2p_signal_compact_offline(inst);
     }
     else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY &&
@@ -854,7 +854,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
         // RELAY 模式
         case P2P_SIGNALING_MODE_RELAY: {
 
-            if (s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_ONLINE)
+            if (s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_REG)
                 print("I:", LA_F("Starting RELAY session with %s", LA_F392, 392), remote_peer_id);
             if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE)
                 print("E:", LA_F("Start RELAY session failed(%d)", LA_F389, 389), ret);
@@ -1239,7 +1239,7 @@ p2p_update(p2p_handle_t hdl) {
         * 阶段 5：统一状态机（集中处理所有 P2P 连接状态转换）
         * ======================================================================== */
 
-        // 转换：REGISTERING/ONLINE → PUNCHING（开始打洞）
+        // 转换：REGISTERING/REGISTERED → PUNCHING（开始打洞）
         if ((s->state == P2P_STATE_SIGNALING || s->state == P2P_STATE_WAITING)
             && (s->nat.state == NAT_PUNCHING || s->nat.state == NAT_CONNECTING)) {
 
@@ -1486,11 +1486,11 @@ p2p_nat_type(p2p_handle_t hdl) {
 
 p2p_probe_state_t
 p2p_probe(p2p_session_t session) {
-    if (!session) return P2P_PROBE_STATE_OFFLINE;
+    if (!session) return P2P_PROBE_STATE_OFF;
     struct p2p_session *s = (struct p2p_session*)session;
 
-    // 已关闭：信令通道已断，返回 OFFLINE
-    if (s->state == P2P_STATE_CLOSED) return P2P_PROBE_STATE_OFFLINE;
+    // 已关闭：信令通道已断，返回 OFF
+    if (s->state == P2P_STATE_CLOSED) return P2P_PROBE_STATE_OFF;
 
     // 已直连时无需探测
     if (s->state == P2P_STATE_CONNECTED) return P2P_PROBE_STATE_CONNECTED;

@@ -23,10 +23,10 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_W13] = "UDP Blocked (STUN unreachable)",  /* SID:13 */
     [LA_W14] = "Undetectable (no STUN/probe configured)",  /* SID:14 */
     [LA_W15] = "Unknown",  /* SID:15 */
-    [LA_S16] = "%s: address exchange failed: peer OFFLINE",  /* SID:16 */
+    [LA_S16] = "%s: address exchange failed: peer OFF",  /* SID:16 */
     [LA_S17] = "%s: address exchange success, sending UDP probe",  /* SID:17 */
     [LA_S18] = "%s: already running, cannot trigger again",  /* SID:18 */
-    [LA_S19] = "%s: peer is OFFLINE",  /* SID:19 */
+    [LA_S19] = "%s: peer is OFF",  /* SID:19 */
     [LA_S20] = "%s: peer is online, waiting echo",  /* SID:20 */
     [LA_S21] = "%s: triggered on CONNECTED state (unnecessary)",  /* SID:21 */
     [LA_S22] = "%s: TURN allocated, starting address exchange",  /* SID:22 */
@@ -118,7 +118,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F109] = "%s: accepted, probe_mapped=%s:%d\n",  /* SID:109 */
     [LA_F110] = "%s: accepted, public=%s:%d auth_key=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n",  /* SID:110 */
     [LA_F111] = "%s: accepted\n",  /* SID:111 */
-    [LA_F112] = "%s: auth_key acquired, auto SYNC0 sent\n",  /* SID:112 */
+    [LA_F112] = "%s: auth_key acquired, auto SYN0 sent\n",  /* SID:112 */
     [LA_F113] = "%s: auth_key acquired, waiting stun pending\n",  /* SID:113 */
     [LA_F114] = "%s: bad FIN marker=0x%02x\n",  /* SID:114 */
     [LA_F115] = "%s: bad payload len=%d\n",  /* SID:115 */
@@ -138,9 +138,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F129] = "%s: duplicate request ignored (sid=%u)\n",  /* SID:129 */
     [LA_F130] = "%s: duplicate request ignored (sid=%u, already processing)\n",  /* SID:130 */
     [LA_F131] = "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n",  /* SID:131 */
-    [LA_F132] = "%s: entered early, %s arrived before SYNC0\n",  /* SID:132 */
+    [LA_F132] = "%s: entered early, %s arrived before SYN0\n",  /* SID:132 */
     [LA_F133] = "%s: entered, %s arrived\n",  /* SID:133 */
-    [LA_F134] = "%s: entered, peer online in SYNC0_ACK\n",  /* SID:134 */
+    [LA_F134] = "%s: entered, peer online in SYN0_ACK\n",  /* SID:134 */
     [LA_F135] = "%s: exchange timeout, retry %d/%d",  /* SID:135 */
     [LA_F136] = "%s: exchange timeout: peer not responding",  /* SID:136 */
     [LA_F137] = "%s: fatal error code=%u, entering ERROR state\n",  /* SID:137 */
@@ -181,7 +181,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F172] = "%s: path[%d] relay UP",  /* SID:172 */
     [LA_F173] = "%s: peer disconnected (ses_id=%u), reset to WAIT_PEER\n",  /* SID:173 */
     [LA_F174] = "%s: peer offline (sid=%u)\n",  /* SID:174 */
-    [LA_F175] = "%s: peer offline in SYNC0_ACK, waiting for peer to come online\n",  /* SID:175 */
+    [LA_F175] = "%s: peer offline in SYN0_ACK, waiting for peer to come online\n",  /* SID:175 */
     [LA_F176] = "%s: peer offline\n",  /* SID:176 */
     [LA_F177] = "%s: peer online, starting NAT punch\n",  /* SID:177 */
     [LA_F178] = "%s: peer reachable via signaling (RTT: %llu ms)",  /* SID:178 */
@@ -243,7 +243,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F234] = "%s: sync fin ack, but cand synced cnt not match sent cnt (cand=%d synced=%d)\n",  /* SID:234 */
     [LA_F235] = "%s: sync forwarded, confirmed=%d synced=%d\n",  /* SID:235 */
     [LA_F236] = "%s: sync0 srflx cand[%d]<%s:%d>%s\n",  /* SID:236 */
-    [LA_F237] = "%s: syncable ready, auto SYNC0 sent\n",  /* SID:237 */
+    [LA_F237] = "%s: syncable ready, auto SYN0 sent\n",  /* SID:237 */
     [LA_F238] = "%s: timeout (sid=%u)\n",  /* SID:238 */
     [LA_F239] = "%s: timeout after %d retries , type unknown\n",  /* SID:239 */
     [LA_F240] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:240 */
@@ -332,8 +332,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F325] = "% No auth_key provided, using default key (insecure)",  /* SID:325 */
     [LA_F326] = "% No shared local route addresses available, host candidates skipped",  /* SID:326 */
     [LA_F327] = "% No valid CHANGED-ADDRESS provided by STUN server, skipping Test I(alt)",  /* SID:327 */
-    [LA_F328] = "% ONLINE: auth_key acquired, auto SYNC0 sent\n",  /* SID:328 */
-    [LA_F329] = "% ONLINE: auth_key acquired, waiting stun pending\n",  /* SID:329 */
+    [LA_F328] = "% REG: auth_key acquired, auto SYN0 sent\n",  /* SID:328 */
+    [LA_F329] = "% REG: auth_key acquired, waiting stun pending\n",  /* SID:329 */
     [LA_F330] = "Open P2P UDP socket on port %d",  /* SID:330 */
     [LA_F331] = "Open P2P UDP socket on port %d failed(%d)",  /* SID:331 */
     [LA_F332] = "% OpenSSL requested but library not linked",  /* SID:332 */
@@ -383,12 +383,12 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F464] = "% STUN resources released (no active sessions)",  /* SID:464 */
     [LA_F374] = "SYNC(trickle): batching, queued %d cand(s) for seq=%u\n",  /* SID:374 */
     [LA_F375] = "% SYNC(trickle): seq overflow, cannot trickle more\n",  /* SID:375 */
-    [LA_F376] = "SYNC0: retry, (attempt %d/%d)\n",  /* SID:376 */
-    [LA_F377] = "SYNC0: timeout, max(%d) attempts reached, reset to INIT\n",  /* SID:377 */
+    [LA_F376] = "SYN0: retry, (attempt %d/%d)\n",  /* SID:376 */
+    [LA_F377] = "SYN0: timeout, max(%d) attempts reached, reset to INIT\n",  /* SID:377 */
     [LA_F378] = "Send window full, dropping packet send_count=%d",  /* SID:378 */
     [LA_F379] = "Sending Allocate Request to %s:%d",  /* SID:379 */
     [LA_F380] = "% Sending FIN packet to peer before closing",  /* SID:380 */
-    [LA_F381] = "% Sending OFFLINE packet to COMPACT signaling server",  /* SID:381 */
+    [LA_F381] = "% Sending OFF packet to COMPACT signaling server",  /* SID:381 */
     [LA_F382] = "Sending Test I to %s:%d (len=%d)",  /* SID:382 */
     [LA_F383] = "% Sending Test I(alt) to CHANGED-ADDRESS",  /* SID:383 */
     [LA_F384] = "% Sending Test II with CHANGE-REQUEST(IP+PORT)",  /* SID:384 */
@@ -450,13 +450,13 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F440] = "[R] %s%s qsend failed(OOM)\n",  /* SID:440 */
     [LA_F441] = "[R] %s%s qsend(%d), len=%u\n",  /* SID:441 */
     [LA_F442] = "[R] Connecting to %s:%d\n",  /* SID:442 */
-    [LA_F443] = "% [R] Disconnected, back to ONLINE state\n",  /* SID:443 */
+    [LA_F443] = "% [R] Disconnected, back to REG state\n",  /* SID:443 */
     [LA_F444] = "% [R] Failed to create TCP socket\n",  /* SID:444 */
     [LA_F445] = "% [R] Failed to set socket non-blocking\n",  /* SID:445 */
     [LA_F446] = "[R] TCP connect failed(%d)\n",  /* SID:446 */
     [LA_F447] = "[R] TCP connect select failed(%d)\n",  /* SID:447 */
-    [LA_F448] = "% [R] TCP connected immediately, sending ONLINE\n",  /* SID:448 */
-    [LA_F449] = "% [R] TCP connected, sending ONLINE\n",  /* SID:449 */
+    [LA_F448] = "% [R] TCP connected immediately, sending REG\n",  /* SID:448 */
+    [LA_F449] = "% [R] TCP connected, sending REG\n",  /* SID:449 */
     [LA_F450] = "% [R] TCP connection closed by peer\n",  /* SID:450 */
     [LA_F451] = "% [R] TCP connection closed during send\n",  /* SID:451 */
     [LA_F452] = "[R] TCP recv error(%d)\n",  /* SID:452 */

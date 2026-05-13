@@ -613,16 +613,16 @@ int main(int argc, char *argv[]) {
             print("I:", "[Chat] Peer disconnected, scheduling reconnect...");
         }
 
-        // 兜底：ONLINE 空闲态也持续尝试 connect。
-        // 某些时序下 CLOSED 窗口很短，可能错过触发；p2p_connect 在 ONLINE 为幂等调用。
-        // 注意：在新架构中 p2p_connect 不再幂等， ONLINE 是正常等待状态，不触发重连。
-        // if (target_name && !connect_pending && st == P2P_STATE_ONLINE && !p2p_is_ready(g_session)) {
+        // 兜底：REG 空闲态也持续尝试 connect。
+        // 某些时序下 CLOSED 窗口很短，可能错过触发；p2p_connect 在 REG 为幂等调用。
+        // 注意：在新架构中 p2p_connect 不再幂等， REG 是正常等待状态，不触发重连。
+        // if (target_name && !connect_pending && st == P2P_STATE_REG && !p2p_is_ready(g_session)) {
         //     connect_pending = true;
         //     connect_retry_at = P_tick_ms() + 200;
         // }
 
         // RELAY/COMPACT 模式下，INIT/CLOSED 允许延后重试启动会话。
-        // ONLINE/REGISTERING/PUNCHING 是正常等待状态，不要间断或重建会话。
+        // REG/REGISTERING/PUNCHING 是正常等待状态，不要间断或重建会话。
         if (connect_pending
             && (st == P2P_STATE_INIT || st == P2P_STATE_CLOSED)
             && P_tick_ms() >= connect_retry_at) {

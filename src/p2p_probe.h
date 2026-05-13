@@ -85,7 +85,7 @@ typedef enum {
  * ============================================================================ */
 typedef struct {
     /* 公共状态（对应 include/p2p.h 的 p2p_probe_state_t）*/
-    p2p_probe_state_t state;        // 统一状态（NONE/RUNNING/SUCCESS/PEER_OFFLINE/TIMEOUT）
+    p2p_probe_state_t state;        // 统一状态（NONE/RUNNING/SUCCESS/PEER_OFF/TIMEOUT）
     uint64_t          start_ms;     // 探测开始时间（毫秒）
     uint64_t          complete_ms;  // 探测完成时间（毫秒）
     int               retries;      // 当前重试计数

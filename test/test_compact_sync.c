@@ -177,7 +177,7 @@ static int find_log(const char *pattern) {
 // 协议构造函数
 ///////////////////////////////////////////////////////////////////////////////
 
-// 构造 ONLINE 包
+// 构造 REG 包
 static int build_online(uint8_t *buf, int buf_size,
                         const char *local_peer_id,
                         uint32_t instance_id) {
@@ -197,7 +197,7 @@ static int build_online(uint8_t *buf, int buf_size,
 #define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
     build_online(buf, buf_size, local, inst_id)
 
-// 构造 SYNC0 包
+// 构造 SYN0 包
 static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
                        const char *remote_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
@@ -245,19 +245,19 @@ typedef struct {
     p2p_candidate_t candidates[16];
 } sync_t;
 
-// 判断是否为首次候选推送包（SYNC0 s2c 或 SYNC seq=0）
+// 判断是否为首次候选推送包（SYN0 s2c 或 SYNC seq=0）
 static int is_sync_packet(uint8_t type) {
     return type == SIG_PKT_SYNC || type == SIG_PKT_SYN0;
 }
 
-// 解析 SYNC / SYNC0(s2c) 包
+// 解析 SYNC / SYN0(s2c) 包
 static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
     memset(info, 0, sizeof(*info));
     
     if (buf[0] != SIG_PKT_SYNC && buf[0] != SIG_PKT_SYN0) return;
     
     // SYNC:  [hdr(4)][session_id(4)][base_index(1)][count(1)][cands]
-    // SYNC0: [hdr(4)][remote_peer_id(32)][session_id(4)][0x00(1)][count(1)][cands]
+    // SYN0: [hdr(4)][remote_peer_id(32)][session_id(4)][0x00(1)][count(1)][cands]
     int off = 4;  // skip hdr
     if (buf[0] == SIG_PKT_SYN0) {
         if (len < 4 + (int)P2P_PEER_ID_MAX + 4 + 1 + 1) return;
@@ -284,7 +284,7 @@ static void parse_sync(const uint8_t *buf, int len, sync_t *info) {
     }
 }
 
-// 发送 ONLINE 并接收 REG_ACK，然后发送 SYNC0，返回 session_id
+// 发送 REG 并接收 REG_ACK，然后发送 SYN0，返回 session_id
 static uint32_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
@@ -312,11 +312,11 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
         for (int i = 0; i < 8; i++) {
             auth_key = (auth_key << 8) | recv_buf[8 + i];
         }
-        // 发送 SYNC0（携带 auth_key + remote_peer_id）
+        // 发送 SYN0（携带 auth_key + remote_peer_id）
         len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
-        // 消耗 SYNC0_ACK，从中提取 session_id
+        // 消耗 SYN0_ACK，从中提取 session_id
         // [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
         uint8_t drain_buf[64];
         struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
@@ -327,7 +327,7 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
             int off = 4 + P2P_PEER_ID_MAX;
             uint32_t ses = ((uint32_t)drain_buf[off] << 24) | ((uint32_t)drain_buf[off+1] << 16) |
                            ((uint32_t)drain_buf[off+2] << 8)  | (uint32_t)drain_buf[off+3];
-            // 发送 C2S SYNC0_ACK 二次确认，触发服务器 SYNC0 推送
+            // 发送 C2S SYN0_ACK 二次确认，触发服务器 SYN0 推送
             uint8_t ack2[8];
             ack2[0] = SIG_PKT_SYN0_ACK;
             ack2[1] = 0; ack2[2] = 0; ack2[3] = 0;
@@ -340,7 +340,7 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
     return 0;
 }
 
-// 发送 SYNC0_ACK（client→server，确认服务器首次候选推送）
+// 发送 SYN0_ACK（client→server，确认服务器首次候选推送）
 static void send_sync0_ack(sock_t sock, uint32_t session_id) {
     uint8_t pkt[16];
     pkt[0] = SIG_PKT_SYN0_ACK;
@@ -426,7 +426,7 @@ static void test_sync_on_pairing(void) {
     sync_t info_alice = {0};
     sync_t info_bob = {0};
     
-    // Alice 接收 SYNC（可能先收到 REGISTER_ACK 更新，跳过）
+    // Alice 接收 SYNC（可能先收到 REG_ACK 更新，跳过）
     for (int i = 0; i < 3; i++) {
         from_len = sizeof(from);
         ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
@@ -530,7 +530,7 @@ static void test_sync_ack_stops_retransmit(void) {
     
     clear_logs();
     
-    // 发送 SYNC0_ACK 停止服务器重传
+    // 发送 SYN0_ACK 停止服务器重传
     send_sync0_ack(sock_alice, session_alice);
     
     P_usleep(200 * 1000);
@@ -742,7 +742,7 @@ static void test_sync_retransmit(void) {
     ssize_t n = recvfrom(sock_alice, (char*)recv_buf, sizeof(recv_buf), 0,
                           (struct sockaddr*)&from, &from_len);
     
-    // 发送 SYNC0_ACK 停止待聊重传
+    // 发送 SYN0_ACK 停止待聊重传
     send_sync0_ack(sock_alice, session_alice);
     send_sync0_ack(sock_bob,   session_bob);
     
@@ -806,7 +806,7 @@ static void test_sync_ack_duplicate(void) {
         if (n > 0 && is_sync_packet(recv_buf[0])) break;
     }
     
-    // 发送两次 SYNC0_ACK
+    // 发送两次 SYN0_ACK
     send_sync0_ack(sock_alice, session_alice);
     P_usleep(100 * 1000);
     

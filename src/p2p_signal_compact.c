@@ -9,10 +9,10 @@
 #include "p2p_internal.h"
 #include "p2p_probe.h"
 
-#define ONLINE_INTERVAL_MS              1000    /* ONLINE/SYNC0 重发间隔 */
+#define REG_INTERVAL_MS              1000    /* REG/SYN0 重发间隔 */
 #define SYNC_INTERVAL_MS                500     /* SYNC 重发间隔 */
-#define MAX_SIG_ATTEMPTS                10      /* 最大 ONLINE/SYNC0 重发次数 */
-#define REGISTER_KEEPALIVE_INTERVAL_MS  20000   /* ONLINE 状态保活重注册间隔（防服务器超时清除槽位） */
+#define MAX_SIG_ATTEMPTS                10      /* 最大 REG/SYN0 重发次数 */
+#define REG_KEEPALIVE_INTERVAL_MS  20000   /* REG 状态保活重注册间隔（防服务器超时清除槽位） */
 #define TRICKLE_BATCH_MS                1000    /* TURN trickle 攒批窗口（多个 TURN 响应在此窗口内合并为一个包） */
 #define MAX_CANDS_PER_PACKET            10      /* 每个 SYNC 包最大候选数 */
 #define NAT_PROBE_MAX_RETRIES           3       /* NAT_PROBE 最大发送次数 */
@@ -23,7 +23,7 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#define TASK_ONLINE                     "ONLINE"
+#define TASK_REG                     "REG"
 #define TASK_SYNC                       "SYNC"
 #define TASK_SYNC_REMOTE                "SYNC REMOTE"
 #define TASK_RPC                        "RPC"
@@ -85,9 +85,9 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
         if (s->inst->cfg.test_ice_srflx_off) --s->remote_cand_cnt;
         else { s->remote_srflx_cnt++;
 
-            // 这里启动打洞需要依赖于信令服务器的 REGISTER_ACK 包中携带的 feature_relay 标志
-            // + 该标志用于决定所使用的冷打洞机制，如果冷打洞不依赖服务器中转，则打洞可以不依赖 REGISTER_ACK 包
-            if (s->sig_sess.compact.state >= SIG_COMPACT_SESS_WAIT_SYNC0_ACK && nat_punch(s, 0) != E_NONE) {
+            // 这里启动打洞需要依赖于信令服务器的 REG_ACK 包中携带的 feature_relay 标志
+            // + 该标志用于决定所使用的冷打洞机制，如果冷打洞不依赖服务器中转，则打洞可以不依赖 REG_ACK 包
+            if (s->sig_sess.compact.state >= SIG_COMPACT_SESS_WAIT_SYN0_ACK && nat_punch(s, 0) != E_NONE) {
                 print("W:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F185, 185),
                     TASK_SYNC_REMOTE, 0, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
             }
@@ -142,7 +142,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
         print("I:", LA_F("%s: remote %s cand[%d]<%s:%d> accepted\n", LA_F205, 205),
               TASK_SYNC_REMOTE, type_str, idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
 
-        if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYNC0_ACK) continue;
+        if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYN0_ACK) continue;
 
         if (nat_punch(s, idx) != E_NONE)
             print("E:", LA_F("%s: punch remote cand[%d]<%s:%d> failed\n", LA_F185, 185),
@@ -207,15 +207,15 @@ static int pack_local_candidates(struct p2p_session *s, uint16_t seq, uint8_t *p
 }
 
 /*
- * 向信令服务器发送 ONLINE（上线登录）请求
+ * 向信令服务器发送 REG（上线登录）请求
  *
- * 包头: [type=SIG_PKT_ONLINE | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_REG | flags=0 | seq=0]
  * 负载: [local_peer_id(32)][instance_id(4)]
  *   - instance_id: 本次 connect() 的实例 ID（网络字节序，32位，必须非 0）
- * 注：候选地址通过后续 SYNC0 包单独提交
+ * 注：候选地址通过后续 SYN0 包单独提交
  */
 static void send_online(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, uint64_t now) {
-    const char* PROTO = "ONLINE";
+    const char* PROTO = "REG";
 
     assert(sig_ctx->state == SIG_COMPACT_WAIT_REG_ACK);
 
@@ -239,7 +239,7 @@ static void send_online(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, u
 }
 
 /*
- * 向信令服务器提交 SYNC0（首批候选 + 指定对端）
+ * 向信令服务器提交 SYN0（首批候选 + 指定对端）
  *
  * 包头: [type=SIG_PKT_SYN0 | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
@@ -248,7 +248,7 @@ static void send_online(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, u
  *   - candidate_count: 首批候选数量（最多 candidates_cached 个）
  */
 static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_t now) {
-    const char* PROTO = "SYNC0";
+    const char* PROTO = "SYN0";
 
     assert(s->inst == inst && !s->id);
 
@@ -256,7 +256,7 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
     assert(sig_ctx->auth_key != 0);
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
-    assert(sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYNC0_ACK);
+    assert(sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYN0_ACK);
 
     uint8_t payload[P2P_MAX_PAYLOAD]; int n = 0;
 
@@ -290,7 +290,7 @@ static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_
 }
 
 /*
- * 在首次收到 SYNC 包，且已经收到 REGISTER_ACK 的情况下，发送剩余候选队列和 FIN 包给对方
+ * 在首次收到 SYNC 包，且已经收到 REG_ACK 的情况下，发送剩余候选队列和 FIN 包给对方
  * 注意：首次收到的 SYNC 包，可能是服务器下发的 seq=0 的 SYNC 包；
  *       也可能是对方发送的 seq!=1 的 SYNC 包（在并发网络状况下，对方的 SYNC 包可能先到达）
  *
@@ -442,7 +442,7 @@ static void resend_candidates_and_fin(struct p2p_session *s, uint64_t now) {
  *
  * 包头: [type=SIG_PKT_REQ | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
- *   - session_id: 本端会话 ID（来自 REGISTER_ACK）
+ *   - session_id: 本端会话 ID（来自 REG_ACK）
  *   - sid: 序列号（2字节，网络字节序），用于匹配响应
  *   - msg: 消息 ID（1字节，用户自定义）
  *   - data: 消息数据（可选）
@@ -658,12 +658,12 @@ void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flag
         p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
         // 上线完成之前，session 肯定处于 WAIT SYNCABLE 阶段
-        assert(sess_ctx->remote_peer_id[0] && sess_ctx->state == SIG_COMPACT_SESS_WAIT_ONLINE);
+        assert(sess_ctx->remote_peer_id[0] && sess_ctx->state == SIG_COMPACT_SESS_WAIT_REG);
 
-        sess_ctx->state = SIG_COMPACT_SESS_WAIT_SYNC0_ACK;
+        sess_ctx->state = SIG_COMPACT_SESS_WAIT_SYN0_ACK;
         send_sync0(inst, s, P_tick_ms());
         sess_ctx->sync_attempts = 1;
-        print("I:", LA_F("ONLINE: auth_key acquired, auto SYNC0 sent\n", LA_F328, 328));
+        print("I:", LA_F("REG: auth_key acquired, auto SYN0 sent\n", LA_F328, 328));
 
         // 根据服务器能力设置探测状态
         if (sig_ctx->feature_msg) {
@@ -704,27 +704,27 @@ void compact_on_alive_ack(struct p2p_instance *inst) {
 }
 
 /*
- * 处理 SYNC0_ACK（即连接应答）, session_id 和首批候选同步提交确认
+ * 处理 SYN0_ACK（即连接应答）, session_id 和首批候选同步提交确认
  *
  * 包头: [type=SIG_PKT_SYN0_ACK | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][online(1)]
- *   - session_id: 对端配对会话 ID（由服务器在 SYNC0 时分配，标识 client↔peer 会话）
+ *   - session_id: 对端配对会话 ID（由服务器在 SYN0 时分配，标识 client↔peer 会话）
  *   - online: 1=对端已上线（已有配对），0=对端尚未上线
  */
 void compact_on_sync0_ack(struct p2p_session *s, const uint8_t *payload, int len) {
     (void)len;
-    const char* PROTO = "SYNC0_ACK";
+    const char* PROTO = "SYN0_ACK";
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
-    // 发送 SYNC0_ACK（方向 2：二次确认，告知服务器已收到 session_id）
+    // 发送 SYN0_ACK（方向 2：二次确认，告知服务器已收到 session_id）
     {
         uint8_t ack_payload[SIG_PKT_SYN0_ACK_C2S_PSZ];
         nwrite_l(ack_payload, s->id);
         udp_send(s->inst, PROTO, SIG_PKT_SYN0_ACK, 0, 0, ack_payload, sizeof(ack_payload), P_tick_ms());
     }
 
-    if (sess_ctx->state != SIG_COMPACT_SESS_WAIT_SYNC0_ACK) return;
+    if (sess_ctx->state != SIG_COMPACT_SESS_WAIT_SYN0_ACK) return;
 
     uint8_t online = payload[P2P_SESS_ID_SZ];
     print("V:", LA_F("%s: accepted (ses_id=%u), peer=%s\n", LA_F102, 102),
@@ -735,17 +735,17 @@ void compact_on_sync0_ack(struct p2p_session *s, const uint8_t *payload, int len
 
     sess_ctx->state = SIG_COMPACT_SESS_WAIT_PEER;
     if (!online) {
-        print("I:", LA_F("%s: peer offline in SYNC0_ACK, waiting for peer to come online\n", LA_F175, 175), TASK_SYNC);
+        print("I:", LA_F("%s: peer offline in SYN0_ACK, waiting for peer to come online\n", LA_F175, 175), TASK_SYNC);
         return;
     }
 
     // 进入 SYNCING 有两个入口，谁先发生谁先执行：
-    // 1. 本处（SYNC0_ACK online=1）：对端已在线，直接进入 SYNCING，立即发送本端剩余候选
-    // 2. compact_on_server_sync0 收到服务器下发的 SYNC0：服务器下发对端候选，同时触发 SYNCING
+    // 1. 本处（SYN0_ACK online=1）：对端已在线，直接进入 SYNCING，立即发送本端剩余候选
+    // 2. compact_on_server_sync0 收到服务器下发的 SYN0：服务器下发对端候选，同时触发 SYNCING
     // 两者均在 WAIT_PEER 状态下判断，状态机本身保证幂等（已 SYNCING 则跳过）
 
     sess_ctx->state = SIG_COMPACT_SESS_SYNCING;
-    print("I:", LA_F("%s: entered, peer online in SYNC0_ACK\n", LA_F134, 134), TASK_SYNC);
+    print("I:", LA_F("%s: entered, peer online in SYN0_ACK\n", LA_F134, 134), TASK_SYNC);
     send_rest_candidates_and_fin(s, P_tick_ms());
 
     // 启动 NAT 打洞（即使当前没有候选也要启动，以便打洞超时后 fallback 到信令中转）
@@ -801,11 +801,11 @@ void compact_on_sync_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 
 
 /*
- * 处理服务器下发的 SYNC0（首次对端候选推送）
+ * 处理服务器下发的 SYN0（首次对端候选推送）
  *
  * 包头: [type=SIG_PKT_SYN0 | flags=0 | seq=0]  （server→client 方向）
  * 负载: [session_id(P2P_SESS_ID_SZ)][0x00(1)][candidate_count(1)][candidates(N*23)]
- *   - session_id: 服务器分配的对端配对会话 ID（来自对端 SYNC0 触发的配对）
+ *   - session_id: 服务器分配的对端配对会话 ID（来自对端 SYN0 触发的配对）
  *   - 0x00: 保留字节（固定为 0，供 unpack_remote_candidates 识别为初始推送）
  *   - candidate_count: 对端候选数量（首个为服务器观察到的公网地址 srflx，必须 >= 1）
  *   客户端收到后以 SIG_PKT_SYNC_ACK(seq=0) 确认
@@ -813,7 +813,7 @@ void compact_on_sync_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
 void compact_on_peer_sync0(struct p2p_session *s,
                              const uint8_t *payload, int len,
                              uint64_t now) {
-    const char* PROTO = "SYNC0";
+    const char* PROTO = "SYN0";
 
     int cand_cnt = payload[P2P_SESS_ID_SZ + 1];
     if (len < (int)(SIG_PKT_SYN0_S2C_PSZ(cand_cnt) - P2P_PEER_ID_MAX)) {
@@ -829,8 +829,8 @@ void compact_on_peer_sync0(struct p2p_session *s,
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
     // 进入 SYNCING 有两个入口，谁先发生谁先执行：
-    // 1. compact_on_sync0_ack（SYNC0_ACK online=1）：对端已在线，直接进入 SYNCING，立即发送本端剩余候选
-    // 2. 本处（收到服务器下发的 SYNC0/SYNC）：服务器下发对端候选，同时触发 SYNCING
+    // 1. compact_on_sync0_ack（SYN0_ACK online=1）：对端已在线，直接进入 SYNCING，立即发送本端剩余候选
+    // 2. 本处（收到服务器下发的 SYN0/SYNC）：服务器下发对端候选，同时触发 SYNCING
     // 两者均在 WAIT_PEER 状态下判断，状态机本身保证幂等（已 SYNCING 则跳过）
     if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_PEER) {
         sess_ctx->state = SIG_COMPACT_SESS_SYNCING;
@@ -856,7 +856,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
     }
 
     // 无论 peer_online 之前是否已设置，只要 NAT 打洞还未启动就启动
-    // 注：Bob 在 SYNC0_ACK(online=1) 时已设置 peer_online，但 punch 尚未启动，需在此触发
+    // 注：Bob 在 SYN0_ACK(online=1) 时已设置 peer_online，但 punch 尚未启动，需在此触发
     if (s->nat.state < NAT_PUNCHING) {
         print("I:", LA_F("%s: peer online, starting NAT punch\n", LA_F177, 177), PROTO);
         nat_punch(s, -1/* all candidates */);
@@ -875,7 +875,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
         }
     }
 
-    // 发送 SYNC0_ACK（client→server 方向）确认收到服务器 SYNC0
+    // 发送 SYN0_ACK（client→server 方向）确认收到服务器 SYN0
     {
         uint8_t ack_payload[SIG_PKT_SYN0_ACK_C2S_PSZ];
         nwrite_l(ack_payload, s->id);
@@ -883,7 +883,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
         err_t err = udp_send(s->inst, PROTO, SIG_PKT_SYN0_ACK, 0, 0, ack_payload, sizeof(ack_payload), now);
         if (err != E_NONE) return;
 
-        print("V:", LA_F("%s sent (ses_id=%u)\n", LA_F56, 56), "SYNC0_ACK", s->id);
+        print("V:", LA_F("%s sent (ses_id=%u)\n", LA_F56, 56), "SYN0_ACK", s->id);
     }
 }
 
@@ -924,7 +924,7 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
     // 但在 UDP 网络中 sync0/sync 包是并发的，先后无法确定。
     if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_PEER) {
         sess_ctx->state = SIG_COMPACT_SESS_SYNCING;
-        print("I:", LA_F("%s: entered early, %s arrived before SYNC0\n", LA_F132, 132), TASK_SYNC, PROTO);
+        print("I:", LA_F("%s: entered early, %s arrived before SYN0\n", LA_F132, 132), TASK_SYNC, PROTO);
         send_rest_candidates_and_fin(s, P_tick_ms());
     }
 
@@ -1003,7 +1003,7 @@ void compact_on_peer_sync(struct p2p_session *s, uint16_t seq, uint8_t flags,
             //            s->active_path);
             // }
 
-            if (sess_ctx->state >= SIG_COMPACT_SESS_WAIT_SYNC0_ACK) {
+            if (sess_ctx->state >= SIG_COMPACT_SESS_WAIT_SYN0_ACK) {
 
                 if (nat_punch(s, 0) != E_NONE) {
                     print("E:", LA_F("Failed to send punch packet for new peer addr\n", LA_F295, 295));
@@ -1082,7 +1082,7 @@ void compact_on_fin(struct p2p_session *s, uint16_t seq, uint8_t flags,
     // 重置到 WAIT_PEER 被动等待状态（对端主动断开，不自动重连）
     // ! 这里可以明确知道是对方断开了连接，所以自己和信令服务器之间的连接和数据状态都是正常的，不需要重置
     //   auth_key 不需要重置，因为它是 client↔server 的认证令牌，对端断开不影响与服务器的关系
-    //   session_id 对应 client↔peer 会话，对端断开后将在下一轮 SYNC0_ACK 中重新获得
+    //   session_id 对应 client↔peer 会话，对端断开后将在下一轮 SYN0_ACK 中重新获得
     sess_ctx->state = SIG_COMPACT_SESS_WAIT_PEER;
     s->id = 0;
 
@@ -1241,7 +1241,7 @@ void compact_on_request_ack(struct p2p_session *s, uint16_t seq, uint8_t flags,
  *   - code: 响应消息 ID（正常响应时）
  *   - data: 响应数据（正常响应时）
  *   - flags: 0=正常响应（B端返回的数据）
- *            SIG_MSG_FLAG_PEER_OFFLINE (0x02)=B端在 REQ_ACK 之后离线
+ *            SIG_MSG_FLAG_PEER_OFF (0x02)=B端在 REQ_ACK 之后离线
  *            SIG_MSG_FLAG_TIMEOUT (0x04)=服务器向B端转发请求超时
  */
 void compact_on_response(struct p2p_session *s, uint16_t seq, uint8_t flags,
@@ -1468,7 +1468,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             break;
         }
 
-        if (type == SIG_PKT_SYN0_ACK) { PROTO = "SYNC0_ACK";
+        if (type == SIG_PKT_SYN0_ACK) { PROTO = "SYN0_ACK";
 
             printf(LA_F("[C] %s recv, len=%d\n", LA_F425, 425), PROTO, payload_len);
 
@@ -1493,7 +1493,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
                 break;
             }
 
-            if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYNC0_ACK) {
+            if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYN0_ACK) {
                 print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)s->sig_sess.compact.state);
                 break;
             }
@@ -1510,7 +1510,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             break;
         }
 
-        if (type == SIG_PKT_SYN0) { PROTO = "SYNC0";
+        if (type == SIG_PKT_SYN0) { PROTO = "SYN0";
 
             printf(LA_F("[C] %s recv, len=%d\n", LA_F425, 425), PROTO, payload_len);
 
@@ -1535,12 +1535,12 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
                 break;
             }
 
-            if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYNC0_ACK) {
+            if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYN0_ACK) {
                 print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)s->sig_sess.compact.state);
                 break;
             }
 
-            // 二次确认机制下，s->id 必已在 SYNC0_ACK 中设置
+            // 二次确认机制下，s->id 必已在 SYN0_ACK 中设置
             if (!s->id) {
                 print("E:", LA_F("%s: unexpected s->id=0\n", LA_F250, 250), PROTO);
                 break;
@@ -1608,7 +1608,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             break;
         }
 
-        if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYNC0_ACK) {
+        if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYN0_ACK) {
             print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)s->sig_sess.compact.state);
             break;
         }
@@ -1623,9 +1623,9 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * 客户端上线（发送 ONLINE，建立 client↔server 关系，获取 auth_key）
+ * 客户端上线（发送 REG，建立 client↔server 关系，获取 auth_key）
  *
- * 包头: [type=SIG_PKT_ONLINE | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_REG | flags=0 | seq=0]
  * 负载: [local_peer_id(32)][instance_id(4)]
  *   - local_peer_id: 本端 ID（32 字节，不足补零）
  *   - instance_id:   本次上线实例 ID（非零，用于服务器区分重启会话）
@@ -1654,13 +1654,13 @@ ret_t p2p_signal_compact_online(struct p2p_instance *inst, const char *local_pee
 }
 
 /*
- * 客户端下线（发送 OFFLINE，清理服务器上的全部状态，回到 INIT）
+ * 客户端下线（发送 OFF，清理服务器上的全部状态，回到 INIT）
  *
- * 包头: [type=SIG_PKT_OFFLINE | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_OFF | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)]
  */
 ret_t p2p_signal_compact_offline(struct p2p_instance *inst) {
-    const char* PROTO = "OFFLINE";
+    const char* PROTO = "OFF";
 
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
     if (sig_ctx->state == SIG_COMPACT_INIT) return E_NONE;
@@ -1686,14 +1686,14 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst) {
 }
 
 /*
- * 建立与对端的会话（发送 SYNC0，建立 client↔peer 关系，获取 session_id）
+ * 建立与对端的会话（发送 SYN0，建立 client↔peer 关系，获取 session_id）
  *
  * 包头: [type=SIG_PKT_SYN0 | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
  *   - auth_key:        REG_ACK 中分配的客户端令牌
  *   - remote_peer_id:  目标对端 ID（32 字节，不足补零）
  *   - candidates:      首批本地候选（最多 candidates_cached 个）
- * 注：若状态为 WAIT_REG_ACK，仅存储 remote_peer_id，SYNC0 在收到 REG_ACK 后自动触发
+ * 注：若状态为 WAIT_REG_ACK，仅存储 remote_peer_id，SYN0 在收到 REG_ACK 后自动触发
  */
 ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_id) {
 
@@ -1714,34 +1714,34 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_
     strncpy(ssss_ctx->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
     ssss_ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
-    // REG_ACK 已收到，且无需等待 stun 返回的异步候选，则立即发 SYNC0
+    // REG_ACK 已收到，且无需等待 stun 返回的异步候选，则立即发 SYN0
     if (sig_ctx->state == SIG_COMPACT_REG) {
 
-        ssss_ctx->state = SIG_COMPACT_SESS_WAIT_SYNC0_ACK;
+        ssss_ctx->state = SIG_COMPACT_SESS_WAIT_SYN0_ACK;
         send_sync0(s->inst, s, P_tick_ms());
         ssss_ctx->sync_attempts = 1;
     }
-    else ssss_ctx->state = SIG_COMPACT_SESS_WAIT_ONLINE;
+    else ssss_ctx->state = SIG_COMPACT_SESS_WAIT_REG;
 
     return E_NONE;
 }
 
 /*
- * 断开与对端的会话（发送 OFFLINE，清理 peer 会话状态，回到 ONLINE）
+ * 断开与对端的会话（发送 OFF，清理 peer 会话状态，回到 REG）
  *
- * 包头: [type=SIG_PKT_OFFLINE | flags=0 | seq=0]
+ * 包头: [type=SIG_PKT_OFF | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)]
  *   - auth_key: REG_ACK 中分配的客户端令牌，服务器据此查找并释放配对槽位
  * 注：若尚在 WAIT_REG_ACK 状态（auth_key 未分配），仅清除 remote_peer_id，不发包
  */
 ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
-    const char* PROTO = "OFFLINE";
+    const char* PROTO = "OFF";
 
     p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
     if (!sess_ctx->remote_peer_id[0]) return E_NONE;        // 没有建立过配对
 
-    // 尚未完成配对（WAIT_SYNC0_ACK 之前）：仅清除 remote，无需通知服务器
-    if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_ONLINE)
+    // 尚未完成配对（WAIT_SYN0_ACK 之前）：仅清除 remote，无需通知服务器
+    if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_REG)
         sess_ctx->state = SIG_COMPACT_SESS_SUSPENDED;
     if (sess_ctx->state == SIG_COMPACT_SESS_SUSPENDED) {
         *sess_ctx->remote_peer_id = 0;
@@ -1771,7 +1771,7 @@ ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
  *
  * 包头: [type=SIG_PKT_SYNC | flags=SIG_SYNC_FLAG_FIN | seq=1-16]
  * 负载: [session_id(P2P_SESS_ID_SZ)][base_index(1)][candidate_count(1)][candidates(N*23)]
- *   - session_id:    会话 ID（SYNC0_ACK 中分配）
+ *   - session_id:    会话 ID（SYN0_ACK 中分配）
  *   - base_index:   本批候选在本端候选列表中的起始索引
  *   - candidates:   本批候选（最多 SYNC_CAND_UNIT 个）
  *   - FIN flag:     末包置位，通知对端本端候选列表已全部发送完毕
@@ -1844,7 +1844,7 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
  *
  * 包头: [type=SIG_PKT_REQ | flags=0 | seq=0]
  * 负载: [session_id(P2P_SESS_ID_SZ)][sid(2)][msg(1)][data(N)]
- *   - session_id: 本端会话 ID（SYNC0_ACK 中分配，用于服务器路由到对端）
+ *   - session_id: 本端会话 ID（SYN0_ACK 中分配，用于服务器路由到对端）
  *   - sid:        RPC 序列号（非零，循环自增，用于匹配响应）
  *   - msg:        应用层消息类型（1 字节，应用自定义）
  *   - data:       消息数据（可选，最多 P2P_MSG_DATA_MAX 字节）
@@ -1856,7 +1856,7 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
 
     P_check(len == 0 || data, return E_INVALID;)
     P_check(len >= 0 && len <= P2P_MSG_DATA_MAX, return E_INVALID;)
-    P_check(sess_ctx->state >= SIG_COMPACT_SESS_WAIT_SYNC0_ACK, return E_NONE_CONTEXT;)    // 未上线
+    P_check(sess_ctx->state >= SIG_COMPACT_SESS_WAIT_SYN0_ACK, return E_NONE_CONTEXT;)    // 未上线
     p2p_compact_ctx_t *sig_ctx = &s->inst->sig_ctx.compact;
     if (!sig_ctx->feature_msg) {
         print("E:", LA_F("MSG RPC not supported by server\n", LA_F321, 321));
@@ -1928,23 +1928,23 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
     if (sig_ctx->state < SIG_COMPACT_WAIT_REG_ACK) return;
 
-    // REGISTERING 状态：定期重发 ONLINE
+    // REGISTERING 状态：定期重发 REG
     if (sig_ctx->state == SIG_COMPACT_WAIT_REG_ACK) {
 
-        if (tick_diff(now, sig_ctx->last_send_time) >= ONLINE_INTERVAL_MS) {
+        if (tick_diff(now, sig_ctx->last_send_time) >= REG_INTERVAL_MS) {
 
             // 超时检查
             if (sig_ctx->sig_attempts++ < MAX_SIG_ATTEMPTS) {
 
                 print("I:", LA_F("%s: retry, (attempt %d/%d)\n", LA_F214, 214),
-                      TASK_ONLINE, sig_ctx->sig_attempts, MAX_SIG_ATTEMPTS);
+                      TASK_REG, sig_ctx->sig_attempts, MAX_SIG_ATTEMPTS);
 
                 send_online(inst, sig_ctx, now);
             }
             else {
 
                 print("W:", LA_F("%s: timeout, max(%d) attempts reached, reset to INIT\n", LA_F241, 241),
-                      TASK_ONLINE, MAX_SIG_ATTEMPTS);
+                      TASK_REG, MAX_SIG_ATTEMPTS);
 
                 sig_ctx->state = SIG_COMPACT_INIT;
             }
@@ -1958,25 +1958,25 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
         p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
 
         // 前面已经确保完成上线、且无需等待 stun 完成对公网候选的收集，所以不应再有 WAIT SYNCABLE 的会话存在了
-        assert(sess_ctx->state != SIG_COMPACT_SESS_WAIT_ONLINE);
+        assert(sess_ctx->state != SIG_COMPACT_SESS_WAIT_REG);
         if (sess_ctx->state == SIG_COMPACT_SESS_SUSPENDED) continue;
 
-        // WAIT_SYNC0_ACK 状态：SYNC0 重传
-        if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYNC0_ACK) {
+        // WAIT_SYN0_ACK 状态：SYN0 重传
+        if (sess_ctx->state == SIG_COMPACT_SESS_WAIT_SYN0_ACK) {
 
-            // SYNC0 重传（等待服务器缓存首批候选）
-            if (tick_diff(now, sess_ctx->sync_send_time) >= ONLINE_INTERVAL_MS) {
+            // SYN0 重传（等待服务器缓存首批候选）
+            if (tick_diff(now, sess_ctx->sync_send_time) >= REG_INTERVAL_MS) {
 
                 if (sess_ctx->sync_attempts++ < MAX_SIG_ATTEMPTS) {
 
-                    print("I:", LA_F("SYNC0: retry, (attempt %d/%d)\n", LA_F376, 376),
+                    print("I:", LA_F("SYN0: retry, (attempt %d/%d)\n", LA_F376, 376),
                           sess_ctx->sync_attempts, MAX_SIG_ATTEMPTS);
 
                     send_sync0(inst, s, now);
                 }
                 else {
 
-                    print("W:", LA_F("SYNC0: timeout, max(%d) attempts reached, reset to INIT\n", LA_F377, 377),
+                    print("W:", LA_F("SYN0: timeout, max(%d) attempts reached, reset to INIT\n", LA_F377, 377),
                           MAX_SIG_ATTEMPTS);
 
                     sess_ctx->state = SIG_COMPACT_SESS_SUSPENDED;
@@ -2076,7 +2076,7 @@ void p2p_signal_compact_tick_send(struct p2p_instance *inst, uint64_t now) {
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
     if (sig_ctx->state != SIG_COMPACT_REG || sig_ctx->sig_sessions) return;
 
-    if (tick_diff(now, sig_ctx->last_send_time) >= REGISTER_KEEPALIVE_INTERVAL_MS) {
+    if (tick_diff(now, sig_ctx->last_send_time) >= REG_KEEPALIVE_INTERVAL_MS) {
 
         /*
          * 发送 ALIVE 保活包

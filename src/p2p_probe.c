@@ -23,7 +23,7 @@
 
 void probe_init(probe_ctx_t *ctx) {
     memset(ctx, 0, sizeof(*ctx));
-    ctx->state = P2P_PROBE_STATE_OFFLINE;
+    ctx->state = P2P_PROBE_STATE_OFF;
     ctx->mode.compact.phase = PROBE_COMPACT_PHASE_INIT;
     ctx->mode.relay.step = PROBE_RELAY_STEP_INIT;
 }
@@ -32,7 +32,7 @@ void probe_reset(struct p2p_session *s) {
     probe_ctx_t *ctx = &s->probe;
     
     // 重置统一上下文
-    ctx->state = P2P_PROBE_STATE_OFFLINE;
+    ctx->state = P2P_PROBE_STATE_OFF;
     ctx->mode.compact.phase = PROBE_COMPACT_PHASE_INIT;
     ctx->mode.compact.sid   = 0;
     ctx->mode.relay.step    = PROBE_RELAY_STEP_INIT;
@@ -46,9 +46,9 @@ void probe_reset(struct p2p_session *s) {
 void probe_trigger(struct p2p_session *s) {
     probe_ctx_t *ctx = &s->probe;
 
-    // NO_SUPPORT 和 OFFLINE 状态在信令握手时已确定，直接返回
+    // NO_SUPPORT 和 OFF 状态在信令握手时已确定，直接返回
     if (ctx->state == P2P_PROBE_STATE_NO_SUPPORT || 
-        ctx->state == P2P_PROBE_STATE_OFFLINE) {
+        ctx->state == P2P_PROBE_STATE_OFF) {
         return;
     }
 
@@ -102,9 +102,9 @@ void probe_compact_on_req_ack(struct p2p_session *s, uint16_t sid, uint8_t statu
     if (status == 0) {
         print("I:", LA_S("%s: peer is online, waiting echo", LA_S20, 20), TASK_RELAY_PROBE);
     } else {
-        ctx->state = P2P_PROBE_STATE_PEER_OFFLINE;
+        ctx->state = P2P_PROBE_STATE_PEER_OFF;
         ctx->complete_ms = 0;
-        print("W:", LA_S("%s: peer is OFFLINE", LA_S19, 19), TASK_RELAY_PROBE);
+        print("W:", LA_S("%s: peer is OFF", LA_S19, 19), TASK_RELAY_PROBE);
     }
 }
 
@@ -148,9 +148,9 @@ void probe_relay_on_exchange_done(struct p2p_session *s, bool success) {
         ctx->start_ms = P_tick_ms();
         print("I:", LA_S("%s: address exchange success, sending UDP probe", LA_S17, 17), TASK_RELAY_PROBE);
     } else {
-        ctx->state = P2P_PROBE_STATE_PEER_OFFLINE;
+        ctx->state = P2P_PROBE_STATE_PEER_OFF;
         ctx->complete_ms = P_tick_ms();
-        print("W:", LA_S("%s: address exchange failed: peer OFFLINE", LA_S16, 16), TASK_RELAY_PROBE);
+        print("W:", LA_S("%s: address exchange failed: peer OFF", LA_S16, 16), TASK_RELAY_PROBE);
     }
 }
 
@@ -241,10 +241,10 @@ static void probe_relay_tick(struct p2p_session *s, uint64_t now_ms) {
     if (ctx->state != P2P_PROBE_STATE_RUNNING) {
         // 完成状态：等待间隔后自动重启
         if (ctx->state == P2P_PROBE_STATE_SUCCESS ||
-            ctx->state == P2P_PROBE_STATE_PEER_OFFLINE ||
+            ctx->state == P2P_PROBE_STATE_PEER_OFF ||
             ctx->state == P2P_PROBE_STATE_TIMEOUT ||
             ctx->state == P2P_PROBE_STATE_PEER_TIMEOUT ||
-            ctx->state == P2P_PROBE_STATE_OFFLINE) {
+            ctx->state == P2P_PROBE_STATE_OFF) {
             
             if (ctx->complete_ms == 0) ctx->complete_ms = now_ms;
 

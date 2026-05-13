@@ -94,7 +94,7 @@
  *   ./test_relay_rpc <server_path> [port]
  *
  * 示例：
- *   ./test_relay_rpc ./p2p_server 9780
+ *   ./test_relay_rpc ./p2p_server 9333
  */
 
 #define MOD_TAG "TEST"
@@ -109,7 +109,7 @@
 #include <sys/wait.h>
 
 // 默认配置
-#define DEFAULT_SERVER_PORT     9780
+#define DEFAULT_SERVER_PORT     9333
 #define DEFAULT_SERVER_HOST     "127.0.0.1"
 #define RECV_TIMEOUT_MS         2000
 
@@ -238,7 +238,7 @@ static int tcp_recv_relay_packet(sock_t sock, uint8_t *buf, int buf_size,
 // 协议构造函数
 ///////////////////////////////////////////////////////////////////////////////
 
-// 构造 ONLINE 包
+// 构造 REG 包
 static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_t instance_id) {
     const uint16_t payload_len = P2P_RLY_REG_PSZ;
     if (buf_size < 3 + (int)payload_len) return -1;
@@ -258,7 +258,7 @@ static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_
     return 3 + payload_len;
 }
 
-// 构造 SYNC0 包
+// 构造 SYN0 包
 static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
     uint16_t payload_len = P2P_RLY_SYN0_PSZ(candidate_count);
@@ -391,7 +391,7 @@ typedef struct {
     int data_len;
 } rly_rpc_pkt_t;
 
-// 发送 ONLINE 并接收 REG_ACK
+// 发送 REG 并接收 REG_ACK
 static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t instance_id, online_ack_t *ack) {
     uint8_t pkt[64];
     int pkt_len = build_online(pkt, sizeof(pkt), peer_id, instance_id);
@@ -418,7 +418,7 @@ static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t insta
     return 0;
 }
 
-// 发送 SYNC0 并接收 SYNC0_ACK
+// 发送 SYN0 并接收 SYN0_ACK
 static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
                                 int cand_count, p2p_candidate_t *cands,
                                 sync0_ack_t *ack) {
@@ -452,7 +452,7 @@ static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id,
     return 0;
 }
 
-// 消费待处理的包（下行 SYNC0 等）
+// 消费待处理的包（下行 SYN0 等）
 static void drain_pending_packets(sock_t sock) {
     P_sock_rcvtimeo(sock, 200);
     uint8_t discard[512];
@@ -464,7 +464,7 @@ static void drain_pending_packets(sock_t sock) {
     P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
 }
 
-// 建立配对（两端 ONLINE + SYNC0）
+// 建立配对（两端 REG + SYN0）
 static int establish_pair(sock_t *sock_a, uint64_t *session_a,
                           sock_t *sock_b, uint64_t *session_b,
                           const char *name_a, const char *name_b) {
@@ -522,7 +522,7 @@ static int wait_rly_rpc(sock_t sock, uint8_t expect_type, rly_rpc_pkt_t *out) {
 
             return 1;
         }
-        // 收到其他包（STATUS/SYNC0_ACK 等），继续接收
+        // 收到其他包（STATUS/SYN0_ACK 等），继续接收
     }
     return 0;
 }
@@ -561,6 +561,18 @@ static void test_msg_req_forwarded(void) {
     // Bob 等待 REQ
     rly_rpc_pkt_t req;
     int got = wait_rly_rpc(sb, P2P_RLY_REQ, &req);
+
+    // Bob 发送 RSP（完成 RPC 流程，避免服务器超时检查尝试发送错误响应）
+    uint8_t rsp_data[] = "ack";
+    len = build_rly_resp(pkt, sizeof(pkt), ses_b, 1, 0x00, rsp_data, sizeof(rsp_data) - 1);
+    tcp_send_all(sb, pkt, len);
+
+    // Alice 接收 RSP（清空管道）
+    rly_rpc_pkt_t rsp;
+    wait_rly_rpc(sa, P2P_RLY_RSP, &rsp);
+
+    // 给服务器一点时间完成内部处理
+    P_usleep(50 * 1000);
 
     P_sock_close(sa); P_sock_close(sb);
 
@@ -779,14 +791,14 @@ static void test_msg_req_peer_offline(void) {
     online_ack_t ack;
     if (send_online_recv_ack(sa, "offline_alice", inst, &ack) <= 0 || !ack.received) {
         P_sock_close(sa);
-        TEST_FAIL(TEST_NAME, "ONLINE failed"); return;
+        TEST_FAIL(TEST_NAME, "REG failed"); return;
     }
 
-    // SYNC0 单方面（Bob 不在线）
+    // SYN0 单方面（Bob 不在线）
     sync0_ack_t sync;
     if (send_sync0_recv_ack(sa, "offline_bob", 0, NULL, &sync) <= 0 || !sync.received) {
         P_sock_close(sa);
-        TEST_FAIL(TEST_NAME, "SYNC0 failed"); return;
+        TEST_FAIL(TEST_NAME, "SYN0 failed"); return;
     }
     uint64_t ses_a = sync.session_id;
 
@@ -854,6 +866,17 @@ static void test_msg_req_bad_payload(void) {
     rly_rpc_pkt_t req;
     int got = wait_rly_rpc(sb, P2P_RLY_REQ, &req);
 
+    // Bob 发送 RSP（完成 RPC 流程）
+    uint8_t rsp_data[] = "ok";
+    len = build_rly_resp(pkt, sizeof(pkt), ses_b, 1, 0x00, rsp_data, sizeof(rsp_data) - 1);
+    tcp_send_all(sb, pkt, len);
+
+    // Alice 接收 RSP
+    rly_rpc_pkt_t rsp;
+    wait_rly_rpc(sa, P2P_RLY_RSP, &rsp);
+
+    P_usleep(50 * 1000);
+
     P_sock_close(sa); P_sock_close(sb);
 
     if (!got) { TEST_FAIL(TEST_NAME, "server crashed after bad payload"); return; }
@@ -874,7 +897,7 @@ static void test_msg_req_bad_session(void) {
     online_ack_t ack;
     if (send_online_recv_ack(sa, "badsess_alice", inst, &ack) <= 0 || !ack.received) {
         P_sock_close(sa);
-        TEST_FAIL(TEST_NAME, "ONLINE failed"); return;
+        TEST_FAIL(TEST_NAME, "REG failed"); return;
     }
 
     // 发送一个虚假 session_id 的 REQ
@@ -990,6 +1013,7 @@ static void test_msg_rpc_and_data_parallel(void) {
 
     // Bob 应收到两个包（DATA 和 REQ），顺序可能不同
     int got_data = 0, got_req = 0;
+    uint16_t req_sid = 0;
     for (int i = 0; i < 10; i++) {
         uint8_t recv_buf[1200];
         uint8_t type;
@@ -1000,10 +1024,25 @@ static void test_msg_rpc_and_data_parallel(void) {
             got_data = 1;
         } else if (type == P2P_RLY_REQ) {
             got_req = 1;
+            // 提取 sid（在 session_id 之后的 2 字节）
+            req_sid = ((uint16_t)recv_buf[7] << 8) | recv_buf[8];
         }
 
         if (got_data && got_req) break;
     }
+
+    // Bob 发送 RSP（完成 RPC 流程）
+    if (got_req) {
+        uint8_t rsp_data[] = "ok";
+        len = build_rly_resp(pkt, sizeof(pkt), ses_b, req_sid, 0x00, rsp_data, sizeof(rsp_data) - 1);
+        tcp_send_all(sb, pkt, len);
+
+        // Alice 接收 RSP
+        rly_rpc_pkt_t rsp;
+        wait_rly_rpc(sa, P2P_RLY_RSP, &rsp);
+    }
+
+    P_usleep(50 * 1000);
 
     P_sock_close(sa); P_sock_close(sb);
 

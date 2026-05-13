@@ -29,20 +29,20 @@
 #   ┌─────────────────────────────────────────────────────────────────────┐
 #   │ COMPACT 协议测试（需要 p2p_server）                                  │
 #   ├─────────────────────────────────────────────────────────────────────┤
-#   │ test_compact_register   REGISTER/OFFLINE 注册协议                   │
+#   │ test_compact_register   REG/OFF 注册协议                   │
 #   │ test_compact_sync       SYNC/SYNC_ACK 候选同步协议                  │
-#   │ test_compact_lifecycle  ALIVE/OFFLINE 生命周期协议                  │
-#   │ test_compact_rpc        MSG RPC 消息转发机制                        │
+#   │ test_compact_lifecycle  ALIVE/OFF 生命周期协议                  │
+#   │ test_compact_rpc        RPC 消息转发机制                        │
 #   │ test_compact_relay      中继转发和 NAT 探测                         │
 #   └─────────────────────────────────────────────────────────────────────┘
 #
 #   ┌─────────────────────────────────────────────────────────────────────┐
 #   │ RELAY 协议测试（需要 p2p_server --relay）                           │
 #   ├─────────────────────────────────────────────────────────────────────┤
-#   │ test_relay_register     ONLINE/SYNC0 注册协议                       │
+#   │ test_relay_register     REG/SYN0 注册协议                       │
 #   │ test_relay_lifecycle    ALIVE/FIN 生命周期协议                      │
 #   │ test_relay_data         DATA 中继转发                               │
-#   │ test_relay_rpc          MSG RPC 消息转发机制                        │
+#   │ test_relay_rpc          RPC 消息转发机制                        │
 #   └─────────────────────────────────────────────────────────────────────┘
 #
 #   ┌─────────────────────────────────────────────────────────────────────┐

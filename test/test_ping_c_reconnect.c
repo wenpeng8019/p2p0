@@ -7,7 +7,7 @@
  *
  * 1. both_crash:   双端崩溃重连
  *    - 启动 alice/bob，等待连接成功
- *    - SIGKILL 双端（模拟崩溃，不发送 UNREGISTER）
+ *    - SIGKILL 双端（模拟崩溃，不发送 OFF）
  *    - 重新启动 alice/bob（新 instance_id）
  *    - 验证能否正常重新连接
  *

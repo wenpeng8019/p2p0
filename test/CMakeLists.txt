@@ -27,7 +27,7 @@ if(I18N_ENABLED)
     target_compile_definitions(test_transport PRIVATE I18N_ENABLED)
 endif()
 
-# COMPACT REGISTER 协议单元测试
+# COMPACT REG 协议单元测试
 add_executable(test_compact_register
     test_compact_register.c
 )
@@ -47,7 +47,7 @@ target_include_directories(test_compact_sync PRIVATE
 )
 target_link_libraries(test_compact_sync stdc ${TEST_PLATFORM_LIBS})
 
-# COMPACT 生命周期协议单元测试 (ALIVE/UNREGISTER/FIN)
+# COMPACT 生命周期协议单元测试 (ALIVE/OFF/FIN)
 add_executable(test_compact_lifecycle
     test_compact_lifecycle.c
 )

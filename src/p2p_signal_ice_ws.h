@@ -9,14 +9,14 @@
  *   客户端 → 服务器：
  *     REG <peer_id> <instance_id>  注册身份（instance_id 区分重连/重启）
  *     OFF                          主动下线
- *     SYNC0 <remote_peer_id>      创建/恢复会话
+ *     SYN0 <remote_peer_id>      创建/恢复会话
  *     SYNC <to_peer_id>\n<payload> 同步数据给指定 peer
  *     FIN <session_id>            主动断开会话
  *
  *   服务器 → 客户端：
  *     REG OK <sync_max>           注册成功
  *     REG FAIL <reason>           注册失败
- *     SYNC0 <peer_id> <session_id> online|offline  会话应答/对端上线推送
+ *     SYN0 <peer_id> <session_id> online|offline  会话应答/对端上线推送
  *     SYNC <from_peer_id>\n<payload> 来自其他 peer 的同步数据
  *     FIN <session_id>            对端断连通知
  *

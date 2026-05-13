@@ -62,7 +62,7 @@ t0: 初始化
          │                                                       │
          │ 1. connect(NULL)                                      │ connect(gist_a)
          │    写入心跳时间戳到 gist_a                            │    开始收集 ICE 候选
-         │    "ONLINE:<timestamp>"                               │    （STUN 后台运行）
+         │    "REG:<timestamp>"                               │    （STUN 后台运行）
          │    每 5 分钟自动刷新                                  │
          │                                                       │
          │ 2. 每 5s 轮询自己的 gist_a                            │
@@ -78,7 +78,7 @@ t0: 初始化
 t1: Offer 投递完成                                               │
          │                                          4. 每 1s 轮询 gist_a
          │                                             double check:
-         │                                             若读到 "ONLINE:" 说明
+         │                                             若读到 "REG:" 说明
          │                                             心跳覆盖了 offer → 重发
          │ 5. 轮询 gist_a 检测到 offer                           │    等待 Alice 响应
          │    GET /gists/gist_a                                  │
@@ -126,15 +126,15 @@ t4: P2P 连接建立
 
 | 阶段 | content 内容 | 说明 |
 |------|-------------|------|
-| **心跳** | `"ONLINE:<timestamp>:<peer_id>"` | SUB 方上线标识，每 5 分钟刷新 |
+| **心跳** | `"REG:<timestamp>:<peer_id>"` | SUB 方上线标识，每 5 分钟刷新 |
 | **Offer** | `"OFFER:<gist_id>:<peer_id>"` | PUB 投递到 SUB 的信箱 |
 | **候选列表** | `Base64(DES(SDP candidates))` | 各方发布自己的候选 |
 
 **心跳格式（明文）：**
 ```
-ONLINE:1713100800:alice
+REG:1713100800:alice
 ```
-- `ONLINE:` — 固定前缀，标识 SUB 在线状态
+- `REG:` — 固定前缀，标识 SUB 在线状态
 - `<timestamp>` — Unix 时间戳（秒），PUB 据此判断 SUB 是否仍在线
 - `<peer_id>` — SUB 的 peer_id，PUB 据此知道对端身份（gist_id 的别名）
 - PUB 检测时间戳超过 5 分钟未刷新则打印警告
@@ -232,7 +232,7 @@ p2p_connect(handle, NULL);
 | 状态 | 轮询目标 | 间隔 | 说明 |
 |------|---------|------|------|
 | SUB 等待 offer | 自己的 Gist | 5s | 心跳模式，低频 |
-| SUB 心跳刷新 | 自己的 Gist | 5min | 更新 ONLINE 时间戳 |
+| SUB 心跳刷新 | 自己的 Gist | 5min | 更新 REG 时间戳 |
 | PUB 等待响应 | SUB 的 Gist | 1s | 检测 SUB 是否收到 offer |
 | 双方同步候选 | 对方的 Gist | 1s | 高频交换候选 |
 
@@ -250,14 +250,14 @@ tick_recv:
 
   PUB/OFFERING: GET SUB 的 Gist (1s)
     → 仍是 "OFFER:" → SUB 还没响应，继续等待
-    → 发现 "ONLINE:" → 心跳覆盖了 offer，重发 offer
+    → 发现 "REG:" → 心跳覆盖了 offer，重发 offer
     → 其他内容 → SUB 已响应候选数据 → 解密注入 → 进入 SYNCING
 
   SYNCING: GET 对方的 Gist (1s)
     → 解密候选 → 注入 remote_cands → nat_punch
 
 tick_send:
-  SUB/WAIT_OFFER: PATCH 自己的 Gist 写入 "ONLINE:<timestamp>"
+  SUB/WAIT_OFFER: PATCH 自己的 Gist 写入 "REG:<timestamp>"
                   首次写入 + 每 5 分钟刷新
   PUB/OFFERING:   GET SUB 的 Gist 检查时间戳 (>5min 则警告)
                   PATCH SUB 的 Gist 写入 offer

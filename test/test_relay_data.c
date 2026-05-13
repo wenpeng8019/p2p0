@@ -238,7 +238,7 @@ static int tcp_recv_relay_packet(sock_t sock, uint8_t *buf, int buf_size,
 // 协议构造函数
 ///////////////////////////////////////////////////////////////////////////////
 
-// 构造 ONLINE 包
+// 构造 REG 包
 static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_t instance_id) {
     const uint16_t payload_len = P2P_RLY_REG_PSZ;
     if (buf_size < 3 + (int)payload_len) return -1;
@@ -258,7 +258,7 @@ static int build_online(uint8_t *buf, int buf_size, const char *peer_id, uint32_
     return 3 + payload_len;
 }
 
-// 构造 SYNC0 包
+// 构造 SYN0 包
 static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
     uint16_t payload_len = P2P_RLY_SYN0_PSZ(candidate_count);
@@ -407,7 +407,7 @@ typedef struct {
     uint32_t sack;
 } relay_packet_t;
 
-// 发送 ONLINE 并接收 REG_ACK
+// 发送 REG 并接收 REG_ACK
 static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t instance_id, online_ack_t *ack) {
     uint8_t pkt[64];
     int pkt_len = build_online(pkt, sizeof(pkt), peer_id, instance_id);
@@ -434,7 +434,7 @@ static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t insta
     return 0;
 }
 
-// 发送 SYNC0 并接收 SYNC0_ACK
+// 发送 SYN0 并接收 SYN0_ACK
 static int send_sync0_recv_ack(sock_t sock, const char *target_peer_id, 
                                 int cand_count, p2p_candidate_t *cands,
                                 sync0_ack_t *ack) {
@@ -531,14 +531,14 @@ static int wait_relay_packet(sock_t sock, relay_packet_t *pkt) {
             return 1;
         }
         
-        // 收到其他包（如 SYNC0/STATUS），继续接收
+        // 收到其他包（如 SYN0/STATUS），继续接收
     }
     
     pkt->received = 0;
     return 0;
 }
 
-// 消费待处理的包（下行 SYNC0 等）
+// 消费待处理的包（下行 SYN0 等）
 static void drain_pending_packets(sock_t sock) {
     P_sock_rcvtimeo(sock, 200);
     uint8_t discard[512];
@@ -550,7 +550,7 @@ static void drain_pending_packets(sock_t sock) {
     P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
 }
 
-// 建立配对（两端 ONLINE + SYNC0）
+// 建立配对（两端 REG + SYN0）
 // 返回: 0=失败, 1=成功
 static int establish_pair(sock_t *sock_a, uint64_t *session_a,
                           sock_t *sock_b, uint64_t *session_b,
@@ -558,33 +558,33 @@ static int establish_pair(sock_t *sock_a, uint64_t *session_a,
     uint32_t inst_a = (uint32_t)P_tick_us() + 1000;
     uint32_t inst_b = (uint32_t)P_tick_us() + 1001;
     
-    // Alice ONLINE
+    // Alice REG
     online_ack_t ack_a;
     if (send_online_recv_ack(*sock_a, name_a, inst_a, &ack_a) <= 0 || !ack_a.received) {
         return 0;
     }
     
-    // Alice SYNC0
+    // Alice SYN0
     sync0_ack_t sync_a;
     if (send_sync0_recv_ack(*sock_a, name_b, 0, NULL, &sync_a) <= 0 || !sync_a.received) {
         return 0;
     }
     *session_a = sync_a.session_id;
     
-    // Bob ONLINE
+    // Bob REG
     online_ack_t ack_b;
     if (send_online_recv_ack(*sock_b, name_b, inst_b, &ack_b) <= 0 || !ack_b.received) {
         return 0;
     }
     
-    // Bob SYNC0
+    // Bob SYN0
     sync0_ack_t sync_b;
     if (send_sync0_recv_ack(*sock_b, name_a, 0, NULL, &sync_b) <= 0 || !sync_b.received) {
         return 0;
     }
     *session_b = sync_b.session_id;
     
-    // 消费可能的下行 SYNC0
+    // 消费可能的下行 SYN0
     drain_pending_packets(*sock_a);
     drain_pending_packets(*sock_b);
     
@@ -896,18 +896,18 @@ static void test_relay_data_bad_session(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 5000;
     
-    // ONLINE + SYNC0
+    // REG + SYN0
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "bad_data_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
     sync0_ack_t sync_ack;
     if (send_sync0_recv_ack(sock, "bad_data_bob", 0, NULL, &sync_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
     }
     
@@ -940,18 +940,18 @@ static void test_relay_data_peer_offline(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 6000;
     
-    // ONLINE + SYNC0（对端离线）
+    // REG + SYN0（对端离线）
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "offline_data_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
     sync0_ack_t sync_ack;
     if (send_sync0_recv_ack(sock, "offline_data_bob", 0, NULL, &sync_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "SYNC0 failed");
+        TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
     }
     
@@ -992,11 +992,11 @@ static void test_relay_data_bad_payload(void) {
     
     uint32_t inst_id = (uint32_t)P_tick_us() + 7000;
     
-    // ONLINE
+    // REG
     online_ack_t online_ack;
     if (send_online_recv_ack(sock, "bad_payload_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
-        TEST_FAIL(TEST_NAME, "ONLINE failed");
+        TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     

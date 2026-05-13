@@ -219,7 +219,7 @@ struct p2p_session {
     /* ======================== 多会话标识 ======================== */
     uint32_t                        id;                 // 该会话唯一标识 id（随机非零，发包时携带供对端派发）
                                                         // 仅在 multi_session 模式下有效; 对端收包后据此 ID 路由到对应会话
-                                                        // COMPACT 模式下同时用作 signaling session_id（来自 SYNC0_ACK）
+                                                        // COMPACT 模式下同时用作 signaling session_id（来自 SYN0_ACK）
     union {
         p2p_compact_session_t   compact;                // COMPACT 模式信令上下文（会话级别：与对端的关系）
         p2p_relay_session_t     relay;                  // RELAY 模式信令上下文（会话级别：与对端的关系）

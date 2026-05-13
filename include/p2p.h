@@ -62,7 +62,7 @@ typedef enum {
     P2P_STATE_INIT = 0,                         // 初始状态
     P2P_STATE_CLOSED,                           // 已关闭
     P2P_STATE_ERROR,                            // 错误状态（不可恢复，等价于自动关闭）
-    P2P_STATE_SIGNALING,                        // 上线中（正在向信令服务器发送 ONLINE）
+    P2P_STATE_SIGNALING,                        // 上线中（正在向信令服务器发送 REG）
     P2P_STATE_WAITING,                          // 等待对端上线后开始候选同步（已在信令服务器上线）
     P2P_STATE_PUNCHING,                         // NAT 打洞中
     P2P_STATE_LOST,                             // 信号丢失（可能恢复，也可能不会，需要由应用层来决定断开或重连；NAT 和 中继都丢失了）
@@ -78,7 +78,7 @@ typedef enum {
  */
 typedef enum {
     // 前置状态（不探测的原因）
-    P2P_PROBE_STATE_OFFLINE = 0,                // 本地离线，信令未就绪（初始状态）
+    P2P_PROBE_STATE_OFF = 0,                // 本地离线，信令未就绪（初始状态）
     P2P_PROBE_STATE_CONNECTED,                  // P2P 已直连，无需探测
     P2P_PROBE_STATE_NO_SUPPORT,                 // 信令服务不支持探测（服务器不支持或协议不适用）
     
@@ -87,7 +87,7 @@ typedef enum {
     P2P_PROBE_STATE_RUNNING,                    // 探测进行中
     P2P_PROBE_STATE_TIMEOUT,                    // 探测超时（本地无法连接到服务器）
     P2P_PROBE_STATE_SUCCESS,                    // 探测成功（对端通过信令可达）
-    P2P_PROBE_STATE_PEER_OFFLINE,               // 对端离线（服务器无法转发）
+    P2P_PROBE_STATE_PEER_OFF,               // 对端离线（服务器无法转发）
     P2P_PROBE_STATE_PEER_TIMEOUT                // 对端超时（服务器已转发，但对端无响应）
 } p2p_probe_state_t;
 

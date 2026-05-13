@@ -35,14 +35,14 @@
  *   目标：验证单方发起 SYN0 时对端离线
  *   方法：Alice 上线后发送 SYN0 等待一个尚未注册的 Bob
  *   预期：
- *     - 收到 SYN0_ACK，online=0 (PEER_OFFLINE)
+ *     - 收到 SYN0_ACK，online=0 (PEER_OFF)
  *     - session_id 非零
  *
  * 测试 3: sync0_peer_online
  *   目标：验证双方同时 SYN0 后配对成功
  *   方法：Alice 上线并 SYN0 等待 Bob → Bob 上线并 SYN0 等待 Alice
  *   预期：
- *     - Alice 首次收到 online=0 (PEER_OFFLINE)
+ *     - Alice 首次收到 online=0 (PEER_OFF)
  *     - Bob SYN0 后收到 online=1 (PEER_REG)
  *     - Alice 收到对端的 SYN0（下行转发）
  *

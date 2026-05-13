@@ -12,27 +12,27 @@
  * ┌──────────────────────────────────────────────────────────────────────┐
  * │ COMPACT 模式：一步式配对注册（UDP 无状态设计）                        │
  * │                                                                      │
- * │   REGISTER(local_id, remote_id, candidates)                         │
+ * │   REG(local_id, remote_id, candidates)                         │
  * │       ↓                                                              │
  * │   服务器建立 pair(A↔B)，等待双方注册成对                             │
  * │       ↓                                                              │
- * │   REGISTER_ACK(peer_online?, session_id, server_features)           │
+ * │   REG_ACK(peer_online?, session_id, server_features)           │
  * │                                                                      │
- * │   特点：REGISTER 一次完成三方关系（自己-服务器-对方）                 │
+ * │   特点：REG 一次完成三方关系（自己-服务器-对方）                 │
  * └──────────────────────────────────────────────────────────────────────┘
  *
  * ┌──────────────────────────────────────────────────────────────────────┐
  * │ RELAY 模式：两阶段分离设计（TCP 有状态设计）                          │
  * │                                                                      │
- * │   阶段1: ONLINE(my_name, instance_id)                                │
+ * │   阶段1: REG(my_name, instance_id)                                │
  * │       ↓                                                              │
  * │   REG_ACK(server_features)  ← 仅建立"客户端-服务器"连接           │
  * │                                                                      │
- * │   阶段2: SYNC0(target_name)                                          │
+ * │   阶段2: SYN0(target_name)                                          │
  * │       ↓                                                              │
- * │   SYNC0_ACK(peer_status, session_id)  ← 建立"我-对方"会话            │
+ * │   SYN0_ACK(peer_status, session_id)  ← 建立"我-对方"会话            │
  * │                                                                      │
- * │   特点1：分离设计，ONLINE 后可发起多个 SYNC0，支持并发会话           │
+ * │   特点1：分离设计，REG 后可发起多个 SYN0，支持并发会话           │
  * │   特点2：instance_id 机制允许 TCP 重连但保持数据上下文（会话可恢复） │
  * └──────────────────────────────────────────────────────────────────────┘
  *
@@ -56,7 +56,7 @@
  * ============================================================================
  *
  * 每次调用 online() 时，客户端生成新的 32 位随机数 instance_id（参考 RTP SSRC）。
- * instance_id 与 name 一起在 ONLINE 消息中发送给服务器，用于标识客户端连接实例。
+ * instance_id 与 name 一起在 REG 消息中发送给服务器，用于标识客户端连接实例。
  *
  * 服务器处理逻辑：
  *   - 相同的 (name, instance_id) → 重传，幂等处理
@@ -75,24 +75,24 @@
  *
  *   阶段1: 客户端上线（建立客户端-服务器连接）
  *   ┌────────────────────────────────────────────────────┐
- *   │  INIT ──→ CONNECTING ──→ WAIT_REG_ACK ──→ ONLINE │
+ *   │  INIT ──→ CONNECTING ──→ WAIT_REG_ACK ──→ REG │
  *   └────────────────────────────────────────────────────┘
  *                                    ↓
  *   阶段2: 建立会话（申请连接对方，进行候选交换）
  *   ┌────────────────────────────────────────────────────┐
- *   ONLINE ──→ WAIT_SYNC0_ACK ──→ WAIT_PEER ──→ SYNCING ──→ READY │
+ *   REG ──→ WAIT_SYN0_ACK ──→ WAIT_PEER ──→ SYNCING ──→ READY │
  *   └────────────────────────────────────────────────────┘
  *
  *   - INIT:              未启动
  *   - CONNECTING:        TCP 连接建立中
- *   - WAIT_REG_ACK:   已发送 ONLINE，等待 REG_ACK
- *   - ONLINE:            已上线，可以发起多个 SYNC0（核心状态）
- *   - WAIT_SYNC0_ACK:    已发送 SYNC0，等待 SYNC0_ACK（分配 session_id）
+ *   - WAIT_REG_ACK:   已发送 REG，等待 REG_ACK
+ *   - REG:            已上线，可以发起多个 SYN0（核心状态）
+ *   - WAIT_SYN0_ACK:    已发送 SYN0，等待 SYN0_ACK（分配 session_id）
  *   - WAIT_PEER:         已分配 session_id，但对端离线，等待首个 SYNC
  *   - SYNCING:           候选同步中（上传/接收 SYNC）
  *   - READY:             候选同步完成，可以开始 P2P 打洞
  *
- * 注意：ONLINE 状态是稳定状态，可以在此状态下发起多个 SYNC0，
+ * 注意：REG 状态是稳定状态，可以在此状态下发起多个 SYN0，
  *       从而支持与多个对端并发建立会话（每个会话有独立的 session_id）。
  *
  * ============================================================================
@@ -216,11 +216,11 @@ typedef struct {
 
 typedef enum {
     SIG_RELAY_SESS_SUSPENDED = 0,                       /* 挂起的 session，连接过程超时挂起。报错逻辑统一在 p2p_compact_ctx_t 中处理 */
-    SIG_RELAY_SESS_WAIT_ONLINE,                         /* 执行 connect() 创建了 session，但信令服务还未完成在线登录 */
-    SIG_RELAY_SESS_WAIT_SYNC0_ACK,                      /* 已发送 SYNC0，等待 SYNC0_ACK */
-    SIG_RELAY_SESS_WAIT_PEER,                           /* 已收到 SYNC0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
+    SIG_RELAY_SESS_WAIT_REG,                         /* 执行 connect() 创建了 session，但信令服务还未完成在线登录 */
+    SIG_RELAY_SESS_WAIT_SYN0_ACK,                      /* 已发送 SYN0，等待 SYN0_ACK */
+    SIG_RELAY_SESS_WAIT_PEER,                           /* 已收到 SYN0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
     SIG_RELAY_SESS_WAIT_STUN,                           /* 双方在线，已启动 NAT 打洞，等待本地 STUN 收集完成后再同步候选 */
-    SIG_RELAY_SESS_SYNCING,                             /* 收到 PEER SYNC0 或 SYNC0_ACK online=1，向对方同步后续候选队列和 FIN */
+    SIG_RELAY_SESS_SYNCING,                             /* 收到 PEER SYN0 或 SYN0_ACK online=1，向对方同步后续候选队列和 FIN */
     SIG_RELAY_SESS_READY                                /* 已完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
 } p2p_relay_sess_st;
 
@@ -275,7 +275,7 @@ void p2p_signal_relay_tick_recv(struct p2p_instance *inst, uint64_t now);
  *
  * 处理信令发送和重传：
  *   - 心跳保活（ALIVE）
- *   - SYNC0 重传
+ *   - SYN0 重传
  *   - 上传候选（SYNC）
  *
  * 在 p2p_update() 的阶段 7（信令推送）中调用。
@@ -289,8 +289,8 @@ void p2p_signal_relay_tick_send(struct p2p_instance *inst, uint64_t now);
 /*
  * 客户端上线（阶段1：建立与服务器的 TCP 连接）
  *
- * 创建 TCP socket，连接到 RELAY 服务器，并发送 ONLINE 消息。
- * 成功后进入 ONLINE 状态，可以发起多个 SYNC0 会话。
+ * 创建 TCP socket，连接到 RELAY 服务器，并发送 REG 消息。
+ * 成功后进入 REG 状态，可以发起多个 SYN0 会话。
  *
  * @param s             P2P 会话
  * @param local_peer_id 本端名称
@@ -328,10 +328,10 @@ void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
 //-----------------------------------------------------------------------------
 
 /*
- * 建立与对端的会话（阶段2：发送 SYNC0 请求）
+ * 建立与对端的会话（阶段2：发送 SYN0 请求）
  *
  * 向服务器请求建立与目标对端的会话，服务器分配 session_id。
- * 前提：必须已经处于 ONLINE 状态。
+ * 前提：必须已经处于 REG 状态。
  *
  * @param s             P2P 会话
  * @param remote_peer_id 目标对端名称
@@ -343,7 +343,7 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
  * 断开当前会话（阶段2：发送 FIN 消息）
  *
  * 向服务器发送 FIN 消息，通知结束与对端的会话。
- * 清理会话状态后回到 ONLINE 状态，可以再次发起 SYNC0。
+ * 清理会话状态后回到 REG 状态，可以再次发起 SYN0。
  * 前提：必须处于 WAIT_PEER / SYNCING / READY 状态。
  *
  * @param s   P2P 会话

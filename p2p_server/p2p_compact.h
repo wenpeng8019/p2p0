@@ -17,9 +17,9 @@ typedef struct compact_session {
 
     // SYNC(seq=0) 可靠传输（首包 + 地址变更通知）
     // sync0_acked 状态机：
-    //   0  = 初始，未收到过来自客户端的 SYNC0_ACK
-    //   1  = 客户端对服务器返回的 SYNC0_ACK 的（二次）确认。服务器在达成该状态前，确保不向客户端转发来自对端的 SYNC0
-    //   2  = 客户端对（服务器转发的）对端 SYNC0 的 ACK 确认
+    //   0  = 初始，未收到过来自客户端的 SYN0_ACK
+    //   1  = 客户端对服务器返回的 SYN0_ACK 的（二次）确认。服务器在达成该状态前，确保不向客户端转发来自对端的 SYN0
+    //   2  = 客户端对（服务器转发的）对端 SYN0 的 ACK 确认
     //  -1  = 重传超时放弃
     int                             sync0_acked;
     struct compact_session*         sync0_pending_next;         // 待确认链表指针（-1 表示链表最后一个）

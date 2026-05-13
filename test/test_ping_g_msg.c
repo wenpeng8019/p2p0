@@ -77,7 +77,7 @@
 #define SYNC_TIMEOUT_MS         15000       // 同步超时 15 秒（Gist API 较慢）
 #define CONNECT_TIMEOUT_MS      90000       // 连接超时 90 秒（Gist 轮询间隔大）
 #define MESSAGE_TIMEOUT_MS      5000        // 消息发送/接收超时 5 秒
-#define GIST_REGISTER_WAIT_MS   5000        // 等待 Bob 在 Gist 上注册心跳
+#define GIST_REG_WAIT_MS   5000        // 等待 Bob 在 Gist 上注册心跳
 
 // 测试状态
 static const char *g_ping_path = NULL;
@@ -409,8 +409,8 @@ static void test_message_exchange(void) {
     }
 
     // 3. 等待 Bob 在 Gist 上注册心跳
-    printf("[3] Waiting for Bob to register heartbeat (%d ms)...\n", GIST_REGISTER_WAIT_MS);
-    P_usleep(GIST_REGISTER_WAIT_MS * 1000);
+    printf("[3] Waiting for Bob to register heartbeat (%d ms)...\n", GIST_REG_WAIT_MS);
+    P_usleep(GIST_REG_WAIT_MS * 1000);
 
     // 4. 启动 Alice (PUB 模式, -t bob, 主动发起)
     printf("[4] Starting Alice (PUB, target=bob, pubsub)...\n");

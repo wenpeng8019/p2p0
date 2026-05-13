@@ -55,10 +55,10 @@ enum {
     LA_W15,  /* "Unknown"  [p2p_internal.h] */
 
     /* Strings (LA_S) */
-    LA_S16,  /* "%s: address exchange failed: peer OFFLINE"  [p2p_probe.c] */
+    LA_S16,  /* "%s: address exchange failed: peer OFF"  [p2p_probe.c] */
     LA_S17,  /* "%s: address exchange success, sending UDP probe"  [p2p_probe.c] */
     LA_S18,  /* "%s: already running, cannot trigger again"  [p2p_probe.c] */
-    LA_S19,  /* "%s: peer is OFFLINE"  [p2p_probe.c] */
+    LA_S19,  /* "%s: peer is OFF"  [p2p_probe.c] */
     LA_S20,  /* "%s: peer is online, waiting echo"  [p2p_probe.c] */
     LA_S21,  /* "%s: triggered on CONNECTED state (unnecessary)"  [p2p_probe.c] */
     LA_S22,  /* "%s: TURN allocated, starting address exchange"  [p2p_probe.c] */
@@ -153,7 +153,7 @@ enum {
     LA_F109,  /* "%s: accepted, probe_mapped=%s:%d\n" (%s,%s,%d)  [p2p_signal_compact.c] */
     LA_F110,  /* "%s: accepted, public=%s:%d auth_key=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n" (%s,%s,%d,%l,%d,%d,%s,%s)  [p2p_signal_compact.c] */
     LA_F111,  /* "%s: accepted\n" (%s)  [p2p_signal_compact.c, p2p_signal_relay.c] */
-    LA_F112,  /* "%s: auth_key acquired, auto SYNC0 sent\n" (%s)  [p2p_signal_relay.c] */
+    LA_F112,  /* "%s: auth_key acquired, auto SYN0 sent\n" (%s)  [p2p_signal_relay.c] */
     LA_F113,  /* "%s: auth_key acquired, waiting stun pending\n" (%s)  [p2p_signal_relay.c] */
     LA_F114,  /* "%s: bad FIN marker=0x%02x\n" (%s)  [p2p_signal_relay.c] */
     LA_F115,  /* "%s: bad payload len=%d\n" (%s,%d)  [p2p_signal_relay.c] */
@@ -173,9 +173,9 @@ enum {
     LA_F129,  /* "%s: duplicate request ignored (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
     LA_F130,  /* "%s: duplicate request ignored (sid=%u, already processing)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F131,  /* "%s: duplicate/irrelevant response acked (sid=%u, current sid=%u, state=%d)\n" (%s,%u,%u,%d)  [p2p_signal_compact.c] */
-    LA_F132,  /* "%s: entered early, %s arrived before SYNC0\n" (%s,%s)  [p2p_signal_compact.c] */
+    LA_F132,  /* "%s: entered early, %s arrived before SYN0\n" (%s,%s)  [p2p_signal_compact.c] */
     LA_F133,  /* "%s: entered, %s arrived\n" (%s,%s)  [p2p_signal_compact.c] */
-    LA_F134,  /* "%s: entered, peer online in SYNC0_ACK\n" (%s)  [p2p_signal_compact.c] */
+    LA_F134,  /* "%s: entered, peer online in SYN0_ACK\n" (%s)  [p2p_signal_compact.c] */
     LA_F135,  /* "%s: exchange timeout, retry %d/%d" (%s,%d,%d)  [p2p_probe.c] */
     LA_F136,  /* "%s: exchange timeout: peer not responding" (%s)  [p2p_probe.c] */
     LA_F137,  /* "%s: fatal error code=%u, entering ERROR state\n" (%s,%u)  [p2p_signal_relay.c] */
@@ -216,7 +216,7 @@ enum {
     LA_F172,  /* "%s: path[%d] relay UP" (%s,%d)  [p2p_nat.c] */
     LA_F173,  /* "%s: peer disconnected (ses_id=%u), reset to WAIT_PEER\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F174,  /* "%s: peer offline (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
-    LA_F175,  /* "%s: peer offline in SYNC0_ACK, waiting for peer to come online\n" (%s)  [p2p_signal_compact.c] */
+    LA_F175,  /* "%s: peer offline in SYN0_ACK, waiting for peer to come online\n" (%s)  [p2p_signal_compact.c] */
     LA_F176,  /* "%s: peer offline\n" (%s)  [p2p_signal_relay.c] */
     LA_F177,  /* "%s: peer online, starting NAT punch\n" (%s)  [p2p_signal_compact.c] */
     LA_F178,  /* "%s: peer reachable via signaling (RTT: %llu ms)" (%s,%l)  [p2p_probe.c] */
@@ -278,7 +278,7 @@ enum {
     LA_F234,  /* "%s: sync fin ack, but cand synced cnt not match sent cnt (cand=%d synced=%d)\n" (%s,%d,%d)  [p2p_signal_relay.c] */
     LA_F235,  /* "%s: sync forwarded, confirmed=%d synced=%d\n" (%s,%d,%d)  [p2p_signal_relay.c] */
     LA_F236,  /* "%s: sync0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
-    LA_F237,  /* "%s: syncable ready, auto SYNC0 sent\n" (%s)  [p2p_signal_relay.c] */
+    LA_F237,  /* "%s: syncable ready, auto SYN0 sent\n" (%s)  [p2p_signal_relay.c] */
     LA_F238,  /* "%s: timeout (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
     LA_F239,  /* "%s: timeout after %d retries , type unknown\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F240,  /* "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates" (%s,%l,%d)  [p2p_nat.c] */
@@ -369,8 +369,8 @@ enum {
     LA_F325,  /* "No auth_key provided, using default key (insecure)"  [p2p_signal_pubsub.c] */
     LA_F326,  /* "No shared local route addresses available, host candidates skipped"  [p2p.c] */
     LA_F327,  /* "No valid CHANGED-ADDRESS provided by STUN server, skipping Test I(alt)"  [p2p_stun.c] */
-    LA_F328,  /* "ONLINE: auth_key acquired, auto SYNC0 sent\n"  [p2p_signal_compact.c] */
-    LA_F329,  /* "ONLINE: auth_key acquired, waiting stun pending\n"  [p2p_signal_compact.c] */
+    LA_F328,  /* "REG: auth_key acquired, auto SYN0 sent\n"  [p2p_signal_compact.c] */
+    LA_F329,  /* "REG: auth_key acquired, waiting stun pending\n"  [p2p_signal_compact.c] */
     LA_F330,  /* "Open P2P UDP socket on port %d" (%d)  [p2p.c] */
     LA_F331,  /* "Open P2P UDP socket on port %d failed(%d)" (%d,%d)  [p2p.c] */
     LA_F332,  /* "OpenSSL requested but library not linked"  [p2p.c] */
@@ -417,12 +417,12 @@ enum {
     LA_F373,  /* "STUN collecting to %s:%d (len=%d)" (%s,%d,%d)  [p2p_stun.c] */
     LA_F374,  /* "SYNC(trickle): batching, queued %d cand(s) for seq=%u\n" (%d,%u)  [p2p_signal_compact.c] */
     LA_F375,  /* "SYNC(trickle): seq overflow, cannot trickle more\n"  [p2p_signal_compact.c] */
-    LA_F376,  /* "SYNC0: retry, (attempt %d/%d)\n" (%d,%d)  [p2p_signal_compact.c] */
-    LA_F377,  /* "SYNC0: timeout, max(%d) attempts reached, reset to INIT\n" (%d)  [p2p_signal_compact.c] */
+    LA_F376,  /* "SYN0: retry, (attempt %d/%d)\n" (%d,%d)  [p2p_signal_compact.c] */
+    LA_F377,  /* "SYN0: timeout, max(%d) attempts reached, reset to INIT\n" (%d)  [p2p_signal_compact.c] */
     LA_F378,  /* "Send window full, dropping packet send_count=%d" (%d)  [p2p_trans_reliable.c] */
     LA_F379,  /* "Sending Allocate Request to %s:%d" (%s,%d)  [p2p_turn.c] */
     LA_F380,  /* "Sending FIN packet to peer before closing"  [p2p.c] */
-    LA_F381,  /* "Sending OFFLINE packet to COMPACT signaling server"  [p2p.c] */
+    LA_F381,  /* "Sending OFF packet to COMPACT signaling server"  [p2p.c] */
     LA_F382,  /* "Sending Test I to %s:%d (len=%d)" (%s,%d,%d)  [p2p_stun.c] */
     LA_F383,  /* "Sending Test I(alt) to CHANGED-ADDRESS"  [p2p_stun.c] */
     LA_F384,  /* "Sending Test II with CHANGE-REQUEST(IP+PORT)"  [p2p_stun.c] */
@@ -484,13 +484,13 @@ enum {
     LA_F440,  /* "[R] %s%s qsend failed(OOM)\n" (%s,%s)  [p2p_signal_relay.c] */
     LA_F441,  /* "[R] %s%s qsend(%d), len=%u\n" (%s,%s,%d,%u)  [p2p_signal_relay.c] */
     LA_F442,  /* "[R] Connecting to %s:%d\n" (%s,%d)  [p2p_signal_relay.c] */
-    LA_F443,  /* "[R] Disconnected, back to ONLINE state\n"  [p2p_signal_relay.c] */
+    LA_F443,  /* "[R] Disconnected, back to REG state\n"  [p2p_signal_relay.c] */
     LA_F444,  /* "[R] Failed to create TCP socket\n"  [p2p_signal_relay.c] */
     LA_F445,  /* "[R] Failed to set socket non-blocking\n"  [p2p_signal_relay.c] */
     LA_F446,  /* "[R] TCP connect failed(%d)\n" (%d)  [p2p_signal_relay.c] */
     LA_F447,  /* "[R] TCP connect select failed(%d)\n" (%d)  [p2p_signal_relay.c] */
-    LA_F448,  /* "[R] TCP connected immediately, sending ONLINE\n"  [p2p_signal_relay.c] */
-    LA_F449,  /* "[R] TCP connected, sending ONLINE\n"  [p2p_signal_relay.c] */
+    LA_F448,  /* "[R] TCP connected immediately, sending REG\n"  [p2p_signal_relay.c] */
+    LA_F449,  /* "[R] TCP connected, sending REG\n"  [p2p_signal_relay.c] */
     LA_F450,  /* "[R] TCP connection closed by peer\n"  [p2p_signal_relay.c] */
     LA_F451,  /* "[R] TCP connection closed during send\n"  [p2p_signal_relay.c] */
     LA_F452,  /* "[R] TCP recv error(%d)\n" (%d)  [p2p_signal_relay.c] */

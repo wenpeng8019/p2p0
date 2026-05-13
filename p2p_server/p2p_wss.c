@@ -315,14 +315,14 @@ wss_free_client(client_t *client) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// 处理 SYNC0 消息：创建/恢复会话
+// 处理 SYN0 消息：创建/恢复会话
 static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
                             uint8_t *payload, size_t payload_len) {
     const char *PROTO = "SYN0";
 
     if (!*remote_peer_id) {
         print("E:", LA_F("%s: invalid remote id\n", LA_F142, 142), PROTO);
-        wss_send_text((cw_client_t*)client, "SYNC0 FAIL invalid remote id");
+        wss_send_text((cw_client_t*)client, "SYN0 FAIL invalid remote id");
         return;
     }
 
@@ -334,12 +334,12 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
     if (side == E_OUT_OF_MEMORY) {
         print("E:", LA_F("%s: OOM building session '%s' -> '%s'\n", LA_F37, 37),
               PROTO, client->base.local_peer_id, remote_peer_id);
-        wss_send_text((cw_client_t*)client, "SYNC0 FAIL OOM");
+        wss_send_text((cw_client_t*)client, "SYN0 FAIL OOM");
         return;
     }
     if (side < E_NONE && side != E_DUPLICATE) {
         print("E:", LA_F("%s: build session to '%s' failed(%d)\n", LA_F44, 44), PROTO, remote_peer_id, side);
-        wss_send_text((cw_client_t*)client, "SYNC0 FAIL internal");
+        wss_send_text((cw_client_t*)client, "SYN0 FAIL internal");
         return;
     }
 
@@ -350,11 +350,11 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
         // 根据对端在线状态返回相应响应
         if (remote_s) {
             char _b[8+P2P_PEER_ID_MAX+12+8]; 
-            snprintf(_b, sizeof(_b), "SYNC0 %s %u online", remote_peer_id, local_s->base.session_id); 
+            snprintf(_b, sizeof(_b), "SYN0 %s %u online", remote_peer_id, local_s->base.session_id); 
             wss_send_text((cw_client_t*)client, _b);
         } else {
             char _b[8+P2P_PEER_ID_MAX+12+8]; 
-            snprintf(_b, sizeof(_b), "SYNC0 %s %u offline", remote_peer_id, local_s->base.session_id); 
+            snprintf(_b, sizeof(_b), "SYN0 %s %u offline", remote_peer_id, local_s->base.session_id); 
             wss_send_text((cw_client_t*)client, _b);
         }
         return;
@@ -373,7 +373,7 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
     // 如果对方不在线，立刻返回 sync0 offline
     if (!remote_s) {
 
-        { char _b[8+P2P_PEER_ID_MAX+12+8]; snprintf(_b,sizeof(_b),"SYNC0 %s %u offline",remote_peer_id,local_s->base.session_id); wss_send_text((cw_client_t*)client,_b); }
+        { char _b[8+P2P_PEER_ID_MAX+12+8]; snprintf(_b,sizeof(_b),"SYN0 %s %u offline",remote_peer_id,local_s->base.session_id); wss_send_text((cw_client_t*)client,_b); }
 
         print("I:", LA_F("%s: '%s' -> '%s' created (id=%u, peer_zombie)\n", LA_F63, 63),
               PROTO, client->base.local_peer_id, remote_peer_id, local_s->base.session_id);
@@ -388,7 +388,7 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
 
         //-------
 
-        { char _b[8+P2P_PEER_ID_MAX+12+8]; snprintf(_b,sizeof(_b),"SYNC0 %s %u online",remote_peer_id,local_s->base.session_id); wss_send_text((cw_client_t*)client,_b); }
+        { char _b[8+P2P_PEER_ID_MAX+12+8]; snprintf(_b,sizeof(_b),"SYN0 %s %u online",remote_peer_id,local_s->base.session_id); wss_send_text((cw_client_t*)client,_b); }
         // 将 remote 端积压数据入队到 local_s（通过 sync_peer_send 队列发给 client）
         if (remote_s->sync_len)
             wss_enqueue_sync(remote_s, local_s);
@@ -396,7 +396,7 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
         //-------
 
         wss_client_t *remote_c = (wss_client_t*)remote_s->base.client;
-        { char _b[8+P2P_PEER_ID_MAX+12+8]; snprintf(_b,sizeof(_b),"SYNC0 %s %u online",client->base.local_peer_id,remote_s->base.session_id); wss_send_text((cw_client_t*)remote_c,_b); }
+        { char _b[8+P2P_PEER_ID_MAX+12+8]; snprintf(_b,sizeof(_b),"SYN0 %s %u online",client->base.local_peer_id,remote_s->base.session_id); wss_send_text((cw_client_t*)remote_c,_b); }
         // 将 local 端积压数据入队到 remote_s（通过 sync_peer_send 队列发给 remote_c）
         if (local_s->sync_len)
             wss_enqueue_sync(local_s, remote_s);
@@ -743,7 +743,7 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
         return;
     }
 
-    // SYNC0 <remote_peer_id>[\n<payload>]
+    // SYN0 <remote_peer_id>[\n<payload>]
     if (strncmp((char*)msg, P2P_WSS_CMD_SYN0, P2P_WSS_CMD_SYN0_SZ) == 0) {
 
         char *remote_id = (char*)msg + P2P_WSS_CMD_SYN0_SZ;

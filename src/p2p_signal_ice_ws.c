@@ -166,7 +166,7 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
         }
         ctx->feature_relay = (features & P2P_RLY_FEATURE_RELAY) != 0;
         ctx->feature_msg   = (features & P2P_RLY_FEATURE_MSG) != 0;
-        ctx->state = ICE_WS_ONLINE;
+        ctx->state = ICE_WS_REG;
         print("I:", "[WS] registered OK (relay=%s, msg=%s)\n",
               ctx->feature_relay ? "yes" : "no", ctx->feature_msg ? "yes" : "no");
     }
@@ -212,7 +212,7 @@ static void on_ws_close(ws_client_t *c, uint16_t status_code, const char *reason
 static int ws_sync(struct p2p_instance *inst, const char *to_peer_id,
                   const char *payload) {
     p2p_ice_ws_ctx_t *ctx = &inst->sig_ctx.ice_ws;
-    if (ctx->state != ICE_WS_ONLINE || !ctx->ws) return -1;
+    if (ctx->state != ICE_WS_REG || !ctx->ws) return -1;
 
     size_t to_len  = strlen(to_peer_id);
     size_t pay_len = strlen(payload);
@@ -334,7 +334,7 @@ void p2p_signal_ice_ws_tick(struct p2p_instance *inst, uint64_t now_ms) {
     }
 
     /* 未在线则不处理会话级信令 */
-    if (ctx->state != ICE_WS_ONLINE) return;
+    if (ctx->state != ICE_WS_REG) return;
 
     /* 遍历会话，同步候选 */
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {

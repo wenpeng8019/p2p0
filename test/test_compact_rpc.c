@@ -193,7 +193,7 @@ static int find_log(const char *pattern) {
 // 协议构造函数
 ///////////////////////////////////////////////////////////////////////////////
 
-// 构造 ONLINE 包
+// 构造 REG 包
 static int build_online(uint8_t *buf, int buf_size,
                         const char *local_peer_id,
                         uint32_t instance_id) {
@@ -213,7 +213,7 @@ static int build_online(uint8_t *buf, int buf_size,
 #define build_register(buf, buf_size, local, remote, inst_id, cand_count, cands) \
     build_online(buf, buf_size, local, inst_id)
 
-// 构造 SYNC0 包
+// 构造 SYN0 包
 static int build_sync0(uint8_t *buf, int buf_size, uint64_t auth_key,
                        const char *remote_peer_id,
                        int candidate_count, p2p_candidate_t *candidates) {
@@ -425,7 +425,7 @@ static void parse_msg_resp(const uint8_t *buf, int len, msg_resp_t *resp) {
     }
 }
 
-// 发送 ONLINE 并接收 REG_ACK，然后发送 SYNC0，返回 session_id
+// 发送 REG 并接收 REG_ACK，然后发送 SYN0，返回 session_id
 static uint32_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];
@@ -453,11 +453,11 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
         for (int i = 0; i < 8; i++) {
             auth_key = (auth_key << 8) | recv_buf[8 + i];
         }
-        // 发送 SYNC0（携带 auth_key + remote_peer_id）
+        // 发送 SYN0（携带 auth_key + remote_peer_id）
         len = build_sync0(pkt, sizeof(pkt), auth_key, remote, cand_count, cands);
         sendto(sock, (const char*)pkt, len, 0,
                (struct sockaddr*)&server_addr, sizeof(server_addr));
-        // 接收 SYNC0_ACK，提取 session_id
+        // 接收 SYN0_ACK，提取 session_id
         // [hdr(4)][remote_peer_id(32)][session_id(4)][online(1)]
         uint8_t drain_buf[64];
         struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);

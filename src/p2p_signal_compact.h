@@ -8,8 +8,8 @@
  * 基于 UDP 的轻量信令协议，通过服务器交换候选地址，完成 P2P 打洞。
  *
  * 与 RELAY（TCP 两阶段分离）相比，COMPACT 采用 UDP 无状态设计：
- *   - 无独立的 ONLINE 稳定态，ONLINE 兼含候选注册（embedded candidates）
- *   - SYNC0 取代 RELAY 的第二阶段请求，同样返回 session_id 和对端在线状态
+ *   - 无独立的 REG 稳定态，REG 兼含候选注册（embedded candidates）
+ *   - SYN0 取代 RELAY 的第二阶段请求，同样返回 session_id 和对端在线状态
  *   - AUTH_KEY（REG_ACK 中分配）取代 TCP 长连接作为 client↔server 认证令牌
  *
  * 协议消息列表：
@@ -42,32 +42,32 @@
  *
  *   阶段1: online() / offline()
  *   ┌────────────────────────────────────────────────────────────────────────────┐
- *   │  INIT ──→ WAIT_REG_ACK ──→ ONLINE          ← disconnect() 回退到此     │
+ *   │  INIT ──→ WAIT_REG_ACK ──→ REG          ← disconnect() 回退到此     │
  *   │                           ↘ (connect() 已调用，REG_ACK 直接到阶段2)    │
  *   └────────────────────────────────────────────────────────────────────────────┘
- *                              ↓ connect()（ONLINE 状态立即发 SYNC0）
+ *                              ↓ connect()（REG 状态立即发 SYN0）
  *   阶段2: connect() / disconnect()
  *   ┌──────────────────────────────────────────────────────────────────────────┐
- *   │  WAIT_SYNC0_ACK ──→ WAIT_PEER ──→ SYNCING ──→ READY                     │
+ *   │  WAIT_SYN0_ACK ──→ WAIT_PEER ──→ SYNCING ──→ READY                     │
  *   └──────────────────────────────────────────────────────────────────────────┘
  *
  *   - INIT:            未启动
- *   - WAIT_REG_ACK: 已发送 ONLINE，等待 REG_ACK（获取 auth_key）
- *   - ONLINE:          已收到 REG_ACK（auth_key 有效），等待 connect() 触发 SYNC0
- *   - WAIT_SYNC0_ACK:  已发送 SYNC0，等待 SYNC0_ACK（获取 session_id）
+ *   - WAIT_REG_ACK: 已发送 REG，等待 REG_ACK（获取 auth_key）
+ *   - REG:          已收到 REG_ACK（auth_key 有效），等待 connect() 触发 SYN0
+ *   - WAIT_SYN0_ACK:  已发送 SYN0，等待 SYN0_ACK（获取 session_id）
  *   - WAIT_PEER:       已分配 session_id，等待对端上线（服务器下发 SYNC seq=0）
  *   - SYNCING:         候选同步中（接收/发送 SYNC）
  *   - READY:           候选同步完成，开始 P2P 打洞
  *
  * connect() 可先于 REG_ACK 调用（仅存储 remote_peer_id），
- * 收到 REG_ACK 后自动触发 SYNC0（懒触发，与 RELAY 模式一致）。
+ * 收到 REG_ACK 后自动触发 SYN0（懒触发，与 RELAY 模式一致）。
  *
  * ============================================================================
  * NAT 类型探测（可选）
  * ============================================================================
  *
  * 利用主端口和探测端口的两次映射观察，参考 RFC 5780 单 IP 简化模式：
- *   - ONLINE → REG_ACK：主端口返回 Mapped_Addr1 + probe_port
+ *   - REG → REG_ACK：主端口返回 Mapped_Addr1 + probe_port
  *   - NAT_PROBE → NAT_PROBE_ACK：探测端口返回 Mapped_Addr2（使用相同本地端口）
  *
  * 三分类判断：
@@ -76,14 +76,14 @@
  *   - Mapped_Port1 != Mapped_Port2    → SYMMETRIC（端口随机 NAT）
  *   - probe_port == 0                 → UNDETECTABLE（服务器不支持探测）
  *
- * 探测在 WAIT_SYNC0_ACK 期间后台进行，超时不影响打洞主流程。
+ * 探测在 WAIT_SYN0_ACK 期间后台进行，超时不影响打洞主流程。
  *
  * ============================================================================
  * Trickle 候选支持
  * ============================================================================
  *
  * 候选列表分批上传（SYNC seq 1..16 窗口），支持：
- *   - HOST/公网候选随 ONLINE 首批嵌入上传（embedded candidates）
+ *   - HOST/公网候选随 REG 首批嵌入上传（embedded candidates）
  *   - STUN/TURN 候选后续 trickle 补发
  *   - count=0 + FIN flag 标识发送结束
  *
@@ -114,7 +114,7 @@ struct p2p_instance;
 typedef enum {
     SIG_COMPACT_INIT = 0,                                   /* 未启动 */
     SIG_COMPACT_ERROR,                                      /* 错误状态，需重启 */
-    SIG_COMPACT_WAIT_REG_ACK,                               /* 已发送 ONLINE，等待 REG_ACK */
+    SIG_COMPACT_WAIT_REG_ACK,                               /* 已发送 REG，等待 REG_ACK */
     SIG_COMPACT_REG,                                        /* 已上线, 收到 REG_ACK */
 } p2p_compact_st;
 
@@ -124,15 +124,15 @@ typedef struct {
     struct sockaddr_in  server_addr;                        /* 信令服务器地址 */
     uint64_t            last_send_time;                     /* 上次发送时间 */
     uint64_t            last_recv_time;                     /* 上次收到时间 */
-    int                 sig_attempts;                       /* ONLINE 总共尝试次数 */
+    int                 sig_attempts;                       /* REG 总共尝试次数 */
     int                 sig_sessions;                       /* 正在使用信令服务器的会话（sync0/sync），该值不为 0 则无需 keep-alive */
 
     /* 和服务器的会话 */
     char                local_peer_id[P2P_PEER_ID_MAX];     /* 本端 ID */
     uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
-    uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 REG_ACK 中获得，用于 SYNC0/ALIVE */
+    uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 REG_ACK 中获得，用于 SYN0/ALIVE */
 
-    /* REGISTER_ACK 返回的信息 */
+    /* REG_ACK 返回的信息 */
     uint8_t             max_candidates;                     /* 服务器允许缓存的最大候选数量 */
     bool                feature_relay;                      /* 服务器是否支持中继 */
     bool                feature_msg;                        /* 服务器是否支持 RPC */
@@ -149,10 +149,10 @@ typedef struct {
 
 typedef enum {
     SIG_COMPACT_SESS_SUSPENDED = 0,                         /* 挂起的 session，连接过程超时挂起。报错逻辑统一在 p2p_compact_ctx_t 中处理 */
-    SIG_COMPACT_SESS_WAIT_ONLINE,                           /* 执行 connect() 创建了 session，但信令服务还未完成在线登录 */
-    SIG_COMPACT_SESS_WAIT_SYNC0_ACK,                        /* 已发送 SYNC0，等待 SYNC0_ACK */
-    SIG_COMPACT_SESS_WAIT_PEER,                             /* 已收到 SYNC0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
-    SIG_COMPACT_SESS_SYNCING,                               /* 收到 PEER SYNC0 或 SYNC0_ACK online=1，向对方同步后续候选队列和 FIN */
+    SIG_COMPACT_SESS_WAIT_REG,                           /* 执行 connect() 创建了 session，但信令服务还未完成在线登录 */
+    SIG_COMPACT_SESS_WAIT_SYN0_ACK,                        /* 已发送 SYN0，等待 SYN0_ACK */
+    SIG_COMPACT_SESS_WAIT_PEER,                             /* 已收到 SYN0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
+    SIG_COMPACT_SESS_SYNCING,                               /* 收到 PEER SYN0 或 SYN0_ACK online=1，向对方同步后续候选队列和 FIN */
     SIG_COMPACT_SESS_READY                                  /* 已完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
 } p2p_compact_sess_st;
 
@@ -160,8 +160,8 @@ typedef enum {
 typedef struct {
 
     p2p_compact_sess_st state;                              /* 会话状态 */
-    uint64_t            sync_send_time;                     /* 上次 SYNC0/SYNC 发送时间（用于重传控制）*/
-    int                 sync_attempts;                      /* SYNC0/SYNC 总共尝试次数 */
+    uint64_t            sync_send_time;                     /* 上次 SYN0/SYNC 发送时间（用于重传控制）*/
+    int                 sync_attempts;                      /* SYN0/SYNC 总共尝试次数 */
 
     char                remote_peer_id[P2P_PEER_ID_MAX];    /* 对端 ID */
 
@@ -212,9 +212,9 @@ void p2p_signal_compact_init(p2p_compact_ctx_t *ctx);
  * 信令服务周期维护（拉取阶段）— 注册重试、保活
  * 
  * 处理各信令状态下的维护任务：
- * - WAIT_REG_ACK：定期重发 ONLINE（获取 auth_key）
- * - WAIT_SYNC0_ACK：定期重发 SYNC0（获取 session_id）
- * - ONLINE/WAIT_PEER/SYNCING/READY：发送 ALIVE keepalive 保持服务器槽位
+ * - WAIT_REG_ACK：定期重发 REG（获取 auth_key）
+ * - WAIT_SYN0_ACK：定期重发 SYN0（获取 session_id）
+ * - REG/WAIT_PEER/SYNCING/READY：发送 ALIVE keepalive 保持服务器槽位
  * 
  * 在 p2p_update() 的阶段 2（信令拉取）中调用。
  * 
@@ -244,7 +244,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_instance *inst, uint64_t now)
 //-----------------------------------------------------------------------------
 
 /*
- * 阶段1：客户端上线（发送 ONLINE，建立 client↔server 关系，获取 auth_key）
+ * 阶段1：客户端上线（发送 REG，建立 client↔server 关系，获取 auth_key）
  *
  * @param s             会话对象
  * @param local_peer_id 本端 ID
@@ -255,7 +255,7 @@ ret_t p2p_signal_compact_online(struct p2p_instance *inst, const char *local_pee
                                 const struct sockaddr_in *server);
 
 /*
- * 阶段1：客户端下线（发送 OFFLINE，清理服务器上的全部状态，回到 INIT）
+ * 阶段1：客户端下线（发送 OFF，清理服务器上的全部状态，回到 INIT）
  *
  * @param s 会话对象
  * @return  E_NONE=成功，其他=错误码
@@ -265,9 +265,9 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst);
 //-----------------------------------------------------------------------------
 
 /*
- * 阶段2：建立与对端的会话（发送 SYNC0，建立 client↔peer 关系，获取 session_id）
+ * 阶段2：建立与对端的会话（发送 SYN0，建立 client↔peer 关系，获取 session_id）
  *
- * 若尚未收到 REG_ACK（WAIT_REG_ACK 状态），将在收到后自动触发 SYNC0。
+ * 若尚未收到 REG_ACK（WAIT_REG_ACK 状态），将在收到后自动触发 SYN0。
  * 前提：必须已经调用过 online()。
  *
  * @param s              会话对象
@@ -277,7 +277,7 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst);
 ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_id);
 
 /*
- * 阶段2：断开与对端的会话（发送 OFFLINE，清理 peer 会话，回到 ONLINE 等待下次 connect()）
+ * 阶段2：断开与对端的会话（发送 OFF，清理 peer 会话，回到 REG 等待下次 connect()）
  *
  * @param s 会话对象
  * @return  E_NONE=成功，其他=错误码

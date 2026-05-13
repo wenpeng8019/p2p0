@@ -146,8 +146,8 @@ enum {
     LA_F102,  /* "Relay support: %s\n" (%s)  [server.c] */
     LA_F103,  /* "SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%u)\n" (%s,%s,%d,%d,%u)  [p2p_compact.c] */
     LA_F104,  /* "SYNC retransmit failed: %s <-> %s (gave up after %d tries)\n" (%s,%s,%d)  [p2p_compact.c] */
-    LA_F105,  /* disabled "SYNC0: candidates exchanged '%.*s'(%d) <-> '%.*s'(%d)\n" */
-    LA_F106,  /* disabled "SYNC0_ACK queue busy for '%s', drop\n" */
+    LA_F105,  /* disabled "SYN0: candidates exchanged '%.*s'(%d) <-> '%.*s'(%d)\n" */
+    LA_F106,  /* disabled "SYN0_ACK queue busy for '%s', drop\n" */
     LA_F107,  /* disabled "SYNC_ACK queue busy for '%s', drop\n" */
     LA_F108,  /* "Send %s: auth_key=%llu, peer='%s'\n" (%s,%l,%s)  [p2p_compact.c] */
     LA_F109,  /* "Send %s: base_index=%u, cands=%d, ses_id=%u, peer='%s'\n" (%s,%u,%d,%u,%s)  [p2p_compact.c] */

@@ -66,7 +66,7 @@
 #define SYNC_TIMEOUT_MS         15000       // 同步超时（Gist API 较慢）
 #define CONNECT_TIMEOUT_MS      90000       // 连接超时（Gist 轮询间隔较大）
 #define MESSAGE_TIMEOUT_MS      5000
-#define GIST_REGISTER_WAIT_MS   5000        // 等待 SUB 心跳写入 Gist
+#define GIST_REG_WAIT_MS   5000        // 等待 SUB 心跳写入 Gist
 #define RECONNECT_SETTLE_MS     3000        // 崩溃后等待状态稳定
 
 static const char *g_ping_path = NULL;
@@ -361,8 +361,8 @@ static int do_connect(const char *label) {
     sync_client(&g_bob);
 
     // 2. 等待 Bob 心跳写入 Gist
-    printf("[%s] Waiting for Bob heartbeat on Gist (%d ms)...\n", label, GIST_REGISTER_WAIT_MS);
-    P_usleep(GIST_REGISTER_WAIT_MS * 1000);
+    printf("[%s] Waiting for Bob heartbeat on Gist (%d ms)...\n", label, GIST_REG_WAIT_MS);
+    P_usleep(GIST_REG_WAIT_MS * 1000);
 
     // 3. Alice (PUB, target=bob)
     printf("[%s] Starting Alice (PUB, target=bob)...\n", label);
@@ -424,7 +424,7 @@ static void test_both_crash(void) {
     printf("[2] Simulating dual crash (SIGKILL)...\n");
     kill_client(&g_alice);
     kill_client(&g_bob);
-    int settle = RECONNECT_SETTLE_MS + GIST_REGISTER_WAIT_MS;
+    int settle = RECONNECT_SETTLE_MS + GIST_REG_WAIT_MS;
     printf("    Waiting %d ms for Gist state to settle...\n", settle);
     P_usleep(settle * 1000);
 
@@ -470,8 +470,8 @@ static void test_pub_crash(void) {
     }
     sync_client(&g_bob);
 
-    printf("    Waiting for Bob heartbeat on Gist (%d ms)...\n", GIST_REGISTER_WAIT_MS);
-    P_usleep(GIST_REGISTER_WAIT_MS * 1000);
+    printf("    Waiting for Bob heartbeat on Gist (%d ms)...\n", GIST_REG_WAIT_MS);
+    P_usleep(GIST_REG_WAIT_MS * 1000);
 
     printf("[2] Starting Alice (PUB, target=bob)...\n");
     if (start_client(&g_alice, "bob") != 0) {
@@ -515,9 +515,9 @@ static void test_pub_crash(void) {
 
     // 等待 Bob 检测到 CLOSED 并重回 WAIT_OFFER + 写入新心跳到 Gist
     printf("[6] Waiting for Bob to re-register heartbeat (%d ms)...\n",
-           RECONNECT_SETTLE_MS + GIST_REGISTER_WAIT_MS);
+           RECONNECT_SETTLE_MS + GIST_REG_WAIT_MS);
     {
-        int total_wait = RECONNECT_SETTLE_MS + GIST_REGISTER_WAIT_MS;
+        int total_wait = RECONNECT_SETTLE_MS + GIST_REG_WAIT_MS;
         int elapsed = 0;
         while (elapsed < total_wait) {
             P_usleep(2000 * 1000);
@@ -623,8 +623,8 @@ static void test_sub_crash(void) {
     }
     sync_client(&g_bob);
 
-    printf("    Waiting for Bob heartbeat on Gist (%d ms)...\n", GIST_REGISTER_WAIT_MS);
-    P_usleep(GIST_REGISTER_WAIT_MS * 1000);
+    printf("    Waiting for Bob heartbeat on Gist (%d ms)...\n", GIST_REG_WAIT_MS);
+    P_usleep(GIST_REG_WAIT_MS * 1000);
 
     printf("[2] Starting Alice (PUB, target=bob)...\n");
     if (start_client(&g_alice, "bob") != 0) {

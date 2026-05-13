@@ -30,7 +30,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F48] = "%s: forwarded to peer, cands=%d\n",  /* SID:48 */
     [LA_F63] = "%s: peer '%s' offline, cached cands=%d\n",  /* SID:63 */
     [LA_F152] = "%s: '%s' <-> '%s' paired (ses=%u/%u)\n",  /* SID:152 */
-    [LA_F93] = "ONLINE: '%s' came online (inst=%u)\n",  /* SID:93 */
+    [LA_F93] = "REG: '%s' came online (inst=%u)\n",  /* SID:93 */
     [LA_F98] = "REG_ACK sent to '%s'\n",  /* SID:98 */
     [LA_F153] = "%s: '%s' reconnected & renew (inst=%u)\n",  /* SID:153 */
     [LA_F45] = "%s: close ses_id=%u\n",  /* SID:45 */
@@ -71,13 +71,13 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F209] = "%s: deprecated (ses_id=%u, sid=%u, last=%u), drop\n",  /* SID:209 */
     [LA_F210] = "%s: duplicate SYN0 (ses_id=%u), resend ACK\n",  /* SID:210 */
     [LA_F211] = "%s: duplicate SYN0 (ses_id=%u), resend response\n",  /* SID:211 */
-    [LA_F159] = "%s: duplicate SYNC0 with different candidates from '%s'\n",  /* SID:159 */
-    [LA_F97] = "ONLINE: duplicate from '%s'\n",  /* SID:97 */
+    [LA_F159] = "%s: duplicate SYN0 with different candidates from '%s'\n",  /* SID:159 */
+    [LA_F97] = "REG: duplicate from '%s'\n",  /* SID:97 */
     [LA_F160] = "%s: invalid REG format\n",  /* SID:160 */
     [LA_F49] = "%s: invalid auth_key=0 from %s\n",  /* SID:49 */
-    [LA_F94] = "ONLINE: '%s' new instance (old=%u, new=%u), destroying old\n",  /* SID:94 */
+    [LA_F94] = "REG: '%s' new instance (old=%u, new=%u), destroying old\n",  /* SID:94 */
     [LA_F50] = "%s: invalid instance_id=0 from %s\n",  /* SID:50 */
-    [LA_F96] = "ONLINE: bad payload(len=%u, expected=%u)\n",  /* SID:96 */
+    [LA_F96] = "REG: bad payload(len=%u, expected=%u)\n",  /* SID:96 */
     [LA_F161] = "%s: invalid relay flag from client\n",  /* SID:161 */
     [LA_F142] = "recv() failed: errno=%d\n",  /* SID:142 */
     [LA_F52] = "%s: invalid seq=%u\n",  /* SID:52 */
@@ -139,7 +139,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F178] = "New %s client connected from %s:%d, assigned slot %d\n",  /* SID:178 */
     [LA_F99] = "P2P Signaling Server listening on port %d (TCP + UDP)...\n",  /* SID:99 */
     [LA_F223] = "REG: '%s' new instance (old=%u, new=%u), resetting session\n",  /* SID:223 */
-    [LA_F95] = "ONLINE: '%s' reconnected (inst=%u), migrating fd\n",  /* SID:95 */
+    [LA_F95] = "REG: '%s' reconnected (inst=%u), migrating fd\n",  /* SID:95 */
     [LA_F85] = "REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n",  /* SID:85 */
     [LA_F86] = "REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n",  /* SID:86 */
     [LA_F87] = "REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:87 */
@@ -186,7 +186,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F186] = "[UDP] REQ recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:186 */
     [LA_F187] = "[UDP] RSP recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:187 */
     [LA_F188] = "[UDP] RSP_ACK recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:188 */
-    [LA_F189] = "[UDP] SYNC0 recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:189 */
+    [LA_F189] = "[UDP] SYN0 recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:189 */
     [LA_F134] = "[UDP] %s recv from %s, len=%zu\n",  /* SID:134 */
     [LA_F190] = "[UDP] SYNC_ACK recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:190 */
     [LA_F143] = "select failed(%d)\n",  /* SID:143 */
@@ -230,8 +230,8 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F23] = "%s: '%.*s' cleared stale peer marker, ready for re-pair\n",  /* SID:23 */
     [LA_F54] = "%s: late-paired '%.*s' <-> '%.*s' (waiting session found)\n",  /* SID:54 */
     [LA_F69] = "%s: skip pairing '%.*s' with stale '%.*s' (peer_died, awaiting re-register)\n",  /* SID:69 */
-    [LA_F105] = "SYNC0: candidates exchanged '%.*s'(%d) <-> '%.*s'(%d)\n",  /* SID:105 */
-    [LA_F106] = "SYNC0_ACK queue busy for '%s', drop\n",  /* SID:106 */
+    [LA_F105] = "SYN0: candidates exchanged '%.*s'(%d) <-> '%.*s'(%d)\n",  /* SID:105 */
+    [LA_F106] = "SYN0_ACK queue busy for '%s', drop\n",  /* SID:106 */
     [LA_F107] = "SYNC_ACK queue busy for '%s', drop\n",  /* SID:107 */
     [LA_F121] = "Timeout & cleanup for client '%s' (inactive for %.1f seconds)\n",  /* SID:121 */
     [LA_F132] = "[TCP] New connection from %s:%d\n",  /* SID:132 */

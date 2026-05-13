@@ -234,12 +234,12 @@ typedef struct compact_pair_s {
 ```
 Alice                  Server                    Bob
   |                      |                        |
-  |--- REGISTER(bob) --->|                        |
+  |--- REG(bob) --->|                        |
   |   [alice → bob]      | [创建记录1: alice→bob]|
   |                      | [查找反向: bob→alice] |
   |                      | [未找到，等待]         |
   |                      |                        |
-  |                      |<--- REGISTER(alice) ---|
+  |                      |<--- REG(alice) ---|
   |                      |   [bob → alice]        |
   |                      | [创建记录2: bob→alice]|
   |                      | [查找反向: alice→bob] |
@@ -250,7 +250,7 @@ Alice                  Server                    Bob
   |   双向通知！          |                        |
 ```
 
-#### COMPACT_PKT_REGISTER (0x01)
+#### COMPACT_PKT_REG (0x01)
 
 - **方向**: 客户端 → 服务器
 - **Payload**: `[ local_peer_id: 32 bytes | remote_peer_id: 32 bytes ]` (64 bytes total)
@@ -410,7 +410,7 @@ cleanup_compact_pairs() {
 
 客户端检测到 `peer == (void*)-1` 时：
 - 重置为 `NULL`（允许重新配对）
-- 重新发送 REGISTER 进入配对流程
+- 重新发送 REG 进入配对流程
 
 ### 5. 服务器实现要求
 
@@ -418,7 +418,7 @@ cleanup_compact_pairs() {
 |------|------------------|----------------|
 | 协议 | 无状态 UDP | 长连接 TCP |
 | 数据结构 | `compact_pair_t` 双向配对 | `ice_client_t` 单向映射 |
-| 超时清理 | 30 秒无 REGISTER 则清除 | 连接断开立即清除 |
+| 超时清理 | 30 秒无 REG 则清除 | 连接断开立即清除 |
 | 地址变化 | 主动推送 PEER_INFO | N/A（TCP 连接地址不变） |
 | 并发支持 | 需支持多对 peer 同时在线 | 同左 |
 | 认证 | 无（基于 local_peer_id 信任） | 无（基于 local_peer_id 信任） |
@@ -431,12 +431,12 @@ cleanup_compact_pairs() {
 ```
 Alice (local_peer_id="alice")    Server                Bob (local_peer_id="bob")
       |                      |                        |
-      |-- REGISTER ---------->|                        |
+      |-- REG ---------->|                        |
       |  ["alice", "bob"]     |                        |
       |                       | [创建记录1]            |
       |                       | [查找反向: 未找到]     |
       |                       |                        |
-      |                       |<-------- REGISTER -----|
+      |                       |<-------- REG -----|
       |                       |        ["bob", "alice"]|
       |                       | [创建记录2]            |
       |                       | [查找反向: 找到！]     |
@@ -453,7 +453,7 @@ Alice (local_peer_id="alice")    Server                Bob (local_peer_id="bob")
       |<==================== DATA ====================>|
       |                       |                        |
       | [Alice IP 变化] ------>|                        |
-      |-- REGISTER ---------->|                        |
+      |-- REG ---------->|                        |
       |  ["alice", "bob"]     |                        |
       |                       | [检测到地址变化]       |
       |                       | [更新记录1]            |
@@ -467,7 +467,7 @@ Alice (local_peer_id="alice")    Server                Bob (local_peer_id="bob")
 
 ### 关键时间参数
 
-- `REGISTER_INTERVAL_MS = 1000ms` — 注册重发间隔
+- `REG_INTERVAL_MS = 1000ms` — 注册重发间隔
 - `PUNCH_INTERVAL_MS = 500ms` — 打洞间隔
 - `PUNCH_TIMEOUT_MS = 5000ms` — 打洞超时（转 RELAY）
 - `PING_INTERVAL_MS = 15000ms` — 心跳间隔
@@ -500,7 +500,7 @@ RELAY 模式使用 **TCP 长连接**进行信令交换，支持完整的 ICE/Tri
 | **重传** | 应用层 PEER_INFO_ACK | TCP 自动 |
 | **负载大小** | < 1400 bytes | 无限制（建议<64KB） |
 | **离线缓存** | 整包缓存 | 单候选缓存（最大255个） |
-| **服务器清理** | 30秒无REGISTER | 60秒无消息 |
+| **服务器清理** | 30秒无REG | 60秒无消息 |
 | **地址变化** | 主动推送 | N/A（TCP地址不变） |
 | **寻址方式** | local_peer_id (32B) | name (32B) |
 
@@ -1116,8 +1116,8 @@ p2p_signaling_payload_t (76B header + N×32B candidates)
 | 0x21 | P2P_PKT_ACK | 确认包（flags & 0x01 = 携带 session_id） |
 | 0x22 | P2P_PKT_CRYPTO | DTLS 加密包（flags & 0x01 = 携带 session_id） |
 | **0x80-0x8F** | **核心信令** | |
-| 0x80 | SIG_PKT_REGISTER | 注册到信令服务器 |
-| 0x81 | SIG_PKT_REGISTER_ACK | 注册确认 |
+| 0x80 | SIG_PKT_REG | 注册到信令服务器 |
+| 0x81 | SIG_PKT_REG_ACK | 注册确认 |
 | 0x82 | SIG_PKT_PEER_INFO | 候选列表同步包 |
 | 0x83 | SIG_PKT_PEER_INFO_ACK | 候选列表确认 |
 | 0x84 | SIG_PKT_NAT_PROBE | NAT 类型探测请求 |
