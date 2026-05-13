@@ -302,10 +302,10 @@ static int build_unregister(uint8_t *buf, int buf_size, uint64_t auth_key) {
     return n;
 }
 
-// 发送并接收 ONLINE_ACK
+// 发送并接收 REG_ACK
 typedef struct {
     int received;           // 是否收到响应
-    uint64_t auth_key;      // ONLINE_ACK 返回的认证密钥
+    uint64_t auth_key;      // REG_ACK 返回的认证密钥
     uint32_t instance_id;
     uint8_t max_candidates;
     uint32_t public_ip;
@@ -329,7 +329,7 @@ static int send_online_recv_ack(const uint8_t *pkt, int pkt_len, register_ack_t 
     // 设置超时
     P_sock_rcvtimeo(g_sock, timeout_ms);
     
-    // 接收（跳过非 ONLINE_ACK 的包，如 SYNC）
+    // 接收（跳过非 REG_ACK 的包，如 SYNC）
     uint8_t recv_buf[256];
     struct sockaddr_in from;
     socklen_t from_len;
@@ -432,7 +432,7 @@ static void test_register_peer_offline(void) {
         return;
     }
     if (ack.auth_key == 0) {
-        TEST_FAIL(TEST_NAME, "ONLINE_ACK rejected (auth_key=0)");
+        TEST_FAIL(TEST_NAME, "REG_ACK rejected (auth_key=0)");
         return;
     }
     if (ack.auth_key == 0) {
@@ -478,7 +478,7 @@ static void test_register_peer_online(void) {
     send_register_recv_ack(pkt, len, &ack_alice, RECV_TIMEOUT_MS);
     
     if (!ack_alice.received || ack_alice.auth_key == 0) {
-        TEST_FAIL(TEST_NAME, "Alice should get valid ONLINE_ACK (auth_key != 0)");
+        TEST_FAIL(TEST_NAME, "Alice should get valid REG_ACK (auth_key != 0)");
         return;
     }
     printf("    Alice ONLINE: auth_key=0x%016llx\n", (unsigned long long)ack_alice.auth_key);
@@ -488,7 +488,7 @@ static void test_register_peer_online(void) {
     send_register_recv_ack(pkt, len, &ack_bob, RECV_TIMEOUT_MS);
     
     if (!ack_bob.received || ack_bob.auth_key == 0) {
-        TEST_FAIL(TEST_NAME, "Bob should get valid ONLINE_ACK (auth_key != 0)");
+        TEST_FAIL(TEST_NAME, "Bob should get valid REG_ACK (auth_key != 0)");
         return;
     }
     printf("    Bob ONLINE: auth_key=0x%016llx\n", (unsigned long long)ack_bob.auth_key);
@@ -782,7 +782,7 @@ static void test_register_with_candidates(void) {
     send_online_recv_ack(pkt, len, &ack, RECV_TIMEOUT_MS);
     
     if (!ack.received) {
-        TEST_FAIL(TEST_NAME, "ONLINE_ACK not received");
+        TEST_FAIL(TEST_NAME, "REG_ACK not received");
         return;
     }
     
@@ -974,7 +974,7 @@ static void test_register_addr_change(void) {
         return;
     }
     
-    // 解析第二次响应（auth_key 在 ONLINE_ACK payload 偏移 4～11 处）
+    // 解析第二次响应（auth_key 在 REG_ACK payload 偏移 4～11 处）
     uint64_t session_id2 = 0;
     for (int i = 0; i < 8; i++) {
         session_id2 = (session_id2 << 8) | recv_buf[8 + i];
@@ -1020,7 +1020,7 @@ static void test_register_peer_id_max_length(void) {
     }
     
     if (ack.auth_key == 0) {
-        TEST_FAIL(TEST_NAME, "ONLINE_ACK rejected (auth_key=0)");
+        TEST_FAIL(TEST_NAME, "REG_ACK rejected (auth_key=0)");
         return;
     }
     
@@ -1055,7 +1055,7 @@ static void test_register_candidates_overflow(void) {
     send_online_recv_ack(pkt, len, &ack, RECV_TIMEOUT_MS);
     
     if (!ack.received) {
-        TEST_FAIL(TEST_NAME, "ONLINE_ACK not received");
+        TEST_FAIL(TEST_NAME, "REG_ACK not received");
         return;
     }
     
@@ -1078,7 +1078,7 @@ static void test_register_candidates_overflow(void) {
         TEST_PASS(TEST_NAME);
         printf("    Server handled %d candidates correctly\n", 20);
     } else {
-        // 如果没有候选数量日志，只要收到 ONLINE_ACK 就算通过
+        // 如果没有候选数量日志，只要收到 REG_ACK 就算通过
         TEST_PASS(TEST_NAME);
         printf("    Registered with %d candidates via SYNC0 (truncation depends on server config)\n", 20);
     }
@@ -1135,7 +1135,7 @@ static void test_register_reconnect_after_disconnect(void) {
     
     if (n <= 0 || recv_buf[0] != SIG_PKT_REG_ACK) {
         P_sock_close(sock_alice); P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Alice ONLINE_ACK not received");
+        TEST_FAIL(TEST_NAME, "Alice REG_ACK not received");
         return;
     }
     uint64_t alice_auth_key = 0;
@@ -1154,7 +1154,7 @@ static void test_register_reconnect_after_disconnect(void) {
     
     if (n <= 0 || recv_buf[0] != SIG_PKT_REG_ACK) {
         P_sock_close(sock_alice); P_sock_close(sock_bob);
-        TEST_FAIL(TEST_NAME, "Bob ONLINE_ACK not received");
+        TEST_FAIL(TEST_NAME, "Bob REG_ACK not received");
         return;
     }
     uint64_t bob_auth_key = 0;
@@ -1224,7 +1224,7 @@ static void test_register_reconnect_after_disconnect(void) {
     P_sock_close(sock_bob);
     
     if (n <= 0 || recv_buf[0] != SIG_PKT_REG_ACK) {
-        TEST_FAIL(TEST_NAME, "Alice reconnect ONLINE_ACK not received");
+        TEST_FAIL(TEST_NAME, "Alice reconnect REG_ACK not received");
         return;
     }
     

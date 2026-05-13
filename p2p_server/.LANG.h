@@ -53,7 +53,7 @@ enum {
 
     /* Formats (LA_F) */
     LA_F11,  /* "[TCP] conn closed (EOF on recv)\n"  [server.c] */
-    LA_F12,  /* disabled "% Client sent data before ONLINE_ACK completed\n" */
+    LA_F12,  /* disabled "% Client sent data before REG_ACK completed\n" */
     LA_F13,  /* "%s accepted, '%s' -> '%s', ses_id=%u\n" (%s,%s,%s,%u)  [p2p_compact.c] */
     LA_F14,  /* "%s accepted, peer='%s', auth_key=%llu\n" (%s,%s,%l)  [p2p_compact.c] */
     LA_F15,  /* "%s accepted, seq=%u, ses_id=%u\n" (%s,%u,%u)  [p2p_compact.c] */

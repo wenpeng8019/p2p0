@@ -835,9 +835,9 @@ static inline void add_srflx_candidate(struct p2p_instance *inst, int recv_sock_
 
     bool sig_ready = false;
     if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
-        sig_ready = inst->sig_ctx.compact.state == SIG_COMPACT_ONLINE;
+        sig_ready = inst->sig_ctx.compact.state == SIG_COMPACT_REG;
     } else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
-        sig_ready = inst->sig_ctx.relay.state == SIG_RELAY_ONLINE;
+        sig_ready = inst->sig_ctx.relay.state == SIG_RELAY_REG;
     } else sig_ready = true;
 
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {

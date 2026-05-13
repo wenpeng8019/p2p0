@@ -407,7 +407,7 @@ typedef struct {
     uint32_t sack;
 } relay_packet_t;
 
-// 发送 ONLINE 并接收 ONLINE_ACK
+// 发送 ONLINE 并接收 REG_ACK
 static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t instance_id, online_ack_t *ack) {
     uint8_t pkt[64];
     int pkt_len = build_online(pkt, sizeof(pkt), peer_id, instance_id);

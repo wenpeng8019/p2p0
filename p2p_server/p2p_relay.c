@@ -894,7 +894,7 @@ static bool relay_resolve_payload_len(ct_client_t* client, uint8_t* hdr_buf, uin
                                        uint32_t* payload_len, uint16_t* payload_offset) {
     (void)client;
     assert(hdr_len == sizeof(p2p_relay_hdr_t));
-    *payload_len = ntohs(((p2p_relay_hdr_t*)hdr_buf)->size);
+    ++hdr_buf; nread_s(payload_len, hdr_buf);
     *payload_offset = sizeof(p2p_relay_hdr_t);  // 预留 relay_hdr 前缀供零拷贝重写
     return true;
 }
@@ -986,7 +986,7 @@ static buf16_item_t* relay_handle_handshake(ct_client_t **pclient, uint8_t* hdr_
         memcpy(client->base.local_peer_id, payload, P2P_PEER_ID_MAX);
         client->base.local_peer_id[P2P_PEER_ID_MAX] = '\0';
 
-        // 注：identify_client 在 relay_handshake_finish 中调用（custom_tcp 框架要求握手回调返回时 client 尚未入索引）
+        identify_client(&client->base);
 
         print("I:", LA_F("%s: '%s' new REG (inst=%u)\n", LA_F93, 93), PROTO,
               client->base.local_peer_id, instance_id);
@@ -1005,14 +1005,6 @@ static buf16_item_t* relay_handle_handshake(ct_client_t **pclient, uint8_t* hdr_
     if (ARGS_msg.i64)   ack_payload[0] |= P2P_RLY_FEATURE_MSG;
     ack_payload[1] = (uint8_t)MAX_CANDIDATES;
     return ack;
-}
-
-static void relay_handshake_finish(ct_client_t *client) {
-    // 新客户端（尚未入索引）：握手完成后才添加到索引
-    if (!client_identified(&client->base)) {
-        identify_client(&client->base);
-    }
-    client->handshake = 0;
 }
 
 static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
@@ -1137,7 +1129,7 @@ relay_init(void) {
     g_ctx.max_payload_len = P2P_MAX_PAYLOAD;
     g_ctx.resolve_payload_len = relay_resolve_payload_len;
     g_ctx.handle_handshake = relay_handle_handshake;
-    g_ctx.handshake_finish = relay_handshake_finish;
+    g_ctx.handshake_finish = NULL;
     g_ctx.handle_proto = relay_handle_proto;
     g_ctx.handle_peer_sent = relay_handle_peer_sent;
     g_ctx.session_break = relay_session_break;

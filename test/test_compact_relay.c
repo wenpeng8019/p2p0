@@ -362,7 +362,7 @@ static void parse_relay_packet(const uint8_t *buf, int len, relay_packet_t *pkt)
     }
 }
 
-// 发送 ONLINE 并接收 ONLINE_ACK，然后发送 SYNC0，返回 session_id
+// 发送 ONLINE 并接收 REG_ACK，然后发送 SYNC0，返回 session_id
 static uint32_t register_peer(sock_t sock, const char *local, const char *remote, 
                                uint32_t inst_id, int cand_count, p2p_candidate_t *cands) {
     uint8_t pkt[512];

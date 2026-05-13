@@ -26,7 +26,7 @@
  * │                                                                      │
  * │   阶段1: ONLINE(my_name, instance_id)                                │
  * │       ↓                                                              │
- * │   ONLINE_ACK(server_features)  ← 仅建立"客户端-服务器"连接           │
+ * │   REG_ACK(server_features)  ← 仅建立"客户端-服务器"连接           │
  * │                                                                      │
  * │   阶段2: SYNC0(target_name)                                          │
  * │       ↓                                                              │
@@ -37,11 +37,11 @@
  * └──────────────────────────────────────────────────────────────────────┘
  *
  * 协议消息列表：
- *   - ONLINE:        客户端上线（建立客户端-服务器连接）
- *   - ONLINE_ACK:    服务器确认上线，返回服务器能力标志
- *   - ALIVE:         客户端心跳保活（维持 TCP 长连接）
- *   - SYNC0:         请求建立与对端的会话（申请连接对方）
- *   - SYNC0_ACK:     服务器确认会话，返回 session_id 和对端在线状态
+ *   - REG:           客户端上线（建立客户端-服务器连接）
+ *   - REG_ACK:       服务器确认上线，返回服务器能力标志
+ *   - ALV:           客户端心跳保活（维持 TCP 长连接）
+ *   - SYN0:          请求建立与对端的会话（申请连接对方）
+ *   - SYN0_ACK:      服务器确认会话，返回 session_id 和对端在线状态
  *   - FIN:           主动断开与对端会话（按 session_id）
  *   - SYNC:          双向候选传输（Client→Server 上传，Server→Client 下发）
  *   - SYNC_ACK:      服务器确认候选，返回转发/缓存状态
@@ -75,7 +75,7 @@
  *
  *   阶段1: 客户端上线（建立客户端-服务器连接）
  *   ┌────────────────────────────────────────────────────┐
- *   │  INIT ──→ CONNECTING ──→ WAIT_ONLINE_ACK ──→ ONLINE │
+ *   │  INIT ──→ CONNECTING ──→ WAIT_REG_ACK ──→ ONLINE │
  *   └────────────────────────────────────────────────────┘
  *                                    ↓
  *   阶段2: 建立会话（申请连接对方，进行候选交换）
@@ -85,7 +85,7 @@
  *
  *   - INIT:              未启动
  *   - CONNECTING:        TCP 连接建立中
- *   - WAIT_ONLINE_ACK:   已发送 ONLINE，等待 ONLINE_ACK
+ *   - WAIT_REG_ACK:   已发送 ONLINE，等待 REG_ACK
  *   - ONLINE:            已上线，可以发起多个 SYNC0（核心状态）
  *   - WAIT_SYNC0_ACK:    已发送 SYNC0，等待 SYNC0_ACK（分配 session_id）
  *   - WAIT_PEER:         已分配 session_id，但对端离线，等待首个 SYNC
@@ -170,8 +170,8 @@ typedef enum {
     SIG_RELAY_INIT = 0,                                 /* 未启动 */
     SIG_RELAY_ERROR,                                    /* 错误状态 */
     SIG_RELAY_CONNECTING,                               /* TCP 连接建立中 */
-    SIG_RELAY_WAIT_ONLINE_ACK,                          /* 等待 ONLINE_ACK */
-    SIG_RELAY_ONLINE,                                   /* 已上线 */
+    SIG_RELAY_WAIT_REG_ACK,                             /* 等待 REG_ACK */
+    SIG_RELAY_REG,                                      /* 已上线 */
 } p2p_relay_st;
 
 typedef struct {
@@ -187,7 +187,7 @@ typedef struct {
     char                local_peer_id[P2P_PEER_ID_MAX]; /* 本端名称 */
     uint32_t            instance_id;                    /* 本次 online() 生成的实例 ID（参考 RTP SSRC）*/
 
-    /* 服务器能力（ONLINE_ACK 返回）*/
+    /* 服务器能力（REG_ACK 返回）*/
     uint8_t             candidate_sync_max;             /* 服务器允许的单包最大候选数（0=使用本地默认）*/
     bool                feature_relay;                  /* 支持数据包中继 */
     bool                feature_msg;                    /* 支持 RPC 机制 */

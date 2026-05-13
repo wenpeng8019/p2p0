@@ -10,17 +10,17 @@
  * 与 RELAY（TCP 两阶段分离）相比，COMPACT 采用 UDP 无状态设计：
  *   - 无独立的 ONLINE 稳定态，ONLINE 兼含候选注册（embedded candidates）
  *   - SYNC0 取代 RELAY 的第二阶段请求，同样返回 session_id 和对端在线状态
- *   - AUTH_KEY（ONLINE_ACK 中分配）取代 TCP 长连接作为 client↔server 认证令牌
+ *   - AUTH_KEY（REG_ACK 中分配）取代 TCP 长连接作为 client↔server 认证令牌
  *
  * 协议消息列表：
- *   - ONLINE:        客户端上线（注册本端 ID + 初始候选地址，获取 auth_key）
- *   - ONLINE_ACK:    服务器确认，返回 auth_key、公网地址、服务器能力
- *   - SYNC0:         建立与对端的会话（获取 session_id）
- *   - SYNC0_ACK:     服务器确认会话，返回 session_id 和对端在线状态
- *   - ALIVE:         保活心跳（维持 UDP 配对槽位）
+ *   - REG:          客户端上线（注册本端 ID + 初始候选地址，获取 auth_key）
+ *   - REG_ACK:       服务器确认，返回 auth_key、公网地址、服务器能力
+ *   - SYN0:          建立与对端的会话（获取 session_id）
+ *   - SYN0_ACK:      服务器确认会话，返回 session_id 和对端在线状态
+ *   - ALV:           保活心跳（维持 UDP 配对槽位）
  *   - SYNC:          双向候选传输（Client→Server 上传，Server→Client 下发）
  *   - SYNC_ACK:      候选接收确认（可靠传输控制）
- *   - OFFLINE:    主动下线，释放配对槽位，服务器通知对端 FIN
+ *   - OFF:           主动下线，释放配对槽位，服务器通知对端 FIN
  *   - FIN:           服务器通知本端：对端已离线
  *   - NAT_PROBE:     NAT 类型探测（发往服务器探测端口，可选）
  *   - NAT_PROBE_ACK: 返回探测端口观察到的映射地址
@@ -42,8 +42,8 @@
  *
  *   阶段1: online() / offline()
  *   ┌────────────────────────────────────────────────────────────────────────────┐
- *   │  INIT ──→ WAIT_ONLINE_ACK ──→ ONLINE          ← disconnect() 回退到此     │
- *   │                           ↘ (connect() 已调用，ONLINE_ACK 直接到阶段2)    │
+ *   │  INIT ──→ WAIT_REG_ACK ──→ ONLINE          ← disconnect() 回退到此     │
+ *   │                           ↘ (connect() 已调用，REG_ACK 直接到阶段2)    │
  *   └────────────────────────────────────────────────────────────────────────────┘
  *                              ↓ connect()（ONLINE 状态立即发 SYNC0）
  *   阶段2: connect() / disconnect()
@@ -52,22 +52,22 @@
  *   └──────────────────────────────────────────────────────────────────────────┘
  *
  *   - INIT:            未启动
- *   - WAIT_ONLINE_ACK: 已发送 ONLINE，等待 ONLINE_ACK（获取 auth_key）
- *   - ONLINE:          已收到 ONLINE_ACK（auth_key 有效），等待 connect() 触发 SYNC0
+ *   - WAIT_REG_ACK: 已发送 ONLINE，等待 REG_ACK（获取 auth_key）
+ *   - ONLINE:          已收到 REG_ACK（auth_key 有效），等待 connect() 触发 SYNC0
  *   - WAIT_SYNC0_ACK:  已发送 SYNC0，等待 SYNC0_ACK（获取 session_id）
  *   - WAIT_PEER:       已分配 session_id，等待对端上线（服务器下发 SYNC seq=0）
  *   - SYNCING:         候选同步中（接收/发送 SYNC）
  *   - READY:           候选同步完成，开始 P2P 打洞
  *
- * connect() 可先于 ONLINE_ACK 调用（仅存储 remote_peer_id），
- * 收到 ONLINE_ACK 后自动触发 SYNC0（懒触发，与 RELAY 模式一致）。
+ * connect() 可先于 REG_ACK 调用（仅存储 remote_peer_id），
+ * 收到 REG_ACK 后自动触发 SYNC0（懒触发，与 RELAY 模式一致）。
  *
  * ============================================================================
  * NAT 类型探测（可选）
  * ============================================================================
  *
  * 利用主端口和探测端口的两次映射观察，参考 RFC 5780 单 IP 简化模式：
- *   - ONLINE → ONLINE_ACK：主端口返回 Mapped_Addr1 + probe_port
+ *   - ONLINE → REG_ACK：主端口返回 Mapped_Addr1 + probe_port
  *   - NAT_PROBE → NAT_PROBE_ACK：探测端口返回 Mapped_Addr2（使用相同本地端口）
  *
  * 三分类判断：
@@ -114,8 +114,8 @@ struct p2p_instance;
 typedef enum {
     SIG_COMPACT_INIT = 0,                                   /* 未启动 */
     SIG_COMPACT_ERROR,                                      /* 错误状态，需重启 */
-    SIG_COMPACT_WAIT_ONLINE_ACK,                            /* 已发送 ONLINE，等待 ONLINE_ACK */
-    SIG_COMPACT_ONLINE,                                     /* 已上线, 收到 ONLINE_ACK */
+    SIG_COMPACT_WAIT_REG_ACK,                               /* 已发送 ONLINE，等待 REG_ACK */
+    SIG_COMPACT_REG,                                        /* 已上线, 收到 REG_ACK */
 } p2p_compact_st;
 
 typedef struct {
@@ -130,7 +130,7 @@ typedef struct {
     /* 和服务器的会话 */
     char                local_peer_id[P2P_PEER_ID_MAX];     /* 本端 ID */
     uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
-    uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 ONLINE_ACK 中获得，用于 SYNC0/ALIVE */
+    uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 REG_ACK 中获得，用于 SYNC0/ALIVE */
 
     /* REGISTER_ACK 返回的信息 */
     uint8_t             max_candidates;                     /* 服务器允许缓存的最大候选数量 */
@@ -166,7 +166,7 @@ typedef struct {
     char                remote_peer_id[P2P_PEER_ID_MAX];    /* 对端 ID */
 
     /* 候选同步管理 */
-    int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量（ONLINE_ACK 中 max_candidates 限制）*/
+    int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量（REG_ACK 中 max_candidates 限制）*/
     uint16_t            candidates_mask;                    /* 后续候选队列 seq 窗口 mask，用于全部完成确认，同时意味着最多发 16 个包 */
     uint16_t            candidates_acked;                   /* 后续候选队列对方确认的窗口 */
     uint16_t            trickle_idx_base;                   /* trickle 候选队列在 local_cands 中的起始索引 */
@@ -212,7 +212,7 @@ void p2p_signal_compact_init(p2p_compact_ctx_t *ctx);
  * 信令服务周期维护（拉取阶段）— 注册重试、保活
  * 
  * 处理各信令状态下的维护任务：
- * - WAIT_ONLINE_ACK：定期重发 ONLINE（获取 auth_key）
+ * - WAIT_REG_ACK：定期重发 ONLINE（获取 auth_key）
  * - WAIT_SYNC0_ACK：定期重发 SYNC0（获取 session_id）
  * - ONLINE/WAIT_PEER/SYNCING/READY：发送 ALIVE keepalive 保持服务器槽位
  * 
@@ -267,7 +267,7 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst);
 /*
  * 阶段2：建立与对端的会话（发送 SYNC0，建立 client↔peer 关系，获取 session_id）
  *
- * 若尚未收到 ONLINE_ACK（WAIT_ONLINE_ACK 状态），将在收到后自动触发 SYNC0。
+ * 若尚未收到 REG_ACK（WAIT_REG_ACK 状态），将在收到后自动触发 SYNC0。
  * 前提：必须已经调用过 online()。
  *
  * @param s              会话对象

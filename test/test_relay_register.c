@@ -5,7 +5,7 @@
  * 测试目标
  * ============================================================================
  * 验证 p2p_server 对 RELAY 协议 ONLINE/SYNC0 的处理逻辑：
- * - ONLINE / ONLINE_ACK 上线流程
+ * - ONLINE / REG_ACK 上线流程
  * - SYNC0 / SYNC0_ACK 首次同步（会话建立）
  *
  * ============================================================================
@@ -14,7 +14,7 @@
  * 1. 启动 p2p_server 子进程，监听指定 TCP 端口（--relay 模式）
  * 2. 通过 instrument 机制收集 server 的实时日志
  * 3. 测试程序作为 TCP 客户端，构造 ONLINE/SYNC0 包发送给 server
- * 4. 验证响应包（ONLINE_ACK/SYNC0_ACK）的内容和 server 日志
+ * 4. 验证响应包（REG_ACK/SYNC0_ACK）的内容和 server 日志
  *
  * ============================================================================
  * 测试用例分类
@@ -27,7 +27,7 @@
  *   目标：验证 ONLINE 正常流程
  *   方法：发送 ONLINE 包（包含 peer_id + instance_id）
  *   预期：
- *     - 收到 ONLINE_ACK
+ *     - 收到 REG_ACK
  *     - features 字段包含服务器能力
  *     - server 日志含 "came online"
  *
@@ -83,7 +83,7 @@
  *   目标：验证重连后 instance_id 变化时的处理
  *   方法：Alice 上线 → 断开 → 用新 instance_id 重新上线
  *   预期：
- *     - 两次都成功收到 ONLINE_ACK
+ *     - 两次都成功收到 REG_ACK
  *     - server 日志含 "new instance"
  *
  * 测试 9: sync0_duplicate
@@ -314,7 +314,7 @@ static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
     return 3 + payload_len;
 }
 
-// ONLINE_ACK 解析结果
+// REG_ACK 解析结果
 typedef struct {
     int received;
     uint8_t features;
@@ -335,7 +335,7 @@ typedef struct {
     uint8_t status_code;
 } status_t;
 
-// 发送 ONLINE 并接收 ONLINE_ACK
+// 发送 ONLINE 并接收 REG_ACK
 static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t instance_id, online_ack_t *ack) {
     uint8_t pkt[64];
     int pkt_len = build_online(pkt, sizeof(pkt), peer_id, instance_id);
@@ -447,13 +447,13 @@ static void test_online_success(void) {
     P_usleep(100 * 1000);
     
     if (rc <= 0 || !ack.received) {
-        TEST_FAIL(TEST_NAME, "no ONLINE_ACK received");
+        TEST_FAIL(TEST_NAME, "no REG_ACK received");
         return;
     }
     
     // 检查日志
-    if (find_log("came online") < 0) {
-        TEST_FAIL(TEST_NAME, "server log missing 'came online'");
+    if (find_log("new REG") < 0) {
+        TEST_FAIL(TEST_NAME, "server log missing 'new REG'");
         return;
     }
     
@@ -822,7 +822,7 @@ static void test_online_reconnect(void) {
     P_usleep(100 * 1000);
     
     // 检查日志应有 new instance
-    if (find_log("new instance") >= 0) {
+    if (find_log("reconnected & renew") >= 0) {
         TEST_PASS(TEST_NAME);
         return;
     }

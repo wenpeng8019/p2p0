@@ -182,7 +182,7 @@ struct p2p_instance;
 typedef enum {
     SIG_PUBSUB_INIT = 0,                                /* 未启动 */
     SIG_PUBSUB_ERROR,                                   /* 错误状态 */
-    SIG_PUBSUB_ONLINE,                                  /* 已上线 */
+    SIG_PUBSUB_REG,                                  /* 已上线 */
 } p2p_pubsub_st;
 
 typedef struct {

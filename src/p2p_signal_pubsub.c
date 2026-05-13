@@ -623,7 +623,7 @@ ret_t p2p_signal_pubsub_online(struct p2p_instance *inst, const char *local_peer
     if (inst->cfg.auth_key)
         strncpy(ctx->auth_key, inst->cfg.auth_key, sizeof(ctx->auth_key) - 1);
 
-    ctx->state = SIG_PUBSUB_ONLINE;
+    ctx->state = SIG_PUBSUB_REG;
 
     print("I:", LA_F("ONLINE: local_gist=%s peer=%s", LA_F320, 320), gist_id, local_peer_id);
     return E_NONE;
@@ -642,7 +642,7 @@ ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_addr) 
     p2p_signal_pubsub_ctx_t *ctx = &s->inst->sig_ctx.pubsub;
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
-    if (ctx->state < SIG_PUBSUB_ONLINE) {
+    if (ctx->state < SIG_PUBSUB_REG) {
         print("W:", LA_F("CONNECT: instance not online yet", 0, 0));
         return E_NONE_CONTEXT;
     }
@@ -765,7 +765,7 @@ void p2p_signal_pubsub_trickle_candidate(struct p2p_session *s) {
  */
 void p2p_signal_pubsub_tick_recv(struct p2p_instance *inst, uint64_t now) {
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
-    if (ctx->state < SIG_PUBSUB_ONLINE) return;
+    if (ctx->state < SIG_PUBSUB_REG) return;
 
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
@@ -812,7 +812,7 @@ void p2p_signal_pubsub_tick_recv(struct p2p_instance *inst, uint64_t now) {
  */
 void p2p_signal_pubsub_tick_send(struct p2p_instance *inst, uint64_t now) {
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
-    if (ctx->state < SIG_PUBSUB_ONLINE) return;
+    if (ctx->state < SIG_PUBSUB_REG) return;
 
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
@@ -906,7 +906,7 @@ static void setup_with_peer(struct p2p_instance **out_inst, struct p2p_session *
     strncpy(ctx->local_gist_id, env_gist, sizeof(ctx->local_gist_id) - 1);
     strncpy(ctx->local_peer_id, peer_id, sizeof(ctx->local_peer_id) - 1);
     strncpy(ctx->auth_key, env_key ? env_key : "testkey1", sizeof(ctx->auth_key) - 1);
-    ctx->state = SIG_PUBSUB_ONLINE;
+    ctx->state = SIG_PUBSUB_REG;
 
     s->sig_sess.pubsub.remote_sync_ver = -1;
 

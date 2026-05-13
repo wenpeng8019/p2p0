@@ -31,7 +31,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F63] = "%s: peer '%s' offline, cached cands=%d\n",  /* SID:63 */
     [LA_F152] = "%s: '%s' <-> '%s' paired (ses=%u/%u)\n",  /* SID:152 */
     [LA_F93] = "ONLINE: '%s' came online (inst=%u)\n",  /* SID:93 */
-    [LA_F98] = "ONLINE_ACK sent to '%s'\n",  /* SID:98 */
+    [LA_F98] = "REG_ACK sent to '%s'\n",  /* SID:98 */
     [LA_F153] = "%s: '%s' reconnected & renew (inst=%u)\n",  /* SID:153 */
     [LA_F45] = "%s: close ses_id=%u\n",  /* SID:45 */
     [LA_F24] = "%s: '%s' sid=%u code=%u data_len=%d\n",  /* SID:24 */
@@ -200,7 +200,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F204] = "unsupported type=%u (ses_id=%u)\n",  /* SID:204 */
     [LA_F184] = "[UDP] ALIVE recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:184 */
     [LA_F185] = "[UDP] OFF recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:185 */
-    [LA_F12] = "% Client sent data before ONLINE_ACK completed\n",  /* SID:12 */
+    [LA_F12] = "% Client sent data before REG_ACK completed\n",  /* SID:12 */
     [LA_F19] = "%s from '%.*s': new instance(old=%u new=%u), resetting\n",  /* SID:19 */
     [LA_F23] = "%s: '%.*s' cleared stale peer marker, ready for re-pair\n",  /* SID:23 */
     [LA_F54] = "%s: late-paired '%.*s' <-> '%.*s' (waiting session found)\n",  /* SID:54 */

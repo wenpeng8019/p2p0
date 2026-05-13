@@ -415,7 +415,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 #define SIG_PKT_NAT             0xA0        // NAT 类型探测请求（发往探测端口）
 #define SIG_PKT_NAT_ACK         0xA1        // NAT 类型探测响应（返回第二次映射地址）
 
-/* ONLINE_ACK 标志位（p2p_packet_hdr_t.flags） */
+/* REG_ACK 标志位（p2p_packet_hdr_t.flags） */
 #define SIG_REG_FLAG_RELAY          0x01    // 服务器支持数据中继功能（P2P 打洞失败降级）
 #define SIG_REG_FLAG_MSG            0x02    // 服务器支持 MSG RPC 机制（可可靠中转请求-应答）
 
@@ -438,12 +438,12 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - REG 仅建立客户端与服务器的关系，不携带 remote_peer_id 和候选地址
  *   - instance_id: 本次 connect() 的实例 ID（网络字节序，32位，必须非 0）
  *   - 语义:
- *       * instance_id 相同: 视为 REG 重传（例如客户端未收到 ONLINE_ACK）
+ *       * instance_id 相同: 视为 REG 重传（例如客户端未收到 REG_ACK）
  *       * instance_id 不同: 视为同一 local_peer_id 的新实例（客户端重启/重连），服务端重置旧状态
  *   总大小: 4(包头) + 36(payload) = 40 字节
  */
  #define SIG_PKT_REG_PSZ            (P2P_PEER_ID_MAX + sizeof(uint32_t))                               // peer_id(32) + instance_id(4)
-/* ONLINE_ACK:
+/* REG_ACK:
  *   payload: [instance_id(4)][auth_key(SIG_AUTH_KEY_PSZ)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)]
  *   包头: type=0x81, flags=见下, seq=0
  *   - auth_key: 客户端-服务器认证令牌（network byte order, 64-bit），用于后续 SYN0 和 ALV 包的身份验证
@@ -463,7 +463,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 /* OFFLINE:
  *   payload: [auth_key(SIG_AUTH_KEY_PSZ)]
  *   包头: type=0x82, flags=0, seq=0
- *   - auth_key: 来自 ONLINE_ACK 的客户端-服务器认证令牌（network byte order），服务器用于 O(1) 查找并释放配对槽位
+ *   - auth_key: 来自 REG_ACK 的客户端-服务器认证令牌（network byte order），服务器用于 O(1) 查找并释放配对槽位
  *   客户端主动断开时发送，请求服务器立即释放配对槽位
  *   服务器收到后会向对端发送 FIN 通知
  */
@@ -471,7 +471,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
 /* ALV:
  *   payload: [auth_key(SIG_AUTH_KEY_PSZ)]
  *   包头: type=0x83, flags=0, seq=0
- *   - auth_key: 客户端-服务器认证令牌（来自 ONLINE_ACK），用于服务器识别并更新槽位活跃时间
+ *   - auth_key: 客户端-服务器认证令牌（来自 REG_ACK），用于服务器识别并更新槽位活跃时间
  *   用于客户端在 ONLINE/READY 状态定期发送，保持服务器槽位活跃
  */
  #define SIG_PKT_ALV_PSZ            SIG_AUTH_KEY_PSZ                                                   // auth_key(SIG_AUTH_KEY_PSZ)
@@ -485,11 +485,11 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  * 方向 1: client → server（建立和对端连接，并提交首批同步候选）
  *   payload: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(P2P_PEER_ID_MAX)][candidate_count(1)][candidates(N*23)]
- *   - auth_key: 来自 ONLINE_ACK 的客户端-服务器认证令牌（network byte order）
+ *   - auth_key: 来自 REG_ACK 的客户端-服务器认证令牌（network byte order）
  *   - remote_peer_id: 目标对端 ID（32字节，不足补零）
  *   - candidate_count: 首批候选数量（最多 max_candidates 个）
  *   - candidates: 首批候选地址列表（每 23 字节，p2p_candidate_t 格式）
- *   客户端在收到 ONLINE_ACK 后立即发送，同时完成：
+ *   客户端在收到 REG_ACK 后立即发送，同时完成：
  *     1. 提交首批候选供服务器缓存
  *     2. 指定 remote_peer_id，建立与对端的配对关系
  *
@@ -645,13 +645,13 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  *   1. 上线阶段：
  *      - 客户端发送 ONLINE（含 local_peer_id 与 instance_id）
- *      - 服务器回复 ONLINE_ACK（告知 auth_key、max_candidates、公网地址）
+ *      - 服务器回复 REG_ACK（告知 auth_key、max_candidates、公网地址）
  *        · auth_key=0: 服务器拒绝登录（无可用槽位），客户端停止重试
  *        · auth_key≠0: 登录成功，用于后续 SYN0/ALV 身份验证
- *      - 收到 ONLINE_ACK 后停止 ONLINE 重发，进入 ONLINE 状态
+ *      - 收到 REG_ACK 后停止 ONLINE 重发，进入 ONLINE 状态
  *
  *   2. 候选同步阶段（三次握手 + 序列化确认）：
- *      - 客户端收到 ONLINE_ACK 后立即发送 SYN0（含 auth_key + remote_peer_id + 首批候选）
+ *      - 客户端收到 REG_ACK 后立即发送 SYN0（含 auth_key + remote_peer_id + 首批候选）
  *      - 服务器回复 SYN0_ACK（含 session_id + online），online=1 表示对端已上线
  *      - 客户端收到 SYN0_ACK 后，回复 SYN0_ACK（二次确认，含 session_id）
  *      - 服务器在收到二次确认前，不会将对端的 SYN0 转发过来（确保 session_id 先建立）
@@ -666,14 +666,14 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *      Alice (在线)           Server                    Bob (离线)
  *        |                       |                          |
  *        |--- ONLINE ----------->|                          |
- *        |<-- ONLINE_ACK --------|  (auth_key + capabilities)
+ *        |<-- REG_ACK --------|  (auth_key + capabilities)
  *        |--- SYN0 ------------->|  (auth_key + 首批候选)   |
  *        |<-- SYN0_ACK ----------|  (session_id, online=0)  |
  *        |--- SYN0_ACK --------->|  (二次确认, session_id)  |
  *        |   [进入 ONLINE]       |  (缓存 Alice 的候选)     |
  *        |    ... Bob 上线 ...                              |
  *        |                       |<-- ONLINE ---------------|
- *        |                       |--- ONLINE_ACK ---------->|  (auth_key + capabilities)
+ *        |                       |--- REG_ACK ------------->|  (auth_key + capabilities)
  *        |                       |<-- SYN0 -----------------|  (auth_key + 首批候选)
  *        |                       |--- SYN0_ACK ------------>|  (session_id, online=1)
  *        |                       |<-- SYN0_ACK -------------|  (二次确认, session_id)
@@ -688,13 +688,13 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *        |----------- SYNC(seq=3, count=0, FIN) ----------->|  (结束标识)
  *        |<---------- SYNC_ACK(seq=3) ----------------------|
  *
- * 注：ONLINE 仅在上线阶段发送，收到 ONLINE_ACK 后停止（直到重连）；SYN0 在收到 ONLINE_ACK 后发送
+ * 注：ONLINE 仅在上线阶段发送，收到 REG_ACK 后停止（直到重连）；SYN0 在收到 REG_ACK 后发送
  *
  * 2. MSG RPC 机制（服务器可选实现）
  * ============================================================================
  *
  * 通过服务器中转，实现对端间可信赖的一次请求-应答交互（类似 RPC）。
- * 服务器是否支持由 ONLINE_ACK.flags 中 SIG_ONACK_FLAG_MSG (0x02) 位标识。
+ * 服务器是否支持由 REG_ACK.flags 中 SIG_ONACK_FLAG_MSG (0x02) 位标识。
  *
  * msg 特殊值（请求消息类型）：
  *   - msg=0: Echo 测试，B端自动回复相同数据，无需应用层介入

@@ -456,7 +456,7 @@ p2p_recv(p2p_session_t session, void *buf, int len);
 /**
  * 通过信令服务器向对端发送 MSG 请求（A 端）。
  *
- * 仅在 COMPACT 模式、服务器支持 MSG（ONLINE_ACK flags 含 SIG_ONACK_FLAG_MSG）
+ * 仅在 COMPACT 模式、服务器支持 MSG（REG_ACK flags 含 SIG_ONACK_FLAG_MSG）
  * 且当前无挂起请求时有效。发送成功后通过 on_response 回调接收应答。
  *
  * @param session   会话对象

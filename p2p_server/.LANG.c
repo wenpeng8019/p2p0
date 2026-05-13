@@ -202,7 +202,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F204] = "unsupported type=%u (ses_id=%u)\n",  /* SID:204 */
     [LA_F184] = "[UDP] ALIVE recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:184 disabled */
     [LA_F185] = "[UDP] OFF recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:185 disabled */
-    [LA_F12] = "% Client sent data before ONLINE_ACK completed\n",  /* SID:12 disabled */
+    [LA_F12] = "% Client sent data before REG_ACK completed\n",  /* SID:12 disabled */
     [LA_F19] = "%s from '%.*s': new instance(old=%u new=%u), resetting\n",  /* SID:19 disabled */
     [LA_F23] = "%s: '%.*s' cleared stale peer marker, ready for re-pair\n",  /* SID:23 disabled */
     [LA_F54] = "%s: late-paired '%.*s' <-> '%.*s' (waiting session found)\n",  /* SID:54 disabled */

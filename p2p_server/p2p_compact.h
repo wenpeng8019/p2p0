@@ -34,7 +34,7 @@ typedef struct compact_session {
     int                             rpc_retry;                  // 重传次数
     bool                            rpc_responding;             // RPC 阶段（false=REQ等待对端，true=RSP等待确认）
     uint8_t                         rpc_code;                   // RPC 消息类型/响应码（REQ阶段=消息类型，RSP阶段=响应码）
-    uint8_t                         rpc_flags;                  // RPC flags（RSP 阶段使用：PEER_OFFLINE/TIMEOUT）
+    uint8_t                         rpc_flags;                  // RPC flags（RSP 阶段使用：PEER_OFF/TIMEOUT）
     uint8_t                         rpc_data[P2P_MSG_DATA_MAX]; // RPC 数据缓冲区
     int                             rpc_data_len;               // RPC 数据长度
 
@@ -44,7 +44,7 @@ typedef struct compact_client {
     client_t                        base;
 
     struct sockaddr_in              addr;                       // 公网地址（UDP 源地址）
-    uint64_t                        auth_key;                   // client↔server 认证令牌（ONLINE_ACK 分配，OFFLINE/ALIVE/SYNC0 鉴权用）
+    uint64_t                        auth_key;                   // client↔server 认证令牌（REG_ACK 分配，OFF/ALV/SYN0 鉴权用）
 
     UT_hash_handle                  hh;                         // 按 auth_key 索引（client↔server 鉴权查找）
 } compact_client_t;

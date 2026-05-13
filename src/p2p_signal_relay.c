@@ -456,7 +456,7 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
     }
 
     p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
-    if (sig_ctx->state != SIG_RELAY_WAIT_ONLINE_ACK) {
+    if (sig_ctx->state != SIG_RELAY_WAIT_REG_ACK) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sig_ctx->state);
         return;
     }
@@ -474,7 +474,7 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
           TASK_REG, sig_ctx->candidate_sync_max, def, sig_ctx->feature_relay ? "yes" : "no", sig_ctx->feature_msg ? "yes" : "no");
 
     // 切换到 ONLINE 状态
-    sig_ctx->state = SIG_RELAY_ONLINE;
+    sig_ctx->state = SIG_RELAY_REG;
     inst->state = P2P_SIG_ST_READY;
     print("I:", LA_F("%s: ready to start session\n", LA_F197, 197), TASK_REG);
 
@@ -519,7 +519,7 @@ void handle_alive_ack(struct p2p_instance *inst, uint64_t now) {
     const char* PROTO = "ALIVE_ACK";
 
     p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
-    if (sig_ctx->state < SIG_RELAY_ONLINE) {
+    if (sig_ctx->state < SIG_RELAY_REG) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sig_ctx->state);
         return;
     }
@@ -579,7 +579,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
         print("W:", LA_F("%s: peer offline\n", LA_F176, 176), PROTO);
 
         p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
-        if (sig_ctx->state >= SIG_RELAY_ONLINE) {
+        if (sig_ctx->state >= SIG_RELAY_REG) {
             sess_ctx->state = SIG_RELAY_SESS_WAIT_PEER;
             s->state = P2P_STATE_WAITING;
             print("I:", LA_F("[ST:%s] peer went offline, waiting for reconnect\n", LA_F460, 460), "WAIT_PEER");
@@ -1180,7 +1180,7 @@ ret_t p2p_signal_relay_online(struct p2p_instance *inst, const char *local_peer_
     // 连接立即成功（少见）
     if (ret == 0) {
         print("I:", LA_F("[R] TCP connected immediately, sending REG\n", LA_F448, 448));
-        sig_ctx->state = SIG_RELAY_WAIT_ONLINE_ACK;
+        sig_ctx->state = SIG_RELAY_WAIT_REG_ACK;
         send_online(inst, P_tick_ms());
     }
     // 连接进行中
@@ -1305,7 +1305,7 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
     sess_ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
     // 已上线：立即发送 SYNC0；否则等待 REG_ACK 后自动触发
-    if (sig_ctx->state == SIG_RELAY_ONLINE) {
+    if (sig_ctx->state == SIG_RELAY_REG) {
         sess_ctx->state = SIG_RELAY_SESS_WAIT_SYNC0_ACK;
         send_sync0(s->inst, s, P_tick_ms());
     }
@@ -1522,7 +1522,7 @@ void p2p_signal_relay_tick_recv(struct p2p_instance *inst, uint64_t now) {
         // 连接成功，发送 REG
         if (ret > 0 && FD_ISSET(sig_ctx->sockfd, &wfds)) {
             print("I:", LA_F("[R] TCP connected, sending REG\n", LA_F449, 449));
-            sig_ctx->state = SIG_RELAY_WAIT_ONLINE_ACK;
+            sig_ctx->state = SIG_RELAY_WAIT_REG_ACK;
             send_online(inst, now);
         } else if (ret < 0) {
             print("E:", LA_F("[R] TCP connect select failed(%d)\n", LA_F447, 447), P_sock_errno());
@@ -1613,7 +1613,7 @@ void p2p_signal_relay_tick_recv(struct p2p_instance *inst, uint64_t now) {
     // ====================================================================
 
     // 服务器应答超时检查
-    if (sig_ctx->state == SIG_RELAY_WAIT_ONLINE_ACK) {
+    if (sig_ctx->state == SIG_RELAY_WAIT_REG_ACK) {
         if (tick_diff(now, sig_ctx->last_send_time) > P2P_RELAY_ACK_TIMEOUT_MS) {
             print("E:", LA_F("[R] %s timeout\n", LA_F439, 439), "REG_ACK");
             P_sock_close(sig_ctx->sockfd);
@@ -1651,7 +1651,7 @@ void p2p_signal_relay_tick_send(struct p2p_instance *inst, uint64_t now) {
     // ====================================================================
 
     // 心跳保活
-    if (sig_ctx->state >= SIG_RELAY_ONLINE) {
+    if (sig_ctx->state >= SIG_RELAY_REG) {
         if (tick_diff(now, sig_ctx->last_send_time) > P2P_RELAY_HEARTBEAT_INTERVAL_MS) {
             send_alive(inst, now);
         }

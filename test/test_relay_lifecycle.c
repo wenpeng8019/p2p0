@@ -297,7 +297,7 @@ static int build_fin(uint8_t *buf, int buf_size, uint32_t session_id) {
     return 3 + payload_len;
 }
 
-// ONLINE_ACK 解析结果
+// REG_ACK 解析结果
 typedef struct {
     int received;
     uint8_t features;
@@ -311,7 +311,7 @@ typedef struct {
     uint8_t online;
 } sync0_ack_t;
 
-// 发送 ONLINE 并接收 ONLINE_ACK
+// 发送 ONLINE 并接收 REG_ACK
 static int send_online_recv_ack(sock_t sock, const char *peer_id, uint32_t instance_id, online_ack_t *ack) {
     uint8_t pkt[64];
     int pkt_len = build_online(pkt, sizeof(pkt), peer_id, instance_id);

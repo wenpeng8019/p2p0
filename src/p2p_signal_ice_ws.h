@@ -43,10 +43,10 @@ struct p2p_session;
  * ============================================================================ */
 
 typedef enum {
-    ICE_WS_INIT = 0,       /* 未连接 */
+    ICE_WS_INIT = 0,        /* 未连接 */
     ICE_WS_CONNECTING,      /* WS 握手中 */
-    ICE_WS_REGISTERING,     /* 已连接，等待 ONLINE OK */
-    ICE_WS_ONLINE,          /* 注册成功，可收发 */
+    ICE_WS_REGISTERING,     /* 已连接，等待 REG_ACK */
+    ICE_WS_REG,             /* 注册成功，可收发 */
     ICE_WS_ERROR,           /* 错误 */
 } p2p_ice_ws_state_t;
 

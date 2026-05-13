@@ -217,7 +217,7 @@ static int pack_local_candidates(struct p2p_session *s, uint16_t seq, uint8_t *p
 static void send_online(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, uint64_t now) {
     const char* PROTO = "ONLINE";
 
-    assert(sig_ctx->state == SIG_COMPACT_WAIT_ONLINE_ACK);
+    assert(sig_ctx->state == SIG_COMPACT_WAIT_REG_ACK);
 
     uint8_t payload[SIG_PKT_REG_PSZ];
 
@@ -243,7 +243,7 @@ static void send_online(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, u
  *
  * 包头: [type=SIG_PKT_SYN0 | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
- *   - auth_key: 坥自 ONLINE_ACK 的客户端-服务器认证令牌
+ *   - auth_key: 坥自 REG_ACK 的客户端-服务器认证令牌
  *   - remote_peer_id: 目标对端 ID
  *   - candidate_count: 首批候选数量（最多 candidates_cached 个）
  */
@@ -568,9 +568,9 @@ static void reset_peer(p2p_compact_session_t *sess_ctx) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * 处理 ONLINE_ACK，服务器上线确认
+ * 处理 REG_ACK，服务器上线确认
  *
- * 包头: [type=SIG_PKT_ONLINE_ACK | flags=见下 | seq=0]
+ * 包头: [type=SIG_PKT_REG_ACK | flags=见下 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ) | instance_id(4) | max_candidates(1) | public_ip(4) | public_port(2) | probe_port(2)]
  *   - auth_key: 客户端-服务器认证令牌（0=服务器拒绝登录，无可用槽位）
  *   - max_candidates: 服务器缓存的最大候选数量（0=不支持缓存）
@@ -581,7 +581,7 @@ static void reset_peer(p2p_compact_session_t *sess_ctx) {
 void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flags,
                               const uint8_t *payload, int len) {
     (void)seq; (void)len;
-    const char* PROTO = "ONLINE_ACK";
+    const char* PROTO = "REG_ACK";
 
     // instance_id 先于 auth_key，可在验证state前快速过滤过期 ACK
     uint32_t ack_instance_id = 0;
@@ -594,7 +594,7 @@ void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flag
     }
 
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
-    if (sig_ctx->state != SIG_COMPACT_WAIT_ONLINE_ACK) {
+    if (sig_ctx->state != SIG_COMPACT_WAIT_REG_ACK) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sig_ctx->state);
         return;
     }
@@ -606,7 +606,7 @@ void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flag
         return;
     }
 
-    // ONLINE_ACK 下发 auth_key（客户端-服务器认证令牌）
+    // REG_ACK 下发 auth_key（客户端-服务器认证令牌）
     sig_ctx->auth_key = ack_auth_key;
 
     sig_ctx->feature_relay = (flags & SIG_REG_FLAG_RELAY) != 0;      // 服务器是否支持数据中继转发
@@ -628,7 +628,7 @@ void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flag
           sig_ctx->feature_relay ? "yes" : "no",
           sig_ctx->feature_msg ? "yes" : "no");
 
-    sig_ctx->state = SIG_COMPACT_ONLINE;
+    sig_ctx->state = SIG_COMPACT_REG;
     inst->state = P2P_SIG_ST_READY;
 
     // 如果服务器支持数据中继
@@ -685,7 +685,7 @@ void compact_on_alive_ack(struct p2p_instance *inst) {
 
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
 
-    if (sig_ctx->state < SIG_COMPACT_ONLINE) {
+    if (sig_ctx->state < SIG_COMPACT_REG) {
         print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sig_ctx->state);
         return;
     }
@@ -1434,7 +1434,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
 
     do { const char *PROTO;
 
-        if (type == SIG_PKT_REG_ACK) { PROTO = "ONLINE_ACK";
+        if (type == SIG_PKT_REG_ACK) { PROTO = "REG_ACK";
 
             printf(LA_F("[C] %s recv, seq=%u, flags=0x%02x, len=%d\n", LA_F426, 426),
                 PROTO, seq, flags, payload_len);
@@ -1646,7 +1646,7 @@ ret_t p2p_signal_compact_online(struct p2p_instance *inst, const char *local_pee
     strncpy(sig_ctx->local_peer_id, local_peer_id, P2P_PEER_ID_MAX - 1);
     sig_ctx->local_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
-    sig_ctx->state = SIG_COMPACT_WAIT_ONLINE_ACK;
+    sig_ctx->state = SIG_COMPACT_WAIT_REG_ACK;
     send_online(inst, sig_ctx, P_tick_ms());
     sig_ctx->sig_attempts = 1;
 
@@ -1690,10 +1690,10 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst) {
  *
  * 包头: [type=SIG_PKT_SYN0 | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)][remote_peer_id(32)][candidate_count(1)][candidates(N*23)]
- *   - auth_key:        ONLINE_ACK 中分配的客户端令牌
+ *   - auth_key:        REG_ACK 中分配的客户端令牌
  *   - remote_peer_id:  目标对端 ID（32 字节，不足补零）
  *   - candidates:      首批本地候选（最多 candidates_cached 个）
- * 注：若状态为 WAIT_ONLINE_ACK，仅存储 remote_peer_id，SYNC0 在收到 ONLINE_ACK 后自动触发
+ * 注：若状态为 WAIT_REG_ACK，仅存储 remote_peer_id，SYNC0 在收到 REG_ACK 后自动触发
  */
 ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_id) {
 
@@ -1714,8 +1714,8 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_
     strncpy(ssss_ctx->remote_peer_id, remote_peer_id, P2P_PEER_ID_MAX - 1);
     ssss_ctx->remote_peer_id[P2P_PEER_ID_MAX - 1] = '\0';
 
-    // ONLINE_ACK 已收到，且无需等待 stun 返回的异步候选，则立即发 SYNC0
-    if (sig_ctx->state == SIG_COMPACT_ONLINE) {
+    // REG_ACK 已收到，且无需等待 stun 返回的异步候选，则立即发 SYNC0
+    if (sig_ctx->state == SIG_COMPACT_REG) {
 
         ssss_ctx->state = SIG_COMPACT_SESS_WAIT_SYNC0_ACK;
         send_sync0(s->inst, s, P_tick_ms());
@@ -1731,8 +1731,8 @@ ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_
  *
  * 包头: [type=SIG_PKT_OFFLINE | flags=0 | seq=0]
  * 负载: [auth_key(SIG_AUTH_KEY_PSZ)]
- *   - auth_key: ONLINE_ACK 中分配的客户端令牌，服务器据此查找并释放配对槽位
- * 注：若尚在 WAIT_ONLINE_ACK 状态（auth_key 未分配），仅清除 remote_peer_id，不发包
+ *   - auth_key: REG_ACK 中分配的客户端令牌，服务器据此查找并释放配对槽位
+ * 注：若尚在 WAIT_REG_ACK 状态（auth_key 未分配），仅清除 remote_peer_id，不发包
  */
 ret_t p2p_signal_compact_disconnect(struct p2p_session *s) {
     const char* PROTO = "OFFLINE";
@@ -1926,10 +1926,10 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
 
     // 如果还未登录，或已经出错
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
-    if (sig_ctx->state < SIG_COMPACT_WAIT_ONLINE_ACK) return;
+    if (sig_ctx->state < SIG_COMPACT_WAIT_REG_ACK) return;
 
     // REGISTERING 状态：定期重发 ONLINE
-    if (sig_ctx->state == SIG_COMPACT_WAIT_ONLINE_ACK) {
+    if (sig_ctx->state == SIG_COMPACT_WAIT_REG_ACK) {
 
         if (tick_diff(now, sig_ctx->last_send_time) >= ONLINE_INTERVAL_MS) {
 
@@ -1952,7 +1952,7 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
 
         return;
     }
-    assert(sig_ctx->state == SIG_COMPACT_ONLINE);
+    assert(sig_ctx->state == SIG_COMPACT_REG);
 
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_compact_session_t *sess_ctx = &s->sig_sess.compact;
@@ -2074,7 +2074,7 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
 void p2p_signal_compact_tick_send(struct p2p_instance *inst, uint64_t now) {
 
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
-    if (sig_ctx->state != SIG_COMPACT_ONLINE || sig_ctx->sig_sessions) return;
+    if (sig_ctx->state != SIG_COMPACT_REG || sig_ctx->sig_sessions) return;
 
     if (tick_diff(now, sig_ctx->last_send_time) >= REGISTER_KEEPALIVE_INTERVAL_MS) {
 
@@ -2083,7 +2083,7 @@ void p2p_signal_compact_tick_send(struct p2p_instance *inst, uint64_t now) {
          *
          * 包头: [type=SIG_PKT_ALIVE | flags=0 | seq=0]
          * 负载: [auth_key(SIG_AUTH_KEY_PSZ)]
-         *   - auth_key: 客户端-服务器认证令牌（来自 ONLINE_ACK）
+         *   - auth_key: 客户端-服务器认证令牌（来自 REG_ACK）
          * 说明: 保活包，维持服务器上的注册状态
          */
         {   const char* PROTO = "ALIVE";
@@ -2119,7 +2119,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_instance *inst, uint64_t now)
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
 
     // 探测端口未知
-    if (sig_ctx->state == SIG_COMPACT_INIT || sig_ctx->state == SIG_COMPACT_WAIT_ONLINE_ACK) {
+    if (sig_ctx->state == SIG_COMPACT_INIT || sig_ctx->state == SIG_COMPACT_WAIT_REG_ACK) {
         return;
     }
     // 不支持探测
