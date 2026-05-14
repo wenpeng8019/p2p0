@@ -1097,42 +1097,11 @@ static buf16_item_t* relay_error_item(ct_client_t *client, bool handshake) {
     return item;
 }
 
-ct_client_ctx_t*
-relay_init(void) {
+static bool relay_init_client(client_t* c) {
 
-    // 初始化 RPC 待确认队列
-    TQ_INIT(&g_relay_rpc_pending_q,
-            REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
-            offsetof(relay_session_t, rpc_pending_prev),
-            offsetof(relay_session_t, rpc_pending_next),
-            offsetof(relay_session_t, rpc_sent_time));
+    if (!ct_init_client((ct_client_t*)c)) return false;
 
-    buf16_item_t *fatal_item = (buf16_item_t*)g_relay_fatal;
-    p2p_relay_hdr_t *fatal_hdr = (p2p_relay_hdr_t*)ITEM2BUF(fatal_item);
-    fatal_hdr->type = P2P_RLY_STA;
-    fatal_hdr->size = htons(P2P_RLY_STA_PSZ(0, 0));
-    fatal_item->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0));
-    ((uint8_t*)(fatal_hdr + 1))[1] = P2P_RLY_ERR_INTERNAL;
-
-    g_ctx.base.free    = relay_free_client;
-    g_ctx.base.migrate = ct_migrate_client;
-    g_ctx.max_payload_len = P2P_MAX_PAYLOAD;
-    g_ctx.resolve_payload_len = relay_resolve_payload_len;
-    g_ctx.handle_handshake = relay_handle_handshake;
-    g_ctx.handshake_finish = NULL;
-    g_ctx.handle_proto = relay_handle_proto;
-    g_ctx.handle_peer_sent = relay_handle_peer_sent;
-    g_ctx.session_break = relay_session_break;
-    g_ctx.client_unreachable = NULL;
-    g_ctx.fatal_item = (buf16_item_t*)g_relay_fatal;
-    g_ctx.error_item = relay_error_item;
-    return &g_ctx;
-}
-
-bool
-relay_init_client(relay_client_t* client) {
-
-    if (!ct_init_client((ct_client_t*)client)) return false;
+    relay_client_t* client = (relay_client_t*)c;
 
     // ct_init_client 为流模式分配了 recv_buf；relay 使用帧模式，释放并切换
     if (((ct_client_t*)client)->recv_buf) {
@@ -1155,10 +1124,42 @@ relay_init_client(relay_client_t* client) {
 }
 
 // 释放 client
-void
-relay_free_client(client_t *client) {
+static void relay_free_client(client_t *client) {
 
     ct_free_client(&g_ctx, (ct_client_t*)client);
+}
+
+ct_client_ctx_t*
+relay_init(void) {
+
+    // 初始化 RPC 待确认队列
+    TQ_INIT(&g_relay_rpc_pending_q,
+            REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
+            offsetof(relay_session_t, rpc_pending_prev),
+            offsetof(relay_session_t, rpc_pending_next),
+            offsetof(relay_session_t, rpc_sent_time));
+
+    buf16_item_t *fatal_item = (buf16_item_t*)g_relay_fatal;
+    p2p_relay_hdr_t *fatal_hdr = (p2p_relay_hdr_t*)ITEM2BUF(fatal_item);
+    fatal_hdr->type = P2P_RLY_STA;
+    fatal_hdr->size = htons(P2P_RLY_STA_PSZ(0, 0));
+    fatal_item->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0));
+    ((uint8_t*)(fatal_hdr + 1))[1] = P2P_RLY_ERR_INTERNAL;
+
+    g_ctx.base.free = relay_free_client;
+    g_ctx.base.init = relay_init_client;
+    g_ctx.base.migrate = ct_migrate_client;
+    g_ctx.max_payload_len = P2P_MAX_PAYLOAD;
+    g_ctx.resolve_payload_len = relay_resolve_payload_len;
+    g_ctx.handle_handshake = relay_handle_handshake;
+    g_ctx.handshake_finish = NULL;
+    g_ctx.handle_proto = relay_handle_proto;
+    g_ctx.handle_peer_sent = relay_handle_peer_sent;
+    g_ctx.session_break = relay_session_break;
+    g_ctx.client_unreachable = NULL;
+    g_ctx.fatal_item = (buf16_item_t*)g_relay_fatal;
+    g_ctx.error_item = relay_error_item;
+    return &g_ctx;
 }
 
 // 检查 RELAY RPC 超时（队列按时间排序，未超时即短路返回）

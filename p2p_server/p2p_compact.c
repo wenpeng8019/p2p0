@@ -22,7 +22,7 @@ static timeout_queue_t              g_sync0_pending_q;
 // MSG RPC 待确认超时队列
 static timeout_queue_t              g_rpc_pending_q;
 
-static client_ctx_t                 g_ctx = { compact_free_client, NULL };
+static client_ctx_t                 g_ctx;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -278,25 +278,7 @@ static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-client_ctx_t*
-compact_init(void) {
-    TQ_INIT(&g_sync0_pending_q,
-            SYN0_MAX_RETRY * SYN0_RETRY_INTERVAL_MS,
-            offsetof(compact_session_t, sync0_pending_prev),
-            offsetof(compact_session_t, sync0_pending_next),
-            offsetof(compact_session_t, sync0_sent_time));
-    
-    TQ_INIT(&g_rpc_pending_q,
-            RSP_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
-            offsetof(compact_session_t, rpc_pending_prev),
-            offsetof(compact_session_t, rpc_pending_next),
-            offsetof(compact_session_t, rpc_sent_time));
-    
-    return &g_ctx;
-}
-
-bool
-compact_init_client(compact_client_t* c, struct sockaddr_in *from) {
+static bool compact_init_client(compact_client_t* c, struct sockaddr_in *from) {
 
     c->addr = *from;
 
@@ -355,6 +337,24 @@ void compact_free_client(client_t *c) {
     free_client_base(&cc->base);
 }
 
+client_ctx_t*
+compact_init(void) {
+
+    TQ_INIT(&g_sync0_pending_q,
+            SYN0_MAX_RETRY * SYN0_RETRY_INTERVAL_MS,
+            offsetof(compact_session_t, sync0_pending_prev),
+            offsetof(compact_session_t, sync0_pending_next),
+            offsetof(compact_session_t, sync0_sent_time));
+
+    TQ_INIT(&g_rpc_pending_q,
+            RSP_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
+            offsetof(compact_session_t, rpc_pending_prev),
+            offsetof(compact_session_t, rpc_pending_next),
+            offsetof(compact_session_t, rpc_sent_time));
+
+    g_ctx.free = compact_free_client;
+    return &g_ctx;
+}
 
 // 缓存响应数据并从 REQ 阶段转换到 RSP 阶段
 static void compact_transition_to_resp_pending(compact_session_t *requester, uint64_t now,

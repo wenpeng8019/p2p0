@@ -108,22 +108,27 @@ identify_client(client_t* c) {
     return true;
 }
 
-static inline void init_client(client_t* c, sock_t fd) {
+static inline bool init_client(client_t* c) {
+    assert(c->proto >= 0 && c->fd != P_INVALID_SOCKET);
     c->local_peer_id[0] = '\0';
     c->instance_id = 0;
     c->last_active = P_tick_ms();
-    c->fd = fd;
+    if (g_contexts[c->proto]->init && !g_contexts[c->proto]->init(c)) {
+        c->proto = -1; c->fd = P_INVALID_SOCKET;
+        return false;
+    }
     assert(!c->sessions);
+    return true;
 }
 
 client_t*
-alloc_client(int8_t proto, sock_t fd) {
+alloc_client(uint8_t proto, sock_t fd) {
+    assert(proto < 127 && fd != P_INVALID_SOCKET);
 
     for (int k = 0; k < MAX_PEERS; k++) { client_t* c = CLIENTS(k);
         if (c->proto < 0) {
-            c->proto = proto;
-            init_client(c, fd);
-            return c;
+            c->proto = (int8_t)proto; c->fd = fd;
+            return init_client(c) ? c : NULL;
         }
     }
     return NULL;
@@ -867,31 +872,30 @@ int main(int argc, char *argv[]) {
             for (; k < MAX_PEERS; k++) {
                 if (CLIENTS(k)->proto < 0) {
 
+                    CLIENTS(k)->fd = client_fd;
+
                     // WebSocket 监听端口
-                    if (i == 1) {
-                        if (!wss_init_client(&g_client_slots[k].wss)) {
+                    if (i == 1) { CLIENTS(k)->proto = PROTO_WSS;
+                        if (!init_client(CLIENTS(k))) {
                             print("E:", LA_F("Failed to initialize %s client\n", LA_F174, 174), "WS/ICE");
                             P_sock_close(client_fd);
                             break;
                         }
-                        CLIENTS(k)->proto = PROTO_WSS;
                         print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
                                 "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
                     }
                     // 如果是多模态混合端口
                     else if (ARGS_ws.i64) CLIENTS(k)->proto = 127;  // 标记为"暂定"模式的客户端
                     // TCP/Relay 监听端口
-                    else {
-                        if (!relay_init_client(&g_client_slots[k].relay)) {
+                    else { CLIENTS(k)->proto = PROTO_RELAY;
+                        if (!init_client(CLIENTS(k))) {
                             print("E:", LA_F("Failed to initialize %s client\n", LA_F174, 174), "TCP/RELAY");
                             P_sock_close(client_fd);
                             break;
                         }
-                        CLIENTS(k)->proto = PROTO_RELAY;
                         print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
                                 "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
                     }
-                    init_client(CLIENTS(k), client_fd);
                     TCP_CLIENTS(k)->io = TCP_IO_FLAG_WANT_READ;  /* 新连接默认进入读取状态，等待客户端发送数据 */
                     break;
                 }
@@ -932,48 +936,45 @@ int main(int argc, char *argv[]) {
             ct_client_t* ws_client = (m == PROTO_WSS) ? CT_CLIENTS(i) : NULL;
 
             // 处理数据接收
-            if ((TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_READ)
-                && FD_ISSET(CLIENTS(i)->fd, &read_fds)) {
+            if ((TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_READ) && FD_ISSET(CLIENTS(i)->fd, &read_fds)) {
 
                 // 对于多模态混合端口，需要先根据数据包内容判断协议类型
                 if (m == 127) {
 #ifdef WITH_WS
-                    uint8_t buf[1]; ssize_t n = recv(CLIENTS(i)->fd, (char *)buf, sizeof(buf), MSG_PEEK);
-                    if (n > 0) {
-                        // WebSocket 握手请求的特征。即 HTTP GET 请求行，也就是以 "GET " 开头
-                        if (buf[0] == 'G') {
-                            print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
-                                  "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
-                            if (!wss_init_client(&g_client_slots[i].wss)) {
-                                P_sock_close(CLIENTS(i)->fd);
-                                CLIENTS(i)->fd = P_INVALID_SOCKET;
-                                CLIENTS(i)->proto = -1;
-                                print("E:", LA_F("Failed to initialize WS/ICE client for slot %d\n", LA_F176, 176), i);
-                                continue;
-                            }
-                            ws_client = CT_CLIENTS(i);
-                            CLIENTS(i)->proto = m = PROTO_WSS;
-                        } else { 
-                            print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
-                                  "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
-                            if (!relay_init_client(&g_client_slots[i].relay)) {
-                                P_sock_close(CLIENTS(i)->fd);
-                                CLIENTS(i)->fd = P_INVALID_SOCKET;
-                                CLIENTS(i)->proto = -1;
-                                print("E:", LA_F("Failed to initialize TCP/RELAY client for slot %d\n", LA_F175, 175), i);
-                                continue;
-                            }
-                            CLIENTS(i)->proto = m = PROTO_RELAY;
-                        }
-                    } else {
-                        if (n == 0)
-                            print("I:", LA_F("Client closed during protocol detection (slot %d)\n", LA_F172, 172), i);
-                        else
-                            print("E:", LA_F("Failed to peek client data for protocol detection (slot %d)\n", LA_F177, 177), i);
+                    uint8_t buf[1]; size_t n = sizeof(buf);  //ssize_t n = recv(CLIENTS(i)->fd, (char *)buf, sizeof(buf), MSG_PEEK);
+                    ret_t r = P_recv_nonblock(CLIENTS(i)->fd, buf, &n, MSG_PEEK);
+                    if (r > 0) continue; // would block
+                    if (r < 0) {
+                        if (r == E_NONE_CONTEXT) print("I:", LA_F("Client closed during protocol detection (slot %d)\n", LA_F172, 172), i);
+                        else print("E:", LA_F("Failed to peek client data for protocol detection (slot %d), errno=%d\n", LA_F177, 177), i, r);
                         P_sock_close(CLIENTS(i)->fd);
                         CLIENTS(i)->fd = P_INVALID_SOCKET;
-                        CLIENTS(i)->proto = -1;   // 释放槽位
+                        CLIENTS(i)->proto = -1;
                         continue;
+                    }
+
+                    sock_t saved_fd = CLIENTS(i)->fd;
+
+                    // WebSocket 握手请求的特征。即 HTTP GET 请求行，也就是以 "GET " 开头
+                    if (buf[0] == 'G') { CLIENTS(i)->proto = m = PROTO_WSS;
+                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
+                              "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
+
+                        if (!init_client(CLIENTS(i))) {
+                            P_sock_close(saved_fd);
+                            print("E:", LA_F("Failed to initialize WS/ICE client for slot %d\n", LA_F176, 176), i);
+                            continue;
+                        }
+                        ws_client = CT_CLIENTS(i);
+                    } else { CLIENTS(i)->proto = m = PROTO_RELAY;
+                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
+                              "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
+
+                        if (!init_client(CLIENTS(i))) {
+                            P_sock_close(saved_fd);
+                            print("E:", LA_F("Failed to initialize TCP/RELAY client for slot %d\n", LA_F175, 175), i);
+                            continue;
+                        }
                     }
 #else
                     assert(false);

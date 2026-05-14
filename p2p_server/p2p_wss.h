@@ -89,11 +89,6 @@ typedef struct wss_client {
 cw_client_ctx_t*
 wss_init(void);
 
-bool
-wss_init_client(wss_client_t* c);
-void
-wss_free_client(client_t *client);
-
 void
 retry_wss_pending(uint64_t now);
 

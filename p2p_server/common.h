@@ -391,6 +391,7 @@ typedef enum break_mode {
 
 typedef struct client_ctx {
     void (*free)   (struct client *c);                              // 必须实现；用于释放派生的 client 对象，派生实现最终调用 free_client_base
+    bool (*init)   (struct client *c);                              // nullable；用于初始化派生的 client 对象
     void (*migrate)(struct client *to, struct client *from);        // nullable; 实现派生 client 对象状态迁移，被 resident_client 调用
 } client_ctx_t;
 
@@ -418,7 +419,7 @@ free_client_base(client_t *c);
 // 分配一个指定派生协议类型的 client 对象
 // + 主要用于 UDP/COMPACT 协议调用，因为 TCP/xxx 协议在 accept 建链时就已经自动分配了 client 对象
 client_t*
-alloc_client(int8_t proto, sock_t fd);
+alloc_client(uint8_t proto, sock_t fd);
 
 // 唯一标识客户端（注册 local_peer_id，并加入全局索引哈希表）
 // todo，增加参数 local_peer_id ？

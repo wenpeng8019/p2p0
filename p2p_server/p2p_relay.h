@@ -57,10 +57,6 @@ typedef struct relay_client {
 ct_client_ctx_t*
 relay_init(void);
 
-bool
-relay_init_client(relay_client_t* client);
-void
-relay_free_client(client_t *client);
 
 void
 relay_retry_pending(uint64_t now);

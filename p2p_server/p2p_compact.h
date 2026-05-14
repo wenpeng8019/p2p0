@@ -57,13 +57,6 @@ typedef struct compact_client {
 client_ctx_t*
 compact_init(void);
 
-bool
-compact_init_client(compact_client_t* c, struct sockaddr_in *from);
-void
-compact_free_client(client_t *c);
-
-extern client_ctx_t g_compact_client_ctx;
-
 void
 compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct sockaddr_in *from);
 void

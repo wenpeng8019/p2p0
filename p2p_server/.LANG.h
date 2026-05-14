@@ -222,7 +222,7 @@ enum {
     LA_F174,  /* "Failed to initialize %s client\n" (%s)  [server.c] */
     LA_F175,  /* "Failed to initialize TCP/RELAY client for slot %d\n" (%d)  [server.c] */
     LA_F176,  /* "Failed to initialize WS/ICE client for slot %d\n" (%d)  [server.c] */
-    LA_F177,  /* "Failed to peek client data for protocol detection (slot %d)\n" (%d)  [server.c] */
+    LA_F177,  /* "Failed to peek client data for protocol detection (slot %d), errno=%d\n" (%d,%d)  [server.c] */
     LA_F178,  /* "New %s client connected from %s:%d, assigned slot %d\n" (%s,%s,%d,%d)  [server.c] */
     LA_F179,  /* "handshake<%d> sent to '%s'\n" (%d,%s)  [custom_tcp.c] */
     LA_F180,  /* disabled "WebSocket recv callback error: errno=%d\n" */

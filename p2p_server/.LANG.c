@@ -131,7 +131,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F174] = "Failed to initialize %s client\n",  /* SID:174 */
     [LA_F175] = "Failed to initialize TCP/RELAY client for slot %d\n",  /* SID:175 */
     [LA_F176] = "Failed to initialize WS/ICE client for slot %d\n",  /* SID:176 */
-    [LA_F177] = "Failed to peek client data for protocol detection (slot %d)\n",  /* SID:177 */
+    [LA_F177] = "Failed to peek client data for protocol detection (slot %d), errno=%d\n",  /* SID:177 */
     [LA_F82] = "% Goodbye!\n",  /* SID:82 */
     [LA_F83] = "Invalid port number %d (range: 1-65535)\n",  /* SID:83 */
     [LA_F84] = "Invalid probe port %d (range: 0-65535)\n",  /* SID:84 */

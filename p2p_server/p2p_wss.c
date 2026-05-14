@@ -242,8 +242,17 @@ static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, b
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static bool wss_init_client(client_t *c) {
+    return cw_init_client((cw_client_t*)c, &g_wss_ctx);
+}
+
+static void wss_free_client(client_t *client) {
+    cw_free_client(&g_wss_ctx, (cw_client_t*)client);
+}
+
 cw_client_ctx_t*
 wss_init(void) {
+
     // 初始化 RPC 待确认队列
     TQ_INIT(&g_wss_rpc_pending_q,
             REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
@@ -252,6 +261,7 @@ wss_init(void) {
             offsetof(wss_session_t, rpc_sent_time));
 
     g_wss_ctx.base.base.free    = wss_free_client;
+    g_wss_ctx.base.base.init    = wss_init_client;
     g_wss_ctx.base.base.migrate = ct_migrate_client;
 
     cw_ctx_init(&g_wss_ctx);
@@ -269,15 +279,6 @@ wss_init(void) {
     return &g_wss_ctx;
 }
 
-bool
-wss_init_client(wss_client_t *c) {
-    return cw_init_client((cw_client_t*)c, &g_wss_ctx);
-}
-
-void
-wss_free_client(client_t *client) {
-    cw_free_client(&g_wss_ctx, (cw_client_t*)client);
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 
