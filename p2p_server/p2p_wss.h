@@ -61,12 +61,12 @@ typedef struct wss_session {
     uint16_t                        sync_len;               /* 已存储字节数 */
 
     /* SYNC 发送队列（对标 relay sync_peer_send，含 ACK_PENDING 机制） */
-    buf16_item_t*                   sync_peer_send[WSS_PEER_Q_MAX];
-    uint8_t                         sync_peer_send_cnt;
+    buf16_item_t*                   sync_peer_slots[WSS_PEER_Q_MAX];    /* 循环队列的 slots 数组（指针） */
+    buffer_round_t                  sync_peer_send;                     /* 发送队列（循环缓冲） */
 
     /* PKT 发送队列（对标 relay pkt_peer_send） */
-    buf16_item_t*                   pkt_peer_send[WSS_PEER_Q_MAX];
-    uint8_t                         pkt_peer_send_cnt;
+    buf16_item_t*                   pkt_peer_slots[WSS_PEER_Q_MAX];     /* 循环队列的 slots 数组（指针） */
+    buffer_round_t                  pkt_peer_send;                      /* 发送队列（循环缓冲） */
 
     /* MSG RPC 状态（与 relay_session_t 一致，独立于 SYNC 通道） */
     uint16_t                        rpc_pending_sid;        /* 0=空闲, 非零=等待 RSP 的 REQ sid */

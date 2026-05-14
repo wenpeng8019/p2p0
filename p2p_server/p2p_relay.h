@@ -18,16 +18,16 @@ typedef struct relay_session {
 
     /* SYNC 同步服务相关字段 */
     uint8_t                         last_sid;                           // 会话同步的最后一个 sid
-    buf16_item_t*                   sync_peer_send[RELAY_PEER_Q_MAX];   // 发送队列；[0] 为队头
-    uint8_t                         sync_peer_send_cnt;                 // 队列中的 item 数量
-                                                                        // 队头 [0] 的发送状态由 refer 判定：
+    buf16_item_t*                   sync_peer_slots[RELAY_PEER_Q_MAX];  // 循环队列的 slots 数组（指针）
+    buffer_round_t                  sync_peer_send;                     // 发送队列（循环缓冲）
+                                                                        // 队头 FRONT 的发送状态由 refer 判定：
                                                                         //   refer=NULL            → 待发但未启动（对端暂不可达）
                                                                         //   refer=session         → TCP 写入中
                                                                         //   refer=REFER_ACK_PENDING → 等待应用层 ACK
 
     /* PKT 中继服务相关字段 */
-    buf16_item_t*                   pkt_peer_send[RELAY_PEER_Q_MAX];    // 发送队列；[0] 为队头
-    uint8_t                         pkt_peer_send_cnt;                  // 队列中的 item 数量
+    buf16_item_t*                   pkt_peer_slots[RELAY_PEER_Q_MAX];   // 循环队列的 slots 数组（指针）
+    buffer_round_t                  pkt_peer_send;                      // 发送队列（循环缓冲）
 
     /* RPC 服务相关字段 */
     uint16_t                        rpc_last_sid;                       // 最后一个 RPC sid，维护 RPC 序列一致性（sid 循环递增）

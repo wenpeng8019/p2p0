@@ -120,21 +120,18 @@ static void wss_send_sync_confirm(wss_session_t *src_s, size_t bytes) {
 // 同时向 src_s 的 client 回复 confirm（因为 ring buffer 已从 src_s 中移走）
 // 返回 false 表示队列已满或 OOM
 static bool wss_enqueue_sync(wss_session_t *src_s, wss_session_t *dst_s) {
-    if (dst_s->sync_peer_send_cnt >= WSS_PEER_Q_MAX) return false;
+    if (BUF_R_FULL(&dst_s->sync_peer_send)) return false;
 
     size_t cached = src_s->sync_len;
     buf16_item_t *item = wss_build_sync_frame(src_s, dst_s->base.session_id);
     if (!item) return false;
 
-    // 入队
-    dst_s->sync_peer_send[dst_s->sync_peer_send_cnt] = item;
-    dst_s->sync_peer_send_cnt++;
-
-    // 若队头（刚入队且是第一项），立即发送
-    if (dst_s->sync_peer_send_cnt == 1) {
+    // 入队并在首次时冷启动发送
+    if (BUF_R_EMPTY(&dst_s->sync_peer_send)) {
         item->refer = (void*)dst_s;
         ct_session_send((ct_session_t*)dst_s, item);
     }
+    BUF_R_PUSH(&dst_s->sync_peer_send, item);
 
     // 通知 src 端已转发（ring buffer 已被 build_sync_frame 清空）
     wss_send_sync_confirm(src_s, cached);
@@ -205,23 +202,26 @@ static void wss_session_send_rpc_code(wss_session_t *s, uint16_t sid, uint8_t co
 //-----------------------------------------------------------------------------
 
 // 清理一个 SYNC/PKT 通道的所有队列项，并将存活项转发给 dst（镜像 relay_ch_break_forward）
-static void wss_ch_break_forward(buf16_item_t **arr, uint8_t *cnt, wss_session_t *dst) {
-    for (uint8_t i = 0; i < *cnt; i++) {
-        buf16_item_t *it = arr[i]; arr[i] = NULL;
-        if (it->refer != NULL && it->refer != ITEM_REF_ACK_PENDING) it->refer = NULL;
-        else ct_session_send((ct_session_t*)dst, it);
+static void wss_ch_break_forward(buffer_round_t *rq, wss_session_t *dst) {
+    if (BUF_R_EMPTY(rq)) return;
+    
+    buf16_item_t *front = BUF_R_FRONT(rq);
+    if (front->refer == ITEM_REF_ACK_PENDING) {
+        free_buf16(front);
+        BUF_R_POP(rq);
     }
-    *cnt = 0;
+
+    BUF_R_FOR(rq, it,
+        if (it->refer) it->refer = NULL;                // 如果正在发送中，取消 refer（转为由对方发送完成后自动释放）
+        else ct_session_send((ct_session_t*)dst, it);   // 直接发送到对方的发送队列中，且不添加 refer
+    )
+    BUF_R_CLEAR(rq);
 }
 
 // 清理一个通道的所有队列项并释放
-static void wss_ch_break_free(buf16_item_t **arr, uint8_t *cnt) {
-    for (uint8_t i = 0; i < *cnt; i++) {
-        buf16_item_t *it = arr[i]; arr[i] = NULL;
-        if (it->refer != NULL && it->refer != ITEM_REF_ACK_PENDING) it->refer = NULL;
-        else free_buf16(it);
-    }
-    *cnt = 0;
+static void wss_ch_break_free(buffer_round_t *rq) {
+    BUF_R_FOR(rq, it, free_buf16(it);)
+    BUF_R_CLEAR(rq);
 }
 
 // 发送 FIN 文本帧给对端 session 的 client
@@ -262,18 +262,18 @@ static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, b
     if (break_mode == SESS_BREAK_STOP) return;
 
     // 清理本端队列，转发剩余项给对端
-    wss_ch_break_forward(session->sync_peer_send, &session->sync_peer_send_cnt, peer);
-    wss_ch_break_forward(session->pkt_peer_send,  &session->pkt_peer_send_cnt,  peer);
+    wss_ch_break_forward(&session->sync_peer_send, peer);
+    wss_ch_break_forward(&session->pkt_peer_send,  peer);
 
     // 向对端发送 FIN
     wss_session_send_fin(peer);
 
     if (break_mode == SESS_BREAK_CLOSE) {
-        wss_ch_break_forward(peer->sync_peer_send, &peer->sync_peer_send_cnt, session);
-        wss_ch_break_forward(peer->pkt_peer_send,  &peer->pkt_peer_send_cnt,  session);
+        wss_ch_break_forward(&peer->sync_peer_send, session);
+        wss_ch_break_forward(&peer->pkt_peer_send,  session);
     } else {
-        wss_ch_break_free(peer->sync_peer_send, &peer->sync_peer_send_cnt);
-        wss_ch_break_free(peer->pkt_peer_send,  &peer->pkt_peer_send_cnt);
+        wss_ch_break_free(&peer->sync_peer_send);
+        wss_ch_break_free(&peer->pkt_peer_send);
     }
 
     // 清理本端 ring buffer
@@ -463,7 +463,7 @@ static void wss_handle_pkt(wss_session_t *session, buf16_item_t *payload1, uint8
     nwrite_l(payload + 1, peer_s->base.session_id);
 
     // 检查 pkt_peer_send 队列是否已满
-    if (peer_s->pkt_peer_send_cnt >= WSS_PEER_Q_MAX) {
+    if (BUF_R_FULL(&peer_s->pkt_peer_send)) {
         print("W:", LA_F("%s: pkt queue full, dropping\n", LA_F214, 214), PROTO);
         return;   // payload1 由调用方（handle_frame）释放
     }
@@ -474,14 +474,12 @@ static void wss_handle_pkt(wss_session_t *session, buf16_item_t *payload1, uint8
     // cw_send_frame 会在 [0, payload_pos) 写入帧头
     uint16_t payload_pos = (uint16_t)(payload - ITEM2BUF(payload1));
 
-    peer_s->pkt_peer_send[peer_s->pkt_peer_send_cnt] = payload1;
-    peer_s->pkt_peer_send_cnt++;
-
-    if (peer_s->pkt_peer_send_cnt == 1) {
-        // 队头：立即发送
+    // 入队并在首次时冷启动发送
+    if (BUF_R_EMPTY(&peer_s->pkt_peer_send)) {
         payload1->refer = (void*)peer_s;
         cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, payload1, payload_pos);
     }
+    BUF_R_PUSH(&peer_s->pkt_peer_send, payload1);
     // 否则在队列中等待，handle_peer_sent 时再发
 }
 
@@ -579,16 +577,14 @@ static void wss_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_ite
 
     // 判断是 PKT 还是 SYNC：WS 帧头在 payload_pos 之前，opcode 在 buf_item->pos 偏移0
     // 简单判断：pkt_peer_send[0] == buf_item → PKT
-    if (session->pkt_peer_send_cnt > 0 && session->pkt_peer_send[0] == buf_item) {
+    if (!BUF_R_EMPTY(&session->pkt_peer_send) && BUF_R_FRONT(&session->pkt_peer_send) == buf_item) {
 
         buf_item->refer = NULL;  // 允许调用方释放
 
-        session->pkt_peer_send[0] = session->pkt_peer_send[1];
-        session->pkt_peer_send[1] = NULL;
-        session->pkt_peer_send_cnt--;
+        BUF_R_POP(&session->pkt_peer_send);
 
-        if (session->pkt_peer_send_cnt > 0) {
-            buf16_item_t *next = session->pkt_peer_send[0];
+        if (!BUF_R_EMPTY(&session->pkt_peer_send)) {
+            buf16_item_t *next = BUF_R_FRONT(&session->pkt_peer_send);
             next->refer = (void*)session;
             // 恢复 payload_pos：零拷贝时 pos=0，payload 在 10 字节之后
             uint8_t *payload_start = ITEM2BUF(next) + 10;
@@ -597,7 +593,7 @@ static void wss_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_ite
         }
         // 如需要 READY 信号（WSS 协议中为可选），可在此扩展
 
-    } else if (session->sync_peer_send_cnt > 0 && session->sync_peer_send[0] == buf_item) {
+    } else if (!BUF_R_EMPTY(&session->sync_peer_send) && BUF_R_FRONT(&session->sync_peer_send) == buf_item) {
 
         // SYNC：TCP 写入完成，保留队头，设 ACK_PENDING 等待应用层 confirm
         buf_item->refer = ITEM_REF_ACK_PENDING;
@@ -610,28 +606,30 @@ static void wss_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_ite
 // SYNC confirm 到来时调用（由 wss_handle_message 中的 "SYNC <sid> confirm" 分支调用）
 // 移出 sync_peer_send 队头，若 ring buffer 仍有数据继续入队
 static void wss_on_sync_confirmed(wss_session_t *dst_s) {
-    if (dst_s->sync_peer_send_cnt == 0) return;
+    if (BUF_R_EMPTY(&dst_s->sync_peer_send)) return;
 
-    buf16_item_t *head = dst_s->sync_peer_send[0];
+    buf16_item_t *head = BUF_R_FRONT(&dst_s->sync_peer_send);
     assert(head->refer == ITEM_REF_ACK_PENDING);
+
+    // 记录队列是否满（在释放队头之前检查）
+    bool was_full = BUF_R_FULL(&dst_s->sync_peer_send);
+
     head->refer = NULL;
     free_buf16(head);
 
-    dst_s->sync_peer_send[0] = dst_s->sync_peer_send[1];
-    dst_s->sync_peer_send[1] = NULL;
-    dst_s->sync_peer_send_cnt--;
+    BUF_R_POP(&dst_s->sync_peer_send);
 
     // 队头若已就绪（排队时未能立即发送），继续发送
-    if (dst_s->sync_peer_send_cnt > 0) {
-        buf16_item_t *next = dst_s->sync_peer_send[0];
+    if (!BUF_R_EMPTY(&dst_s->sync_peer_send)) {
+        buf16_item_t *next = BUF_R_FRONT(&dst_s->sync_peer_send);
         next->refer = (void*)dst_s;
         ct_session_send((ct_session_t*)dst_s, next);
     }
 
-    // 若 src_s ring buffer 仍有积压数据，再次入队
+    // 队列从满→非满：若 src_s ring buffer 仍有积压数据，补发 confirm 并继续入队
     if (!PEER_ONLINE(&dst_s->base)) return;
     wss_session_t *src_s = (wss_session_t*)dst_s->base.peer;
-    if (src_s->sync_len > 0 && dst_s->sync_peer_send_cnt < WSS_PEER_Q_MAX)
+    if (was_full && src_s->sync_len > 0 && !BUF_R_FULL(&dst_s->sync_peer_send))
         wss_enqueue_sync(src_s, dst_s);
 }
 
@@ -694,10 +692,10 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
                 // 重连场景：重发 sync_peer_send 队头中处于 ACK_PENDING 状态的 SYNC 帧
                 for (session_t *sess = client->base.sessions; sess; sess = sess->next) {
                     wss_session_t *ws_sess = (wss_session_t*)sess;
-                    if (ws_sess->sync_peer_send_cnt > 0 &&
-                        ws_sess->sync_peer_send[0]->refer == ITEM_REF_ACK_PENDING) {
-                        ws_sess->sync_peer_send[0]->refer = (void*)ws_sess;
-                        ct_session_send((ct_session_t*)sess, ws_sess->sync_peer_send[0]);
+                    if (!BUF_R_EMPTY(&ws_sess->sync_peer_send) &&
+                        BUF_R_FRONT(&ws_sess->sync_peer_send)->refer == ITEM_REF_ACK_PENDING) {
+                        BUF_R_FRONT(&ws_sess->sync_peer_send)->refer = (void*)ws_sess;
+                        ct_session_send((ct_session_t*)sess, BUF_R_FRONT(&ws_sess->sync_peer_send));
                     }
                 }
 
