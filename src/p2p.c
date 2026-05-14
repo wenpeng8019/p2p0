@@ -105,7 +105,7 @@ static inline void gather_local_candidates(struct p2p_session *s) {
                     uint16_t local_pref = (uint16_t)(65535 - host_index++);
                     c->priority = p2p_ice_calc_priority(P2P_ICE_CAND_HOST, local_pref, 1);
 
-                    print("I:", LA_F("Gathered Host6 candidate: %s:%d (priority=0x%08x)", LA_F298, 298),
+                    print("I:", LA_F("Gathered Host6 candidate: %s:%d (priority=0x%08x)", LA_F503, 503),
                             sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), c->priority);
                 }
             }
@@ -419,11 +419,11 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         }
         /* PUBSUB 无信令中转：若所有候选地址族或所有候选类型都被禁用，则无法建立连接 */
         if (cfg->test_ice_ipv4_off && cfg->test_ice_ipv6_off) {
-            print("E:", LA_F("PUBSUB mode: both IPv4 and IPv6 disabled, no candidates possible", LA_F336, 336));
+            print("E:", LA_F("PUBSUB mode: both IPv4 and IPv6 disabled, no candidates possible", LA_F506, 506));
             return NULL;
         }
         if (cfg->test_ice_host_off && cfg->test_ice_srflx_off && cfg->test_ice_relay_off) {
-            print("E:", LA_F("PUBSUB mode: all candidate types (host/srflx/relay) disabled, no candidates possible", LA_F336, 336));
+            print("E:", LA_F("PUBSUB mode: all candidate types (host/srflx/relay) disabled, no candidates possible", LA_F505, 505));
             return NULL;
         }
     }
@@ -580,7 +580,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
     }
     else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
 
-        print("I:", LA_F("REG to RELAY signaling server at %s:%d", LA_F320, 320),
+        print("I:", LA_F("REG to RELAY signaling server at %s:%d", LA_F510, 510),
               inst->cfg.server_host, inst->cfg.server_port);
 
         struct sockaddr_in server_addr;
@@ -601,7 +601,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
 
         if ((ret = p2p_signal_pubsub_online(inst, inst->local_peer_id,
                                              inst->cfg.gh_token, inst->cfg.gist_id)) != E_NONE) {
-            print("E:", LA_F("PUBSUB online failed(%d)", LA_F270, 270), ret);
+            print("E:", LA_F("PUBSUB online failed(%d)", LA_F507, 507), ret);
             inst->state = P2P_SIG_ST_ERROR;
         }
         else inst->state = P2P_SIG_ST_REG;
@@ -757,7 +757,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
     if (strategy < P2P_PATH_STRATEGY_CONNECTION_FIRST || strategy > P2P_PATH_STRATEGY_HYBRID)
         strategy = P2P_PATH_STRATEGY_CONNECTION_FIRST;
     path_manager_init(s, strategy);
-    print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F339, 339), strategy);
+    print("I:", LA_F("Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)", LA_F509, 509), strategy);
 
     reliable_init(s);
 
@@ -857,7 +857,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
             if (s->sig_sess.relay.state == SIG_RELAY_SESS_WAIT_REG)
                 print("I:", LA_F("Starting RELAY session with %s", LA_F392, 392), remote_peer_id);
             if ((ret = p2p_signal_relay_connect(s, remote_peer_id)) != E_NONE)
-                print("E:", LA_F("Start RELAY session failed(%d)", LA_F389, 389), ret);
+                print("E:", LA_F("Start RELAY session failed(%d)", LA_F516, 516), ret);
 
             // 无需 client 是否已经 online，这里都是 signaling，因为会话需要注册
             s->state = P2P_STATE_SIGNALING;

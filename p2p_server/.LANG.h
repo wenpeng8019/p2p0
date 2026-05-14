@@ -185,7 +185,7 @@ enum {
     LA_F141,  /* "probe UDP bind failed(%d)\n" (%d)  [server.c] */
     LA_F142,  /* "%s: invalid remote id\n" (%s)  [p2p_wss.c, p2p_relay.c] */
     LA_F143,  /* "[WS] HTTP handshake rejected\n"  [custom_ws.c] */
-    LA_F144,  /* "[TCP]  send(%s) failed(%d)\n" (%s,%d)  [server.c] */
+    LA_F144,  /* "[%s] send failed(%d)\n" (%s,%d)  [server.c] */
     LA_F145,  /* "%s: busy (ses_id=%u), pending\n" (%s,%u)  [p2p_relay.c] */
     LA_F146,  /* disabled "%s: ses_id=%u peer not connected\n" */
     LA_F147,  /* "%s: rejected for not reg\n" (%s)  [p2p_wss.c, p2p_relay.c] */
@@ -227,7 +227,7 @@ enum {
     LA_F179,  /* "handshake<%d> sent to '%s'\n" (%d,%s)  [custom_tcp.c] */
     LA_F180,  /* disabled "WebSocket recv callback error: errno=%d\n" */
     LA_F181,  /* "WebSocket service listening on port %d\n" (%d)  [server.c] */
-    LA_F182,  /* "[TCP] conn closed (EOF on send, PROTO=%s)\n" (%s)  [server.c] */
+    LA_F182,  /* "[%s] conn closed (EOF on send)\n" (%s)  [server.c] */
     LA_F183,  /* "[%s] recv failed(%d) during handshake(%d) \n" (%s,%d,%d)  [server.c] */
     LA_F184,  /* disabled "[UDP] ALIVE recv from %s, seq=%u, flags=0x%02x, len=%zu\n" */
     LA_F185,  /* disabled "[UDP] OFF recv from %s, seq=%u, flags=0x%02x, len=%zu\n" */

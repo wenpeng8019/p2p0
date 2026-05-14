@@ -485,7 +485,7 @@ ssize_t
 udp_send(sock_t udp_fd, const void *buf, int len, const struct sockaddr_in *to, const char *PROTO);
 
 int
-tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *PROTO);
+tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *SP);
 
 // SP（SUB PROTOCOL）为 NULL 时，默认为 "TCP"
 int

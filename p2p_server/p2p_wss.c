@@ -269,7 +269,7 @@ wss_init(void) {
     g_wss_ctx.base.session_break    = wss_session_break;
     g_wss_ctx.base.max_payload_len  = WSS_MAX_PAYLOAD;
     g_wss_ctx.base.fatal_item       = NULL;                 // fatal_item: 静态错误帧，WS 协议层只需发 close，不需要像 relay 那样单独构造
-    g_wss_ctx.base.error_item       = NULL;
+    // g_wss_ctx.base.error_item 已经在 cw_ctx_init 中设置为 cw_tcp_error_item，不要覆盖
 
     g_wss_ctx.sub_protocol   = "p2p";
     g_wss_ctx.handle_frame   = wss_handle_frame;

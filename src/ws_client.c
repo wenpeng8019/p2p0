@@ -331,8 +331,8 @@ int ws_client_connect(ws_client_t *c,
 
     int r = connect(c->fd, (struct sockaddr *)&addr, sizeof(addr));
     if (r == 0) {
-        /* 立即连通（本地环回等） */
-        c->state = WS_CLIENT_HANDSHAKING;
+        /* 立即连通（本地环回等）- 仍然需要通过 finish_connect 验证 */
+        c->state = WS_CLIENT_CONNECTING;
     } else {
         if (P_sock_is_inprogress()) {
             c->state = WS_CLIENT_CONNECTING;

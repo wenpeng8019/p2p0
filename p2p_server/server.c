@@ -425,28 +425,25 @@ int
 tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz, const char* SP) {
     assert(client->base.proto >=0 && client->base.fd != P_INVALID_SOCKET);
 
-    size_t len = *r_sz; *r_sz = 0;
-    while (*r_sz < len) {
-        ssize_t n = recv(client->base.fd, (char *)buf + *r_sz, len - *r_sz, 0);
-        if (n == 0) {
-            if (client->handshake)
-                print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on recv)\n", LA_F224, 224),
-                      SP?SP:"TCP", (int)client->handshake);
-            else print("I:", LA_F("[%s] conn closed (EOF on recv)\n", LA_F11, 11), SP?SP:"TCP");
-            return -1;
-        }
-        if (n < 0) {
-            if (P_sock_is_interrupted()) continue;
-            if (P_sock_is_wouldblock()) return 1;
-            if (client->handshake)
-                print("E:", LA_F("[%s] recv failed(%d) during handshake(%d) \n", LA_F183, 183),
-                      SP?SP:"TCP", P_sock_errno(), (int)client->handshake);
-            else print("E:", LA_F("[%s] recv failed(%d)\n", LA_F225, 225), SP?SP:"TCP", P_sock_errno());
-            return -2;
-        }
-        *r_sz += (size_t)n;
+    ret_t r = P_recv_nonblock(client->base.fd, buf, r_sz, 0);
+    
+    if (r == E_NONE_CONTEXT) {
+        if (client->handshake)
+            print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on recv)\n", LA_F224, 224),
+                  SP?SP:"TCP", (int)client->handshake);
+        else print("I:", LA_F("[%s] conn closed (EOF on recv)\n", LA_F11, 11), SP?SP:"TCP");
+        return -1;
     }
-    return 0;
+    
+    if (r < 0) {
+        if (client->handshake)
+            print("E:", LA_F("[%s] recv failed(%d) during handshake(%d) \n", LA_F183, 183),
+                  SP?SP:"TCP", E_EXT_CODE(r), (int)client->handshake);
+        else print("E:", LA_F("[%s] recv failed(%d)\n", LA_F225, 225), SP?SP:"TCP", E_EXT_CODE(r));
+        return -2;
+    }
+    
+    return r;  // 0=完成, 1=WOULDBLOCK
 }
 
 /*
@@ -454,31 +451,31 @@ tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz, const char* SP) {
  * 说明：用于发送小消息（ACK、header 等）
  *      先尝试立即发送，若发送缓冲区满则依赖主循环的异步发送机制
  * 返回: 0=全部发送完成, +1=WOULDBLOCK, -1=连接关闭(EOF), -2=真错误
- *      len_io: 输入=希望发送字节数，输出=实际发送字节数
+ *      w_sz: 输入=希望发送字节数，输出=实际发送字节数
  */
 int
-tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *PROTO) {
+tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *SP) {
     assert(client->base.proto >=0 && client->base.fd != P_INVALID_SOCKET);
-    if (!w_sz) return -2;
 
-    size_t len = *w_sz; *w_sz = 0;
-    if (!PROTO) PROTO = "unknown";
-
-    while (*w_sz < len) {
-        ssize_t n = send(client->base.fd, (const char *)buf + *w_sz, len - *w_sz, 0);
-        if (n == 0) {
-            print("I:", LA_F("[TCP] conn closed (EOF on send, PROTO=%s)\n", LA_F182, 182), PROTO);
-            return -1;
-        }
-        if (n < 0) {
-            if (P_sock_is_interrupted()) continue;
-            if (P_sock_is_wouldblock()) return 1;
-            print("E:", LA_F("[TCP]  send(%s) failed(%d)\n", LA_F144, 144), PROTO, P_sock_errno());
-            return -2;
-        }
-        *w_sz += (size_t)n;
+    ret_t r = P_send_nonblock(client->base.fd, buf, w_sz, 0);
+    
+    if (r == E_NONE_CONTEXT) {
+        if (client->handshake)
+            print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on send)\n", 0, 0),
+                  SP?SP:"TCP", (int)client->handshake);
+        else print("I:", LA_F("[%s] conn closed (EOF on send)\n", LA_F182, 182), SP?SP:"TCP");
+        return -1;
     }
-    return 0;
+    
+    if (r < 0) {
+        if (client->handshake)
+            print("E:", LA_F("[%s] send failed(%d) during handshake(%d)\n", 0, 0),
+                  SP?SP:"TCP", E_EXT_CODE(r), (int)client->handshake);
+        else print("E:", LA_F("[%s] send failed(%d)\n", LA_F144, 144), SP?SP:"TCP", E_EXT_CODE(r));
+        return -2;
+    }
+    
+    return r;  // 0=完成, 1=WOULDBLOCK
 }
 
 //-----------------------------------------------------------------------------

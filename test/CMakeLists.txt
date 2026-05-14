@@ -167,6 +167,54 @@ target_include_directories(test_relay_rpc PRIVATE
 )
 target_link_libraries(test_relay_rpc stdc ${TEST_PLATFORM_LIBS})
 
+# WSS 协议注册/上线单元测试
+add_executable(test_wss_register
+    test_wss_register.c
+)
+target_include_directories(test_wss_register PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+    ${CMAKE_SOURCE_DIR}/src
+    ${WSLAY_INCLUDE_DIRS}
+)
+target_link_libraries(test_wss_register p2p_static ${TEST_PLATFORM_LIBS})
+target_compile_definitions(test_wss_register PRIVATE WITH_WS)
+target_compile_options(test_wss_register PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
+)
+
+# WSS 协议生命周期单元测试
+add_executable(test_wss_lifecycle
+    test_wss_lifecycle.c
+)
+target_include_directories(test_wss_lifecycle PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+    ${CMAKE_SOURCE_DIR}/src
+    ${WSLAY_INCLUDE_DIRS}
+)
+target_link_libraries(test_wss_lifecycle p2p_static ${TEST_PLATFORM_LIBS})
+target_compile_definitions(test_wss_lifecycle PRIVATE WITH_WS)
+target_compile_options(test_wss_lifecycle PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
+)
+
+# WSS RPC 协议单元测试
+add_executable(test_wss_rpc
+    test_wss_rpc.c
+)
+target_include_directories(test_wss_rpc PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+    ${CMAKE_SOURCE_DIR}/src
+    ${WSLAY_INCLUDE_DIRS}
+)
+target_link_libraries(test_wss_rpc p2p_static ${TEST_PLATFORM_LIBS})
+target_compile_definitions(test_wss_rpc PRIVATE WITH_WS)
+target_compile_options(test_wss_rpc PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
+)
+
 # P2P Ping 双客户端连接测试 (RELAY 模式, Alice <-> Bob)
 add_executable(test_ping_r_connect
     test_ping_r_connect.c
@@ -328,6 +376,13 @@ add_test(NAME test_relay_lifecycle   COMMAND test_relay_lifecycle   ${SERVER_PAT
 add_test(NAME test_relay_data        COMMAND test_relay_data        ${SERVER_PATH})
 add_test(NAME test_relay_rpc         COMMAND test_relay_rpc         ${SERVER_PATH})
 
+# --- WSS 协议测试（需要 p2p_server --ws） ---
+if(WITH_WS)
+    add_test(NAME test_wss_register      COMMAND test_wss_register      ${SERVER_PATH})
+    add_test(NAME test_wss_lifecycle     COMMAND test_wss_lifecycle     ${SERVER_PATH})
+    add_test(NAME test_wss_rpc           COMMAND test_wss_rpc           ${SERVER_PATH})
+endif()
+
 # --- 端到端测试 COMPACT（需要 p2p_ping + p2p_server） ---
 set(PING_PATH $<TARGET_FILE:p2p_ping>)
 
@@ -362,6 +417,13 @@ set_tests_properties(
     PROPERTIES LABELS "protocol"
 )
 
+if(WITH_WS)
+    set_tests_properties(
+        test_wss_register test_wss_lifecycle test_wss_rpc
+        PROPERTIES LABELS "protocol"
+    )
+endif()
+
 set_tests_properties(
     test_ping_template test_ping_c_connect test_ping_c_msg
     test_ping_c_filter test_ping_c_reconnect
@@ -377,6 +439,13 @@ set_tests_properties(
     test_relay_register test_relay_lifecycle test_relay_data test_relay_rpc
     PROPERTIES TIMEOUT 30
 )
+
+if(WITH_WS)
+    set_tests_properties(
+        test_wss_register test_wss_lifecycle test_wss_rpc
+        PROPERTIES TIMEOUT 30
+    )
+endif()
 
 # e2e 测试超时（内部有 30s connect timeout，需要更多裕量）
 set_tests_properties(

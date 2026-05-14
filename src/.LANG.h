@@ -43,11 +43,11 @@ enum {
     LA_W3,  /* "Full Cone NAT"  [p2p_internal.h] */
     LA_W4,  /* "Open Internet (No NAT)"  [p2p_internal.h] */
     LA_W5,  /* "Port Restricted Cone NAT"  [p2p_internal.h] */
-    LA_W6,  /* "PUB"  [p2p_signal_pubsub.c] */
+    LA_W6,  /* disabled "PUB" */
     LA_W7,  /* "punch"  [p2p_nat.c] */
     LA_W8,  /* "Restricted Cone NAT"  [p2p_internal.h] */
     LA_W9,  /* "retry"  [p2p_nat.c] */
-    LA_W10,  /* "SUB"  [p2p_signal_pubsub.c] */
+    LA_W10,  /* disabled "SUB" */
     LA_W11,  /* "Symmetric NAT (port-random)"  [p2p_internal.h] */
     LA_W12,  /* "Timeout (no response)"  [p2p_internal.h] */
     LA_W13,  /* "UDP Blocked (STUN unreachable)"  [p2p_internal.h] */
@@ -65,20 +65,20 @@ enum {
     LA_S23,  /* "[SCTP] association established"  [p2p_trans_sctp.c] */
     LA_S24,  /* "[SCTP] usrsctp initialized, connecting..."  [p2p_trans_sctp.c] */
     LA_S25,  /* "[SCTP] usrsctp_socket failed"  [p2p_trans_sctp.c] */
-    LA_S26,  /* "Channel ID validation failed"  [p2p_signal_pubsub.c] */
+    LA_S26,  /* disabled "Channel ID validation failed" */
     LA_S27,  /* "Detecting local network addresses"  [p2p_route.c] */
-    LA_S28,  /* "Gist GET failed"  [p2p_signal_pubsub.c] */
-    LA_S29,  /* "Invalid channel_id format (security risk)"  [p2p_signal_pubsub.c] */
-    LA_S30,  /* "Out of memory"  [p2p_signal_pubsub.c] */
+    LA_S28,  /* disabled "Gist GET failed" */
+    LA_S29,  /* disabled "Invalid channel_id format (security risk)" */
+    LA_S30,  /* disabled "Out of memory" */
     LA_S31,  /* "Push local cand<%s:%d> failed(OOM)\n"  [p2p.c] */
-    LA_S32,  /* "Push remote cand<%s:%d> failed(OOM)\n"  [p2p_signal_pubsub.c] */
-    LA_S33,  /* "resync candidates"  [p2p_signal_relay.c] */
-    LA_S34,  /* disabled "sync candidates" */
-    LA_S35,  /* disabled "waiting for peer" */
+    LA_S32,  /* "Push local IPv6 cand failed(OOM)\n"  [p2p.c] */
+    LA_S33,  /* "resync for peer"  [p2p_signal_relay.c] */
+    LA_S34,  /* "sync candidates"  [p2p_signal_relay.c] */
+    LA_S35,  /* "waiting for peer"  [p2p_signal_relay.c] */
 
     /* Formats (LA_F) */
     LA_F36,  /* "  [%d] %s/%d" (%d,%s,%d)  [p2p_route.c] */
-    LA_F37,  /* "%s %s sent (ses_id=%u), seq=%u flags=0x%02x len=%u\n" (%s,%s,%u,%u,%u)  [p2p_signal_relay.c] */
+    LA_F37,  /* "  [v6:%d] %s" (%d,%s)  [p2p_route.c] */
     LA_F38,  /* "%s NOTIFY: accepted\n" (%s)  [p2p_signal_compact.c] */
     LA_F39,  /* "%s NOTIFY: ignored old notify base=%u (current=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F40,  /* "%s NOTIFY: invalid(base=%u cand_cnt=%d flags=0x%02x)\n" (%s,%u,%d)  [p2p_signal_compact.c] */
@@ -107,7 +107,7 @@ enum {
     LA_F63,  /* "%s sent, inst_id=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F64,  /* "%s sent, name='%s' rid=%u\n" (%s,%s,%u)  [p2p_signal_relay.c] */
     LA_F65,  /* "%s sent, retry=%u\n" (%s,%u)  [p2p_signal_compact.c] */
-    LA_F66,  /* "%s sent, ses_id=%u cand_base=%d, cand_cnt=%d fin=%d\n" (%s,%u,%d,%d,%d)  [p2p_signal_relay.c] */
+    LA_F66,  /* "%s sent, ses_id=%u sid=%u cand_base=%d, cand_cnt=%d fin=%d\n" (%s,%u,%u,%d,%d,%d)  [p2p_signal_relay.c] */
     LA_F67,  /* "%s sent, ses_id=%u\n" (%s,%u)  [p2p_signal_relay.c] */
     LA_F68,  /* "%s sent, target='%s' cand=%u\n" (%s,%s,%u)  [p2p_signal_relay.c] */
     LA_F69,  /* "%s sent\n" (%s)  [p2p_signal_compact.c, p2p_signal_relay.c] */
@@ -154,7 +154,7 @@ enum {
     LA_F110,  /* "%s: accepted, public=%s:%d auth_key=%llu max_cands=%d probe_port=%d relay=%s msg=%s\n" (%s,%s,%d,%l,%d,%d,%s,%s)  [p2p_signal_compact.c] */
     LA_F111,  /* "%s: accepted\n" (%s)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F112,  /* "%s: auth_key acquired, auto SYN0 sent\n" (%s)  [p2p_signal_relay.c] */
-    LA_F113,  /* "%s: auth_key acquired, waiting stun pending\n" (%s)  [p2p_signal_relay.c] */
+    LA_F113,  /* disabled "%s: auth_key acquired, waiting stun pending\n" */
     LA_F114,  /* "%s: bad FIN marker=0x%02x\n" (%s)  [p2p_signal_relay.c] */
     LA_F115,  /* "%s: bad payload len=%d\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F116,  /* "%s: bad payload(%d)" (%s,%d)  [p2p_nat.c] */
@@ -183,7 +183,7 @@ enum {
     LA_F139,  /* "%s: ignored for seq=%u (expect=%d)\n" (%s,%u,%d)  [p2p_signal_compact.c] */
     LA_F140,  /* "%s: ignored for sid=%u (current sid=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F141,  /* "%s: ignored in invalid state=%d\n" (%s,%d)  [p2p_signal_compact.c] */
-    LA_F142,  /* "%s: ignored in state=%d\n" (%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_F142,  /* "%s: GET %s — empty or failed" (%s,%s)  [p2p_signal_pubsub.c] */
     LA_F143,  /* "%s: ignored, upsert %s:%d failed" (%s,%s,%d)  [p2p_nat.c] */
     LA_F144,  /* "%s: invalid ack_seq=%u\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F145,  /* "%s: invalid cand idx: %d (count: %d)" (%s,%d,%d)  [p2p_nat.c] */
@@ -222,7 +222,7 @@ enum {
     LA_F178,  /* "%s: peer reachable via signaling (RTT: %llu ms)" (%s,%l)  [p2p_probe.c] */
     LA_F179,  /* "%s: pkt payload exceeds limit (%d > %d)\n" (%s,%d,%d)  [p2p_signal_relay.c] */
     LA_F180,  /* "%s: pkt recv (ses_id=%u), inner type=%u\n" (%s,%u,%u)  [p2p_signal_relay.c] */
-    LA_F181,  /* "%s: processed, synced=%d\n" (%s,%d)  [p2p_signal_relay.c] */
+    LA_F181,  /* "%s: processed sid=%u synced=%d\n" (%s,%u,%d)  [p2p_signal_relay.c] */
     LA_F182,  /* "%s: promoted prflx cand[%d]<%s:%d> → %s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c, p2p_signal_relay.c] */
     LA_F183,  /* "%s: protocol mismatch, recv PKT_ACK on trans=%s" (%s,%s)  [p2p_nat.c] */
     LA_F184,  /* "%s: punch cand[%d] %s:%d (%s)" (%s,%d,%s,%d,%s)  [p2p_nat.c] */
@@ -262,23 +262,23 @@ enum {
     LA_F218,  /* "%s: server rejected (no slot)\n" (%s)  [p2p_signal_compact.c] */
     LA_F219,  /* "%s: sess_id=%u req_type=%u code=%u msg=%s\n" (%s,%u,%u,%u,%s)  [p2p_signal_relay.c] */
     LA_F220,  /* "%s: sess_id=%u req_type=%u code=%u\n" (%s,%u,%u,%u)  [p2p_signal_relay.c] */
-    LA_F221,  /* "%s: session established(st=%s peer=%s), syncing\n" (%s,%s,%s)  [p2p_signal_relay.c] */
-    LA_F222,  /* "%s: session offer(st=%s peer=%s), waiting\n" (%s,%s,%s)  [p2p_signal_relay.c] */
-    LA_F223,  /* "%s: session reset by peer(st=%s old=%u new=%u), %s\n" (%s,%s,%u,%u,%s)  [p2p_signal_relay.c] */
+    LA_F221,  /* "%s: session established(st=%s peer=%s), %s\n" (%s,%s,%s,%s)  [p2p_signal_relay.c] */
+    LA_F222,  /* disabled "%s: session offer(st=%s peer=%s), waiting\n" */
+    LA_F223,  /* "%s: session reset by peer(old=%u new=%u), %s\n" (%s,%u,%u,%s)  [p2p_signal_relay.c] */
     LA_F224,  /* "%s: session suspend(st=%s)\n" (%s,%s)  [p2p_signal_relay.c] */
     LA_F225,  /* "%s: session_id changed (old=%u new=%u)\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F226,  /* "%s: stale ACK(ack_inst=%u local_inst=%u), ignored\n" (%s,%u,%u)  [p2p_signal_compact.c] */
     LA_F227,  /* "%s: started, sending first probe\n" (%s)  [p2p_signal_compact.c] */
-    LA_F228,  /* "%s: sync ack confirmed cnt=%d exceeds unacked cnt=%d\n" (%s,%d,%d)  [p2p_signal_relay.c] */
+    LA_F228,  /* disabled "%s: sync ack confirmed cnt=%d exceeds unacked cnt=%d\n" */
     LA_F229,  /* "%s: sync busy, will retry\n" (%s)  [p2p_signal_relay.c] */
     LA_F230,  /* "%s: sync complete (ses_id=%u)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F231,  /* "%s: sync complete (ses_id=%u, mask=0x%04x)\n" (%s,%u)  [p2p_signal_compact.c] */
     LA_F232,  /* "%s: sync done, st=%s cands=%d\n" (%s,%s,%d)  [p2p_signal_relay.c] */
     LA_F233,  /* "%s: sync done\n" (%s)  [p2p_signal_relay.c] */
-    LA_F234,  /* "%s: sync fin ack, but cand synced cnt not match sent cnt (cand=%d synced=%d)\n" (%s,%d,%d)  [p2p_signal_relay.c] */
-    LA_F235,  /* "%s: sync forwarded, confirmed=%d synced=%d\n" (%s,%d,%d)  [p2p_signal_relay.c] */
+    LA_F234,  /* disabled "%s: sync fin ack, but cand synced cnt not match sent cnt (cand=%d synced=%d)\n" */
+    LA_F235,  /* "%s: sync confirm sid=%u synced=%d base=%d\n" (%s,%u,%d,%d)  [p2p_signal_relay.c] */
     LA_F236,  /* "%s: sync0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
-    LA_F237,  /* "%s: syncable ready, auto SYN0 sent\n" (%s)  [p2p_signal_relay.c] */
+    LA_F237,  /* disabled "%s: syncable ready, auto SYN0 sent\n" */
     LA_F238,  /* "%s: timeout (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
     LA_F239,  /* "%s: timeout after %d retries , type unknown\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F240,  /* "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates" (%s,%l,%d)  [p2p_nat.c] */
@@ -299,9 +299,9 @@ enum {
     LA_F255,  /* "%s:%04d: %s" (%s,%s)  [p2p_dtls_mbedtls.c] */
     LA_F256,  /* "%s_ACK sent to %s:%d (try), echo_seq=%u" (%s,%s,%d,%u)  [p2p_nat.c] */
     LA_F257,  /* "ACK processed ack_seq=%u send_base=%u inflight=%d" (%u,%u,%d)  [p2p_trans_reliable.c] */
-    LA_F258,  /* "Answer already present, skipping offer re-publish"  [p2p_signal_pubsub.c] */
+    LA_F258,  /* disabled "% Answer already present, skipping offer re-publish" */
     LA_F259,  /* "Attempting Simultaneous Open to %s:%d" (%s,%d)  [p2p_tcp_punch.c] */
-    LA_F260,  /* "Auto-send answer (with %d candidates) total sent %s" (%d,%s)  [p2p_signal_pubsub.c] */
+    LA_F260,  /* "%s: heartbeat written" (%s)  [p2p_signal_pubsub.c] */
     LA_F261,  /* "BIO_new failed"  [p2p_dtls_openssl.c] */
     LA_F262,  /* "Base64 decode failed"  [p2p_signal_pubsub.c] */
     LA_F263,  /* "Bind failed"  [p2p_tcp_punch.c] */
@@ -318,7 +318,7 @@ enum {
     LA_F274,  /* "Data stored in recv buffer seq=%u len=%d base=%u" (%u,%d,%u)  [p2p_trans_reliable.c] */
     LA_F275,  /* "Detect local network interfaces failed(%d)" (%d)  [p2p.c] */
     LA_F276,  /* "Detection completed %s" (%s)  [p2p_stun.c] */
-    LA_F277,  /* "Duplicate remote cand<%s:%d> from signaling, skipped" (%s,%d)  [p2p_signal_pubsub.c] */
+    LA_F277,  /* disabled "Duplicate remote cand<%s:%d> from signaling, skipped" */
     LA_F278,  /* "Exported %d candidates to SDP (%d bytes)" (%d,%d)  [p2p_ice.c] */
     LA_F279,  /* "Failed to allocate DTLS context"  [p2p_dtls_mbedtls.c] */
     LA_F280,  /* "Failed to allocate OpenSSL context"  [p2p_dtls_openssl.c] */
@@ -338,7 +338,7 @@ enum {
     LA_F294,  /* "Failed to send Test I(alt), continue to Test III"  [p2p_stun.c] */
     LA_F295,  /* "Failed to send punch packet for new peer addr\n"  [p2p_signal_compact.c] */
     LA_F296,  /* "Failed to start TURN allocation"  [p2p.c] */
-    LA_F297,  /* "Field %s is empty or too short" (%s)  [p2p_signal_pubsub.c] */
+    LA_F297,  /* disabled "Field %s is empty or too short" */
     LA_F298,  /* "Full SDP generation requires ice_ufrag and ice_pwd"  [p2p_ice.c] */
     LA_F299,  /* "Gathered Host candidate: %s:%d (priority=0x%08x)" (%s,%d)  [p2p.c] */
     LA_F300,  /* "Gathered Relay Candidate %s:%u (priority=%u)" (%s,%u,%u)  [p2p_turn.c] */
@@ -351,39 +351,39 @@ enum {
     LA_F307,  /* "Ignore %s pkt from unknown path %s:%d" (%s,%s,%d)  [p2p_nat.c] */
     LA_F308,  /* "Imported %d candidates from SDP" (%d)  [p2p_ice.c] */
     LA_F309,  /* "Imported SDP candidate: %s:%d typ %s (priority=0x%08x)" (%s,%d,%s)  [p2p_ice.c] */
-    LA_F310,  /* "Initialize PUBSUB signaling context failed(%d)" (%d)  [p2p.c] */
+    LA_F310,  /* disabled "Initialize PUBSUB signaling context failed(%d)" */
     LA_F311,  /* "Initialize network subsystem failed(%d)" (%d)  [p2p.c] */
     LA_F312,  /* "Initialize signaling mode: %d" (%d)  [p2p.c] */
-    LA_F313,  /* "Initialized: %s" (%s)  [p2p_signal_pubsub.c] */
+    LA_F313,  /* disabled "Initialized: %s" */
     LA_F314,  /* "Invalid IP address: %s" (%s)  [p2p_ice.c] */
     LA_F315,  /* "Invalid remote_peer_id for %s mode" (%s)  [p2p.c] */
     LA_F316,  /* "Invalid signaling mode in configuration"  [p2p.c] */
     LA_F317,  /* "LOST recovery: NAT connected but no path available"  [p2p.c] */
-    LA_F318,  /* "Local address detection done: %d address(es)" (%d)  [p2p_route.c] */
+    LA_F318,  /* "Local address detection done: %d IPv4, %d IPv6 address(es)" (%d,%d)  [p2p_route.c] */
     LA_F319,  /* "REG to COMPACT signaling server at %s:%d" (%s,%d)  [p2p.c] */
-    LA_F320,  /* "REG to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F320,  /* "REG to PUBSUB signaling (Gist: %s)" (%s)  [p2p.c] */
     LA_F321,  /* "MSG RPC not supported by server\n"  [p2p_signal_compact.c] */
     LA_F322,  /* "NAT connected but no available path in path manager"  [p2p.c] */
     LA_F323,  /* "NAT detection skipped (skip_stun_test=true), Srflx gathered"  [p2p_stun.c] */
     LA_F324,  /* "No advanced transport layer enabled, using simple reliable layer"  [p2p.c] */
-    LA_F325,  /* "No auth_key provided, using default key (insecure)"  [p2p_signal_pubsub.c] */
+    LA_F325,  /* disabled "% No auth_key provided, using default key (insecure)" */
     LA_F326,  /* "No shared local route addresses available, host candidates skipped"  [p2p.c] */
     LA_F327,  /* "No valid CHANGED-ADDRESS provided by STUN server, skipping Test I(alt)"  [p2p_stun.c] */
     LA_F328,  /* "REG: auth_key acquired, auto SYN0 sent\n"  [p2p_signal_compact.c] */
-    LA_F329,  /* "REG: auth_key acquired, waiting stun pending\n"  [p2p_signal_compact.c] */
+    LA_F329,  /* disabled "% REG: auth_key acquired, waiting stun pending\n" */
     LA_F330,  /* "Open P2P UDP socket on port %d" (%d)  [p2p.c] */
     LA_F331,  /* "Open P2P UDP socket on port %d failed(%d)" (%d,%d)  [p2p.c] */
     LA_F332,  /* "OpenSSL requested but library not linked"  [p2p.c] */
     LA_F333,  /* "Out-of-window packet discarded seq=%u base=%u" (%u,%u)  [p2p_trans_reliable.c] */
-    LA_F334,  /* "PUBSUB (PUB): gathering candidates, waiting for STUN before publishing"  [p2p.c] */
-    LA_F335,  /* "PUBSUB (SUB): waiting for offer from any peer"  [p2p.c] */
+    LA_F334,  /* disabled "% PUBSUB (PUB): gathering candidates, waiting for STUN before publishing" */
+    LA_F335,  /* disabled "% PUBSUB (SUB): waiting for offer from any peer" */
     LA_F336,  /* "PUBSUB mode requires gh_token and gist_id"  [p2p.c] */
     LA_F337,  /* "Packet queued seq=%u len=%d inflight=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
-    LA_F338,  /* "Packet too large len=%d max=%d" (%d,%d)  [p2p_trans_reliable.c] */
-    LA_F339,  /* "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)" (%d)  [p2p.c] */
+    LA_F338,  /* "IPv6 socket opened [%s]:%d" (%s,%d)  [p2p.c] */
+    LA_F339,  /* "IPv6 socket open failed, IPv6 candidates disabled"  [p2p.c] */
     LA_F340,  /* "Path switch debounced, waiting for stability"  [p2p.c] */
     LA_F341,  /* "Path switched to better route (idx=%d)" (%d)  [p2p.c] */
-    LA_F342,  /* "Processing (role=%s)" (%s)  [p2p_signal_pubsub.c] */
+    LA_F342,  /* disabled "Processing (role=%s)" */
     LA_F343,  /* "PseudoTCP enabled as transport layer"  [p2p.c] */
     LA_F344,  /* "RELAY path but TURN not allocated"  [p2p_channel.c] */
     LA_F345,  /* "RELAY path but TURN not allocated (dtls)"  [p2p_channel.c] */
@@ -391,8 +391,8 @@ enum {
     LA_F347,  /* "RELAY sent (ses_id=%u), type=0x%02x seq=%u flags=0x%02x" (%u,%u)  [p2p_signal_compact.c] */
     LA_F348,  /* "RELAY/COMPACT mode requires server_host"  [p2p.c] */
     LA_F349,  /* "RTT updated rtt=%dms srtt=%d rttvar=%d rto=%d" (%d,%d,%d,%d)  [p2p_trans_reliable.c] */
-    LA_F350,  /* "Received remote candidate: type=%d, address=%s:%d" (%d,%s,%d)  [p2p_signal_pubsub.c] */
-    LA_F351,  /* "Received valid signal from '%s'" (%s)  [p2p_signal_pubsub.c] */
+    LA_F350,  /* disabled "Received remote candidate: type=%d, address=%s:%d" */
+    LA_F351,  /* "%s: SUB gist not REG (content: %.20s...)" (%s)  [p2p_signal_pubsub.c] */
     LA_F352,  /* "Recv %s pkt from %s:%d" (%s,%s,%d)  [p2p_nat.c] */
     LA_F353,  /* "Recv %s pkt from %s:%d echo_seq=%u" (%s,%s,%d,%u)  [p2p_nat.c] */
     LA_F354,  /* "Recv %s pkt from %s:%d seq=%u" (%s,%s,%d,%u)  [p2p_nat.c] */
@@ -427,10 +427,10 @@ enum {
     LA_F383,  /* "Sending Test I(alt) to CHANGED-ADDRESS"  [p2p_stun.c] */
     LA_F384,  /* "Sending Test II with CHANGE-REQUEST(IP+PORT)"  [p2p_stun.c] */
     LA_F385,  /* "Sending Test III with CHANGE-REQUEST(PORT only)"  [p2p_stun.c] */
-    LA_F386,  /* "Signal payload deserialization failed"  [p2p_signal_pubsub.c] */
+    LA_F386,  /* disabled "% Signal payload deserialization failed" */
     LA_F387,  /* "Skipping Host Candidate gathering (disabled)"  [p2p.c] */
     LA_F388,  /* "Start COMPACT session failed(%d)" (%d)  [p2p.c] */
-    LA_F389,  /* "Start RELAY session failed(%d)" (%d)  [p2p.c] */
+    LA_F389,  /* "Start PUBSUB session failed(%d)" (%d)  [p2p.c] */
     LA_F390,  /* "Start internal thread failed(%d)" (%d)  [p2p.c] */
     LA_F391,  /* "Starting COMPACT session with %s" (%s)  [p2p.c] */
     LA_F392,  /* "Starting RELAY session with %s" (%s)  [p2p.c] */
@@ -464,7 +464,7 @@ enum {
     LA_F420,  /* "Transport layer '%s' init failed, falling back to simple reliable" (%s)  [p2p.c] */
     LA_F421,  /* "Unknown candidate type: %s" (%s)  [p2p_ice.c] */
     LA_F422,  /* "Unknown signaling mode: %d" (%d)  [p2p.c] */
-    LA_F423,  /* "Updating Gist field '%s'..." (%s)  [p2p_signal_pubsub.c] */
+    LA_F423,  /* "%s: publishing %d candidates (ver=%d) to local gist" (%s,%d,%d)  [p2p_signal_pubsub.c] */
     LA_F424,  /* "WebRTC candidate export buffer overflow"  [p2p_ice.c] */
     LA_F425,  /* "[C] %s recv, len=%d\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F426,  /* "[C] %s recv, seq=%u, flags=0x%02x, len=%d\n" (%s,%u,%d)  [p2p_signal_compact.c] */
@@ -480,7 +480,7 @@ enum {
     LA_F436,  /* "[OpenSSL] DTLS handshake completed"  [p2p_dtls_openssl.c] */
     LA_F437,  /* "[OpenSSL] DTLS role: %s (mode=%s)" (%s,%s)  [p2p_dtls_openssl.c] */
     LA_F438,  /* "[R] %s recv, len=%d\n" (%s,%d)  [p2p_signal_relay.c] */
-    LA_F439,  /* "[R] %s timeout\n" (%s)  [p2p_signal_relay.c] */
+    LA_F439,  /* "%s: PATCH failed" (%s)  [p2p_signal_pubsub.c] */
     LA_F440,  /* "[R] %s%s qsend failed(OOM)\n" (%s,%s)  [p2p_signal_relay.c] */
     LA_F441,  /* "[R] %s%s qsend(%d), len=%u\n" (%s,%s,%d,%u)  [p2p_signal_relay.c] */
     LA_F442,  /* "[R] Connecting to %s:%d\n" (%s,%d)  [p2p_signal_relay.c] */
@@ -489,8 +489,8 @@ enum {
     LA_F445,  /* "[R] Failed to set socket non-blocking\n"  [p2p_signal_relay.c] */
     LA_F446,  /* "[R] TCP connect failed(%d)\n" (%d)  [p2p_signal_relay.c] */
     LA_F447,  /* "[R] TCP connect select failed(%d)\n" (%d)  [p2p_signal_relay.c] */
-    LA_F448,  /* "[R] TCP connected immediately, sending REG\n"  [p2p_signal_relay.c] */
-    LA_F449,  /* "[R] TCP connected, sending REG\n"  [p2p_signal_relay.c] */
+    LA_F448,  /* "ICE credentials generated: ufrag=%s" (%s)  [p2p.c] */
+    LA_F449,  /* "ICE-STUN: no session for ufrag, dropped"  [p2p.c] */
     LA_F450,  /* "[R] TCP connection closed by peer\n"  [p2p_signal_relay.c] */
     LA_F451,  /* "[R] TCP connection closed during send\n"  [p2p_signal_relay.c] */
     LA_F452,  /* "[R] TCP recv error(%d)\n" (%d)  [p2p_signal_relay.c] */
@@ -510,10 +510,122 @@ enum {
     LA_F466,  /* "ssl_config_defaults failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
     LA_F467,  /* "ssl_setup failed: -0x%x" (%x)  [p2p_dtls_mbedtls.c] */
     LA_F468,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
-    LA_F469,  /* "✓ Gathered Srflx Candidate Added Remote Candidate %s:%d (priority=%u)" (%s,%d,%u)  [p2p_stun.c] */
+    LA_F469,  /* "✓ Gathered Srflx Candidate %s:%d, priority=%u (ses_id=%u)" (%s,%d,%u,%u)  [p2p_stun.c] */
     LA_F470,  /* "✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
     LA_F471,  /* "%s: recorded peer conn_seq=%u for future CONN_ACK" (%s,%u)  [p2p_nat.c] */
     LA_F472,  /* "retry seq=%u retx=%d rto=%d" (%u,%d,%d)  [p2p_trans_reliable.c] */
+
+    /* Strings (LA_S) */
+    LA_S473,  /* "waiting stun pending"  [p2p_signal_relay.c] */
+
+    /* Formats (LA_F) */
+    LA_F474,  /* "%s %s sent (ses_id=%u), seq=%u flags=0x%02x len=%u\n" (%s,%s,%u,%u,%u)  [p2p_signal_relay.c] */
+    LA_F475,  /* "%s: STUN ready → SYNCING" (%s)  [p2p_signal_pubsub.c] */
+    LA_F476,  /* disabled "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" */
+    LA_F477,  /* "%s: SUB online (heartbeat %llds ago), early nat_punch" (%s,%l)  [p2p_signal_pubsub.c] */
+    LA_F478,  /* "%s: SUB responded with %d candidates (ver=%d)" (%s,%d,%d)  [p2p_signal_pubsub.c] */
+    LA_F479,  /* "%s: bad payload(%d, type=%u)\n" (%s,%d,%u)  [p2p_signal_relay.c] */
+    LA_F480,  /* "%s: cannot read SUB gist %s" (%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F481,  /* "%s: heartbeat write failed" (%s)  [p2p_signal_pubsub.c] */
+    LA_F482,  /* "%s: ignored in state=%d\n" (%s,%d)  [p2p_signal_compact.c, p2p_signal_relay.c] */
+    LA_F483,  /* "%s: mailbox empty, waiting" (%s)  [p2p_signal_pubsub.c] */
+    LA_F484,  /* "%s: offer %s (my gist=%s)" (%s,%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F485,  /* "%s: offer confirmed" (%s)  [p2p_signal_pubsub.c] */
+    LA_F486,  /* "%s: offer overwritten by SUB heartbeat, resending" (%s)  [p2p_signal_pubsub.c] */
+    LA_F487,  /* "%s: published %d candidates (ver=%d)" (%s,%d,%d)  [p2p_signal_pubsub.c] */
+    LA_F488,  /* "%s: received %d candidates (ver=%d) from %s" (%s,%d,%d,%s)  [p2p_signal_pubsub.c] */
+    LA_F489,  /* "%s: received offer from %s (peer=%s) → SYNCING" (%s,%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F490,  /* "%s: received offer from %s (peer=%s) → WAIT_STUN" (%s,%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F491,  /* "%s: send offer failed" (%s)  [p2p_signal_pubsub.c] */
+    LA_F492,  /* "%s: skip stale ver=0 from %s (previous session)" (%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F493,  /* "%s: skip stale ver=0 from SUB (previous session)" (%s)  [p2p_signal_pubsub.c] */
+    LA_F494,  /* "%s: stun collection ready, auto SYNC sent\n" (%s)  [p2p_signal_relay.c] */
+    LA_F495,  /* "%s: writing heartbeat (gist=%s) %s" (%s,%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F496,  /* "%s: → READY" (%s)  [p2p_signal_pubsub.c] */
+    LA_F497,  /* "%s: → SYNCING" (%s)  [p2p_signal_pubsub.c] */
+    LA_F498,  /* "%s: → WAIT_STUN" (%s)  [p2p_signal_pubsub.c] */
+    LA_F499,  /* "CONNECT PUB: target=%s/%s" (%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F500,  /* "CONNECT SUB: waiting for offer (gist=%s/%s)" (%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F501,  /* "CONNECT: instance not online yet"  [p2p_signal_pubsub.c] */
+    LA_F502,  /* "DISCONNECT"  [p2p_signal_pubsub.c] */
+    LA_F503,  /* "Gathered Host6 candidate: %s:%d (priority=0x%08x)" (%s,%d)  [p2p.c] */
+    LA_F504,  /* "OFF"  [p2p_signal_pubsub.c] */
+    LA_F505,  /* "PUBSUB mode: all candidate types (host/srflx/relay) disabled, no candidates possible"  [p2p.c] */
+    LA_F506,  /* "PUBSUB mode: both IPv4 and IPv6 disabled, no candidates possible"  [p2p.c] */
+    LA_F507,  /* "PUBSUB online failed(%d)" (%d)  [p2p.c] */
+    LA_F508,  /* "Packet too large len=%d max=%d" (%d,%d)  [p2p_trans_reliable.c] */
+    LA_F509,  /* "Path manager initialized with strategy: %d (0=conn,1=perf,2=hybrid)" (%d)  [p2p.c] */
+    LA_F510,  /* "REG to RELAY signaling server at %s:%d" (%s,%d)  [p2p.c] */
+    LA_F511,  /* "REG: local_gist=%s peer=%s" (%s,%s)  [p2p_signal_pubsub.c] */
+    LA_F512,  /* "REG: peer_id cannot contain '/' (got \"%s\")" (%s)  [p2p_signal_pubsub.c] */
+    LA_F513,  /* "SDP REMOTE: %s cand<%s:%d> (disabled)" (%s,%s,%d)  [p2p_signal_pubsub.c] */
+    LA_F514,  /* "SDP REMOTE: %s cand[%d]<%s:%d> accepted" (%s,%d,%s,%d)  [p2p_signal_pubsub.c] */
+    LA_F515,  /* "SDP import failed or empty"  [p2p_signal_pubsub.c] */
+    LA_F516,  /* "Start RELAY session failed(%d)" (%d)  [p2p.c] */
+    LA_F517,  /* "[R] %s timeout\n" (%s)  [p2p_signal_relay.c] */
+    LA_F518,  /* "[R] TCP connected immediately, sending REG\n"  [p2p_signal_relay.c] */
+    LA_F519,  /* "[R] TCP connected, sending REG\n"  [p2p_signal_relay.c] */
+    _LA_520,
+    _LA_521,
+    _LA_522,
+    _LA_523,
+    _LA_524,
+    _LA_525,
+    _LA_526,
+    _LA_527,
+    _LA_528,
+    _LA_529,
+    _LA_530,
+    _LA_531,
+    _LA_532,
+    _LA_533,
+    _LA_534,
+    _LA_535,
+    _LA_536,
+    _LA_537,
+    _LA_538,
+    _LA_539,
+    _LA_540,
+    _LA_541,
+    _LA_542,
+    _LA_543,
+    _LA_544,
+    _LA_545,
+    _LA_546,
+    _LA_547,
+    _LA_548,
+    _LA_549,
+    _LA_550,
+    _LA_551,
+    _LA_552,
+    _LA_553,
+    _LA_554,
+    _LA_555,
+    _LA_556,
+    _LA_557,
+    _LA_558,
+    _LA_559,
+    _LA_560,
+    _LA_561,
+    _LA_562,
+    _LA_563,
+    _LA_564,
+    _LA_565,
+    _LA_566,
+    _LA_567,
+    _LA_568,
+    _LA_569,
+    _LA_570,
+    _LA_571,
+    _LA_572,
+    _LA_573,
+    _LA_574,
+    _LA_575,
+    LA_F576,  /* "%s: session offer(st=%s peer=%s), %s\n" (%s,%s,%s,%s)  [p2p_signal_relay.c] */
+    LA_F577,  /* "%s: SUB gist empty, waiting" (%s)  [p2p_signal_pubsub.c] */
+    LA_F578,  /* disabled "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" */
+    LA_F579,  /* disabled "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" */
+    LA_F580,  /* "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" (%s,%l,%d)  [p2p_signal_pubsub.c] */
 
     LA_NUM
 };

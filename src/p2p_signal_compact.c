@@ -595,7 +595,7 @@ void compact_on_online_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flag
 
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
     if (sig_ctx->state != SIG_COMPACT_WAIT_REG_ACK) {
-        print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sig_ctx->state);
+        print("V:", LA_F("%s: ignored in state=%d\n", LA_F482, 482), PROTO, (int)sig_ctx->state);
         return;
     }
 
@@ -686,7 +686,7 @@ void compact_on_alive_ack(struct p2p_instance *inst) {
     p2p_compact_ctx_t *sig_ctx = &inst->sig_ctx.compact;
 
     if (sig_ctx->state < SIG_COMPACT_REG) {
-        print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)sig_ctx->state);
+        print("V:", LA_F("%s: ignored in state=%d\n", LA_F482, 482), PROTO, (int)sig_ctx->state);
         return;
     }
 
@@ -1494,7 +1494,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             }
 
             if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYN0_ACK) {
-                print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)s->sig_sess.compact.state);
+                print("V:", LA_F("%s: ignored in state=%d\n", LA_F482, 482), PROTO, (int)s->sig_sess.compact.state);
                 break;
             }
 
@@ -1536,7 +1536,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
             }
 
             if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYN0_ACK) {
-                print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)s->sig_sess.compact.state);
+                print("V:", LA_F("%s: ignored in state=%d\n", LA_F482, 482), PROTO, (int)s->sig_sess.compact.state);
                 break;
             }
 
@@ -1609,7 +1609,7 @@ void p2p_signal_compact_proto(struct p2p_instance *inst, uint8_t type, uint8_t f
         }
 
         if (s->sig_sess.compact.state < SIG_COMPACT_SESS_WAIT_SYN0_ACK) {
-            print("V:", LA_F("%s: ignored in state=%d\n", LA_F142, 142), PROTO, (int)s->sig_sess.compact.state);
+            print("V:", LA_F("%s: ignored in state=%d\n", LA_F482, 482), PROTO, (int)s->sig_sess.compact.state);
             break;
         }
 

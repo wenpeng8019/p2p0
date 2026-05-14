@@ -293,7 +293,7 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
 
     client->io &= ~TCP_IO_FLAG_WANT_READ;               // 停止接收数据
 
-    if (!fatal) {
+    if (!fatal && ctx->error_item) {
 
         buf16_item_t *err_item = ctx->error_item(client, false);
         if (err_item) {
@@ -313,7 +313,12 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
     // 清除除了正在发送的包以外的所有待发送数据
     clear_client_sending(client);
 
-    // 追加 fatal 作为最后一项
+    // 追加 fatal 作为最后一项（如果 fatal_item 为 NULL，直接释放 client）
+    if (!ctx->fatal_item) {
+        ct_free_client(ctx, client);
+        return;
+    }
+    
     if (client->send_buff_queue.rear) {
         client->send_buff_queue.rear->next = ctx->fatal_item;
         assert((client->io & TCP_IO_FLAG_WANT_WRITE));
@@ -352,8 +357,10 @@ static inline void prepare_next_recv(ct_client_t *client, buf16_item_t* recv_buf
         else if (!client->recv_buf) {
             assert(!client->payload_buf);
             if (recv_buf->next) { free_buf16(recv_buf->next); recv_buf->next = NULL; }
-            if (!client->recv_cur) { assert(!recv_buf->pos && !recv_buf->len); free_buf16(recv_buf);
-            } else { recv_buf->refer = (void*)-1; client->payload_buf = recv_buf; }
+            // 如果数据已完全消费，清零游标并释放 buf
+            if (recv_buf->pos == recv_buf->len) client->recv_cur = 0;
+            if (client->recv_cur) { recv_buf->refer = (void*)-1; client->payload_buf = recv_buf; } 
+            else free_buf16(recv_buf);
         }
         // 如果只是调整流模式的 recv_buf
         else {
@@ -366,7 +373,6 @@ static inline void prepare_next_recv(ct_client_t *client, buf16_item_t* recv_buf
     }
 }
 
-// 处理 RELAY 模式信令（TCP 长连接）- 统一接收+分发架构
 void 
 ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
@@ -601,7 +607,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 }
             }
             // 如果存在缓释的 recv_buf
-            else if (payload_item->refer) { assert(payload_item->next);     // 这里不应该有延迟切换项
+            else if (payload_item->refer) { assert(!payload_item->next);    // 这里不应该有延迟切换项
 
                 buf = ITEM2BUF(payload_item) + payload_item->pos;           // 获取 payload 中已消费之后的剩余数据
                 sz  = payload_item->len - payload_item->pos; assert(sz);    // 获取 payload 中已消费之后的剩余部分长度
@@ -772,13 +778,13 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             client->payload_cur = 0;
 
             client->recv_cur = 0;
-            if (bak_item) bak_item->pos = bak_item->len = 0;        // 此时的 recv_buf（如果存在）肯定已经全部被消费完成
+            if (bak_item) bak_item->pos = bak_item->len = 0;            // 此时的 recv_buf（如果存在）肯定已经全部被消费完成
             goto handshake;
         }
         ctx->handle_proto(client, buf, sz, buf_item, payload_item);
 
         if (client->payload_buf) {
-            free_buffer(payload_item);            // 若回调置 payload_buf=NULL 表示已接管所有权，跳过释放
+            free_buffer(payload_item);                                  // 若回调置 payload_buf=NULL 表示已接管所有权，跳过释放
             client->payload_buf = NULL;
         }
         client->payload_cur = 0;
@@ -839,6 +845,11 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         ctx->handshake_finish(client);
 
     prepare_next:
+        // 如果 handle_proto 设置了 CLOSING 状态（如 WS Close frame），清除 WANT_READ 并停止处理
+        if (TCP_HS_IS_CLOSING(client)) {
+            client->io &= ~TCP_IO_FLAG_WANT_READ;
+            return;
+        }
         prepare_next_recv(client, bak_item);
     }   // for(;;)
 
@@ -1043,9 +1054,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             }
 
             // 如果发送的是对端发过来的数据
-            if (item->refer) {
-                if (item->refer == ITEM_REF_ACK_PENDING)
-                assert(item->refer != ITEM_REF_ACK_PENDING && item->refer != ITEM_REF_CLIENT_ERROR);
+            if (item->refer && ctx->handle_peer_sent) {
                 ctx->handle_peer_sent((ct_session_t*)item->refer, item);
             }
 

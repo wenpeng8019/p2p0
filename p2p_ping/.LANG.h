@@ -60,8 +60,8 @@ enum {
     LA_S18,  /* "Enable DTLS (MbedTLS)"  [p2p_ping.c] */
     LA_S19,  /* "Enable DTLS (OpenSSL)"  [p2p_ping.c] */
     LA_S20,  /* "Enable PseudoTCP"  [p2p_ping.c] */
-    LA_S21,  /* "GitHub Gist ID for Public Signaling"  [p2p_ping.c] */
-    LA_S22,  /* "GitHub Token for Public Signaling"  [p2p_ping.c] */
+    LA_S21,  /* "GitHub Gist ID for Pub/Sub Signaling"  [p2p_ping.c] */
+    LA_S22,  /* "GitHub Token for Pub/Sub Signaling"  [p2p_ping.c] */
     LA_S23,  /* "Log level (0-5)"  [p2p_ping.c] */
     LA_S24,  /* "Signaling server IP[:PORT]"  [p2p_ping.c] */
     LA_S25,  /* "Skip NAT type detection (RFC 3489 Test II/III)"  [p2p_ping.c] */
@@ -71,28 +71,42 @@ enum {
     LA_S29,  /* "TURN server address"  [p2p_ping.c] */
     LA_S30,  /* "TURN username"  [p2p_ping.c] */
     LA_S31,  /* "Use Chinese language"  [p2p_ping.c] */
-    LA_S32,  /* "Use COMPACT mode (UDP signaling, default is ICE/TCP)"  [p2p_ping.c] */
+    LA_S32,  /* "Use COMPACT mode (UDP signaling, default is TCP/RELAY)"  [p2p_ping.c] */
     LA_S33,  /* "Your Peer Name"  [p2p_ping.c] */
+    LA_S34,  /* "Wait for STUN srflx candidates before sync"  [p2p_ping.c] */
+    LA_S35,  /* "Use WSS mode (WebSocket signaling, default is TCP/RELAY)"  [p2p_ping.c] */
 
     /* Formats (LA_F) */
-    LA_F34,  /* "=== P2P Ping Diagnostic Tool ===\n"  [p2p_ping.c] */
-    LA_F35,  /* "Debugger connected, resuming execution.\n"  [p2p_ping.c] */
     LA_F36,  /* "Failed to create sessions\n"  [p2p_ping.c] */
-    LA_F37,  /* "Failed to initialize connection\n"  [p2p_ping.c] */
+    LA_F37,  /* "Failed to initialize PUBSUB SUB session\n"  [p2p_ping.c] */
     LA_F38,  /* "No signaling mode.\nUse --server or --github\n"  [p2p_ping.c] */
     LA_F39,  /* "Running in %s mode (connecting to %s)..." (%s,%s)  [p2p_ping.c] */
     LA_F40,  /* "Running in %s mode (waiting for connection)..." (%s)  [p2p_ping.c] */
-    LA_F41,  /* "Timeout waiting for debugger. Continuing without debugger.\n"  [p2p_ping.c] */
-    LA_F42,  /* "Waiting Debugger(%s) connecting...\n" (%s)  [p2p_ping.c] */
+
+    /* Strings (LA_S) */
+    LA_S41,  /* "Disable IPv4 candidates (for testing)"  [p2p_ping.c] */
+    LA_S42,  /* "Disable IPv6 candidates (for testing)"  [p2p_ping.c] */
+
+    /* Formats (LA_F) */
     LA_F43,  /* "[Chat] Echo mode enabled: received messages will be echoed back.\n"  [p2p_ping.c] */
     LA_F44,  /* "[Chat] Entering message mode. Type and press Enter to send. Ctrl+C to quit.\n"  [p2p_ping.c] */
     LA_F45,  /* "[EVENT] State: %s -> %s\n" (%s,%s)  [p2p_ping.c] */
     LA_F46,  /* "[STATE] %s (%d) -> %s (%d)\n" (%s,%d,%s,%d)  [p2p_ping.c] */
 
+    /* Strings (LA_S) */
+    LA_S47,  /* "Enable multi-path Srflx (per-interface STUN)"  [p2p_ping.c] */
+
+    /* Formats (LA_F) */
+    LA_F48,  /* "=== P2P Ping Diagnostic Tool ===\n"  [p2p_ping.c] */
+    LA_F49,  /* "Debugger connected, resuming execution.\n"  [p2p_ping.c] */
+    LA_F50,  /* "Failed to initialize connection\n"  [p2p_ping.c] */
+    LA_F51,  /* "Timeout waiting for debugger. Continuing without debugger.\n"  [p2p_ping.c] */
+    LA_F52,  /* "Waiting Debugger(%s) connecting...\n" (%s)  [p2p_ping.c] */
+
     LA_NUM
 };
 
 /* 格式字符串起始位置（用于验证） */
-#define LA_FMT_START LA_F34
+#define LA_FMT_START LA_F48
 
 #endif /* LANG_H__ */

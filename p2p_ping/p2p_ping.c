@@ -37,7 +37,7 @@ ARGS_S(false, to,            't', "to",           LA_CS("Target Peer Name (if sp
 ARGS_S(false, stun,           0,  "stun",         LA_CS("STUN server address", LA_S26, 26));
 ARGS_B(false, wait_stun,      0,  "wait-stun",    LA_CS("Wait for STUN srflx candidates before sync", LA_S34, 34));
 ARGS_B(false, skip_stun_test, 0,  "no-stun-test", LA_CS("Skip NAT type detection (RFC 3489 Test II/III)", LA_S25, 25));
-ARGS_B(false, multi_srflx,    0,  "multi-srflx",  LA_CS("Enable multi-path Srflx (per-interface STUN)", 0, 0));
+ARGS_B(false, multi_srflx,    0,  "multi-srflx",  LA_CS("Enable multi-path Srflx (per-interface STUN)", LA_S47, 47));
 ARGS_S(false, turn,           0,  "turn",         LA_CS("TURN server address", LA_S29, 29));
 ARGS_S(false, turn_user,      0,  "turn-user",    LA_CS("TURN username", LA_S30, 30));
 ARGS_S(false, turn_pass,      0,  "turn-pass",    LA_CS("TURN password", LA_S28, 28));
@@ -524,7 +524,7 @@ int main(int argc, char *argv[]) {
     else if (ARGS_github.str && ARGS_gist.str)
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
 
-    print("I:", LA_F("=== P2P Ping Diagnostic Tool ===\n", LA_F34, 34));
+    print("I:", LA_F("=== P2P Ping Diagnostic Tool ===\n", LA_F48, 48));
 
     if (ARGS_debugger.str) {
         /* 
@@ -536,13 +536,13 @@ int main(int argc, char *argv[]) {
          */
         instrument_listen(on_instrument, ARGS_debugger.str);
 
-        print("I:", LA_F("Waiting Debugger(%s) connecting...\n", LA_F42, 42), ARGS_debugger.str);
+        print("I:", LA_F("Waiting Debugger(%s) connecting...\n", LA_F52, 52), ARGS_debugger.str);
 
         ret_t r = instrument_wait(my_name, ARGS_debugger.str, 60 * 1000);
         if (r == E_NONE) {
-            print("I:", LA_F("Debugger connected, resuming execution.\n", LA_F35, 35));
+            print("I:", LA_F("Debugger connected, resuming execution.\n", LA_F49, 49));
         } else {
-            print("W:", LA_F("Timeout waiting for debugger. Continuing without debugger.\n", LA_F41, 41));
+            print("W:", LA_F("Timeout waiting for debugger. Continuing without debugger.\n", LA_F51, 51));
         }
     }
 
@@ -573,7 +573,7 @@ int main(int argc, char *argv[]) {
     if (target_name) {
         g_session = p2p_connect(hdl, target_name, ARGS_wait_stun.i64 ? true : false);
         if (!g_session) {
-            print("E:", LA_F("Failed to initialize connection\n", LA_F37, 37));
+            print("E:", LA_F("Failed to initialize connection\n", LA_F50, 50));
             return 1;
         }
         if (p2p_state(g_session) == P2P_STATE_INIT) {
@@ -629,7 +629,7 @@ int main(int argc, char *argv[]) {
             if (g_session) { p2p_close(g_session); g_session = NULL; }
             g_session = p2p_connect(hdl, target_name, ARGS_wait_stun.i64 ? true : false);
             if (!g_session) {
-                print("E:", LA_F("Failed to initialize connection\n", LA_F37, 37));
+                print("E:", LA_F("Failed to initialize connection\n", LA_F50, 50));
                 break;
             }
             connect_pending = false;  // 已触发，等状态机推进；CLOSED 时再重置

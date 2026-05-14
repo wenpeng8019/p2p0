@@ -89,6 +89,10 @@ static uint16_t cw_hdr_full_sz(uint8_t len7) {
 
 static bool cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint16_t hdr_len,
                                    uint32_t *payload_len, uint16_t *payload_offset) {
+    
+    // HTTP 握手阶段没有 payload
+    if (TCP_HS_IS_HANDSHAKING(client)) { *payload_len = 0; *payload_offset = 0; return true; }
+    
     uint8_t len7 = hdr_buf[1] & 0x7F;
 
     // 第一次调用：2 字节 base header，解析扩展需求
@@ -241,18 +245,13 @@ static buf16_item_t *cw_tcp_handle_handshake(ct_client_t **pclient,
 
 static void cw_tcp_handshake_finish(ct_client_t *client) {
     cw_client_t *cwc = (cw_client_t*)client;
-    // 切换到帧模式：释放 HTTP recv_buf，设置 hdr_rs 指向静态帧头缓冲
-    if (client->recv_buf) {
-        // handshake_finish 中修改 recv_buf → NULL 触发框架切换到帧模式
-        // 注意：框架在 handshake_finish 返回后会调用 prepare_next_recv(client, old_recv_buf)
-        // 所以这里直接将 recv_buf 置 NULL，框架会处理好帧模式的切换
-        if (client->recv_buf->next) { free_buf16(client->recv_buf->next); client->recv_buf->next = NULL; }
-        // 不在此 free，让框架的 prepare_next_recv 处理（它会检测 recv_buf 变化并释放）
-        client->recv_buf = NULL;
-    }
+    
+    // 切换到帧模式：将 recv_buf 设为 NULL 触发框架切换
+    client->recv_buf = NULL;
+    
     // 设置帧模式参数
-    client->hdr_rs = cwc->ws_hdr_buf;  // 14 字节静态缓冲
-    client->hdr_sz = 2;                // 初始读取 2 字节
+    client->hdr_rs = cwc->ws_hdr_buf;  // 14 字节静态帧头缓冲
+    client->hdr_sz = 2;                // 初始读取 2 字节基础帧头
     // 结束握手阶段，进入正常帧收发阶段
     client->handshake = 0;
 }
@@ -317,15 +316,15 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
         uint8_t *ctrl_data = payload0 ? ITEM2BUF(payload0) + payload0->pos : NULL;
         uint8_t  ctrl_len  = (uint8_t)ctrl_total;
         if (opcode == WS_OP_CLOSE) {
-            uint16_t code = (ctrl_len >= 2) ? (uint16_t)((ctrl_data[0]<<8)|ctrl_data[1]) : 1000;
+            uint16_t code = (ctrl_len >= 2 && ctrl_data) ? (uint16_t)((ctrl_data[0]<<8)|ctrl_data[1]) : 1000;
             // RFC 6455 §7.4.1: 状态码必须合法
-            if (ctrl_len >= 2 && !cw_valid_close_code(code)) {
+            if (ctrl_len >= 2 && ctrl_data && !cw_valid_close_code(code)) {
                 cw_send_close(cwc, 1002);
                 client->handshake = TCP_HS_FLAG_CLOSING;
                 return;
             }
             // RFC 6455 §5.5.1: close frame reason string（第 2 字节起）必须是合法 UTF-8
-            if (ctrl_len > 2) {
+            if (ctrl_len > 2 && ctrl_data) {
                 uint32_t tmp = WS_UTF8_ACCEPT;
                 if (!cw_utf8_check(&tmp, ctrl_data + 2, ctrl_len - 2) || tmp != WS_UTF8_ACCEPT) {
                     cw_send_close(cwc, 1007);
@@ -345,7 +344,7 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
                 uint8_t *pb = ITEM2BUF(pong);
                 pb[0] = 0x8A;  // FIN | PONG
                 pb[1] = ctrl_len;
-                if (ctrl_len) memcpy(pb + 2, ctrl_data, ctrl_len);
+                if (ctrl_len && ctrl_data) memcpy(pb + 2, ctrl_data, ctrl_len);
                 pong->len = (uint16_t)(2 + ctrl_len);
                 pong->pos = 0;
                 ct_client_send(client, pong, true);  // 高优先级发送
@@ -447,12 +446,6 @@ oom:
         cwc->ws_frag_len = 0;
     }
     ct_client_error(&wctx->base, client, CUSTOM_TCP_ERR_INTERNAL, true);
-}
-
-static buf16_item_t *cw_tcp_error_item(ct_client_t *client, bool handshake) {
-    (void)client; (void)handshake;
-    // WS 协议错误直接关闭 TCP，不发应答（握手失败已在 handle_handshake 中单独处理）
-    return NULL;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -574,6 +567,8 @@ ret_t cw_send_close(cw_client_t *client, uint16_t code) {
     client->io |= CW_IO_FLAG_CLOSING;
     client->base.last_active = P_tick_ms();
     ct_client_send((ct_client_t*)client, item, true);
+    // 注意：必须在 ct_client_send 之后设置 CLOSING 标志，因为 ct_client_send 要求 handshake == 0
+    ((tcp_client_t*)client)->handshake = TCP_HS_FLAG_CLOSING;
     return E_NONE;
 }
 
@@ -594,9 +589,7 @@ void cw_ctx_init(cw_client_ctx_t *ctx) {
     ctx->base.handle_handshake       = cw_tcp_handle_handshake;
     ctx->base.handshake_finish       = cw_tcp_handshake_finish;
     ctx->base.handle_proto           = cw_tcp_handle_proto;
-    ctx->base.error_item             = cw_tcp_error_item;
-    // handle_peer_sent, session_break, client_unreachable 由上层填充
-    // fatal_item 由上层填充
+    // fatal_item/error_item/client_unreachable 由上层填充
 }
 
 ///////////////////////////////////////////////////////////////////////////////

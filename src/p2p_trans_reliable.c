@@ -43,7 +43,7 @@ int reliable_send_pkt(struct p2p_session *s, const uint8_t *data, int len) {
         return -1;
     }
     if (len > P2P_MAX_PAYLOAD) {
-        print("W:", LA_F("Packet too large len=%d max=%d", LA_F338, 338), len, P2P_MAX_PAYLOAD);
+        print("W:", LA_F("Packet too large len=%d max=%d", LA_F508, 508), len, P2P_MAX_PAYLOAD);
         return -1;
     }
 

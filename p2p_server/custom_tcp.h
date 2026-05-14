@@ -53,6 +53,8 @@ typedef struct ct_session {
 // + recv_buf:         流模式接收缓冲（非 NULL = 流模式，NULL = 帧模式）
 //                     流模式：pos 指向当前请求 header 的起始，recv_cur 是边界扫描游标
 //                     切换到帧模式时，若 recv_buf 尚有未消费数据，会保留为 payload_buf（缓释）
+//                     ⚠️ 修改 recv_buf 时无需手动释放旧对象（包括 recv_buf->next），只需直接赋新值或 NULL，
+//                        框架在回调后会自动调用 prepare_next_recv 处理模式切换和资源释放
 // + recv_cur:         流模式：边界扫描游标；帧模式：hdr_rs 已读取字节数
 // + payload_buf:      当前正在接收的 payload 缓冲；NULL 表示未进入 payload 接收阶段
 //                     + 帧模式切换时，原 recv_buf 中未消费的数据会暂存在此（refer=(void*)-1 标记）
@@ -142,8 +144,9 @@ typedef void (*ct_handshake_finish_cb)(ct_client_t *client);
 typedef void (*ct_handle_proto_cb)(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
                                    buf16_item_t* payload0, buf16_item_t* payload1);
 
-// session 级 buf_item 发送完成时调用（buf_item->refer 指向对端 session）
+// session 级 buf_item 发送完成时调用（nullable）
 // + 用于实现对端感知的发送确认（如中继转发的流量控制）
+// + 可为 NULL，此时跳过对端发送确认通知
 typedef void (*ct_handle_peer_sent_cb)(ct_session_t *session, buf16_item_t *buf_item);
 
 // session 配对关系被打破时调用
@@ -158,7 +161,8 @@ typedef void (*ct_client_unreachable_cb)(ct_client_t *client, bool readOrWrite);
 
 // 构造错误应答 buf_item（填充错误响应内容到 buf_item 后返回，框架负责发送和释放）
 // + handshake: true 表示发生在握手阶段（此时 last_error 已设置）
-// + 返回 NULL 表示 OOM，框架将直接强制释放 client
+// + 返回 NULL 表示 OOM，框架将按 fatal 处理
+// + 回调本身可以为 NULL（nullable），此时所有错误按 fatal 处理
 typedef buf16_item_t* (*ct_error_item_cb)(ct_client_t *client, bool handshake);
 
 //-----------------------------------------------------------------------------
@@ -166,17 +170,18 @@ typedef buf16_item_t* (*ct_error_item_cb)(ct_client_t *client, bool handshake);
 
 // 协议上下文扩展字段（内联宏，供派生协议上下文结构体使用）
 // + 参考 CUSTOM_TCP_CLIENT/ct_client_t 的宏继承模式
+// + nullable 字段：handshake_finish, handle_peer_sent, client_unreachable, fatal_item, error_item
 #define CUSTOM_TCP_CTX \
     uint32_t                        max_payload_len;            \
     ct_resolve_payload_len_cb       resolve_payload_len;        \
     ct_handle_handshake_cb          handle_handshake;           \
-    ct_handshake_finish_cb          handshake_finish;           \
+    ct_handshake_finish_cb          handshake_finish;           /* nullable: 握手完成回调（可选） */ \
     ct_handle_proto_cb              handle_proto;               \
-    ct_handle_peer_sent_cb          handle_peer_sent;           \
+    ct_handle_peer_sent_cb          handle_peer_sent;           /* nullable: 对端发送确认回调（可选） */ \
     ct_session_break_cb             session_break;              \
-    ct_client_unreachable_cb        client_unreachable;         \
-    buf16_item_t*                   fatal_item;                 \
-    ct_error_item_cb                error_item;
+    ct_client_unreachable_cb        client_unreachable;         /* nullable: client 不可达回调（可选） */ \
+    buf16_item_t*                   fatal_item;                 /* nullable: 致命错误应答包，NULL 时直接释放 client */ \
+    ct_error_item_cb                error_item;                 /* nullable: 错误应答构造回调，NULL 时按 fatal 处理 */
 
 typedef struct ct_client_ctx {
     client_ctx_t                    base;                       // 继承 client_ctx_t（必须为第一个成员）
@@ -209,7 +214,9 @@ ct_reactive_client(ct_client_ctx_t* ctx, ct_client_t *client);
 
 // 报告错误：
 // + fatal=false（非致命）：清除 WANT_READ，向 client 发送一个错误应答包，发送完成后关闭连接
+//   - 如 error_item 回调为 NULL，按 fatal 处理
 // + fatal=true（致命）：终止所有 session，清空发送队列，追加 fatal_item 后关闭连接
+//   - 如 fatal_item 为 NULL，直接释放 client
 void
 ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal);
 

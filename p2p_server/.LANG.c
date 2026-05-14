@@ -167,9 +167,11 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F122] = "Unknown packet type 0x%02x from %s\n",  /* SID:122 */
     [LA_F181] = "WebSocket service listening on port %d\n",  /* SID:181 */
     [LA_F11] = "[%s] conn closed (EOF on recv)\n",  /* SID:11 */
+    [LA_F182] = "[%s] conn closed (EOF on send)\n",  /* SID:182 */
     [LA_F224] = "[%s] conn closed during handshake(%d) (EOF on recv)\n",  /* SID:224 */
     [LA_F183] = "[%s] recv failed(%d) during handshake(%d) \n",  /* SID:183 */
     [LA_F225] = "[%s] recv failed(%d)\n",  /* SID:225 */
+    [LA_F144] = "[%s] send failed(%d)\n",  /* SID:144 */
     [LA_F123] = "[Relay] %s for ses_id=%u: peer unavailable (dropped)\n",  /* SID:123 */
     [LA_F124] = "[Relay] %s for unknown ses_id=%u (dropped)\n",  /* SID:124 */
     [LA_F125] = "[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%u)\n",  /* SID:125 */
@@ -177,11 +179,9 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F127] = "[Relay] %s: '%s' -> '%s' (ses_id=%u)\n",  /* SID:127 */
     [LA_F128] = "[Relay] %s: bad payload(len=%zu)\n",  /* SID:128 */
     [LA_F129] = "[Relay] %s: missing SESSION flag, dropped\n",  /* SID:129 */
-    [LA_F144] = "[TCP]  send(%s) failed(%d)\n",  /* SID:144 */
     [LA_F130] = "% [TCP] Failed to set client socket to non-blocking mode\n",  /* SID:130 */
     [LA_F131] = "% [TCP] Max peers reached, rejecting connection\n",  /* SID:131 */
     [LA_F133] = "% [TCP] OOM: cannot allocate recv buffer for new client\n",  /* SID:133 */
-    [LA_F182] = "[TCP] conn closed (EOF on send, PROTO=%s)\n",  /* SID:182 */
     [LA_F135] = "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:135 */
     [LA_F136] = "[UDP] %s send to %s:%d failed(%d)\n",  /* SID:136 */
     [LA_F137] = "[UDP] %s send to %s:%d, len=%d\n",  /* SID:137 */
