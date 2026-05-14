@@ -215,15 +215,16 @@ typedef struct buffer_round {
 #define BUF_R_BACK(rq)                                      \
     (BUF_R_FULL(rq) ? NULL : &(rq)->slots[(rq)->w])
 
-// 提交写入到队尾（在使用 BUF_R_BACK 填充数据后调用）
+// 提交写入到队尾（入队成功时 item 保持不变，队列满时 item 置为 NULL 表示失败）
+// 备注：调用后检查 item 是否为 NULL 可判断入队是否成功
 #define BUF_R_PUSH(rq, item) do {                           \
     if ((rq)->r == (rq)->w) {                               \
         if ((rq)->size < 0) {                               \
-            (rq)->slots[0] = item; item = NULL;             \
+            (rq)->slots[0] = item;                          \
             (rq)->r = 0; (rq)->w = 1;                       \
             if ((rq)->size < -1) (rq)->size = -(rq)->size;  \
-        }                                                   \
-    } else { (rq)->slots[(rq)->w] = item; item = NULL;      \
+        } else item = NULL;  /* 队列满，置空表示失败 */     \
+    } else { (rq)->slots[(rq)->w] = item;                   \
         (rq)->w = ((rq)->w + 1) % (rq)->size;               \
     }                                                       \
 } while(0)
