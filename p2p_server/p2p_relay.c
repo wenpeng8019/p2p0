@@ -29,9 +29,8 @@ const char* PROTO_STR(uint8_t proto) {
 #define RELAY_PEER(s)               ((relay_session_t*)PEER(s))
 #define RELAY_CLIENT(s)             ((relay_client_t*)CLIENT(s))
 
-// RELAY RPC 待确认链表（按 rpc_sent_time 排序，队头最早超时）
-static relay_session_t*             g_relay_rpc_pending_head = NULL;
-static relay_session_t*             g_relay_rpc_pending_rear = NULL;
+// RELAY RPC 待确认队列（按 rpc_sent_time 排序，队头最早超时）
+static timeout_queue_t              g_relay_rpc_pending_q;
 
 static uint8_t                      g_relay_fatal[sizeof(buf16_item_t) + sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0)];
 static ct_client_ctx_t              g_ctx;
@@ -39,44 +38,6 @@ static ct_client_ctx_t              g_ctx;
 #define RLY_ERR_2_CT_ERR(err)       (CUSTOM_TCP_ERR_DISCONNECTED + (err) - P2P_RLY_ERR_DISCONNECTED)
 
 ///////////////////////////////////////////////////////////////////////////////
-
-// 将 session 加到 RPC 待确认链表尾部
-static void relay_pending_enqueue_rpc(relay_session_t *session) {
-    session->rpc_pending_next = (relay_session_t*)(void*)-1;
-    if (g_relay_rpc_pending_rear) {
-        g_relay_rpc_pending_rear->rpc_pending_next = session;
-        g_relay_rpc_pending_rear = session;
-    } else {
-        g_relay_rpc_pending_head = session;
-        g_relay_rpc_pending_rear = session;
-    }
-}
-
-// 将 session 从 RPC 待确认链表移除
-static void relay_pending_remove_rpc(relay_session_t *session) {
-    if (!g_relay_rpc_pending_head || !session->rpc_pending_next) return;
-
-    if (g_relay_rpc_pending_head == session) {
-        g_relay_rpc_pending_head = session->rpc_pending_next;
-        session->rpc_pending_next = NULL;
-        if (g_relay_rpc_pending_head == (void*)-1) {
-            g_relay_rpc_pending_head = NULL;
-            g_relay_rpc_pending_rear = NULL;
-        }
-        return;
-    }
-
-    relay_session_t *prev = g_relay_rpc_pending_head;
-    while (prev->rpc_pending_next != session) {
-        assert(prev->rpc_pending_next == (void*)-1);
-        prev = prev->rpc_pending_next;
-    }
-    prev->rpc_pending_next = session->rpc_pending_next;
-    if (session->rpc_pending_next == (void*)-1) {
-        g_relay_rpc_pending_rear = prev;
-    }
-    session->rpc_pending_next = NULL;
-}
 
 //-----------------------------------------------------------------------------
 
@@ -340,7 +301,7 @@ static void relay_session_break(ct_session_t *ct_session, ct_session_t *ct_peer,
     // 存在对端发起的 req
     if (peer->rpc_pending_sid) {
         relay_session_send_rpc_code(peer, peer->rpc_pending_sid, P2P_RPC_ERR_PEER_OFF);
-        relay_pending_remove_rpc(peer);
+        if (TQ_INQ(&g_relay_rpc_pending_q, peer)) TQ_RM(&g_relay_rpc_pending_q, peer);
         peer->rpc_sent_time = 0;
         peer->rpc_pending_sid = 0;
     }
@@ -352,7 +313,7 @@ static void relay_session_break(ct_session_t *ct_session, ct_session_t *ct_peer,
         if (break_mode != SESS_BREAK_TERM)
             relay_session_send_rpc_code(session, session->rpc_pending_sid, P2P_RPC_ERR_BREAK);
 
-        relay_pending_remove_rpc(session);
+        if (TQ_INQ(&g_relay_rpc_pending_q, session)) TQ_RM(&g_relay_rpc_pending_q, session);
         session->rpc_sent_time = 0;
         session->rpc_pending_sid = 0;
     }
@@ -846,7 +807,7 @@ static void relay_handle_req(relay_client_t *client, relay_session_t *session, b
     // 转发 REQ 到对端，记录 pending sid（等 RSP 回来才解锁）
     session->rpc_pending_sid = sid;
     session->rpc_sent_time = P_tick_ms();
-    relay_pending_enqueue_rpc(session);
+    TQ_ADD(&g_relay_rpc_pending_q, session, session->rpc_sent_time);
 }
 
 // 处理 RPC_RSP 消息（零拷贝转发）
@@ -905,7 +866,7 @@ static void relay_handle_rsp(relay_client_t *client, relay_session_t *session, b
     ct_session_send((ct_session_t*)peer, buf_item);
 
     // 解锁 rpc_pending_sid（RPC 生命周期完成），释放 pending 状态
-    relay_pending_remove_rpc(peer);
+    if (TQ_INQ(&g_relay_rpc_pending_q, peer)) TQ_RM(&g_relay_rpc_pending_q, peer);
     peer->rpc_pending_sid = 0;
     peer->rpc_sent_time = 0;
 }
@@ -1139,6 +1100,13 @@ static buf16_item_t* relay_error_item(ct_client_t *client, bool handshake) {
 ct_client_ctx_t*
 relay_init(void) {
 
+    // 初始化 RPC 待确认队列
+    TQ_INIT(&g_relay_rpc_pending_q,
+            REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
+            offsetof(relay_session_t, rpc_pending_prev),
+            offsetof(relay_session_t, rpc_pending_next),
+            offsetof(relay_session_t, rpc_sent_time));
+
     buf16_item_t *fatal_item = (buf16_item_t*)g_relay_fatal;
     p2p_relay_hdr_t *fatal_hdr = (p2p_relay_hdr_t*)ITEM2BUF(fatal_item);
     fatal_hdr->type = P2P_RLY_STA;
@@ -1196,25 +1164,14 @@ relay_free_client(client_t *client) {
 // 检查 RELAY RPC 超时（队列按时间排序，未超时即短路返回）
 void relay_retry_pending(uint64_t now) {
 
-    while (g_relay_rpc_pending_head) { relay_session_t *s = g_relay_rpc_pending_head;
-
-        // 队列按时间排序，未超时即全部未超时
-        if (tick_diff(now, s->rpc_sent_time) < REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS) return;
-
-        // 移除队头
-        g_relay_rpc_pending_head = s->rpc_pending_next;
-        if (g_relay_rpc_pending_head == (void*)-1) {
-            g_relay_rpc_pending_head = g_relay_rpc_pending_rear = NULL;
-        }
-        s->rpc_pending_next = NULL;
-
+    relay_session_t *s;
+    TQ_RETRY(&g_relay_rpc_pending_q, now, s,
         // 向请求方发送超时错误 RSP
         uint16_t sid = s->rpc_pending_sid;
         s->rpc_pending_sid = 0;
-
         print("W:", "[R] RPC timeout: sid=%u (ses_id=%u)\n", sid, s->base.session_id);
         relay_session_send_rpc_code(s, sid, P2P_RPC_ERR_TIMEOUT);
-    }
+    )
 }
 
 ///////////////////////////////////////////////////////////////////////////////

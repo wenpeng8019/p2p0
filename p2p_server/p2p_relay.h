@@ -35,7 +35,8 @@ typedef struct relay_session {
                                                                         // 全程：REQ→转发→RSP→转发回来才解锁
                                                                         // RSP 返回时验证 sid 一致性
     uint64_t                        rpc_sent_time;                      // RPC 发起时间戳（毫秒，用于超时检测）
-    struct relay_session*           rpc_pending_next;                   // RPC 待确认链表指针（NULL=不在链表中，-1=链表尾）
+    struct relay_session*           rpc_pending_prev;                   // RPC 待确认链表前驱指针（用于 timeout_queue_t）
+    struct relay_session*           rpc_pending_next;                   // RPC 待确认链表后继指针（用于 timeout_queue_t）
 
 } relay_session_t;
 

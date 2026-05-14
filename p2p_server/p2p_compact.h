@@ -22,14 +22,16 @@ typedef struct compact_session {
     //   2  = 客户端对（服务器转发的）对端 SYN0 的 ACK 确认
     //  -1  = 重传超时放弃
     int                             sync0_acked;
-    struct compact_session*         sync0_pending_next;         // 待确认链表指针（-1 表示链表最后一个）
+    struct compact_session*         sync0_pending_prev;         // 超时队列前驱指针
+    struct compact_session*         sync0_pending_next;         // 超时队列后继指针
     uint64_t                        sync0_sent_time;            // 当前待确认 seq=0 最近发送时间（毫秒）
     int                             sync0_retry;                // 当前待确认 seq=0 重传次数
     uint8_t                         sync0_base_index;           // 当前待确认 seq=0 的 base_index（0=首包，!=0 地址变更通知）
 
     // MSG RPC（请求-响应机制，共用字段存储两个阶段的数据）
     uint16_t                        rpc_last_sid;               // 最后一次完成或正在执行的 RPC 序列号（0=未使用）
-    struct compact_session*         rpc_pending_next;           // RPC 待确认链表指针（NULL=空闲，-1=链表尾）
+    struct compact_session*         rpc_pending_prev;           // 超时队列前驱指针
+    struct compact_session*         rpc_pending_next;           // 超时队列后继指针
     uint64_t                        rpc_sent_time;              // 最后发送时间（毫秒）
     int                             rpc_retry;                  // 重传次数
     bool                            rpc_responding;             // RPC 阶段（false=REQ等待对端，true=RSP等待确认）

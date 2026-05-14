@@ -16,111 +16,15 @@ ARGS(probe_port);
 
 static compact_client_t*            g_clients_by_auth = NULL;
 
-// SYNC(seq=0) 待确认链表（仅包含已发送首包但未收到 ACK 的配对）
-static compact_session_t*           g_sync0_pending_head = NULL;
-static compact_session_t*           g_sync0_pending_rear = NULL;
+// SYNC(seq=0) 待确认超时队列
+static timeout_queue_t              g_sync0_pending_q;
 
-// MSG RPC 待确认链表（统一管理 REQ 和 RSP 阶段，通过 rpc_responding 区分）
-static compact_session_t*           g_rpc_pending_head = NULL;
-static compact_session_t*           g_rpc_pending_rear = NULL;
+// MSG RPC 待确认超时队列
+static timeout_queue_t              g_rpc_pending_q;
 
 static client_ctx_t                 g_ctx = { compact_free_client, NULL };
 
 ///////////////////////////////////////////////////////////////////////////////
-
-// 从待确认链表移除
-static void compact_pending_remove_syn0(compact_session_t *cs) {
-
-    if (!g_sync0_pending_head || !cs->sync0_pending_next) return;
-
-    if (g_sync0_pending_head == cs) {
-        g_sync0_pending_head = cs->sync0_pending_next;
-        cs->sync0_pending_next = NULL;
-        if (g_sync0_pending_head == (compact_session_t*)(void*)-1) {
-            g_sync0_pending_head = NULL;
-            g_sync0_pending_rear = NULL;
-        }
-        return;
-    }
-
-    compact_session_t *prev = g_sync0_pending_head;
-    while (prev->sync0_pending_next != cs) {
-        if (prev->sync0_pending_next == (compact_session_t*)(void*)-1) return;
-        prev = prev->sync0_pending_next;
-    }
-
-    prev->sync0_pending_next = cs->sync0_pending_next;
-
-    if (cs->sync0_pending_next == (compact_session_t*)(void*)-1) {
-        g_sync0_pending_rear = prev;
-    }
-
-    cs->sync0_pending_next = NULL;
-}
-
-// 将 session 加入 SYNC(seq=0) 待确认链表
-static void compact_pending_enqueue_syn0(compact_session_t *cs, uint8_t base_index, uint64_t now) {
-
-    if (cs->sync0_pending_next) {
-        compact_pending_remove_syn0(cs);
-    }
-
-    cs->sync0_base_index = base_index;
-    cs->sync0_retry = 0;
-    cs->sync0_sent_time = now;
-
-    cs->sync0_pending_next = (compact_session_t*)(void*)-1;
-    if (g_sync0_pending_rear) {
-        g_sync0_pending_rear->sync0_pending_next = cs;
-        g_sync0_pending_rear = cs;
-    } else {
-        g_sync0_pending_head = cs;
-        g_sync0_pending_rear = cs;
-    }
-}
-
-// 从 RPC 待确认链表移除
-static void compact_pending_remove_rpc(compact_session_t *cs) {
-
-    if (!g_rpc_pending_head || !cs->rpc_pending_next) return;
-
-    if (g_rpc_pending_head == cs) {
-        g_rpc_pending_head = cs->rpc_pending_next;
-        cs->rpc_pending_next = NULL;
-        if (g_rpc_pending_head == (compact_session_t*)(void*)-1) {
-            g_rpc_pending_head = NULL;
-            g_rpc_pending_rear = NULL;
-        }
-        return;
-    }
-
-    compact_session_t *prev = g_rpc_pending_head;
-    while (prev->rpc_pending_next != cs) {
-        if (prev->rpc_pending_next == (compact_session_t*)(void*)-1) return;
-        prev = prev->rpc_pending_next;
-    }
-
-    prev->rpc_pending_next = cs->rpc_pending_next;
-    if (cs->rpc_pending_next == (compact_session_t*)(void*)-1) {
-        g_rpc_pending_rear = prev;
-    }
-    cs->rpc_pending_next = NULL;
-}
-
-// 将 session 加入 RPC 待确认链表
-static void compact_pending_enqueue_rpc(compact_session_t *cs) {
-
-    cs->rpc_pending_next = (compact_session_t*)(void*)-1;
-    if (g_rpc_pending_rear) {
-        g_rpc_pending_rear->rpc_pending_next = cs;
-        g_rpc_pending_rear = cs;
-    } else {
-        g_rpc_pending_head = cs;
-        g_rpc_pending_rear = cs;
-    }
-}
-
-//-----------------------------------------------------------------------------
 
 // 发送 REG_ACK: [hdr(4)][instance_id(4)][auth_key(SIG_AUTH_KEY_PSZ)][max_candidates(1)][public_ip(4)][public_port(2)][probe_port(2)] = 25字节
 // auth_key=0 表示服务器拒绝（无可用槽位）
@@ -376,6 +280,18 @@ static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
 
 client_ctx_t*
 compact_init(void) {
+    TQ_INIT(&g_sync0_pending_q,
+            SYN0_MAX_RETRY * SYN0_RETRY_INTERVAL_MS,
+            offsetof(compact_session_t, sync0_pending_prev),
+            offsetof(compact_session_t, sync0_pending_next),
+            offsetof(compact_session_t, sync0_sent_time));
+    
+    TQ_INIT(&g_rpc_pending_q,
+            RSP_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
+            offsetof(compact_session_t, rpc_pending_prev),
+            offsetof(compact_session_t, rpc_pending_next),
+            offsetof(compact_session_t, rpc_sent_time));
+    
     return &g_ctx;
 }
 
@@ -397,8 +313,8 @@ compact_init_client(compact_client_t* c, struct sockaddr_in *from) {
 static void compact_free_session(session_t *s) {
 
     compact_session_t *cs = (compact_session_t*)s;
-    if (cs->sync0_pending_next) compact_pending_remove_syn0(cs);
-    if (cs->rpc_pending_next)   compact_pending_remove_rpc(cs);
+    if (TQ_INQ(&g_sync0_pending_q, cs)) TQ_RM(&g_sync0_pending_q, cs);
+    if (TQ_INQ(&g_rpc_pending_q, cs))   TQ_RM(&g_rpc_pending_q, cs);
 
     // 通知对端断开，并标记对端 peer 指针为 -1
     if (PEER_ONLINE(&cs->base)) {
@@ -407,13 +323,13 @@ static void compact_free_session(session_t *s) {
         peer->addr_notify_seq = 0;
         peer->candidate_count = 0;
 
-        if (peer->sync0_pending_next) compact_pending_remove_syn0(peer);
+        if (TQ_INQ(&g_sync0_pending_q, peer)) TQ_RM(&g_sync0_pending_q, peer);
         peer->sync0_acked = 0;
         peer->sync0_sent_time = 0;
         peer->sync0_retry = 0;
         peer->sync0_base_index = 0;
 
-        if (peer->rpc_pending_next) compact_pending_remove_rpc(peer);
+        if (TQ_INQ(&g_rpc_pending_q, peer)) TQ_RM(&g_rpc_pending_q, peer);
         peer->rpc_last_sid = 0;
         peer->rpc_sent_time = 0;
         peer->rpc_retry = 0;
@@ -454,7 +370,7 @@ static void compact_transition_to_resp_pending(compact_session_t *requester, uin
     }
     requester->rpc_sent_time = now;
     requester->rpc_retry = 0;
-    compact_pending_enqueue_rpc(requester);
+    TQ_ADD(&g_rpc_pending_q, requester, requester->rpc_sent_time);
     compact_send_msg_resp_to_requester(requester);
 }
 
@@ -554,16 +470,22 @@ static void compact_handle_syn0(struct sockaddr_in *from, uint8_t *payload, size
                P2P_PEER_ID_MAX, remote_peer_id);
 
         // 如果对端已二次确认 SYN0_ACK，则触发 SYN0 推送
-        if (remote_s->sync0_acked == 1 && !remote_s->sync0_pending_next) {
+        if (remote_s->sync0_acked == 1 && !TQ_INQ(&g_sync0_pending_q, remote_s)) {
             compact_session_send_syn0(remote_s, 0);
-            compact_pending_enqueue_syn0(remote_s, 0, local_client->base.last_active);
+            remote_s->sync0_base_index = 0;
+            remote_s->sync0_retry = 0;
+            remote_s->sync0_sent_time = local_client->base.last_active;
+            TQ_ADD(&g_sync0_pending_q, remote_s, remote_s->sync0_sent_time);
         }
     }
 
     // 回复 SYN0_ACK 并加入（一阶段）待确认队列（等待客户端二次确认）
     compact_send_syn0_ack(local_s, remote_peer_id, remote_s != NULL);
-    assert(local_s->sync0_acked == 0 && !local_s->sync0_pending_next);
-    compact_pending_enqueue_syn0(local_s, 0, local_client->base.last_active);
+    assert(local_s->sync0_acked == 0 && !TQ_INQ(&g_sync0_pending_q, local_s));
+    local_s->sync0_base_index = 0;
+    local_s->sync0_retry = 0;
+    local_s->sync0_sent_time = local_client->base.last_active;
+    TQ_ADD(&g_sync0_pending_q, local_s, local_s->sync0_sent_time);
 }
 
 // SIG_PKT_SYN0_ACK（client→server）
@@ -589,9 +511,7 @@ static void compact_handle_syn0_ack(struct sockaddr_in *from, uint8_t *payload, 
             s->sync0_acked = 1;
 
             // 从 SYN0_ACK 待确认队列中移除
-            if (s->sync0_pending_next) {
-                compact_pending_remove_syn0(s);
-            }
+            if (TQ_INQ(&g_sync0_pending_q, s)) TQ_RM(&g_sync0_pending_q, s);
             s->sync0_retry = 0;
             s->sync0_sent_time = 0;
 
@@ -599,9 +519,12 @@ static void compact_handle_syn0_ack(struct sockaddr_in *from, uint8_t *payload, 
                    PROTO, COMPACT_CLIENT(s)->base.local_peer_id, session_id);
 
             // 二次确认后，若已配对则触发 SYN0 推送
-            if (PEER_ONLINE(&s->base) && !s->sync0_pending_next) {
+            if (PEER_ONLINE(&s->base) && !TQ_INQ(&g_sync0_pending_q, s)) {
                 compact_session_send_syn0(s, 0);
-                compact_pending_enqueue_syn0(s, 0, P_tick_ms());
+                s->sync0_base_index = 0;
+                s->sync0_retry = 0;
+                s->sync0_sent_time = P_tick_ms();
+                TQ_ADD(&g_sync0_pending_q, s, s->sync0_sent_time);
             }
         }
         else {
@@ -613,9 +536,7 @@ static void compact_handle_syn0_ack(struct sockaddr_in *from, uint8_t *payload, 
                        PROTO, COMPACT_CLIENT(s)->base.local_peer_id, s->sync0_retry, session_id);
             }
 
-            if (s->sync0_pending_next) {
-                compact_pending_remove_syn0(s);
-            }
+            if (TQ_INQ(&g_sync0_pending_q, s)) TQ_RM(&g_sync0_pending_q, s);
 
             s->sync0_base_index = 0;
             s->sync0_retry = 0;
@@ -625,7 +546,11 @@ static void compact_handle_syn0_ack(struct sockaddr_in *from, uint8_t *payload, 
             if (s->addr_notify_seq != 0) {
 
                 compact_session_send_syn0(s, s->addr_notify_seq);
-                compact_pending_enqueue_syn0(s, s->addr_notify_seq, P_tick_ms());
+                if (TQ_INQ(&g_sync0_pending_q, s)) TQ_RM(&g_sync0_pending_q, s);
+                s->sync0_base_index = s->addr_notify_seq;
+                s->sync0_retry = 0;
+                s->sync0_sent_time = P_tick_ms();
+                TQ_ADD(&g_sync0_pending_q, s, s->sync0_sent_time);
 
                 print("I:", LA_F("Addr changed for '%s', deferred notifying '%s' (ses_id=%u)\n", LA_F76, 76),
                       COMPACT_CLIENT(s)->base.local_peer_id, COMPACT_CLIENT(s)->base.local_peer_id,
@@ -664,9 +589,7 @@ static void compact_handle_sync_ack(sock_t udp_fd, uint8_t *buf, size_t len,
         if (c) {
             check_addr_change(COMPACT_CLIENT(c), from);
 
-            if (c->sync0_pending_next) {
-                compact_pending_remove_syn0(c);
-            }
+            if (TQ_INQ(&g_sync0_pending_q, c)) TQ_RM(&g_sync0_pending_q, c);
 
             c->sync0_base_index = 0;
             c->sync0_retry = 0;
@@ -837,7 +760,7 @@ static void compact_handle_req(struct sockaddr_in *from, p2p_packet_hdr_t *hdr,
         print("I:", LA_F("%s new sid=%u > pending sid=%u (responding=%d), canceling old RPC (ses_id=%u)\n", LA_F20, 20),
               PROTO, sid, requester->rpc_last_sid, requester->rpc_responding, requester->base.session_id);
 
-        compact_pending_remove_rpc(requester);
+        if (TQ_INQ(&g_rpc_pending_q, requester)) TQ_RM(&g_rpc_pending_q, requester);
     }
 
     if (requester->rpc_last_sid != 0 && !uint16_circle_newer(sid, requester->rpc_last_sid)) {
@@ -856,7 +779,7 @@ static void compact_handle_req(struct sockaddr_in *from, p2p_packet_hdr_t *hdr,
 
     requester->rpc_sent_time = P_tick_ms();
     requester->rpc_retry = 0;
-    compact_pending_enqueue_rpc(requester);
+    TQ_ADD(&g_rpc_pending_q, requester, requester->rpc_sent_time);
     compact_session_send_req_to_peer(requester);
 
     print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u, msg=%u (ses_id=%u)\n", LA_F18, 18),
@@ -912,13 +835,13 @@ static void compact_handle_rsp(struct sockaddr_in *from, uint8_t *payload, size_
 
     compact_session_t *requester = COMPACT_PEER(responder);
 
-    if (!requester->rpc_pending_next || requester->rpc_responding || requester->rpc_last_sid != sid) {
+    if (!TQ_INQ(&g_rpc_pending_q, requester) || requester->rpc_responding || requester->rpc_last_sid != sid) {
         print("W:", LA_F("%s: no matching pending msg (sid=%u, expected=%u)\n", LA_F57, 57),
               PROTO, sid, requester->rpc_last_sid);
         return;
     }
 
-    compact_pending_remove_rpc(requester);
+    if (TQ_INQ(&g_rpc_pending_q, requester)) TQ_RM(&g_rpc_pending_q, requester);
     compact_transition_to_resp_pending(requester, P_tick_ms(), 0, resp_code, resp_data, resp_len);
 
     print("I:", LA_F("%s forwarded: '%s' -> '%s', sid=%u (ses_id=%u)\n", LA_F17, 17),
@@ -959,7 +882,7 @@ static void compact_handle_rsp_ack(uint8_t *payload, size_t payload_len) {
         return;
     }
 
-    compact_pending_remove_rpc(requester);
+    if (TQ_INQ(&g_rpc_pending_q, requester)) TQ_RM(&g_rpc_pending_q, requester);
     requester->rpc_responding = false;
     requester->rpc_retry = 0;
 
@@ -988,7 +911,11 @@ static bool check_addr_change(compact_client_t *client, const struct sockaddr_in
             if (peer->addr_notify_seq == 0) peer->addr_notify_seq = 1;
 
             compact_session_send_syn0(peer, peer->addr_notify_seq);
-            compact_pending_enqueue_syn0(peer, peer->addr_notify_seq, P_tick_ms());
+            if (TQ_INQ(&g_sync0_pending_q, peer)) TQ_RM(&g_sync0_pending_q, peer);
+            peer->sync0_base_index = peer->addr_notify_seq;
+            peer->sync0_retry = 0;
+            peer->sync0_sent_time = P_tick_ms();
+            TQ_ADD(&g_sync0_pending_q, peer, peer->sync0_sent_time);
 
             print("I:", LA_F("Addr changed for '%s', notifying '%s' (ses_id=%u)\n", LA_F77, 77),
                   client->base.local_peer_id, COMPACT_CLIENT(peer)->base.local_peer_id, peer->base.session_id);
@@ -1214,39 +1141,24 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
 // 检查并重传 RPC（统一处理 REQ 和 RSP 阶段）
 void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
 
-    while (g_sync0_pending_head) {
-
-        if (tick_diff(now, g_sync0_pending_head->sync0_sent_time) < SYN0_RETRY_INTERVAL_MS) {
-            return;
-        }
-
-        compact_session_t *q = g_sync0_pending_head;
-        g_sync0_pending_head = q->sync0_pending_next;
-
+    // 处理 SYNC(seq=0) 超时重传
+    compact_session_t *q;
+    TQ_RETRY(&g_sync0_pending_q, now, q,
         if (q->sync0_retry >= SYN0_MAX_RETRY) {
-
             const char *remote_id = PEER_ONLINE(&q->base) ? q->base.peer->client->local_peer_id
                                     : (q->base.pair->sessions[0] == &q->base ? q->base.pair->peer_id[1]
                                                                               : q->base.pair->peer_id[0]);
             print("W:", LA_F("SYNC retransmit failed: %s <-> %s (gave up after %d tries)\n", LA_F104, 104),
                    q->base.client->local_peer_id, remote_id, q->sync0_retry);
 
-            q->sync0_pending_next = NULL;
             if (q->sync0_base_index == 0) {
                 q->sync0_acked = -1/* 超时停止 */;
             }
-
-            if (g_sync0_pending_head == (compact_session_t*)(void*)-1) {
-                g_sync0_pending_head = NULL;
-                g_sync0_pending_rear = NULL;
-                return;
-            }
+            // TQ_RETRY 已自动移除
         }
         else {
-
             // 状态 0：重传 SYN0_ACK，等待客户端二次确认
             if (q->sync0_acked == 0) {
-                // 从 pair 获取 remote_peer_id（避免 peer 为 NULL 时的解引用）
                 const char *remote_id = PEER_ONLINE(&q->base) ? q->base.peer->client->local_peer_id
                                         : (q->base.pair->sessions[0] == &q->base ? q->base.pair->peer_id[1]
                                                                                   : q->base.pair->peer_id[0]);
@@ -1254,30 +1166,16 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
             }
             // 状态 1：重传 SYN0，等待客户端确认收到该（来自对端的）SYN0
             else {
-
                 // 如果对端已经不在线了，就不必重传了
                 if (!PEER_ONLINE(&q->base)) {
-                    q->sync0_pending_next = NULL;
-                    if (g_sync0_pending_head == (compact_session_t*)(void*)-1) {
-                        g_sync0_pending_head = NULL;
-                        g_sync0_pending_rear = NULL;
-                        return; // sync0_pending 链表已空，直接返回
-                    }
-                    continue;
+                    continue; // TQ_RETRY 已移除，跳过
                 }
                 compact_session_send_syn0(q, q->sync0_base_index);
             }
 
             q->sync0_retry++;
             q->sync0_sent_time = now;
-
-            if (g_sync0_pending_head == (compact_session_t*)(void*)-1) {
-                g_sync0_pending_head = q;
-            } else {
-                q->sync0_pending_next = (compact_session_t*)(void*)-1;
-                g_sync0_pending_rear->sync0_pending_next = q;
-                g_sync0_pending_rear = q;
-            }
+            TQ_ADD(&g_sync0_pending_q, q, q->sync0_sent_time); // 重新入队
 
             print("V:", LA_F("SYNC resent, %s <-> %s, attempt %d/%d (ses_id=%u)\n", LA_F103, 103),
                    COMPACT_CLIENT(q)->base.local_peer_id,
@@ -1285,26 +1183,13 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
                                          : (q->base.pair->sessions[0] == &q->base ? q->base.pair->peer_id[1]
                                                                                    : q->base.pair->peer_id[0]),
                    q->sync0_retry, SYN0_MAX_RETRY, q->base.session_id);
-
-            if (g_sync0_pending_head == q) return;
         }
-    }
+    )
 
-    while (g_rpc_pending_head) {
-
-        if (tick_diff(now, g_rpc_pending_head->rpc_sent_time) < RPC_RETRY_INTERVAL_MS) {
-            return;
-        }
-
-        compact_session_t *q = g_rpc_pending_head;
-        g_rpc_pending_head = q->rpc_pending_next;
-        if (g_rpc_pending_head == (compact_session_t*)(void*)-1) {
-            g_rpc_pending_head = NULL;
-            g_rpc_pending_rear = NULL;
-        }
-
+    // 处理 RPC 超时重传
+    TQ_RETRY(&g_rpc_pending_q, now, q,
         if (!q->rpc_responding) {
-
+            // REQ 阶段
             if (!PEER_ONLINE(&q->base)) {
                 print("W:", LA_F("REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n", LA_F86, 86),
                       COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->base.session_id);
@@ -1321,40 +1206,34 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
                 compact_session_send_req_to_peer(q);
                 q->rpc_retry++;
                 q->rpc_sent_time = now;
-                compact_pending_enqueue_rpc(q);
+                TQ_ADD(&g_rpc_pending_q, q, q->rpc_sent_time); // 重新入队
 
                 print("V:", LA_F("REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n", LA_F87, 87),
                       COMPACT_CLIENT(q)->base.local_peer_id, COMPACT_CLIENT(q->base.peer)->base.local_peer_id,
                       q->rpc_last_sid, q->rpc_retry, REQ_MAX_RETRY, q->base.session_id);
-
-                if (g_rpc_pending_head == q) return;
             }
         }
         else {
-
+            // RSP 阶段
             if (q->rpc_retry >= RSP_MAX_RETRY) {
                 print("W:", LA_F("RSP gave up after %d retries, sid=%u (ses_id=%u)\n", LA_F88, 88),
                       q->rpc_retry, q->rpc_last_sid, q->base.session_id);
 
-                q->rpc_pending_next = NULL;
                 q->rpc_responding = false;
                 q->rpc_retry = 0;
+                // TQ_RETRY 已自动移除
             }
             else {
                 q->rpc_retry++;
                 compact_send_msg_resp_to_requester(q);
                 q->rpc_sent_time = now;
-                compact_pending_enqueue_rpc(q);
+                TQ_ADD(&g_rpc_pending_q, q, q->rpc_sent_time); // 重新入队
 
                 print("V:", LA_F("RSP resent back to '%s', sid=%u, attempt %d/%d (ses_id=%u)\n", LA_F89, 89),
                       COMPACT_CLIENT(q)->base.local_peer_id, q->rpc_last_sid, q->rpc_retry, RSP_MAX_RETRY, q->base.session_id);
-
-                if (g_rpc_pending_head == q) return;
             }
         }
-
-        if (!g_rpc_pending_head) return;
-    }
+    )
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -8,9 +8,8 @@
 ARGS(relay);
 ARGS(msg);
 
-// WSS RPC 待确认链表（按 rpc_sent_time 排序，队头最早超时）
-static wss_session_t*               g_wss_rpc_pending_head = NULL;
-static wss_session_t*               g_wss_rpc_pending_rear = NULL;
+// WSS RPC 待确认队列（按 rpc_sent_time 排序，队头最早超时）
+static timeout_queue_t              g_wss_rpc_pending_q;
 
 static cw_client_ctx_t              g_wss_ctx;
 
@@ -21,8 +20,6 @@ static cw_client_ctx_t              g_wss_ctx;
 static void wss_handle_frame(cw_client_t *base, uint8_t opcode, buf16_item_t *payload0, buf16_item_t *payload1);
 static void wss_handle_peer_sent(ct_session_t *session, buf16_item_t *buf_item);
 static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, break_mode_e break_mode);
-static void wss_pending_enqueue_rpc(wss_session_t *s);
-static void wss_pending_remove_rpc(wss_session_t *s);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -141,44 +138,6 @@ static bool wss_enqueue_sync(wss_session_t *src_s, wss_session_t *dst_s) {
     return true;
 }
 
-// 将 session 加到 RPC 待确认链表尾部
-static void wss_pending_enqueue_rpc(wss_session_t *s) {
-    s->rpc_pending_next = (wss_session_t*)(void*)-1;
-    if (g_wss_rpc_pending_rear) {
-        g_wss_rpc_pending_rear->rpc_pending_next = s;
-        g_wss_rpc_pending_rear = s;
-    } else {
-        g_wss_rpc_pending_head = s;
-        g_wss_rpc_pending_rear = s;
-    }
-}
-
-// 将 session 从 RPC 待确认链表移除
-static void wss_pending_remove_rpc(wss_session_t *s) {
-    if (!g_wss_rpc_pending_head || !s->rpc_pending_next) return;
-
-    if (g_wss_rpc_pending_head == s) {
-        g_wss_rpc_pending_head = s->rpc_pending_next;
-        s->rpc_pending_next = NULL;
-        if (g_wss_rpc_pending_head == (void*)-1) {
-            g_wss_rpc_pending_head = NULL;
-            g_wss_rpc_pending_rear = NULL;
-        }
-        return;
-    }
-
-    wss_session_t *prev = g_wss_rpc_pending_head;
-    while (prev->rpc_pending_next != s) {
-        assert(prev->rpc_pending_next != (void*)-1);
-        prev = prev->rpc_pending_next;
-    }
-    prev->rpc_pending_next = s->rpc_pending_next;
-    if (s->rpc_pending_next == (void*)-1) {
-        g_wss_rpc_pending_rear = prev;
-    }
-    s->rpc_pending_next = NULL;
-}
-
 //-----------------------------------------------------------------------------
 
 // 服务器生成 RPC 错误 RSP（二进制帧）
@@ -245,7 +204,7 @@ static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, b
     // 存在对端发起的 REQ 等待本端 RSP
     if (peer->rpc_pending_sid) {
         wss_session_send_rpc_code(peer, peer->rpc_pending_sid, P2P_RPC_ERR_PEER_OFF);
-        wss_pending_remove_rpc(peer);
+        if (TQ_INQ(&g_wss_rpc_pending_q, peer)) TQ_RM(&g_wss_rpc_pending_q, peer);
         peer->rpc_sent_time   = 0;
         peer->rpc_pending_sid = 0;
     }
@@ -254,7 +213,7 @@ static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, b
     if (session->rpc_pending_sid) {
         if (break_mode != SESS_BREAK_TERM)
             wss_session_send_rpc_code(session, session->rpc_pending_sid, P2P_RPC_ERR_BREAK);
-        wss_pending_remove_rpc(session);
+        if (TQ_INQ(&g_wss_rpc_pending_q, session)) TQ_RM(&g_wss_rpc_pending_q, session);
         session->rpc_sent_time   = 0;
         session->rpc_pending_sid = 0;
     }
@@ -285,6 +244,13 @@ static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, b
 
 cw_client_ctx_t*
 wss_init(void) {
+    // 初始化 RPC 待确认队列
+    TQ_INIT(&g_wss_rpc_pending_q,
+            REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
+            offsetof(wss_session_t, rpc_pending_prev),
+            offsetof(wss_session_t, rpc_pending_next),
+            offsetof(wss_session_t, rpc_sent_time));
+
     g_wss_ctx.base.base.free    = wss_free_client;
     g_wss_ctx.base.base.migrate = ct_migrate_client;
 
@@ -522,7 +488,7 @@ static void wss_handle_req(wss_session_t *session, buf16_item_t *payload1, uint8
 
     session->rpc_pending_sid = sid;
     session->rpc_sent_time   = P_tick_ms();
-    wss_pending_enqueue_rpc(session);
+    TQ_ADD(&g_wss_rpc_pending_q, session, session->rpc_sent_time);
 }
 
 // 处理 RSP — RPC 响应转发（零拷贝）
@@ -561,7 +527,7 @@ static void wss_handle_rsp(wss_session_t *session, buf16_item_t *payload1, uint8
     payload1->refer = (void*)peer_s;
     cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, payload1, payload_pos);
 
-    wss_pending_remove_rpc(peer_s);
+    if (TQ_INQ(&g_wss_rpc_pending_q, peer_s)) TQ_RM(&g_wss_rpc_pending_q, peer_s);
     peer_s->rpc_pending_sid = 0;
 }
 
@@ -945,22 +911,13 @@ static void wss_handle_frame(cw_client_t *base, uint8_t opcode,
 // 检查 WSS RPC 超时（队列按时间排序，未超时即短路返回）
 void retry_wss_pending(uint64_t now) {
 
-    while (g_wss_rpc_pending_head) { wss_session_t *s = g_wss_rpc_pending_head;
-
-        if (tick_diff(now, s->rpc_sent_time) < REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS) return;
-
-        g_wss_rpc_pending_head = s->rpc_pending_next;
-        if (g_wss_rpc_pending_head == (void*)-1) {
-            g_wss_rpc_pending_head = g_wss_rpc_pending_rear = NULL;
-        }
-        s->rpc_pending_next = NULL;
-
+    wss_session_t *s;
+    TQ_RETRY(&g_wss_rpc_pending_q, now, s,
         uint16_t sid = s->rpc_pending_sid;
         s->rpc_pending_sid = 0;
-
         print("W:", LA_F("[W] RPC timeout: sid=%u (ses_id=%u)\n", LA_F199, 199), sid, s->base.session_id);
         wss_session_send_rpc_code(s, sid, P2P_RPC_ERR_TIMEOUT);
-    }
+    )
 }
 
 ///////////////////////////////////////////////////////////////////////////////

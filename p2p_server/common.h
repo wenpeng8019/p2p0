@@ -272,6 +272,72 @@ static inline uint32_t BUF_S_read(buffer_stream_t* s, uint8_t* buf, uint32_t len
 
 //-----------------------------------------------------------------------------
 
+typedef struct timeout_queue {
+    uint32_t                        timeout_limit;                  // 超时限制
+    uint32_t                        obj_prev_offset;                // obj 中的 prev 成员的偏移位置（字节）
+    uint32_t                        obj_next_offset;                // obj 中的 next 成员的偏移位置（字节）
+    uint32_t                        obj_time_offset;                // obj 中的 time 成员的偏移位置（字节）
+    void*                           head;                           // 队头对象指针（head->prev 指向队尾）
+} timeout_queue_t;
+
+#define TQ_INIT(q, _timeout_limit, _obj_prev_offset, _obj_next_offset, _obj_time_offset) do { \
+    (q)->timeout_limit = (_timeout_limit);                                                  \
+    (q)->obj_prev_offset = (_obj_prev_offset);                                              \
+    (q)->obj_next_offset = (_obj_next_offset);                                              \
+    (q)->obj_time_offset = (_obj_time_offset);                                              \
+    (q)->head = NULL;                                                                       \
+} while(0)
+
+#define TQ_INQ(q, obj)                                                                      \
+    (*(void**)((uint8_t*)(obj) + (q)->obj_prev_offset) != NULL)
+
+#define TQ_ADD(q, obj, time) do {                                                           \
+    *(uint64_t*)((uint8_t*)(obj) + (q)->obj_time_offset) = (time);                          \
+    *(void**)((uint8_t*)(obj) + (q)->obj_next_offset) = NULL;                               \
+    if ((q)->head) {                                                                        \
+        void* rear = *(void**)((uint8_t*)(q)->head + (q)->obj_prev_offset);                 \
+        *(void**)((uint8_t*)(obj) + (q)->obj_prev_offset) = rear;                           \
+        *(void**)((uint8_t*)(rear) + (q)->obj_next_offset) = (obj);                         \
+        *(void**)((uint8_t*)(q)->head + (q)->obj_prev_offset) = (obj);                      \
+    } else {                                                                                \
+        (q)->head = (obj);                                                                  \
+        *(void**)((uint8_t*)(obj) + (q)->obj_prev_offset) = (obj);                          \
+    }                                                                                       \
+} while(0)
+
+#define TQ_RM(q, obj) do {                                                                  \
+    void* prev = *(void**)((uint8_t*)(obj) + (q)->obj_prev_offset);                         \
+    void* next = *(void**)((uint8_t*)(obj) + (q)->obj_next_offset);                         \
+    if ((obj) == (q)->head) {                                                               \
+        if (next) {                                                                         \
+            (q)->head = next;                                                               \
+            *(void**)((uint8_t*)(next) + (q)->obj_prev_offset) = prev;                      \
+        } else (q)->head = NULL;                                                            \
+    } else {                                                                                \
+        *(void**)((uint8_t*)(prev) + (q)->obj_next_offset) = next;                          \
+        if (next) *(void**)((uint8_t*)(next) + (q)->obj_prev_offset) = prev;                \
+        else *(void**)((uint8_t*)(q)->head + (q)->obj_prev_offset) = prev;                  \
+    }                                                                                       \
+    *(void**)((uint8_t*)(obj) + (q)->obj_prev_offset) = NULL;                               \
+    *(void**)((uint8_t*)(obj) + (q)->obj_next_offset) = NULL;                               \
+} while(0)
+
+#define TQ_RETRY(q, now, it, ...)                                                           \
+    while ((it = (q)->head)) {                                                              \
+        uint64_t obj_time = *(uint64_t*)((uint8_t*)(it) + (q)->obj_time_offset);            \
+        if (tick_diff(now, obj_time) < (q)->timeout_limit) break;                           \
+        void* next = *(void**)((uint8_t*)(it) + (q)->obj_next_offset);                      \
+        if (next) {                                                                         \
+            (q)->head = next;                                                               \
+            *(void**)((uint8_t*)(next) + (q)->obj_prev_offset) = *(void**)((uint8_t*)(it) + (q)->obj_prev_offset); \
+        } else (q)->head = NULL;                                                            \
+        *(void**)((uint8_t*)(it) + (q)->obj_prev_offset) = NULL;                            \
+        *(void**)((uint8_t*)(it) + (q)->obj_next_offset) = NULL;                            \
+        __VA_ARGS__                                                                         \
+    }
+
+//-----------------------------------------------------------------------------
+
 enum {
     PROTO_COMPACT,
     PROTO_RELAY,

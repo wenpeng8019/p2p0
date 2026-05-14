@@ -71,7 +71,8 @@ typedef struct wss_session {
     /* MSG RPC 状态（与 relay_session_t 一致，独立于 SYNC 通道） */
     uint16_t                        rpc_pending_sid;        /* 0=空闲, 非零=等待 RSP 的 REQ sid */
     uint64_t                        rpc_sent_time;          /* REQ 转发时间戳（用于超时检测） */
-    struct wss_session*             rpc_pending_next;       /* RPC 超时链表指针（-1=尾部） */
+    struct wss_session*             rpc_pending_prev;       /* RPC 超时队列前驱指针（用于 timeout_queue_t） */
+    struct wss_session*             rpc_pending_next;       /* RPC 超时队列后继指针（用于 timeout_queue_t） */
 } wss_session_t;
 
 typedef struct wss_client {
