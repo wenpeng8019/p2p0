@@ -396,7 +396,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     uint8_t* buf; uint16_t sz, payload_offset; uint32_t payload_len, len; size_t io;
     buf16_item_t *payload_item, *buf_item, *bak_item, *ack_item =  NULL;
-    client->base.last_active = P_tick_ms(); int r; int16_t error = 0;
+    client->base.last_active = P_tick_ms(); int r; int16_t error;
     for(assert(client->handshake >= 0);;) {
 
         // 握手写阶段，禁止接收新消息（此时应该已经取消了 TCP_IO_FLAG_WANT_READ）
@@ -801,6 +801,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         if (TCP_HS_IS_HANDSHAKING(client)) {
             ack_item = ctx->handle_handshake(&client, buf, sz, buf_item, payload_item);
             assert(bak_item == client->recv_buf);                       // handle_handshake 期间不应调整（下一次请求的）recv_buf
+
             if (client->payload_buf) {
                 free_buffer(payload_item);
                 client->payload_buf = NULL;
@@ -825,11 +826,10 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     handshake:  // 握手阶段可以直接写入，而无需再次等待 writable 周期判定。但注意，由于支持重连前移机制，此时 client 可能已不是初始分配的 client
 
-        assert(!client->last_error);
         if (!ack_item) {
 
             // 握手成功必须返回应答包
-            if (!error) error = CUSTOM_TCP_ERR_PROTOCOL;
+            if (!client->last_error) error = CUSTOM_TCP_ERR_PROTOCOL;
 
             // 握手阶段报错但不返回应答，则直接释放 client
             if (!ctx->error_item || !((ack_item = ctx->error_item(client, true)))) {
@@ -837,7 +837,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 return;
             }
         }
-        else assert(!BUF_IS_32BIT(ack_item->flags) && !error);
+        else assert(!BUF_IS_32BIT(ack_item->flags) && !client->last_error);
 
         io = ack_item->len;
         r = tcp_send((tcp_client_t*)client, ITEM2BUF(ack_item), &io, SP);
@@ -851,8 +851,6 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             BUF_Q_PUSH(&client->send_buff_queue, ack_item)
             client->sending_cur = io;
 
-            client->last_error = error;
-
             // 进入握手写阶段，同时暂停接收数据，等握手（ACK 发送）完成后再继续
             client->io &= ~TCP_IO_FLAG_WANT_READ;
             client->io |= TCP_IO_FLAG_WANT_WRITE;
@@ -862,7 +860,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         free_buf16(ack_item);
 
         // （应答直接发送完成）如果握手阶段存在失败，直接释放 client
-        if (error) {
+        if (client->last_error) {
             ct_free_client(ctx, client);
             return;
         }

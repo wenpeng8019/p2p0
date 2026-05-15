@@ -9,10 +9,11 @@
 //   帧模式 (recv_buf == NULL)：以固定长度（hdr_sz）读取 header，支持动态扩展
 //
 // payload 零拷贝传递：
-//   当 payload 跨越 recv_buf/socket 边界时，ct_handle_recv 会将已收到的部分（payload0）
-//   直接指向 recv_buf 内的数据传给应用（零拷贝），同时分配 payload1 用于接收剩余部分。
-//   payload1->pos 初始指向 socket 读入数据的起始偏移，[payload1->pos - already, payload1->pos)
-//   这段前置空间可供应用按需将 payload0 拷入，以获得完整的连续缓冲区。
+//   当 payload 跨越 recv_buf/socket 边界时，ct_handle_recv 会将已收到的部分，即 recv_buf 内的数据
+//   直接（作为 payload0）传给应用（零拷贝），同时分配 payload1 用于接收剩余部分。
+//   payload1->pos 指向 payload 数据的起点，注意
+//   如果存在 payload0，则从 pos 开始的前置 len(payload0) 空间是为 payload0 预留的，
+//   payload1 实际加载的数据从 pos + len(payload0) 开始
 //   ⚠️ payload0 是 recv_buf 内部的借用切片，回调返回后 recv_buf 会被复用，禁止将 payload0 加入任何 buf 队列。
 //
 // payload_offset（前置保留空间）的用途：
@@ -118,13 +119,15 @@ typedef struct ct_client {
 typedef ret_t (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf, uint16_t hdr_len,
                                            uint32_t* payload_len, uint16_t* payload_offset);
 
-// 握手阶段收到完整消息时调用
+// 握手阶段收到完整消息时触发
 // + *client: 当前握手 client 指针的地址。回调可修改 *client 来切换 client 实例（见【client swap 机制】）
 // + hdr_buf/hdr_len: header 数据（流模式指向 recv_buf 内部，帧模式指向 hdr_rs）
 // + payload0: recv_buf 内部的 payload 片段（零拷贝，NULL 表示无）
 //   ⚠️ payload0 禁止加入任何 buf 队列（回调返回后 recv_buf 会被复用）
 // + payload1: 单独分配的 payload 缓冲（大 payload 跨 socket 读取时使用，NULL 表示无）
-//   - payload1->pos 指向 socket 读入数据的起始；[pos - len(payload0), pos) 为前置预留空间
+//   - payload1->pos 指向 payload 数据的起点
+//   - 若存在 payload0，则从 pos 开始的前置 len(payload0) 空间为其预留，payload1 实际加载的数据从 pos + len(payload0) 开始
+//   - 此外，如果 ct_resolve_payload_len_cb 返回的 payload_offset 不为 0，则 pos == payload_offset，否则 pos == 0
 // + 返回非 NULL 的 ack buf_item 表示握手成功；返回 NULL 且 last_error==0 表示协议错误
 //   ⚠️ 关键约束：返回的 ack 必须是 buf16_item_t（非 BUF_IS_32BIT），否则会破坏握手发送路径的内存布局约定。
 // + 注意：回调期间不应调整 recv_buf（框架有 assert 保证）
@@ -137,29 +140,29 @@ typedef ret_t (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf
 typedef buf16_item_t* (*ct_handle_handshake_cb)(ct_client_t **client, uint8_t* hdr_buf, uint16_t hdr_len,
                                                 buf16_item_t* payload0, buf16_item_t* payload1);
 
-// 握手 ACK 发送完成后调用（nullable）
+// 握手 ACK 发送完成后触发（nullable）
 // + 可在此调整 recv_buf（如切换模式、调整缓冲大小）
 typedef void (*ct_handshake_finish_cb)(ct_client_t *client);
 
-// 正常阶段收到完整消息时调用
+// 正常阶段收到完整消息时触发
 // + payload0/payload1 语义同 handle_handshake（payload0 同样禁止加入 buf 队列）
 // + 回调内可通过修改 client->recv_buf 在流/帧模式间切换
 //   框架会在回调返回后通过 prepare_next_recv 处理模式切换的状态一致性
 typedef void (*ct_handle_proto_cb)(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
                                    buf16_item_t* payload0, buf16_item_t* payload1);
 
-// session 级 buf_item 发送完成时调用（nullable）
+// session 级 buf_item 发送完成时触发（nullable）
 // + 用于实现对端感知的发送确认（如中继转发的流量控制）
 // + 可为 NULL，此时跳过对端发送确认通知
 typedef void (*ct_handle_peer_sent_cb)(ct_session_t *session, buf16_item_t *buf_item);
 
-// session 配对关系被打破时调用
+// session 配对关系被打破时触发
 // + SESS_BREAK_STOP: session 保留，仅断开配对关系（如对端暂时不可达）
 // + SESS_BREAK_CLOSE: session 将被销毁，可向 client 返回状态（软退出）
 // + SESS_BREAK_TERM: session 将被销毁，不再向 client 返回任何数据（硬退出）
 typedef void (*ct_session_break_cb)(ct_session_t *session, ct_session_t *peer, break_mode_e break_mode);
 
-// client 变为不可达时调用（nullable）
+// client 变为不可达时触发（nullable）
 // + readOrWrite: true = 读错误，false = 写错误
 typedef void (*ct_client_unreachable_cb)(ct_client_t *client, bool readOrWrite);
 
