@@ -873,13 +873,13 @@ static void relay_handle_rsp(relay_client_t *client, relay_session_t *session, b
 
 //-----------------------------------------------------------------------------
 
-static bool relay_resolve_payload_len(ct_client_t* client, uint8_t* hdr_buf, uint16_t hdr_len,
+static ret_t relay_resolve_payload_len(ct_client_t* client, uint8_t* hdr_buf, uint16_t hdr_len,
                                        uint32_t* payload_len, uint16_t* payload_offset) {
     (void)client;
     assert(hdr_len == sizeof(p2p_relay_hdr_t));
     ++hdr_buf; nread_s(payload_len, hdr_buf);
     *payload_offset = sizeof(p2p_relay_hdr_t);  // 预留 relay_hdr 前缀供零拷贝重写
-    return true;
+    return E_NONE;
 }
 
 static buf16_item_t* relay_handle_handshake(ct_client_t **pclient, uint8_t* hdr_buf, uint16_t hdr_len,

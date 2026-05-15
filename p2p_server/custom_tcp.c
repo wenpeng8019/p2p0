@@ -259,7 +259,7 @@ ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client) {
 
 // 优雅的关闭 client
 void 
-ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client) {
+ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client) { // todo 增加 reply 选项，并作为 ws 的 close frame 的处理函数
 
     // 中断所有 session
     if (client->base.sessions)
@@ -346,26 +346,42 @@ static inline void prepare_next_recv(ct_client_t *client, buf16_item_t* recv_buf
     if (recv_buf != client->recv_buf) {
         // 如果之前是帧模式，转为流模式
         if (!recv_buf) {
-            // 之前存在未消费完成的 recv_buf
-            if (client->payload_buf) { assert(!client->payload_buf->next);
-                client->payload_buf->next = client->recv_buf;   // 新的流模式 recv_buf 需要延迟切换
+
+            // 之前存在暂存（未消费完成）的 recv_buf
+            // ! 帧模式处理完成后默认会自动释放 payload_buf，除非该 payload_buf 是之前暂存（未消费完成）的特殊 recv_buf
+            if (client->payload_buf) { assert(client->payload_buf->refer == (void*)-1 && !client->payload_buf->next);
+                client->payload_buf->next = client->recv_buf;       // 新的流模式 recv_buf 需要延迟切换，所以作为缓释 recv_buf
                 client->recv_buf = client->payload_buf;
                 client->payload_buf = NULL;
             }
         }
         // 如果之前是流模式，转为帧模式
-        else if (!client->recv_buf) {
-            assert(!client->payload_buf);
-            if (recv_buf->next) { free_buf16(recv_buf->next); recv_buf->next = NULL; }
-            // 如果数据已完全消费，清零游标并释放 buf
+        else if (!client->recv_buf) { assert(!client->payload_buf);
+            if (recv_buf->next) {                                   // 之前设置的缓释 recv_buf 已经没有意义，即还没完成延迟切换就又切换了
+                free_buf16(recv_buf->next); recv_buf->next = NULL;
+            }
+
+            // 如果数据已完全消费，直接释放 buf（清零游标后下面会释放）
+            // ! 对于流模式，需要在每帧处理完成后，检查释放 recv_buf；因为它不像流模式那样，可以在下次读取更多数据前，自动重置或释放 recv_buf
             if (recv_buf->pos == recv_buf->len) client->recv_cur = 0;
-            if (client->recv_cur) { recv_buf->refer = (void*)-1; client->payload_buf = recv_buf; } 
-            else free_buf16(recv_buf);
+
+            // 如果还有未消费完成的数据，需要作为特殊的 payload_buf 暂存，refer == (void*)-1 作为标记
+            if (client->recv_cur) {
+                recv_buf->refer = (void*)-1; client->payload_buf = recv_buf;
+            } else free_buf16(recv_buf);
         }
         // 如果只是调整流模式的 recv_buf
-        else {
-            if (!client->recv_cur) { assert(!recv_buf->pos && !recv_buf->len); free_buf16(recv_buf); }
-            else { if (recv_buf->next) free_buf16(recv_buf->next);
+        else { assert(!client->recv_buf->pos && !client->recv_buf->len && !client->recv_buf->next);   // 新设置的 recv_buf 内容应该是空的
+
+            // 如果之前的 recv_buf 已经全部被消费完成则直接释放
+            // + 事实上，这里不释放也可以，因为流模式支持在下次读取更多数据前，自动重置或释放 recv_buf
+            if (!client->recv_cur) { assert(!recv_buf->pos && !recv_buf->len);
+                free_buf16(recv_buf);
+            }
+            // 否则新设置的 recv_buf 需要进行延迟切换，即需要作为之前的 recv_buf 的缓释 recv_buf
+            else {
+                // 如果之前已经有一个缓释的 recv_buf，则先释放它（也就是之前还没来得及切换就又切换了）
+                if (recv_buf->next) free_buf16(recv_buf->next);
                 recv_buf->next = client->recv_buf;
                 client->recv_buf = recv_buf;
             }
@@ -373,7 +389,7 @@ static inline void prepare_next_recv(ct_client_t *client, buf16_item_t* recv_buf
     }
 }
 
-void 
+void
 ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     assert(client->hdr_rs && client->hdr_sz);
@@ -482,7 +498,9 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 // 解析 payload len, payload offset
                 // + 这里允许应用层给 payload 留出一个 offset 前置空间，以便实现将上行的 payload 包直接作为下行的应答包、或中继转发包
                 // ! 作为流模式的 header 协议，此时获得的 header 应该是完整的，所以要求必须解析出有效的 payload_len 值
-                if (!ctx->resolve_payload_len(client, buf, sz, &payload_len, &payload_offset)) {
+                r = ctx->resolve_payload_len(client, buf, sz, &payload_len, &payload_offset);
+                if (r != E_NONE) {
+                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
                     client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
@@ -601,17 +619,23 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                 // 解析 payload size, payload offset
                 // + 作为帧模式的 header 协议，允许根据对已有的 hdr 部分的解析来动态调整后续的 hdr 类型尺寸
-                if (!ctx->resolve_payload_len(client, client->hdr_rs, client->hdr_sz, &payload_len, &payload_offset)) {
-                    assert(client->recv_cur < client->hdr_sz);
+                r = ctx->resolve_payload_len(client, client->hdr_rs, client->hdr_sz, &payload_len, &payload_offset);
+                if (r < 0) {
+                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
+                    client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+                    if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
+                    goto error;
+                }
+                if (r) { assert(client->recv_cur < client->hdr_sz);
                     goto ext_hdr;
                 }
             }
             // 如果存在缓释的 recv_buf
-            else if (payload_item->refer) { assert(!payload_item->next);    // 这里不应该有延迟切换项
+            else if (payload_item->refer) { assert(!payload_item->next);    // 这里不应该有缓释的 recv_buf（延迟切换项）
 
+                assert(client->recv_cur == payload_item->pos);
                 buf = ITEM2BUF(payload_item) + payload_item->pos;           // 获取 payload 中已消费之后的剩余数据
                 sz  = payload_item->len - payload_item->pos; assert(sz);    // 获取 payload 中已消费之后的剩余部分长度
-                assert(client->recv_cur == payload_item->pos);
                 for (;;) {
 
                     // 如果已消费剩余部分不足一个 hdr 的长度，删除 payload，并继续读取后续的 hdr
@@ -626,8 +650,14 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     // 解析 payload size, payload offset
                     // + 如果动态扩展需要读取更多的 hdr size，则继续重新读取 hdr
                     len = client->hdr_sz;
-                    if (!ctx->resolve_payload_len(client, buf, client->hdr_sz, &payload_len, &payload_offset)) {
-                        assert(client->hdr_sz > len);
+                    r = ctx->resolve_payload_len(client, buf, client->hdr_sz, &payload_len, &payload_offset);
+                    if (r < 0) {
+                        print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
+                        client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+                        if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
+                        goto error;
+                    }
+                    if (r) { assert(client->hdr_sz > len);
                         continue;
                     }
 
@@ -801,8 +831,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             if (!client->last_error) client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
 
             // 握手阶段报错但不返回应答，则直接释放 client
-            ack_item = ctx->error_item(client, true);
-            if (!ack_item) {
+            if (!ctx->error_item || !((ack_item = ctx->error_item(client, true)))) {
                 ct_free_client(ctx, client);
                 return;
             }
@@ -846,7 +875,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     prepare_next:
         // 如果 handle_proto 设置了 CLOSING 状态（如 WS Close frame），清除 WANT_READ 并停止处理
-        if (TCP_HS_IS_CLOSING(client)) {
+        if (TCP_HS_IS_CLOSING(client)) { // todo ws 适配使用 client off 后，可取消
             client->io &= ~TCP_IO_FLAG_WANT_READ;
             return;
         }
@@ -890,15 +919,22 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
     if (TCP_HS_IS_HANDSHAKING(client)) {
 
         assert(client->send_buff_queue.head);
-        buf16_item_t* buf_item = client->send_buff_queue.head; assert(buf_item == client->send_buff_queue.rear);
-        size_t sz = buf_item->len, len = sz - client->sending_cur;
-        int r = tcp_send((tcp_client_t*)client, ITEM2BUF(buf_item) + client->sending_cur, &len, SP);
+        buf16_item_t* buf_item = client->send_buff_queue.head; 
+        assert(buf_item == client->send_buff_queue.rear);                           // 握手阶段 send_queue 只会有一个 buf_item
+        assert(!BUF_IS_32BIT(buf_item->flags) && buf_item->pos < buf_item->len);    // 握手阶段只允许 buf16_item_t（ACK/错误包），禁止 32-bit 大包
+        
+        // 首次发送时对齐到有效起始位置，后续 sending_cur 统一表示绝对偏移
+        if (!client->sending_cur) client->sending_cur = buf_item->pos;
+
+        assert(client->sending_cur >= buf_item->pos && client->sending_cur <= buf_item->len);
+        size_t sz = buf_item->len, io = sz - client->sending_cur;
+        int r = tcp_send((tcp_client_t*)client, ITEM2BUF(buf_item) + client->sending_cur, &io, SP);
         if (r < 0) {
             ct_free_client(ctx, client);    // 握手阶段发送失败，直接释放 client
             return;
         }
 
-        if (!len || (client->sending_cur += len) < sz) return;
+        if (!io || (client->sending_cur += io) < sz) return;
 
         client->sending_cur = 0;
         BUF_Q_POP(&client->send_buff_queue, buf_item);
@@ -955,10 +991,16 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             item = sending_session->send_queue.head;
         }
 
-        uint8_t* buf; uint32_t sz;
-        if (BUF_IS_32BIT(item->flags)) {
-           buf = ITEM2BUF(BUF32(item)); sz = BUF32(item)->len;
-        } else { buf = ITEM2BUF(item); sz = item->len; }
+        uint8_t* buf; uint32_t sz; uint16_t pos;
+        if (BUF_IS_32BIT(item->flags)) { buf32_item_t *buf32 = BUF32(item);
+            buf = ITEM2BUF(buf32); sz = buf32->len; pos = buf32->pos;
+        } else { buf = ITEM2BUF(item); sz = item->len; pos = item->pos; }
+        assert(pos < sz);
+
+        // 首次发送时对齐到有效起始位置，后续 sending_cur 统一表示绝对偏移
+        if (!client->sending_cur) client->sending_cur = pos;
+
+        assert(client->sending_cur >= pos && client->sending_cur <= sz);
         size_t io = sz - client->sending_cur;
 
         int rc = tcp_send((tcp_client_t*)client, buf + client->sending_cur, &io, SP);
@@ -994,7 +1036,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         if (rc > 0) return;     // would block，等待下次可写事件
 
         // 部分发送：更新偏移量，等下次可写事件继续
-        if ((client->sending_cur += (int)io) < sz) return;
+        if (!io || (client->sending_cur += (uint32_t)io) < sz) return;
         client->sending_cur = 0;
 
         // 当前 item 发送完成，推进发送队列

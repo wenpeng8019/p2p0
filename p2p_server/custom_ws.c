@@ -69,53 +69,41 @@ static ret_t cw_http_accept(const char *req, char *resp_buf, size_t resp_buf_len
 
 ///////////////////////////////////////////////////////////////////////////////
 // WS 帧头解析（帧模式 resolve_payload_len）
-//
-// hdr_buf: 指向 client->ws_hdr_buf（即 hdr_rs）
-// hdr_len: 当前已读取字节数（等于 client->hdr_sz，框架在读满后调用）
-//
-// 动态扩展规则：
-//   初始 hdr_sz=2 → 读完 2 字节后调用：
-//     payload_len7 == 126 → 需要再读 2 字节扩展长度 + 4 字节 mask → hdr_sz=8，返回 false
-//     payload_len7 == 127 → 需要再读 8 字节扩展长度 + 4 字节 mask → hdr_sz=14，返回 false
-//     其他              → 需要再读 4 字节 mask → hdr_sz=6，返回 false
-//   下次调用（hdr_len=6/8/14）时已有 mask key，返回 true
 
-// 根据 hdr_len==2 时的 len7 字段，返回完整帧头所需字节数（含 mask key）
-static uint16_t cw_hdr_full_sz(uint8_t len7) {
-    if (len7 == 126) return 8;   // 2 + 2(ext) + 4(mask)
-    if (len7 == 127) return 14;  // 2 + 8(ext) + 4(mask)
-    return 6;                    // 2 + 4(mask)
-}
-
-static bool cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint16_t hdr_len,
-                                   uint32_t *payload_len, uint16_t *payload_offset) {
+static ret_t cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint16_t hdr_len,
+                                    uint32_t *payload_len, uint16_t *payload_offset) {
     
     // HTTP 握手阶段没有 payload
-    if (TCP_HS_IS_HANDSHAKING(client)) { *payload_len = 0; *payload_offset = 0; return true; }
+    if (TCP_HS_IS_HANDSHAKING(client)) { *payload_len = 0; *payload_offset = 0; return E_NONE; }
     
     uint8_t len7 = hdr_buf[1] & 0x7F;
 
-    // 第一次调用：2 字节 base header，解析扩展需求
+    // 首次默认 base hdr 为 2 字节
     if (hdr_len == 2) {
-        if (!(hdr_buf[1] & 0x80)) {
-            // 未携带 mask，当作 payload_len=0 返回 true，在 handle_proto 中检查拒绝
-            *payload_len = 0;
-            *payload_offset = 0;
-            return true;
-        }
-        // 更新 hdr_sz 为完整帧头大小（含扩展长度和 mask key）
-        client->hdr_sz = cw_hdr_full_sz(len7);
-        return false;  // 需要继续读取
+
+        // 作为服务端，必须携带 mask 信息，即需要执行解掩码操作（RFC 6455 §5.3）
+        if (!(hdr_buf[1] & 0x80)) return E_INVALID;
+
+        // 动态扩展 hdr_sz 为完整帧头大小（含扩展长度和 mask key）
+        //   初始 hdr_sz=2 → 读完 2 字节后调用：
+        //     payload_len7 == 126 → 需要再读 2 字节扩展长度 + 4 字节 mask → hdr_sz=8
+        //     payload_len7 == 127 → 需要再读 8 字节扩展长度 + 4 字节 mask → hdr_sz=14
+        //     其他                 → 需要再读 4 字节 mask → hdr_sz=6
+        if (len7 == 126) client->hdr_sz = 8;        // 2 + 2(ext/int16) + 4(mask)
+        else if (len7 == 127) client->hdr_sz = 14;  // 2 + 8(ext/int64) + 4(mask)
+        else client->hdr_sz = 6;                    // 2 + 4(mask)
+
+        return 1;  // 需要继续读取
     }
 
     // 第二次调用：已读完 mask key 和扩展长度
-    uint32_t plen; uint8_t mask_off;
-    if      (len7 == 127) { plen = (uint32_t)nget_ll(hdr_buf + 2); mask_off = 10; }
-    else if (len7 == 126) { plen = nget_s(hdr_buf + 2);            mask_off = 4;  }
-    else                  { plen = len7;                           mask_off = 2;  }
+    uint8_t mask_off;
+    if      (len7 == 127) { *payload_len = (uint32_t)nget_ll(hdr_buf + 2); mask_off = 10; }
+    else if (len7 == 126) { *payload_len = nget_s(hdr_buf + 2);            mask_off = 4;  }
+    else                  { *payload_len = len7;                           mask_off = 2;  }
 
-    // 保存 mask key 到固定位置（hdr_buf[10..13] 作为 mask key 暂存区，统一从此读取）
-    // 将 mask_key 复制到 hdr_buf 末尾固定偏移（offset 10），方便 handle_proto 统一读取
+    // 保存 mask key 到固定位置（hdr_buf[10..13] 作为 mask key 暂存区，方便 handle_proto 统一从此读取）
+    // + 由于 mask_off == 10 与 mask_off == 4/2 + 4 区间不重合，可以直接复制
     if (mask_off != 10) {
         hdr_buf[10] = hdr_buf[mask_off];
         hdr_buf[11] = hdr_buf[mask_off+1];
@@ -123,9 +111,8 @@ static bool cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint16
         hdr_buf[13] = hdr_buf[mask_off+3];
     }
 
-    *payload_len    = plen;
     *payload_offset = 0;    // 默认不预留；上层子协议可在自己的 resolve 中覆盖
-    return true;
+    return E_NONE;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -272,7 +259,6 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
     // RFC 6455 §5.2: RSV1/2/3 必须为 0（未协商任何扩展时）
     if (hdr_buf[0] & 0x70) {
         cw_send_close(cwc, 1002);
-        client->handshake = TCP_HS_FLAG_CLOSING;
         return;
     }
 
@@ -310,7 +296,6 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
         uint32_t ctrl_total = plen0 + (payload1 ? (payload1->len - payload1->pos) : 0u);
         if (!fin || ctrl_total > 125) {
             cw_send_close(cwc, 1002);
-            client->handshake = TCP_HS_FLAG_CLOSING;
             return;
         }
         uint8_t *ctrl_data = payload0 ? ITEM2BUF(payload0) + payload0->pos : NULL;
@@ -320,7 +305,6 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
             // RFC 6455 §7.4.1: 状态码必须合法
             if (ctrl_len >= 2 && ctrl_data && !cw_valid_close_code(code)) {
                 cw_send_close(cwc, 1002);
-                client->handshake = TCP_HS_FLAG_CLOSING;
                 return;
             }
             // RFC 6455 §5.5.1: close frame reason string（第 2 字节起）必须是合法 UTF-8
@@ -328,14 +312,12 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
                 uint32_t tmp = WS_UTF8_ACCEPT;
                 if (!cw_utf8_check(&tmp, ctrl_data + 2, ctrl_len - 2) || tmp != WS_UTF8_ACCEPT) {
                     cw_send_close(cwc, 1007);
-                    client->handshake = TCP_HS_FLAG_CLOSING;
                     return;
                 }
             }
             if (wctx->handle_close) wctx->handle_close(cwc, code);
             // 自动回复 close
             cw_send_close(cwc, code);
-            client->handshake = TCP_HS_FLAG_CLOSING;
         } else if (opcode == WS_OP_PING) {
             if (wctx->handle_ping) wctx->handle_ping(cwc, ctrl_data, ctrl_len);
             // 自动回复 pong，携带相同 payload
@@ -357,7 +339,6 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
     // RFC 6455 §5.2: 保留 opcode（0x3-0x7 数据帧、0xB-0xF 控制帧）必须拒绝
     if ((opcode >= 0x3 && opcode <= 0x7) || opcode >= 0xB) {
         cw_send_close(cwc, 1002);
-        client->handshake = TCP_HS_FLAG_CLOSING;
         return;
     }
 
@@ -367,12 +348,10 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
     bool in_frag = (cwc->ws_opcode != 0);
     if (opcode == WS_OP_CONTINUATION && !in_frag) {
         cw_send_close(cwc, 1002);
-        client->handshake = TCP_HS_FLAG_CLOSING;
         return;
     }
     if ((opcode == WS_OP_TEXT || opcode == WS_OP_BINARY) && in_frag) {
         cw_send_close(cwc, 1002);
-        client->handshake = TCP_HS_FLAG_CLOSING;
         return;
     }
 
@@ -391,7 +370,6 @@ static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t 
         if (ok && fin && *st != WS_UTF8_ACCEPT) ok = false;  // FIN 时截断于多字节序列中间
         if (!ok) {
             cw_send_close(cwc, 1007);
-            client->handshake = TCP_HS_FLAG_CLOSING;
             return;
         }
     }
@@ -566,7 +544,8 @@ ret_t cw_send_close(cw_client_t *client, uint16_t code) {
     item->pos = 0;
     client->io |= CW_IO_FLAG_CLOSING;
     client->base.last_active = P_tick_ms();
-    ct_client_send((ct_client_t*)client, item, true);
+    // 使用 immediate=false，让 close 帧排在队尾，确保先发送已入队的应用层消息（如 REG_ACK）
+    ct_client_send((ct_client_t*)client, item, false);
     // 注意：必须在 ct_client_send 之后设置 CLOSING 标志，因为 ct_client_send 要求 handshake == 0
     ((tcp_client_t*)client)->handshake = TCP_HS_FLAG_CLOSING;
     return E_NONE;

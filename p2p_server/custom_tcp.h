@@ -109,11 +109,14 @@ typedef struct ct_client {
 // 解析 header，填充 payload_len（payload 总字节数）和 payload_offset（payload 前置保留空间字节数）
 // + payload_offset：框架在分配 payload1 时会在数据前预留该大小的空间，供应用写入新 header 后
 //   直接将 payload1 投入转发队列，实现零拷贝转发（不需要 payload_offset 时填 0）
-// + 返回 false 表示需要更多 header 数据（帧模式专用，用于动态扩展 header size）
-//   此时需将 client->hdr_sz 更新为新的期望读取长度，框架会继续读取后再次调用
-// + 流模式下 header 已完整，必须返回 true
-typedef bool (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf, uint16_t hdr_len,
-                                          uint32_t* payload_len, uint16_t* payload_offset);
+// + 返回:
+//   <0: 解析报错
+//   >0: 表示需要更多 header 数据（帧模式专用，用于动态扩展 header size）
+//       此时需将 client->hdr_sz 更新为新的期望读取长度，框架会继续读取后再次调用
+//       + 流模式下 header 在首次解析时就已完整，必须返回 0
+//   =0: 解析完成且成功
+typedef ret_t (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf, uint16_t hdr_len,
+                                           uint32_t* payload_len, uint16_t* payload_offset);
 
 // 握手阶段收到完整消息时调用
 // + *client: 当前握手 client 指针的地址。回调可修改 *client 来切换 client 实例（见【client swap 机制】）
@@ -123,6 +126,7 @@ typedef bool (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf,
 // + payload1: 单独分配的 payload 缓冲（大 payload 跨 socket 读取时使用，NULL 表示无）
 //   - payload1->pos 指向 socket 读入数据的起始；[pos - len(payload0), pos) 为前置预留空间
 // + 返回非 NULL 的 ack buf_item 表示握手成功；返回 NULL 且 last_error==0 表示协议错误
+//   ⚠️ 关键约束：返回的 ack 必须是 buf16_item_t（非 BUF_IS_32BIT），否则会破坏握手发送路径的内存布局约定。
 // + 注意：回调期间不应调整 recv_buf（框架有 assert 保证）
 //
 // 【client swap 机制】重连握手时，回调可通过修改 *client 将 from→reg 的切换通知框架：
@@ -162,6 +166,7 @@ typedef void (*ct_client_unreachable_cb)(ct_client_t *client, bool readOrWrite);
 // 构造错误应答 buf_item（填充错误响应内容到 buf_item 后返回，框架负责发送和释放）
 // + handshake: true 表示发生在握手阶段（此时 last_error 已设置）
 // + 返回 NULL 表示 OOM，框架将按 fatal 处理
+// + 约束：若 handshake=true，返回值必须是 buf16_item_t（非 BUF_IS_32BIT）
 // + 回调本身可以为 NULL（nullable），此时所有错误按 fatal 处理
 typedef buf16_item_t* (*ct_error_item_cb)(ct_client_t *client, bool handshake);
 

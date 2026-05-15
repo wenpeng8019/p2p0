@@ -170,6 +170,8 @@ target_link_libraries(test_relay_rpc stdc ${TEST_PLATFORM_LIBS})
 # WSS 协议注册/上线单元测试
 add_executable(test_wss_register
     test_wss_register.c
+    ${CMAKE_SOURCE_DIR}/src/.LANG.c
+    ${CMAKE_SOURCE_DIR}/i18n/i18n.c
 )
 target_include_directories(test_wss_register PRIVATE
     ${CMAKE_SOURCE_DIR}/include

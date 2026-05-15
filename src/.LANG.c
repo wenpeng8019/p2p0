@@ -377,7 +377,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F510] = "REG to RELAY signaling server at %s:%d",  /* SID:510 */
     [LA_F328] = "% REG: auth_key acquired, auto SYN0 sent\n",  /* SID:328 */
     [LA_F511] = "REG: local_gist=%s peer=%s",  /* SID:511 */
-    [LA_F512] = "REG: peer_id cannot contain '/' (got \\"%s\\")",  /* SID:512 */
+    [LA_F512] = "REG: peer_id cannot contain '/' (got \"%s\")",  /* SID:512 */
     [LA_F344] = "% RELAY path but TURN not allocated",  /* SID:344 */
     [LA_F345] = "% RELAY path but TURN not allocated (dtls)",  /* SID:345 */
     [LA_F346] = "% RELAY recovery: NAT connected but no path available",  /* SID:346 */

@@ -1,7 +1,7 @@
 /*
  * P2P 信令服务器
  *
- * 支持两种信令模式：
+ * 支持三种信令模式：
  *
  * 1. COMPACT 模式 (UDP)
  *    - 对应客户端 p2p_signal_compact 模块
@@ -13,6 +13,13 @@
  *    - 有状态信令，基于 TCP 长连接
  *    - 支持在线状态查询、以及基本数据中转功能，用于支持 ICE/STUN/TURN 协议架构实现的信令服务器
  *
+ * 3. WSS 模式 (TCP)
+ *    - 对应客户端 p2p_signal_wss 模块
+ *    - 基于 WebSocket 的信令模式，支持浏览器端的 P2P 通信
+ * 
+ * 关于 uthash 的使用：
+ * 1. HASH_ADD 不要求 hh 成员被初始化为 0，但 HASH_FIND 要求 hh 成员被初始化为 0。
+ * 2. HASH_DELETE 不会自动将 hh 成员（包括 tbl 指针）置为 NULL
  */
 
 #define MOD_TAG "P2P0d"
@@ -139,7 +146,10 @@ free_client_base(client_t *c) {
 
     assert(!c->sessions);
 
-    if (c->hh.tbl) HASH_DELETE(hh, g_clients, c);
+    if (c->hh.tbl) {
+        HASH_DELETE(hh, g_clients, c); 
+        c->hh.tbl = NULL;
+    }
 
     // > PROTO_COMPACT 说明是 TCP 连接
     if (c->proto > PROTO_COMPACT) {
@@ -277,8 +287,8 @@ pair_session(client_t *client, const char *remote_peer_id,
         if (!s) { free(pair); return E_OUT_OF_MEMORY; }
 
         pair->valid = true;
-        memcpy(pair->peer_id[0], client->local_peer_id, P2P_PEER_ID_MAX);
-        memcpy(pair->peer_id[1], remote_peer_id, P2P_PEER_ID_MAX);
+        memcpy(pair->peer_id[0], client->local_peer_id, strnlen(client->local_peer_id, P2P_PEER_ID_MAX));
+        memcpy(pair->peer_id[1], remote_peer_id, strnlen(remote_peer_id, P2P_PEER_ID_MAX));
         HASH_ADD_KEYPTR(hh, g_session_pairs, pair->peer_id, 2 * P2P_PEER_ID_MAX, pair);
 
         // 本端初始作为 sess pair 的 left side
@@ -927,7 +937,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // 处理 TCP/IO（先发送后接收，单次遍历）
+        // 处理 TCP/IO
         for (int i = 0; i < MAX_PEERS; i++) { int8_t m = CLIENTS(i)->proto;
             if (m <= 0 || CLIENTS(i)->fd == P_INVALID_SOCKET) continue;
             ct_client_t* ws_client = (m == PROTO_WSS) ? CT_CLIENTS(i) : NULL;
