@@ -209,7 +209,7 @@ static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, b
         peer->rpc_pending_sid = 0;
     }
 
-    // 存在本端发起的 REQ 等待对端 RSP
+    // 存在本端发起的 REQ 等待对端 RSP，// fixme 如果是错误导致的 stop，这里 send 数据会断言报错
     if (session->rpc_pending_sid) {
         if (break_mode != SESS_BREAK_TERM)
             wss_session_send_rpc_code(session, session->rpc_pending_sid, P2P_RPC_ERR_BREAK);
@@ -442,18 +442,26 @@ static void wss_handle_pkt(wss_session_t *session, buf16_item_t *payload1, uint8
         return;   // payload1 由调用方（handle_frame）释放
     }
 
-    // 零拷贝：将 payload1 前置空间作为 WS 帧头区域，直接入队
-    payload1->pos = 0;         // 暴露前置的 WS 帧头预留空间
-    // payload1 的 payload_pos 在 resolve_payload_len 中已预留 10 字节；payload 从 payload1->pos+10 开始
-    // cw_send_frame 会在 [0, payload_pos) 写入帧头
+    // 严格零拷贝：payload 必须在 payload1 内，且前置空间 >= 10
+    if (!payload1) {
+        print("E:", LA_F("%s: missing payload1 for zero-copy forward\n", LA_F230, 230), PROTO);
+        return;
+    }
     uint16_t payload_pos = (uint16_t)(payload - ITEM2BUF(payload1));
+    if (payload_pos < 10) {
+        print("E:", LA_F("%s: invalid payload_pos=%u (<10)\n", LA_F230, 230), PROTO, payload_pos);
+        return;
+    }
+    buf16_item_t *fwd_item = payload1;
+
+    fwd_item->pos = 0;
 
     // 入队并在首次时冷启动发送
     if (BUF_R_EMPTY(&peer_s->pkt_peer_send)) {
-        payload1->refer = (void*)peer_s;
-        cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, payload1, payload_pos);
+        fwd_item->refer = (void*)peer_s;
+        cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, fwd_item, payload_pos);
     }
-    BUF_R_PUSH(&peer_s->pkt_peer_send, payload1);
+    BUF_R_PUSH(&peer_s->pkt_peer_send, fwd_item);
     // 否则在队列中等待，handle_peer_sent 时再发
 }
 
@@ -489,8 +497,17 @@ static void wss_handle_req(wss_session_t *session, buf16_item_t *payload1, uint8
 
     nwrite_l(payload + 1, peer_s->base.session_id);
 
-    payload1->pos = 0;
+    if (!payload1) {
+        print("E:", LA_F("%s: missing payload1 for zero-copy forward\n", LA_F230, 230), PROTO);
+        return;
+    }
     uint16_t payload_pos = (uint16_t)(payload - ITEM2BUF(payload1));
+    if (payload_pos < 10) {
+        print("E:", LA_F("%s: invalid payload_pos=%u (<10)\n", LA_F230, 230), PROTO, payload_pos);
+        return;
+    }
+
+    payload1->pos = 0;
     payload1->refer = (void*)peer_s;
     cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, payload1, payload_pos);
 
@@ -530,10 +547,20 @@ static void wss_handle_rsp(wss_session_t *session, buf16_item_t *payload1, uint8
 
     nwrite_l(payload + 1, peer_s->base.session_id);
 
-    payload1->pos = 0;
+    if (!payload1) {
+        print("E:", LA_F("%s: missing payload1 for zero-copy forward\n", LA_F230, 230), PROTO);
+        return;
+    }
     uint16_t payload_pos = (uint16_t)(payload - ITEM2BUF(payload1));
-    payload1->refer = (void*)peer_s;
-    cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, payload1, payload_pos);
+    if (payload_pos < 10) {
+        print("E:", LA_F("%s: invalid payload_pos=%u (<10)\n", LA_F230, 230), PROTO, payload_pos);
+        return;
+    }
+    buf16_item_t *fwd_item = payload1;
+
+    fwd_item->pos = 0;
+    if (fwd_item == payload1) fwd_item->refer = (void*)peer_s;
+    cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, fwd_item, payload_pos);
 
     if (TQ_INQ(&g_wss_rpc_pending_q, peer_s)) TQ_RM(&g_wss_rpc_pending_q, peer_s);
     peer_s->rpc_pending_sid = 0;
@@ -899,13 +926,16 @@ static void wss_handle_frame(cw_client_t *base, uint8_t opcode,
                        ITEM2BUF(payload0) + payload0->pos, p0_len);
                 data = ITEM2BUF(payload1) + payload1->pos;
             } else {
-                // 极罕见：前置空间不够
-                buf16_item_t *tmp = alloc_buf16(BUF_FLAGS(buffer_sz_flag(len + 1), 0));
+                // 极罕见：前置空间不够；这里也预留 10 字节，保持与转发路径一致
+                uint16_t total = (uint16_t)(10 + len);
+                buf16_item_t *tmp = alloc_buf16(BUF_FLAGS(buffer_sz_flag(total), 0));
                 if (!tmp) return;
-                memcpy(ITEM2BUF(tmp), ITEM2BUF(payload0) + payload0->pos, p0_len);
-                if (p1_len) memcpy(ITEM2BUF(tmp) + p0_len, ITEM2BUF(payload1) + payload1->pos, p1_len);
-                tmp->pos = 0; tmp->len = len;
-                wss_handle_binary(client, tmp, ITEM2BUF(tmp), len);
+                uint8_t *dst = ITEM2BUF(tmp) + 10;
+                memcpy(dst, ITEM2BUF(payload0) + payload0->pos, p0_len);
+                if (p1_len) memcpy(dst + p0_len, ITEM2BUF(payload1) + payload1->pos, p1_len);
+                tmp->pos = 10;
+                tmp->len = total;
+                wss_handle_binary(client, tmp, dst, len);
                 free_buf16(tmp);
                 return;
             }

@@ -111,7 +111,8 @@ static ret_t cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint1
         hdr_buf[13] = hdr_buf[mask_off+3];
     }
 
-    *payload_offset = 0;    // 默认不预留；上层子协议可在自己的 resolve 中覆盖
+    // 这里默认为上层零拷贝转发预留 WS 头空间
+    *payload_offset = 10;
     return E_NONE;
 }
 
@@ -564,10 +565,10 @@ void cw_retry_closing(cw_client_ctx_t *ctx, cw_client_t *client, uint64_t now) {
 // + 将 WS 回调绑定到 tcp ctx，供 cw_init_client 调用方使用（一次性初始化）
 
 void cw_ctx_init(cw_client_ctx_t *ctx) {
-    ctx->base.resolve_payload_len    = cw_resolve_payload_len;
-    ctx->base.handle_handshake       = cw_tcp_handle_handshake;
-    ctx->base.handshake_finish       = cw_tcp_handshake_finish;
-    ctx->base.handle_proto           = cw_tcp_handle_proto;
+    if (!ctx->base.resolve_payload_len) ctx->base.resolve_payload_len = cw_resolve_payload_len;
+    if (!ctx->base.handle_handshake) ctx->base.handle_handshake = cw_tcp_handle_handshake;
+    if (!ctx->base.handshake_finish) ctx->base.handshake_finish = cw_tcp_handshake_finish;
+    if (!ctx->base.handle_proto) ctx->base.handle_proto = cw_tcp_handle_proto;
     // fatal_item/error_item/client_unreachable 由上层填充
 }
 

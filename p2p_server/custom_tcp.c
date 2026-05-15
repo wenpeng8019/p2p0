@@ -396,7 +396,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     uint8_t* buf; uint16_t sz, payload_offset; uint32_t payload_len, len; size_t io;
     buf16_item_t *payload_item, *buf_item, *bak_item, *ack_item =  NULL;
-    client->base.last_active = P_tick_ms(); int r;
+    client->base.last_active = P_tick_ms(); int r; int16_t error = 0;
     for(assert(client->handshake >= 0);;) {
 
         // 握手写阶段，禁止接收新消息（此时应该已经取消了 TCP_IO_FLAG_WANT_READ）
@@ -434,7 +434,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                                 sz = buffer_size(buf_item->flags);
                                 if (buf_item->len) {
                                     if (buf_item->len >= sz) {
-                                        client->last_error = CUSTOM_TCP_ERR_OVERFLOW;
+                                        error = CUSTOM_TCP_ERR_OVERFLOW;
                                         if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                                         goto error;
                                     }
@@ -453,7 +453,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                         // 超出预设缓存大小限制
                         if (len > sz) {
-                            client->last_error = CUSTOM_TCP_ERR_OVERFLOW;
+                            error = CUSTOM_TCP_ERR_OVERFLOW;
                             if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                             goto error;
                         }
@@ -467,7 +467,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                         r = tcp_recv((tcp_client_t*)client, buf + buf_item->len, &io, SP);
                         if (r > 0) return;
                         if (r < 0) {
-                            client->last_error = r < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
+                            error = r < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
                             if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                             goto error;
                         }
@@ -501,7 +501,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 r = ctx->resolve_payload_len(client, buf, sz, &payload_len, &payload_offset);
                 if (r != E_NONE) {
                     print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
-                    client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+                    error = CUSTOM_TCP_ERR_PROTOCOL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
                 }
@@ -510,7 +510,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 // TODO(WS): RFC 6455 §7.4.1 要求发送 close(1009 Message Too Big) 而非直接断 TCP
                 //           当前底层无法感知上层是否为 WS 协议，暂用 CUSTOM_TCP_ERR_OVERFLOW 统一处理
                 if (payload_len > ctx->max_payload_len) {
-                    client->last_error = CUSTOM_TCP_ERR_OVERFLOW;
+                    error = CUSTOM_TCP_ERR_OVERFLOW;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
                 }
@@ -587,9 +587,9 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 // 分配新的 payload buffer
                 payload_item = alloc_buffer(0, payload_len += payload_offset);
                 if (!payload_item) {
-                    client->last_error = CUSTOM_TCP_ERR_INTERNAL;
+                    error = CUSTOM_TCP_ERR_INTERNAL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
-                    ct_client_error(ctx, client, client->last_error, true);
+                    ct_client_error(ctx, client, error, true);
                     return;
                 }
                 payload_item->len = payload_len;
@@ -610,7 +610,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     r = tcp_recv((tcp_client_t*)client, client->hdr_rs + client->recv_cur, &io, NULL);
                     if (r > 0) return;
                     if (r < 0) {
-                        client->last_error = r < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
+                        error = r < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
                         if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                         goto error;
                     }
@@ -622,7 +622,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 r = ctx->resolve_payload_len(client, client->hdr_rs, client->hdr_sz, &payload_len, &payload_offset);
                 if (r < 0) {
                     print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
-                    client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+                    error = CUSTOM_TCP_ERR_PROTOCOL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
                 }
@@ -653,7 +653,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     r = ctx->resolve_payload_len(client, buf, client->hdr_sz, &payload_len, &payload_offset);
                     if (r < 0) {
                         print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
-                        client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+                        error = CUSTOM_TCP_ERR_PROTOCOL;
                         if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                         goto error;
                     }
@@ -662,7 +662,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     }
 
                     if (payload_len > ctx->max_payload_len) {
-                        client->last_error = CUSTOM_TCP_ERR_OVERFLOW;
+                        error = CUSTOM_TCP_ERR_OVERFLOW;
                         if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                         goto error;
                     }
@@ -743,9 +743,9 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             // 分配新的 payload buffer
             payload_item = alloc_buffer(0, payload_len += payload_offset);
             if (!payload_item) {
-                client->last_error = CUSTOM_TCP_ERR_INTERNAL;
+                error = CUSTOM_TCP_ERR_INTERNAL;
                 if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
-                ct_client_error(ctx, client, client->last_error, true);
+                ct_client_error(ctx, client, error, true);
                 return;
             }
             if (BUF_IS_32BIT(payload_item->flags)) {
@@ -781,7 +781,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             r = tcp_recv((tcp_client_t*)client, buf + client->payload_cur, &io, SP);
             if (r > 0) return;
             if (r < 0) {
-                client->last_error = r < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
+                error = r < -1 ? CUSTOM_TCP_ERR_IO : CUSTOM_TCP_ERR_DISCONNECTED;
                 if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                 goto error;
             }
@@ -825,10 +825,11 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     handshake:  // 握手阶段可以直接写入，而无需再次等待 writable 周期判定。但注意，由于支持重连前移机制，此时 client 可能已不是初始分配的 client
 
+        assert(!client->last_error);
         if (!ack_item) {
 
             // 握手成功必须返回应答包
-            if (!client->last_error) client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+            if (!error) error = CUSTOM_TCP_ERR_PROTOCOL;
 
             // 握手阶段报错但不返回应答，则直接释放 client
             if (!ctx->error_item || !((ack_item = ctx->error_item(client, true)))) {
@@ -836,7 +837,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 return;
             }
         }
-        else assert(!BUF_IS_32BIT(ack_item->flags) && !client->last_error);
+        else assert(!BUF_IS_32BIT(ack_item->flags) && !error);
 
         io = ack_item->len;
         r = tcp_send((tcp_client_t*)client, ITEM2BUF(ack_item), &io, SP);
@@ -850,6 +851,8 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             BUF_Q_PUSH(&client->send_buff_queue, ack_item)
             client->sending_cur = io;
 
+            client->last_error = error;
+
             // 进入握手写阶段，同时暂停接收数据，等握手（ACK 发送）完成后再继续
             client->io &= ~TCP_IO_FLAG_WANT_READ;
             client->io |= TCP_IO_FLAG_WANT_WRITE;
@@ -859,7 +862,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         free_buf16(ack_item);
 
         // （应答直接发送完成）如果握手阶段存在失败，直接释放 client
-        if (client->last_error) {
+        if (error) {
             ct_free_client(ctx, client);
             return;
         }
@@ -880,7 +883,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
 // 网络 I/O 等非致命错误，也就是不破坏（之前/已发生的）数据完整性的错误
 // + 此时会清除 recv_buf 中的数据、关闭读取，同时（最后）发送一个错误状态码，并等发送完成后会自动关闭连接
-error: assert(client->last_error);
+error: assert(error && !client->last_error);
 
     // 清除已读取的部分
     client->recv_cur = 0;
@@ -898,8 +901,8 @@ error: assert(client->last_error);
     if (ctx->client_unreachable)
         ctx->client_unreachable(client, true);
 
-    // 报错处理（这会停止接收新的请求数据）
-    ct_client_error(ctx, client, client->last_error, false);
+    // 报错处理（这会停止接收新的请求数据，也会禁止再发送新消息，即错误是最后一个消息，所以必须在最后执行）
+    ct_client_error(ctx, client, error, false);
 
     // 重新计时，等待客户端（重置）处理，并通过超时机制来释放 client
     client->base.last_active = P_tick_ms();
