@@ -29,7 +29,7 @@ endif()
 
 # COMPACT REG 协议单元测试
 add_executable(test_compact_register
-    test_compact_register.c
+        test_compact_reg.c
 )
 target_include_directories(test_compact_register PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -69,7 +69,7 @@ target_link_libraries(test_compact_rpc stdc ${TEST_PLATFORM_LIBS})
 
 # COMPACT RELAY/NAT_PROBE 协议单元测试
 add_executable(test_compact_relay
-    test_compact_relay.c
+        test_compact_relay.c
 )
 target_include_directories(test_compact_relay PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -129,7 +129,7 @@ target_link_libraries(test_ping_c_filter stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY 协议注册/上线单元测试
 add_executable(test_relay_register
-    test_relay_register.c
+        test_relay_reg.c
 )
 target_include_directories(test_relay_register PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -149,7 +149,7 @@ target_link_libraries(test_relay_lifecycle stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY 数据中继协议单元测试 (DATA/ACK/CRYPTO)
 add_executable(test_relay_data
-    test_relay_data.c
+        test_relay_pkt.c
 )
 target_include_directories(test_relay_data PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -169,7 +169,7 @@ target_link_libraries(test_relay_rpc stdc ${TEST_PLATFORM_LIBS})
 
 # WSS 协议注册/上线单元测试
 add_executable(test_wss_register
-    test_wss_register.c
+        test_wss_reg.c
     ${CMAKE_SOURCE_DIR}/src/.LANG.c
     ${CMAKE_SOURCE_DIR}/i18n/i18n.c
 )
