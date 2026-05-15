@@ -260,6 +260,7 @@ pair_session(client_t *client, const char *remote_peer_id,
     if (!client || !remote_peer_id || !local_s || !remote_s) return E_INVALID;
     *local_s = NULL;
     *remote_s = NULL;
+    bool new_sess = false;
 
     // 查找和对端的 sess pair
     char peer_key[3 * P2P_PEER_ID_MAX];
@@ -285,6 +286,7 @@ pair_session(client_t *client, const char *remote_peer_id,
         // 分配本端 sess 对象
         s = (session_t*)calloc(1, session_type_size);
         if (!s) { free(pair); return E_OUT_OF_MEMORY; }
+        new_sess = true;
 
         pair->valid = true;
         memcpy(pair->peer_id[0], client->local_peer_id, strnlen(client->local_peer_id, P2P_PEER_ID_MAX));
@@ -340,6 +342,7 @@ pair_session(client_t *client, const char *remote_peer_id,
     if (!s) {
         s = (session_t*)calloc(1, session_type_size);
         if (!s) return E_OUT_OF_MEMORY;
+        new_sess = true;
     }
 
     // 如果本端主动断开后，又重新发起新的连接
@@ -375,7 +378,7 @@ pair_session(client_t *client, const char *remote_peer_id,
     HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), s);
     
     *local_s = s;
-    return side;
+    return side | (new_sess ? PAIR_NEW_SESS_MASK : 0);
 }
 
 // 释放会话

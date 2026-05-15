@@ -381,6 +381,7 @@ struct session {
 #define PEER_VALID(p)               ((p) && (void*)(p) != (void*)-1)
 #define PEER_ONLINE(s)              PEER_VALID(PEER(s))
 
+#define TCP_PEER_SENDABLE(s)        TCP_SENDABLE(PEER(s)->client)
 #define TCP_PEER_REACHABLE(s)       TCP_REACHABLE(PEER(s)->client)
 
 typedef enum break_mode {
@@ -440,11 +441,24 @@ solo_session(client_t *client, session_t **local_s,
              size_t session_type_size);
 
 // 配对一个本端和远程的会话
+// + 返回值：
+//   <0 : 错误码（维持原有错误语义）
+//   >=0: 按 PAIR_* 宏编码的成功状态（bit0=左右，bit1=本端是否新建）
+// + local_s: 始终返回本端会话对象
+// + remote_s: 对端在线时返回其会话对象，否则为 NULL
 ret_t
 pair_session(client_t *client, const char *remote_peer_id,
              session_t **local_s, session_t **remote_s,
              size_t session_type_size);
 
+// pair_session 成功返回值编码（ret_t >= 0）：
+//   bit0: 本端 local_s 在 pair 中的位置（0=left, 1=right）
+//   bit1: 本端 local_s 是否为本次新创建（1=new, 0=复用已存在 session）
+// 失败保持原语义（ret_t < 0，常见如 E_OUT_OF_MEMORY / E_DUPLICATE 等）。
+#define PAIR_SIDE_MASK             ((ret_t)0x01)
+#define PAIR_NEW_SESS_MASK         ((ret_t)0x02)
+#define PAIR_GET_SIDE(v)           ((ret_t)(v) & PAIR_SIDE_MASK)
+#define PAIR_IS_LOCAL_NEW(v)       ((((ret_t)(v)) & PAIR_NEW_SESS_MASK) != 0)
 
 //-----------------------------------------------------------------------------
 
@@ -477,6 +491,7 @@ typedef struct tcp_client
     (c)->io = TCP_IO_FLAG_WANT_READ; \
     (c)->handshake = TCP_HS_FLAG_HANDSHAKING
 
+#define TCP_SENDABLE(c)             (((tcp_client_t*)c)->handshake == 0)
 #define TCP_REACHABLE(c)            (((tcp_client_t*)c)->io & TCP_IO_FLAG_WANT_READ)
 
 //-----------------------------------------------------------------------------

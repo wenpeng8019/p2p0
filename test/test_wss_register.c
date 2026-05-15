@@ -460,19 +460,10 @@ static void test_sync0_peer_online(void) {
     // Bob SYN0 等待 Alice
     snprintf(cmd, sizeof(cmd), "SYN0 pair_alice_ws\n");
     int rc2 = ws_send_and_wait(bob, cmd, RECV_TIMEOUT_MS);
-    if (rc2 <= 0) {
+    if (rc2 <= 0 || strstr(g_ws_last_message, "online") == NULL) {
         ws_client_destroy(alice);
         ws_client_destroy(bob);
-        TEST_FAIL(TEST_NAME, "Bob should get SYN0_ACK");
-        return;
-    }
-
-    if (strstr(g_ws_last_message, "SYN0") == NULL ||
-        (strstr(g_ws_last_message, "online") == NULL &&
-         strstr(g_ws_last_message, "offline") == NULL)) {
-        ws_client_destroy(alice);
-        ws_client_destroy(bob);
-        TEST_FAIL(TEST_NAME, "unexpected SYN0_ACK format");
+        TEST_FAIL(TEST_NAME, "Bob should get online");
         return;
     }
     
@@ -630,14 +621,14 @@ int main(int argc, char *argv[]) {
     printf("\n[*] Running tests...\n");
     
     // 一、正常功能测试
-    // test_ws_handshake();
-    // test_online_success();
-    // test_sync0_peer_offline();
+    test_ws_handshake();
+    test_online_success();
+    test_sync0_peer_offline();
     test_sync0_peer_online();
-    
+
     // 二、失败验证测试
-    // test_sync0_not_online();
-    // test_malformed_command();
+    test_sync0_not_online();
+    test_malformed_command();
     
     // 终止 server
     if (g_server_pid > 0) {

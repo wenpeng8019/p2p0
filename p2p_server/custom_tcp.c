@@ -259,7 +259,7 @@ ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client) {
 
 // 优雅的关闭 client
 void 
-ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client) { // todo 增加 reply 选项，并作为 ws 的 close frame 的处理函数
+ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client) {
 
     // 中断所有 session
     if (client->base.sessions)
@@ -397,11 +397,11 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
     uint8_t* buf; uint16_t sz, payload_offset; uint32_t payload_len, len; size_t io;
     buf16_item_t *payload_item, *buf_item, *bak_item, *ack_item =  NULL;
     client->base.last_active = P_tick_ms(); int r;
-    for(;;) {
+    for(assert(client->handshake >= 0);;) {
 
         // 握手写阶段，禁止接收新消息（此时应该已经取消了 TCP_IO_FLAG_WANT_READ）
         // + 相应的，该阶段的 recv_buf 会被 handshake ack 复用作为 send_buf
-        assert(!client->handshake || (TCP_HS_IS_HANDSHAKING(client) && !(client->io & TCP_IO_FLAG_WANT_WRITE)));
+        assert(client->handshake <= 0 || (TCP_HS_IS_HANDSHAKING(client) && !(client->io & TCP_IO_FLAG_WANT_WRITE)));
 
         payload_item = client->payload_buf;
 
@@ -874,11 +874,6 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         ctx->handshake_finish(client);
 
     prepare_next:
-        // 如果 handle_proto 设置了 CLOSING 状态（如 WS Close frame），清除 WANT_READ 并停止处理
-        if (TCP_HS_IS_CLOSING(client)) { // todo ws 适配使用 client off 后，可取消
-            client->io &= ~TCP_IO_FLAG_WANT_READ;
-            return;
-        }
         prepare_next_recv(client, bak_item);
     }   // for(;;)
 

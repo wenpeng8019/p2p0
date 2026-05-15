@@ -383,15 +383,11 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     }
     
     // 初始化循环队列（首次创建时）
-    if (side >= 0 && !local_s->sync_peer_send.slots) {
+    if (PAIR_IS_LOCAL_NEW(side)) {
         BUF_R_INIT(&local_s->sync_peer_send, local_s->sync_peer_slots, RELAY_PEER_Q_MAX);
         BUF_R_INIT(&local_s->pkt_peer_send, local_s->pkt_peer_slots, RELAY_PEER_Q_MAX);
     }
-    if (remote_s && !remote_s->sync_peer_send.slots) {
-        BUF_R_INIT(&remote_s->sync_peer_send, remote_s->sync_peer_slots, RELAY_PEER_Q_MAX);
-        BUF_R_INIT(&remote_s->pkt_peer_send, remote_s->pkt_peer_slots, RELAY_PEER_Q_MAX);
-    }
-
+    
     if (local_s->last_sid) {
         print("E:", LA_F("%s: deprecated (ses_id=%u, sid=%u), drop\n", LA_F207, 207),
               PROTO, local_s->base.session_id, local_s->last_sid);

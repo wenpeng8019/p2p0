@@ -546,8 +546,8 @@ ret_t cw_send_close(cw_client_t *client, uint16_t code) {
     client->base.last_active = P_tick_ms();
     // 使用 immediate=false，让 close 帧排在队尾，确保先发送已入队的应用层消息（如 REG_ACK）
     ct_client_send((ct_client_t*)client, item, false);
-    // 注意：必须在 ct_client_send 之后设置 CLOSING 标志，因为 ct_client_send 要求 handshake == 0
-    ((tcp_client_t*)client)->handshake = TCP_HS_FLAG_CLOSING;
+    // 交由基类统一执行关闭收口：停止接收、清理 sessions / recv_buf，并保持 close 帧继续发送
+    ct_client_off(&client->ws_ctx->base, (ct_client_t*)client);
     return E_NONE;
 }
 

@@ -327,11 +327,18 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
         return;
     }
 
+    // pair_session 成功后，若本端 session 为新建，初始化本端 SYNC/PKT 发送环形队列
+    if (PAIR_IS_LOCAL_NEW(side)) {
+        BUF_R_INIT(&local_s->sync_peer_send, local_s->sync_peer_slots, WSS_PEER_Q_MAX);
+        BUF_R_INIT(&local_s->pkt_peer_send, local_s->pkt_peer_slots, WSS_PEER_Q_MAX);
+    }
+
     if (payload_len > WSS_SYNC_PAYLOAD_MAX)
         payload_len = WSS_SYNC_PAYLOAD_MAX;
 
     print("V:", LA_F("%s: local='%s', remote='%s', online=%d, sync_cache=%u\n", LA_F162, 162),
-          PROTO, client->base.local_peer_id, remote_peer_id, side, remote_s ? 1 : 0, (uint32_t)payload_len);
+            PROTO, client->base.local_peer_id, remote_peer_id, remote_s ? 1 : 0, (uint32_t)payload_len);
+
 
     if (payload_len) {
         wss_sync_write(local_s, payload, payload_len);
