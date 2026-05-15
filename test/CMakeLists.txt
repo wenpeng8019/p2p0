@@ -28,14 +28,14 @@ if(I18N_ENABLED)
 endif()
 
 # COMPACT REG 协议单元测试
-add_executable(test_compact_register
+add_executable(test_compact_reg
         test_compact_reg.c
 )
-target_include_directories(test_compact_register PRIVATE
+target_include_directories(test_compact_reg PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_compact_register stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_compact_reg stdc ${TEST_PLATFORM_LIBS})
 
 # COMPACT PEER_INFO 协议单元测试
 add_executable(test_compact_sync
@@ -128,14 +128,14 @@ target_include_directories(test_ping_c_filter PRIVATE
 target_link_libraries(test_ping_c_filter stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY 协议注册/上线单元测试
-add_executable(test_relay_register
+add_executable(test_relay_reg
         test_relay_reg.c
 )
-target_include_directories(test_relay_register PRIVATE
+target_include_directories(test_relay_reg PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_relay_register stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_relay_reg stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY 协议生命周期单元测试 (ALIVE/FIN)
 add_executable(test_relay_lifecycle
@@ -148,14 +148,14 @@ target_include_directories(test_relay_lifecycle PRIVATE
 target_link_libraries(test_relay_lifecycle stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY 数据中继协议单元测试 (DATA/ACK/CRYPTO)
-add_executable(test_relay_data
+add_executable(test_relay_pkt
         test_relay_pkt.c
 )
-target_include_directories(test_relay_data PRIVATE
+target_include_directories(test_relay_pkt PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
 )
-target_link_libraries(test_relay_data stdc ${TEST_PLATFORM_LIBS})
+target_link_libraries(test_relay_pkt stdc ${TEST_PLATFORM_LIBS})
 
 # RELAY RPC 协议单元测试
 add_executable(test_relay_rpc
@@ -168,20 +168,20 @@ target_include_directories(test_relay_rpc PRIVATE
 target_link_libraries(test_relay_rpc stdc ${TEST_PLATFORM_LIBS})
 
 # WSS 协议注册/上线单元测试
-add_executable(test_wss_register
+add_executable(test_wss_reg
         test_wss_reg.c
     ${CMAKE_SOURCE_DIR}/src/.LANG.c
     ${CMAKE_SOURCE_DIR}/i18n/i18n.c
 )
-target_include_directories(test_wss_register PRIVATE
+target_include_directories(test_wss_reg PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/stdc
     ${CMAKE_SOURCE_DIR}/src
     ${WSLAY_INCLUDE_DIRS}
 )
-target_link_libraries(test_wss_register p2p_static ${TEST_PLATFORM_LIBS})
-target_compile_definitions(test_wss_register PRIVATE WITH_WS)
-target_compile_options(test_wss_register PRIVATE
+target_link_libraries(test_wss_reg p2p_static ${TEST_PLATFORM_LIBS})
+target_compile_definitions(test_wss_reg PRIVATE WITH_WS)
+target_compile_options(test_wss_reg PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
 )
 
@@ -296,61 +296,24 @@ target_include_directories(test_ping_g_reconnect PRIVATE
     ${CMAKE_SOURCE_DIR}/stdc
 )
 target_link_libraries(test_ping_g_reconnect stdc ${TEST_PLATFORM_LIBS})
-# WebSocket server + client 集成测试
+# WebSocket 浏览器端对端手动演示（非自动化测试，不加入 CTest）
 if(WITH_WS)
-    add_executable(test_ws
-        test_ws.c
+    # 用法：./test/test_wss_sdp
+    add_executable(test_wss_sdp
+            test_wss_sdp.c
     )
-    target_include_directories(test_ws PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/p2p_server
-        ${WSLAY_INCLUDE_DIRS}
-    )
-    target_link_libraries(test_ws
-        p2p_static
-        ${TEST_PLATFORM_LIBS}
-    )
-    target_compile_definitions(test_ws PRIVATE WITH_WS)
-
-    # p2p_server --ws 集成测试（启动真实 server 子进程）
-    add_executable(test_ws_server_integration
-        test_ws_server_integration.c
-    )
-    target_include_directories(test_ws_server_integration PRIVATE
+    target_include_directories(test_wss_sdp PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src
         ${CMAKE_SOURCE_DIR}/p2p_server
         ${CMAKE_SOURCE_DIR}/stdc
         ${WSLAY_INCLUDE_DIRS}
     )
-    target_link_libraries(test_ws_server_integration
+    target_link_libraries(test_wss_sdp
         p2p_static
         ${TEST_PLATFORM_LIBS}
     )
-    target_compile_definitions(test_ws_server_integration PRIVATE WITH_WS)
-    # register_* 是测试框架的占位函数，从不被调用，抑制 -Wunused-function 警告
-    target_compile_options(test_ws_server_integration PRIVATE
-        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
-    )
-
-    # WebSocket 浏览器端对端手动演示（非自动化测试，不加入 CTest）
-    # 用法：./test/test_ws_browser
-    add_executable(test_ws_browser
-        test_ws_browser.c
-    )
-    target_include_directories(test_ws_browser PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/p2p_server
-        ${CMAKE_SOURCE_DIR}/stdc
-        ${WSLAY_INCLUDE_DIRS}
-    )
-    target_link_libraries(test_ws_browser
-        p2p_static
-        ${TEST_PLATFORM_LIBS}
-    )
-    target_compile_definitions(test_ws_browser PRIVATE WITH_WS)
+    target_compile_definitions(test_wss_sdp PRIVATE WITH_WS)
 endif()
 
 # 添加测试
@@ -358,31 +321,27 @@ enable_testing()
 
 # --- 独立单元测试（无外部依赖） ---
 add_test(NAME test_transport     COMMAND test_transport)
-if(WITH_WS)
-    add_test(NAME test_ws                    COMMAND test_ws)
-    add_test(NAME test_ws_server_integration COMMAND test_ws_server_integration)
-endif()
 
 # --- COMPACT 协议测试（需要 p2p_server） ---
 set(SERVER_PATH $<TARGET_FILE:p2p_server>)
 
-add_test(NAME test_compact_register  COMMAND test_compact_register  ${SERVER_PATH})
+add_test(NAME test_compact_lifecycle COMMAND test_compact_lifecycle ${SERVER_PATH})
+add_test(NAME test_compact_reg       COMMAND test_compact_reg       ${SERVER_PATH})
 add_test(NAME test_compact_sync      COMMAND test_compact_sync      ${SERVER_PATH})
-add_test(NAME test_compact_lifecycle COMMAND test_compact_lifecycle  ${SERVER_PATH})
+add_test(NAME test_compact_relay     COMMAND test_compact_relay     ${SERVER_PATH})
 add_test(NAME test_compact_rpc       COMMAND test_compact_rpc       ${SERVER_PATH})
-add_test(NAME test_compact_relay     COMMAND test_compact_relay      ${SERVER_PATH})
 
 # --- RELAY 协议测试（需要 p2p_server） ---
-add_test(NAME test_relay_register    COMMAND test_relay_register    ${SERVER_PATH})
 add_test(NAME test_relay_lifecycle   COMMAND test_relay_lifecycle   ${SERVER_PATH})
-add_test(NAME test_relay_data        COMMAND test_relay_data        ${SERVER_PATH})
+add_test(NAME test_relay_reg         COMMAND test_relay_reg         ${SERVER_PATH})
+add_test(NAME test_relay_pkt         COMMAND test_relay_pkt         ${SERVER_PATH})
 add_test(NAME test_relay_rpc         COMMAND test_relay_rpc         ${SERVER_PATH})
 
 # --- WSS 协议测试（需要 p2p_server --ws） ---
 if(WITH_WS)
-    add_test(NAME test_wss_register      COMMAND test_wss_register      ${SERVER_PATH})
-    add_test(NAME test_wss_lifecycle     COMMAND test_wss_lifecycle     ${SERVER_PATH})
-    add_test(NAME test_wss_rpc           COMMAND test_wss_rpc           ${SERVER_PATH})
+    add_test(NAME test_wss_lifecycle COMMAND test_wss_lifecycle     ${SERVER_PATH})
+    add_test(NAME test_wss_reg       COMMAND test_wss_reg           ${SERVER_PATH})
+    add_test(NAME test_wss_rpc       COMMAND test_wss_rpc           ${SERVER_PATH})
 endif()
 
 # --- 端到端测试 COMPACT（需要 p2p_ping + p2p_server） ---
@@ -408,20 +367,17 @@ add_test(NAME test_ping_g_reconnect  COMMAND test_ping_g_reconnect  ${PING_PATH}
 
 # --- 测试标签（用于分组运行：ctest -L unit / ctest -L protocol / ctest -L e2e） ---
 set_tests_properties(test_transport PROPERTIES LABELS "unit")
-if(WITH_WS)
-    set_tests_properties(test_ws test_ws_server_integration PROPERTIES LABELS "unit")
-endif()
 
 set_tests_properties(
-    test_compact_register test_compact_sync test_compact_lifecycle
+    test_compact_reg test_compact_sync test_compact_lifecycle
     test_compact_rpc test_compact_relay
-    test_relay_register test_relay_lifecycle test_relay_data test_relay_rpc
+    test_relay_reg test_relay_lifecycle test_relay_pkt test_relay_rpc
     PROPERTIES LABELS "protocol"
 )
 
 if(WITH_WS)
     set_tests_properties(
-        test_wss_register test_wss_lifecycle test_wss_rpc
+        test_wss_reg test_wss_lifecycle test_wss_rpc
         PROPERTIES LABELS "protocol"
     )
 endif()
@@ -436,15 +392,15 @@ set_tests_properties(
 
 # 协议测试超时（启动子进程，需要额外裕量）
 set_tests_properties(
-    test_compact_register test_compact_sync test_compact_lifecycle
+    test_compact_reg test_compact_sync test_compact_lifecycle
     test_compact_rpc test_compact_relay
-    test_relay_register test_relay_lifecycle test_relay_data test_relay_rpc
+    test_relay_reg test_relay_lifecycle test_relay_pkt test_relay_rpc
     PROPERTIES TIMEOUT 30
 )
 
 if(WITH_WS)
     set_tests_properties(
-        test_wss_register test_wss_lifecycle test_wss_rpc
+        test_wss_reg test_wss_lifecycle test_wss_rpc
         PROPERTIES TIMEOUT 30
     )
 endif()

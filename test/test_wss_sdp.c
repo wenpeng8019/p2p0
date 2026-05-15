@@ -1,17 +1,18 @@
 /*
- * test_ws_browser.c — WebSocket 浏览器端对端手动演示
+ * test_ws_browser.c — WebSocket 浏览器 SDP 通知交换演示
  *
  * 用法：
  *   ./test/test_ws_browser           （自动选端口）
- *   ./test/test_ws_browser 9100 9101  （relay_port ws_port）
+ *   ./test/test_ws_browser 9100       （relay/ws 共用端口）
  *
  * 流程：
- *   1. 启动 p2p_server（--ws-port 独立端口）
+ *   1. 启动 p2p_server（--ws，共用 relay 端口）
  *   2. 生成 HTML 页面写到 /tmp/p2p_ws_test.html
  *   3. 自动打开浏览器（macOS: open, Linux: xdg-open）
- *   4. ws_client 连接 WS 端口，依次发送演示消息
- *   5. 消息经 ws_server 广播到浏览器页面显示
- *   6. 按 Enter 结束
+ *   4. 浏览器自动 REG 为 bob_browser，并在收到 SDP 后回发 SDP
+ *   5. C 端 ws_client REG 为 alice_native，向浏览器发送 SDP 通知
+ *   6. 验证：alice 收到 SDP OK + 收到来自 bob_browser 的 SDP 回传
+ *   7. 按 Enter 结束
  *
  * 注意：需要编译时开启 WITH_WS
  */
@@ -35,6 +36,7 @@
 #  include <arpa/inet.h>
 #  include <sys/wait.h>
 #  include <errno.h>
+#  include <sys/stat.h>
 #endif
 
 /* -----------------------------------------------------------------------
@@ -69,13 +71,16 @@ static uint16_t pick_free_port(void) {
  * -------------------------------------------------------------------- */
 static const char *find_server_binary(void) {
     static const char *candidates[] = {
+        "build/p2p_server/p2p_server",
         "p2p_server/p2p_server",
         "../p2p_server/p2p_server",
         "./p2p_server",
         NULL
     };
     for (int i = 0; candidates[i]; i++) {
-        if (access(candidates[i], X_OK) == 0) return candidates[i];
+        struct stat st;
+        if (stat(candidates[i], &st) == 0 && S_ISREG(st.st_mode) && access(candidates[i], X_OK) == 0)
+            return candidates[i];
     }
     return NULL;
 }
@@ -87,9 +92,9 @@ typedef struct { pid_t pid; } server_proc_t;
 
 static server_proc_t start_server(const char *bin, uint16_t relay_port, uint16_t ws_port) {
     server_proc_t sp = { -1 };
-    char relay_str[8], ws_str[8];
+    char relay_str[8];
     snprintf(relay_str, sizeof(relay_str), "%u", (unsigned)relay_port);
-    snprintf(ws_str,   sizeof(ws_str),   "%u", (unsigned)ws_port);
+    (void)ws_port;
 
     pid_t pid = fork();
     if (pid < 0) return sp;
@@ -97,23 +102,35 @@ static server_proc_t start_server(const char *bin, uint16_t relay_port, uint16_t
         /* 子进程：将 stdout/stderr 重定向到 /dev/null */
         int dn = open("/dev/null", O_WRONLY);
         if (dn >= 0) { dup2(dn, 1); dup2(dn, 2); close(dn); }
-        execlp(bin, bin, "-p", relay_str, "--ws-port", ws_str, (char *)NULL);
+        execlp(bin, bin, "-p", relay_str, "--ws", (char *)NULL);
         _exit(1);
     }
     sp.pid = pid;
 
-    /* 等待 TCP 端口就绪（最多 1s）*/
+    /* 等待 TCP 端口就绪（最多 2s）*/
+    int ready = 0;
     for (int i = 0; i < 100; i++) {
-        sleep_ms(10);
+        sleep_ms(20);
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd < 0) continue;
         struct sockaddr_in a = {0};
         a.sin_family = AF_INET;
         a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         a.sin_port = htons(relay_port);
-        if (connect(fd, (struct sockaddr *)&a, sizeof(a)) == 0) { close(fd); break; }
+        if (connect(fd, (struct sockaddr *)&a, sizeof(a)) == 0) {
+            ready = 1;
+            close(fd);
+            break;
+        }
         close(fd);
     }
+
+    if (!ready) {
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+        sp.pid = -1;
+    }
+
     return sp;
 }
 
@@ -135,7 +152,7 @@ static const char HTML_FMT[] =
     "<head>\n"
     "<meta charset=\"utf-8\">\n"
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-    "<title>P2P WebSocket Demo</title>\n"
+    "<title>P2P WebSocket SDP Demo</title>\n"
     "<style>\n"
     "* { box-sizing:border-box; margin:0; padding:0 }\n"
     "body { font-family:'SF Mono',Consolas,monospace; background:#0d1117;\n"
@@ -160,7 +177,7 @@ static const char HTML_FMT[] =
     "</style>\n"
     "</head>\n"
     "<body>\n"
-    "<h1>&#127760; P2P WebSocket Demo</h1>\n"
+    "<h1>&#127760; P2P WebSocket SDP Demo</h1>\n"
     "<div id=\"bar\">\n"
     "  <div id=\"dot\"></div>\n"
     "  <div id=\"info\">Connecting to ws://127.0.0.1:%u ...</div>\n"
@@ -168,7 +185,11 @@ static const char HTML_FMT[] =
     "<ul id=\"log\"></ul>\n"
     "<script>\n"
     "const WS_PORT = %u;\n"
-    "const ws  = new WebSocket('ws://127.0.0.1:' + WS_PORT);\n"
+    "const SELF_ID = 'bob_browser';\n"
+    "const PEER_ID = 'alice_native';\n"
+    "const INSTANCE_ID = 2001;\n"
+    "let answered = false;\n"
+    "const ws  = new WebSocket('ws://127.0.0.1:' + WS_PORT, 'p2p');\n"
     "const dot  = document.getElementById('dot');\n"
     "const info = document.getElementById('info');\n"
     "const log  = document.getElementById('log');\n"
@@ -183,6 +204,11 @@ static const char HTML_FMT[] =
     "ws.onopen = () => {\n"
     "  dot.className = 'ok';\n"
     "  info.textContent = 'Connected  ws://127.0.0.1:' + WS_PORT;\n"
+    "  ws.send('REG ' + SELF_ID + ' ' + INSTANCE_ID + '\\n');\n"
+    "  const li = document.createElement('li');\n"
+    "  li.innerHTML = '<span class=\"t\">' + ts() + '</span>'\n"
+    "               + '<span class=\"msg\">TX: REG ' + SELF_ID + ' ' + INSTANCE_ID + '</span>';\n"
+    "  log.appendChild(li);\n"
     "};\n"
     "ws.onclose = () => {\n"
     "  dot.className = '';\n"
@@ -193,10 +219,20 @@ static const char HTML_FMT[] =
     "  info.textContent = 'Connection error';\n"
     "};\n"
     "ws.onmessage = (e) => {\n"
+    "  const txt = String(e.data || '');\n"
     "  const li = document.createElement('li');\n"
     "  li.innerHTML = '<span class=\"t\">' + ts() + '</span>'\n"
-    "               + '<span class=\"msg\">' + esc(e.data) + '</span>';\n"
+    "               + '<span class=\"msg\">RX: ' + esc(txt) + '</span>';\n"
     "  log.appendChild(li);\n"
+    "  if (!answered && txt.startsWith('SDP ' + PEER_ID + '\\n')) {\n"
+    "    answered = true;\n"
+    "    const ans = 'v=0\\r\\no=bob_browser 2 2 IN IP4 127.0.0.1\\r\\ns=P2P-Answer\\r\\nt=0 0\\r\\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\\r\\n';\n"
+    "    ws.send('SDP ' + PEER_ID + '\\n' + ans);\n"
+    "    const tx = document.createElement('li');\n"
+    "    tx.innerHTML = '<span class=\"t\">' + ts() + '</span>'\n"
+    "                 + '<span class=\"msg\">TX: SDP ' + PEER_ID + ' (answer)</span>';\n"
+    "    log.appendChild(tx);\n"
+    "  }\n"
     "  window.scrollTo(0, document.body.scrollHeight);\n"
     "};\n"
     "</script>\n"
@@ -235,7 +271,36 @@ static void open_browser(const char *path) {
  * ws_client 辅助
  * -------------------------------------------------------------------- */
 static int g_connected = 0;
+static int g_reg_ok = 0;
+static int g_sdp_ok = 0;
+static int g_sdp_from_browser = 0;
+
 static void on_open(ws_client_t *c, void *ud) { (void)c; (void)ud; g_connected = 1; }
+
+static void on_msg(ws_client_t *c, ws_msg_type_t type, const uint8_t *data, size_t len, void *ud) {
+    (void)c; (void)ud;
+    if (type != WS_MSG_TEXT || !data || len == 0) return;
+
+    char txt[2048];
+    size_t n = len < sizeof(txt) - 1 ? len : sizeof(txt) - 1;
+    memcpy(txt, data, n);
+    txt[n] = '\0';
+
+    printf("    [RX] %s\n", txt);
+
+    if (strncmp(txt, "REG OK ", 7) == 0) {
+        g_reg_ok = 1;
+        return;
+    }
+    if (strncmp(txt, "SDP OK bob_browser", 18) == 0) {
+        g_sdp_ok = 1;
+        return;
+    }
+    if (strncmp(txt, "SDP bob_browser\n", 16) == 0) {
+        g_sdp_from_browser = 1;
+        return;
+    }
+}
 
 /* pump：驱动 ws_client 事件循环，最多等 ms 毫秒直到 flag 为真 */
 static int pump_until(ws_client_t *c, int *flag, int ms) {
@@ -261,7 +326,7 @@ static void send_and_flush(ws_client_t *c, const char *msg) {
  * main
  * -------------------------------------------------------------------- */
 int main(int argc, char **argv) {
-    printf("=== P2P WebSocket Browser Demo ===\n\n");
+    printf("=== P2P WebSocket Browser SDP Demo ===\n\n");
 
     /* ---- 1. 找 p2p_server 二进制 ---- */
     const char *bin = find_server_binary();
@@ -274,14 +339,14 @@ int main(int argc, char **argv) {
 
     /* ---- 2. 确定端口 ---- */
     uint16_t relay_port, ws_port;
-    if (argc >= 3) {
+    if (argc >= 2) {
         relay_port = (uint16_t)atoi(argv[1]);
-        ws_port    = (uint16_t)atoi(argv[2]);
+        ws_port    = relay_port;
     } else {
         relay_port = pick_free_port();
-        ws_port    = pick_free_port();
+        ws_port    = relay_port;
     }
-    if (!relay_port || !ws_port || relay_port == ws_port) {
+    if (!relay_port || !ws_port) {
         fprintf(stderr, "[错误] 无法分配端口\n");
         return 1;
     }
@@ -314,8 +379,13 @@ int main(int argc, char **argv) {
     /* ---- 7. ws_client 连接 ---- */
     printf("[6] ws_client 连接 ws://127.0.0.1:%u ...\n", ws_port);
     g_connected = 0;
+    g_reg_ok = 0;
+    g_sdp_ok = 0;
+    g_sdp_from_browser = 0;
     ws_client_cfg_t cfg = {0};
     cfg.on_open = on_open;
+    cfg.on_message = on_msg;
+    cfg.extra_headers = "Sec-WebSocket-Protocol: p2p\r\n";
     ws_client_t *cli = ws_client_create(&cfg);
     if (!cli) { fprintf(stderr, "[错误] ws_client_create 失败\n"); stop_server(&sp); return 1; }
 
@@ -329,27 +399,39 @@ int main(int argc, char **argv) {
     }
     printf("    握手成功！\n\n");
 
-    /* ---- 8. 发送演示消息 ---- */
-    const char *messages[] = {
-        "Hello, Browser! \xe4\xbd\xa0\xe5\xa5\xbd\xef\xbc\x8c\xe6\xb5\x8f\xe8\xa7\x88\xe5\x99\xa8\xef\xbc\x81",
-        "This message is sent from a C WebSocket client.",
-        "\xe8\xbf\x99\xe6\x98\xaf\xe6\x9d\xa5\xe8\x87\xaa C \xe5\xae\xa2\xe6\x88\xb7\xe7\xab\xaf\xe7\x9a\x84\xe7\xac\xac\xe4\xb8\x89\xe6\x9d\xa1\xe6\xb6\x88\xe6\x81\xaf\xe3\x80\x82",
-        "p2p WebSocket: same server port for both relay and WS!",
-        "\xe6\xb5\x8b\xe8\xaf\x95\xe5\xae\x8c\xe6\x88\x90\xe3\x80\x82\xe6\x8a\x80\xe6\x9c\xaf\xe6\xa0\x88: p2p_server + wslay + ws_client \u2192 Browser",
-        NULL
-    };
-
-    printf("[7] \xe5\x8f\x91\xe9\x80\x81\xe6\xbc\x94\xe7\xa4\xba\xe6\xb6\x88\xe6\x81\xaf...\n");
-    for (int i = 0; messages[i]; i++) {
-        printf("    \xe2\x86\x92 [%d] %s\n", i + 1, messages[i]);
-        send_and_flush(cli, messages[i]);
-        sleep_ms(700);   /* 每条消息间隔 700ms，让浏览器逐条显示 */
+    /* ---- 8. 协议演示：alice REG + SDP offer，等待 SDP OK 与浏览器回传 ---- */
+    printf("[7] 发送 REG（alice_native）...\n");
+    send_and_flush(cli, "REG alice_native 1001\n");
+    if (!pump_until(cli, &g_reg_ok, 2000)) {
+        fprintf(stderr, "[错误] 未收到 REG OK\n");
+        ws_client_destroy(cli); stop_server(&sp); return 1;
     }
-    printf("\n");
+
+    printf("[8] 发送 SDP 通知到 bob_browser ...\n");
+    const char *offer =
+        "v=0\r\n"
+        "o=alice_native 1 1 IN IP4 127.0.0.1\r\n"
+        "s=P2P-Offer\r\n"
+        "t=0 0\r\n"
+        "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n";
+    char sdp_msg[1024];
+    snprintf(sdp_msg, sizeof(sdp_msg), "SDP bob_browser\n%s", offer);
+    send_and_flush(cli, sdp_msg);
+
+    if (!pump_until(cli, &g_sdp_ok, 3000)) {
+        fprintf(stderr, "[错误] 未收到 SDP OK bob_browser\n");
+        ws_client_destroy(cli); stop_server(&sp); return 1;
+    }
+    if (!pump_until(cli, &g_sdp_from_browser, 5000)) {
+        fprintf(stderr, "[错误] 未收到来自 bob_browser 的 SDP 回传\n");
+        ws_client_destroy(cli); stop_server(&sp); return 1;
+    }
+
+    printf("[9] SDP 通知交换成功（alice -> bob_browser -> alice）\n\n");
 
     /* ---- 9. 等用户确认后退出 ---- */
-    printf("[\xe5\xae\x8c\xe6\x88\x90] \xe6\xb6\x88\xe6\x81\xaf\xe5\xb7\xb2\xe5\x8f\x91\xe9\x80\x81\xe3\x80\x82\n");
-    printf("         \xe8\xaf\xb7\xe5\x9c\xa8\xe6\xb5\x8f\xe8\xa7\x88\xe5\x99\xa8\xe4\xb8\xad\xe6\x9f\xa5\xe7\x9c\x8b\xe6\x95\x88\xe6\x9e\x9c\xef\xbc\x8c\xe6\x8c\x89 Enter \xe7\xbb\x93\xe6\x9d\x9f...\n");
+    printf("[完成] 浏览器 SDP 交换演示已完成。\n");
+    printf("       请在浏览器中查看 REG/SDP 收发日志，按 Enter 结束...\n");
     (void)getchar();
 
     /* ---- 10. 清理 ---- */

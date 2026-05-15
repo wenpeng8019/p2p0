@@ -12,6 +12,7 @@
  *   客户端 → 服务器：
  *     REG <peer_id>                 注册身份（类似 RELAY REG）
  *     OFF                           主动下线，立即释放服务器资源（与 REG 配对）
+ *     SDP <remote_peer_id>\n<sdp>   按 peer_id 转发 SDP 文本（不依赖 session）
  *     SYN0 <remote_peer_id>        创建/恢复会话（类似 RELAY SYN0）
  *     SYN0 <remote_peer_id>\n<payload>  创建会话 + 携带预缓存负载
  *     SYNC <session_id>\n<payload>  按 session_id 路由同步数据（类似 RELAY SYNC）
@@ -20,6 +21,8 @@
  *   服务器 → 客户端：
  *     REG OK <sync_max>             注册成功（sync_max = 预缓存负载上限）
  *     REG FAIL <reason>             注册失败
+ *     SDP OK <remote_peer_id>       SDP 转发成功
+ *     SDP FAIL <remote_peer_id> <reason>  SDP 转发失败
  *     SYN0 <peer_id> <session_id> online|offline  应答/推送
  *     SYN0 <peer_id> <session_id> busy  负载超出缓存可用空间
  *     SYN0 FAIL <reason>           会话创建失败

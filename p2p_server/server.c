@@ -249,7 +249,7 @@ find_session(uint32_t session_id) {
 ret_t
 solo_session(client_t *client, session_t **local_s,
              size_t session_type_size) {
-
+    (void)client;(void)local_s;(void)session_type_size;
     return -1;
 }
 
@@ -549,6 +549,9 @@ void signal_handler(int signum) {
 #endif
 
 int main(int argc, char *argv[]) {
+    (void)g_client_slots[0].compact;
+    (void)g_client_slots[0].relay;
+    (void)g_client_slots[0].wss;
 
     // 初始化语言系统
     LA_init();
@@ -991,7 +994,7 @@ int main(int argc, char *argv[]) {
 #endif
                 }
 
-                if (m == PROTO_RELAY) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_RELAY], (ct_client_t*)&g_client_slots[i].relay, NULL);
+                if (m == PROTO_RELAY) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_RELAY], CT_CLIENTS(i), NULL);
 #ifdef WITH_WS
                 else if (ws_client) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS"); // fixme 这里的操作可能会导致 client 被销毁，从而无需再执行后面
 #endif
@@ -1001,7 +1004,7 @@ int main(int argc, char *argv[]) {
             if ((TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_WRITE)
                 && FD_ISSET(CLIENTS(i)->fd, &write_fds)) {
 
-                if (m == PROTO_RELAY) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_RELAY], (ct_client_t*)&g_client_slots[i].relay, NULL);
+                if (m == PROTO_RELAY) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_RELAY], CT_CLIENTS(i), NULL);
 #ifdef WITH_WS
                 else if (ws_client) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS");
 #endif

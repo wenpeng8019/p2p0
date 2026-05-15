@@ -28,6 +28,15 @@ static inline bool wss_client_online(const wss_client_t *c) {
     return c && c->base.fd != P_INVALID_SOCKET && !TCP_HS_IS_HANDSHAKING((ct_client_t*)c);
 }
 
+/* SDP 转发目的端可达性：在线 + 非 closing + 已注册 + WSS 协议 + 非自发自收 */
+static inline bool wss_client_reachable_for_sdp(const wss_client_t *src, const wss_client_t *dst) {
+    return dst && dst != src
+        && dst->base.proto == PROTO_WSS
+        && dst->base.local_peer_id[0]
+        && !(dst->io & WSS_IO_FLAG_CLOSING)
+        && wss_client_online(dst);
+}
+
 /* 写入 n 字节（可绕回），返回 0=成功, -1=空间不足 */
 static inline int wss_sync_write(wss_session_t *s, const uint8_t *src, size_t n) {
     if (n > WSS_SYNC_PAYLOAD_MAX - s->sync_len) return -1;
@@ -59,6 +68,70 @@ static ret_t wss_send_text(cw_client_t *client, const char *str) {
     memcpy(buf, str, text_len);
     item->len = total;
     return cw_send_frame(client, WS_OP_TEXT, item, 10);
+}
+
+// 发送 SDP FAIL 文本帧给发送方
+static void wss_send_sdp_fail(wss_client_t *client, const char *remote_peer_id, const char *reason) {
+    char buf[128 + P2P_PEER_ID_MAX];
+    snprintf(buf, sizeof(buf), P2P_WSS_RSP_SDP_FAIL_FMT,
+             remote_peer_id ? remote_peer_id : "", reason ? reason : "internal");
+    wss_send_text((cw_client_t*)client, buf);
+}
+
+// 按 peer_id 转发 SDP 文本并回复发送方 SDP OK/FAIL
+static void wss_handle_sdp(wss_client_t *src_c, const char *remote_peer_id,
+                           const uint8_t *sdp, size_t sdp_len) {
+    const char *PROTO = "SDP";
+
+    if (!remote_peer_id || !remote_peer_id[0]) {
+        wss_send_sdp_fail(src_c, "", "empty peer id");
+        return;
+    }
+    if (strlen(remote_peer_id) > P2P_PEER_ID_MAX) {
+        wss_send_sdp_fail(src_c, remote_peer_id, "peer id too long");
+        return;
+    }
+    if (!sdp || sdp_len == 0) {
+        wss_send_sdp_fail(src_c, remote_peer_id, "empty sdp");
+        return;
+    }
+
+    wss_client_t *dst_c = (wss_client_t*)find_client(remote_peer_id);
+    if (!wss_client_reachable_for_sdp(src_c, dst_c)) {
+        wss_send_sdp_fail(src_c, remote_peer_id, "peer unreachable");
+        return;
+    }
+
+    char hdr[8 + P2P_PEER_ID_MAX + 4];
+    int hdr_len = snprintf(hdr, sizeof(hdr), P2P_WSS_CMD_SDP_FMT, src_c->base.local_peer_id);
+    if (hdr_len <= 0 || (size_t)hdr_len + sdp_len > UINT16_MAX - 10u) {
+        wss_send_sdp_fail(src_c, remote_peer_id, "too large");
+        return;
+    }
+
+    uint16_t total = (uint16_t)(10u + (size_t)hdr_len + sdp_len);
+    buf16_item_t *item = alloc_buf16(BUF_FLAGS(buffer_sz_flag(total), 0));
+    if (!item) {
+        wss_send_sdp_fail(src_c, remote_peer_id, "OOM");
+        return;
+    }
+
+    uint8_t *buf = ITEM2BUF(item) + 10;
+    memcpy(buf, hdr, (size_t)hdr_len);
+    memcpy(buf + hdr_len, sdp, sdp_len);
+    item->len = total;
+
+    if (cw_send_frame((cw_client_t*)dst_c, WS_OP_TEXT, item, 10) != E_NONE) {
+        wss_send_sdp_fail(src_c, remote_peer_id, "peer unreachable");
+        return;
+    }
+
+    char ok[32 + P2P_PEER_ID_MAX];
+    snprintf(ok, sizeof(ok), P2P_WSS_RSP_SDP_OK_FMT, remote_peer_id);
+    wss_send_text((cw_client_t*)src_c, ok);
+
+    print("V:", LA_F("%s: '%s' -> '%s' (%zu bytes)\n", LA_F167, 167),
+          PROTO, src_c->base.local_peer_id, remote_peer_id, sdp_len);
 }
 
 // 构造 SYNC 转发帧：帧头 "SYNC <dst_sid>\n" + ring buffer 内容(连续化) + "\n"(fin mark)
@@ -739,6 +812,21 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
         print("I:", LA_F("%s: '%s'\n", LA_F72, 72), "OFF",
               client->base.local_peer_id);
         ct_client_off(&g_wss_ctx.base, (ct_client_t*)client);
+        return;
+    }
+
+    // SDP <remote_peer_id>\n<sdp>
+    if (strncmp((char*)msg, P2P_WSS_CMD_SDP, P2P_WSS_CMD_SDP_SZ) == 0) {
+        char *remote_id = (char*)msg + P2P_WSS_CMD_SDP_SZ;
+        uint8_t *sdp = (uint8_t*)(ln + 1);
+        size_t sdp_len = len - (size_t)(sdp - msg);
+
+        ln_trim;
+        while (sdp_len > 0 && (sdp[sdp_len - 1] == '\n' || sdp[sdp_len - 1] == '\r')) {
+            --sdp_len;
+        }
+
+        wss_handle_sdp(client, remote_id, sdp, sdp_len);
         return;
     }
 

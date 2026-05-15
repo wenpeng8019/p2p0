@@ -944,7 +944,7 @@ typedef struct {
  *
  * 特殊错误码（服务器生成的错误响应，on_response 回调 len=-1）：
  *   0xFF (P2P_RPC_ERR_PEER_OFF): 对端在等待响应期间离线
- *   0xFE (P2P_RPC_ERR_TIMEOUT): 服务器转发超时
+ *   0xFE (P2P_RPC_ERR_TIMEOUT):      服务器转发超时
  *
  * 流控：使用 rpc_pending 通道（独立于 SYNC/DATA 的 peer_send），
  *      每个方向同时最多一个 RPC 消息在传输中。
@@ -1011,29 +1011,23 @@ typedef struct {
  *   │   (上传剩余 5 个候选)         │  立即转发给 B                │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
- *   │                               │   [sid=456][cnt=5]           │
+ *   │                               │  [sid=456][cnt=5]            │
  *   │                               │   (A 的 5 个候选)            │
  *   │                               │                              │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=5]            │
  *   │   (状态 3: 已转发 5 个)       │  缓冲区有空间才回            │
  *   │                               │                              │
  *   ├────── SYNC ─────────────────►│  [sid=123][cnt=3]            │
- *   │   (再上传 3 个)               │                              │
+ *   │   (再上传 3 个)               │  B 在线，实时转发            │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
- *   │                               │   [sid=456][cnt=3]           │
- *   │                               │                              │
- *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=3]            │
+ *   │                               │  [sid=456][cnt=3]            │
  *   │                               │                              │
  *   ├────── SYNC ─────────────────►│  [sid=123][cnt=0][fin=0xFF]  │
  *   │   (上传完成，FIN 标记)        │                              │
  *   │                               │                              │
  *   │                               ├────── SYNC ────────────────►│
- *   │                               │   [sid=456][cnt=0][fin=0xFF] │
- *   │                               │   (A 候选传输完成)           │
- *   │                               │                              │
- *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=0]            │
- *   │  (状态 3: fwd=0 表示全部完成) │  FIN 确认                    │
+ *   │                               │  [sid=456][cnt=0][fin=0xFF]  │
  *   │                               │                              │
  *   │<======================== P2P ICE 打洞 ======================>│
  *
@@ -1200,7 +1194,7 @@ typedef struct {
  * ============================================================================
  *
  * 基于 WebSocket 的 ICE 信令通道，为 P2P_SIGNALING_MODE_ICE 模式提供
- * ICE 候选交换。每条 WS text frame 承载一条消息，纯文本格式。
+ * ICE 候选交换，并支持按 peer_id 的 SDP 文本转发。每条 WS text frame 承载一条消息，纯文本格式。
  *
  * 与 COMPACT/RELAY 的二进制协议不同，WSS 采用可读文本协议，
  * 便于调试和跨语言集成（如浏览器 JavaScript 客户端）。
@@ -1219,7 +1213,7 @@ typedef struct {
  * - 第一个空格前为命令关键字（大写）
  * - 空格分隔字段
  * - 每条消息以 '\n' 结尾（作为消息结束标识；接收方可将 msg[len-1] 置 '\0' 后按 C 字符串处理）
- * - SYNC/SYN0 消息中第一个 '\n' 分隔头部字段与 payload，payload 后有终结 '\n'
+ * - SYNC/SYN0/SDP 消息中第一个 '\n' 分隔头部字段与 payload
  * - peer_id: UTF-8 字符串，最长 P2P_PEER_ID_MAX-1 字节（不含 NUL）
  * - session_id: uint32 十进制 ASCII 表示
 */
@@ -1227,12 +1221,15 @@ typedef struct {
 /* WSS 消息类型前缀（纯文本匹配，非二进制编码） */
 #define P2P_WSS_CMD_REG         "REG "          /* + <peer_id> <instance_id>\n */                                      // 注册身份
 #define P2P_WSS_CMD_OFF         "OFF"           /* OFF\n */                                                            // 主动下线（立即释放资源）
+#define P2P_WSS_CMD_SDP         "SDP "          /* + <remote_peer_id>\n<sdp> */                                        // 基于 peer_id 的 SDP 文本转发（不依赖会话）
 #define P2P_WSS_CMD_SYN0        "SYN0 "         /* + <remote_peer_id>\n  或  <remote_peer_id>\n<payload>\n */          // 创建/恢复会话（可选预缓存负载）
 #define P2P_WSS_CMD_SYNC        "SYNC "         /* + <session_id>\n<payload>\n */                                      // 同步数据 (C2S & S2C)
 #define P2P_WSS_CMD_FIN         "FIN "          /* + <session_id>\n */                                                 // 会话结束 (C2S & S2C)
 
 #define P2P_WSS_RSP_REG_OK      "REG OK "       /* + <sync_max> <features>\n */           // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
 #define P2P_WSS_RSP_REG_FAIL    "REG FAIL "     /* + <reason>\n */
+#define P2P_WSS_RSP_SDP_OK      "SDP OK "       /* + <remote_peer_id>\n */
+#define P2P_WSS_RSP_SDP_FAIL    "SDP FAIL "     /* + <remote_peer_id> <reason>\n */
 #define P2P_WSS_RSP_SYN0        "SYN0 "         /* + <peer_id> <session_id> online\n|offline\n|busy\n */
 #define P2P_WSS_RSP_SYN0_FAIL   "SYN0 FAIL "    /* + <reason>\n */
 #define P2P_WSS_RSP_SYNC        "SYNC "         /* + <session_id> confirm <bytes>\n|busy\n  (S2C 响应) */
@@ -1243,7 +1240,7 @@ typedef struct {
 
 /* WSS 二进制帧类型（WebSocket binary frame, opcode=0x2）
  *
- * 帧格式: [type(1)][session_id(P2P_SESS_ID_SZ4)][payload(N)]
+ * 帧格式: [type(1)][session_id(P2P_SESS_ID_SZ)][payload(N)]
  *   - type: 见下方 P2P_WSS_BIN_* 定义
  *   - session_id: uint32 网络字节序，路由键
  *   - payload: 类型相关数据（服务器仅重写 session_id，透传 payload）
@@ -1334,6 +1331,48 @@ typedef struct {
  *   → "OFF\n"
  */
 #define P2P_WSS_CMD_OFF_MSG         P2P_WSS_CMD_OFF "\n"                 /* "OFF\n" */
+/* ────────────────────────────────────────────────────────────────────────────
+ * SDP — 基于 peer_id 的文本转发（双向：客户端 → 服务器 → 客户端）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "SDP <remote_peer_id>\n<sdp>"
+ *   - remote_peer_id: 目标对端 peer_id
+ *   - sdp: 完整 SDP 文本（可包含多行），位于首个 '\n' 之后直到帧末尾
+ *
+ * 功能: 按 peer_id 直接路由并转发 SDP 文本，不依赖双方是否已建会，不依赖 session_id。
+ *       与 SYNC 的区别：SYNC 走 session_id 路由并具备缓存/confirm 语义；
+ *       SDP 仅做在线即时转发并返回一次成功/失败结果（类似 RPC ACK）。
+ *
+ * 前置条件: 发送方必须已 REG 注册。
+ *
+ * 服务端处理:
+ *   1. 未 REG → 返回 "REG FAIL not registered\n"
+ *   2. remote_peer_id 为空 → 返回 "SDP FAIL <remote_peer_id> empty peer id\n"
+ *   3. sdp 为空 → 返回 "SDP FAIL <remote_peer_id> empty sdp\n"
+ *   4. 对端不存在/未注册/离线 → 返回 "SDP FAIL <remote_peer_id> peer offline\n"
+ *   5. 对端在线 → 转发给对端并返回 "SDP OK <remote_peer_id>\n"
+ *
+ * 转发格式（S2C）:
+ *   "SDP <source_peer_id>\n<sdp>"
+ *
+ * 响应（回给发送方）:
+ *   "SDP OK <remote_peer_id>\n"
+ *   "SDP FAIL <remote_peer_id> <reason>\n"
+ *
+ * 示例:
+ *   → "SDP bob_device_02\nv=0\no=- 123 2 IN IP4 127.0.0.1\n..."
+ *   ← "SDP OK bob_device_02\n"
+ *
+ *   (bob 收到)
+ *   ← "SDP alice_device_01\nv=0\no=- 123 2 IN IP4 127.0.0.1\n..."
+ */
+#define P2P_WSS_CMD_SDP_SZ              (sizeof(P2P_WSS_CMD_SDP) - 1u)             /* "SDP " */
+#define P2P_WSS_CMD_SDP_FMT             P2P_WSS_CMD_SDP "%s\n"                     /* "SDP <remote_peer_id>\n<sdp>" 头部 */
+
+#define P2P_WSS_RSP_SDP_OK_SZ           (sizeof(P2P_WSS_RSP_SDP_OK) - 1u)           /* "SDP OK " */
+#define P2P_WSS_RSP_SDP_OK_FMT          P2P_WSS_RSP_SDP_OK "%s\n"                  /* "SDP OK <remote_peer_id>\n" */
+#define P2P_WSS_RSP_SDP_FAIL_SZ         (sizeof(P2P_WSS_RSP_SDP_FAIL) - 1u)         /* "SDP FAIL " */
+#define P2P_WSS_RSP_SDP_FAIL_FMT        P2P_WSS_RSP_SDP_FAIL "%s %s\n"             /* "SDP FAIL <remote_peer_id> <reason>\n" */
 /* ────────────────────────────────────────────────────────────────────────────
  * SYN0 — 创建/恢复会话（客户端 → 服务器）
  * ────────────────────────────────────────────────────────────────────────────
@@ -1435,7 +1474,7 @@ typedef struct {
  *
  * 触发时机（服务器主动推送，无需客户端请求）:
  *   1. 对端 REG 注册/重连成功 → 遍历其所有已配对会话，
- *      向每个在线对端推送 "SYN0 <reconnected_peer_id> <my_session_id> online\n"，
+ *      向每个在线对端推送 "SYN0 <reconnected_peer_id> <my_session_id> online\n",
  *      同时向重连方推送所有在线对端的 "SYN0 <peer_id> <my_session_id> online\n"
  *      若任一方有预缓存负载被转发，则以 SYNC 流式帧投递，并回复 "SYNC <ses_id> confirm <bytes>\n"
  *   2. 本端 SYN0 创建会话时对端已在线 → 双向交换缓存（同上）
@@ -1456,12 +1495,13 @@ typedef struct {
 #define P2P_WSS_CMD_SYN0_FMT            P2P_WSS_CMD_SYN0 "%s\n"                    /* "SYN0 <remote_peer_id>\n" */
 
 #define P2P_WSS_RSP_SYN0_SZ             (sizeof(P2P_WSS_RSP_SYN0) - 1u)            /* "SYN0 " */
-#define P2P_WSS_RSP_SYN0_REG_FMT     P2P_WSS_RSP_SYN0 "%s %u online\n"          /* "SYN0 <peer_id> <session_id> online\n" */
-#define P2P_WSS_RSP_SYN0_OFF_FMT    P2P_WSS_RSP_SYN0 "%s %u offline\n"         /* "SYN0 <peer_id> <session_id> offline\n" */
+#define P2P_WSS_RSP_SYN0_REG_FMT        P2P_WSS_RSP_SYN0 "%s %u online\n"          /* "SYN0 <peer_id> <session_id> online\n" */
+#define P2P_WSS_RSP_SYN0_OFF_FMT        P2P_WSS_RSP_SYN0 "%s %u offline\n"         /* "SYN0 <peer_id> <session_id> offline\n" */
 #define P2P_WSS_RSP_SYN0_BUSY_FMT       P2P_WSS_RSP_SYN0 "%s %u busy\n"            /* "SYN0 <peer_id> <session_id> busy\n" */
 
 #define P2P_WSS_RSP_SYN0_FAIL_SZ        (sizeof(P2P_WSS_RSP_SYN0_FAIL) - 1u)       /* "SYN0 FAIL " */
 #define P2P_WSS_RSP_SYN0_FAIL_FMT       P2P_WSS_RSP_SYN0_FAIL "%s\n"               /* "SYN0 FAIL <reason>\n" */
+
 /* ────────────────────────────────────────────────────────────────────────────
  * SYNC — 同步数据交换（双向：客户端 ↔ 服务器）
  * ────────────────────────────────────────────────────────────────────────────
@@ -1582,7 +1622,7 @@ typedef struct {
  *
  * 以下消息使用 WebSocket 二进制帧传输，与上方文本帧信令共享同一 WS 连接。
  * 二进制帧用于 P2P 数据中继（打洞失败降级）和 MSG RPC（服务器中转请求-应答），
- * 对应 RELAY 模式的 P2P_RLY_PKT / P2P_RLY_REQ / P2P_RLY_RSP。
+ * 对应 RELAY 模式 P2P_RLY_PKT / P2P_RLY_REQ / P2P_RLY_RSP。
  *
  * 公共帧格式: [type(1)][session_id(P2P_SESS_ID_SZ)][payload(N)]
  *   - type: 消息类型（P2P_WSS_BIN_*）
@@ -1680,7 +1720,7 @@ typedef struct {
  *   │                                │  peer_id="alice", cid=N
  *   │◄── "REG OK <sync_max>\n" ─────┤
  *   │                                │
- *   [进入 REG 状态]               │
+ *   [进入 REG 状态]                  │
  *   │                                │
  *   [WebSocket 自身的 PING/PONG]     │  (保活由 WS 协议层处理)
  *
