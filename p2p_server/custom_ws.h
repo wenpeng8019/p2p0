@@ -25,12 +25,37 @@
 // WS opcode 常量（RFC 6455 §5.2）
 // 0x3–0x7: 保留非控制帧；0xB–0xF: 保留控制帧
 
-#define WS_OP_CONTINUATION  0x0     // 续帧（分片消息的后续帧）
-#define WS_OP_TEXT          0x1     // 文本帧（UTF-8 编码）
-#define WS_OP_BINARY        0x2     // 二进制帧
-#define WS_OP_CLOSE         0x8     // 连接关闭帧（控制帧，payload 可含 2 字节状态码）
-#define WS_OP_PING          0x9     // Ping 帧（控制帧，payload <= 125 字节）
-#define WS_OP_PONG          0xA     // Pong 帧（控制帧，回复 ping 或主动心跳）
+#define WS_OP_CONTINUATION          0x0   // 续帧（分片消息的后续帧）
+#define WS_OP_TEXT                  0x1   // 文本帧（UTF-8 编码）
+#define WS_OP_BINARY                0x2   // 二进制帧
+#define WS_OP_CLOSE                 0x8   // 连接关闭帧（控制帧，payload 可含 2 字节状态码）
+#define WS_OP_PING                  0x9   // Ping 帧（控制帧，payload <= 125 字节）
+#define WS_OP_PONG                  0xA   // Pong 帧（控制帧，回复 ping 或主动心跳）
+
+//-----------------------------------------------------------------------------
+// WebSocket Close Code 预定义（RFC 6455 §7.4.1）
+//
+// 1000~1011: 标准定义
+// 1004/1005/1006/1015: 仅用于内部，不允许实际发送
+// 3000~4999: 应用自定义
+#define WS_CLOSE_NORMAL             1000  // 正常关闭，连接完成了它的目的
+#define WS_CLOSE_GOING_AWAY         1001  // 端点离开（如服务器关闭/浏览器跳转）
+#define WS_CLOSE_PROTOCOL_ERROR     1002  // 协议错误
+#define WS_CLOSE_UNSUPPORTED_DATA   1003  // 不支持的数据类型
+//      WS_CLOSE_RESERVED           1004  // 保留，不得使用
+//      WS_CLOSE_NO_STATUS          1005  // 仅内部使用，不得发送
+//      WS_CLOSE_ABNORMAL           1006  // 仅内部使用，不得发送
+#define WS_CLOSE_INVALID_DATA       1007  // 非法数据内容（如文本帧非 UTF-8）
+#define WS_CLOSE_POLICY_VIOLATION   1008  // 策略原因关闭
+#define WS_CLOSE_MESSAGE_TOO_BIG    1009  // 消息过大
+#define WS_CLOSE_MANDATORY_EXT      1010  // 缺少必要扩展
+#define WS_CLOSE_INTERNAL_ERROR     1011  // 服务器内部错误
+// 扩展: 部分实现
+#define WS_CLOSE_SERVICE_RESTART    1012  // 服务重启（扩展/部分实现）
+#define WS_CLOSE_TRY_AGAIN_LATER    1013  // 临时不可用，建议稍后重试（扩展）
+#define WS_CLOSE_BAD_GATEWAY        1014  // 网关错误（扩展）
+#define WS_CLOSE_TLS_HANDSHAKE      1015  // TLS 握手失败，仅内部使用
+// 3000~4999: 应用自定义
 
 //-----------------------------------------------------------------------------
 // WS client 扩展字段（内联宏，供派生结构体使用）
@@ -55,9 +80,10 @@ typedef struct cw_client {
     TCP_CLIENT
     CUSTOM_TCP_CLIENT
     CUSTOM_WS_CLIENT
+    uint8_t                         close_frame_buf[sizeof(buf16_item_t) + 4];
 } cw_client_t;
 
-#define CW_CLIENT(c)     ((ct_client_t*)(c))
+#define CW_CLIENT(c)     ((cw_client_t*)(c))
 
 // I/O 关闭状态标志（复用 TCP_IO_FLAG_CUSTOM_BIT）
 #define CW_IO_FLAG_CLOSING  (1 << TCP_IO_FLAG_CUSTOM_BIT)  // 本端已发 close 帧，等待对端 close 或超时
@@ -67,11 +93,14 @@ typedef struct cw_client {
 
 // 收到完整 WS 数据帧（text 或 binary）时调用
 // + opcode: WS_OP_TEXT 或 WS_OP_BINARY
-// + payload0: recv_buf/frag_buf 内的零拷贝切片（⚠️ 禁止加入 buf 队列）
-// + payload1: 剩余 payload 的单独分配缓冲（NULL 表示无）
-// + payload_offset 由 resolve_payload_len 指定，payload1 前置空间可写入新帧头实现零拷贝转发
+// + payload: 指向 payload 数据的指针。对于分片聚合帧，该值为 NULL，且 payload_len > 0
+// + payload_len: payload 数据总字节数（分片场景下为全部分片之和）
+// + buf_item: payload 所属的 buf_item（可用于零拷贝转发），即对应 custom_tcp 框架中的 payload1。
+//             如果 payload 的所属 buf_item 是 custom_tcp 框架中的 payload0，则此时的 buf_item 为 NULL
+//             此时无法零拷贝转发，如过上层需要转发，则需要自行复制到新 buf_item 中
 typedef void (*cw_handle_frame_cb)(cw_client_t *client, uint8_t opcode,
-                                   buf16_item_t *payload0, buf16_item_t *payload1);
+                                   uint8_t *payload, uint32_t payload_len,
+                                   buf16_item_t *buf_item);
 
 // 收到 ping 帧时调用（nullable）；框架已自动发送 pong 回复，回调仅供通知
 typedef void (*cw_handle_ping_cb)(cw_client_t *client, const uint8_t *data, uint8_t len);
@@ -104,6 +133,7 @@ typedef struct cw_client_ctx {
 
     // 对端发起 close 时调用（nullable）
     cw_handle_close_cb              handle_close;
+
 } cw_client_ctx_t;
 
 //-----------------------------------------------------------------------------
@@ -124,12 +154,15 @@ void
 cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client);
 
 // 发送 WS 帧
-// + opcode: WS_OP_TEXT / WS_OP_BINARY
+// + opcode: WS_OP_TEXT / WS_OP_BINARY / WS_OP_CONTINUATION
 // + buf_item: 上层分配的 buf_item，框架接管所有权，发送完成后自动释放
-// + payload_pos: buf_item 中 payload 数据的起始偏移（允许 buf_item 前置有帧头预留空间）
-//   框架会在 [0, payload_pos) 区间写入 WS 帧头，因此 payload_pos >= 10（最大帧头长度）
+// + payload_offset: buf_item 中 payload 数据的起始偏移（允许 buf_item 前置有帧头预留空间）
+//   框架会在 [0, payload_offset) 区间写入 WS 帧头，因此 payload_offset >= 有效的 hdr size
+//   这里的有效 hdr size 为: 2 + 2/4/6
 ret_t
-cw_send_frame(cw_client_t *client, uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_pos);
+cw_send_frame(cw_client_t *client, uint8_t opcode,
+              buf16_item_t *buf_item, uint16_t payload_offset,
+              bool immediate);
 
 // 发送 WS close 帧（code=1000 表示正常关闭）
 ret_t

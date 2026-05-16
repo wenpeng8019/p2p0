@@ -232,13 +232,19 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
 // + 如发送队列非空：标记为 CLOSING，停止读取，等发送完成后自动调用 free_client_base
 // + 如发送队列为空：直接调用 free_client_base
 void
-ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client);
+ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client, buf16_item_t* last_item);
 
-// 关闭单个 session
+// 关闭指定 session
 // + terminate=false：session 的待发数据转移到 client 队列继续发送
 // + terminate=true：session 的待发数据直接丢弃
 void
-ct_close_session(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate);
+ct_session_close(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate);
+
+// 关闭所有 session
+// + terminate=false：session 的待发数据转移到 client 队列继续发送
+// + terminate=true：session 的待发数据直接丢弃
+void
+ct_session_clear(ct_client_ctx_t* ctx, ct_client_t *client, bool terminate);
 
 // 向 client 发送队列追加 buf_item（仅在 handshake==0 时调用）
 // + immediate=true：高优先级，插入到当前正在发送的包之后（或队头），确保优先发出

@@ -35,7 +35,7 @@ void ct_client_send(ct_client_t *client, buf16_item_t* buf_item, bool immediate)
         if (client->send_buff_queue.head != buf_item) return;  // 如果队列之前不空，直接返回
     }
 
-    if (TCP_REACHABLE(client)) {
+    if (TCP_REACHABLE(client)) {        // todo 为什么是 reachable
         assert(client->base.fd != P_INVALID_SOCKET && client->last_error == 0);
         client->io |= TCP_IO_FLAG_WANT_WRITE;
     }
@@ -140,7 +140,7 @@ static void clear_client_sending(ct_client_t *client) {
 //-----------------------------------------------------------------------------
 
 // 关闭/销毁某个会话
-void ct_close_session(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate) {
+void ct_session_close(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate) {
 
     // 如果已和对端 session 建立连接
     if (PEER_ONLINE(session)) {
@@ -154,9 +154,8 @@ void ct_close_session(ct_client_ctx_t* ctx, ct_session_t *session, bool terminat
     free_session_base(&session->base);
 }
 
-// 所有会话
-static void custom_close_all_sessions(ct_client_ctx_t* ctx, ct_client_t* client, bool terminate) {
-
+void
+ct_session_clear(ct_client_ctx_t* ctx, ct_client_t *client, bool terminate) {
 
     while (client->base.sessions) { ct_session_t* session = (ct_session_t*)client->base.sessions;
 
@@ -236,7 +235,7 @@ void
 ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client) {
 
     if (client->base.sessions)
-        custom_close_all_sessions(ctx, client, true);
+        ct_session_clear(ctx, client, true);
 
     // 释放 recv buf
     if (client->recv_buf) {
@@ -259,11 +258,11 @@ ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client) {
 
 // 优雅的关闭 client
 void 
-ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client) {
+ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client, buf16_item_t* last_item) {
 
     // 中断所有 session
     if (client->base.sessions)
-        custom_close_all_sessions(ctx, client, false);
+        ct_session_clear(ctx, client, false);
 
     // 释放 recv buf
     if (client->recv_buf) {
@@ -275,6 +274,11 @@ ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client) {
         if (client->payload_buf->next) free_buf16(client->payload_buf->next);
         free_buffer(client->payload_buf);
         client->payload_buf = NULL;
+    }
+
+    if (last_item) {
+        BUF_Q_APPEND(&client->send_buff_queue, last_item);
+        client->io |= TCP_IO_FLAG_WANT_WRITE;
     }
 
     // 如果发送队列不为空，标记为 closing（send 完成后会自动完成 term），否则直接 term
@@ -308,7 +312,7 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
 
     // 终止所有 session
     if (client->base.sessions)
-        custom_close_all_sessions(ctx, client, true);
+        ct_session_clear(ctx, client, true);
 
     // 清除除了正在发送的包以外的所有待发送数据
     clear_client_sending(client);
@@ -507,9 +511,8 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 }
 
                 // 安全检查：payload 过大溢出
-                // TODO(WS): RFC 6455 §7.4.1 要求发送 close(1009 Message Too Big) 而非直接断 TCP
-                //           当前底层无法感知上层是否为 WS 协议，暂用 CUSTOM_TCP_ERR_OVERFLOW 统一处理
                 if (payload_len > ctx->max_payload_len) {
+                    print("E:", LA_F("[CT] payload len(%u) overflow, max: %u\n", 0, 0), payload_len, ctx->max_payload_len);
                     error = CUSTOM_TCP_ERR_OVERFLOW;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;

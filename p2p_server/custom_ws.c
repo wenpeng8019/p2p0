@@ -21,51 +21,33 @@
 
 #include "custom_ws.h"
 
-// HTTP 握手 recv 缓冲大小（存放 HTTP 请求 header，流模式 recv_buf 使用 8K）
-#define CW_HTTP_BUF_FLAGS   BUF_FLAG_8192(0)
-// HTTP 应答最大长度（需容纳 101 Switching Protocols 响应）
-#define CW_HTTP_RSP_MAX    512
+// HTTP 握手 recv 缓冲大小（存放 HTTP 请求 header，流模式 recv_buf 使用 2K）
+#define CW_HTTP_BUF_FLAGS       BUF_FLAG_2048(0)
 // WS 帧头最大字节数
-#define CW_WS_HDR_MAX       14
+#define CW_WS_HDR_MAX           14
+
+///////////////////////////////////////////////////////////////////////////////
+
 // WS GUID（RFC 6455）
 #define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-///////////////////////////////////////////////////////////////////////////////
+// http 握手处理，返回 HTTP 响应文本（不含 "\r\n\r\n" 尾）
+static ret_t cw_http_accept(const char *req, char *resp_buf, const char *sub_protocol);
+
 // UTF-8 验证（RFC 6455 §8.1：文本帧 payload 必须是合法 UTF-8）
 // 使用 Bjoern Hoehrmann 的 DFA（https://bjoern.hoehrmann.de/utf-8/decoder/dfa/）
-// state=0（WS_UTF8_ACCEPT）表示已完成一个合法序列，state=12 表示非法，其余为中间态
+// state=0（WS_UTF8_ACCEPT）表示已完成一个合法序列；state=12 表示非法；其余为中间态
 #define WS_UTF8_ACCEPT 0u
 #define WS_UTF8_REJECT 12u
 
-static const uint8_t g_ws_utf8d[364] = {
-    /* byte → char-class（0‥11） */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
-    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7, 7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
-    10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
-    /* state × char-class → next-state */
-    0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
-    12,0,12,12,12,12,12,0,12,0,12,12,  12,24,12,12,12,12,12,24,12,24,12,12,
-    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
-    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
-    12,36,12,12,12,12,12,12,12,12,12,12,
-};
-
 // 逐字节推进 DFA；返回 false 表示遇到非法 UTF-8（state 已变为 REJECT）
-static bool cw_utf8_check(uint32_t *state, const uint8_t *data, uint32_t len) {
-    for (uint32_t i = 0; i < len; i++) {
-        uint32_t type = g_ws_utf8d[data[i]];
-        *state = g_ws_utf8d[256 + *state + type];
-        if (*state == WS_UTF8_REJECT) return false;
-    }
-    return true;
-}
+static bool cw_utf8_check(uint32_t *state, const uint8_t *data, uint32_t len);
 
-static ret_t cw_http_accept(const char *req, char *resp_buf, size_t resp_buf_len, const char *sub_protocol);
+// RFC 6455 §7.4.1: close 状态码合法性（1000-1011 不含 1004/1005/1006，或 3000-4999）
+static bool cw_valid_close_code(uint16_t c) {
+    return (c >= 1000 && c <= 1011 && c != 1004 && c != 1005 && c != 1006) ||
+           (c >= 3000 && c <= 4999);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // WS 帧头解析（帧模式 resolve_payload_len）
@@ -119,312 +101,291 @@ static ret_t cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint1
 ///////////////////////////////////////////////////////////////////////////////
 // 控制帧辅助
 
-// RFC 6455 §7.4.1: close 状态码合法性（1000-1011 不含 1004/1005/1006，或 3000-4999）
-static bool cw_valid_close_code(uint16_t c) {
-    return (c >= 1000 && c <= 1011 && c != 1004 && c != 1005 && c != 1006) ||
-           (c >= 3000 && c <= 4999);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// 掩码解除（客户端发来的帧 payload 必须用 mask key XOR 还原）
-
-static void cw_unmask(uint8_t *data, uint32_t len, const uint8_t mask[4]) {
+static void cw_unmask(uint8_t *buf, uint32_t len, const uint8_t mask[4]) {
     uint32_t i;
     for (i = 0; i + 4 <= len; i += 4) {
-        data[i]   ^= mask[0];
-        data[i+1] ^= mask[1];
-        data[i+2] ^= mask[2];
-        data[i+3] ^= mask[3];
+        buf[i]   ^= mask[0];
+        buf[i+1] ^= mask[1];
+        buf[i+2] ^= mask[2];
+        buf[i+3] ^= mask[3];
     }
-    for (; i < len; i++) data[i] ^= mask[i & 3];
+    for (; i < len; i++) buf[i] ^= mask[i & 3];
+}
+
+static void cw_unmask2(uint8_t *buf1, uint32_t len1, const uint8_t *buf0, uint32_t len0, const uint8_t mask[4]) {
+    uint32_t i = 0;
+    for (; i + 4 <= len0; i += 4) {
+        buf1[i]   = buf0[i]   ^ mask[0];
+        buf1[i+1] = buf0[i+1] ^ mask[1];
+        buf1[i+2] = buf0[i+2] ^ mask[2];
+        buf1[i+3] = buf0[i+3] ^ mask[3];
+    }
+    if (i >= len0) cw_unmask(buf1 + len0, len1 - len0, mask);
+    else {
+        for (; i < len0; i++) buf1[i] = buf0[i] ^ mask[i & 3];
+        for (; i < len1; i++) buf1[i] ^= mask[i & 3];
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // custom_tcp 回调实现
 
+#define ACCEPT_BUF_SZ   256
+
 // 握手阶段（HTTP Upgrade 请求）处理
 // + hdr_buf: recv_buf 中 HTTP 请求文本（不含 "\r\n\r\n" 尾）
 // + hdr_len: HTTP header 文本长度
 // + payload0/payload1: HTTP header 之后不应有 payload（WS 协议握手阶段不携带 body）
-static buf16_item_t *cw_tcp_handle_handshake(ct_client_t **pclient,
+static buf16_item_t *cw_tcp_handle_handshake(ct_client_t **t_c,
                                               uint8_t *hdr_buf, uint16_t hdr_len,
                                               buf16_item_t *payload0, buf16_item_t *payload1) {
     (void)payload0; (void)payload1;
-    ct_client_t *client = *pclient;
-    cw_client_t *cwc = (cw_client_t*)client;
-    cw_client_ctx_t *wctx = cwc->ws_ctx;
+    ct_client_t *c = *t_c;
+    cw_client_t *client = (cw_client_t*)c;
+    cw_client_ctx_t *context = client->ws_ctx;
 
-    // hdr_buf 指向流模式 recv_buf 内部，内容是不含 "\r\n\r\n" 的 HTTP 请求文本
-    // 需要 NUL 结尾才能用 strstr；hdr_buf 后紧跟 recv_buf 中剩余数据，
-    // 此时 recv_buf->pos = header 起始，recv_cur = header 结束（\r\n\r\n 之前）
-    // 框架传入的 hdr_buf 本身没有 \0，但 recv_buf 里 recv_cur 之后的字节是 \r\n\r\n，
-    // 可以暂时覆写（此时 hdr_buf[hdr_len] 指向 '\r'），用完即恢复
-    uint8_t saved = hdr_buf[hdr_len];
+    buf16_item_t *resp_item = alloc_buf16(BUF_FLAG_256(0));
+    if (!resp_item) {
+        c->last_error = CUSTOM_TCP_ERR_INTERNAL;
+        return NULL;
+    }
+    uint8_t *resp_buf = ITEM2BUF(resp_item);
+
     hdr_buf[hdr_len] = '\0';
-
-    // 利用 recv_buf 前置空间（pos 之前）写入 HTTP 应答（最多 CW_HTTP_RSP_MAX 字节）
-    // recv_buf->pos 是本次 header 起始偏移，前面的空间在流模式中是已消费区域，可以复用
-    buf16_item_t *recv_buf = client->recv_buf;
-    uint8_t *resp_buf;
-    size_t resp_buf_sz;
-    if (recv_buf->pos >= CW_HTTP_RSP_MAX) {
-        // pos 之前有足够空间，直接用
-        resp_buf = ITEM2BUF(recv_buf);
-        resp_buf_sz = CW_HTTP_RSP_MAX;
-    } else {
-        // 空间不足，分配一个临时缓冲（正常不应发生，HTTP 请求一般不会在 recv_buf 起始处）
-        // 分配 128 字节足够容纳 101 响应
-        buf16_item_t *resp_item = alloc_buf16(BUF_FLAG_512(0));
-        if (!resp_item) {
-            hdr_buf[hdr_len] = saved;
-            client->last_error = CUSTOM_TCP_ERR_INTERNAL;
-            return NULL;
-        }
-        resp_buf = ITEM2BUF(resp_item);
-        resp_buf_sz = 512;
-        // 将 resp_item 挂到 recv_buf->next 作为应答缓冲（框架不会使用 next，安全）
-        // 但这样生命期管理复杂；更简单：直接在应答 buf_item 里构造整个应答
-        ret_t r = cw_http_accept((const char*)hdr_buf, (char*)resp_buf, resp_buf_sz, wctx->sub_protocol);
-        hdr_buf[hdr_len] = saved;
-        if (r < E_NONE) {
-            print("E:", LA_F("[WS] HTTP handshake rejected\n", LA_F143, 143));
-            free_buf16(resp_item);
-            client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
-            return NULL;
-        }
-        // 可选回调：上层鉴权
-        if (wctx->handshake_done && !wctx->handshake_done(cwc)) {
-            free_buf16(resp_item);
-            client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
-            return NULL;
-        }
-        resp_item->len = (uint16_t)r;
-        resp_item->pos = 0;
-        return resp_item;
-    }
-
-    ret_t r = cw_http_accept((const char*)hdr_buf, (char*)resp_buf, resp_buf_sz, wctx->sub_protocol);
-    hdr_buf[hdr_len] = saved;
+    ret_t r = cw_http_accept((const char*)hdr_buf, (char*)resp_buf, context->sub_protocol);
     if (r < E_NONE) {
-        print("E:", LA_F("[WS] HTTP handshake rejected\n", LA_F143, 143));
-        client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+        print("E:", LA_F("[WS] HTTP accept rejected(%d)\n", LA_F143, 143));
+        c->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+        free_buf16(resp_item);
         return NULL;
     }
-
     // 可选回调：上层鉴权
-    if (wctx->handshake_done && !wctx->handshake_done(cwc)) {
-        client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+    if (context->handshake_done && !context->handshake_done(client)) {
+        c->last_error = CUSTOM_TCP_ERR_PROTOCOL;
+        free_buf16(resp_item);
         return NULL;
     }
-
-    // 将应答存入 recv_buf 前置空间，构造一个引用它的 buf_item
-    // 注意：recv_buf 自身不能直接作为 ack_item 返回（框架 handshake 后会继续复用 recv_buf 读数据）
-    // 正确做法：分配一个独立的 ack buf_item（不依赖 recv_buf）
-    buf16_item_t *ack = alloc_buf16(BUF_FLAG_512(0));
-    if (!ack) {
-        client->last_error = CUSTOM_TCP_ERR_INTERNAL;
-        return NULL;
-    }
-    memcpy(ITEM2BUF(ack), resp_buf, (size_t)r);
-    ack->len = (uint16_t)r;
-    ack->pos = 0;
-    return ack;
+    resp_item->len = (uint16_t)r;
+    return resp_item;
 }
 
-static void cw_tcp_handshake_finish(ct_client_t *client) {
-    cw_client_t *cwc = (cw_client_t*)client;
+static void cw_tcp_handshake_finish(ct_client_t *c) {
+    cw_client_t *client = (cw_client_t*)c;
     
-    // 切换到帧模式：将 recv_buf 设为 NULL 触发框架切换
-    client->recv_buf = NULL;
+    // 切换到帧模式
+    // + 将 recv_buf 设为 NULL 触发框架切换
+    c->recv_buf = NULL;
     
     // 设置帧模式参数
-    client->hdr_rs = cwc->ws_hdr_buf;  // 14 字节静态帧头缓冲
-    client->hdr_sz = 2;                // 初始读取 2 字节基础帧头
+    c->hdr_rs = client->ws_hdr_buf;     // 14 字节静态帧头缓冲
+    c->hdr_sz = 2;                      // 初始读取 2 字节基础帧头
+
     // 结束握手阶段，进入正常帧收发阶段
-    client->handshake = 0;
+    c->handshake = 0;
 }
 
-static void cw_tcp_handle_proto(ct_client_t *client, uint8_t *hdr_buf, uint16_t hdr_len,
+static void cw_tcp_handle_proto(ct_client_t *c, uint8_t *hdr_buf, uint16_t hdr_len,
                                 buf16_item_t *payload0, buf16_item_t *payload1) {
     (void)hdr_len;
-    cw_client_t *cwc = (cw_client_t*)client;
-    cw_client_ctx_t *wctx = cwc->ws_ctx;
+    cw_client_t *client = (cw_client_t*)c;
+    cw_client_ctx_t *context = client->ws_ctx;
 
-    uint8_t opcode = hdr_buf[0] & 0x0F;
-    uint8_t fin    = (hdr_buf[0] >> 7) & 1;
-    uint8_t masked = hdr_buf[1] & 0x80;
+    uint8_t opcode = hdr_buf[0] & 0x0F;         // Byte[0] bit0-3: opcode
+    uint8_t fin    = (hdr_buf[0] >> 7) & 1;     // Byte[0] bit7: FIN
+    uint8_t masked = hdr_buf[1] & 0x80;         // Byte[1] bit7: MASK
 
     // 重置帧模式 hdr_sz 为 2（下一帧）
-    client->hdr_sz = 2;
+    c->hdr_sz = 2;
 
     // RFC 6455 §5.2: RSV1/2/3 必须为 0（未协商任何扩展时）
-    if (hdr_buf[0] & 0x70) {
-        cw_send_close(cwc, 1002);
+    if (hdr_buf[0] & 0x70) {                    // Byte[0] bit4-6: RSV1/2/3
+        print("E:", LA_F("[WS] RSV bit set in opcode %u\n", 0, 0), opcode);
+        ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
         return;
     }
 
     // 服务端要求客户端帧必须有 mask（RFC 6455 §5.3）
     if (!masked) {
-        ct_client_error(&wctx->base, client, CUSTOM_TCP_ERR_PROTOCOL, false);
-        return;
-    }
-
-    // mask key 已被 cw_resolve_payload_len 统一复制到 hdr_buf[10..13]
-    const uint8_t *mask = hdr_buf + 10;
-
-    // 解除 payload mask（in-place）
-    // payload0 是 recv_buf 内的切片（零拷贝），payload1 是独立缓冲
-    // 两段在逻辑上连续，mask 偏移需要跨段衔接
-    uint32_t plen0 = 0;
-    if (payload0) {
-        plen0 = payload0->len - payload0->pos;
-        cw_unmask(ITEM2BUF(payload0) + payload0->pos, plen0, mask);
-        if (payload1) {
-            uint8_t *p1buf = ITEM2BUF(payload1) + payload1->pos;
-            uint32_t p1len = payload1->len - payload1->pos;
-            for (uint32_t i = 0; i < p1len; i++)
-                p1buf[i] ^= mask[(plen0 + i) & 3];
-        }
-    } else if (payload1) {
-        uint8_t *p1buf = ITEM2BUF(payload1) + payload1->pos;
-        uint32_t p1len = payload1->len - payload1->pos;
-        cw_unmask(p1buf, p1len, mask);
-    }
-
-    // 控制帧处理（control frames: close/ping/pong）
-    if (opcode >= WS_OP_CLOSE) {
-        // RFC 6455 §5.5: 控制帧必须 FIN，且 payload ≤ 125 字节
-        uint32_t ctrl_total = plen0 + (payload1 ? (payload1->len - payload1->pos) : 0u);
-        if (!fin || ctrl_total > 125) {
-            cw_send_close(cwc, 1002);
-            return;
-        }
-        uint8_t *ctrl_data = payload0 ? ITEM2BUF(payload0) + payload0->pos : NULL;
-        uint8_t  ctrl_len  = (uint8_t)ctrl_total;
-        if (opcode == WS_OP_CLOSE) {
-            uint16_t code = (ctrl_len >= 2 && ctrl_data) ? (uint16_t)((ctrl_data[0]<<8)|ctrl_data[1]) : 1000;
-            // RFC 6455 §7.4.1: 状态码必须合法
-            if (ctrl_len >= 2 && ctrl_data && !cw_valid_close_code(code)) {
-                cw_send_close(cwc, 1002);
-                return;
-            }
-            // RFC 6455 §5.5.1: close frame reason string（第 2 字节起）必须是合法 UTF-8
-            if (ctrl_len > 2 && ctrl_data) {
-                uint32_t tmp = WS_UTF8_ACCEPT;
-                if (!cw_utf8_check(&tmp, ctrl_data + 2, ctrl_len - 2) || tmp != WS_UTF8_ACCEPT) {
-                    cw_send_close(cwc, 1007);
-                    return;
-                }
-            }
-            if (wctx->handle_close) wctx->handle_close(cwc, code);
-            // 自动回复 close
-            cw_send_close(cwc, code);
-        } else if (opcode == WS_OP_PING) {
-            if (wctx->handle_ping) wctx->handle_ping(cwc, ctrl_data, ctrl_len);
-            // 自动回复 pong，携带相同 payload
-            buf16_item_t *pong = alloc_buf16(BUF_FLAG_128(0));
-            if (pong) {
-                uint8_t *pb = ITEM2BUF(pong);
-                pb[0] = 0x8A;  // FIN | PONG
-                pb[1] = ctrl_len;
-                if (ctrl_len && ctrl_data) memcpy(pb + 2, ctrl_data, ctrl_len);
-                pong->len = (uint16_t)(2 + ctrl_len);
-                pong->pos = 0;
-                ct_client_send(client, pong, true);  // 高优先级发送
-            }
-        }
-        // WS_OP_PONG：无需处理
+        print("E:", LA_F("[WS] Client frame missing mask\n", 0, 0));
+        ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
         return;
     }
 
     // RFC 6455 §5.2: 保留 opcode（0x3-0x7 数据帧、0xB-0xF 控制帧）必须拒绝
     if ((opcode >= 0x3 && opcode <= 0x7) || opcode >= 0xB) {
-        cw_send_close(cwc, 1002);
+        print("E:", LA_F("[WS] Reserved opcode %u\n", 0, 0), opcode);
+        ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
         return;
     }
 
     // RFC 6455 §5.4: 分片状态机一致性
     // + CONTINUATION 帧必须在 TEXT/BINARY 分片序列进行中（ws_opcode != 0）
     // + 新 TEXT/BINARY 帧不可在已有分片序列进行中出现
-    bool in_frag = (cwc->ws_opcode != 0);
-    if (opcode == WS_OP_CONTINUATION && !in_frag) {
-        cw_send_close(cwc, 1002);
+    if (client->ws_opcode != 0) {
+        if (opcode == WS_OP_TEXT || opcode == WS_OP_BINARY) {
+            print("E:", LA_F("[WS] New %s without fragmentation end\n", 0, 0), opcode == WS_OP_TEXT ? "TEXT" : "BINARY");
+            ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
+            return;
+        }
+    }
+    else if (opcode == WS_OP_CONTINUATION) {
+        print("E:", LA_F("[WS] CONTINUATION frame without fragmentation going\n", 0, 0));
+        ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
         return;
     }
-    if ((opcode == WS_OP_TEXT || opcode == WS_OP_BINARY) && in_frag) {
-        cw_send_close(cwc, 1002);
+
+    // RFC 6455 §5.5: 控制帧必须 FIN，且 payload ≤ 125 字节
+    // + 这里 hdr len > 6 等价于 payload len > 125 字节
+    if (opcode >= WS_OP_CLOSE && (!fin || hdr_len > 6)) {
+        print("E:", LA_F("[WS] Invalid control frame: opcode=%u fin=%u hdr_len=%u\n", 0, 0), opcode, fin, hdr_len - 4);
+        ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
+        return;
+    }
+
+    // 解 mask（in-place）
+    // + mask key 已被 cw_resolve_payload_len 统一复制到 hdr_buf[10..13]
+    //   另外，直接将 payload0 的数据归并到 payload1（如果需要）
+    uint8_t *payload; uint32_t payload_len; const uint8_t *mask = hdr_buf + 10;
+    if (payload1) {
+        payload = ITEM2BUF(payload1) + payload1->pos;
+        payload_len = payload1->len - payload1->pos;
+        if (payload0)
+            cw_unmask2(payload, payload_len,
+                  ITEM2BUF(payload0) + payload0->pos,
+                  payload0->len - payload0->pos, mask);
+        else cw_unmask(payload, payload_len, mask);
+    } else if (payload0) {
+        payload = ITEM2BUF(payload0) + payload0->pos;
+        payload_len = payload0->len - payload0->pos;
+        cw_unmask(payload, payload_len, mask);
+    } else { payload = NULL; payload_len = 0; }
+
+    // 对于控制帧处理（control frames: close/ping/pong）
+    if (opcode >= WS_OP_CLOSE) {
+
+        if (opcode == WS_OP_CLOSE) {
+
+            uint16_t code = 1000;
+            if (payload) {
+
+                // 读取状态码
+                if (payload_len >= 2) { code = (uint16_t)((payload[0]<<8)|payload[1]);
+
+                    // RFC 6455 §7.4.1: 状态码必须合法
+                    if (!cw_valid_close_code(code)) {
+                        print("E:", LA_F("[WS] Invalid close code %u\n", 0, 0), code);
+                        ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
+                        return;
+                    }
+                }
+
+                // RFC 6455 §5.5.1: close frame reason string（第 2 字节起）必须是合法 UTF-8
+                if (payload_len > 2) {
+                    uint32_t tmp = WS_UTF8_ACCEPT;
+                    if (!cw_utf8_check(&tmp, payload + 2, payload_len - 2) || tmp != WS_UTF8_ACCEPT) {
+                        print("E:", LA_F("[WS] Invalid UTF-8 in close reason\n", 0, 0));
+                        ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
+                        return;
+                    }
+                }
+            }
+
+            if (context->handle_close)
+                context->handle_close(client, code);
+
+            // 自动回复 close
+            uint8_t* ptr = client->close_frame_buf + sizeof(buf16_item_t) + 2;
+            nwrite_s(ptr, code);
+
+            // 交由基类统一执行关闭收口：停止接收、清理 sessions / recv_buf，并保持 close 帧继续发送
+            ct_client_off(&client->ws_ctx->base, (ct_client_t*)client, (buf16_item_t*)client->close_frame_buf);
+        }
+        else if (opcode == WS_OP_PING) {
+
+            if (context->handle_ping)
+                context->handle_ping(client, payload, payload_len);
+
+            // 自动回复 pong，携带相同 payload
+
+            // 如果可以 zero-copy 直接转发
+            if (payload1)
+                cw_send_frame(client, WS_OP_PONG, payload1, payload1->pos, true);
+            else { buf16_item_t *pong = alloc_buf16(BUF_FLAG_128(0));
+                if (pong) {
+                    uint8_t *pb = ITEM2BUF(pong);
+                    pb[0] = 0x8A;  // FIN | PONG
+                    pb[1] = payload_len;
+                    if (payload_len && payload) memcpy(pb + 2, payload, payload_len);
+                    pong->len = (uint16_t)(2 + payload_len);
+                    ct_client_send(c, pong, true);  // 高优先级发送
+                }
+            }
+        }
+
+        // WS_OP_PONG：无需处理
         return;
     }
 
     // RFC 6455 §8.1：TEXT 帧（含分片）payload 必须是合法 UTF-8，逐片增量验证
-    // opcode==TEXT 时重置 DFA（新消息），CONTINUATION 时沿用上片状态跨片累积
-    bool is_text = (opcode == WS_OP_TEXT) ||
-                   (opcode == WS_OP_CONTINUATION && cwc->ws_opcode == WS_OP_TEXT);
-    if (is_text) {
-        if (opcode == WS_OP_TEXT) cwc->ws_utf8state = WS_UTF8_ACCEPT;  // 新消息重置
-        uint32_t *st = &cwc->ws_utf8state;
-        bool ok = (plen0 == 0) || cw_utf8_check(st, ITEM2BUF(payload0) + payload0->pos, plen0);
-        if (ok && payload1) {
-            uint32_t p1len = payload1->len - payload1->pos;
-            ok = cw_utf8_check(st, ITEM2BUF(payload1) + payload1->pos, p1len);
-        }
-        if (ok && fin && *st != WS_UTF8_ACCEPT) ok = false;  // FIN 时截断于多字节序列中间
+    // + opcode==TEXT 时重置 DFA（新消息），CONTINUATION 时沿用上片状态跨片累积
+    if ((opcode == WS_OP_TEXT) ||
+        (opcode == WS_OP_CONTINUATION && client->ws_opcode == WS_OP_TEXT)) {
+        if (opcode == WS_OP_TEXT) client->ws_utf8state = WS_UTF8_ACCEPT;        // 新消息重置
+        bool ok = !payload_len || cw_utf8_check(&client->ws_utf8state, payload, payload_len);
+        if (ok && fin && client->ws_utf8state != WS_UTF8_ACCEPT) ok = false;    // FIN 时要确保 UTF-8 序列完整，即不能截断于多字节序列中间
         if (!ok) {
-            cw_send_close(cwc, 1007);
+            print("E:", LA_F("[WS] Invalid UTF-8 in TEXT frame\n", 0, 0));
+            ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
             return;
         }
     }
 
-    // 数据帧（text/binary/continuation）
+    // 对于片段帧（text/binary/continuation）
     if (opcode == WS_OP_CONTINUATION || !fin) {
-        // 分片帧：聚合到 ws_frag_q
-        // 第一个分片：opcode 非 0，后续 continuation: opcode == 0
-        if (opcode != WS_OP_CONTINUATION) cwc->ws_opcode = opcode;  // 记录起始帧 opcode
 
-        uint32_t add_len = plen0 + (payload1 ? (payload1->len - payload1->pos) : 0);
+        // 第一个分片：
+        if (opcode != WS_OP_CONTINUATION) client->ws_opcode = opcode;   // 记录起始帧 opcode
 
-        // payload0 是 recv_buf 内的零拷贝切片，必须复制一份再入队
-        if (plen0) {
-            buf16_item_t *p0copy = alloc_buf16(BUF_FLAGS(buffer_sz_flag(plen0 ? plen0 : 1), 0));
-            if (!p0copy) goto oom;
-            memcpy(ITEM2BUF(p0copy), ITEM2BUF(payload0) + payload0->pos, plen0);
-            p0copy->len = (uint16_t)plen0;
-            p0copy->pos = 0;
-            BUF_Q_APPEND(&cwc->ws_frag_q, p0copy);
+        // 聚合到 ws_frag_q
+        if (payload_len) { client->ws_frag_len += payload_len;
+
+            if (payload1) { c->payload_buf = NULL;                      // 所有权已转移，避免框架释放
+                BUF_Q_APPEND(&client->ws_frag_q, payload1);
+            }
+            else { assert(payload0);
+                buf16_item_t *p0copy = alloc_buf16(BUF_FLAGS(buffer_sz_flag(payload_len ? payload_len : 1), 0));
+                if (!p0copy) goto oom;
+                memcpy(ITEM2BUF(p0copy), ITEM2BUF(payload0) + payload0->pos, payload_len);
+                p0copy->len = (uint16_t)payload_len;
+                p0copy->pos = 0;
+                BUF_Q_APPEND(&client->ws_frag_q, p0copy);
+            }
         }
-        // payload1 是框架独立分配的缓冲，直接接管所有权追加入队（零拷贝）
-        if (payload1) {
-            BUF_Q_APPEND(&cwc->ws_frag_q, payload1);
-            client->payload_buf = NULL;  // 所有权已转移，通知框架跳过释放
-        }
-        cwc->ws_frag_len += add_len;
 
-        if (!fin) return;   // 还有后续分片
-
-        // 最后一个分片：组装完成，回调上层（以链表头作为 payload0 交付）
-        if (wctx->handle_frame) {
-            wctx->handle_frame(cwc, cwc->ws_opcode, cwc->ws_frag_q.head, NULL);
-        } else {
-            BUF_Q_CLEAR(&cwc->ws_frag_q, it, free_buf16(it););
+        // 最后一个分片：组装完成，回调上层
+        if (fin) {
+            if (context->handle_frame) {
+                context->handle_frame(client, client->ws_opcode, NULL, client->ws_frag_len, client->ws_frag_q.head);
+                client->ws_frag_q.head = client->ws_frag_q.rear = NULL;
+            } else { BUF_Q_CLEAR(&client->ws_frag_q, it, free_buf16(it);); }
+            client->ws_frag_len = 0; client->ws_opcode = 0;
         }
-        cwc->ws_frag_q.head = cwc->ws_frag_q.rear = NULL;
-        cwc->ws_frag_len = 0;
-        cwc->ws_opcode = 0;   // 分片序列结束，重置状态（下一帧 CONTINUATION 视为协议错误）
+
         return;
     }
 
     // 完整帧（非分片）：直接回调
-    if (wctx->handle_frame)
-        wctx->handle_frame(cwc, opcode, payload0, payload1);
+    if (context->handle_frame)
+        context->handle_frame(client, opcode, payload, payload_len, payload1);
     return;
 
 oom:
     print("E:", LA_F("[WS] OOM in fragment reassembly\n", LA_F226, 226));
-    if (cwc->ws_frag_q.head) {
-        BUF_Q_CLEAR(&cwc->ws_frag_q, it, free_buf16(it););
-        cwc->ws_frag_len = 0;
+    if (client->ws_frag_q.head) {
+        BUF_Q_CLEAR(&client->ws_frag_q, it, free_buf16(it););
+        client->ws_frag_len = 0;
     }
-    ct_client_error(&wctx->base, client, CUSTOM_TCP_ERR_INTERNAL, true);
+    ct_client_error(&context->base, c, CUSTOM_TCP_ERR_INTERNAL, true);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -434,29 +395,35 @@ bool cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx) {
     (void)ctx;
 
     // 分配 HTTP 握手接收缓冲（流模式）
-    buf16_item_t *buf = alloc_buf16(CW_HTTP_BUF_FLAGS);
-    if (!buf) {
+    buf16_item_t *recv_buf = alloc_buf16(CW_HTTP_BUF_FLAGS);
+    if (!recv_buf) {
         print("E:", LA_F("[WS] OOM: cannot allocate HTTP recv buffer\n", LA_F227, 227));
         return false;
     }
 
+    uint8_t *buf = client->close_frame_buf + sizeof(buf16_item_t);
+    buf[0] = 0x88;      // FIN | CLOSE
+    buf[1] = 2;         // payload len = 2
+    ((buf16_item_t*)client->close_frame_buf)->len   = 4;
+    ((buf16_item_t*)client->close_frame_buf)->refer = ITEM_REF_STATIC;
+
     // 初始化 custom_tcp 字段（流模式，hdr_rs="\r\n\r\n"，hdr_sz=4）
     // 注意：recv_buf 由 ct_init_client 分配，这里替换为更大的 HTTP 缓冲
-    ct_client_t *ctc = (ct_client_t*)client;
-    ctc->recv_buf = buf;
-    ctc->recv_cur = 0;
-    ctc->send_buff_queue.head = ctc->send_buff_queue.rear = NULL;
-    ctc->send_sess_head = ctc->send_sess_rear = NULL;
-    ctc->sending_sess = NULL;
-    ctc->sending_cur = 0;
-    ctc->last_error = 0;
-    ctc->payload_buf = NULL;
-    ctc->payload_cur = 0;
+    ct_client_t *c = (ct_client_t*)client;
+    c->recv_buf = recv_buf;
+    c->recv_cur = 0;
+    c->send_buff_queue.head = c->send_buff_queue.rear = NULL;
+    c->send_sess_head = c->send_sess_rear = NULL;
+    c->sending_sess = NULL;
+    c->sending_cur = 0;
+    c->last_error = 0;
+    c->payload_buf = NULL;
+    c->payload_cur = 0;
 
     // 握手阶段：流模式，以 "\r\n\r\n" 为边界
     static const uint8_t CRLF2[4] = {'\r','\n','\r','\n'};
-    ctc->hdr_rs = (uint8_t*)CRLF2;
-    ctc->hdr_sz = 4;
+    c->hdr_rs = (uint8_t*)CRLF2;
+    c->hdr_sz = 4;
 
     // 初始化 WS 专有字段
     client->ws_ctx = ctx;
@@ -471,6 +438,7 @@ bool cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx) {
 }
 
 void cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client) {
+
     if (client->ws_frag_q.head) {
         BUF_Q_CLEAR(&client->ws_frag_q, it, free_buf16(it););
         client->ws_frag_len = 0;
@@ -481,74 +449,68 @@ void cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client) {
 // 构造并发送 WS 帧头（服务端，无 mask）
 // + buf_item: 上层分配的缓冲，[0, payload_pos) 为预留空间，[payload_pos, len) 为 payload
 // + payload_pos 必须 >= 实际帧头长度（由 payload 大小决定）
-ret_t cw_send_frame(cw_client_t *client, uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_pos) {
+ret_t cw_send_frame(cw_client_t *client, uint8_t opcode,
+                    buf16_item_t *buf_item, uint16_t payload_offset,
+                    bool immediate) {
 
     assert(!client->handshake);
 
-    uint32_t plen; uint8_t hdr[10]; uint8_t hdr_sz;
-    if (BUF_IS_32BIT(buf_item->flags)) {
-        plen = BUF32(buf_item)->len - payload_pos;
-    } else {
-        plen = buf_item->len - payload_pos;
-    }
+    uint32_t payload_len = (BUF_IS_32BIT(buf_item->flags) ? BUF32(buf_item)->len : buf_item->len) - payload_offset;
 
+    uint8_t hdr[10]; uint8_t hdr_sz;
     hdr[0] = 0x80 | (opcode & 0x0F);   // FIN=1, RSV=0, opcode
-    if (plen <= 125) {
-        hdr[1] = (uint8_t)plen;
+    if (payload_len <= 125) {
+        hdr[1] = (uint8_t)payload_len;
         hdr_sz = 2;
-    } else if (plen <= 65535) {
+    } else if (payload_len <= 65535) {
         hdr[1] = 126;
-        hdr[2] = (uint8_t)(plen >> 8);
-        hdr[3] = (uint8_t)(plen);
+        hdr[2] = (uint8_t)(payload_len >> 8);
+        hdr[3] = (uint8_t)(payload_len);
         hdr_sz = 4;
     } else {
         hdr[1] = 127;
         hdr[2] = 0; hdr[3] = 0; hdr[4] = 0; hdr[5] = 0;
-        hdr[6] = (uint8_t)(plen >> 24);
-        hdr[7] = (uint8_t)(plen >> 16);
-        hdr[8] = (uint8_t)(plen >> 8);
-        hdr[9] = (uint8_t)(plen);
+        hdr[6] = (uint8_t)(payload_len >> 24);
+        hdr[7] = (uint8_t)(payload_len >> 16);
+        hdr[8] = (uint8_t)(payload_len >> 8);
+        hdr[9] = (uint8_t)(payload_len);
         hdr_sz = 10;
     }
 
-    if (payload_pos < hdr_sz) {
-        print("E:", LA_F("[WS] send_frame: payload_pos(%u) < hdr_sz(%u)\n", LA_F228, 228), payload_pos, hdr_sz);
+    if (payload_offset < hdr_sz) {
+        print("E:", LA_F("[WS] send_frame: payload_pos(%u) < hdr_sz(%u)\n", LA_F228, 228), payload_offset, hdr_sz);
         free_buffer(buf_item);
         return E_INVALID;
     }
 
     // 将帧头写入 payload 前的预留空间末尾（紧靠 payload）
-    uint8_t *buf_start;
+    uint8_t *buf;
     if (BUF_IS_32BIT(buf_item->flags)) {
-        buf_start = ITEM2BUF(BUF32(buf_item));
-        BUF32(buf_item)->pos = payload_pos - hdr_sz;
+        buf = ITEM2BUF(BUF32(buf_item));
+        BUF32(buf_item)->pos = payload_offset - hdr_sz;
     } else {
-        buf_start = ITEM2BUF(buf_item);
-        buf_item->pos = payload_pos - hdr_sz;
+        buf = ITEM2BUF(buf_item);
+        buf_item->pos = payload_offset - hdr_sz;
     }
-    memcpy(buf_start + (payload_pos - hdr_sz), hdr, hdr_sz);
+    memcpy(buf + (payload_offset - hdr_sz), hdr, hdr_sz);
 
-    ct_client_send((ct_client_t*)client, buf_item, false);
+    ct_client_send((ct_client_t*)client, buf_item, immediate);
     return E_NONE;
 }
 
 ret_t cw_send_close(cw_client_t *client, uint16_t code) {
-    buf16_item_t *item = alloc_buf16(BUF_FLAG_128(0));
-    if (!item) return E_OUT_OF_MEMORY;
-    uint8_t *buf = ITEM2BUF(item);
-    // WS close 帧：FIN=1, opcode=0x8, payload=2字节状态码
-    buf[0] = 0x88;   // FIN | CLOSE
-    buf[1] = 2;      // payload len = 2
-    buf[2] = (uint8_t)(code >> 8);
-    buf[3] = (uint8_t)(code);
-    item->len = 4;
-    item->pos = 0;
+
+    ct_session_clear((ct_client_ctx_t*)client->ws_ctx, (ct_client_t*)client, false);
+
+    if (!code) code = 1000;
+    uint8_t *buf = client->close_frame_buf + sizeof(buf16_item_t) + 2;
+    nwrite_s(buf, code);
+
+    ct_client_send((ct_client_t*)client, (buf16_item_t*)client->close_frame_buf, false);
+
     client->io |= CW_IO_FLAG_CLOSING;
     client->base.last_active = P_tick_ms();
-    // 使用 immediate=false，让 close 帧排在队尾，确保先发送已入队的应用层消息（如 REG_ACK）
-    ct_client_send((ct_client_t*)client, item, false);
-    // 交由基类统一执行关闭收口：停止接收、清理 sessions / recv_buf，并保持 close 帧继续发送
-    ct_client_off(&client->ws_ctx->base, (ct_client_t*)client);
+
     return E_NONE;
 }
 
@@ -564,12 +526,40 @@ void cw_retry_closing(cw_client_ctx_t *ctx, cw_client_t *client, uint64_t now) {
 // custom_tcp_ctx_t 初始化助手
 // + 将 WS 回调绑定到 tcp ctx，供 cw_init_client 调用方使用（一次性初始化）
 
+static buf16_item_t* cw_error_item(ct_client_t *c, bool handshake) {
+
+    if (handshake) return NULL;
+
+    int16_t s_tc_err_code[CUSTOM_TCP_ERR_CUSTOM-1] = {
+        /* CUSTOM_TCP_ERR_DISCONNECTED */ WS_CLOSE_GOING_AWAY,
+        /* CUSTOM_TCP_ERR_IO */ WS_CLOSE_BAD_GATEWAY,
+        /* CUSTOM_TCP_ERR_OVERFLOW */ WS_CLOSE_MESSAGE_TOO_BIG,
+        /* CUSTOM_TCP_ERR_INTERNAL */ WS_CLOSE_INTERNAL_ERROR,
+        /* CUSTOM_TCP_ERR_PROTOCOL */ WS_CLOSE_PROTOCOL_ERROR,
+        /* CUSTOM_TCP_ERR_CUSTOM */ 
+    };
+
+    uint16_t ws_code = c->last_error;
+    if (!ws_code) ws_code = CUSTOM_TCP_ERR_PROTOCOL;
+    else if (ws_code < CUSTOM_TCP_ERR_CUSTOM)
+        ws_code = s_tc_err_code[ws_code];
+
+    buf16_item_t* close_frame = (buf16_item_t*)CW_CLIENT(c)->close_frame_buf;
+    uint8_t *buf = ITEM2BUF(close_frame) + 2;
+    nwrite_s(buf, ws_code);
+
+    return close_frame;
+}
+
 void cw_ctx_init(cw_client_ctx_t *ctx) {
+
+    ctx->base.error_item = cw_error_item;
     if (!ctx->base.resolve_payload_len) ctx->base.resolve_payload_len = cw_resolve_payload_len;
     if (!ctx->base.handle_handshake) ctx->base.handle_handshake = cw_tcp_handle_handshake;
     if (!ctx->base.handshake_finish) ctx->base.handshake_finish = cw_tcp_handshake_finish;
     if (!ctx->base.handle_proto) ctx->base.handle_proto = cw_tcp_handle_proto;
-    // fatal_item/error_item/client_unreachable 由上层填充
+
+    // client_unreachable 由上层填充
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -619,7 +609,7 @@ static void ws_b64_sha1(const uint8_t src[20], char dst[29]) {
         dst[j++]=t[(v>>18)&63];dst[j++]=t[(v>>12)&63];dst[j++]=t[(v>>6)&63];dst[j++]=t[v&63];
     }
     {uint32_t v=((uint32_t)src[18]<<16)|((uint32_t)src[19]<<8);
-     dst[j++]=t[(v>>18)&63];dst[j++]=t[(v>>12)&63];dst[j++]=t[(v>>6)&63];dst[j++]='=';}
+     dst[j++]=t[(v>>18)&63];dst[j++]=t[(v>>12)&63];dst[j++]=t[(v>>6)&63];dst[j]='=';}
     dst[28]='\0';
 }
 
@@ -629,7 +619,7 @@ static void ws_b64_sha1(const uint8_t src[20], char dst[29]) {
 // + resp_buf_len: 缓冲长度
 // + sub_protocol: 子协议名（NULL 或空串表示不协商）
 // + 返回应答长度（>0），或 E_INVALID / E_OUT_OF_CAPACITY
-static ret_t cw_http_accept(const char *req, char *resp_buf, size_t resp_buf_len, const char *sub_protocol) {
+static ret_t cw_http_accept(const char *req, char *resp_buf, const char *sub_protocol) {
     int n = 0;
     const char *key_field = strstr(req, "Sec-WebSocket-Key:");
     if (!key_field) return E_INVALID;
@@ -644,7 +634,7 @@ static ret_t cw_http_accept(const char *req, char *resp_buf, size_t resp_buf_len
     ws_sha1_update(&sha, (const uint8_t*)combined, strlen(combined));
     uint8_t digest[WS_SHA1_LEN]; ws_sha1_final(&sha, digest);
     char accept[29]; ws_b64_sha1(digest, accept);
-    n = snprintf(resp_buf, resp_buf_len,
+    n = snprintf(resp_buf, ACCEPT_BUF_SZ,
         "HTTP/1.1 101 Switching Protocols\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
@@ -655,6 +645,37 @@ static ret_t cw_http_accept(const char *req, char *resp_buf, size_t resp_buf_len
         sub_protocol ? "Sec-WebSocket-Protocol: " : "",
         sub_protocol ? sub_protocol               : "",
         sub_protocol ? "\r\n"                     : "");
-    return n < (int)resp_buf_len ? (ret_t)n : E_OUT_OF_CAPACITY;
+    return n < ACCEPT_BUF_SZ ? (ret_t)n : E_OUT_OF_CAPACITY;
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+static const uint8_t g_ws_utf8d[364] = {
+    /* byte → char-class（0‥11） */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
+    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7, 7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
+    /* state × char-class → next-state */
+    0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
+    12,0,12,12,12,12,12,0,12,0,12,12,  12,24,12,12,12,12,12,24,12,24,12,12,
+    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
+    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
+    12,36,12,12,12,12,12,12,12,12,12,12,
+};
+
+// 逐字节推进 DFA；返回 false 表示遇到非法 UTF-8（state 已变为 REJECT）
+static bool cw_utf8_check(uint32_t *state, const uint8_t *data, uint32_t len) {
+    for (uint32_t i = 0; i < len; i++) {
+        uint32_t type = g_ws_utf8d[data[i]];
+        *state = g_ws_utf8d[256 + *state + type];
+        if (*state == WS_UTF8_REJECT) return false;
+    }
+    return true;
+}
+
 ///////////////////////////////////////////////////////////////////////////////

@@ -528,7 +528,7 @@ static void relay_handle_fin(relay_session_t *session) {
 
     // 向对端发送 FIN 说明本端已经关闭了连接
     // + 销毁本端的 sess（销毁操作会向对端发送 FIN）
-    ct_close_session(&g_ctx, (ct_session_t*)session, true);
+    ct_session_close(&g_ctx, (ct_session_t*)session, true);
 }
 
 // 处理 SYNC 消息（候选同步 / C→S confirm）
@@ -1003,7 +1003,7 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
 
     case P2P_RLY_OFF:
         print("I:", LA_F("%s: '%s'\n", LA_F72, 72), PROTO_STR(type), client->base.local_peer_id);
-        ct_client_off(&g_ctx, client);
+        ct_client_off(&g_ctx, client, NULL);
         return;
 
     case P2P_RLY_ALV: {
