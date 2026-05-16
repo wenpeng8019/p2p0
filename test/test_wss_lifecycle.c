@@ -52,7 +52,7 @@
 #include "../src/ws_client.h"
 #endif
 
-#define DEFAULT_SERVER_PORT     9335
+#define DEFAULT_SERVER_PORT     9333
 #define DEFAULT_SERVER_HOST     "127.0.0.1"
 
 static int g_server_port = DEFAULT_SERVER_PORT;

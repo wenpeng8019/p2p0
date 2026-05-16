@@ -72,7 +72,8 @@
     uint8_t                         ws_opcode;      \
     buffer_queue_t                  ws_frag_q;      \
     uint32_t                        ws_frag_len;    \
-    uint32_t                        ws_utf8state;
+    uint32_t                        ws_utf8state;   \
+    uint8_t                         ws_close_frame_buf[sizeof(buf16_item_t) + 4];
 
 // 基础 WS client 类型（可通过 CUSTOM_WS_CLIENT 内联到派生结构体）
 typedef struct cw_client {
@@ -80,10 +81,9 @@ typedef struct cw_client {
     TCP_CLIENT
     CUSTOM_TCP_CLIENT
     CUSTOM_WS_CLIENT
-    uint8_t                         close_frame_buf[sizeof(buf16_item_t) + 4];
 } cw_client_t;
 
-#define CW_CLIENT(c)     ((cw_client_t*)(c))
+#define CW_CLIENT(s)     ((cw_client_t*)CLIENT(s))
 
 // I/O 关闭状态标志（复用 TCP_IO_FLAG_CUSTOM_BIT）
 #define CW_IO_FLAG_CLOSING  (1 << TCP_IO_FLAG_CUSTOM_BIT)  // 本端已发 close 帧，等待对端 close 或超时
@@ -134,6 +134,8 @@ typedef struct cw_client_ctx {
     // 对端发起 close 时调用（nullable）
     cw_handle_close_cb              handle_close;
 
+    uint8_t                         fatal_frame_buf[sizeof(buf16_item_t) + 4];
+
 } cw_client_ctx_t;
 
 //-----------------------------------------------------------------------------
@@ -164,7 +166,7 @@ cw_send_frame(cw_client_t *client, uint8_t opcode,
               buf16_item_t *buf_item, uint16_t payload_offset,
               bool immediate);
 
-// 发送 WS close 帧（code=1000 表示正常关闭）
+// 发送 WS close 帧（code==0 || code=WS_CLOSE_NORMAL 表示正常关闭）
 ret_t
 cw_send_close(cw_client_t *client, uint16_t code);
 

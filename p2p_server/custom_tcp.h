@@ -196,6 +196,24 @@ typedef struct ct_client_ctx {
     CUSTOM_TCP_CTX
 } ct_client_ctx_t;
 
+
+static inline buf16_item_t*
+ct_forward_payload(ct_client_t *client,
+                   uint8_t* payload, uint32_t payload_len, uint16_t payload_offset,
+                   buf16_item_t *payload_item) {
+    assert(payload_item == client->payload_buf);
+    if (payload_item) {
+        assert(payload_item->pos == payload_offset && payload_item->len == payload_offset + payload_len);
+        client->payload_buf = NULL;
+    } else { payload_item = alloc_buffer(0, payload_offset + payload_len);
+        if (!payload_item) return NULL;
+        payload_item->pos = payload_offset;
+        payload_item->len = payload_offset + payload_len;
+        memcpy(ITEM2BUF(payload_item) + payload_offset, payload, payload_len);
+    }
+    return payload_item;
+}
+
 //-----------------------------------------------------------------------------
 // Public API
 

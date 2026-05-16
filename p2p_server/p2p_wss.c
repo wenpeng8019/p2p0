@@ -17,7 +17,8 @@ static cw_client_ctx_t              g_wss_ctx;
 #define WSS_CLIENT(s)               ((wss_client_t*)CLIENT(s))
 
 // 前置声明（定义在后面，wss_init 需要引用）
-static void wss_handle_frame(cw_client_t *base, uint8_t opcode, buf16_item_t *payload0, buf16_item_t *payload1);
+static void wss_handle_frame(cw_client_t *c, uint8_t opcode,
+                              uint8_t *payload, uint32_t payload_len, buf16_item_t *buf_item);
 static void wss_handle_peer_sent(ct_session_t *session, buf16_item_t *buf_item);
 static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, break_mode_e break_mode);
 
@@ -67,7 +68,7 @@ static ret_t wss_send_text(cw_client_t *client, const char *str) {
     uint8_t *buf = ITEM2BUF(item) + 10;
     memcpy(buf, str, text_len);
     item->len = total;
-    return cw_send_frame(client, WS_OP_TEXT, item, 10);
+    return cw_send_frame(client, WS_OP_TEXT, item, 10, false);
 }
 
 // 发送 SDP FAIL 文本帧给发送方
@@ -121,7 +122,7 @@ static void wss_handle_sdp(wss_client_t *src_c, const char *remote_peer_id,
     memcpy(buf + hdr_len, sdp, sdp_len);
     item->len = total;
 
-    if (cw_send_frame((cw_client_t*)dst_c, WS_OP_TEXT, item, 10) != E_NONE) {
+    if (cw_send_frame((cw_client_t*)dst_c, WS_OP_TEXT, item, 10, false) != E_NONE) {
         wss_send_sdp_fail(src_c, remote_peer_id, "peer unreachable");
         return;
     }
@@ -228,7 +229,7 @@ static void wss_session_send_rpc_code(wss_session_t *s, uint16_t sid, uint8_t co
     nwrite_s(buf + 1 + P2P_SESS_ID_SZ, sid);
     buf[1 + P2P_SESS_ID_SZ + 2] = code;
     item->len = total;
-    cw_send_frame((cw_client_t*)c, WS_OP_BINARY, item, 10);
+    cw_send_frame((cw_client_t*)c, WS_OP_BINARY, item, 10, false);
 }
 
 //-----------------------------------------------------------------------------
@@ -351,7 +352,6 @@ wss_init(void) {
     g_wss_ctx.handle_close   = NULL;
     return &g_wss_ctx;
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -486,13 +486,13 @@ static void wss_handle_fin(wss_session_t *session) {
     print("I:", LA_F("%s: '%s' ses_id=%u\n", LA_F45, 45),
           PROTO, session->base.client->local_peer_id, session->base.session_id);
 
-    ct_close_session(&g_wss_ctx.base, (ct_session_t*)session, true);
+    ct_session_close(&g_wss_ctx.base, (ct_session_t*)session, true);
 }
 
 // 处理 PKT — P2P 数据包中继（重写 session_id，零拷贝转发）
 // 使用 payload1（已预留 10 字节 WS 帧头空间），直接入队到对端 pkt_peer_send
 // payload 布局（在 payload1 中，从 payload1->pos 起）: [type(1)][session_id(4)][P2P hdr(4)][data(N)]
-static void wss_handle_pkt(wss_session_t *session, buf16_item_t *payload1, uint8_t *payload, uint16_t len) {
+static void wss_handle_pkt(wss_session_t *session, uint8_t *payload, uint16_t len, buf16_item_t *buf_item) {
     const char *PROTO = "PKT";
 
     if (len < P2P_WSS_BIN_PKT_MIN_SZ) {
@@ -515,31 +515,24 @@ static void wss_handle_pkt(wss_session_t *session, buf16_item_t *payload1, uint8
         return;   // payload1 由调用方（handle_frame）释放
     }
 
-    // 严格零拷贝：payload 必须在 payload1 内，且前置空间 >= 10
-    if (!payload1) {
-        print("E:", LA_F("%s: missing payload1 for zero-copy forward\n", LA_F230, 230), PROTO);
+    ct_client_t* c = CT_CLIENT(session);
+    buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
+    if (!buf_item) {
+        print("E:", LA_F("alloc buf failed(OOM)\n", 0, 0));
+        ct_client_error((ct_client_ctx_t*)CW_CLIENT(session)->ws_ctx, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
-    uint16_t payload_pos = (uint16_t)(payload - ITEM2BUF(payload1));
-    if (payload_pos < 10) {
-        print("E:", LA_F("%s: invalid payload_pos=%u (<10)\n", LA_F230, 230), PROTO, payload_pos);
-        return;
-    }
-    buf16_item_t *fwd_item = payload1;
-
-    fwd_item->pos = 0;
 
     // 入队并在首次时冷启动发送
     if (BUF_R_EMPTY(&peer_s->pkt_peer_send)) {
-        fwd_item->refer = (void*)peer_s;
-        cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, fwd_item, payload_pos);
+        buf_item->refer = (void*)peer_s;
+        cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, buf_item, buf_item->pos, false);
     }
-    BUF_R_PUSH(&peer_s->pkt_peer_send, fwd_item);
-    // 否则在队列中等待，handle_peer_sent 时再发
+    BUF_R_PUSH(&peer_s->pkt_peer_send, buf_item);
 }
 
 // 处理 REQ — RPC 请求转发（零拷贝）
-static void wss_handle_req(wss_session_t *session, buf16_item_t *payload1, uint8_t *payload, uint16_t len) {
+static void wss_handle_req(wss_session_t *session, uint8_t *payload, uint16_t len, buf16_item_t *buf_item) {
     const char *PROTO = "REQ";
 
     if (len < P2P_WSS_BIN_RPC_MIN_SZ) {
@@ -570,19 +563,16 @@ static void wss_handle_req(wss_session_t *session, buf16_item_t *payload1, uint8
 
     nwrite_l(payload + 1, peer_s->base.session_id);
 
-    if (!payload1) {
-        print("E:", LA_F("%s: missing payload1 for zero-copy forward\n", LA_F230, 230), PROTO);
-        return;
-    }
-    uint16_t payload_pos = (uint16_t)(payload - ITEM2BUF(payload1));
-    if (payload_pos < 10) {
-        print("E:", LA_F("%s: invalid payload_pos=%u (<10)\n", LA_F230, 230), PROTO, payload_pos);
+    ct_client_t* c = CT_CLIENT(session);
+    buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
+    if (!buf_item) {
+        print("E:", LA_F("alloc buf failed(OOM)\n", 0, 0));
+        ct_client_error((ct_client_ctx_t*)CW_CLIENT(session)->ws_ctx, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
 
-    payload1->pos = 0;
-    payload1->refer = (void*)peer_s;
-    cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, payload1, payload_pos);
+    buf_item->refer = (void*)peer_s;
+    cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, buf_item, buf_item->pos, false);
 
     session->rpc_pending_sid = sid;
     session->rpc_sent_time   = P_tick_ms();
@@ -590,7 +580,7 @@ static void wss_handle_req(wss_session_t *session, buf16_item_t *payload1, uint8
 }
 
 // 处理 RSP — RPC 响应转发（零拷贝）
-static void wss_handle_rsp(wss_session_t *session, buf16_item_t *payload1, uint8_t *payload, uint16_t len) {
+static void wss_handle_rsp(wss_session_t *session, uint8_t *payload, uint16_t len, buf16_item_t *buf_item) {
     const char *PROTO = "RSP";
 
     if (len < P2P_WSS_BIN_RPC_MIN_SZ) {
@@ -620,20 +610,16 @@ static void wss_handle_rsp(wss_session_t *session, buf16_item_t *payload1, uint8
 
     nwrite_l(payload + 1, peer_s->base.session_id);
 
-    if (!payload1) {
-        print("E:", LA_F("%s: missing payload1 for zero-copy forward\n", LA_F230, 230), PROTO);
+    ct_client_t* c = CT_CLIENT(session);
+    buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
+    if (!buf_item) {
+        print("E:", LA_F("alloc buf failed(OOM)\n", 0, 0));
+        ct_client_error((ct_client_ctx_t*)CW_CLIENT(session)->ws_ctx, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
-    uint16_t payload_pos = (uint16_t)(payload - ITEM2BUF(payload1));
-    if (payload_pos < 10) {
-        print("E:", LA_F("%s: invalid payload_pos=%u (<10)\n", LA_F230, 230), PROTO, payload_pos);
-        return;
-    }
-    buf16_item_t *fwd_item = payload1;
 
-    fwd_item->pos = 0;
-    if (fwd_item == payload1) fwd_item->refer = (void*)peer_s;
-    cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, fwd_item, payload_pos);
+    buf_item->refer = (void*)peer_s;
+    cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, buf_item, buf_item->pos, false);
 
     if (TQ_INQ(&g_wss_rpc_pending_q, peer_s)) TQ_RM(&g_wss_rpc_pending_q, peer_s);
     peer_s->rpc_pending_sid = 0;
@@ -663,7 +649,7 @@ static void wss_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_ite
             // 恢复 payload_pos：零拷贝时 pos=0，payload 在 10 字节之后
             uint8_t *payload_start = ITEM2BUF(next) + 10;
             uint16_t payload_pos = (uint16_t)(payload_start - ITEM2BUF(next));
-            cw_send_frame((cw_client_t*)session->base.client, WS_OP_BINARY, next, payload_pos);
+            cw_send_frame((cw_client_t*)session->base.client, WS_OP_BINARY, next, payload_pos, false);
         }
         // 如需要 READY 信号（WSS 协议中为可选），可在此扩展
 
@@ -711,11 +697,8 @@ static void wss_on_sync_confirmed(wss_session_t *dst_s) {
 
 // 处理 WSS 模式信令（WebSocket 文本帧）
 static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len) {
-    assert(client->base.proto == PROTO_WSS);
 
     if (len == 0) return;
-
-    client->base.last_active = P_tick_ms();
 
     char* ln = (char*)strnstr((const char*)msg, "\n", len);
     if (!ln) goto error_proto;
@@ -811,7 +794,7 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
     if (strcmp((char*)msg, P2P_WSS_CMD_OFF) == 0) {
         print("I:", LA_F("%s: '%s'\n", LA_F72, 72), "OFF",
               client->base.local_peer_id);
-        ct_client_off(&g_wss_ctx.base, (ct_client_t*)client);
+        cw_send_close((cw_client_t*)client, 0);
         return;
     }
 
@@ -896,139 +879,58 @@ error_proto:
           client->base.local_peer_id, msg);
 }
 
-// 处理 WSS 模式二进制帧（PKT 中继 + RPC）
-static void wss_handle_binary(wss_client_t *client, buf16_item_t *payload1,
-                               uint8_t *data, uint16_t len) {
-    assert(client->base.proto == PROTO_WSS);
-
-    if (len < 1 + P2P_SESS_ID_SZ) return;
+// handle_frame 回调（custom_ws 框架调用，opcode = TEXT 或 BINARY）
+// custom_ws 已在回调前完成 payload0/payload1 合并和解 mask，此处直接使用 payload 指针
+static void wss_handle_frame(cw_client_t *c, uint8_t opcode,
+                              uint8_t *payload, uint32_t payload_len, buf16_item_t *buf_item) {
+    assert(c->base.proto == PROTO_WSS);
+    wss_client_t *client = (wss_client_t*)c;
 
     client->base.last_active = P_tick_ms();
 
-    uint8_t  type       = data[0];
-    uint8_t* ptr        = data + 1;
+    if (opcode == WS_OP_TEXT) {
+        wss_handle_text(client, payload, payload_len);
+        return;
+    }
+
+    if (payload_len < 1 + P2P_SESS_ID_SZ) {
+        print("E:", LA_F(": bad payload(%u)\n", 0, 0), payload_len);
+        return;
+    }
+    uint8_t  type       = payload[0];
+    uint8_t* ptr        = payload + 1;
     uint32_t session_id = nget_l(ptr);
 
     wss_session_t *ws_s = (wss_session_t*)find_session(session_id);
     if (!ws_s || ws_s->base.client != &client->base) {
-        print("W:", LA_F("BIN: unknown ses_id=%u type=0x%02x from '%s'\n", LA_F171, 171),
+        print("W:", LA_F(": unknown ses_id=%u type=0x%02x from '%s'\n", LA_F171, 171),
               session_id, type, client->base.local_peer_id);
         return;
     }
 
     if (!PEER_ONLINE(&ws_s->base)) {
         print("W:", LA_F("BIN 0x%02x: ses_id=%u peer not connected\n", LA_F170, 170), type, session_id);
-        if (type == P2P_WSS_BIN_REQ && len >= P2P_WSS_BIN_RPC_MIN_SZ) {
-            ptr = data + 1 + P2P_SESS_ID_SZ;
+        if (type == P2P_WSS_BIN_REQ && payload_len >= P2P_WSS_BIN_RPC_MIN_SZ) {
+            ptr = payload + 1 + P2P_SESS_ID_SZ;
             wss_session_send_rpc_code(ws_s, nget_s(ptr), P2P_RPC_ERR_PEER_OFF);
         }
         return;
     }
 
-    bool consumed_payload1 = false;
     switch (type) {
     case P2P_WSS_BIN_PKT:
-        wss_handle_pkt(ws_s, payload1, data, len);
-        consumed_payload1 = true;
+        wss_handle_pkt(ws_s, payload, payload_len, buf_item);
         break;
     case P2P_WSS_BIN_REQ:
-        wss_handle_req(ws_s, payload1, data, len);
-        consumed_payload1 = true;
+        wss_handle_req(ws_s, payload, payload_len, buf_item);
         break;
     case P2P_WSS_BIN_RSP:
-        wss_handle_rsp(ws_s, payload1, data, len);
-        consumed_payload1 = true;
+        wss_handle_rsp(ws_s, payload, payload_len, buf_item);
         break;
     default:
         print("W:", LA_F("BIN: unknown type=0x%02x from '%s'\n", LA_F149, 149),
               type, client->base.local_peer_id);
         break;
-    }
-
-    // 若 payload1 已被零拷贝消费（入队），框架不应再释放它
-    if (consumed_payload1 && payload1 && payload1->refer != NULL) {
-        // payload1->refer is set to session pointer (non-NULL, non-STATIC)
-        // Tell framework not to free: ct_client callback leaves refer as-is
-        // The framework checks payload_buf->refer after handle_proto returns;
-        // setting client->payload_buf = NULL prevents double-free
-        ((ct_client_t*)client)->payload_buf = NULL;
-    }
-}
-
-// handle_frame 回调（custom_ws 框架调用，opcode = TEXT 或 BINARY）
-static void wss_handle_frame(cw_client_t *base, uint8_t opcode,
-                              buf16_item_t *payload0, buf16_item_t *payload1) {
-    wss_client_t *client = (wss_client_t*)base;
-
-    // 将 payload0 + payload1 合并成连续缓冲（TEXT 消息通常较小）
-    // 对于 BINARY 零拷贝转发：只用 payload1，payload0 通常为空
-    if (opcode == WS_OP_TEXT) {
-        // 合并到临时缓冲（TEXT 消息通常 < 256 字节；使用栈或 payload1 空间）
-        uint8_t *msg = NULL;
-        uint16_t total_len = 0;
-
-        if (!payload0 || payload0->len == payload0->pos) {
-            // 只有 payload1
-            msg = ITEM2BUF(payload1) + payload1->pos;
-            total_len = payload1->len - payload1->pos;
-        } else {
-            // payload0 + payload1：需要拼接（一般不常见）
-            uint16_t p0_len = payload0->len - payload0->pos;
-            uint16_t p1_len = payload1 ? (payload1->len - payload1->pos) : 0;
-            total_len = p0_len + p1_len;
-            // 利用 payload1 的前置空间（已预留 10 字节）做临时拼接
-            if (payload1 && payload1->pos >= p0_len) {
-                payload1->pos -= p0_len;
-                memcpy(ITEM2BUF(payload1) + payload1->pos,
-                       ITEM2BUF(payload0) + payload0->pos, p0_len);
-                msg = ITEM2BUF(payload1) + payload1->pos;
-            } else {
-                // 极罕见：前置空间不够，分配临时缓冲
-                buf16_item_t *tmp = alloc_buf16(BUF_FLAGS(buffer_sz_flag(total_len + 1), 0));
-                if (!tmp) return;
-                memcpy(ITEM2BUF(tmp), ITEM2BUF(payload0) + payload0->pos, p0_len);
-                if (p1_len) memcpy(ITEM2BUF(tmp) + p0_len, ITEM2BUF(payload1) + payload1->pos, p1_len);
-                ((char*)ITEM2BUF(tmp))[total_len] = '\0';
-                tmp->pos = 0; tmp->len = total_len;
-                wss_handle_text(client, ITEM2BUF(tmp), total_len);
-                free_buf16(tmp);
-                return;
-            }
-        }
-        wss_handle_text(client, msg, total_len);
-
-    } else { // WS_OP_BINARY
-        uint8_t *data = NULL;
-        uint16_t len  = 0;
-
-        if (!payload0 || payload0->len == payload0->pos) {
-            data = ITEM2BUF(payload1) + payload1->pos;
-            len  = payload1->len - payload1->pos;
-        } else {
-            uint16_t p0_len = payload0->len - payload0->pos;
-            uint16_t p1_len = payload1 ? (payload1->len - payload1->pos) : 0;
-            len = p0_len + p1_len;
-            if (payload1 && payload1->pos >= p0_len) {
-                payload1->pos -= p0_len;
-                memcpy(ITEM2BUF(payload1) + payload1->pos,
-                       ITEM2BUF(payload0) + payload0->pos, p0_len);
-                data = ITEM2BUF(payload1) + payload1->pos;
-            } else {
-                // 极罕见：前置空间不够；这里也预留 10 字节，保持与转发路径一致
-                uint16_t total = (uint16_t)(10 + len);
-                buf16_item_t *tmp = alloc_buf16(BUF_FLAGS(buffer_sz_flag(total), 0));
-                if (!tmp) return;
-                uint8_t *dst = ITEM2BUF(tmp) + 10;
-                memcpy(dst, ITEM2BUF(payload0) + payload0->pos, p0_len);
-                if (p1_len) memcpy(dst + p0_len, ITEM2BUF(payload1) + payload1->pos, p1_len);
-                tmp->pos = 10;
-                tmp->len = total;
-                wss_handle_binary(client, tmp, dst, len);
-                free_buf16(tmp);
-                return;
-            }
-        }
-        wss_handle_binary(client, payload1, data, len);
     }
 }
 

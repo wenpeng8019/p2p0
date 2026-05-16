@@ -227,8 +227,7 @@ static void cw_tcp_handle_proto(ct_client_t *c, uint8_t *hdr_buf, uint16_t hdr_l
             ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
             return;
         }
-    }
-    else if (opcode == WS_OP_CONTINUATION) {
+    } else if (opcode == WS_OP_CONTINUATION) {
         print("E:", LA_F("[WS] CONTINUATION frame without fragmentation going\n", 0, 0));
         ct_client_error(&context->base, c, WS_CLOSE_PROTOCOL_ERROR, false);
         return;
@@ -294,11 +293,11 @@ static void cw_tcp_handle_proto(ct_client_t *c, uint8_t *hdr_buf, uint16_t hdr_l
                 context->handle_close(client, code);
 
             // 自动回复 close
-            uint8_t* ptr = client->close_frame_buf + sizeof(buf16_item_t) + 2;
+            uint8_t* ptr = client->ws_close_frame_buf + sizeof(buf16_item_t) + 2;
             nwrite_s(ptr, code);
 
             // 交由基类统一执行关闭收口：停止接收、清理 sessions / recv_buf，并保持 close 帧继续发送
-            ct_client_off(&client->ws_ctx->base, (ct_client_t*)client, (buf16_item_t*)client->close_frame_buf);
+            ct_client_off(&client->ws_ctx->base, (ct_client_t*)client, (buf16_item_t*)client->ws_close_frame_buf);
         }
         else if (opcode == WS_OP_PING) {
 
@@ -401,12 +400,6 @@ bool cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx) {
         return false;
     }
 
-    uint8_t *buf = client->close_frame_buf + sizeof(buf16_item_t);
-    buf[0] = 0x88;      // FIN | CLOSE
-    buf[1] = 2;         // payload len = 2
-    ((buf16_item_t*)client->close_frame_buf)->len   = 4;
-    ((buf16_item_t*)client->close_frame_buf)->refer = ITEM_REF_STATIC;
-
     // 初始化 custom_tcp 字段（流模式，hdr_rs="\r\n\r\n"，hdr_sz=4）
     // 注意：recv_buf 由 ct_init_client 分配，这里替换为更大的 HTTP 缓冲
     ct_client_t *c = (ct_client_t*)client;
@@ -432,6 +425,12 @@ bool cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx) {
     client->ws_frag_q.head = client->ws_frag_q.rear = NULL;
     client->ws_frag_len = 0;
     client->ws_utf8state = WS_UTF8_ACCEPT;
+
+    uint8_t *buf = client->ws_close_frame_buf + sizeof(buf16_item_t);
+    buf[0] = 0x88;      // FIN | CLOSE
+    buf[1] = 2;         // payload len = 2
+    ((buf16_item_t*)client->ws_close_frame_buf)->len   = 4;
+    ((buf16_item_t*)client->ws_close_frame_buf)->refer = ITEM_REF_STATIC;
 
     TCP_CLIENT_INIT(client);
     return true;
@@ -502,11 +501,11 @@ ret_t cw_send_close(cw_client_t *client, uint16_t code) {
 
     ct_session_clear((ct_client_ctx_t*)client->ws_ctx, (ct_client_t*)client, false);
 
-    if (!code) code = 1000;
-    uint8_t *buf = client->close_frame_buf + sizeof(buf16_item_t) + 2;
+    if (!code) code = WS_CLOSE_NORMAL;
+    uint8_t *buf = client->ws_close_frame_buf + sizeof(buf16_item_t) + 2;
     nwrite_s(buf, code);
 
-    ct_client_send((ct_client_t*)client, (buf16_item_t*)client->close_frame_buf, false);
+    ct_client_send((ct_client_t*)client, (buf16_item_t*)client->ws_close_frame_buf, false);
 
     client->io |= CW_IO_FLAG_CLOSING;
     client->base.last_active = P_tick_ms();
@@ -544,7 +543,7 @@ static buf16_item_t* cw_error_item(ct_client_t *c, bool handshake) {
     else if (ws_code < CUSTOM_TCP_ERR_CUSTOM)
         ws_code = s_tc_err_code[ws_code];
 
-    buf16_item_t* close_frame = (buf16_item_t*)CW_CLIENT(c)->close_frame_buf;
+    buf16_item_t* close_frame = (buf16_item_t*)((cw_client_t*)c)->ws_close_frame_buf;
     uint8_t *buf = ITEM2BUF(close_frame) + 2;
     nwrite_s(buf, ws_code);
 
@@ -558,6 +557,13 @@ void cw_ctx_init(cw_client_ctx_t *ctx) {
     if (!ctx->base.handle_handshake) ctx->base.handle_handshake = cw_tcp_handle_handshake;
     if (!ctx->base.handshake_finish) ctx->base.handshake_finish = cw_tcp_handshake_finish;
     if (!ctx->base.handle_proto) ctx->base.handle_proto = cw_tcp_handle_proto;
+
+    ctx->base.fatal_item = (buf16_item_t*)ctx->fatal_frame_buf;
+    uint8_t *buf = ctx->fatal_frame_buf + sizeof(buf16_item_t);
+    buf[0] = 0x88;      // FIN | CLOSE
+    buf[1] = 2;         // payload len = 2
+    ((buf16_item_t*)ctx->fatal_frame_buf)->len   = 4;
+    ((buf16_item_t*)ctx->fatal_frame_buf)->refer = ITEM_REF_STATIC;
 
     // client_unreachable 由上层填充
 }
