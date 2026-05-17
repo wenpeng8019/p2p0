@@ -18,9 +18,11 @@ static cw_client_ctx_t              g_wss_ctx;
 
 // 前置声明（定义在后面，wss_init 需要引用）
 static void wss_handle_frame(cw_client_t *c, uint8_t opcode,
-                              uint8_t *payload, uint32_t payload_len, buf16_item_t *buf_item);
+                             uint8_t *payload, uint32_t payload_len, buf16_item_t *buf_item);
 static void wss_handle_peer_sent(ct_session_t *session, buf16_item_t *buf_item);
 static void wss_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, break_mode_e break_mode);
+static bool wss_parse_sync_frame_sid(const buf16_item_t *item, uint8_t *sid_out);
+static ret_t wss_send_text(cw_client_t *client, const char *str);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -150,6 +152,33 @@ static buf16_item_t* wss_build_syn0_online_frame(const char *peer_id, uint32_t s
         memcpy(buf + hdr_len, ITEM2BUF(payload_item) + wss_item_pos(payload_item), payload_len);
     item->len = total;
     return item;
+}
+
+static const char* wss_req_type_str(uint8_t req_type) {
+    switch (req_type) {
+    case P2P_WSS_BIN_PKT: return "PKT";
+    case P2P_WSS_BIN_REQ: return "REQ";
+    case P2P_WSS_BIN_RSP: return "RSP";
+    default: return "BIN";
+    }
+}
+
+static ret_t wss_send_status_frame(wss_client_t *client, uint32_t session_id,
+                                   const char *req_type, uint8_t status_code) {
+    char buf[96];
+    snprintf(buf, sizeof(buf), P2P_WSS_RSP_STA_FMT, session_id, req_type, status_code);
+    return wss_send_text((cw_client_t*)client, buf);
+}
+
+static ret_t wss_client_send_status(wss_client_t *client, uint32_t session_id,
+                                    uint8_t req_type, uint8_t status_code) {
+    return wss_send_status_frame(client, session_id, wss_req_type_str(req_type), status_code);
+}
+
+static ret_t wss_session_send_status(wss_session_t *session, uint8_t req_type, uint8_t status_code) {
+    wss_client_t *client = (wss_client_t*)session->base.client;
+    if (!wss_client_online(client)) return E_BUSY;
+    return wss_client_send_status(client, session->base.session_id, req_type, status_code);
 }
 
 // 分配并发送一个 WS text frame（小型文本，如协议应答）
@@ -499,7 +528,9 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
             if (resp) {
                 cw_send_frame((cw_client_t*)client, WS_OP_TEXT, resp, 10, false);
             }
-            if (remote_syn0) free_buffer(remote_syn0);
+            if (remote_syn0) {
+                free_buffer(remote_syn0);
+            }
         } else {
             char _b[8+P2P_PEER_ID_MAX+12+8]; 
             snprintf(_b, sizeof(_b), "SYN0 %s %08X offline", remote_peer_id, local_s->base.session_id);
@@ -549,9 +580,16 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
         {
             buf16_item_t *remote_syn0 = wss_sync_take_syn0_payload(remote_s);
             buf16_item_t *resp = wss_build_syn0_online_frame(remote_peer_id, local_s->base.session_id, remote_syn0);
-            if (resp) cw_send_frame((cw_client_t*)client, WS_OP_TEXT, resp, 10, false);
-            else { char _b[8+P2P_PEER_ID_MAX+12+8]; snprintf(_b,sizeof(_b),"SYN0 %s %08X online",remote_peer_id,local_s->base.session_id); wss_send_text((cw_client_t*)client,_b); }
-            if (remote_syn0) free_buffer(remote_syn0);
+            if (resp) {
+                cw_send_frame((cw_client_t*)client, WS_OP_TEXT, resp, 10, false);
+            } else {
+                char _b[8+P2P_PEER_ID_MAX+12+8];
+                snprintf(_b, sizeof(_b), "SYN0 %s %08X online", remote_peer_id, local_s->base.session_id);
+                wss_send_text((cw_client_t*)client, _b);
+            }
+            if (remote_syn0) {
+                free_buffer(remote_syn0);
+            }
         }
         wss_sync_send_head(local_s);
 
@@ -561,9 +599,16 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
         {
             buf16_item_t *local_syn0 = wss_sync_take_syn0_payload(local_s);
             buf16_item_t *resp = wss_build_syn0_online_frame(client->base.local_peer_id, remote_s->base.session_id, local_syn0);
-            if (resp) cw_send_frame((cw_client_t*)remote_c, WS_OP_TEXT, resp, 10, false);
-            else { char _b[8+P2P_PEER_ID_MAX+12+8]; snprintf(_b,sizeof(_b),"SYN0 %s %08X online",client->base.local_peer_id,remote_s->base.session_id); wss_send_text((cw_client_t*)remote_c,_b); }
-            if (local_syn0) free_buffer(local_syn0);
+            if (resp) {
+                cw_send_frame((cw_client_t*)remote_c, WS_OP_TEXT, resp, 10, false);
+            } else {
+                char _b[8+P2P_PEER_ID_MAX+12+8];
+                snprintf(_b, sizeof(_b), "SYN0 %s %08X online", client->base.local_peer_id, remote_s->base.session_id);
+                wss_send_text((cw_client_t*)remote_c, _b);
+            }
+            if (local_syn0) {
+                free_buffer(local_syn0);
+            }
         }
         wss_sync_send_head(remote_s);
 
@@ -583,7 +628,15 @@ static void wss_handle_sync(wss_session_t *session, uint8_t sid, const uint8_t *
     buf16_item_t *cache_item;
 
     wss_session_t *peer_s = (wss_session_t*)session->base.peer;
-    if (!payload_len || !peer_s || BUF_R_FULL(&peer_s->sync_peer_send)) {
+    if (!payload_len) {
+        wss_send_status_frame(client, session_id, "SYNC", P2P_ERR_INVALID);
+        return;
+    }
+    if (!peer_s) {
+        wss_send_status_frame(client, session_id, "SYNC", P2P_ERR_PEER_OFF);
+        return;
+    }
+    if (BUF_R_FULL(&peer_s->sync_peer_send)) {
         char buf[48];
         snprintf(buf, sizeof(buf), P2P_WSS_RSP_SYNC_BUSY_FMT, session_id, sid);
         wss_send_text((cw_client_t*)client, buf);
@@ -624,11 +677,15 @@ static void wss_handle_pkt(wss_session_t *session, uint8_t *payload, uint16_t le
 
     if (len < P2P_WSS_BIN_PKT_MIN_SZ) {
         print("E:", LA_F("%s: bad payload(len=%u)\n", LA_F156, 156), PROTO, len);
+        wss_session_send_status(session, P2P_WSS_BIN_PKT, P2P_ERR_INVALID);
         return;
     }
 
     wss_session_t *peer_s = (wss_session_t*)session->base.peer;
-    if (!wss_client_online((wss_client_t*)peer_s->base.client)) return;
+    if (!peer_s || !wss_client_online((wss_client_t*)peer_s->base.client)) {
+        wss_session_send_status(session, P2P_WSS_BIN_PKT, P2P_ERR_PEER_OFF);
+        return;
+    }
 
     print("V:", LA_F("%s: sid=%u -> peer_sid=%u, data_len=%u\n", LA_F168, 168),
           PROTO, session->base.session_id, peer_s->base.session_id, len - P2P_WSS_BIN_PKT_MIN_SZ);
@@ -638,7 +695,8 @@ static void wss_handle_pkt(wss_session_t *session, uint8_t *payload, uint16_t le
 
     // 检查 pkt_peer_send 队列是否已满
     if (BUF_R_FULL(&peer_s->pkt_peer_send)) {
-        print("W:", LA_F("%s: pkt queue full, dropping\n", LA_F214, 214), PROTO);
+        print("W:", LA_F("%s: pkt queue full, reply busy\n", LA_F214, 214), PROTO);
+        wss_session_send_status(session, P2P_WSS_BIN_PKT, P2P_ERR_BUSY);
         return;   // payload1 由调用方（handle_frame）释放
     }
 
@@ -656,6 +714,8 @@ static void wss_handle_pkt(wss_session_t *session, uint8_t *payload, uint16_t le
         cw_send_frame((cw_client_t*)peer_s->base.client, WS_OP_BINARY, buf_item, buf_item->pos, false);
     }
     BUF_R_PUSH(&peer_s->pkt_peer_send, buf_item);
+    if (!BUF_R_FULL(&peer_s->pkt_peer_send))
+        wss_session_send_status(session, P2P_WSS_BIN_PKT, P2P_CODE_READY);
 }
 
 // 处理 REQ — RPC 请求转发（零拷贝）
@@ -664,6 +724,7 @@ static void wss_handle_req(wss_session_t *session, uint8_t *payload, uint16_t le
 
     if (len < P2P_WSS_BIN_RPC_MIN_SZ) {
         print("E:", LA_F("%s: bad frame len=%u\n", LA_F155, 155), PROTO, len);
+        wss_session_send_status(session, P2P_WSS_BIN_REQ, P2P_ERR_INVALID);
         return;
     }
 
@@ -676,7 +737,7 @@ static void wss_handle_req(wss_session_t *session, uint8_t *payload, uint16_t le
           PROTO, session->base.client->local_peer_id, sid, msg, data_len);
 
     wss_session_t *peer_s = (wss_session_t*)session->base.peer;
-    if (!wss_client_online((wss_client_t*)peer_s->base.client)) {
+    if (!peer_s || !wss_client_online((wss_client_t*)peer_s->base.client)) {
         print("W:", LA_F("%s: peer offline, sending error resp\n", LA_F64, 64), PROTO);
         wss_session_send_rpc_code(session, sid, P2P_RPC_ERR_PEER_OFF);
         return;
@@ -712,6 +773,7 @@ static void wss_handle_rsp(wss_session_t *session, uint8_t *payload, uint16_t le
 
     if (len < P2P_WSS_BIN_RPC_MIN_SZ) {
         print("E:", LA_F("%s: bad frame len=%u\n", LA_F155, 155), PROTO, len);
+        wss_session_send_status(session, P2P_WSS_BIN_RSP, P2P_ERR_INVALID);
         return;
     }
 
@@ -724,14 +786,16 @@ static void wss_handle_rsp(wss_session_t *session, uint8_t *payload, uint16_t le
           PROTO, session->base.client->local_peer_id, sid, code, data_len);
 
     wss_session_t *peer_s = (wss_session_t*)session->base.peer;
-    if (!wss_client_online((wss_client_t*)peer_s->base.client)) {
+    if (!peer_s || !wss_client_online((wss_client_t*)peer_s->base.client)) {
         print("W:", LA_F("%s: requester offline, discarding\n", LA_F66, 66), PROTO);
+        wss_session_send_status(session, P2P_WSS_BIN_RSP, P2P_ERR_PEER_OFF);
         return;
     }
 
     if (peer_s->rpc_pending_sid != sid) {
         print("W:", LA_F("%s: sid mismatch (got=%u, pending=%u), discarding\n", LA_F68, 68),
               PROTO, sid, peer_s->rpc_pending_sid);
+        wss_session_send_status(session, P2P_WSS_BIN_RSP, P2P_ERR_INVALID);
         return;
     }
 
@@ -768,6 +832,7 @@ static void wss_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_ite
 
         buf_item->refer = NULL;  // 允许调用方释放
 
+        bool was_full = BUF_R_FULL(&session->pkt_peer_send);
         BUF_R_POP(&session->pkt_peer_send);
 
         if (!BUF_R_EMPTY(&session->pkt_peer_send)) {
@@ -778,7 +843,8 @@ static void wss_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_ite
             uint16_t payload_pos = (uint16_t)(payload_start - ITEM2BUF(next));
             cw_send_frame((cw_client_t*)session->base.client, WS_OP_BINARY, next, payload_pos, false);
         }
-        // 如需要 READY 信号（WSS 协议中为可选），可在此扩展
+        if (was_full && session->base.peer)
+            wss_session_send_status((wss_session_t*)session->base.peer, P2P_WSS_BIN_PKT, P2P_CODE_READY);
 
     } else if (!BUF_R_EMPTY(&session->sync_peer_send) && BUF_R_FRONT(&session->sync_peer_send) == buf_item) {
 
@@ -825,7 +891,10 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
     if (len == 0) return;
 
     char* ln = (char*)strnstr((const char*)msg, "\n", len);
-    if (!ln) goto error_proto;
+    if (!ln) {
+        wss_send_status_frame(client, 0, "TXT", P2P_ERR_PROTOCOL);
+        goto error_proto;
+    }
     *ln = '\0';
     #define ln_trim while (ln[-1] == '\n' || ln[-1] == '\r') *--ln = '\0'
 
@@ -836,7 +905,7 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
         if (client->base.local_peer_id[0]) {
             print("E:", LA_F("%s: duplicate from '%s'\n", LA_F97, 97), PROTO, client->base.local_peer_id);
             wss_send_text((cw_client_t*)client, "REG FAIL duplicate reg");
-            goto error_proto;
+            return;
         }
 
         char *remote_id = (char*)msg + P2P_WSS_CMD_REG_SZ;
@@ -845,7 +914,7 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
         if (!inst_id || inst_id == remote_id) {
             print("E:", LA_F("%s: invalid REG format\n", LA_F160, 160), PROTO);
             wss_send_text((cw_client_t*)client, "REG FAIL invalid instance_id");
-            goto error_proto;
+            return;
         }
 
         ln_trim;
@@ -854,12 +923,12 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
         if (!remote_id[0] || strlen(remote_id) > P2P_PEER_ID_MAX) {
              print("E:", LA_F("%s: invalid peer id\n", LA_F96, 96), PROTO);
              wss_send_text((cw_client_t*)client, "REG FAIL empty peer id");
-            goto error_proto;
+            return;
         }
         uint32_t instance_id = (uint32_t)strtoul(inst_id, NULL, 10);
         if (instance_id == 0) {
             wss_send_text((cw_client_t*)client, "REG FAIL invalid instance id");
-            goto error_proto;
+            return;
         }
 
         wss_client_t *reg = (wss_client_t*)find_client(remote_id);
@@ -907,7 +976,8 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
 
     if (!client->base.local_peer_id[0]) {
         print("E:", LA_F("%s: rejected for not reg\n", LA_F147, 147), (char*)msg);
-        goto error_proto;
+        wss_send_text((cw_client_t*)client, "REG FAIL not registered");
+        return;
     }
 
     // PROTO: OFF
@@ -955,6 +1025,7 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
         if (!s || s->client != &client->base) {
             print("W:", LA_F("%s: unknown ses_id=%u\n", LA_F148, 148),
                   "FIN", session_id, client->base.local_peer_id);
+            wss_send_status_frame(client, session_id, "FIN", P2P_ERR_INVALID);
             return;
         }
 
@@ -970,8 +1041,10 @@ static void wss_handle_text(wss_client_t *client, const uint8_t *msg, size_t len
         unsigned sync_sid_u = 0;
         char op[16] = {0};
 
-        if (sscanf(after, "%x %x %15s", &session_id_u, &sync_sid_u, op) < 2 || sync_sid_u > 0xFFu)
-            goto error_proto;
+        if (sscanf(after, "%x %x %15s", &session_id_u, &sync_sid_u, op) < 2 || sync_sid_u > 0xFFu) {
+            wss_send_status_frame(client, 0, "SYNC", P2P_ERR_PROTOCOL);
+            return;
+        }
 
         uint32_t session_id = (uint32_t)session_id_u;
         uint8_t sync_sid = (uint8_t)sync_sid_u;
@@ -1021,6 +1094,7 @@ static void wss_handle_frame(cw_client_t *c, uint8_t opcode,
 
     if (payload_len < 1 + P2P_SESS_ID_SZ) {
         print("E:", LA_F(": bad payload(%u)\n", 0, 0), payload_len);
+        wss_client_send_status(client, 0, payload_len ? payload[0] : 0, P2P_ERR_INVALID);
         return;
     }
     uint8_t  type       = payload[0];
@@ -1031,6 +1105,7 @@ static void wss_handle_frame(cw_client_t *c, uint8_t opcode,
     if (!ws_s || ws_s->base.client != &client->base) {
         print("W:", LA_F(": unknown ses_id=%u type=0x%02x from '%s'\n", LA_F171, 171),
               session_id, type, client->base.local_peer_id);
+        wss_client_send_status(client, session_id, type, P2P_ERR_INVALID);
         return;
     }
 
@@ -1039,6 +1114,8 @@ static void wss_handle_frame(cw_client_t *c, uint8_t opcode,
         if (type == P2P_WSS_BIN_REQ && payload_len >= P2P_WSS_BIN_RPC_MIN_SZ) {
             ptr = payload + 1 + P2P_SESS_ID_SZ;
             wss_session_send_rpc_code(ws_s, nget_s(ptr), P2P_RPC_ERR_PEER_OFF);
+        } else {
+            wss_session_send_status(ws_s, type, P2P_ERR_PEER_OFF);
         }
         return;
     }
@@ -1056,6 +1133,7 @@ static void wss_handle_frame(cw_client_t *c, uint8_t opcode,
     default:
         print("W:", LA_F("BIN: unknown type=0x%02x from '%s'\n", LA_F149, 149),
               type, client->base.local_peer_id);
+        wss_session_send_status(ws_s, type, P2P_ERR_INVALID);
         break;
     }
 }

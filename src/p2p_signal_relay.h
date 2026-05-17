@@ -357,8 +357,11 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
  * 此函数作为 signaling_relay_fn 回调，由 p2p_send_packet 调用。
  * 格式：[type(1)][size(2)][session_id(8)][原始 payload]
  *
- * 流控：发送后设置 awaiting_relay_ready，收到 STATUS(READY) 后清除。
- *       如果 awaiting_relay_ready 为 true，返回 E_BUSY。
+ * 流控：
+ *   - 发送后设置 awaiting_relay_ready。
+ *   - 收到 STATUS(type=P2P_RLY_PKT, code=P2P_ERR_BUSY) 时保持等待，暂停继续发送。
+ *   - 收到 STATUS(type=P2P_RLY_PKT, code=P2P_CODE_READY) 后清除等待，允许继续发送。
+ *   - 如果 awaiting_relay_ready 为 true，返回 E_BUSY。
  *
  * @param s           P2P 会话
  * @param type        包类型（P2P_PKT_DATA / P2P_PKT_ACK / P2P_PKT_CRYPTO）

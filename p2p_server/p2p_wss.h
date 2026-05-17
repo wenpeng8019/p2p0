@@ -30,6 +30,7 @@
  *     SYNC <session_id_hex> <sid_hex>\n\n         fin mark，本批次传输结束
  *     SYNC <session_id_hex> <sid_hex> confirm  同步数据逐包确认（发给发送方）
  *     SYNC <session_id_hex> <sid_hex> busy  同步缓存空间不足
+ *     STA <session_id_hex> <req_type> <status>  统一状态应答（PKT flow-control / 会话级错误）
  *     FIN <session_id>               会话结束通知 (C2S & S2C)
  *
  *   二进制帧（WebSocket binary frame, 用于 P2P 数据中继和 MSG RPC）:
@@ -37,7 +38,7 @@
  *     PACKET (0x01): [0x01][ses_id(4)][p2p_hdr(4)][data(N)]  中继 P2P 包
  *     REQ    (0x02): [0x02][ses_id(4)][sid(2)][msg(1)][data(N)]  RPC 请求
  *     RSP   (0x03): [0x03][ses_id(4)][sid(2)][code(1)][data(N)] RPC 响应
- *   错误（服务器生成伪 RSP）:
+ *   错误（服务器生成伪 RSP / STA）:
  *     code=0xFF: 对端离线 (P2P_RPC_ERR_PEER_OFF)
  *     code=0xFE: 转发超时 (P2P_RPC_ERR_TIMEOUT)
  */

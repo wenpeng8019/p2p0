@@ -544,7 +544,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
     struct p2p_instance *inst = s->inst;
     p2p_relay_session_t *sess_ctx = &s->sig_sess.relay;
 
-    const char *lvl = (code == P2P_RLY_CODE_READY) ? "V:" : "W:";
+    const char *lvl = (code == P2P_CODE_READY) ? "V:" : "W:";
     if (msg)
         print(lvl, LA_F("%s: sess_id=%u req_type=%u code=%u msg=%s\n", LA_F219, 219),
               PROTO, s->id, (unsigned)type, (unsigned)code, msg);
@@ -553,7 +553,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
               PROTO, s->id, (unsigned)type, (unsigned)code);
 
     // 会话忙：服务器转发缓冲区满，稍后重试
-    if (code == P2P_RLY_ERR_BUSY) {
+    if (code == P2P_ERR_BUSY) {
 
         if (type == P2P_RLY_SYNC || type == P2P_RLY_SYN0) {
             if (sess_ctx->trickle_last_time) sess_ctx->trickle_last_time = P_tick_ms();
@@ -566,7 +566,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
         }
     }
     // 服务就绪：解除对应流控
-    else if (code == P2P_RLY_CODE_READY) {
+    else if (code == P2P_CODE_READY) {
 
         if (type == P2P_RLY_PKT) {
             sess_ctx->awaiting_relay_ready = false;
@@ -574,7 +574,7 @@ static void handle_session_status(struct p2p_session *s, uint8_t type, uint8_t c
         }
     }
     // todo 执行 fin by peer
-    else if (code == P2P_RLY_ERR_PEER_OFF) {
+    else if (code == P2P_ERR_PEER_OFF) {
 
         print("W:", LA_F("%s: peer offline\n", LA_F176, 176), PROTO);
 

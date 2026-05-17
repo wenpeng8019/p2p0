@@ -743,6 +743,93 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  * 
  */
 
+/*
+ * ============================================================================
+ * 基于 TCP 连接的 P2P 协议设计说明
+ * ============================================================================
+ * 本节描述 RELAY / WSS 两种“基于 TCP 连接”的 signaling/data tunnel 设计共性。
+ * 两者的线协议不同，但它们共享同一组传输层约束与会话语义：
+ *
+ * 1. 传输可靠性与应用层职责
+ * --------------------------------------------------------------------------
+ *   - 底层使用 TCP，因此字节流本身天然有序、可靠、无重复。
+ *   - 因此协议层无需像 UDP/COMPACT 那样为“链路可靠性”设计重传与累计确认。
+ *   - 但“请求是否被服务器接受 / 是否已转发 / 对端是否暂时不可继续发送”仍需要应用层状态面表达。
+ *   - 也就是说：
+ *       * TCP 负责“送到连接对端”；
+ *       * relay/wss 协议负责“送到哪个会话 / 当前能否继续发 / 请求语义是否成立”。
+ *
+ * 2. session_id 仍然必需
+ * --------------------------------------------------------------------------
+ *   - 即使底层是单条 TCP / WebSocket 连接，仍必须保留 session_id。
+ *   - session_id 的职责不是“TCP 分包”，而是：
+ *       * 多会话并存时的本地派发；
+ *       * 同一 peer 重连后的新旧会话隔离；
+ *       * 服务器在配对会话之间做 O(1) 路由与重写；
+ *       * 统一 relay / wss 的上层 API 语义。
+ *   - 因此所有会话级消息（SYN0 之外的 SYNC / PKT / REQ / RSP / FIN）都带 session_id 或其等价路由键。
+ *
+ * 3. 两类“确认/应答”的边界
+ * --------------------------------------------------------------------------
+ *   - 不再需要“为了对抗网络丢包”的 ACK。
+ *   - 但仍保留两类应用层确认：
+ *       * 语义确认：例如 SYNC confirm，表示该批同步数据已被服务器接受并推进到下一阶段；
+ *       * 流控确认：例如 READY / BUSY 或其文本等价物，表示发送窗口是否可继续推进。
+ *   - 这些确认解决的是“协议状态机推进”，而不是“TCP 是否可靠”。
+ *
+ * 4. 流量控制与背压
+ * --------------------------------------------------------------------------
+ *   - TCP 只能保证字节流最终送达，不能表达“服务器内部按会话分队列后的可承载能力”。
+ *   - 因此 PKT / SYNC / RPC 仍需要显式背压语义：
+ *       * P2P_CODE_READY：当前请求成功，且该方向可继续发送；
+ *       * P2P_ERR_BUSY：服务器该方向队列已满，发送方必须暂停；
+ *       * 其他 P2P_ERR_*：表示协议错误、对端离线、超时、内部错误等失败原因。
+ *   - relay 使用二进制 STATUS(P2P_RLY_STA)；wss 使用文本 STA 或 SYNC busy/confirm。
+ *
+ * 5. 断线重连语义
+ * --------------------------------------------------------------------------
+ *   - 底层 TCP/WS 断开并不等于立刻销毁应用会话。
+ *   - server 可以在短时间内保留 client / session 状态，等待同一 instance 的重连恢复。
+ *   - 因此协议设计必须支持：
+ *       * 未完成的会话级发送队列保留；
+ *       * ACK_PENDING 项在重连后重新投递；
+ *       * session_id 在恢复期间保持稳定；
+ *       * 新实例连接与旧实例污染隔离。
+ *
+ * 6. 分帧方式：relay 与 wss 的区别
+ * --------------------------------------------------------------------------
+ *   - RELAY: 直接跑在裸 TCP 上，必须自行解决粘包/半包。
+ *       * 包头固定为 [type(1)][size(2)]。
+ *       * 接收端需按“先读 3 字节头，再按 size 读 payload”的状态机解帧。
+ *   - WSS: 跑在 WebSocket frame 之上，WS 层已经提供消息边界。
+ *       * text frame 天然是一条完整文本消息；
+ *       * binary frame 天然携带长度；
+ *       * 因此 wss 不需要再定义 relay 那样的额外 size 头来处理粘包。
+ *
+ * 7. 建议理解方式
+ * --------------------------------------------------------------------------
+ *   - 如果把 UDP/COMPACT 看成“既要解决网络不可靠，也要解决协议状态推进”；
+ *   - 那么 relay/wss 则是“网络可靠已由 TCP 提供，只剩会话路由、状态推进、流控和错误表达”。
+ *   - 下文 RELAY / WSS 两节只分别描述各自的线格式与特有状态机，不再重复本节这些 TCP 共性。
+ */
+ #define P2P_CODE_READY              0                  // 请求操作成功，服务器就绪，客户端可继续后续操作
+                                                        // + 对 PKT 流控尤其重要：
+                                                        //   - READY 表示服务器已接收当前 PKT，并且本方向转发队列未满；客户端可继续发送后续 PKT
+                                                        //   - 当队列曾满而后释放出槽位时，服务器会补发 READY，用于解除客户端的 awaiting_relay_ready
+                                                        // + 作为请求/状态应答模式，READY 既表示本次成功，也表示可继续后续操作。
+#define P2P_ERR(c)                  (0x80+(uint8_t)(c)) // 通用错误码基数，code >= 0x80 表示错误
+#define P2P_ERR_DISCONNECTED        P2P_ERR(0)          // 网络 I/O 错误（连接异常/读写失败）
+#define P2P_ERR_IO                  P2P_ERR(1)          // 网络 I/O 错误（连接异常/读写失败）
+#define P2P_ERR_OVERFLOW            P2P_ERR(2)          // 请求协议包数据过大（size 超出限制）
+#define P2P_ERR_INTERNAL            P2P_ERR(3)          // 服务器内部错误。此时应该断开与服务器的连接，等待重连恢复
+#define P2P_ERR_PROTOCOL            P2P_ERR(4)          // 协议错误（未登录/非法状态）
+#define P2P_ERR_PEER_OFF            P2P_ERR(5)          // 对端未完成 REG（未登录）或已 OFF（离线）
+#define P2P_ERR_UNREACHABLE         P2P_ERR(6)          // 对方暂时不可达（对方已经 REG 但可能网络闪断或异常）
+#define P2P_ERR_INVALID             P2P_ERR(7)          // 无效的参数或操作
+#define P2P_ERR_TIMEOUT             P2P_ERR(8)          // 服务器转发请求超时
+#define P2P_ERR_BUSY                P2P_ERR(9)          // 会话忙（前一个转发尚未完成 / 转发队列已满）
+                                                        // + 对 PKT 来说，BUSY 是显式背压信号：服务器要求发送方暂停继续发包，等待后续 READY
+
 /* ============================================================================
  * RELAY 模式协议 (TCP)
  * ============================================================================
@@ -778,22 +865,6 @@ typedef struct {
     uint16_t            size;
 } p2p_relay_hdr_t;
 
-#define P2P_RLY_CODE_READY          0                   // 请求操作成功，服务器就绪，客户端可继续后续操作
-                                                        // + 作为 TCP 协议，都是基于 REQ/RSP 的请求应答模式，也就是每个请求，都会对应一个应答码
-                                                        //   READY 表示请求成功。此外，它也代表客户端可以继续请求后续操作，
-                                                        //   对应的，如果服务器想让客户端延迟后续操作，可以通过延迟返回该状态码来实现。
-#define P2P_RLY_ERR(c)              (0x80+(uint8_t)(c)) // 错误码基数，code >= 0x80 表示错误
-#define P2P_RLY_ERR_DISCONNECTED    P2P_RLY_ERR(0)      // 网络 I/O 错误（连接异常/读写失败）
-#define P2P_RLY_ERR_IO              P2P_RLY_ERR(1)      // 网络 I/O 错误（连接异常/读写失败）
-#define P2P_RLY_ERR_OVERFLOW        P2P_RLY_ERR(2)      // 请求协议包数据过大（size 超出限制）
-#define P2P_RLY_ERR_INTERNAL        P2P_RLY_ERR(3)      // 服务器内部错误。此时应该断开和服务器的连接，等待重连恢复
-#define P2P_RLY_ERR_PROTOCOL        P2P_RLY_ERR(4)      // 协议错误（未登录/非法状态）
-#define P2P_RLY_ERR_PEER_OFF        P2P_RLY_ERR(5)      // 对端未完成 REG（未登录）或已 OFF（离线）
-#define P2P_RLY_ERR_UNREACHABLE     P2P_RLY_ERR(6)      // 对方暂时不可达（对方已经 REG 但可能网络闪断或异常）
-#define P2P_RLY_ERR_INVALID         P2P_RLY_ERR(7)      // 无效的参数或操作
-#define P2P_RLY_ERR_TIMEOUT         P2P_RLY_ERR(8)      // 服务器转发请求超时
-#define P2P_RLY_ERR_BUSY            P2P_RLY_ERR(9)      // 会话忙（前一个转发尚未完成）
-
 /* RELAY REG 下行功能标志 */
 #define P2P_RLY_FEATURE_RELAY       0x01    // 支持数据包中继
 #define P2P_RLY_FEATURE_MSG         0x02    // 支持 MSG RPC 机制
@@ -818,7 +889,7 @@ typedef struct {
  *
  *   RPC（消息请求-应答，REQ/RSP）：
  *     服务器提供实时数据交互中转服务，要求双方必须同时在线且可达，否则服务器
- *     立即回复失败（ERR_PEER_OFF / ERR_UNREACHABLE）或超时（ERR_TIMEOUT）。
+ *     立即回复失败（P2P_ERR_PEER_OFF / P2P_ERR_UNREACHABLE）或超时（P2P_ERR_TIMEOUT）。
  *     网络中断时，服务器会自动中止并清除正在执行的请求，向发起方回复错误。
  *
  * 所有消息：[p2p_relay_hdr_t: 3B][payload: N bytes]
@@ -826,7 +897,7 @@ typedef struct {
  * P2P_RLY_STA:
  *   payload: [type(1)][status_code(1)][[session_id(P2P_SESS_ID_SZ)]|remote_peer_id(P2P_PEER_ID_MAX)][status_msg(N)]
  *   - type: 请求的 p2p_relay_type_t 类型（例如 P2P_RLY_SYN0），用于指示哪个请求出错
- *   - status_code: 见 P2P_RLY_CODE_* 定义
+ *   - status_code: 见 P2P_CODE_* / P2P_ERR_* 定义
  *   - session_id: 会话 ID，对于会话相关的请求（如 SYNC）存在时携带，用于客户端识别对应会话；对于非会话请求（如 REG）则不携带
  *                 注意：P2P_RLY_SYN0 请求尚未建立会话，因此返回的 STATUS 不携带 session_id，但会携带 remote_peer_id 以指示哪个对端的连接请求出错
  *   - status_msg: 可选的状态描述文本（UTF-8 编码）
@@ -931,6 +1002,10 @@ typedef struct {
  *   说明：
  *   - session_id 用于会话隔离与服务器路由（转发到配对会话）。
  *   - 服务器零拷贝转发，仅重写 session_id，不解析内层 P2P hdr。
+ *   - 该通道带显式流控状态：
+ *     - STATUS(type=P2P_RLY_PKT, code=P2P_ERR_BUSY): 对端转发队列已满，发送方必须暂停继续发送 PKT
+ *     - STATUS(type=P2P_RLY_PKT, code=P2P_CODE_READY): 当前 PKT 已接收且队列可继续推进，发送方可恢复发送
+ *   - busy / ready 只用于流量控制，不改变内层 P2P 包语义。
  */
 #define P2P_RLY_PKT_PSZ(n)              (P2P_SESS_ID_SZ + P2P_HDR_SIZE + (n))
 
@@ -1102,6 +1177,13 @@ typedef struct {
  * Server → Target:
  *   - 按目标侧 session_id 重写后原样转发。
  *
+ * Server → Source 状态应答（流量控制）:
+ *   - STATUS(type=P2P_RLY_PKT, code=P2P_ERR_BUSY)
+ *     含义：目标侧 pkt_peer_send 已满，发送方必须暂停继续发送 PKT
+ *   - STATUS(type=P2P_RLY_PKT, code=P2P_CODE_READY)
+ *     含义：服务器已接收当前 PKT，且发送窗口重新可用；发送方可继续发送下一包
+ *   - 这两个状态共同构成 PKT 通道的 stop-and-wait / 背压控制机制。
+ *
  * 6. REQ/RSP 机制 - RPC 请求-应答
  * ============================================================================
  *
@@ -1137,52 +1219,6 @@ typedef struct {
  *   │  [data]                │
  *
  *
- * ============================================================================
- * TCP 特性优化
- * ============================================================================
- *   - 仍需 session_id：用于会话隔离与服务器路由到配对会话
- *   - 无需重传机制：TCP 保证可靠传输
- *   - ACK 可选：主要用于流量控制和错误检测
- *
- * TCP 粘包处理：
- * RELAY 使用 TCP 传输，必须处理粘包/半包问题：
- *
- * 接收状态机：
- *   - RECV_HEADER: 读取包头（9 字节）
- *   - RECV_PAYLOAD: 读取 payload（length 字节）
- *
- * 包头格式：[magic: 4B][type: 1B][length: 4B]
- *   - magic = 0x50325030 ("P2P0")，帧同步标识
- *   - type = 消息类型枚举
- *   - length = payload 长度（不包括包头）
- *
- * 循环读取直到 EAGAIN：
- *   ```c
- *   for (;;) {
- *       switch (state) {
- *       case RECV_HEADER:
- *           n = recv(fd, buf + offset, sizeof(hdr) - offset, 0);
- *           if (n == 0) { close(); return; }
- *           if (n < 0 && EAGAIN) return;
- *           offset += n;
- *           if (offset == sizeof(hdr)) {
- *               state = RECV_PAYLOAD;
- *               offset = 0;
- *           }
- *           break;
- *       case RECV_PAYLOAD:
- *           n = recv(fd, payload + offset, length - offset, 0);
- *           if (n < 0 && EAGAIN) return;
- *           offset += n;
- *           if (offset == length) {
- *               dispatch(type, payload);
- *               state = RECV_HEADER;
- *               offset = 0;
- *           }
- *           break;
- *       }
- *   }
- *   ```
  */
 
 
@@ -1232,14 +1268,16 @@ typedef struct {
  *      其中 session_id_hex 固定 8 位 16 进制（如 1A2B3C4D），sid_hex 固定 2 位 16 进制（如 AF）。
  *   5. 兼容说明：原 confirm <bytes> 语法废弃，所有确认均为一包一 confirm。
  */
-#define P2P_WSS_CMD_REG         "REG "          /* + <peer_id> <instance_id>\n */                                      // 注册身份
-#define P2P_WSS_CMD_OFF         "OFF"           /* OFF\n */                                                            // 主动下线（立即释放资源）
-#define P2P_WSS_CMD_SDP         "SDP "          /* + <remote_peer_id>\n<sdp> */                                        // 基于 peer_id 的 SDP 文本转发（不依赖会话）
-#define P2P_WSS_CMD_SYN0        "SYN0 "         /* + <remote_peer_id>\n  或  <remote_peer_id>\n<payload>\n */          // 创建/恢复会话（可选预缓存负载）
-#define P2P_WSS_CMD_SYNC        "SYNC "         /* + <session_id_hex> <sid_hex>\n<payload>\n */                        // 同步数据 (C2S & S2C)
-#define P2P_WSS_CMD_FIN         "FIN "          /* + <session_id_hex>\n */                                             // 会话结束 (C2S & S2C)
+#define P2P_WSS_CMD_STA         "STA "          /* + <session_id_hex> <req_type> <status_hex>\n */              // 统一状态应答（仅服务器发送）
+#define P2P_WSS_CMD_REG         "REG "          /* + <peer_id> <instance_id>\n */                               // 注册身份
+#define P2P_WSS_CMD_OFF         "OFF"           /* OFF\n */                                                     // 主动下线（立即释放资源）
+#define P2P_WSS_CMD_SDP         "SDP "          /* + <remote_peer_id>\n<sdp> */                                 // 基于 peer_id 的 SDP 文本转发（不依赖会话）
+#define P2P_WSS_CMD_SYN0        "SYN0 "         /* + <remote_peer_id>\n  或  <remote_peer_id>\n<payload>\n */   // 创建/恢复会话（可选预缓存负载）
+#define P2P_WSS_CMD_SYNC        "SYNC "         /* + <session_id_hex> <sid_hex>\n<payload>\n */                 // 同步数据 (C2S & S2C)
+#define P2P_WSS_CMD_FIN         "FIN "          /* + <session_id_hex>\n */                                      // 会话结束 (C2S & S2C)
 
-#define P2P_WSS_RSP_REG_OK      "REG OK "       /* + <sync_max> <features>\n */           // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
+#define P2P_WSS_RSP_STA         "STA "          /* + <session_id_hex> <req_type> <status>\n */
+#define P2P_WSS_RSP_REG_OK      "REG OK "       /* + <sync_max> <features>\n */                                 // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
 #define P2P_WSS_RSP_REG_FAIL    "REG FAIL "     /* + <reason>\n */
 #define P2P_WSS_RSP_SDP_OK      "SDP OK "       /* + <remote_peer_id>\n */
 #define P2P_WSS_RSP_SDP_FAIL    "SDP FAIL "     /* + <remote_peer_id> <reason>\n */
@@ -1260,8 +1298,9 @@ typedef struct {
  *
  * 与 RELAY 模式的区别:
  *   - 无需 relay_hdr.size（WebSocket 帧自带长度）
- *   - 无需 STATUS 应答（WebSocket 可靠传输，PACKET 无需 ACK/流控）
- *   - RPC 错误统一用伪造 RSP 返回（peer_offline / timeout）
+ *   - 状态应答统一走文本 STA；其中 <status_hex> 是 2 位 16 进制，直接复用 P2P_CODE_READY / P2P_ERR_* 定义
+ *   - RPC 错误仍可走伪造 RSP
+ *   - 同一 WS 连接同时承载 text control plane 与 binary data/RPC plane
  */
 #define P2P_WSS_BIN_PKT        0x01    /* [type][ses_id][p2p_hdr(4)][data(N)] */        // 中继 P2P 数据包:
 #define P2P_WSS_BIN_REQ        0x02    /* [type][ses_id][sid(2)][msg(1)][data(N)] */    // RPC 请求
@@ -1389,7 +1428,7 @@ typedef struct {
  * ────────────────────────────────────────────────────────────────────────────
  *
  * 格式: "SYN0 <remote_peer_id>\n"
- *       "SYN0 <remote_peer_id>\n<payload>\n"   （可选携带预缓存负载）
+ *      "SYN0 <remote_peer_id>\n<payload>\n"   （可选携带预缓存负载）
  *   - remote_peer_id: 目标对端 peer_id
  *   - payload: 可选，预缓存的 ICE 候选数据（对端离线时服务器缓存，上线后转发）
  *     最大长度由 REG OK 返回的 sync_max 决定（不含 NUL）
@@ -1567,8 +1606,8 @@ typedef struct {
  *
  * 与 RELAY 的区别:
  *   - 无 relay_hdr.size — WebSocket 帧自带长度
- *   - 无 STATUS 应答 — WebSocket 可靠传输，PACKET 无需 ACK/流控
- *   - RPC 错误统一使用服务器生成的伪 RSP 返回
+ *   - 状态应答使用文本帧 STA，而不是单独的二进制 STATUS 包
+ *   - RPC 错误仍优先使用服务器生成的伪 RSP 返回；STA 主要用于 PKT 流控和统一错误反馈
  *
  * ────────────────────────────────────────────────────────────────────────────
  * PKT — P2P 数据包中继（双向：客户端 ↔ 服务器 ↔ 客户端）
@@ -1585,12 +1624,31 @@ typedef struct {
  * 服务端处理:
  *   1. 查找 session_id 对应的会话
  *   2. 对端在线 → 重写 session_id 为对端的 session_id，原样转发
- *   3. 对端离线 → 静默丢弃（实时数据不缓存）
+ *   3. 对端离线 → 返回 "STA <session_id_hex> PKT 85\n"（P2P_ERR_PEER_OFF）
+ *   4. 对端 pkt 队列满 → 返回 "STA <session_id_hex> PKT 89\n"（P2P_ERR_BUSY），发送方暂停继续发包
+ *   5. 当前 PKT 已接收且仍可继续推进 → 返回 "STA <session_id_hex> PKT 00\n"（P2P_CODE_READY）
  *   服务器不解析内层 p2p_hdr，仅做路由转发。
  *
  * 最小帧长度: P2P_WSS_BIN_PACKET_MIN = 9 字节
  */
 #define P2P_WSS_BIN_PKT_MIN_SZ             (1 + P2P_SESS_ID_SZ + P2P_HDR_SIZE)
+/* ────────────────────────────────────────────────────────────────────────────
+ * STA — 统一状态应答（仅服务器 → 客户端，text frame）
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * 格式: "STA <session_id_hex> <req_type> <status_hex>\n"
+ *   - session_id_hex: 关联会话 ID；若错误发生在建会前或无法归属到具体会话，则为 00000000
+ *   - req_type: 出错或流控对应的请求类别，例如 PKT / REQ / RSP / SYNC / FIN / TXT / BIN
+ *   - status_hex: 1 字节状态码的 2 位 16 进制 ASCII 表示（如 00 / 85 / 89）
+ *     直接复用 P2P_CODE_READY / P2P_ERR_* 的值定义；RELAY 的 P2P_RLY_* 只是兼容别名
+ *
+ * 语义:
+ *   - STA 不替代既有的 "REG FAIL" / "SDP FAIL" / "SYN0 FAIL" / "SYNC ... confirm|busy"；
+ *     它用于补充统一的会话级状态与错误反馈，避免服务器仅打印日志而吞掉请求。
+ *   - 对 PKT 来说，STA(PKT, 89/00) 构成显式流控背压机制，即 BUSY/READY。
+ */
+#define P2P_WSS_CMD_STA_SZ              (sizeof(P2P_WSS_CMD_STA) - 1u)          /* "STA " */
+#define P2P_WSS_RSP_STA_FMT             P2P_WSS_RSP_STA "%08X %s %02X\n"      /* "STA <session_id_hex> <req_type> <status_hex>\n" */
 /* ────────────────────────────────────────────────────────────────────────────
  * REQ — RPC 请求（双向：A → 服务器 → B）
  * ────────────────────────────────────────────────────────────────────────────
