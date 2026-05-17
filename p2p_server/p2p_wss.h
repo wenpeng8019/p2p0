@@ -15,7 +15,7 @@
  *     SDP <remote_peer_id>\n<sdp>   按 peer_id 转发 SDP 文本（不依赖 session）
  *     SYN0 <remote_peer_id>        创建/恢复会话（类似 RELAY SYN0）
  *     SYN0 <remote_peer_id>\n<payload>  创建会话 + 携带预缓存负载
- *     SYNC <session_id>\n<payload>  按 session_id 路由同步数据（类似 RELAY SYNC）
+ *     SYNC <session_id_hex> <sid_hex>\n<payload>  按 session_id 路由同步数据（类似 RELAY SYNC）
  *     FIN <session_id>              主动断开会话（类似 RELAY FIN）
  *
  *   服务器 → 客户端：
@@ -23,13 +23,13 @@
  *     REG FAIL <reason>             注册失败
  *     SDP OK <remote_peer_id>       SDP 转发成功
  *     SDP FAIL <remote_peer_id> <reason>  SDP 转发失败
- *     SYN0 <peer_id> <session_id> online|offline  应答/推送
- *     SYN0 <peer_id> <session_id> busy  负载超出缓存可用空间
+ *     SYN0 <peer_id> <session_id_hex> online|offline  应答/推送
+ *     SYN0 FAIL <reason>           参数非法或 payload 超限
  *     SYN0 FAIL <reason>           会话创建失败
- *     SYNC <session_id>\n<line>     对端同步数据（流式，每行一帧）
- *     SYNC <session_id>\n\n         fin mark，本批次传输结束
- *     SYNC <session_id> confirm <bytes>  同步数据转发确认（发给发送方）
- *     SYNC <session_id> busy        同步缓存空间不足
+ *     SYNC <session_id_hex> <sid_hex>\n<line>     对端同步数据（流式，每行一帧）
+ *     SYNC <session_id_hex> <sid_hex>\n\n         fin mark，本批次传输结束
+ *     SYNC <session_id_hex> <sid_hex> confirm  同步数据逐包确认（发给发送方）
+ *     SYNC <session_id_hex> <sid_hex> busy  同步缓存空间不足
  *     FIN <session_id>               会话结束通知 (C2S & S2C)
  *
  *   二进制帧（WebSocket binary frame, 用于 P2P 数据中继和 MSG RPC）:
@@ -48,8 +48,7 @@
 #include "common.h"
 #include "custom_ws.h"
 
-#define WSS_SYNC_PAYLOAD_MAX        2048        /* SYN0 预缓存负载上限（字节，不含 NUL） */
-#define WSS_MAX_PAYLOAD             (WSS_SYNC_PAYLOAD_MAX + 64) /* max_payload_len for custom_tcp */
+#define WSS_MAX_PAYLOAD             P2P_MAX_PAYLOAD /* max_payload_len for custom_tcp / REG OK sync_max */
 
 /* SYNC/PKT 发送队列深度（与 relay 对齐） */
 #define WSS_PEER_Q_MAX              2u
@@ -58,14 +57,15 @@ typedef struct wss_session {
     session_t                       base;
     CUSTOM_TCP_SESSION
 
-    /* SYN0 预缓存 ring buffer（动态分配，同步完成后释放）*/
-    buf16_item_t*                   sync_buf;               /* NULL=无数据，非NULL=BUF_FLAG_2048 chunk */
-    uint16_t                        sync_head;              /* 读位置 [0, MAX) */
-    uint16_t                        sync_len;               /* 已存储字节数 */
+    uint8_t                         last_sid;               /* 最后一个已分配/接收的 SYNC sid；0 保留给 SYN0 */
 
     /* SYNC 发送队列（对标 relay sync_peer_send，含 ACK_PENDING 机制） */
     buf16_item_t*                   sync_peer_slots[WSS_PEER_Q_MAX];    /* 循环队列的 slots 数组（指针） */
-    buffer_round_t                  sync_peer_send;                     /* 发送队列（循环缓冲） */
+    buffer_round_t                  sync_peer_send;                     /* 发送队列（循环缓冲）
+                                                                        * 队头 FRONT 的发送状态由 refer 判定：
+                                                                        *   refer=NULL             → 待发但未启动（对端暂不可达，或 sid=0 payload 待组装）
+                                                                        *   refer=session          → TCP 写入中
+                                                                        *   refer=ITEM_REF_ACK_PENDING → 等待应用层 ACK */
 
     /* PKT 发送队列（对标 relay pkt_peer_send） */
     buf16_item_t*                   pkt_peer_slots[WSS_PEER_Q_MAX];     /* 循环队列的 slots 数组（指针） */

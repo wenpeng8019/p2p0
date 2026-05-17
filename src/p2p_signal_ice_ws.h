@@ -16,7 +16,7 @@
  *   服务器 → 客户端：
  *     REG OK <sync_max>           注册成功
  *     REG FAIL <reason>           注册失败
- *     SYN0 <peer_id> <session_id> online|offline  会话应答/对端上线推送
+ *     SYN0 <peer_id> <session_id_hex> online|offline  会话应答/对端上线推送
  *     SYNC <from_peer_id>\n<payload> 来自其他 peer 的同步数据
  *     FIN <session_id>            对端断连通知
  *
