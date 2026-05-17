@@ -184,26 +184,28 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  *   时间轴（ms）      Alice                                 Bob
  *   ────────────────────────────────────────────────────────────────────
- *   t=0              PUNCH(seq=1) ─────────────────────────→
- *                    [记录 pending: seq=1, path=0, t=0]
+ *                    |                                      |
+ *   t=0              | PUNCH(seq=1) ─────────────────────→ |
+ *                    | [记录 pending: seq=1, path=0, t=0]   |
  *
- *   t=10                                                    收到 PUNCH(seq=1)
- *                                                           [rx_confirmed=true]
- *                                  ←───────────────────── PUNCH_ACK(seq=1)
+ *   t=10             |                   收到 PUNCH(seq=1)  |
+ *                    |                 [rx_confirmed=true]  |
+ *                    | ←──────────────── PUNCH_ACK(seq=1)  |
  *
- *   t=20             收到 PUNCH_ACK(seq=1)
- *                    [匹配 pending: RTT = 20ms, path=0]
- *                    [tx_confirmed=true]
- *                    [NAT_CONNECTED]
+ *   t=20             | 收到 PUNCH_ACK(seq=1)                |
+ *                    | [匹配 pending: RTT = 20ms, path=0]   |
+ *                    | [tx_confirmed=true]                  |
+ *                    | [NAT_CONNECTED]                      |
  *
- *   t=500            PUNCH(seq=2) ─────────────────────────→ (下一轮定时)
- *                    [记录 pending: seq=2, path=0, t=500]
+ *   t=500            | PUNCH(seq=2) ─────────────────────→ | (下一轮定时)
+ *                    | [记录 pending: seq=2, path=0, t=500] |
  *
- *   t=510                                                   收到 PUNCH(seq=2)
- *                                  ←───────────────────── PUNCH_ACK(seq=2)
+ *   t=510            |                    收到 PUNCH(seq=2) |
+ *                    | ←──────────────── PUNCH_ACK(seq=2)  |
  *
- *   t=520            收到 PUNCH_ACK(seq=2)
- *                    [匹配 pending: RTT = 20ms, path=0]
+ *   t=520            | 收到 PUNCH_ACK(seq=2)                |
+ *                    | [匹配 pending: RTT = 20ms, path=0]   |
+ *                    |                                      |
  *
  * 注：Bob 也会独立定时发送 PUNCH（未在上图中显示），Alice 同样会立即回复 PUNCH_ACK。
  *
@@ -269,23 +271,25 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *
  *   时间轴（ms）      Alice                                 Bob
  *   ────────────────────────────────────────────────────────────────────
- *   t=0              PUNCH(seq=1) ─────────────────────────→
+ *                    |                                     |
+ *   t=0              | PUNCH(seq=1) ────────────────────→ |
  *
- *   t=10                                                    收到 PUNCH(seq=1)
- *                                  ←─────────────────────   REACH(seq=1)
+ *   t=10             |                   收到 PUNCH(seq=1) |
+ *                    | ←──────────────────── REACH(seq=1) |
  *
- *   t=20             收到 REACH(seq=1)
- *                    [双向连通确认]
- *                    CONN(seq=100) ────────────────────────→
+ *   t=20             | 收到 REACH(seq=1)                   |
+ *                    | [双向连通确认]                      |
+ *                    | CONN(seq=100) ───────────────────→ |
  *
- *   t=30                                                    收到 CONN(seq=100)
- *                                                           [状态 → CONNECTED]
- *                                  ←─────────────────────   CONN_ACK(seq=100)
+ *   t=30             |                  收到 CONN(seq=100) |
+ *                    |                 [状态 → CONNECTED] |
+ *                    | ←─────────────── CONN_ACK(seq=100) |
  *
- *   t=40             收到 CONN_ACK(seq=100)
- *                    [停止 CONN 重传]
- *                    [状态 → CONNECTED]
- *                    DATA(seq=1) ──────────────────────────→ (开始数据传输)
+ *   t=40             | 收到 CONN_ACK(seq=100)              |
+ *                    | [停止 CONN 重传]                    |
+ *                    | [状态 → CONNECTED]                 |
+ *                    | DATA(seq=1) ─────────────────────→ | (开始数据传输)
+ *                    |                                     |
  */
 #define P2P_PKT_CONN            0x03        // 连接就绪包（三次握手最后一次）
 #define P2P_PKT_CONN_ACK        0x04        // 连接就绪确认包
@@ -525,7 +529,7 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *   - session_id: 来自 server SYN0 中的会话 ID，用于服务器确认对应配对
  *   客户端收到 server SYN0（首次对端候选推送）后立即回复
  */
-#define SIG_PKT_SYN0_ACK_PSZ        (P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 1u)                             // server→client: remote_peer_id(32) + session_id(P2P_SESS_ID_SZ) + online(1)
+#define SIG_PKT_SYN0_ACK_PSZ        (P2P_PEER_ID_MAX + P2P_SESS_ID_SZ + 1u)                            // server→client: remote_peer_id(32) + session_id(P2P_SESS_ID_SZ) + online(1)
 #define SIG_PKT_SYN0_ACK_C2S_PSZ    (P2P_SESS_ID_SZ)                                                   // client→server: session_id(P2P_SESS_ID_SZ)
 /* SYNC:
  *   payload: [session_id(P2P_SESS_ID_SZ)][notify_seq_or_base(1)][candidate_count(1)][candidates(N*23)]
@@ -659,20 +663,20 @@ static inline void p2p_pkt_hdr_decode(const uint8_t *buf, p2p_packet_hdr_t *hdr)
  *      - 客户端收到 SYN0 后发送 SYN0_ACK（携带 session_id）确认
  *      - 客户端通过 SYNC(seq=1,2,3,...) 继续同步剩余候选（携带 session_id）
  *      - 对端通过 SYNC_ACK 确认，未确认则重发
- *      - 允许乱序：seq>0 可能先于 seq=0 到达，接收端按 seq 位图去重并最终收敛
+ *      - 允许乱序：seq>0 可能先于 seq=0 到达；接收端按序号位图去重，重复包仅 ACK 不重复入表
  *
  *   3. 离线缓存流程：
  *
  *      Alice (在线)           Server                    Bob (离线)
  *        |                       |                          |
- *        |--- REG ----------->|                          |
- *        |<-- REG_ACK --------|  (auth_key + capabilities)
+ *        |--- REG -------------->|                          |
+ *        |<-- REG_ACK -----------|  (auth_key + capabilities)
  *        |--- SYN0 ------------->|  (auth_key + 首批候选)   |
  *        |<-- SYN0_ACK ----------|  (session_id, online=0)  |
  *        |--- SYN0_ACK --------->|  (二次确认, session_id)  |
- *        |   [进入 REG]       |  (缓存 Alice 的候选)     |
+ *        |   [进入 REG]          |  (缓存 Alice 的候选)     |
  *        |    ... Bob 上线 ...                              |
- *        |                       |<-- REG ---------------|
+ *        |                       |<-- REG ------------------|
  *        |                       |--- REG_ACK ------------->|  (auth_key + capabilities)
  *        |                       |<-- SYN0 -----------------|  (auth_key + 首批候选)
  *        |                       |--- SYN0_ACK ------------>|  (session_id, online=1)
@@ -848,57 +852,67 @@ typedef struct {
  *   - Server -> Client: 心跳确认
  */
 #define P2P_RLY_ALV_PSZ                 0u
-/* P2P_RLY_SYN0（三态，上下行负载格式不同）:
- * + 注意一个细节，SYN0 的候选肯定不带有 FIN 标识，也就是 SYN0 肯定不是最后一个 SYNC 包
- * + SYN0 是序列号为 0 的首包，sid 字段固定为 0，因此省略传输；
- *   后续 SYNC 包的 sid 从 1 起始，循环递增。
+/* P2P_RLY_SYN0 — 创建/恢复会话（客户端 → 服务器 & 服务器 → 客户端）:
+ * + SYN0 可视作 sid=0 的首个 sync 包；sid 固定为 0，因此在线协议中省略传输。
+ * + 后续真实 SYNC 的 sid 从 1 起始，循环递增。
+ * + 注意一个细节，SYN0 的候选不带 FIN 标识，也就是 SYN0 不是最后一个 SYNC 包。
+ *   这也同时意味着，sync0 之后至少还会有一个 SYNC 包（即使没有候选，也会有一个 count=0 的空 SYNC 作为结束标识）
  *
- *   状态 1: Client -> Server（发起会话创建，并提交首批候选）
- *     payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
- *     - target_name: 目标 peer 名称，定长 32 字节，0 填充
- *     - candidate_count: 本端首批候选数量（可以为 0）
- *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
- *     注：SYN0 的 sid=0 固定，省略传输；服务端不需要去重，直接转发。
+ * Client -> Server 格式:
+ *   payload: [target_name(32)][candidate_count(1)][candidates(N*23)]
+ *   - target_name: 目标 peer 名称，定长 32 字节，0 填充
+ *   - candidate_count: 本端首批候选数量（可以为 0）
+ *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
+ *   - 语义: 发起/恢复会话，并提交 sid=0 的初始化候选
  *
- *   状态 2: Server -> Client（会话创建应答，对方不在线，立即返回）
- *     payload: [target_name(32)][session_id(P2P_SESS_ID_SZ)][0xFF(1)]
- *     - target_name: 目标 peer 名称，定长 32 字节，0 填充
- *     - session_id: 会话 ID（网络字节序）
- *     - 0xFF(1): 常量，表示对端离线（客户端通过此字节判断是离线应答还是状态 3）
+ * Server -> Client 语义（统一看作 SYN0 的 S2C 三态）:
  *
- *   状态 3: Server -> Client（转发对端同步数据，也就是首批候选集合，同时表示对端在线/或上线）
- *     payload: [source_name(32)][session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)]
- *     - 格式同 P2P_RLY_SYNC，但不包括 sid 和 fin_marker 字段
- *     - candidate_count < 0xFF，0xFF 保留给状态 2 的离线标识
+ *   1. 离线态:
+ *      payload: [target_name(32)][session_id(P2P_SESS_ID_SZ)][0xFF(1)]
+ *      - target_name: 目标 peer 名称，定长 32 字节，0 填充
+ *      - session_id: 会话 ID（网络字节序）
+ *      - 0xFF(1): 常量，表示对端离线
+ *      - 语义: 会话已建立，但对端当前未在线；本端 sid=0 候选已缓存，等待对端上线
+ *
+ *   2. 在线态:
+ *      payload: [source_name(32)][session_id(P2P_SESS_ID_SZ)][candidate_count(1)][candidates(N*23)]
+ *      - source_name: 对端 peer 名称，定长 32 字节，0 填充
+ *      - session_id: 会话 ID（网络字节序）
+ *      - candidate_count: 对端 sid=0 初始化候选数量
+ *      - candidates: 对端首批候选地址列表
+ *      - 语义: 会话建立完成，对端已在线；SYN0 自身就承载 sid=0 的初始化 payload
+ *      - 这可以有两种到达时机，但语义相同：
+ *        a. 对端本来就在线：作为本次建会的直接应答返回
+ *        b. 对端当时离线：先返回离线态；待对端后续上线后，再补发一个在线态 SYN0
+ *
+ *   3. 错误态:
+ *      - 通过 P2P_RLY_STA + P2P_RLY_SYN0 返回错误，而不是单独的 SYN0 负载态
  *
  * SYN0 隐式 ACK 机制：
- *   服务器向对端转发 SYN0（状态 3）后，对端无独立的 SYN0 ACK 消息。
+ *   服务器向对端转发/下发在线态 SYN0 后，对端无独立的 SYN0 ACK 消息。
  *   协议规定：对端收到 SYN0 后，必然随后发送首个 SYNC 上行包（sid=1）；该首个 SYNC 即视为隐式 SYN0 ACK。
  *   服务器收到对端首个 SYNC 上行时，释放对应的 SYN0 转发缓冲区（sync_peer_sent）。
  */
 #define P2P_RLY_SYN0_PSZ(n)             (P2P_PEER_ID_MAX + 1u + (n)*sizeof(p2p_candidate_t))
 #define P2P_RLY_SYN0_S2C_PSZ(n)         (P2P_SESS_ID_SZ + P2P_RLY_SYN0_PSZ(n))
 #define P2P_RLY_IS_SYN0_PEER_OFF(p)     (((uint8_t*)(p))[P2P_PEER_ID_MAX + P2P_SESS_ID_SZ] == 0xFF)
-/* P2P_RLY_SYNC（三态，上下行负载格式不同）:
+/* P2P_RLY_SYNC — 会话数据同步（客户端 ↔ 服务器 ↔ 客户端）:
+ * + SYN0 负责 sid=0 的初始化数据；本节 SYNC 只描述 sid>=1 的后续同步。
  *
- *   状态 1: Client -> Server（上传本端后续候选）
- *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
- *     - session_id: 会话 ID（网络字节序）
- *     - sid: 本包序列号（从 1 起始循环递增；0 保留给 SYN0，但 SYN0 的 sid 省略传输）
- *     - candidate_count: 本包候选数量
- *     - candidates: N 个 p2p_candidate_t（每个 23 字节）
- *     - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
+ * Client -> Server / Server -> Client 数据格式:
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
+ *   - session_id: 会话 ID（网络字节序）
+ *   - sid: 本包序列号（从 1 起始循环递增；0 保留给 SYN0）
+ *   - candidate_count: 本包候选数量
+ *   - candidates: N 个 p2p_candidate_t（每个 23 字节）
+ *   - fin_marker: 可选 1 字节；存在且为 0xFF 表示 FIN（本端候选发送完成）
+ *   - Server -> Client 下发时，session_id 会被重写为接收方本地会话 ID；sid 透传用于去重
  *
- *   状态 2: Server -> Client（ACK，确认本批次全部候选已转发到对端）
- *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)]
- *     - session_id: 会话 ID（网络字节序）
- *     - sid: 回显对应上行 SYNC 的序列号
- *     ! 一个 confirm 表示该批次全部候选已转发；客户端收到后可立即发送下一批 
- * 
- *   状态 3: Server -> Client（下发/转发对端候选）
- *     payload: [session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
- *     - 与状态 1 同格式，session_id 由服务器重写为接收方本地会话 ID
- *     - sid: 对端 SYNC 的序列号（服务端透传，用于客户端去重）
+ * Server -> Client confirm 格式:
+ *   payload: [session_id(P2P_SESS_ID_SZ)][sid(1)]
+ *   - session_id: 会话 ID（网络字节序）
+ *   - sid: 回显对应上行 SYNC 的序列号
+ *   - 语义: 一个 confirm 表示该 sid 对应批次已全部转发到对端；客户端收到后可立即发送下一批
  */
 #define P2P_RLY_SYNC_CONFIRM_PSZ        (P2P_SESS_ID_SZ + 1u)
 #define P2P_RLY_SYNC_PSZ(n, mk)         (P2P_SESS_ID_SZ + 2u + (n)*sizeof(p2p_candidate_t) + ((mk) ? 1u : 0u))
@@ -960,7 +974,7 @@ typedef struct {
  *
  *   Client                    Server
  *   │                            │
- *   ├── TCP Connect ───────────►│
+ *   ├──── TCP Connect ─────────►│
  *   │                            │
  *   ├──── REG ─────────────────►│  [name][instance_id]
  *   │                            │
@@ -974,7 +988,7 @@ typedef struct {
  *   │◄── ALV ───────────────────┤  (空 payload 确认)
  *   │                            │
  *
- * 2. 初始化会话同步（建立会话 + 首批候选同步）
+ * 2. 初始化会话同步（SYN0 = sid=0 初始化包）
  * ============================================================================
  *
  *   Client A                  Server
@@ -982,13 +996,10 @@ typedef struct {
  *   ├──── SYN0 ────────────────►│  [target][cnt=5][cands]
  *   │                            │  查找 B 的状态
  *   │                            │  分配 session_id
- *   │◄── SYN0 ──────────────────┤  [target][sid][state=0x00]
- *   │   (状态 2: 建会应答)       │
+ *   │◄── SYN0 ──────────────────┤  [peer=B][session_id][cnt=5]
+ *   │   (online 态 SYN0，携带 sid=0 初始化候选) │
  *   │                            │
- *   │◄── SYNC ──────────────────┤  [sid][fwd=5]
- *   │ (状态 3: 首批候选处理确认) │  返回首批候选处理数
- *   │                            │
- *   [收到 session_id，可继续上传] 
+ *   [收到 session_id 与 sid=0 候选，可继续上传 sid>=1] 
  *
  * 3. 后续会话同步（对端在线，实时转发）
  * ============================================================================
@@ -997,15 +1008,8 @@ typedef struct {
  *   │                               │                              │
  *   ├────── SYN0 ─────────────────►│  [target=B][cnt=5]           │
  *   │                               │  B 在线，分配 sid=123        │
- *   │◄──── SYN0 ───────────────────┤ [target=B][sid=123][state=0x00]│
- *   │   (状态 2: 建会应答)          │                              │
- *   │                               │                              │
- *   │                               ├────── SYNC ────────────────►│
- *   │                               │   [sid=456][cnt=5]           │
- *   │                               │   (A 的 5 个候选)            │
- *   │                               │                              │
- *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=5]            │
- *   │   (状态 3: SYN0 首批候选确认) │                              │
+ *   │◄──── SYN0 ───────────────────┤ [peer=B][session_id=123][cnt=5]│
+ *   │   (online 态 SYN0，携带 sid=0 初始化候选) │                  │
  *   │                               │                              │
  *   ├────── SYNC ─────────────────►│  [sid=123][cnt=5]            │
  *   │   (上传剩余 5 个候选)         │  立即转发给 B                │
@@ -1041,20 +1045,20 @@ typedef struct {
  *   │                               │                              │
  *   ├────── SYN0 ─────────────────►│  [target=B][cnt=5]           │
  *   │                               │  B 离线                      │
- *   │◄──── SYN0 ───────────────────┤ [target=B][sid=123][state=0xFF]|
- *   │ (状态 2: 建会应答，B 当前离线)│                              │
+ *   │◄──── SYN0 ───────────────────┤ [peer=B][session_id=123][offline]|
+ *   │ (offline 态 SYN0，B 当前离线) │                              │
  *   │                               │                              │
  *   ├────── SYNC ─────────────────►│  [sid=123][cnt=5]            │
  *   │   (上传 5 个候选)             │  尝试缓存                    │
  *   │                               │  [缓冲区空间有限]            │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=3]            │
- *   │   (状态 3: 仅缓存了 3 个)     │  有空间才回确认              │
+ *   │   (confirm: 仅缓存/转发了 3 个)│  有空间才回确认             │
  *   │                               │                              │
  *   ├────── SYNC ─────────────────►│  [sid=123][cnt=2]            │
  *   │   (从第 4 个重传)             │  继续缓存                    │
  *   │                               │                              │
  *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=2]            │
- *   │ (状态 3: 再缓存 2 个，空间满) │  暂不确认，等空间            │
+ *   │ (confirm: 再缓存 2 个，空间满) │  暂不确认，等空间           │
  *   │   [buffer full, no confirm]   │                              │
  *   │                               │                              │
  *   [等待对端上线...]               │                              │
@@ -1064,18 +1068,11 @@ typedef struct {
  *   │                               ├──────── REG ───────────────►│
  *   │                               │                              │
  *   │                               │◄────── SYN0 ────────────────┤  [target=A][cnt=3]
- *   │                               ├──────── SYN0 ──────────────►│  [target=A][sid=456][state=0x00]
+ *   │                               ├──────── SYN0 ──────────────►│  [peer=A][session_id=456][cnt=3]
+ *   │                               │ (online 态 SYN0，携带 sid=0 初始化候选) │
  *   │                               │                              │
- *   │                               ├──────── SYNC ──────────────►│
- *   │                               │   [sid=456][cnt=3]           │
- *   │                               │   (推送 A 其余候选)          │
- *   │                               │                              │
- *   │                               ├──────── SYNC ──────────────►│
- *   │                               │  [sid=456][cnt=0][fin=0xFF]  │
- *   │                               │  (A 候选推送完成)            │
- *   │                               │                              │
- *   │◄──── SYNC ───────────────────┤  [sid=123][fwd=5]            │
- *   │ (状态 3: 对端上线后补回首批)  │  有空间才回确认              │
+ *   │◄──── SYN0 ───────────────────┤  [peer=B][session_id=123][cnt=5] │
+ *   │ (对端上线后补发 online 态 SYN0，携带缓存的 sid=0 候选) │      │
  *   │                               │                              │
  *   ├────── SYNC ─────────────────►│  [sid=123][cnt=2]            │
  *   │   (继续上传剩余候选)          │  B 在线，实时转发            │
@@ -1215,24 +1212,40 @@ typedef struct {
  * - 每条消息以 '\n' 结尾（作为消息结束标识；接收方可将 msg[len-1] 置 '\0' 后按 C 字符串处理）
  * - SYNC/SYN0/SDP 消息中第一个 '\n' 分隔头部字段与 payload
  * - peer_id: UTF-8 字符串，最长 P2P_PEER_ID_MAX-1 字节（不含 NUL）
- * - session_id: uint32 十进制 ASCII 表示
+ * - session_id: 8 位 16 进制 ASCII 表示（如 1A2B3C4D，4 字节，零拷贝友好）
 */
 
-/* WSS 消息类型前缀（纯文本匹配，非二进制编码） */
+/* WSS 消息类型前缀（纯文本匹配，非二进制编码）
+ * 2026-05-17: WSS SYNC/CONFIRM 协议重设计，完全对齐 relay：
+ *   0. SYN0 可视作 sid=0 的首个 sync 包；sid=0 固定，因此在 SYN0 线协议中省略传输。
+ *      后续真实 SYNC 的 sid_hex 从 01 起始，循环递增。
+ *      注意：SYN0 自身不携带结束语义，因此不是最后一个 SYNC 包。
+ *      这也意味着，在 sid=0 的 SYN0 之后，至少还会有一个 sid_hex>=01 的真实 SYNC 包；
+ *      即使没有更多候选，也应由后续 SYNC 显式给出结束语义（例如发送 ICE_DONE）。
+ *   1. 每个 SYNC 包都独立确认（confirm），不再归并累计字节量，无 confirm <bytes> 语法。
+ *   2. <session_id> 字段统一为 8 位 16 进制（4 字节，零拷贝友好，便于 relay/wss 统一转发）。
+ *   3. SYNC/CONFIRM 均带 sid_hex 字段，格式与 relay 完全一致，支持安全的同步中断重连。
+ *   4. 文本协议示例：
+ *        "SYNC <session_id_hex> <sid_hex>\n<payload>\n"
+ *        "SYNC <session_id_hex> <sid_hex> confirm\n"
+ *        "SYNC <session_id_hex> <sid_hex> busy\n"
+ *      其中 session_id_hex 固定 8 位 16 进制（如 1A2B3C4D），sid_hex 固定 2 位 16 进制（如 AF）。
+ *   5. 兼容说明：原 confirm <bytes> 语法废弃，所有确认均为一包一 confirm。
+ */
 #define P2P_WSS_CMD_REG         "REG "          /* + <peer_id> <instance_id>\n */                                      // 注册身份
 #define P2P_WSS_CMD_OFF         "OFF"           /* OFF\n */                                                            // 主动下线（立即释放资源）
 #define P2P_WSS_CMD_SDP         "SDP "          /* + <remote_peer_id>\n<sdp> */                                        // 基于 peer_id 的 SDP 文本转发（不依赖会话）
 #define P2P_WSS_CMD_SYN0        "SYN0 "         /* + <remote_peer_id>\n  或  <remote_peer_id>\n<payload>\n */          // 创建/恢复会话（可选预缓存负载）
-#define P2P_WSS_CMD_SYNC        "SYNC "         /* + <session_id>\n<payload>\n */                                      // 同步数据 (C2S & S2C)
-#define P2P_WSS_CMD_FIN         "FIN "          /* + <session_id>\n */                                                 // 会话结束 (C2S & S2C)
+#define P2P_WSS_CMD_SYNC        "SYNC "         /* + <session_id_hex> <sid_hex>\n<payload>\n */                        // 同步数据 (C2S & S2C)
+#define P2P_WSS_CMD_FIN         "FIN "          /* + <session_id_hex>\n */                                             // 会话结束 (C2S & S2C)
 
 #define P2P_WSS_RSP_REG_OK      "REG OK "       /* + <sync_max> <features>\n */           // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
 #define P2P_WSS_RSP_REG_FAIL    "REG FAIL "     /* + <reason>\n */
 #define P2P_WSS_RSP_SDP_OK      "SDP OK "       /* + <remote_peer_id>\n */
 #define P2P_WSS_RSP_SDP_FAIL    "SDP FAIL "     /* + <remote_peer_id> <reason>\n */
-#define P2P_WSS_RSP_SYN0        "SYN0 "         /* + <peer_id> <session_id> online\n|offline\n|busy\n */
+#define P2P_WSS_RSP_SYN0        "SYN0 "         /* + <peer_id> <session_id_hex> online\n[<payload>\n]|offline\n */
 #define P2P_WSS_RSP_SYN0_FAIL   "SYN0 FAIL "    /* + <reason>\n */
-#define P2P_WSS_RSP_SYNC        "SYNC "         /* + <session_id> confirm <bytes>\n|busy\n  (S2C 响应) */
+#define P2P_WSS_RSP_SYNC        "SYNC "         /* + <session_id_hex> <sid_hex> confirm\n|busy\n  (S2C 响应) */
 
 /* SYNC payload 子类型前缀（应用层约定，服务器透传） */
 #define P2P_WSS_PAY_ICE          "ICE\n"        /* + <candidate_line> */
@@ -1276,8 +1289,8 @@ typedef struct {
  *   3. peer_id 匹配 + instance_id 相同（不同 cid，网络重连）:
  *      - 踢掉旧 WS 连接（ws_server_disconnect, code=1000）
  *      - 复用 wss_client_t，更新 cid，保留所有会话
- *      - 遍历已配对会话，向所有在线对端推送 "SYN0 <peer_id> <peer_session_id> online\n"
- *      - 向本端推送所有在线对端的 "SYN0 <remote_peer_id> <session_id> online\n"
+ *      - 遍历已配对会话，向所有在线对端推送 "SYN0 <peer_id> <peer_session_id_hex> online\n"
+ *      - 向本端推送所有在线对端的 "SYN0 <remote_peer_id> <session_id_hex> online\n"
  *      - 返回 "REG OK <sync_max>\n"
  *   4. peer_id 匹配 + instance_id 不同（客户端重启）:
  *      - 销毁旧 client 及其所有会话（通知对端 FIN）
@@ -1304,12 +1317,10 @@ typedef struct {
 #define P2P_WSS_CMD_REG_SZ          (sizeof(P2P_WSS_CMD_REG) - 1u)      /* "REG " */
 #define P2P_WSS_CMD_REG_FMT         P2P_WSS_CMD_REG "%s %u\n"           /* "REG <peer_id> <instance_id>\n" */
 
-
 #define P2P_WSS_RSP_REG_OK_SZ       (sizeof(P2P_WSS_RSP_REG_OK) - 1u)   /* "REG OK " */
 #define P2P_WSS_RSP_REG_OK_FMT      P2P_WSS_RSP_REG_OK "%u %u\n"        /* "REG OK <sync_max> <features>\n" */
 #define P2P_WSS_RSP_REG_FAIL_SZ     (sizeof(P2P_WSS_RSP_REG_FAIL) - 1u) /* "REG FAIL " */
 #define P2P_WSS_RSP_REG_FAIL_FMT    P2P_WSS_RSP_REG_FAIL "%s\n"         /* "REG FAIL <reason>\n" */
-
 /* ────────────────────────────────────────────────────────────────────────────
  * OFF — 主动下线（客户端 → 服务器）
  * ────────────────────────────────────────────────────────────────────────────
@@ -1366,15 +1377,15 @@ typedef struct {
  *   (bob 收到)
  *   ← "SDP alice_device_01\nv=0\no=- 123 2 IN IP4 127.0.0.1\n..."
  */
-#define P2P_WSS_CMD_SDP_SZ              (sizeof(P2P_WSS_CMD_SDP) - 1u)             /* "SDP " */
-#define P2P_WSS_CMD_SDP_FMT             P2P_WSS_CMD_SDP "%s\n"                     /* "SDP <remote_peer_id>\n<sdp>" 头部 */
+#define P2P_WSS_CMD_SDP_SZ              (sizeof(P2P_WSS_CMD_SDP) - 1u)              /* "SDP " */
+#define P2P_WSS_CMD_SDP_FMT             P2P_WSS_CMD_SDP "%s\n"                      /* "SDP <remote_peer_id>\n<sdp>" 头部 */
 
 #define P2P_WSS_RSP_SDP_OK_SZ           (sizeof(P2P_WSS_RSP_SDP_OK) - 1u)           /* "SDP OK " */
-#define P2P_WSS_RSP_SDP_OK_FMT          P2P_WSS_RSP_SDP_OK "%s\n"                  /* "SDP OK <remote_peer_id>\n" */
+#define P2P_WSS_RSP_SDP_OK_FMT          P2P_WSS_RSP_SDP_OK "%s\n"                   /* "SDP OK <remote_peer_id>\n" */
 #define P2P_WSS_RSP_SDP_FAIL_SZ         (sizeof(P2P_WSS_RSP_SDP_FAIL) - 1u)         /* "SDP FAIL " */
-#define P2P_WSS_RSP_SDP_FAIL_FMT        P2P_WSS_RSP_SDP_FAIL "%s %s\n"             /* "SDP FAIL <remote_peer_id> <reason>\n" */
+#define P2P_WSS_RSP_SDP_FAIL_FMT        P2P_WSS_RSP_SDP_FAIL "%s %s\n"              /* "SDP FAIL <remote_peer_id> <reason>\n" */
 /* ────────────────────────────────────────────────────────────────────────────
- * SYN0 — 创建/恢复会话（客户端 → 服务器）
+ * SYN0 — 创建/恢复会话（客户端 → 服务器 & 服务器 → 客户端）
  * ────────────────────────────────────────────────────────────────────────────
  *
  * 格式: "SYN0 <remote_peer_id>\n"
@@ -1383,9 +1394,11 @@ typedef struct {
  *   - payload: 可选，预缓存的 ICE 候选数据（对端离线时服务器缓存，上线后转发）
  *     最大长度由 REG OK 返回的 sync_max 决定（不含 NUL）
  *
- * 功能: 创建与指定对端的信令会话，建立 session_pair_t 双向配对。
- *       类似 RELAY P2P_RLY_SYN0 / COMPACT SIG_PKT_SYN0。
- *       可选携带首批 ICE 候选作为预缓存负载（类似 RELAY SYN0 的 peer_send）。
+ * 功能: 创建与指定对端的信令同步会话，建立 session_pair_t 双向配对。
+ *       可选携带首批 ICE 候选作为预缓存负载（类似 RELAY SYN0 的 peer_send）
+ *       SYN0 可视作 sid=0 的初始化同步包；后续真实 SYNC 从 sid_hex=01 开始。
+ *       SYN0 自身不携带结束语义，因此不是最后一个 SYNC 包；即使没有更多候选，
+ *       也应由后续真实 SYNC 明确结束本轮同步（例如发送一个 ICE_DONE）。
  *
  * 前置条件: 发送方必须已 REG 注册，否则返回 "REG FAIL not registered\n"
  *
@@ -1393,197 +1406,120 @@ typedef struct {
  *   1. remote_peer_id 为空 → 返回 "SYN0 FAIL empty peer_id\n"
  *   2. 已有到该对端的活跃会话（session_pair 中已存在）:
  *      a. 对端标记已死亡（peer == -1）→ 清除标记，尝试重新配对
- *      b. 追加本端预缓存负载（超出 sync_max 则返回 busy）
+ *      b. 追加本端预缓存负载（超出 sync_max 则返回 FAIL）
  *      c. 对端在线 → 交换双方缓存
- *         - 向本端发送 "SYN0 <remote_peer_id> <session_id> online\n"
- *         - 向对端发送 "SYN0 <local_peer_id> <peer_session_id> online\n"
- *         - 若对端有预缓存，以 SYNC 流式帧投递给本端，并向对端回复 "SYNC <ses_id> confirm <bytes>\n"
- *         - 若本端有预缓存，以 SYNC 流式帧投递给对端，并向本端回复 "SYNC <ses_id> confirm <bytes>\n"
- *      d. 对端离线 → 返回 "SYN0 <remote_peer_id> <session_id> offline\n"
- *      e. payload 超出缓存可用空间 → 追加返回 "SYN0 ... busy\n"
+ *         - 向本端发送 "SYN0 <remote_peer_id> <session_id_hex> online\n[<payload>\n]"
+ *         - 向对端发送 "SYN0 <local_peer_id> <peer_session_id_hex> online\n[<payload>\n]"
+ *         - 若对端有预缓存，则直接拼接在发给本端的 SYN0 online 之后一起下发
+ *         - 若本端有预缓存，则直接拼接在发给对端的 SYN0 online 之后一起下发
+ *      d. 对端离线 → 返回 "SYN0 <remote_peer_id> <session_id_hex> offline\n"
+ *      e. payload 超出 sync_max → 返回 "SYN0 FAIL too large\n"
  *   3. 无已有会话 → 调用 build_session() 创建:
  *      a. 创建 wss_session_t，分配 session_id
  *      b. 查找 session_pair（双向 key），已有则配对
  *      c. 对端已创建会话且未死亡 → 双向配对（peer 指针互指）
- *      d. 追加本端 payload（超出 sync_max 则 busy）
- *      e. 若配对成功且对端在线 → 交换双方缓存 + 发送 confirm（同 2c）
- *      f. 否则返回 "SYN0 <remote_peer_id> <session_id> offline\n"
+ *      d. 追加本端 payload（超出 sync_max 则 FAIL）
+ *      e. 若配对成功且对端在线 → 交换双方缓存；缓存负载直接随 SYN0 online 一起下发
+ *      f. 否则返回 "SYN0 <remote_peer_id> <session_id_hex> offline\n"
  *   4. build_session 失败 → 返回 "SYN0 FAIL internal\n"
  *
- * 响应 (S2C 与推送统一格式):
- *   "SYN0 <remote_peer_id> <session_id> online\n"
- *     — 会话已建立，对端已注册且 WS 连接有效
- *     — session_id: uint32 十进制（由 generate_session_id() 分配）
- *     — 对端有预缓存时，随即以 SYNC 流式帧发送（参见 SYNC 协议）
+ * 服务器 → 客户端语义（统一看作 SYN0 的 S2C 三态）:
+ *   SYN0 在 C2S 方向是 “发起/恢复会话” 的请求；
+ *   在 S2C 方向统一是“应答/通知会话状态 + 返回 session_id_hex”。
  *
- *   "SYN0 <remote_peer_id> <session_id> offline\n"
- *     — 会话已建立，对端未注册或 WS 已断开
- *     — 本端 payload 已缓存，会话保留在服务端，对端上线时自动转发
+ *   1. "SYN0 <remote_peer_id> <session_id_hex> offline\n"
+ *      — 会话已建立，但对端当前未在线
+ *      — 本端 payload 已缓存；对端上线后，服务器会再发送对应的 online 通知
+ *      — 因此 offline 不是与 online 并列的终态，而是“尚未 online”的中间态
  *
- *   "SYN0 <remote_peer_id> <session_id> confirm <confirmed_bytes>\n"
- *     — 预缓存负载已转发至对端，confirmed_bytes 为转发字节数（不含 NUL）
- *     — 客户端可据此计算剩余缓存空间: remaining = sync_max - (sent - confirmed)
+ *   2. "SYN0 <remote_peer_id> <session_id_hex> online\n"
+ *      "SYN0 <remote_peer_id> <session_id_hex> online\n<payload>\n"
+ *      — 会话建立完成，对端已在线
+ *      — session_id_hex: 固定 8 位 16 进制 ASCII（如 0000002A，由 generate_session_id() 分配）
+ *      — 可视作 sid=0 的首个 sync 包：若已有预缓存 payload，则直接附着在本次 SYN0 online 应答/通知内
+ *      — 这可以有两种到达时机，但语义相同：
+ *        a. 对端本来就在线：作为本次 SYN0 的直接应答返回
+ *        b. 对端当时离线：先返回 offline；待对端后续上线后，再补发一个 online 通知
+ *      — 若本包携带 payload，客户端应将其按 sid=0 的初始化数据处理；后续真实 SYNC 从 sid_hex=01 开始
  *
- *   "SYN0 <remote_peer_id> <session_id> busy\n"
- *     — 本次 payload 超出服务器缓存可用空间（sync_max），未被接受
- *     — 客户端应等待 SYNC confirm（缓存空间释放）后重试
- *
- *   "SYN0 FAIL <reason>\n"
- *     — 会话创建失败
- *     reason: "empty peer_id"   — remote_peer_id 为空
- *             "internal"        — build_session 内部错误（OOM / 重复创建）
- *             "not registered"  — 发送方未 REG（返回 "REG FAIL not registered\n"）
+ *   3. "SYN0 FAIL <reason>\n"
+ *      — 会话创建失败，未进入会话态
+ *      — reason: "empty peer_id"   — remote_peer_id 为空
+ *                "internal"        — build_session 内部错误（OOM / 重复创建）
+ *                "too large"       — payload 超出 sync_max 上限，服务器直接拒绝
+ *                "not registered"  — 发送方未 REG（返回 "REG FAIL not registered\n"）
  *
  * 示例:
  *   → "SYN0 bob_device_02\n"
- *   ← "SYN0 bob_device_02 42 offline\n"
+ *   ← "SYN0 bob_device_02 0000002A offline\n"
  *
  *   → "SYN0 bob_device_02\nICE\na=candidate:1 1 udp ...\n"
- *   ← "SYN0 bob_device_02 42 offline\n"              (负载已缓存)
+ *   ← "SYN0 bob_device_02 0000002A offline\n"        (负载已缓存)
  *
  *   (bob 随后也发 SYN0)
  *   → "SYN0 alice_device_01\nICE\na=candidate:2 1 udp ...\n"      (bob 发送)
- *   ← "SYN0 alice_device_01 43 online\n"  (bob 收到，随即收到 alice 的缓存 SYNC 流)
- *   ← "SYNC 43\nICE\na=candidate:1 1 udp ...\n"  (SYNC 帧, bob 收到 alice 缓存)
- *   ← "SYNC 43\n\n"                               (fin mark)
- *   ← "SYNC 43 confirm 52\n"                      (bob 收到，缓存已转发确认)
- *   ← "SYN0 bob_device_02 42 online\n"  (alice 收到，随即收到 bob 的缓存 SYNC 流)
- *   ← "SYNC 42\nICE\na=candidate:2 1 udp ...\n"  (SYNC 帧, alice 收到 bob 缓存)
- *   ← "SYNC 42\n\n"                               (fin mark)
- *   ← "SYNC 42 confirm 48\n"                      (alice 收到，缓存已转发确认)
+ *   ← "SYN0 alice_device_01 0000002B online\nICE\na=candidate:1 1 udp ...\n"
+ *                                            (bob 收到 alice 的 sid=0 初始化 payload)
+ *   ← "SYN0 bob_device_02 0000002A online\nICE\na=candidate:2 1 udp ...\n"
+ *                                            (alice 收到 bob 的 sid=0 初始化 payload)
  *
- *   → "SYN0 bob_device_02\nICE\n...\n"       (alice 再次追加，缓存已满)
- *   ← "SYN0 bob_device_02 42 busy\n"         (超出 sync_max)
- */
+ *   → "SYN0 bob_device_02\nICE\n...\n"       (alice 再次追加，payload 超出 sync_max)
+ *   ← "SYN0 FAIL too large\n"
 
-/* ────────────────────────────────────────────────────────────────────────────
- * SYN0 推送 — 对端上线通知（服务器 → 客户端，S2C 方向）
- * ────────────────────────────────────────────────────────────────────────────
- *
- * 格式: "SYN0 <peer_id> <session_id> online\n"
- *       "SYN0 <peer_id> <session_id> online\n<payload>\n"   （携带对端预缓存负载）
- *   - peer_id: 对端 peer_id
- *   - session_id: 接收方自己的 session_id（uint32 十进制）
- *   - payload: 可选，对端此前 SYN0 中缓存的负载（存在时紧跟 \n 后）
- *
- * 功能: 通知客户端某个已配对对端上线，应发起/重新发起 ICE 候选交换。
- *       与 RELAY 一致：SYN0 在 C2S 方向为会话请求（无 session_id），
- *       在 S2C 方向为应答/推送（服务器插入 session_id）。
- *       应答与推送统一格式，客户端无需区分，统一处理即可。
- *       若对端此前 SYN0 时携带了 payload 且尚未被消费，则以 SYNC 流式帧转发。
- *
- * 触发时机（服务器主动推送，无需客户端请求）:
- *   1. 对端 REG 注册/重连成功 → 遍历其所有已配对会话，
- *      向每个在线对端推送 "SYN0 <reconnected_peer_id> <my_session_id> online\n",
- *      同时向重连方推送所有在线对端的 "SYN0 <peer_id> <my_session_id> online\n"
- *      若任一方有预缓存负载被转发，则以 SYNC 流式帧投递，并回复 "SYNC <ses_id> confirm <bytes>\n"
- *   2. 本端 SYN0 创建会话时对端已在线 → 双向交换缓存（同上）
- *
- * 客户端处理:
- *   收到 "SYN0 <peer_id> <session_id> online\n" 后应：
+ * 客户端处理（统一适用于 direct online 应答和 deferred online 通知）:
+ *   收到 "SYN0 <peer_id> <session_id_hex> online\n" 或
+ *        "SYN0 <peer_id> <session_id_hex> online\n<payload>\n" 后应：
  *   1. 根据 session_id 查找/创建本地 session
- *   2. 若紧随其后收到 SYNC 帧，处理对端预缓存的 ICE 候选
- *   3. 通过 SYNC 发送 ICE 候选发起候选交换
+ *   2. 若 SYN0 自身携带 payload，则按 sid=0 的初始化数据处理该批候选
+ *   3. 通过 SYNC 发送 ICE 候选，发起或继续双方对等的候选交换
  *   4. 若此前已有候选交换（重连场景），应重新收集并发送
  *
+ * 触发来源（对客户端来说无需区分）:
+ *   1. 本端发送 SYN0 时对端已在线 → 直接收到 online 应答
+ *   2. 本端发送 SYN0 时对端离线 → 先收到 offline；对端后续 REG/重连成功后，再收到 online 通知
+ *   3. 任一方若有 SYN0 预缓存 payload，则直接附着在该次 online SYN0 内一起下发
+ *
  * 示例:
- *   ← "SYN0 bob_device_02 42 online\n"
- *   (客户端随后发起 ICE 候选交换)
- *   → "SYNC 42\nICE\na=candidate:...\n"
+ *   ← "SYN0 bob_device_02 0000002A online\n"
+ *   (客户端随后发起或继续 ICE 候选交换)
+ *   → "SYNC 0000002A 2A\nICE\na=candidate:...\n"
  */
 #define P2P_WSS_CMD_SYN0_SZ             (sizeof(P2P_WSS_CMD_SYN0) - 1u)            /* "SYN0 " */
 #define P2P_WSS_CMD_SYN0_FMT            P2P_WSS_CMD_SYN0 "%s\n"                    /* "SYN0 <remote_peer_id>\n" */
 
 #define P2P_WSS_RSP_SYN0_SZ             (sizeof(P2P_WSS_RSP_SYN0) - 1u)            /* "SYN0 " */
-#define P2P_WSS_RSP_SYN0_REG_FMT        P2P_WSS_RSP_SYN0 "%s %u online\n"          /* "SYN0 <peer_id> <session_id> online\n" */
-#define P2P_WSS_RSP_SYN0_OFF_FMT        P2P_WSS_RSP_SYN0 "%s %u offline\n"         /* "SYN0 <peer_id> <session_id> offline\n" */
-#define P2P_WSS_RSP_SYN0_BUSY_FMT       P2P_WSS_RSP_SYN0 "%s %u busy\n"            /* "SYN0 <peer_id> <session_id> busy\n" */
-
+#define P2P_WSS_RSP_SYN0_REG_FMT        P2P_WSS_RSP_SYN0 "%s %08X online\n"        /* "SYN0 <peer_id> <session_id_hex> online\n" */
+#define P2P_WSS_RSP_SYN0_OFF_FMT        P2P_WSS_RSP_SYN0 "%s %08X offline\n"       /* "SYN0 <peer_id> <session_id_hex> offline\n" */
 #define P2P_WSS_RSP_SYN0_FAIL_SZ        (sizeof(P2P_WSS_RSP_SYN0_FAIL) - 1u)       /* "SYN0 FAIL " */
 #define P2P_WSS_RSP_SYN0_FAIL_FMT       P2P_WSS_RSP_SYN0_FAIL "%s\n"               /* "SYN0 FAIL <reason>\n" */
 
 /* ────────────────────────────────────────────────────────────────────────────
- * SYNC — 同步数据交换（双向：客户端 ↔ 服务器）
+ * SYNC — 会话数据同步（客户端 ↔ 服务器 ↔ 客户端）
  * ────────────────────────────────────────────────────────────────────────────
  *
- * 格式: "SYNC <session_id>\n<payload>\n"
- *   - session_id: 发送方的 session_id（由 SYN0 分配，uint32 十进制）
- *   - payload: 任意文本（可含换行符），服务器透传不解析
+ * 格式:
+ *   → "SYNC <session_id_hex> <sid_hex>\n<payload>\n"      // 客户端/服务器 → 服务器/客户端
+ *   ← "SYNC <session_id_hex> <sid_hex> confirm\n"         // 服务器/客户端 → 客户端/服务器
+ *   ← "SYNC <session_id_hex> <sid_hex> busy\n"            // 仅服务器 → 客户端
+ *   - session_id_hex: 8 位 16 进制（4 字节，零拷贝友好）
+ *   - sid_hex: 2 位 16 进制（1 字节，完全对齐 relay，必须为16进制，如 AF）
+ *   - payload: ICE 候选等同步数据
  *
- * 功能: 通过会话路由向对端同步 ICE 候选。
- *       类似 RELAY P2P_RLY_SYNC：服务器按 session_id 查找配对会话，
- *       将 session_id 重写为对端的 session_id 后原样投递。
- *       因为服务端自身维护了 session，不需要交换 SDP，只需交换 ICE 候选行。
- *       SYNC 与 SYN0 共享 pending_sync 缓存空间（受 sync_max 限制）。
+ * 语义：
+ *   - 每个 SYNC 包都独立确认（confirm）
+ *   - confirm 必须带 sid_hex，便于断点续传和安全重连。
+ *   - busy 仅由服务器返回，表示服务器缓存区满，客户端需等待后重试。
  *
- * 前置条件: 发送方必须已 REG 注册，且已通过 SYN0 建立会话
- *
- * 服务端处理:
- *   1. 发送方未注册 → 返回 "REG FAIL not registered\n"
- *   2. session_id 无效（查不到或不属于该 client）→ 静默丢弃
- *   3. 对端在线 → 立即以流式帧转发:
- *      - 重写 session_id 为对端的 session_id
- *      - 每行 payload 单独发送一帧: "SYNC <peer_session_id>\n<line>"
- *        （\n 作为行分隔符，每个 WebSocket 文本帧携带一行）
- *      - 发送完所有行后追加 fin mark 帧: "SYNC <peer_session_id>\n\n"
- *        （空行表示本批次流式传输结束）
- *      - 向发送方返回 "SYNC <session_id> confirm <bytes>\n"（bytes = payload 字节数）
- *   4. 对端离线 → 追加缓存到 pending_sync（与 SYN0 共享缓存空间）:
- *      - 缓存成功 → 静默（对端上线后通过 SYN0 online + 流式 SYNC 帧转发 + SYNC confirm）
- *      - 缓存已满（超出 sync_max）→ 返回 "SYNC <session_id> busy\n"
- *
- * 响应 (S2C):
- *   流式传输格式（服务端转发 payload 时，每行一帧，最后一帧为 fin mark）:
- *
- *   "SYNC <session_id>\n<line>"
- *     — 对端同步数据，单行（session_id 已重写为接收方的 session_id）
- *     — 每个 WebSocket 文本帧携带一行内容（行内不含 \n）
- *     — 接收方按行累积，直到收到 fin mark 为止
- *
- *   "SYNC <session_id>\n\n"
- *     — fin mark：空行，表示本批次流式传输结束
- *
- *   "SYNC <session_id> confirm <confirmed_bytes>\n"
- *     — 同步数据已转发至对端，confirmed_bytes 为转发字节数（不含 NUL）
- *     — 客户端可据此计算剩余缓存空间: remaining = sync_max - (sent - confirmed)
- *
- *   "SYNC <session_id> busy\n"
- *     — 服务器同步缓存空间不足（超出 sync_max），payload 未被接受
- *     — 客户端应等待 confirm（缓存空间释放）后重试
- *
- * payload 子类型（应用层约定，服务器透传）:
- *
- *   "ICE\n<candidate_line>"
- *     ICE 候选行：单个候选（逐条上报，类似 RELAY SYNC trickle）。
- *     candidate_line 格式:
- *       a=candidate:<foundation> <component> <transport> <priority> <addr> <port> typ <type> [raddr <raddr> rport <rport>]
- *
- *   "ICE_DONE"
- *     候选收集完成通知（所有候选均已通过 ICE trickle 发送）。
- *
- * 示例（alice sid=42, bob sid=43）:
- *   → "SYNC 42\nICE\na=candidate:1 1 udp 2130706431 192.168.1.100 12345 typ host\n"
- *   ← "SYNC 42 confirm 67\n"
- *   (bob 收到两帧 →)
- *     帧1: "SYNC 43\nICE"
- *     帧2: "SYNC 43\na=candidate:1 1 udp 2130706431 192.168.1.100 12345 typ host"
- *     帧3 (fin): "SYNC 43\n\n"
- *
- *   → "SYNC 42\nICE_DONE\n"
- *   ← "SYNC 42 confirm 8\n"
- *   (bob 收到两帧 →)
- *     帧1: "SYNC 43\nICE_DONE"
- *     帧2 (fin): "SYNC 43\n\n"
- *
- *   → "SYNC 42\nICE\n...\n"    (bob 离线，缓存到 pending_sync)
- *   (no confirm; when peer comes online, delivered via SYN0 + SYNC stream + SYNC confirm)
+ * 示例：
+ *   → "SYNC 1A2B3C4D AF\nICE candidate:...\n"   // 1A2B3C4D 和 AF 都是16进制
+ *   ← "SYNC 1A2B3C4D AF confirm\n"
+ *   ← "SYNC 1A2B3C4D AF busy\n"
  */
 #define P2P_WSS_CMD_SYNC_SZ             (sizeof(P2P_WSS_CMD_SYNC) - 1u)         /* "SYNC " */
-#define P2P_WSS_CMD_SYNC_FMT            P2P_WSS_CMD_SYNC "%u\n"                 /* "SYNC <session_id>\n" */
+#define P2P_WSS_CMD_SYNC_FMT            P2P_WSS_CMD_SYNC "%08X %02X\n"          /* "SYNC <session_id_hex> <sid_hex>\n" 8位16进制+2位16进制 */
+#define P2P_WSS_RSP_SYNC_CONFIRM_FMT    P2P_WSS_RSP_SYNC "%08X %02X confirm\n"  /* "SYNC <session_id_hex> <sid_hex> confirm\n" */
+#define P2P_WSS_RSP_SYNC_BUSY_FMT       P2P_WSS_RSP_SYNC "%08X %02X busy\n"     /* "SYNC <session_id_hex> <sid_hex> busy\n" */
 
-#define P2P_WSS_RSP_SYNC_SZ             (sizeof(P2P_WSS_RSP_SYNC) - 1u)         /* "SYNC " */
-#define P2P_WSS_RSP_SYNC_CONFIRM_FMT    P2P_WSS_RSP_SYNC "%u confirm %zu\n"     /* "SYNC <session_id> confirm <bytes>\n" */
-#define P2P_WSS_RSP_SYNC_BUSY_FMT       P2P_WSS_RSP_SYNC "%u busy\n"            /* "SYNC <session_id> busy\n" */
 /* ────────────────────────────────────────────────────────────────────────────
  * FIN — 会话结束（双向：C2S + S2C）
  * ────────────────────────────────────────────────────────────────────────────
@@ -1733,9 +1669,9 @@ typedef struct {
  *   │                                │  pair 创建，side=0             │
  *   │                                │  remote_s=NULL (bob 未注册)    │
  *   │                                │  缓存 alice 的 payload         │
- *   │◄── "SYN0 bob 42 offline\n" ───┤                                │
+ *   │◄── "SYN0 bob 0000002A offline\n" ───┤                          │
  *   │                                │                                │
- *   [等待 SYN0 bob 42 online]        │                                │
+ *   [等待 SYN0 bob 0000002A online]  │                                │
  *
  * 3. 会话配对（对端上线 + 双向通知）
  * ────────────────────────────────────────────────────────────────────────────
@@ -1752,37 +1688,32 @@ typedef struct {
  *   │                                │  remote_s=alice's session      │
  *   │                                │  → 双向配对 + 交换缓存        │
  *   │                                │                                │
- *   │◄─ "SYN0 bob 42 online\n" ─────┤  (推送给 alice)
- *   │                                ├─ "SYN0 alice 43 online\n" ───►│  (应答给 bob)
- *   │◄─ "SYNC 42\nICE\n...\n" ──────┤  (bob 的缓存 SYNC 流)
- *   │◄─ "SYNC 42\n\n" ──────────────┤  (fin mark)
- *   │                                ├─ "SYNC 43\nICE\n...\n" ──────►│  (alice 的缓存 SYNC 流)
- *   │                                ├─ "SYNC 43\n\n" ──────────────►│  (fin mark)
- *   │◄─ "SYNC 42 confirm 52\n" ─────┤                                │  (alice 的缓存已转发)
- *   │                                ├─ "SYNC 43 confirm 48\n" ─────►│  (bob 的缓存已转发)
+ *   │◄─ "SYN0 bob 0000002A online\nICE\n...\n" ─┤  (推送给 alice, 含 bob 的 sid=0 payload)
+ *   │                                ├─ "SYN0 alice 0000002B online\nICE\n...\n" ─►│
+ *   │                                │   (应答给 bob, 含 alice 的 sid=0 payload)
  *   │                                │                                │
- *   [处理 bob 的缓存候选]            │ [处理 alice 的缓存候选]
+ *   [处理 bob 的 sid=0 候选]         │ [处理 alice 的 sid=0 候选]
  *
  * 4. 同步交换 ICE 候选（alice sid=42, bob sid=43）
  * ────────────────────────────────────────────────────────────────────────────
  *
  *   Alice                         Server                             Bob
  *   │                                │                                │
- *   ├──── "SYNC 42\nICE\n...\n" ───►│  sid=42 → 配对 → bob sid=43  │
- *   │◄── "SYNC 42 confirm 67\n" ────┤                                │
- *   │                                ├──── "SYNC 43\nICE\n...\n" ───►│
+ *   ├──── "SYNC 0000002A 2A\nICE\n...\n" ───►│ sid=2A → 配对 → bob sid=2B │
+ *   │◄── "SYNC 0000002A 2A confirm\n" ────┤                                │
+ *   │                                ├──── "SYNC 0000002B 2B\nICE\n...\n" ───►│
  *   │                                │                                │
- *   │                                │◄── "SYNC 43\nICE\n...\n" ─────┤
- *   │                                ├──── "SYNC 43 confirm 67\n" ──►│
- *   │◄── "SYNC 42\nICE\n...\n" ─────┤ sid=43 → 配对 → alice sid=42 │
+ *   │                                │◄── "SYNC 0000002B 2B\nICE\n...\n" ─────┤
+ *   │                                ├──── "SYNC 0000002B 2B confirm\n" ──►│
+ *   │◄── "SYNC 0000002A 2A\nICE\n...\n" ─────┤ sid=2B → 配对 → alice sid=2A │
  *   │                                │                                │
- *   ├──── "SYNC 42\nICE_DONE\n" ───►│                                │
- *   │◄── "SYNC 42 confirm 8\n" ─────┤                                │
- *   │                                ├──── "SYNC 43\nICE_DONE\n" ───►│
+ *   ├──── "SYNC 0000002A 2A\nICE_DONE\n" ───►│                        │
+ *   │◄── "SYNC 0000002A 2A confirm\n" ─────┤                        │
+ *   │                                ├──── "SYNC 0000002B 2B\nICE_DONE\n" ───►│
  *   │                                │                                │
- *   │                                │◄── "SYNC 43\nICE_DONE\n" ─────┤
- *   │                                ├──── "SYNC 43 confirm 8\n" ───►│
- *   │◄── "SYNC 42\nICE_DONE\n" ─────┤                                │
+ *   │                                │◄── "SYNC 0000002B 2B\nICE_DONE\n" ─────┤
+ *   │                                ├──── "SYNC 0000002B 2B confirm\n" ───►│
+ *   │◄── "SYNC 0000002A 2A\nICE_DONE\n" ─────┤                        │
  *   │                                │                                │
  *   │◄════════════════════════ P2P ICE 打洞 ═══════════════════════►│
  *
@@ -1805,18 +1736,12 @@ typedef struct {
  *   │                                ├── "REG OK <sync_max>\n" ─────►│
  *   │                                │                                │
  *   │                                │  遍历 bob 的已配对会话         │
- *   │                                │  推送 online，流式转发预缓存   │
- *   │◄── "SYN0 bob 42 online\n" ────┤                                │
- *   │◄── "SYNC 42\nICE\n...\n" ─────┤  (bob 的缓存，如有)            │
- *   │◄── "SYNC 42\n\n" ─────────────┤  (fin mark)                    │
- *   │                                ├── "SYN0 alice 43 online\n" ──►│
- *   │                                ├── "SYNC 43\nICE\n...\n" ─────►│  (alice 的缓存，如有)
- *   │                                ├── "SYNC 43\n\n" ─────────────►│  (fin mark)
- *   │◄── "SYNC 42 confirm N\n" ─────┤  (alice 的缓存已转发，如有)    │
- *   │                                ├── "SYNC 43 confirm M\n" ─────►│  (bob 的缓存已转发，如有)
+ *   │                                │  推送 online，并把预缓存直接附着在 SYN0 内 │
+ *   │◄── "SYN0 bob 0000002A online\nICE\n...\n" ─┤                 │
+ *   │                                ├── "SYN0 alice 0000002B online\nICE\n...\n" ►│
  *   │                                │                                │
  *       [重新发起 ICE 候选交换]      │    [重新发起 ICE 候选交换]
- *   ├── "SYNC 42\nICE\n...\n" ─────►│  ...
+ *   ├── "SYNC 0000002A 2A\nICE\n...\n" ─────►│  ...
  *
  * 6. 超时清理（离线过久，释放资源）
  * ────────────────────────────────────────────────────────────────────────────
