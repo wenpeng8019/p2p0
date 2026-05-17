@@ -235,7 +235,7 @@ static bool relay_session_send_rpc_code(relay_session_t *session, uint16_t sid, 
 // 对端 TCP 写入完成后的回调（通用，SYNC/PKT 通道均使用）
 // PKT：移出队头，队满→写完才发 READY，启动下一项
 // SYNC：TCP 写完但保留队头，将 refer 改为 REFER_ACK_PENDING 等待应用层 ACK
-static void relay_handle_peer_sent(ct_session_t *ct_session, buf16_item_t *buf_item) {
+static void relay_handle_peer_sent(ct_client_ctx_t *ctx, ct_session_t *ct_session, buf16_item_t *buf_item) { (void)ctx;
 
     assert(PEER_ONLINE(ct_session));
 
@@ -291,7 +291,7 @@ static void relay_ch_break_free(buffer_round_t *rq) {
 }
 
 // 停止/终止会话
-static void relay_session_break(ct_session_t *ct_session, ct_session_t *ct_peer, break_mode_e break_mode) {
+static void relay_session_break(ct_client_ctx_t *ctx, ct_session_t *ct_session, ct_session_t *ct_peer, break_mode_e break_mode) { (void)ctx;
 
     // 前提是双方在线
     assert(PEER_ONLINE(ct_session) && PEER_ONLINE(ct_peer));
@@ -879,9 +879,9 @@ static ret_t relay_resolve_payload_len(ct_client_t* client, uint8_t* hdr_buf, ui
     return E_NONE;
 }
 
-static buf16_item_t* relay_handle_handshake(ct_client_t **pclient, uint8_t* hdr_buf, uint16_t hdr_len,
-                                             buf16_item_t* payload0, buf16_item_t* payload1) {
-    ct_client_t *client = *pclient;
+static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t **t_client, uint8_t* hdr_buf, uint16_t hdr_len,
+                                             buf16_item_t* payload0, buf16_item_t* payload1) { (void)ctx;
+    ct_client_t *client = *t_client;
     assert(hdr_len == sizeof(p2p_relay_hdr_t));
     assert(!client->base.local_peer_id[0]);
 
@@ -937,7 +937,7 @@ static buf16_item_t* relay_handle_handshake(ct_client_t **pclient, uint8_t* hdr_
         // 如果 instance_id 一致（断网重连）
         if (resident_client(&reg->base, PROTO_RELAY, instance_id, &client->base)) {
 
-            *pclient = client = (ct_client_t*)reg;
+            *t_client = client = (ct_client_t*)reg;
 
             // SYNC/SYN0 的 ACK_PENDING 项：TCP 已写出但客户端未确认（连接已断无法确保到达）
             // 重置 refer 并重新入队，让新连接重新投递
@@ -987,8 +987,8 @@ static buf16_item_t* relay_handle_handshake(ct_client_t **pclient, uint8_t* hdr_
     return ack;
 }
 
-static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
-                               buf16_item_t* payload0, buf16_item_t* payload1) {
+static void relay_handle_proto(ct_client_ctx_t *ctx, ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
+                               buf16_item_t* payload0, buf16_item_t* payload1) { (void)ctx;
     assert(hdr_len == sizeof(p2p_relay_hdr_t));
     assert(client->base.local_peer_id[0]);
 
@@ -1080,7 +1080,7 @@ static void relay_handle_proto(ct_client_t *client, uint8_t* hdr_buf, uint16_t h
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static buf16_item_t* relay_error_item(ct_client_t *client, bool handshake) {
+static buf16_item_t* relay_error_item(ct_client_t *client) {
 
     buf16_item_t *item = alloc_buf16(BUF_FLAG_512(0));
     if (!item) return NULL;
@@ -1089,7 +1089,7 @@ static buf16_item_t* relay_error_item(ct_client_t *client, bool handshake) {
     hdr->size = htons(P2P_RLY_STA_PSZ(0, 0));
     item->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0));
     uint8_t* p = (uint8_t*)(hdr + 1);
-    p[0] = handshake ? P2P_RLY_REG : P2P_RLY_STA;
+    p[0] = client->handshake ? P2P_RLY_REG : P2P_RLY_STA;
     p[1] = P2P_ERR(client->last_error - 1);
     return item;
 }
