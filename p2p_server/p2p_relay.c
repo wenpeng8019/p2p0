@@ -956,17 +956,20 @@ static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t **
         else {
             print("I:", LA_F("%s: '%s' reconnected & renew (inst=%u)\n", LA_F153, 153), PROTO,
                   client->base.local_peer_id, client->base.instance_id);
+
+            reg = NULL;
         }
     }
     else {
+        print("I:", LA_F("%s: '%s' new REG (inst=%u)\n", LA_F93, 93), PROTO,
+              client->base.local_peer_id, instance_id);
+    }
+
+    if (!reg) {
         client->base.instance_id = instance_id;
         memcpy(client->base.local_peer_id, payload, P2P_PEER_ID_MAX);
         client->base.local_peer_id[P2P_PEER_ID_MAX] = '\0';
-
         identify_client(&client->base);
-
-        print("I:", LA_F("%s: '%s' new REG (inst=%u)\n", LA_F93, 93), PROTO,
-              client->base.local_peer_id, instance_id);
     }
 
     // 构造 REG ACK（新分配小 buf，不复用 payload1 — 重连路径可能已释放 payload1）

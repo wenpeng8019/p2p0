@@ -5,7 +5,8 @@
 
 #include "custom_tcp.h"
 
-#define ITEM_REF_CLIENT_ERROR       ((void*)(uintptr_t)-1)
+#define ITEM_REF_CLIENT_ERROR           ((void*)(uintptr_t)-1)
+#define ITEM_REF_CLIENT_STATIC_ERROR    ((void*)(uintptr_t)-2)
 
 #define STREAM_HEADER_RECV_MAX      128
 
@@ -310,7 +311,8 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
 
         buf16_item_t *err_item = ctx->error_item(client);
         if (err_item) {
-            err_item->refer = ITEM_REF_CLIENT_ERROR;    // 标记该 buf_item 是 error 包
+
+            err_item->refer = err_item->refer == ITEM_REF_STATIC ? ITEM_REF_CLIENT_STATIC_ERROR : ITEM_REF_CLIENT_ERROR;    // 标记该 buf_item 是 error 包
             ct_client_send(client, err_item, true);
             return;
         }
@@ -328,7 +330,7 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
 
     // 追加 fatal 作为最后一项（如果 fatal_item 为 NULL，直接释放 client）
     if (!ctx->fatal_item) {
-        ct_free_client(ctx, client);
+        free_client(&client->base);
         return;
     }
     
@@ -836,23 +838,24 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
             // 握手阶段报错但不返回应答，则直接释放 client
             if (!ctx->error_item || !((ack_item = ctx->error_item(client)))) {
-                ct_free_client(ctx, client);
+                free_client(&client->base);
                 return;
             }
         }
         else assert(!BUF_IS_32BIT(ack_item->flags) && !client->last_error);
 
-        io = ack_item->len;
-        r = tcp_send((tcp_client_t*)client, ITEM2BUF(ack_item), &io, SP);
+        assert(ack_item->pos < ack_item->len);
+        io = (size_t)(ack_item->len - ack_item->pos);
+        r = tcp_send((tcp_client_t*)client, ITEM2BUF(ack_item) + ack_item->pos, &io, SP);
         if (r < 0) {
-            ct_free_client(ctx, client);    // 握手阶段发送失败，直接释放 client
+            free_client(&client->base);    // 握手阶段发送失败，直接释放 client
             return;
         }
 
         // 如果 would block，则标记进入握手写入阶段
         if (r > 0) {
             BUF_Q_PUSH(&client->send_buff_queue, ack_item)
-            client->sending_cur = io;
+            client->sending_cur = (uint16_t)(ack_item->pos + io);
 
             // 进入握手写阶段，同时暂停接收数据，等握手（ACK 发送）完成后再继续
             client->io &= ~TCP_IO_FLAG_WANT_READ;
@@ -860,11 +863,12 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             return;
         }
 
-        free_buf16(ack_item);
+        if (ack_item->refer != ITEM_REF_STATIC)
+            free_buf16(ack_item);
 
         // （应答直接发送完成）如果握手阶段存在失败，直接释放 client
         if (client->last_error) {
-            ct_free_client(ctx, client);
+            free_client(&client->base);
             return;
         }
 
@@ -879,6 +883,8 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
     prepare_next:
         prepare_next_recv(client, bak_item);
+        // 业务可能已经停止读取、甚至释放了 client
+        if (client->base.fd == P_INVALID_SOCKET || !(client->io & TCP_IO_FLAG_WANT_READ)) return;
     }   // for(;;)
 
 
@@ -909,7 +915,6 @@ error: assert(error && !client->last_error);
     client->base.last_active = P_tick_ms();
 }
 
-// 处理 RELAY 模式信令发送（TCP 长连接）- 统一队列发送
 void
 ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
@@ -918,10 +923,10 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
     if (TCP_HS_IS_HANDSHAKING(client)) {
 
         assert(client->send_buff_queue.head);
-        buf16_item_t* buf_item = client->send_buff_queue.head; 
+        buf16_item_t* buf_item = client->send_buff_queue.head;
         assert(buf_item == client->send_buff_queue.rear);                           // 握手阶段 send_queue 只会有一个 buf_item
         assert(!BUF_IS_32BIT(buf_item->flags) && buf_item->pos < buf_item->len);    // 握手阶段只允许 buf16_item_t（ACK/错误包），禁止 32-bit 大包
-        
+
         // 首次发送时对齐到有效起始位置，后续 sending_cur 统一表示绝对偏移
         if (!client->sending_cur) client->sending_cur = buf_item->pos;
 
@@ -929,7 +934,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         size_t sz = buf_item->len, io = sz - client->sending_cur;
         int r = tcp_send((tcp_client_t*)client, ITEM2BUF(buf_item) + client->sending_cur, &io, SP);
         if (r < 0) {
-            ct_free_client(ctx, client);    // 握手阶段发送失败，直接释放 client
+            free_client(&client->base);    // 握手阶段发送失败，直接释放 client
             return;
         }
 
@@ -937,14 +942,14 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
         client->sending_cur = 0;
         BUF_Q_POP(&client->send_buff_queue, buf_item);
-        free_buf16(buf_item);
+        if (buf_item->refer != ITEM_REF_STATIC) free_buf16(buf_item);
 
         // 握手（应答发送）完成
         print("V:", LA_F("handshake<%d> sent to '%s'\n", LA_F179, 179), client->handshake, client->base.local_peer_id);
 
         // 如果（发送的是）握手阶段的错误应答，直接释放 client
         if (client->last_error) {
-            ct_free_client(ctx, client);
+            free_client(&client->base);
             return;
         }
 
@@ -969,7 +974,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         if (!sending_session && !item) {
             client->io &= ~TCP_IO_FLAG_WANT_WRITE;
             if (!(client->io & TCP_IO_FLAG_WANT_READ)) {
-                if (TCP_HS_IS_CLOSING(client)) ct_free_client(ctx, client);
+                if (TCP_HS_IS_CLOSING(client)) free_client(&client->base);
                 else { P_sock_close(client->base.fd);
                     client->base.fd = P_INVALID_SOCKET;
                 }
@@ -1007,7 +1012,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
             // 如果当前发生了 fatal 错误，则发送失败后直接销毁 client
             if (item == ctx->fatal_item || item->next == ctx->fatal_item) {
-                ct_free_client(ctx, client);
+                free_client(&client->base);
                 return;
             }
 
@@ -1048,15 +1053,20 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
             // 如果发送的是 fatal 错误包，发送完成后直接销毁 client
             if (item == ctx->fatal_item) {
-                ct_free_client(ctx, client);
+                free_client(&client->base);
                 return;
             }
 
             // 如果静态内嵌缓冲，不执行 free 操作，仅标记为 NULL（未在发送队列中，即发送完成）；否则正常释放
             if (item->refer == ITEM_REF_STATIC) item->refer = NULL;
-            else { bool is_error = item->refer == ITEM_REF_CLIENT_ERROR;
+            else { bool is_error = false;
 
-                free_buffer(item);
+                if (item->refer == ITEM_REF_CLIENT_STATIC_ERROR) { is_error = true;
+                    item->refer = NULL;
+                } else {
+                    if (item->refer == ITEM_REF_CLIENT_ERROR) is_error = true;
+                    free_buffer(item);
+                }
 
                 // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端重连或超时回收）
                 if (is_error) { assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));

@@ -172,8 +172,8 @@ static void ws_on_message_alice(ws_client_t *c, ws_msg_type_t type, const uint8_
         if (strstr(g_alice_rsp, "SYN0 ")) {
             char peer[128] = {0};
             char state[32] = {0};
-            unsigned int sid = 0;
-            if (sscanf(g_alice_rsp, "SYN0 %127s %u %31s", peer, &sid, state) == 3) {
+            unsigned long sid = 0;
+            if (sscanf(g_alice_rsp, "SYN0 %127s %lx %31s", peer, &sid, state) == 3) {
                 g_alice_session_id = (uint32_t)sid;
                 g_alice_syn0_ok = 1;
             }
@@ -209,8 +209,8 @@ static void ws_on_message_bob(ws_client_t *c, ws_msg_type_t type, const uint8_t 
         if (strstr(g_bob_req, "SYN0 ")) {
             char peer[128] = {0};
             char state[32] = {0};
-            unsigned int sid = 0;
-            if (sscanf(g_bob_req, "SYN0 %127s %u %31s", peer, &sid, state) == 3) {
+            unsigned long sid = 0;
+            if (sscanf(g_bob_req, "SYN0 %127s %lx %31s", peer, &sid, state) == 3) {
                 g_bob_session_id = (uint32_t)sid;
                 g_bob_syn0_ok = 1;
             }

@@ -86,7 +86,7 @@ static ret_t cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint1
                                     uint32_t *payload_len, uint16_t *payload_offset) {
     
     // HTTP 握手阶段没有 payload
-    if (TCP_HS_IS_HANDSHAKING(client)) { *payload_len = 0; *payload_offset = 0; return E_NONE; }
+    if (client->handshake == TCP_HS_FLAG_HANDSHAKING) { *payload_len = 0; *payload_offset = 0; return E_NONE; }
     
     uint8_t len7 = hdr_buf[1] & 0x7F;
 
@@ -133,7 +133,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
                          buf16_item_t *payload0, buf16_item_t *payload1,
                          uint8_t** r_payload, uint32_t* r_payload_len) { (void)hdr_len;
     cw_client_t *client = (cw_client_t*)c;
-    //cw_client_ctx_t *context = (cw_client_ctx_t*)ctx;
+
 
     uint8_t opcode = hdr_buf[0] & 0x0F;         // Byte[0] bit0-3: opcode
     uint8_t fin    = (hdr_buf[0] >> 7) & 1;     // Byte[0] bit7: FIN
@@ -233,11 +233,15 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
                 ((cw_client_ctx_t*)ctx)->handle_close((cw_client_ctx_t*)ctx, client, code);
 
             // 自动回复 close
-            uint8_t* ptr = client->ws_close_frame_buf + sizeof(buf16_item_t) + 2;
-            nwrite_s(ptr, code);
+            buf16_item_t* close_frame = (buf16_item_t*)client->ws_close_frame_buf;
+            if (close_frame->refer) close_frame = NULL;
+            else { close_frame->refer = ITEM_REF_STATIC;
+                uint8_t* ptr = ITEM2BUF(close_frame) + 2;
+                nwrite_s(ptr, code);
+            }
 
             // 交由基类统一执行关闭收口：停止接收、清理 sessions / recv_buf，并保持 close 帧继续发送
-            ct_client_off(ctx, (ct_client_t*)client, (buf16_item_t*)client->ws_close_frame_buf);
+            ct_client_off(ctx, (ct_client_t*)client, close_frame);
         }
         else {
 
@@ -373,7 +377,34 @@ static buf16_item_t *cw_tcp_handle_handshake(ct_client_ctx_t* ctx, ct_client_t *
         assert(client->ws_opcode == 0);  // 握手阶段不应有分片帧
 
         payload0 = ((cw_client_ctx_t*)ctx)->handle_handshake((cw_client_ctx_t*)ctx, (cw_client_t **)t_c, code, payload, payload_len, payload1);
-        if (payload0 == payload1) client->payload_buf = NULL;  // 所有权已转移，避免框架释放
+        if (payload0) {
+            if (payload0 == payload1) client->payload_buf = NULL;  // 所有权已转移，避免框架释放
+
+            P_check(!BUF_IS_32BIT(payload0->flags),
+                print("E:", LA_F("[WS] handshake ack must stay 16-bit\n", 0, 0));
+                free_buffer(payload0);
+                c->last_error = CUSTOM_TCP_ERR_INTERNAL;
+                return NULL;
+            )
+
+            P_check(payload0->pos <= payload0->len,
+                print("E:", LA_F("[WS] invalid handshake ack pos=%u len=%u\n", 0, 0), payload0->pos, payload0->len);
+                free_buf16(payload0);
+                c->last_error = CUSTOM_TCP_ERR_INTERNAL;
+                return NULL;
+            )
+
+            uint8_t hdr_sz = s_hdr_sizes[payload0->flags & CW_BUF_FLAG_HDR_SIZE];
+            if (!hdr_sz) hdr_sz = (uint16_t)(payload0->len - payload0->pos) <= 125 ? 2 : 4;
+            P_check(payload0->pos >= hdr_sz,
+                print("E:", LA_F("[WS] invalid handshake ack hdr_sz=%u pos=%u\n", 0, 0), hdr_sz, payload0->pos);
+                free_buf16(payload0);
+                c->last_error = CUSTOM_TCP_ERR_INTERNAL;
+                return NULL;
+            )
+
+            payload0->pos = (uint16_t)(payload0->pos - hdr_sz);
+        }
     }
     else assert(false);
 
@@ -535,7 +566,7 @@ buf16_item_t *cw_alloc_frame(uint8_t opcode, uint32_t payload_len) {
 }
 
 buf16_item_t *cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args) {
-    P_check(!expect_sz, return NULL;)
+    P_check(expect_sz, return NULL;)
 
     buf16_item_t *item = alloc_buffer(0, 10u + expect_sz);
     if (!item) return NULL;
@@ -650,7 +681,7 @@ static ret_t cw_prepare_send_frame(buf16_item_t *frame) {
 
 ret_t cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate) {
 
-    P_check(client->handshake, return E_INVALID;)
+    P_check(client->handshake == 0, return E_INVALID;)
 
     ret_t r = cw_prepare_send_frame(frame);
     if (r != E_NONE) return r;
@@ -661,7 +692,7 @@ ret_t cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate) {
 
 ret_t cw_session_send(ct_session_t *session, buf16_item_t *frame) {
 
-    P_check(CT_CLIENT(session)->handshake, return E_INVALID;)
+    P_check(CT_CLIENT(session)->handshake == 0, return E_INVALID;)
 
     ret_t r = cw_prepare_send_frame(frame);
     if (r != E_NONE) return r;
@@ -695,9 +726,13 @@ ret_t cw_close(cw_client_ctx_t *ctx, cw_client_t *client, uint16_t code, const c
         code = WS_CLOSE_INTERNAL_ERROR;
     }
 
-    uint8_t *buf = client->ws_close_frame_buf + sizeof(buf16_item_t) + 2;
-    nwrite_s(buf, code);
-    ct_client_send((ct_client_t*)client, (buf16_item_t*)client->ws_close_frame_buf, false);
+    buf16_item_t* close_frame = (buf16_item_t*)client->ws_close_frame_buf;
+    if (!close_frame->refer) {
+        uint8_t *buf = ITEM2BUF(close_frame) + 2;
+        nwrite_s(buf, code);
+        close_frame->refer = ITEM_REF_STATIC;
+        ct_client_send((ct_client_t*)client, close_frame, false);
+    }
 
     client->io |= CW_IO_FLAG_CLOSING;
     client->base.last_active = P_tick_ms();
@@ -749,8 +784,8 @@ static buf16_item_t* cw_error_item(ct_client_t *c) {
 
         uint16_t payload_offset = close_frame->pos;
         uint16_t total_len = close_frame->len;
-        P_check(payload_offset > total_len,
-                print("E:", LA_F("[WS] invalid last_reason pos=%u len=%u\n", 0, 0), payload_offset, total_len);
+        P_check(payload_offset + 2 <= total_len,
+                print("E:", LA_F("[WS] invalid last_reason payload pos=%u len=%u\n", 0, 0), payload_offset, total_len);
                 free_buf16(close_frame);
                 goto fallback_close;)
 
@@ -758,7 +793,7 @@ static buf16_item_t* cw_error_item(ct_client_t *c) {
         uint8_t hdr_sz = s_hdr_sizes[close_frame->flags & CW_BUF_FLAG_HDR_SIZE];
         if (!hdr_sz) hdr_sz = payload_len <= 125 ? 2 : 4;
 
-        P_check(payload_offset < hdr_sz,
+        P_check(payload_offset >= hdr_sz,
                 print("E:", LA_F("[WS] invalid last_reason hdr_sz=%u pos=%u\n", 0, 0), hdr_sz, payload_offset);
                 free_buf16(close_frame);
                 goto fallback_close;)
@@ -769,11 +804,6 @@ static buf16_item_t* cw_error_item(ct_client_t *c) {
             free_buf16(close_frame);
             goto fallback_close;
         }
-
-        P_check(payload_len < 2,
-                print("E:", LA_F("[WS] invalid last_reason payload_len=%u\n", 0, 0), payload_len);
-                free_buf16(close_frame);
-                goto fallback_close;)
 
         if (payload_len > 125) {
             print("W:", LA_F("[WS] truncate last_reason payload_len=%u to 125\n", 0, 0), payload_len);
@@ -793,9 +823,10 @@ static buf16_item_t* cw_error_item(ct_client_t *c) {
 
 fallback_close:
     close_frame = (buf16_item_t*)client->ws_close_frame_buf;
+    if (close_frame->refer) return NULL;
+    close_frame->refer = ITEM_REF_STATIC;
     buf = ITEM2BUF(close_frame) + 2;
     nwrite_s(buf, ws_code);
-
     return close_frame;
 }
 

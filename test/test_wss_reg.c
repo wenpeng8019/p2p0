@@ -622,9 +622,9 @@ int main(int argc, char *argv[]) {
     
     // 一、正常功能测试
     test_ws_handshake();
-    // test_online_success();
-    // test_sync0_peer_offline();
-    // test_sync0_peer_online();
+    test_online_success();
+    test_sync0_peer_offline();
+    test_sync0_peer_online();
 
     // 二、失败验证测试
     test_sync0_not_online();
