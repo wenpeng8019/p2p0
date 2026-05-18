@@ -21,6 +21,8 @@
 
 #include "custom_ws.h"
 
+#include <stdarg.h>
+
 // HTTP 握手 recv 缓冲大小（存放 HTTP 请求 header，流模式 recv_buf 使用 2K）
 #define CW_HTTP_BUF_FLAGS           BUF_FLAG_2048(0)
 // WS 帧头最大字节数
@@ -529,6 +531,41 @@ buf16_item_t *cw_alloc_frame(uint8_t opcode, uint32_t payload_len) {
         item->pos = hdr_sz;
         item->len = (uint16_t)payload_len;
     }
+    return item;
+}
+
+buf16_item_t *cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args) {
+    P_check(!expect_sz, return NULL;)
+
+    buf16_item_t *item = alloc_buffer(0, 10u + expect_sz);
+    if (!item) return NULL;
+
+    int n = vsnprintf((char*)ITEM2BUF(item) + 10, (size_t)expect_sz, fmt, args);
+    if (n < 0) {
+        free_buffer(item);
+        return NULL;
+    }
+
+    uint32_t text_len = (uint32_t)n;
+    if (text_len >= expect_sz) text_len = expect_sz - 1;
+
+    if (BUF_IS_32BIT(item->flags)) {
+        BUF32(item)->pos = 10;
+        BUF32(item)->len = 10u + text_len;
+    } else {
+        item->pos = 10;
+        item->len = (uint16_t)(10u + text_len);
+    }
+
+    if (cw_build_frame(WS_OP_TEXT, item, 10) != E_NONE) return NULL;
+    return item;
+}
+
+buf16_item_t *cw_printf_frame(uint32_t expect_sz, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);
+    va_end(args);
     return item;
 }
 

@@ -181,6 +181,16 @@ cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client);
 buf16_item_t*
 cw_alloc_frame(uint8_t opcode, uint32_t payload_len);
 
+// 分配一个 WS text frame，并将 printf 格式化结果写入 payload
+// + expect_sz: 预期 payload 缓冲大小（传给 vsnprintf 的 size，包含结尾 '\0' 预留）
+// + 返回后 frame->pos 指向 payload 起始处；发送仍需交给 cw_client_send / cw_session_send
+buf16_item_t*
+cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args);
+
+// 同 cw_vprintf_frame 的可变参数封装
+buf16_item_t*
+cw_printf_frame(uint32_t expect_sz, const char *fmt, ...);
+
 // 在已有 buf_item 上构建 WS frame
 // + opcode: WS_OP_TEXT / WS_OP_BINARY / WS_OP_CONTINUATION
 // + buf_item: 上层分配的 buf_item
