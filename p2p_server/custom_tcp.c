@@ -204,6 +204,15 @@ ct_init_client(ct_client_t* client) {
 }
 
 void
+ct_reactive_client(ct_client_t *client) {
+
+    client->last_error = 0;                     // 重置错误状态
+    client->io |= TCP_IO_FLAG_WANT_READ;        // 重新激活读取（之前断网时会被关闭）
+    if (client->send_buff_queue.head || client->send_sess_head)
+        client->io |= TCP_IO_FLAG_WANT_WRITE;   // 如果存在未完成的发送，重新激活写入
+}
+
+void
 ct_migrate_client(client_t *to_base, client_t *from_base) {
     ct_client_t *to   = (ct_client_t*)to_base;
     ct_client_t *from = (ct_client_t*)from_base;
@@ -332,15 +341,6 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
         client->io |= TCP_IO_FLAG_WANT_WRITE;
     }
     client->send_buff_queue.rear = ctx->fatal_item;
-}
-
-void
-ct_reactive_client(ct_client_ctx_t* ctx, ct_client_t *client) { (void)ctx;
-
-    client->last_error = 0;                     // 重置错误状态
-    client->io |= TCP_IO_FLAG_WANT_READ;        // 重新激活读取（之前断网时会被关闭）
-    if (client->send_buff_queue.head || client->send_sess_head)
-        client->io |= TCP_IO_FLAG_WANT_WRITE;   // 如果存在未完成的发送，重新激活写入
 }
 
 ///////////////////////////////////////////////////////////////////////////////

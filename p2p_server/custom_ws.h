@@ -32,6 +32,12 @@
 #define WS_OP_PING                  0x9   // Ping 帧（控制帧，payload <= 125 字节）
 #define WS_OP_PONG                  0xA   // Pong 帧（控制帧，回复 ping 或主动心跳）
 
+// WS frame hdr size class（占用 buf_item->flags 低 2 bit）
+#define CW_BUF_FLAG_HDR_SIZE        0x3
+#define CW_BUF_HDR_2                0x1   // payload_len <= 125，对应 2 字节 hdr
+#define CW_BUF_HDR_4                0x2   // 126 <= payload_len <= 65535，对应 4 字节 hdr
+#define CW_BUF_HDR_10               0x3   // payload_len > 65535，对应 10 字节 hdr
+
 //-----------------------------------------------------------------------------
 // WebSocket Close Code 预定义（RFC 6455 §7.4.1）
 //
@@ -66,13 +72,15 @@
 // + ws_frag_q:     分片帧的聚合队列（收到非 FIN 帧时追加，head==NULL 表示无分片进行中）
 // + ws_frag_len:   ws_frag_q 中已聚合的总字节数
 // + ws_utf8state:  TEXT 帧 UTF-8 DFA 当前状态（0=ACCEPT；跨分片保持；RFC 6455 §8.1）
+// + last_reason:   可选的 WS close frame（由 cw_alloc_frame(WS_OP_CLOSE, 2 + reason_len) 分配）
+//                  pos 指向 WS payload 起始处；[pos..pos+1] 留给 close code，reason 从 [pos+2..len) 开始
 #define CUSTOM_WS_CLIENT \
-    struct cw_client_ctx*           ws_ctx;         \
     uint8_t                         ws_hdr_buf[14]; \
     uint8_t                         ws_opcode;      \
     buffer_queue_t                  ws_frag_q;      \
     uint32_t                        ws_frag_len;    \
     uint32_t                        ws_utf8state;   \
+    buf16_item_t*                   last_reason;    \
     uint8_t                         ws_close_frame_buf[sizeof(buf16_item_t) + 4];
 
 // 基础 WS client 类型（可通过 CUSTOM_WS_CLIENT 内联到派生结构体）
@@ -88,8 +96,20 @@ typedef struct cw_client {
 // I/O 关闭状态标志（复用 TCP_IO_FLAG_CUSTOM_BIT）
 #define CW_IO_FLAG_CLOSING  (1 << TCP_IO_FLAG_CUSTOM_BIT)  // 本端已发 close 帧，等待对端 close 或超时
 
+typedef struct cw_client_ctx cw_client_ctx_t;
+
 //-----------------------------------------------------------------------------
 // 回调类型
+
+// 应用层握手协议
+// > opcode: WS_OP_TEXT 或 WS_OP_BINARY
+// > payload: 指向 payload 数据的指针。握手阶段不支持分片聚合帧，所以该值肯定不为 NULL
+// > payload_len: payload 数据总字节数
+// > buf_item: payload 所属的 buf_item（可用于零拷贝转发），也就是允许将应答写入 buf_item 并直接返回
+// + 另外，和 custom tcp 一样，t_client 指向的 client 可以被 resident 替换
+typedef buf16_item_t* (*cw_handle_handshake_cb)(cw_client_ctx_t *ctx, cw_client_t ** t_client, uint8_t opcode,
+                                                uint8_t *payload, uint32_t payload_len,
+                                                buf16_item_t *buf_item);
 
 // 收到完整 WS 数据帧（text 或 binary）时调用
 // + opcode: WS_OP_TEXT 或 WS_OP_BINARY
@@ -98,32 +118,32 @@ typedef struct cw_client {
 // + buf_item: payload 所属的 buf_item（可用于零拷贝转发），即对应 custom_tcp 框架中的 payload1。
 //             如果 payload 的所属 buf_item 是 custom_tcp 框架中的 payload0，则此时的 buf_item 为 NULL
 //             此时无法零拷贝转发，如过上层需要转发，则需要自行复制到新 buf_item 中
-typedef void (*cw_handle_frame_cb)(cw_client_t *client, uint8_t opcode,
+typedef void (*cw_handle_frame_cb)(cw_client_ctx_t *ctx, cw_client_t *client, uint8_t opcode,
                                    uint8_t *payload, uint32_t payload_len,
                                    buf16_item_t *buf_item);
 
 // 收到 ping 帧时调用（nullable）；框架已自动发送 pong 回复，回调仅供通知
-typedef void (*cw_handle_ping_cb)(cw_client_t *client, const uint8_t *data, uint8_t len);
+typedef void (*cw_handle_ping_cb)(cw_client_ctx_t *ctx, cw_client_t *client, const uint8_t *data, uint8_t len);
 
 // 对端发起 close 握手时调用（nullable）；框架已自动入队 close 回复，回调仅供通知
-typedef void (*cw_handle_close_cb)(cw_client_t *client, uint16_t code);
+typedef void (*cw_handle_close_cb)(cw_client_ctx_t *ctx, cw_client_t *client, uint16_t code);
 
 // 握手（HTTP Upgrade）完成时调用（nullable）
 // + 可在此进行鉴权、子协议协商结果处理等
 // + 返回 false 表示拒绝连接，框架会发送 403 并关闭连接
-typedef bool (*cw_handshake_done_cb)(cw_client_t *client);
+typedef bool (*cw_handshake_done_cb)(cw_client_ctx_t *ctx, cw_client_t *client);
 
 //-----------------------------------------------------------------------------
 // 协议上下文（每个 WS 子协议类型共享一个）
 
-typedef struct cw_client_ctx {
+struct cw_client_ctx {
     ct_client_ctx_t                 base;
 
     // WS 子协议名（HTTP 握手 Sec-WebSocket-Protocol 字段，NULL 表示不协商）
     const char*                     sub_protocol;
 
-    // 握手完成回调（nullable）；返回 false 拒绝连接
-    cw_handshake_done_cb            handshake_done;
+    // 应用层的握手处理
+    cw_handle_handshake_cb          handle_handshake;
 
     // 收到数据帧（text/binary）时调用
     cw_handle_frame_cb              handle_frame;
@@ -135,8 +155,7 @@ typedef struct cw_client_ctx {
     cw_handle_close_cb              handle_close;
 
     uint8_t                         fatal_frame_buf[sizeof(buf16_item_t) + 4];
-
-} cw_client_ctx_t;
+};
 
 //-----------------------------------------------------------------------------
 // Public API
@@ -155,20 +174,37 @@ cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx);
 void
 cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client);
 
-// 发送 WS 帧
+// 分配一个完整的 WS frame 缓冲
+// + payload_len: WS payload 总长度；函数内部会按该长度计算 hdr size，预填 opcode/length、frame flags，并将 pos 指向 payload 起始处
+// + 当总长度超过 16bit 时，内部会自动分配 32bit buffer
+// + 返回后调用方直接向 ITEM2BUF(item) + item->pos 写入 payload 数据即可；len 已固定为整帧总长
+buf16_item_t*
+cw_alloc_frame(uint8_t opcode, uint32_t payload_len);
+
+// 在已有 buf_item 上构建 WS frame
 // + opcode: WS_OP_TEXT / WS_OP_BINARY / WS_OP_CONTINUATION
-// + buf_item: 上层分配的 buf_item，框架接管所有权，发送完成后自动释放
+// + buf_item: 上层分配的 buf_item
 // + payload_offset: buf_item 中 payload 数据的起始偏移（允许 buf_item 前置有帧头预留空间）
 //   框架会在 [0, payload_offset) 区间写入 WS 帧头，因此 payload_offset >= 有效的 hdr size
-//   这里的有效 hdr size 为: 2 + 2/4/6
+//   这里的有效 hdr size 为: 2 / 4 / 10；并会同步设置 frame flags
 ret_t
-cw_send_frame(cw_client_t *client, uint8_t opcode,
-              buf16_item_t *buf_item, uint16_t payload_offset,
-              bool immediate);
+cw_build_frame(uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_offset);
 
-// 发送 WS close 帧（code==0 || code=WS_CLOSE_NORMAL 表示正常关闭）
+// 发送已构建完成的 WS frame 到 client
+// + frame: 由 cw_alloc_frame / cw_build_frame 生成；默认 pos 指向 payload，发送前框架会校验 frame flags 并回退到 hdr 起始位置
 ret_t
-cw_send_close(cw_client_t *client, uint16_t code);
+cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
+
+// 发送已构建完成的 WS frame 到 session
+// + frame: 由 cw_alloc_frame / cw_build_frame 生成；默认 pos 指向 payload，发送前框架会校验 frame flags 并回退到 hdr 起始位置
+ret_t
+cw_session_send(ct_session_t *session, buf16_item_t *frame);
+
+// 服务端主动 grace close
+// + 执行 session clear，向客户端发送 WS close 帧（code==0 || code=WS_CLOSE_NORMAL 表示正常关闭）
+// + reason: nullable；非空时作为 close reason 一并发送（受 WS 控制帧 125 字节限制）
+ret_t
+cw_close(cw_client_ctx_t *ctx, cw_client_t *client, uint16_t code, const char* reason/* nullable */);
 
 // grace close 超时检查（在 server 的定期 cleanup 中调用）
 void

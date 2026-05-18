@@ -224,35 +224,23 @@ ct_forward_payload(ct_client_t *client,
 bool
 ct_init_client(ct_client_t* client);
 
-// 接收状态迁移（resident_client 的 client_ctx_t.migrate 默认实现）
+// 重连激活：重置 last_error，恢复 WANT_READ，如有未完成发送则恢复 WANT_WRITE
+// + 适用于 TCP 断线重连后，原 client 槽位复用的场景
+void
+ct_reactive_client(ct_client_t *client);
+
+// 接收状态迁移，由 resident_client 触发执行（即对 client_ctx_t.migrate 接口的 ct_client 层实现）
 // + 将 from 的 recv_buf/recv_cur/hdr_rs 内容/payload_buf/payload_cur 转移到 to
-// + 迁移后 from 对应字段清零，确保 free 时不重复释放
-// + relay、wss 等使用 custom_tcp 框架的模块，将此函数注册为其 client_ctx_t.migrate
+//   迁移后 from 对应字段清零，确保 free 时不重复释放
+// + relay、wss 等使用 custom_tcp 框架的模块，默认会将此函数注册为其 client_ctx_t.migrate
 void
 ct_migrate_client(client_t *to, client_t *from);
+
+//-----------------------------------------------------------------------------
 
 // 强制释放 client：关闭所有 session（TERM），释放 recv/payload buf，清空发送队列，调用 free_client_base
 void
 ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client);
-
-// 重连激活：重置 last_error，恢复 WANT_READ，如有未完成发送则恢复 WANT_WRITE
-// + 适用于 TCP 断线重连后，原 client 槽位复用的场景
-void
-ct_reactive_client(ct_client_ctx_t* ctx, ct_client_t *client);
-
-// 报告错误：
-// + fatal=false（非致命）：清除 WANT_READ，向 client 发送一个错误应答包，发送完成后关闭连接
-//   - 如 error_item 回调为 NULL，按 fatal 处理
-// + fatal=true（致命）：终止所有 session，清空发送队列，追加 fatal_item 后关闭连接
-//   - 如 fatal_item 为 NULL，直接释放 client
-void
-ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal);
-
-// 优雅关闭 client：中断所有 session（CLOSE），释放 recv buf
-// + 如发送队列非空：标记为 CLOSING，停止读取，等发送完成后自动调用 free_client_base
-// + 如发送队列为空：直接调用 free_client_base
-void
-ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client, buf16_item_t* last_item);
 
 // 关闭指定 session
 // + terminate=false：session 的待发数据转移到 client 队列继续发送
@@ -265,6 +253,8 @@ ct_session_close(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate);
 // + terminate=true：session 的待发数据直接丢弃
 void
 ct_session_clear(ct_client_ctx_t* ctx, ct_client_t *client, bool terminate);
+
+//-----------------------------------------------------------------------------
 
 // 向 client 发送队列追加 buf_item（仅在 handshake==0 时调用）
 // + immediate=true：高优先级，插入到当前正在发送的包之后（或队头），确保优先发出
@@ -279,7 +269,21 @@ void
 ct_session_send(ct_session_t *session, buf16_item_t* buf_item);
 
 //-----------------------------------------------------------------------------
-// server 层调度接口（实现 socket 数据 I/O）
+// 调度派发接口
+
+// 优雅关闭 client：中断所有 session（CLOSE），释放 recv buf
+// + 如发送队列非空：标记为 CLOSING，停止读取，等发送完成后自动调用 free_client_base
+// + 如发送队列为空：直接调用 free_client_base
+void
+ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client, buf16_item_t* last_item);
+
+// 报告错误：
+// + fatal=false（非致命）：停止读取，向 client 发送最后一个错误应答包，发送完成后关闭连接
+//   - 如 error_item 回调为 NULL，则转为 fatal 处理
+// + fatal=true（致命）：终止所有 session，清空发送队列，追加 fatal_item 并在发送完成后释放 client
+//   - 如 fatal_item 为 NULL，直接释放 client
+void
+ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal);
 
 // 接收处理（WANT_READ & select 就绪时调用）
 // + 内部循环处理握手和正常消息的读取、解析、分发，直到 would block 或出错
