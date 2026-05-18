@@ -884,15 +884,15 @@ static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t **
     ct_client_t *client = *t_client;
     assert(hdr_len == sizeof(p2p_relay_hdr_t));
     assert(!client->base.local_peer_id[0]);
+    const char* PROTO = "REG";
 
     // 握手阶段只支持 REG 请求（REG 本质就是握手请求）
     if (((p2p_relay_hdr_t*)hdr_buf)->type != P2P_RLY_REG) {
-        print("E:", LA_F("%s: rejected for not reg\n", LA_F147, 147), PROTO_STR(((p2p_relay_hdr_t*)hdr_buf)->type));
+        print("E:", LA_F("%s: rejected for not reg(%s)\n", LA_F147, 147), PROTO, PROTO_STR(((p2p_relay_hdr_t*)hdr_buf)->type));
         client->last_error = RLY_ERR_2_CT_ERR(P2P_ERR_PROTOCOL);
         return NULL;
     }
 
-    const char* PROTO = "REG";
     buf16_item_t *payload_item = payload0 ? payload0 : payload1;
     if (!payload_item) {
         print("E:", LA_F("%s: missing payload\n", LA_F213, 213), PROTO);
@@ -950,7 +950,7 @@ static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t **
                 }
             }
 
-            ct_reactive_client(&g_ctx, client);
+            ct_reactive_client(client);
 
             print("I:", LA_F("%s: '%s' reconnected & reactive (inst=%u)\n", LA_F98, 98), PROTO,
                    client->base.local_peer_id, client->base.instance_id);

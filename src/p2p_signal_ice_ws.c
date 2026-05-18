@@ -171,6 +171,7 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
               ctx->feature_relay ? "yes" : "no", ctx->feature_msg ? "yes" : "no");
     }
     else if (strncmp(txt, "REG FAIL", 8) == 0) {
+        /* legacy compatibility: newer servers close the WS with close reason instead */
         ctx->state = ICE_WS_ERROR;
         print("E:", "[WS] registration failed: %s\n", txt + 9);
     }

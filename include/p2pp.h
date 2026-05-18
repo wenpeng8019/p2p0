@@ -1278,7 +1278,6 @@ typedef struct {
 
 #define P2P_WSS_RSP_STA         "STA "          /* + <session_id_hex> <req_type> <status>\n */
 #define P2P_WSS_RSP_REG_OK      "REG OK "       /* + <sync_max> <features>\n */                                 // 注册成功，sync_max=预缓存负载上限，features=功能位掩码
-#define P2P_WSS_RSP_REG_FAIL    "REG FAIL "     /* + <reason>\n */
 #define P2P_WSS_RSP_SDP_OK      "SDP OK "       /* + <remote_peer_id>\n */
 #define P2P_WSS_RSP_SDP_FAIL    "SDP FAIL "     /* + <remote_peer_id> <reason>\n */
 #define P2P_WSS_RSP_SYN0        "SYN0 "         /* + <peer_id> <session_id_hex> online\n[<payload>\n]|offline\n */
@@ -1323,7 +1322,7 @@ typedef struct {
  *       类似 RELAY P2P_RLY_REG / COMPACT SIG_PKT_REG。
  *
  * 服务端处理:
- *   1. peer_id 为空 / instance_id 无效 → 返回 "REG FAIL ...\n"
+ *   1. peer_id 为空 / instance_id 无效 → 关闭 WS 连接，并在 close reason 中返回具体错误
  *   2. peer_id + instance_id 均匹配（同一 cid）→ 幂等，返回 "REG OK <sync_max>\n"
  *   3. peer_id 匹配 + instance_id 相同（不同 cid，网络重连）:
  *      - 踢掉旧 WS 连接（ws_server_disconnect, code=1000）
@@ -1344,10 +1343,9 @@ typedef struct {
  *     - features: 服务器功能位掩码（十进制），与 RELAY 一致:
  *         0x01 = P2P_RLY_FEATURE_RELAY（支持数据包中继）
  *         0x02 = P2P_RLY_FEATURE_MSG（支持 MSG RPC 机制）
- *   "REG FAIL <reason>\n"      — 注册失败
- *     reason: "empty peer_id"      — peer_id 为空
- *             "invalid instance_id" — instance_id 缺失或为 0
- *             "OOM"                — 内存分配失败
+ *   注册失败不再返回文本协议应答；服务器会直接发送 WS close 帧并关闭连接。
+ *     - close code: 映射自协议错误（通常为 WS_CLOSE_PROTOCOL_ERROR）
+ *     - close reason: 例如 "empty peer id" / "invalid instance id" / "duplicate reg"
  *
  * 示例:
  *   → "REG alice_device_01 3827401956\n"
@@ -1358,8 +1356,6 @@ typedef struct {
 
 #define P2P_WSS_RSP_REG_OK_SZ       (sizeof(P2P_WSS_RSP_REG_OK) - 1u)   /* "REG OK " */
 #define P2P_WSS_RSP_REG_OK_FMT      P2P_WSS_RSP_REG_OK "%u %u\n"        /* "REG OK <sync_max> <features>\n" */
-#define P2P_WSS_RSP_REG_FAIL_SZ     (sizeof(P2P_WSS_RSP_REG_FAIL) - 1u) /* "REG FAIL " */
-#define P2P_WSS_RSP_REG_FAIL_FMT    P2P_WSS_RSP_REG_FAIL "%s\n"         /* "REG FAIL <reason>\n" */
 /* ────────────────────────────────────────────────────────────────────────────
  * OFF — 主动下线（客户端 → 服务器）
  * ────────────────────────────────────────────────────────────────────────────
@@ -1396,7 +1392,7 @@ typedef struct {
  * 前置条件: 发送方必须已 REG 注册。
  *
  * 服务端处理:
- *   1. 未 REG → 返回 "REG FAIL not registered\n"
+ *   1. 未 REG → 服务器可直接关闭连接（close reason: "not registered"）
  *   2. remote_peer_id 为空 → 返回 "SDP FAIL <remote_peer_id> empty peer id\n"
  *   3. sdp 为空 → 返回 "SDP FAIL <remote_peer_id> empty sdp\n"
  *   4. 对端不存在/未注册/离线 → 返回 "SDP FAIL <remote_peer_id> peer offline\n"
@@ -1439,7 +1435,7 @@ typedef struct {
  *       SYN0 自身不携带结束语义，因此不是最后一个 SYNC 包；即使没有更多候选，
  *       也应由后续真实 SYNC 明确结束本轮同步（例如发送一个 ICE_DONE）。
  *
- * 前置条件: 发送方必须已 REG 注册，否则返回 "REG FAIL not registered\n"
+ * 前置条件: 发送方必须已 REG 注册，否则服务器可直接关闭连接（close reason: "not registered"）
  *
  * 服务端处理:
  *   1. remote_peer_id 为空 → 返回 "SYN0 FAIL empty peer_id\n"
@@ -1486,7 +1482,7 @@ typedef struct {
  *      — reason: "empty peer_id"   — remote_peer_id 为空
  *                "internal"        — build_session 内部错误（OOM / 重复创建）
  *                "too large"       — payload 超出 sync_max 上限，服务器直接拒绝
- *                "not registered"  — 发送方未 REG（返回 "REG FAIL not registered\n"）
+ *                "not registered"  — 发送方未 REG（可能直接触发 WS close）
  *
  * 示例:
  *   → "SYN0 bob_device_02\n"
@@ -1643,7 +1639,7 @@ typedef struct {
  *     直接复用 P2P_CODE_READY / P2P_ERR_* 的值定义；RELAY 的 P2P_RLY_* 只是兼容别名
  *
  * 语义:
- *   - STA 不替代既有的 "REG FAIL" / "SDP FAIL" / "SYN0 FAIL" / "SYNC ... confirm|busy"；
+ *   - STA 不替代既有的注册成功应答、"SDP FAIL" / "SYN0 FAIL" / "SYNC ... confirm|busy"；
  *     它用于补充统一的会话级状态与错误反馈，避免服务器仅打印日志而吞掉请求。
  *   - 对 PKT 来说，STA(PKT, 89/00) 构成显式流控背压机制，即 BUSY/READY。
  */

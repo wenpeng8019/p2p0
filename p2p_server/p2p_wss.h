@@ -20,7 +20,7 @@
  *
  *   服务器 → 客户端：
  *     REG OK <sync_max>             注册成功（sync_max = 预缓存负载上限）
- *     REG FAIL <reason>             注册失败
+ *     注册失败不再返回文本协议；服务器直接发送 WS close，具体细节放在 close reason 中
  *     SDP OK <remote_peer_id>       SDP 转发成功
  *     SDP FAIL <remote_peer_id> <reason>  SDP 转发失败
  *     SYN0 <peer_id> <session_id_hex> online|offline  应答/推送
