@@ -39,8 +39,6 @@ static ct_client_ctx_t              g_ctx;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-//-----------------------------------------------------------------------------
-
 // client 级的状态应答
 // + STATUS 包不走 session 队列，直接挂到 client 上
 static bool relay_send_status(relay_client_t *client, uint8_t req_type, uint8_t status_code) {
@@ -342,7 +340,6 @@ static void relay_session_break(ct_client_ctx_t *ctx, ct_session_t *ct_session, 
     session->rpc_last_sid = peer->rpc_last_sid = 0;
 }
 
-
 ///////////////////////////////////////////////////////////////////////////////
 
 // 处理 SYN0 消息（首次同步）
@@ -519,18 +516,6 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     }
 }
 
-// 处理 FIN 消息（会话结束）
-// payload: [session_id(P2P_SESS_ID_SZ)]
-static void relay_handle_fin(relay_session_t *session) {
-    const char *PROTO = "FIN";
-
-    print("I:", LA_F("%s: close ses_id=%u\n", LA_F158, 158), PROTO, session->base.session_id);
-
-    // 向对端发送 FIN 说明本端已经关闭了连接
-    // + 销毁本端的 sess（销毁操作会向对端发送 FIN）
-    ct_session_close(&g_ctx, (ct_session_t*)session, true);
-}
-
 // 处理 SYNC 消息（候选同步 / C→S confirm）
 // 上行: [session_id(P2P_SESS_ID_SZ)][sid(1)][candidate_count(1)][candidates(N*23)][fin_marker(0|1)]
 // confirm: [session_id(P2P_SESS_ID_SZ)][sid(1)][confirmed_count(1)]  ← 客户端确认收到服务器下发的 SYNC
@@ -693,6 +678,18 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
     // 队列未满时立即 confirm；队满时等 A 的 confirm 释放槽后补发（流控）
     if (!BUF_R_FULL(&session->sync_peer_send))
         relay_session_send_sync_confirm(session, sid);
+}
+
+// 处理 FIN 消息（会话结束）
+// payload: [session_id(P2P_SESS_ID_SZ)]
+static void relay_handle_fin(relay_session_t *session) {
+    const char *PROTO = "FIN";
+
+    print("I:", LA_F("%s: close ses_id=%u\n", LA_F158, 158), PROTO, session->base.session_id);
+
+    // 向对端发送 FIN 说明本端已经关闭了连接
+    // + 销毁本端的 sess（销毁操作会向对端发送 FIN）
+    ct_session_close(&g_ctx, (ct_session_t*)session, true);
 }
 
 // 处理 PKT 消息（零拷贝转发）
