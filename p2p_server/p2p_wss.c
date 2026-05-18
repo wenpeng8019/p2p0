@@ -40,27 +40,6 @@ static inline void wss_item_set_range(buf16_item_t *item, uint16_t pos, uint32_t
     }
 }
 
-static buf16_item_t* wss_take_payload_item(wss_client_t *client,
-                                           const uint8_t *payload, size_t payload_len,
-                                           buf16_item_t *payload_item) {
-    if (!payload_len) return NULL;
-
-    if (!payload_item) {
-        buf16_item_t *copy = alloc_buffer(0, 10u + payload_len);
-        if (!copy) return NULL;
-        memcpy(ITEM2BUF(copy) + 10, payload, payload_len);
-        wss_item_set_range(copy, 10, 10u + (uint32_t)payload_len);
-        return copy;
-    }
-
-    uint8_t *dst = ITEM2BUF(payload_item) + 10;
-    if (dst != payload)
-        memmove(dst, payload, payload_len);
-    wss_item_set_range(payload_item, 10, 10u + (uint32_t)payload_len);
-    ((ct_client_t*)client)->payload_buf = NULL;
-    return payload_item;
-}
-
 static buf16_item_t* wss_append_payload_item(buf16_item_t *base, buf16_item_t *tail) {
     size_t base_len = base ? (size_t)((BUF_IS_32BIT(base->flags) ? BUF32(base)->len : base->len)
                                       - (BUF_IS_32BIT(base->flags) ? BUF32(base)->pos : base->pos)) : 0;
@@ -137,15 +116,6 @@ static buf16_item_t* wss_build_syn0_online_frame(const char *peer_id, uint32_t s
                payload_len);
     item->len = total;
     return item;
-}
-
-static const char* wss_req_type_str(uint8_t req_type) {
-    switch (req_type) {
-    case P2P_WSS_BIN_PKT: return "PKT";
-    case P2P_WSS_BIN_REQ: return "REQ";
-    case P2P_WSS_BIN_RSP: return "RSP";
-    default: return "BIN";
-    }
 }
 
 // 分配一个预期大小的文本 payload 缓冲，snprintf 写入后按实际长度构建并发送 WS text frame。
@@ -449,7 +419,7 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
     }
 
     if (payload_len) {
-        cache_item = wss_take_payload_item(client, payload, payload_len, payload_item);
+        cache_item = ct_forward_payload((ct_client_t*)client, payload, (uint32_t)payload_len, 10, payload_item);
         if (!cache_item) {
             wss_send_printf((cw_client_t*)client, sizeof("SYN0 FAIL OOM"), "%s", "SYN0 FAIL OOM");
             return;
@@ -609,7 +579,7 @@ static void wss_handle_sync(wss_session_t *session, uint8_t sid, const uint8_t *
         return;
     }
 
-    cache_item = wss_take_payload_item(client, payload, payload_len, payload_item);
+    cache_item = ct_forward_payload((ct_client_t*)client, (uint8_t*)payload, (uint32_t)payload_len, 10, payload_item);
     if (!cache_item) {
         wss_send_printf((cw_client_t*)client, 48u, P2P_WSS_RSP_SYNC_BUSY_FMT, session_id, sid);
         return;
@@ -877,7 +847,7 @@ static buf16_item_t* wss_handle_handshake_cb(cw_client_ctx_t *ctx, cw_client_t *
     }
 
     if (opcode != WS_OP_TEXT) {
-        print("E:", LA_F("%s: rejected for not reg(%s)\n", LA_F147, 147), PROTO, wss_req_type_str(opcode));
+        print("E:", LA_F("%s: rejected for not reg(%s)\n", LA_F147, 147), PROTO, "bin frame");
         client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
         close_reason = "not registered";
         goto error_close;
@@ -1125,6 +1095,15 @@ error_proto:
                     P2P_WSS_RSP_STA_FMT, 0, "TXT", P2P_ERR_PROTOCOL);
     print("V:", LA_F("unknown msg from '%s': %.32s\n", LA_F203, 203),
           client->base.local_peer_id, msg);
+}
+
+static const char* wss_req_type_str(uint8_t req_type) {
+    switch (req_type) {
+    case P2P_WSS_BIN_PKT: return "PKT";
+    case P2P_WSS_BIN_REQ: return "REQ";
+    case P2P_WSS_BIN_RSP: return "RSP";
+    default: return "UNKNOWN";
+    }
 }
 
 // handle_frame 回调（custom_ws 框架调用，opcode = TEXT 或 BINARY）

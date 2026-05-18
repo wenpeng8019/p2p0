@@ -205,12 +205,26 @@ ct_forward_payload(ct_client_t *client,
                    buf16_item_t *payload_item) {
     assert(payload_item == client->payload_buf);
     if (payload_item) {
-        assert(payload_item->pos == payload_offset && payload_item->len == payload_offset + payload_len);
+        uint8_t *dst = ITEM2BUF(payload_item) + payload_offset;
+        if (dst != payload)
+            memmove(dst, payload, payload_len);
+        if (BUF_IS_32BIT(payload_item->flags)) {
+            BUF32(payload_item)->pos = payload_offset;
+            BUF32(payload_item)->len = payload_offset + payload_len;
+        } else {
+            payload_item->pos = payload_offset;
+            payload_item->len = payload_offset + payload_len;
+        }
         client->payload_buf = NULL;
     } else { payload_item = alloc_buffer(0, payload_offset + payload_len);
         if (!payload_item) return NULL;
-        payload_item->pos = payload_offset;
-        payload_item->len = payload_offset + payload_len;
+        if (BUF_IS_32BIT(payload_item->flags)) {
+            BUF32(payload_item)->pos = payload_offset;
+            BUF32(payload_item)->len = payload_offset + payload_len;
+        } else {
+            payload_item->pos = payload_offset;
+            payload_item->len = payload_offset + payload_len;
+        }
         memcpy(ITEM2BUF(payload_item) + payload_offset, payload, payload_len);
     }
     return payload_item;
