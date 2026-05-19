@@ -425,7 +425,8 @@ static void compact_handle_syn0(struct sockaddr_in *from, uint8_t *payload, size
 
     compact_session_t *local_s = NULL, *remote_s = NULL;
     ret_t side = pair_session(&local_client->base, remote_peer_id,
-                             (session_t**)&local_s, (session_t**)&remote_s, sizeof(compact_session_t));
+                             (session_t**)&local_s, (session_t**)&remote_s,
+                             sizeof(compact_session_t), NULL);
 
     // UDP 允许可靠性重传，所以 E_DUPLICATE 不视为错误
     if (side == E_DUPLICATE) {

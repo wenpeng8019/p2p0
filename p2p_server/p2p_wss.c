@@ -274,7 +274,7 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
     wss_session_t *local_s = NULL, *remote_s = NULL;
     ret_t side = pair_session(&client->base, remote_peer_id,
                               (session_t**)&local_s, (session_t**)&remote_s,
-                              sizeof(wss_session_t));
+                              sizeof(wss_session_t), NULL);
 
     if (side == E_OUT_OF_MEMORY) {
         print("E:", LA_F("%s: OOM building session '%s' -> '%s'\n", LA_F37, 37),

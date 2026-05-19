@@ -256,7 +256,8 @@ solo_session(client_t *client, session_t **local_s,
 // 创建新会话对
 ret_t
 pair_session(client_t *client, const char *remote_peer_id,
-             session_t **local_s, session_t **remote_s, size_t session_type_size) {
+             session_t **local_s, session_t **remote_s,
+             size_t session_type_size, void(*init)(session_t* session)) {
     if (!client || !remote_peer_id || !local_s || !remote_s) return E_INVALID;
     *local_s = NULL;
     *remote_s = NULL;
@@ -376,7 +377,12 @@ pair_session(client_t *client, const char *remote_peer_id,
     // 分配 sess id
     s->session_id = generate_session_id();
     HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), s);
-    
+
+    // 初始化新的 session
+    if (new_sess && init) {
+        init(s);
+    }
+
     *local_s = s;
     return side | (new_sess ? PAIR_NEW_SESS_MASK : 0);
 }
@@ -404,7 +410,7 @@ free_session_base(session_t *s) {
     client_t *client = s->client;
     if (client) {
         if (s->prev) s->prev->next = s->next;
-        else         client->sessions = s->next;
+        else client->sessions = s->next;
         if (s->next) s->next->prev = s->prev;
         s->prev = s->next = NULL;
     }
@@ -808,14 +814,14 @@ int main(int argc, char *argv[]) {
 
                 // client 超时淘汰检测
                 if (tick_diff(now, CLIENTS(i)->last_active) >= CLIENT_TIMEOUT_S * 1000) {
-                    print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F73, 73),
-                          CLIENTS(i)->local_peer_id, tick_diff(now, CLIENTS(i)->last_active) / 1000.0);
-                    if (m >= 0 && m < PROTO_NUM) g_contexts[m]->free(CLIENTS(i));
-                    else if (m == 127) {
-                        P_sock_close(CLIENTS(i)->fd);
-                        CLIENTS(i)->fd = P_INVALID_SOCKET;
-                        CLIENTS(i)->proto = -1;
-                    }
+                    // print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F73, 73),
+                    //       CLIENTS(i)->local_peer_id, tick_diff(now, CLIENTS(i)->last_active) / 1000.0);
+                    // if (m >= 0 && m < PROTO_NUM) g_contexts[m]->free(CLIENTS(i));
+                    // else if (m == 127) {
+                    //     P_sock_close(CLIENTS(i)->fd);
+                    //     CLIENTS(i)->fd = P_INVALID_SOCKET;
+                    //     CLIENTS(i)->proto = -1;
+                    // }
                 }
                 else if (m != PROTO_COMPACT) {
 #ifdef WITH_WSLAY

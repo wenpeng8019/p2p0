@@ -449,7 +449,7 @@ solo_session(client_t *client, session_t **local_s,
 ret_t
 pair_session(client_t *client, const char *remote_peer_id,
              session_t **local_s, session_t **remote_s,
-             size_t session_type_size);
+             size_t session_type_size, void(*init)(session_t* session));
 
 // pair_session 成功返回值编码（ret_t >= 0）：
 //   bit0: 本端 local_s 在 pair 中的位置（0=left, 1=right）
