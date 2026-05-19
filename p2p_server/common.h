@@ -17,7 +17,7 @@
 
 #define MAX_PEERS                       128     /* 允许最大同时在线客户端数量 */
 
-#define CLIENT_TIMEOUT_S                60      /* 客户端超时淘汰时间（秒） */
+#define DEFAULT_CLIENT_TIMEOUT_S        60      /* 客户端超时淘汰时间默认值（秒） */
 
 #define CLEANUP_INTERVAL_S              10      /* cleanup 过期客户端的时间间隔（秒） */
 

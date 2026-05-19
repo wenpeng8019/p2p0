@@ -105,7 +105,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F475] = "%s: STUN ready → SYNCING",  /* SID:475 */
     [LA_F577] = "%s: SUB gist empty, waiting",  /* SID:577 */
     [LA_F351] = "%s: SUB gist not REG (content: %.20s...)",  /* SID:351 */
-    [LA_F580] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:580 */
+    [LA_F581] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:581 */
     [LA_F477] = "%s: SUB online (heartbeat %llds ago), early nat_punch",  /* SID:477 */
     [LA_F478] = "%s: SUB responded with %d candidates (ver=%d)",  /* SID:478 */
     [LA_F96] = "%s: SUCCESS: UDP reachable via TURN (RTT: %llu ms)",  /* SID:96 */
@@ -377,7 +377,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F510] = "REG to RELAY signaling server at %s:%d",  /* SID:510 */
     [LA_F328] = "% REG: auth_key acquired, auto SYN0 sent\n",  /* SID:328 */
     [LA_F511] = "REG: local_gist=%s peer=%s",  /* SID:511 */
-    [LA_F512] = "REG: peer_id cannot contain '/' (got \"%s\")",  /* SID:512 */
+    [LA_F512] = "REG: peer_id cannot contain '/' (got \\"%s\\")",  /* SID:512 */
     [LA_F344] = "% RELAY path but TURN not allocated",  /* SID:344 */
     [LA_F345] = "% RELAY path but TURN not allocated (dtls)",  /* SID:345 */
     [LA_F346] = "% RELAY recovery: NAT connected but no path available",  /* SID:346 */
@@ -506,6 +506,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F468] = "transport send_data failed, %d bytes dropped",  /* SID:468 */
     [LA_F469] = "✓ Gathered Srflx Candidate %s:%d, priority=%u (ses_id=%u)",  /* SID:469 */
     [LA_F470] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:470 */
+    [LA_F580] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:580 disabled */
     [LA_F579] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:579 disabled */
     [LA_F578] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:578 disabled */
     [LA_F476] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:476 disabled */

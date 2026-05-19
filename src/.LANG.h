@@ -625,7 +625,8 @@ enum {
     LA_F577,  /* "%s: SUB gist empty, waiting" (%s)  [p2p_signal_pubsub.c] */
     LA_F578,  /* disabled "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" */
     LA_F579,  /* disabled "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" */
-    LA_F580,  /* "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" (%s,%l,%d)  [p2p_signal_pubsub.c] */
+    LA_F580,  /* disabled "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" */
+    LA_F581,  /* "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" (%s,%l,%d)  [p2p_signal_pubsub.c] */
 
     LA_NUM
 };

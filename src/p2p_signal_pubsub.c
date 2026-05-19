@@ -355,7 +355,7 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
                 long long age = (long long)(now_sec - sub_ts);
                 if (age > P2P_PUBSUB_HEARTBEAT_SEC) {
                     print("W:", LA_F("%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",
-                        LA_F351, LA_F580, 580), TASK_POLL, age, P2P_PUBSUB_HEARTBEAT_SEC);
+                        LA_F351, LA_F581, 581), TASK_POLL, age, P2P_PUBSUB_HEARTBEAT_SEC);
                 } else {
                     print("I:", LA_F("%s: SUB online (heartbeat %llds ago), early nat_punch", LA_F477, 477),
                         TASK_POLL, age);
