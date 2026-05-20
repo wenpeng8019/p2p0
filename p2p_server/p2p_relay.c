@@ -283,63 +283,6 @@ static void relay_ch_break_forward(buffer_round_t *rq, relay_session_t *dst) {
     BUF_R_CLEAR(rq);
 }
 
-// 停止/终止会话
-static void relay_session_break(ct_client_ctx_t *ctx, ct_session_t *ct_session, ct_session_t *ct_peer, break_mode_e break_mode) { (void)ctx;
-
-    // 前提是双方在线
-    assert(PEER_ONLINE(ct_session) && PEER_ONLINE(ct_peer));
-
-    relay_session_t *session = (relay_session_t*)ct_session, *peer = (relay_session_t*)ct_peer;
-
-    // 存在对端发起的 req
-    if (peer->rpc_pending_sid) {
-        relay_session_send_rpc_code(peer, peer->rpc_pending_sid, P2P_RPC_ERR_PEER_OFF);
-        if (TQ_INQ(&g_relay_rpc_pending_q, peer)) TQ_RM(&g_relay_rpc_pending_q, peer);
-        peer->rpc_sent_time = 0;
-        peer->rpc_pending_sid = 0;
-    }
-
-    // 存在本端发起的 req
-    if (session->rpc_pending_sid) {
-
-        // 如果依然可以向本地发送数据
-        if (break_mode != SESS_BREAK_TERM)
-            relay_session_send_rpc_code(session, session->rpc_pending_sid, P2P_RPC_ERR_BREAK);
-
-        if (TQ_INQ(&g_relay_rpc_pending_q, session)) TQ_RM(&g_relay_rpc_pending_q, session);
-        session->rpc_sent_time = 0;
-        session->rpc_pending_sid = 0;
-    }
-
-    // 如果只是（unreachable）暂停通讯的状态（即会话和数据完整性不会被破坏）
-    if (break_mode == SESS_BREAK_STOP) return;
-
-    // 如果是 grace 关闭会话
-    if (break_mode == SESS_BREAK_CLOSE) {
-
-        // 把剩余数据发给对端
-        relay_ch_break_forward(&session->sync_peer_send, peer);
-        relay_ch_break_forward(&session->pkt_peer_send,  peer);
-
-        // 向对端发送最后一个 FIN 包
-        relay_session_send_fin(peer);
-
-        // 将对端剩余数据发给本端
-        relay_ch_break_forward(&peer->sync_peer_send, session);
-        relay_ch_break_forward(&peer->pkt_peer_send,  session);
-    }
-    else {
-
-        relay_ch_break_forward(&session->sync_peer_send, NULL);
-        relay_ch_break_forward(&session->pkt_peer_send,  NULL);
-        relay_ch_break_forward(&peer->sync_peer_send, NULL);
-        relay_ch_break_forward(&peer->pkt_peer_send,  NULL);
-    }
-
-    session->last_sid = peer->last_sid = 0;
-    session->rpc_last_sid = peer->rpc_last_sid = 0;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 static void relay_session_init(session_t* s) {
@@ -714,7 +657,7 @@ static void relay_handle_fin(relay_session_t *session) {
 
     // 向对端发送 FIN 说明本端已经关闭了连接
     // + 销毁本端的 sess（销毁操作会向对端发送 FIN）
-    ct_session_close(&g_ctx, (ct_session_t*)session, true);
+    free_session((session_t*)session, true); // todo 是否会向对端成功发 fin
 }
 
 // 处理 PKT 消息（零拷贝转发）
@@ -973,7 +916,7 @@ static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t **
                 }
             }
 
-            ct_reactive_client(client);
+            activate_client(&client->base, 1);
 
             print("I:", LA_F("%s: '%.*s' reconnected & reactive (inst=%u)\n", LA_F98, 98), PROTO,
                    P2P_PEER_ID_MAX, payload, instance_id);
@@ -993,9 +936,7 @@ static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t **
 
     if (!reg) {
         client->base.instance_id = instance_id;
-        memcpy(client->base.local_peer_id, payload, P2P_PEER_ID_MAX);
-        client->base.local_peer_id[P2P_PEER_ID_MAX] = '\0';
-        identify_client(&client->base);
+        identify_client(&client->base, (char*)payload);
     }
 
     // 构造 REG ACK 包
@@ -1104,9 +1045,7 @@ static void relay_handle_proto(ct_client_ctx_t *ctx, ct_client_t *client, uint8_
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-
-static buf16_item_t* relay_error_item(ct_client_t *client) {
+static static buf16_item_t* relay_error_item(ct_client_t *client) {
 
     buf16_item_t *item = alloc_buf16(BUF_FLAG_512(0));
     if (!item) return NULL;
@@ -1120,9 +1059,11 @@ static buf16_item_t* relay_error_item(ct_client_t *client) {
     return item;
 }
 
-static bool relay_init_client(client_t* c) {
+///////////////////////////////////////////////////////////////////////////////
 
-    if (!ct_init_client((ct_client_t*)c)) return false;
+static bool relay_client_reset(client_ctx_t* ctx, client_t *c, bool init) {
+
+    if (!ct_client_reset(ctx, c, init)) return false;
 
     relay_client_t* client = (relay_client_t*)c;
 
@@ -1146,14 +1087,79 @@ static bool relay_init_client(client_t* c) {
     return true;
 }
 
-// 释放 client
-static void relay_free_client(client_t *client) {
+// 停止/终止会话
+static void relay_session_break(client_ctx_t* ctx, session_t *s, session_t *ps, break_mode_e break_mode) { (void)ctx;
 
-    ct_free_client(&g_ctx, (ct_client_t*)client);
+    // 前提是双方在线
+    assert(PEER_ONLINE(s) && PEER_ONLINE(ps));
+
+    relay_session_t *session = (relay_session_t*)s, *peer = (relay_session_t*)ps;
+
+    // 存在对端发起的 req
+    if (peer->rpc_pending_sid) {
+        relay_session_send_rpc_code(peer, peer->rpc_pending_sid, P2P_RPC_ERR_PEER_OFF);
+        if (TQ_INQ(&g_relay_rpc_pending_q, peer)) TQ_RM(&g_relay_rpc_pending_q, peer);
+        peer->rpc_sent_time = 0;
+        peer->rpc_pending_sid = 0;
+    }
+
+    // 存在本端发起的 req
+    if (session->rpc_pending_sid) {
+
+        // 如果依然可以向本地发送数据
+        if (break_mode != SESS_BREAK_TERM)
+            relay_session_send_rpc_code(session, session->rpc_pending_sid, P2P_RPC_ERR_BREAK);
+
+        if (TQ_INQ(&g_relay_rpc_pending_q, session)) TQ_RM(&g_relay_rpc_pending_q, session);
+        session->rpc_sent_time = 0;
+        session->rpc_pending_sid = 0;
+    }
+
+    // 如果只是（unreachable）暂停通讯的状态（即会话和数据完整性不会被破坏）
+    if (break_mode == SESS_BREAK_STOP) return;
+
+    // 如果是 grace 关闭会话
+    if (break_mode == SESS_BREAK_CLOSE) {
+
+        // 把剩余数据发给对端
+        relay_ch_break_forward(&session->sync_peer_send, peer);
+        relay_ch_break_forward(&session->pkt_peer_send,  peer);
+
+        // 向对端发送最后一个 FIN 包
+        relay_session_send_fin(peer);
+
+        // 将对端剩余数据发给本端
+        relay_ch_break_forward(&peer->sync_peer_send, session);
+        relay_ch_break_forward(&peer->pkt_peer_send,  session);
+    }
+    else {
+
+        relay_ch_break_forward(&session->sync_peer_send, NULL);
+        relay_ch_break_forward(&session->pkt_peer_send,  NULL);
+        relay_ch_break_forward(&peer->sync_peer_send, NULL);
+        relay_ch_break_forward(&peer->pkt_peer_send,  NULL);
+    }
+
+    session->last_sid = peer->last_sid = 0;
+    session->rpc_last_sid = peer->rpc_last_sid = 0;
 }
 
 ct_client_ctx_t*
 relay_init(void) {
+
+    g_ctx.base.cb_reset = relay_client_reset;
+    g_ctx.base.cb_break = relay_session_break;
+    ct_ctx_init(&g_ctx);
+
+    g_ctx.max_payload_len = P2P_MAX_PAYLOAD;
+    g_ctx.resolve_payload_len = relay_resolve_payload_len;
+    g_ctx.handle_handshake = relay_handle_handshake;
+    g_ctx.handshake_finish = NULL;
+    g_ctx.handle_proto = relay_handle_proto;
+    g_ctx.handle_peer_sent = relay_handle_peer_sent;
+    g_ctx.client_unreachable = NULL;
+    g_ctx.fatal_item = (buf16_item_t*)g_relay_fatal;
+    g_ctx.error_item = relay_error_item;
 
     // 初始化 RPC 待确认队列
     TQ_INIT(&g_relay_rpc_pending_q,
@@ -1169,19 +1175,6 @@ relay_init(void) {
     fatal_item->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_STA_PSZ(0, 0));
     ((uint8_t*)(fatal_hdr + 1))[1] = P2P_ERR_INTERNAL;
 
-    g_ctx.base.free = relay_free_client;
-    g_ctx.base.init = relay_init_client;
-    g_ctx.base.migrate = ct_migrate_client;
-    g_ctx.max_payload_len = P2P_MAX_PAYLOAD;
-    g_ctx.resolve_payload_len = relay_resolve_payload_len;
-    g_ctx.handle_handshake = relay_handle_handshake;
-    g_ctx.handshake_finish = NULL;
-    g_ctx.handle_proto = relay_handle_proto;
-    g_ctx.handle_peer_sent = relay_handle_peer_sent;
-    g_ctx.session_break = relay_session_break;
-    g_ctx.client_unreachable = NULL;
-    g_ctx.fatal_item = (buf16_item_t*)g_relay_fatal;
-    g_ctx.error_item = relay_error_item;
     return &g_ctx;
 }
 

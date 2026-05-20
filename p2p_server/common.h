@@ -404,7 +404,7 @@ struct client_ctx {
     bool (*cb_activate)(client_ctx_t* ctx, client_t *c, int active);
 
     // [option] 执行对 session 的终止或中断。如果创建了 session 对象，则该接口是必须实现的。如果不使用 session，则可以设为 NULL
-    void (*cb_break)  (client_ctx_t* ctx, session_t *s, session_t *peer, break_mode_e break_mode);
+    void (*cb_break)  (client_ctx_t* ctx, session_t *s, session_t *ps, break_mode_e break_mode);
 
     // [nullable] 执行 session 的销毁和资源回收。相比于 cb_break：cb_break 关注的是双方的关系，cb_close 关注的是 session 对象自身
     void (*cb_close)  (client_ctx_t* ctx, session_t *s, bool terminate, bool clearing);

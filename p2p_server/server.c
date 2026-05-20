@@ -520,9 +520,9 @@ activate_client(client_t* c, int active) {
 
         if (!ctx->cb_activate(ctx, c, 0)) return false;
 
-        for(session_t *s = c->sessions, *peer; s; s = s->next) { peer = s->peer;
-            if (PEER_VALID(peer) && ctx->cb_activate(ctx, peer->client, 0))
-                ctx->cb_break(ctx, s, peer, SESS_BREAK_STOP);       // 任何一端 deactivate，双方的 session 就会 stop
+        for(session_t *s = c->sessions, *ps; s; s = s->next) { ps = s->peer;
+            if (PEER_VALID(ps) && ctx->cb_activate(ctx, ps->client, 0))
+                ctx->cb_break(ctx, s, ps, SESS_BREAK_STOP);         // 任何一端 deactivate，双方的 session 就会 stop
         }
 
         ctx->cb_activate(ctx, c, active);
