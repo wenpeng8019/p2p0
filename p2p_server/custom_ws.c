@@ -467,65 +467,6 @@ static void cw_tcp_handle_proto(ct_client_ctx_t *ctx, ct_client_t *c, uint8_t *h
 ///////////////////////////////////////////////////////////////////////////////
 // Public API
 
-bool cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx) {
-    (void)ctx;
-
-    // 分配 HTTP 握手接收缓冲（流模式）
-    buf16_item_t *recv_buf = alloc_buf16(CW_HTTP_BUF_FLAGS);
-    if (!recv_buf) {
-        print("E:", LA_F("[WS] OOM: cannot allocate HTTP recv buffer\n", LA_F227, 227));
-        return false;
-    }
-
-    // 初始化 custom_tcp 字段（流模式，hdr_rs="\r\n\r\n"，hdr_sz=4）
-    // 注意：recv_buf 由 ct_init_client 分配，这里替换为更大的 HTTP 缓冲
-    ct_client_t *c = (ct_client_t*)client;
-    c->recv_buf = recv_buf;
-    c->recv_cur = 0;
-    c->send_buff_queue.head = c->send_buff_queue.rear = NULL;
-    c->send_sess_head = c->send_sess_rear = NULL;
-    c->sending_sess = NULL;
-    c->sending_cur = 0;
-    c->last_error = 0;
-    c->payload_buf = NULL;
-    c->payload_cur = 0;
-
-    // 握手阶段：流模式，以 "\r\n\r\n" 为边界
-    static const uint8_t CRLF2[4] = {'\r','\n','\r','\n'};
-    c->hdr_rs = (uint8_t*)CRLF2;
-    c->hdr_sz = 4;
-
-    // 初始化 WS 专有字段
-    memset(client->ws_hdr_buf, 0, sizeof(client->ws_hdr_buf));
-    client->ws_opcode = 0;
-    client->ws_frag_q.head = client->ws_frag_q.rear = NULL;
-    client->ws_frag_len = 0;
-    client->ws_utf8state = WS_UTF8_ACCEPT;
-    client->last_reason = NULL;
-
-    uint8_t *buf = client->ws_close_frame_buf + sizeof(buf16_item_t);
-    buf[0] = 0x88;      // FIN | CLOSE
-    buf[1] = 2;         // payload len = 2
-    ((buf16_item_t*)client->ws_close_frame_buf)->len   = 4;
-    ((buf16_item_t*)client->ws_close_frame_buf)->refer = ITEM_REF_STATIC;
-
-    TCP_CLIENT_INIT(client);
-    return true;
-}
-
-void cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client) {
-
-    if (client->ws_frag_q.head) {
-        BUF_Q_CLEAR(&client->ws_frag_q, it, free_buf16(it););
-        client->ws_frag_len = 0;
-    }
-    if (client->last_reason) {
-        free_buf16(client->last_reason);
-        client->last_reason = NULL;
-    }
-    ct_free_client(&ctx->base, (ct_client_t*)client);
-}
-
 // 构造并发送 WS 帧头（服务端，无 mask）
 // + buf_item: 上层分配的缓冲，[0, payload_pos) 为预留空间，[payload_pos, len) 为 payload
 // + payload_pos 必须 >= 实际帧头长度（由 payload 大小决定）
@@ -589,14 +530,6 @@ buf16_item_t *cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args
     }
 
     if (cw_build_frame(WS_OP_TEXT, item, 10) != E_NONE) return NULL;
-    return item;
-}
-
-buf16_item_t *cw_printf_frame(uint32_t expect_sz, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);
-    va_end(args);
     return item;
 }
 
@@ -701,9 +634,9 @@ ret_t cw_session_send(ct_session_t *session, buf16_item_t *frame) {
     return E_NONE;
 }
 
-ret_t cw_close(cw_client_ctx_t *ctx, cw_client_t *client, uint16_t code, const char* reason/* nullable */) {
+ret_t cw_close(cw_client_t *client, uint16_t code, const char* reason/* nullable */) {
 
-    ct_session_clear((ct_client_ctx_t*)ctx, (ct_client_t*)client, false);
+    clear_sessions((client_t*)client, false);
 
     if (!code) code = WS_CLOSE_NORMAL;
 
@@ -740,17 +673,78 @@ ret_t cw_close(cw_client_ctx_t *ctx, cw_client_t *client, uint16_t code, const c
     return r;
 }
 
-void cw_retry_closing(cw_client_ctx_t *ctx, cw_client_t *client, uint64_t now) {
+void cw_retry_closing(cw_client_t *client, uint64_t now) {
     if ((client->io & CW_IO_FLAG_CLOSING) &&
         tick_diff(now, client->base.last_active) >= (uint64_t)ARGS_client_timeout.i64 * 1000u) {
         print("I:", LA_F("[WS] close timeout, force closing\n", LA_F192, 192));
-        cw_free_client(ctx, client);
+        free_client(&client->base);
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // custom_tcp_ctx_t 初始化助手
 // + 将 WS 回调绑定到 tcp ctx，供 cw_init_client 调用方使用（一次性初始化）
+
+static void client_free(cw_client_t *client) {
+
+    if (client->ws_frag_q.head) {
+        BUF_Q_CLEAR(&client->ws_frag_q, it, free_buf16(it););
+        client->ws_frag_len = 0;
+        client->ws_opcode = 0;
+    }
+    if (client->last_reason) {
+        free_buf16(client->last_reason);
+        client->last_reason = NULL;
+    }
+}
+
+void cw_client_free(client_ctx_t* ctx, client_t *c) {
+    client_free((cw_client_t*)c);
+    ct_client_free(ctx, c);
+}
+
+bool cw_client_reset(client_ctx_t* ctx, client_t *c, bool init) { (void)ctx;
+    cw_client_t *client = (cw_client_t*)c;
+
+    // 分配 HTTP 握手接收缓冲（流模式）
+    buf16_item_t *recv_buf = alloc_buf16(CW_HTTP_BUF_FLAGS);
+    if (!recv_buf) {
+        print("E:", LA_F("[WS] OOM: cannot allocate HTTP recv buffer\n", LA_F227, 227));
+        return false;
+    }
+    static const uint8_t CRLF2[4] = {'\r','\n','\r','\n'};
+
+    ct_client_reset(ctx, c, true);
+
+    if (init) {
+
+        // 初始化 WS 专有字段
+        client->ws_opcode = 0;
+        client->ws_frag_q.head = client->ws_frag_q.rear = NULL;
+        client->ws_frag_len = 0;
+
+        client->last_reason = NULL;
+
+        uint8_t *buf = client->ws_close_frame_buf + sizeof(buf16_item_t);
+        buf[0] = 0x88;      // FIN | CLOSE
+        buf[1] = 2;         // payload len = 2
+        ((buf16_item_t*)client->ws_close_frame_buf)->len   = 4;
+    }
+    else client_free(client);
+
+    // 初始化 custom_tcp 字段（流模式，hdr_rs="\r\n\r\n"，hdr_sz=4）
+    // 注意：recv_buf 由 ct_init_client 分配，这里替换为更大的 HTTP 缓冲
+    ct_client_t *ct_c = (ct_client_t*)c;
+    ct_c->recv_buf = recv_buf;
+
+    // 握手阶段：流模式，以 "\r\n\r\n" 为边界
+    ct_c->hdr_rs = (uint8_t*)CRLF2;
+    ct_c->hdr_sz = 4;
+
+    client->ws_utf8state = WS_UTF8_ACCEPT;
+
+    return true;
+}
 
 static buf16_item_t* cw_error_item(ct_client_t *c) {
     cw_client_t *client = (cw_client_t*)c;
@@ -830,12 +824,18 @@ fallback_close:
     return close_frame;
 }
 
+//-----------------------------------------------------------------------------
+
 void cw_ctx_init(cw_client_ctx_t *ctx) {
 
-    if (!ctx->base.resolve_payload_len) ctx->base.resolve_payload_len = cw_resolve_payload_len;
-    if (!ctx->base.handle_handshake) ctx->base.handle_handshake = cw_tcp_handle_handshake;
-    if (!ctx->base.handshake_finish) ctx->base.handshake_finish = cw_tcp_handshake_finish;
-    if (!ctx->base.handle_proto) ctx->base.handle_proto = cw_tcp_handle_proto;
+    if (!ctx->base.base.cb_free) ctx->base.base.cb_free = cw_client_free;
+    if (!ctx->base.base.cb_reset) ctx->base.base.cb_reset = cw_client_reset;
+
+    ctx->base.resolve_payload_len = cw_resolve_payload_len;
+    ctx->base.handle_handshake = cw_tcp_handle_handshake;
+    ctx->base.handshake_finish = cw_tcp_handshake_finish;
+    ctx->base.handle_proto = cw_tcp_handle_proto;
+    ct_ctx_init(&ctx->base);
 
     ctx->base.error_item = cw_error_item;
     ctx->base.fatal_item = (buf16_item_t*)ctx->fatal_frame_buf;
@@ -843,9 +843,6 @@ void cw_ctx_init(cw_client_ctx_t *ctx) {
     buf[0] = 0x88;      // FIN | CLOSE
     buf[1] = 2;         // payload len = 2
     ((buf16_item_t*)ctx->fatal_frame_buf)->len   = 4;
-    ((buf16_item_t*)ctx->fatal_frame_buf)->refer = ITEM_REF_STATIC;
-
-    // client_unreachable 由上层填充
 }
 
 ///////////////////////////////////////////////////////////////////////////////

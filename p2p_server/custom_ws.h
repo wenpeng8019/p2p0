@@ -157,7 +157,7 @@ struct cw_client_ctx {
     uint8_t                         fatal_frame_buf[sizeof(buf16_item_t) + 4];
 };
 
-//-----------------------------------------------------------------------------
+///////////////////////////////////////////////////////////////////////////////
 // Public API
 
 // 初始化 WS 协议上下文（绑定内部回调到 ctx->base）
@@ -165,14 +165,11 @@ struct cw_client_ctx {
 void
 cw_ctx_init(cw_client_ctx_t *ctx);
 
-// 初始化 WS client
-// + 必须在 accept 后、第一次 cw_handle_recv 之前调用
-bool
-cw_init_client(cw_client_t *client, cw_client_ctx_t *ctx);
+// custom ws 可被重载的接口实现
+void cw_client_free(client_ctx_t* ctx, client_t *c);
+bool cw_client_reset(client_ctx_t* ctx, client_t *c, bool init);
 
-// 强制释放 WS client（关闭所有 session，释放所有缓冲）
-void
-cw_free_client(cw_client_ctx_t *ctx, cw_client_t *client);
+///////////////////////////////////////////////////////////////////////////////
 
 // 分配一个完整的 WS frame 缓冲
 // + payload_len: WS payload 总长度；函数内部会按该长度计算 hdr size，预填 opcode/length、frame flags，并将 pos 指向 payload 起始处
@@ -187,9 +184,12 @@ cw_alloc_frame(uint8_t opcode, uint32_t payload_len);
 buf16_item_t*
 cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args);
 
-// 同 cw_vprintf_frame 的可变参数封装
-buf16_item_t*
-cw_printf_frame(uint32_t expect_sz, const char *fmt, ...);
+static inline buf16_item_t* cw_printf_frame(uint32_t expect_sz, const char *fmt, ...) {
+    va_list args; va_start(args, fmt);
+    buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);
+    va_end(args);
+    return item;
+}
 
 // 在已有 buf_item 上构建 WS frame
 // + opcode: WS_OP_TEXT / WS_OP_BINARY / WS_OP_CONTINUATION
@@ -199,6 +199,8 @@ cw_printf_frame(uint32_t expect_sz, const char *fmt, ...);
 //   这里的有效 hdr size 为: 2 / 4 / 10；并会同步设置 frame flags
 ret_t
 cw_build_frame(uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_offset);
+
+//-----------------------------------------------------------------------------
 
 // 发送已构建完成的 WS frame 到 client
 // + frame: 由 cw_alloc_frame / cw_build_frame 生成；默认 pos 指向 payload，发送前框架会校验 frame flags 并回退到 hdr 起始位置
@@ -210,17 +212,19 @@ cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
 ret_t
 cw_session_send(ct_session_t *session, buf16_item_t *frame);
 
+//-----------------------------------------------------------------------------
+
 // 服务端主动 grace close
 // + 执行 session clear，向客户端发送 WS close 帧（code==0 || code=WS_CLOSE_NORMAL 表示正常关闭）
 // + reason: nullable；非空时作为 close reason 一并发送（受 WS 控制帧 125 字节限制）
 ret_t
-cw_close(cw_client_ctx_t *ctx, cw_client_t *client, uint16_t code, const char* reason/* nullable */);
+cw_close(cw_client_t *client, uint16_t code, const char* reason/* nullable */);
 
 // grace close 超时检查（在 server 的定期 cleanup 中调用）
 void
-cw_retry_closing(cw_client_ctx_t *ctx, cw_client_t *client, uint64_t now);
+cw_retry_closing(cw_client_t *client, uint64_t now);
 
-//-----------------------------------------------------------------------------
+///////////////////////////////////////////////////////////////////////////////
 
 #endif // P2P_CUSTOM_WS_H
 

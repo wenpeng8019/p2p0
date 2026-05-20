@@ -483,7 +483,10 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
                 do_free_session(s);
             }
 
-            ctx->cb_reset(ctx, c, false);
+            if (!ctx->cb_reset(ctx, c, false)) {    // todo 完善失败逻辑
+                c->proto = -1; c->fd = P_INVALID_SOCKET;
+                return false;
+            }
         }
 
         return true;
@@ -505,25 +508,34 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
     return false;
 }
 
-void
-activate_client(client_t* c, bool active) {
+bool
+activate_client(client_t* c, int active) {
     assert(c && c->proto >= 0);
     client_ctx_t* ctx = g_contexts[c->proto];
 
-    if (!ctx->cb_activate) return;
+    if (!ctx->cb_activate) return false;
+    if (!active) return ctx->cb_activate(ctx, c, 0);
 
-    if (!active) {
+    if (active < 0) {
 
-        if (!ctx->cb_activate(ctx, c, 0)) return;
+        if (!ctx->cb_activate(ctx, c, 0)) return false;
 
         for(session_t *s = c->sessions, *peer; s; s = s->next) { peer = s->peer;
             if (PEER_VALID(peer) && ctx->cb_activate(ctx, peer->client, 0))
                 ctx->cb_break(ctx, s, peer, SESS_BREAK_STOP);       // 任何一端 deactivate，双方的 session 就会 stop
         }
 
-        ctx->cb_activate(ctx, c, -1);
+        ctx->cb_activate(ctx, c, active);
+
+        c->last_active = P_tick_ms();                               // 记录失效前的最后活跃时间，供后续 cleanup 使用
     }
-    else if (!ctx->cb_activate(ctx, c, 0)) ctx->cb_activate(ctx, c, 1);
+    else {
+        if (!ctx->cb_activate(ctx, c, 0)) return false;
+
+        ctx->cb_activate(ctx, c, active);
+    }
+
+    return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1127,7 +1139,7 @@ int main(int argc, char *argv[]) {
             }
 
 #ifdef WITH_WS
-            if (ws_client) cw_retry_closing((cw_client_ctx_t*)g_contexts[PROTO_WSS], (cw_client_t*)ws_client, now);
+            if (ws_client) cw_retry_closing((cw_client_t*)ws_client, now);
 #endif
         }
 
