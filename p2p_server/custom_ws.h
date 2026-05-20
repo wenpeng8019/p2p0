@@ -64,16 +64,17 @@
 // 3000~4999: 应用自定义
 
 //-----------------------------------------------------------------------------
-// WS client 扩展字段（内联宏，供派生结构体使用）
-//
-// + ws_ctx:        指向所属的 custom_ws_ctx_t（init 时保存，回调中用于访问 ws 级配置）
-// + ws_hdr_buf:    14 字节静态缓冲，帧模式下作为 hdr_rs 使用（存放 WS 帧头字节）
-// + ws_opcode:     当前帧的 opcode（FIN bit 在 bit7：0x80 | opcode）
-// + ws_frag_q:     分片帧的聚合队列（收到非 FIN 帧时追加，head==NULL 表示无分片进行中）
-// + ws_frag_len:   ws_frag_q 中已聚合的总字节数
-// + ws_utf8state:  TEXT 帧 UTF-8 DFA 当前状态（0=ACCEPT；跨分片保持；RFC 6455 §8.1）
-// + last_reason:   可选的 WS close frame（由 cw_alloc_frame(WS_OP_CLOSE, 2 + reason_len) 分配）
-//                  pos 指向 WS payload 起始处；[pos..pos+1] 留给 close code，reason 从 [pos+2..len) 开始
+/**
+ * @brief                           WS client 扩展字段（内联宏，供派生结构体使用）
+ * @details
+ *  ws_hdr_buf                      14 字节静态缓冲，帧模式下作为 hdr_rs 使用，用于存放 WS 帧头字节
+ *  ws_opcode                       当前帧的 opcode，FIN bit 位于 bit7，即 0x80 | opcode
+ *  ws_frag_q                       分片帧聚合队列，收到非 FIN 帧时追加，空队列表示当前没有分片进行中
+ *  ws_frag_len                     ws_frag_q 中已聚合的总字节数
+ *  ws_utf8state                    TEXT 帧 UTF-8 DFA 当前状态，跨分片保持，0 表示 ACCEPT
+ *  last_reason                     可选的 WS close frame，由 cw_alloc_frame(WS_OP_CLOSE, 2 + reason_len) 分配
+ *                                  pos 指向 WS payload 起始处，[pos..pos+1] 留给 close code，reason 从 [pos+2..len) 开始
+ */
 #define CUSTOM_WS_CLIENT \
     uint8_t                         ws_hdr_buf[14]; \
     uint8_t                         ws_opcode;      \
@@ -101,36 +102,60 @@ typedef struct cw_client_ctx cw_client_ctx_t;
 //-----------------------------------------------------------------------------
 // 回调类型
 
-// 应用层握手协议
-// > opcode: WS_OP_TEXT 或 WS_OP_BINARY
-// > payload: 指向 payload 数据的指针。握手阶段不支持分片聚合帧，所以该值肯定不为 NULL
-// > payload_len: payload 数据总字节数
-// > buf_item: payload 所属的 buf_item（可用于零拷贝转发），也就是允许将应答写入 buf_item 并直接返回
-// + 另外，和 custom tcp 一样，t_client 指向的 client 可以被 resident 替换
+/**
+ * @brief                           应用层握手回调
+ * @param ctx
+ * @param t_client                  当前 client 指针地址，可在回调内替换为 resident 后的新 client
+ * @param opcode                    WS_OP_TEXT 或 WS_OP_BINARY
+ * @param payload                   payload 数据指针。握手阶段不支持分片聚合，因此这里必定非 NULL
+ * @param payload_len               payload 总字节数
+ * @param buf_item                  payload 所属的 buf_item，可直接复用来构造并返回应答
+ * @return                          返回握手应答 frame；返回 NULL 则表示握手失败
+ */
 typedef buf16_item_t* (*cw_handle_handshake_cb)(cw_client_ctx_t *ctx, cw_client_t ** t_client, uint8_t opcode,
                                                 uint8_t *payload, uint32_t payload_len,
                                                 buf16_item_t *buf_item);
 
-// 收到完整 WS 数据帧（text 或 binary）时调用
-// + opcode: WS_OP_TEXT 或 WS_OP_BINARY
-// + payload: 指向 payload 数据的指针。对于分片聚合帧，该值为 NULL，且 payload_len > 0
-// + payload_len: payload 数据总字节数（分片场景下为全部分片之和）
-// + buf_item: payload 所属的 buf_item（可用于零拷贝转发），即对应 custom_tcp 框架中的 payload1。
-//             如果 payload 的所属 buf_item 是 custom_tcp 框架中的 payload0，则此时的 buf_item 为 NULL
-//             此时无法零拷贝转发，如过上层需要转发，则需要自行复制到新 buf_item 中
+/**
+ * @brief                           收到完整 WS 数据帧时调用
+ * @param ctx
+ * @param client
+ * @param opcode                    WS_OP_TEXT 或 WS_OP_BINARY
+ * @param payload                   payload 数据指针。若为分片聚合帧，则这里为 NULL，实际总长度由 payload_len 给出
+ * @param payload_len               payload 总字节数，分片场景下为所有分片聚合后的总和
+ * @param buf_item                  payload 所属的 buf_item，可用于零拷贝转发
+ *                                  若 payload 来自 custom_tcp 的 payload0，则这里为 NULL，需要上层自行复制后转发
+ * @return                          无
+ */
 typedef void (*cw_handle_frame_cb)(cw_client_ctx_t *ctx, cw_client_t *client, uint8_t opcode,
                                    uint8_t *payload, uint32_t payload_len,
                                    buf16_item_t *buf_item);
 
-// 收到 ping 帧时调用（nullable）；框架已自动发送 pong 回复，回调仅供通知
+/**
+ * @brief                           收到 ping 帧时调用
+ * @param ctx
+ * @param client
+ * @param data
+ * @param len
+ * @return                          无
+ */
 typedef void (*cw_handle_ping_cb)(cw_client_ctx_t *ctx, cw_client_t *client, const uint8_t *data, uint8_t len);
 
-// 对端发起 close 握手时调用（nullable）；框架已自动入队 close 回复，回调仅供通知
+/**
+ * @brief                           对端发起 close 握手时调用
+ * @param ctx
+ * @param client
+ * @param code
+ * @return                          无
+ */
 typedef void (*cw_handle_close_cb)(cw_client_ctx_t *ctx, cw_client_t *client, uint16_t code);
 
-// 握手（HTTP Upgrade）完成时调用（nullable）
-// + 可在此进行鉴权、子协议协商结果处理等
-// + 返回 false 表示拒绝连接，框架会发送 403 并关闭连接
+/**
+ * @brief                           HTTP Upgrade 握手完成时调用
+ * @param ctx
+ * @param client
+ * @return                          返回 false 表示拒绝连接，框架会发送 403 并关闭连接
+ */
 typedef bool (*cw_handshake_done_cb)(cw_client_ctx_t *ctx, cw_client_t *client);
 
 //-----------------------------------------------------------------------------
@@ -139,19 +164,29 @@ typedef bool (*cw_handshake_done_cb)(cw_client_ctx_t *ctx, cw_client_t *client);
 struct cw_client_ctx {
     ct_client_ctx_t                 base;
 
-    // WS 子协议名（HTTP 握手 Sec-WebSocket-Protocol 字段，NULL 表示不协商）
+    /**
+     * @brief                       WS 子协议名，对应 HTTP 握手中的 Sec-WebSocket-Protocol 字段
+     */
     const char*                     sub_protocol;
 
-    // 应用层的握手处理
+    /**
+     * @brief                       应用层握手处理回调
+     */
     cw_handle_handshake_cb          handle_handshake;
 
-    // 收到数据帧（text/binary）时调用
+    /**
+     * @brief                       收到数据帧时调用
+     */
     cw_handle_frame_cb              handle_frame;
 
-    // 收到 ping 帧时调用（nullable）
+    /**
+     * @brief                       收到 ping 帧时调用，可为空
+     */
     cw_handle_ping_cb               handle_ping;
 
-    // 对端发起 close 时调用（nullable）
+    /**
+     * @brief                       对端发起 close 时调用，可为空
+     */
     cw_handle_close_cb              handle_close;
 
     uint8_t                         fatal_frame_buf[sizeof(buf16_item_t) + 4];
@@ -160,8 +195,11 @@ struct cw_client_ctx {
 ///////////////////////////////////////////////////////////////////////////////
 // Public API
 
-// 初始化 WS 协议上下文（绑定内部回调到 ctx->base）
-// + 必须在设置应用层回调之前调用（或之后调用，不影响，因 base 字段独立）
+/**
+ * @brief                           初始化 WS 协议上下文，并绑定内部回调到 ctx->base
+ * @param ctx
+ * @return                          无
+ */
 void
 cw_ctx_init(cw_client_ctx_t *ctx);
 
@@ -171,16 +209,22 @@ bool cw_client_reset(client_ctx_t* ctx, client_t *c, bool init);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// 分配一个完整的 WS frame 缓冲
-// + payload_len: WS payload 总长度；函数内部会按该长度计算 hdr size，预填 opcode/length、frame flags，并将 pos 指向 payload 起始处
-// + 当总长度超过 16bit 时，内部会自动分配 32bit buffer
-// + 返回后调用方直接向 ITEM2BUF(item) + item->pos 写入 payload 数据即可；len 已固定为整帧总长
+/**
+ * @brief                           分配一个完整的 WS frame 缓冲
+ * @param opcode
+ * @param payload_len               WS payload 总长度
+ * @return                          返回后可直接向 ITEM2BUF(item) + item->pos 写入 payload；len 已固定为整帧总长
+ */
 buf16_item_t*
 cw_alloc_frame(uint8_t opcode, uint32_t payload_len);
 
-// 分配一个 WS text frame，并将 printf 格式化结果写入 payload
-// + expect_sz: 预期 payload 缓冲大小（传给 vsnprintf 的 size，包含结尾 '\0' 预留）
-// + 返回后 frame->pos 指向 payload 起始处；发送仍需交给 cw_client_send / cw_session_send
+/**
+ * @brief                           分配一个 WS text frame，并将 printf 格式化结果写入 payload
+ * @param expect_sz                 预期 payload 缓冲大小，包含结尾 '\0' 预留
+ * @param fmt
+ * @param args
+ * @return                          返回后 frame->pos 指向 payload 起始处
+ */
 buf16_item_t*
 cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args);
 
@@ -191,36 +235,56 @@ static inline buf16_item_t* cw_printf_frame(uint32_t expect_sz, const char *fmt,
     return item;
 }
 
-// 在已有 buf_item 上构建 WS frame
-// + opcode: WS_OP_TEXT / WS_OP_BINARY / WS_OP_CONTINUATION
-// + buf_item: 上层分配的 buf_item
-// + payload_offset: buf_item 中 payload 数据的起始偏移（允许 buf_item 前置有帧头预留空间）
-//   框架会在 [0, payload_offset) 区间写入 WS 帧头，因此 payload_offset >= 有效的 hdr size
-//   这里的有效 hdr size 为: 2 / 4 / 10；并会同步设置 frame flags
+/**
+ * @brief                           在已有 buf_item 上构建 WS frame
+ * @param opcode                    WS_OP_TEXT、WS_OP_BINARY 或 WS_OP_CONTINUATION
+ * @param buf_item                  上层分配的 buf_item
+ * @param payload_offset            payload 数据在 buf_item 中的起始偏移
+ *                                  框架会在 [0, payload_offset) 区间写入 WS 帧头，因此该值必须不小于有效 hdr size
+ * @return                          0 表示成功，其他值表示失败
+ */
 ret_t
 cw_build_frame(uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_offset);
 
 //-----------------------------------------------------------------------------
 
-// 发送已构建完成的 WS frame 到 client
-// + frame: 由 cw_alloc_frame / cw_build_frame 生成；默认 pos 指向 payload，发送前框架会校验 frame flags 并回退到 hdr 起始位置
+/**
+ * @brief                           发送已构建完成的 WS frame 到 client
+ * @param client
+ * @param frame                     由 cw_alloc_frame 或 cw_build_frame 生成
+ * @param immediate
+ * @return                          0 表示成功，其他值表示失败
+ */
 ret_t
 cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
 
-// 发送已构建完成的 WS frame 到 session
-// + frame: 由 cw_alloc_frame / cw_build_frame 生成；默认 pos 指向 payload，发送前框架会校验 frame flags 并回退到 hdr 起始位置
+/**
+ * @brief                           发送已构建完成的 WS frame 到 session
+ * @param session
+ * @param frame                     由 cw_alloc_frame 或 cw_build_frame 生成
+ * @return                          0 表示成功，其他值表示失败
+ */
 ret_t
 cw_session_send(ct_session_t *session, buf16_item_t *frame);
 
 //-----------------------------------------------------------------------------
 
-// 服务端主动 grace close
-// + 执行 session clear，向客户端发送 WS close 帧（code==0 || code=WS_CLOSE_NORMAL 表示正常关闭）
-// + reason: nullable；非空时作为 close reason 一并发送（受 WS 控制帧 125 字节限制）
+/**
+ * @brief                           服务端主动发起 graceful close
+ * @param client
+ * @param code                      0 或 WS_CLOSE_NORMAL 表示正常关闭
+ * @param reason                    可选 close reason，受 WS 控制帧 125 字节限制
+ * @return                          0 表示成功，其他值表示失败
+ */
 ret_t
 cw_close(cw_client_t *client, uint16_t code, const char* reason/* nullable */);
 
-// grace close 超时检查（在 server 的定期 cleanup 中调用）
+/**
+ * @brief                           检查 graceful close 是否超时
+ * @param client
+ * @param now
+ * @return                          无
+ */
 void
 cw_retry_closing(cw_client_t *client, uint64_t now);
 

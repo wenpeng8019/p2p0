@@ -133,54 +133,6 @@ static void wss_ch_break_free(buffer_round_t *rq) {
     BUF_R_CLEAR(rq);
 }
 
-// session_break 回调（对标 relay_session_break）
-// 触发时机：其中一端连接断开或主动下线
-static void wss_session_break(ct_client_ctx_t *ct_ctx, ct_session_t *ct_session, ct_session_t *ct_peer, break_mode_e break_mode) { (void)ct_ctx;
-
-    assert(PEER_ONLINE(ct_session) && PEER_ONLINE(ct_peer));
-
-    wss_session_t *session = (wss_session_t*)ct_session;
-    wss_session_t *peer    = (wss_session_t*)ct_peer;
-
-    // 存在对端发起的 REQ 等待本端 RSP
-    if (peer->rpc_pending_sid) {
-        wss_session_send_rpc_code(peer, peer->rpc_pending_sid, P2P_RPC_ERR_PEER_OFF);
-        if (TQ_INQ(&g_wss_rpc_pending_q, peer)) TQ_RM(&g_wss_rpc_pending_q, peer);
-        peer->rpc_sent_time   = 0;
-        peer->rpc_pending_sid = 0;
-    }
-
-    // 存在本端发起的 REQ 等待对端 RSP，// fixme 如果是错误导致的 stop，这里 send 数据会断言报错
-    if (session->rpc_pending_sid) {
-        if (break_mode != SESS_BREAK_TERM)
-            wss_session_send_rpc_code(session, session->rpc_pending_sid, P2P_RPC_ERR_BREAK);
-        if (TQ_INQ(&g_wss_rpc_pending_q, session)) TQ_RM(&g_wss_rpc_pending_q, session);
-        session->rpc_sent_time   = 0;
-        session->rpc_pending_sid = 0;
-    }
-
-    if (break_mode == SESS_BREAK_STOP) return;
-
-    // 清理本端队列，转发剩余项给对端
-    wss_ch_break_forward(&session->sync_peer_send, peer);
-    wss_ch_break_forward(&session->pkt_peer_send,  peer);
-
-    // 向对端发送 FIN
-    if (TCP_SENDABLE(peer->base.client))
-        wss_send_printf((cw_client_t*)peer->base.client, 16u, "FIN %u", peer->base.session_id);
-
-    if (break_mode == SESS_BREAK_CLOSE) {
-        wss_ch_break_forward(&peer->sync_peer_send, session);
-        wss_ch_break_forward(&peer->pkt_peer_send,  session);
-    } else {
-        wss_ch_break_free(&peer->sync_peer_send);
-        wss_ch_break_free(&peer->pkt_peer_send);
-    }
-
-    session->last_sid = 0;
-    peer->last_sid = 0;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 static buf16_item_t* wss_build_syn0_cache_item(wss_client_t *client,
@@ -230,6 +182,12 @@ static buf16_item_t* wss_build_syn0_cache_item(wss_client_t *client,
     return item;
 }
 
+static void wss_session_init(session_t* s) {
+    wss_session_t* session = (wss_session_t*)s;
+    BUF_R_INIT(&session->sync_peer_send, session->sync_peer_slots, WSS_PEER_Q_MAX);
+    BUF_R_INIT(&session->pkt_peer_send, session->pkt_peer_slots, WSS_PEER_Q_MAX);
+}
+
 static void wss_send_syn0_online_item(cw_client_t *client, buf16_item_t *item,
                                       const char *peer_id, uint32_t session_id) {
     char session_id_hex[9];
@@ -274,7 +232,7 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
     wss_session_t *local_s = NULL, *remote_s = NULL;
     ret_t side = pair_session(&client->base, remote_peer_id,
                               (session_t**)&local_s, (session_t**)&remote_s,
-                              sizeof(wss_session_t), NULL);
+                              sizeof(wss_session_t), wss_session_init);
 
     if (side == E_OUT_OF_MEMORY) {
         print("E:", LA_F("%s: OOM building session '%s' -> '%s'\n", LA_F37, 37),
@@ -327,12 +285,6 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
                             "SYN0 %s %08X offline", remote_peer_id, local_s->base.session_id);
         }
         return;
-    }
-
-    // pair_session 成功后，若本端 session 为新建，初始化本端 SYNC/PKT 发送环形队列
-    if (PAIR_IS_LOCAL_NEW(side)) {
-        BUF_R_INIT(&local_s->sync_peer_send, local_s->sync_peer_slots, WSS_PEER_Q_MAX);
-        BUF_R_INIT(&local_s->pkt_peer_send, local_s->pkt_peer_slots, WSS_PEER_Q_MAX);
     }
 
     print("V:", LA_F("%s: local='%s', remote='%s', online=%d, payload=%u\n", LA_F162, 162),
@@ -465,7 +417,7 @@ static void wss_handle_sync(wss_session_t *session, uint8_t sid,
     session->last_sid = sid;
 
     if (!payload_item) {
-        print("E:", LA_F("%s: missing recv item for zero-copy forward\n", LA_F44, 44), "SYNC");
+        print("E:", LA_F("%s: missing recv item for zero-copy forward\n", LA_F234, 234), "SYNC");
         wss_send_printf((cw_client_t*)client, 96u,
                         P2P_WSS_RSP_STA_FMT, session_id, "SYNC", P2P_ERR_PROTOCOL);
         return;
@@ -476,7 +428,7 @@ static void wss_handle_sync(wss_session_t *session, uint8_t sid,
     hdr_len = snprintf(hdr_text, sizeof(hdr_text), P2P_WSS_CMD_SYNC_FMT,
                        peer_s->base.session_id, sid);
     if (item_msg != msg || hdr_len <= 0 || (size_t)hdr_len > msg_len) {
-        print("E:", LA_F("%s: invalid recv layout for zero-copy forward\n", LA_F156, 156), "SYNC");
+        print("E:", LA_F("%s: invalid recv layout for zero-copy forward\n", LA_F233, 233), "SYNC");
         wss_send_printf((cw_client_t*)client, 96u,
                         P2P_WSS_RSP_STA_FMT, session_id, "SYNC", P2P_ERR_PROTOCOL);
         return;
@@ -499,7 +451,7 @@ static void wss_handle_sync(wss_session_t *session, uint8_t sid,
         wss_send_printf((cw_client_t*)session->base.client, 48u,
                         P2P_WSS_RSP_SYNC_CONFIRM_FMT, session->base.session_id, sid);
 
-    print("V:", LA_F("%s: sid=%u -> peer_sid=%u sync_sid=%u\n", LA_F167, 167),
+    print("V:", LA_F("%s: sid=%u -> peer_sid=%u sync_sid=%u\n", LA_F240, 240),
           "SYNC", session->base.session_id, peer_s->base.session_id, sid);
 
 }
@@ -511,7 +463,7 @@ static void wss_handle_fin(wss_session_t *session) {
     print("I:", LA_F("%s: '%s' ses_id=%u\n", LA_F45, 45),
           PROTO, session->base.client->local_peer_id, session->base.session_id);
 
-    ct_session_close(&g_wss_ctx.base, (ct_session_t*)session, true);
+    ct_session_close(&g_wss_ctx.base.base, &session->base, true, false);
 }
 
 // 处理 PKT — P2P 数据包中继（重写 session_id，零拷贝转发）
@@ -552,7 +504,7 @@ static void wss_handle_pkt(cw_client_ctx_t *ctx, wss_session_t *session, uint8_t
     ct_client_t* c = CT_CLIENT(session);
     buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
     if (!buf_item) {
-        print("E:", LA_F("alloc buf failed(OOM)\n", 0, 0));
+        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F259, 259));
         ct_client_error(&ctx->base, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
@@ -607,7 +559,7 @@ static void wss_handle_req(cw_client_ctx_t *ctx, wss_session_t *session, uint8_t
     ct_client_t* c = CT_CLIENT(session);
     buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
     if (!buf_item) {
-        print("E:", LA_F("alloc buf failed(OOM)\n", 0, 0));
+        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F259, 259));
         ct_client_error(&ctx->base, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
@@ -662,7 +614,7 @@ static void wss_handle_rsp(cw_client_ctx_t *ctx, wss_session_t *session, uint8_t
     ct_client_t* c = CT_CLIENT(session);
     buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
     if (!buf_item) {
-        print("E:", LA_F("alloc buf failed(OOM)\n", 0, 0));
+        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F259, 259));
         ct_client_error(&ctx->base, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
@@ -760,7 +712,7 @@ static buf16_item_t* wss_handle_handshake_cb(cw_client_ctx_t *ctx, cw_client_t *
     }
 
     if (opcode != WS_OP_TEXT) {
-        print("E:", LA_F("%s: rejected for not reg(%s)\n", LA_F147, 147), PROTO, "bin frame");
+        print("E:", LA_F("%s: rejected for not reg(%s)\n", LA_F236, 236), PROTO, "bin frame");
         client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
         close_reason = "not registered";
         goto error_close;
@@ -768,7 +720,7 @@ static buf16_item_t* wss_handle_handshake_cb(cw_client_ctx_t *ctx, cw_client_t *
 
     uint8_t *line_end = memchr(payload, '\n', payload_len);
     if (!line_end) {
-        print("E:", LA_F("%s: rejected for not reg(%s)\n", LA_F160, 160), PROTO, "invalid format");
+        print("E:", LA_F("%s: rejected for not reg(%s)\n", LA_F236, 236), PROTO, "invalid format");
         client->last_error = CUSTOM_TCP_ERR_PROTOCOL;
         close_reason = "invalid instance_id";
         goto error_close;
@@ -855,25 +807,24 @@ static buf16_item_t* wss_handle_handshake_cb(cw_client_ctx_t *ctx, cw_client_t *
                 }
             }
 
-            ct_reactive_client((ct_client_t*)client);
+            activate_client(&client->base, 1);
 
-            print("I:", LA_F("%s: '%s' reconnected & reactive (inst=%u)\n", LA_F98, 98),
+            print("I:", LA_F("%s: '%s' reconnected & reactive (inst=%u)\n", LA_F231, 231),
                   PROTO, client->base.local_peer_id, client->base.instance_id);
         } else {
-            print("I:", LA_F("%s: '%s' reconnected & renew (inst=%u)\n", LA_F153, 153),
+            print("I:", LA_F("%s: '%s' reconnected & renew (inst=%u)\n", LA_F232, 232),
                   PROTO, reg->base.local_peer_id, instance_id);
 
             reg = NULL;
         }
     } else {
-        print("I:", LA_F("%s: '%s' new REG (inst=%u)\n", LA_F93, 93), PROTO,
+        print("I:", LA_F("%s: '%s' new REG (inst=%u)\n", LA_F230, 230), PROTO,
               client->base.local_peer_id, instance_id);
     }
 
     if (!reg) {
         client->base.instance_id = instance_id;
-        memcpy(client->base.local_peer_id, remote_id, remote_len + 1);
-        identify_client(&client->base);
+        identify_client(&client->base, remote_id);
     }
 
     buf16_item_t *ack = cw_printf_frame(48u, "REG OK %d %d", WSS_MAX_PAYLOAD,
@@ -894,6 +845,7 @@ error_close:
 
 // 处理 WSS 模式信令（WebSocket 文本帧）
 static void wss_handle_text(cw_client_ctx_t *ctx, wss_client_t *client, const uint8_t *msg, size_t len, buf16_item_t *payload_item) {
+    (void)ctx;
 
     if (len == 0) goto error_proto;
 
@@ -903,8 +855,8 @@ static void wss_handle_text(cw_client_ctx_t *ctx, wss_client_t *client, const ui
     #define ln_trim while (ln[-1] == '\n' || ln[-1] == '\r') *--ln = '\0'
 
     if (!client->base.local_peer_id[0]) {
-        print("E:", LA_F("%s: rejected for not reg\n", LA_F147, 147), (char*)msg);
-        cw_close(ctx, (cw_client_t*)client, WS_CLOSE_PROTOCOL_ERROR, NULL);
+        print("E:", LA_F("%s: rejected for not reg\n", LA_F237, 237), (char*)msg);
+        cw_close((cw_client_t*)client, WS_CLOSE_PROTOCOL_ERROR, NULL);
         return;
     }
 
@@ -912,7 +864,7 @@ static void wss_handle_text(cw_client_ctx_t *ctx, wss_client_t *client, const ui
     if (strcmp((char*)msg, P2P_WSS_CMD_OFF) == 0) {
         print("I:", LA_F("%s: '%s'\n", LA_F72, 72), "OFF",
               client->base.local_peer_id);
-        cw_close(ctx, (cw_client_t*)client, 0, NULL);
+        cw_close((cw_client_t*)client, 0, NULL);
         return;
     }
 
@@ -1056,7 +1008,7 @@ static void wss_handle_frame(cw_client_ctx_t *ctx, cw_client_t *c, uint8_t opcod
     }
 
     if (payload_len < 1 + P2P_SESS_ID_SZ) {
-        print("E:", LA_F(": bad payload(%u)\n", 0, 0), payload_len);
+        print("E:", LA_F(": bad payload(%u)\n", LA_F242, 242), payload_len);
         wss_send_printf((cw_client_t*)client, 96u,
                         P2P_WSS_RSP_STA_FMT, 0,
                         wss_req_type_str(payload_len ? payload[0] : 0), P2P_ERR_INVALID);
@@ -1111,13 +1063,54 @@ static void wss_handle_frame(cw_client_ctx_t *ctx, cw_client_t *c, uint8_t opcod
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static bool wss_init_client(client_t *c) {
-    return cw_init_client((cw_client_t*)c, &g_wss_ctx);
+// session_break 回调（对标 relay_session_break）
+// 触发时机：其中一端连接断开或主动下线
+static void wss_session_break(client_ctx_t *ctx, session_t *s, session_t *ps, break_mode_e break_mode) { (void)ctx;
+
+    assert(PEER_ONLINE(s) && PEER_ONLINE(ps));
+
+    wss_session_t *session = (wss_session_t*)s;
+    wss_session_t *peer    = (wss_session_t*)ps;
+
+    // 存在对端发起的 REQ 等待本端 RSP
+    if (peer->rpc_pending_sid) {
+        wss_session_send_rpc_code(peer, peer->rpc_pending_sid, P2P_RPC_ERR_PEER_OFF);
+        if (TQ_INQ(&g_wss_rpc_pending_q, peer)) TQ_RM(&g_wss_rpc_pending_q, peer);
+        peer->rpc_sent_time   = 0;
+        peer->rpc_pending_sid = 0;
+    }
+
+    // 存在本端发起的 REQ 等待对端 RSP，// fixme 如果是错误导致的 stop，这里 send 数据会断言报错
+    if (session->rpc_pending_sid) {
+        if (break_mode != SESS_BREAK_TERM)
+            wss_session_send_rpc_code(session, session->rpc_pending_sid, P2P_RPC_ERR_BREAK);
+        if (TQ_INQ(&g_wss_rpc_pending_q, session)) TQ_RM(&g_wss_rpc_pending_q, session);
+        session->rpc_sent_time   = 0;
+        session->rpc_pending_sid = 0;
+    }
+
+    if (break_mode == SESS_BREAK_STOP) return;
+
+    // 清理本端队列，转发剩余项给对端
+    wss_ch_break_forward(&session->sync_peer_send, peer);
+    wss_ch_break_forward(&session->pkt_peer_send,  peer);
+
+    // 向对端发送 FIN
+    if (TCP_SENDABLE(peer->base.client))
+        wss_send_printf((cw_client_t*)peer->base.client, 16u, "FIN %u", peer->base.session_id);
+
+    if (break_mode == SESS_BREAK_CLOSE) {
+        wss_ch_break_forward(&peer->sync_peer_send, session);
+        wss_ch_break_forward(&peer->pkt_peer_send,  session);
+    } else {
+        wss_ch_break_free(&peer->sync_peer_send);
+        wss_ch_break_free(&peer->pkt_peer_send);
+    }
+
+    session->last_sid = 0;
+    peer->last_sid = 0;
 }
 
-static void wss_free_client(client_t *client) {
-    cw_free_client(&g_wss_ctx, (cw_client_t*)client);
-}
 
 cw_client_ctx_t*
 wss_init(void) {
@@ -1130,18 +1123,16 @@ wss_init(void) {
             offsetof(wss_session_t, rpc_sent_time));
 
     g_wss_ctx.base.max_payload_len  = WSS_MAX_PAYLOAD;
-    g_wss_ctx.base.base.free        = wss_free_client;
-    g_wss_ctx.base.base.init        = wss_init_client;
-    g_wss_ctx.base.base.migrate     = ct_migrate_client;
+    g_wss_ctx.base.base.cb_activate = ct_client_activate;
+    g_wss_ctx.base.base.cb_break    = wss_session_break;
     g_wss_ctx.base.handle_peer_sent = wss_handle_peer_sent;
-    g_wss_ctx.base.session_break    = wss_session_break;
 
-    cw_ctx_init(&g_wss_ctx);
     g_wss_ctx.sub_protocol   = "p2p";
     g_wss_ctx.handle_handshake = wss_handle_handshake_cb;
     g_wss_ctx.handle_frame     = wss_handle_frame;
-    g_wss_ctx.handle_ping      = NULL;
-    g_wss_ctx.handle_close     = NULL;
+
+    cw_ctx_init(&g_wss_ctx);
+
     return &g_wss_ctx;
 }
 

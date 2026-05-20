@@ -259,15 +259,26 @@ pair_session(client_t *c, const char *remote_peer_id,
             if (pair->sessions[0]->client == c) { *local_s = pair->sessions[0]; side = 0; *remote_s = pair->sessions[1]; }
             else { *local_s = pair->sessions[1]; side = 1; *remote_s = pair->sessions[0]; }
 
-            assert((*local_s)->peer != (void*)-1 && (*remote_s)->peer != (void*)-1);    // 双方肯定都在线
-            assert((*local_s)->peer || (*remote_s)->peer);                              // 至少有一方已经和对端打通
+            assert((*local_s)->peer != (void*)-1 || (*remote_s)->peer != (void*)-1);    // 双方不可能同时处于被对方断开的状态
 
-            if (!(*local_s)->peer) return E_DUPLICATE;                                  // 如果本端已将对端重置（即重复发起连接）
-            (*remote_s)->peer = *local_s;                                               // 完成对端与自己的打通
-            return side;
+            // 如果本端主动断开后，又重新发起新的连接。但此时对端还未确认（即未发起新的连接）
+            // + 之前主动断开会将对端的 peer 置位 -1
+            if ((*remote_s)->peer == (void*)-1) {
+                assert(!(*local_s)->peer);
+                return E_DUPLICATE;
+            }
+
+            // 如果双方都不是被对方断开的状态，则此时双方肯定已经彼此打通了
+            if ((*local_s)->peer != (void*)-1) {
+                assert((*local_s)->peer && (*remote_s)->peer);
+                return E_DUPLICATE;
+            }
+
+            // 之前本端被对端断开，且对端已经重新连接，此时是本端重新连接
+            assert(!(*remote_s)->peer);
         }
 
-        if (pair->sessions[0]->client != c) { *remote_s = pair->sessions[0];            // 如果对端存在（本端之前已经脱离）
+        else if (pair->sessions[0]->client != c) { *remote_s = pair->sessions[0];       // 如果对端存在（本端之前已经脱离）
             assert(!(*remote_s)->peer || (*remote_s)->peer != (void*)-1);
             side = 1;                                                                   // 本端将位于 pair 的 right side
         } else { *local_s = s = pair->sessions[0];                                      // 如果本端存在（对端之前已经脱离）
@@ -290,13 +301,13 @@ pair_session(client_t *c, const char *remote_peer_id,
 
     if (*local_s) { assert(s->peer == (void*)-1);                                       // 如果对端已脱离（对端脱离时，会将本端的 peer 置位 -1）
 
-        // 重置本端为新的连接
-        s->peer = NULL;
-
         // 重新分配 sess id，并重建索引
         s->session_id = generate_session_id();
         HASH_DELETE(hh, g_sessions, s);
         HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), s);
+
+        if (*remote_s) { s->peer = *remote_s; remote_s[0]->peer = s; }                  // 如果对端存在，完成两端的打通
+        else s->peer = NULL;                                                            // 重置本端为新的连接
         return side;
     }
 
@@ -308,25 +319,13 @@ pair_session(client_t *c, const char *remote_peer_id,
 
         assert(*remote_s);
 
-        // 如果本端主动断开后，又重新发起新的连接
-        // + 主动断开时，会将对端的 peer 置位 -1
-        // + 本端主动断开，不能假设对端已知情（向对端发 fin 是业务层的事，且不一定可靠）
-        // ! 这里要求本端主动断开时，会将对端的 session 重置
+        // 如果本端主动断开后，又重新发起新的连接，但此时对端还未确认（即未发起新的连接）
         if ((*remote_s)->peer == (void*)-1) {
-
-            // 重置对端为新的连接，但还未与本端打通
-            // + 此时需要对端执行一次 pair_session 来完成到本端的打通
-            remote_s[0]->peer = s;                                                      // 标记对端被重置后，本端又发起新的连接
-            s->peer = NULL;                                                             // 标记本端已发起新的连接
-
-            // 重新分配 sess id，并重建索引
-            remote_s[0]->session_id = generate_session_id();
-            HASH_DELETE(hh, g_sessions, *remote_s);
-            HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), *remote_s);
+            *remote_s = NULL;                                                           // 视对端不存在
         }
         else { assert(!(*remote_s)->peer);                                              // 对端已发起对自己的连接
             remote_s[0]->peer = s;                                                      // 完成两端的打通
-            s->peer = remote_s[0];
+            s->peer = *remote_s;
         }
     }
     else assert(!*remote_s);
@@ -356,8 +355,11 @@ pair_session(client_t *c, const char *remote_peer_id,
 
 void
 free_client(client_t *c) {
-    assert(c && c->proto >= 0 && !c->sessions);
+    assert(c && c->proto >= 0);
     client_ctx_t* ctx = g_contexts[c->proto];
+
+    if (c->sessions)
+        clear_sessions(c, true);
 
     ctx->cb_free(ctx, c);
 
@@ -435,13 +437,22 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
     client_ctx_t* ctx = g_contexts[c->proto];
 
     // 对于重连的情况，即之前的 client 连接已经断开，客户端发起新的连接，但状态保留
-    if (c->proto == proto && (c->instance_id == instance_id || ctx->cb_reset)) {
+    if (c->proto == proto && (c->instance_id == instance_id || ctx->cb_reset)) do {
+
+        // 如果客户端发起了新的实例连接
+        if (c->instance_id != instance_id) { c->instance_id = instance_id;
+
+            // 终断并清除所有本端 session
+            if (c->sessions) clear_sessions(c, true);
+
+            if (!ctx->cb_reset(ctx, c, false)) break;
+        }
 
         // 如果存在新分配的 from client，迁移 fd 和 last_active 到旧的 client
         if (from) {
 
             // 同实例重连：迁移 fd 到旧槽位，保留会话状态
-            print("I:", LA_F("REG: '%s' reconnected (inst=%u), migrating\n", LA_F95, 95),
+            print("I:", LA_F("[T] '%s' reconnected (inst=%u), migrating\n", LA_F95, 95),
                    c->local_peer_id, instance_id);
 
             if (c->fd != P_INVALID_SOCKET) P_sock_close(c->fd);
@@ -456,43 +467,11 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
         }
         else c->last_active = P_tick_ms();
 
-        // 如果客户端发起了新的实例连接
-        if (c->instance_id != instance_id) { c->instance_id = instance_id;
-
-            session_t* s = c->sessions, *n; c->sessions = NULL;
-            for (; s; s = n) { n = s->next;
-
-                if (PEER_ONLINE(s)) {
-
-                    // 如果对端对自己发起了新的连接（本端已被对端重置）重新添加到队列
-                    if (!s->peer->peer) {
-
-                        s->prev = NULL; s->next = c->sessions;
-                        if (c->sessions) c->sessions->prev = s;
-                        c->sessions = s;
-                        continue;
-                    }
-
-                    ctx->cb_break(ctx, s, PEER(s), SESS_BREAK_TERM);
-                }
-
-                if (ctx->cb_close) {
-                    ctx->cb_close(ctx, s, true, true);
-                }
-
-                do_free_session(s);
-            }
-
-            if (!ctx->cb_reset(ctx, c, false)) {    // todo 完善失败逻辑
-                c->proto = -1; c->fd = P_INVALID_SOCKET;
-                return false;
-            }
-        }
-
         return true;
-    }
 
-    print("I:", LA_F("REG: '%s' new instance (old=%u, new=%u), resetting session\n", LA_F223, 223),
+    } while (0);
+
+    print("I:", LA_F("[T] '%s' new instance (old=%u, new=%u), resetting session\n", LA_F223, 223),
            c->local_peer_id, c->instance_id, instance_id);
 
     // 先将之前的释放
@@ -599,7 +578,7 @@ tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *SP) {
     
     if (r == E_NONE_CONTEXT) {
         if (client->handshake)
-            print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on send)\n", 0, 0),
+            print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on send)\n", LA_F243, 243),
                   SP?SP:"TCP", (int)client->handshake);
         else print("I:", LA_F("[%s] conn closed (EOF on send)\n", LA_F182, 182), SP?SP:"TCP");
         return -1;
@@ -607,7 +586,7 @@ tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *SP) {
     
     if (r < 0) {
         if (client->handshake)
-            print("E:", LA_F("[%s] send failed(%d) during handshake(%d)\n", 0, 0),
+            print("E:", LA_F("[%s] send failed(%d) during handshake(%d)\n", LA_F244, 244),
                   SP?SP:"TCP", E_EXT_CODE(r), (int)client->handshake);
         else print("E:", LA_F("[%s] send failed(%d)\n", LA_F144, 144), SP?SP:"TCP", E_EXT_CODE(r));
         return -2;

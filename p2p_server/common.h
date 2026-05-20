@@ -377,7 +377,7 @@ struct session {
 
 #define CLIENT(s)                   ((session_t*)(s))->client
 #define PEER(s)                     ((session_t*)(s))->peer
-#define PEER_VALID(p)               ((p) && (void*)(p) != (void*)-1)
+#define PEER_VALID(ps)              ((ps) && (void*)(ps) != (void*)-1)
 #define PEER_ONLINE(s)              PEER_VALID(PEER(s))
 
 #define TCP_PEER_SENDABLE(s)        TCP_SENDABLE(PEER(s)->client)
@@ -391,90 +391,167 @@ typedef enum break_mode {
 
 struct client_ctx {
 
-    // [required] 用于释放派生的 client 对象，派生实现最终调用 free_client_base
+    /**
+     * @brief                       释放派生 client 对象
+     * @details                     必填回调；派生实现最终应调用底层释放逻辑
+     */
     void (*cb_free)   (client_ctx_t* ctx, client_t *c);
 
-    // [nullable] 用于初始化或重置 client 对象
+    /**
+     * @brief                       初始化或重置 client 对象
+     * @details                     可为空
+     */
     bool (*cb_reset)  (client_ctx_t* ctx, client_t *c, bool init);
 
-    // [nullable] 实现派生 client 对象状态迁移，被 resident_client 调用
+    /**
+     * @brief                       迁移派生 client 对象状态
+     * @details                     可为空，由 resident_client 调用
+     */
     void (*cb_migrate)(client_ctx_t* ctx, client_t *to, client_t *from);
 
-    // [nullable] 获取、或调整 client 对象的 active 状态。参数: 0: query; >0: activate code; <0: deactivate code;
+    /**
+     * @brief                       获取或调整 client 的 active 状态
+     * @details                     可为空。active 参数中，0 表示查询，正值表示激活，负值表示失活
+     */
     bool (*cb_activate)(client_ctx_t* ctx, client_t *c, int active);
 
-    // [option] 执行对 session 的终止或中断。如果创建了 session 对象，则该接口是必须实现的。如果不使用 session，则可以设为 NULL
+    /**
+     * @brief                       执行 session 的终止或中断
+     * @details                     如果协议创建了 session 对象，则该回调必须实现；否则可为空
+     */
     void (*cb_break)  (client_ctx_t* ctx, session_t *s, session_t *ps, break_mode_e break_mode);
 
-    // [nullable] 执行 session 的销毁和资源回收。相比于 cb_break：cb_break 关注的是双方的关系，cb_close 关注的是 session 对象自身
+    /**
+     * @brief                       执行 session 的销毁和资源回收
+     * @details                     可为空。相比 cb_break，cb_close 关注 session 对象自身资源
+     */
     void (*cb_close)  (client_ctx_t* ctx, session_t *s, bool terminate, bool clearing);
 
-    // [nullable] 在清除所有 session 之前/之后触发
+    /**
+     * @brief                       在清除所有 session 前后触发
+     * @details                     可为空。preOrPost 为 true 表示清除前，false 表示清除后
+     */
     void (*cb_clear)  (client_ctx_t* ctx, client_t *c, bool preOrPost);
 };
 
-// 释放 client
+/**
+ * @brief                           释放 client
+ * @param c
+ * @return                          无
+ */
 void
 free_client(client_t *c);
 
-// 将同一个客户端的两个槽合并，确保 client 为单一实例
-// + client 为之前存在的，而 from 则会根据 UDP/TCP 的不同特性而选择是否为 NULL
-//   > TCP 每个连接都对应一个 client，所以 from 为新连接分配的 client 对象，这里要将新的 client 归并到之前的 client
-//   > UDP 没有独立连接的概念，所以协议会自行根据一个 AUTH KEY 来维持唯一性
+/**
+ * @brief                           合并同一客户端的两个槽位，确保最终只保留一个 client 实例
+ * @param c                         已存在的目标 client
+ * @param proto
+ * @param instance_id
+ * @param from                      待归并的来源 client；UDP 场景下可为 NULL
+ * @return                          是否成功
+ */
 bool
 resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from/* nullable */);
 
-// 分配一个指定派生协议类型的 client 对象
-// + 主要用于 UDP/COMPACT 协议调用，因为 TCP/xxx 协议在 accept 建链时就已经自动分配了 client 对象
+/**
+ * @brief                           分配一个指定协议类型的 client 对象
+ * @param proto
+ * @param fd
+ * @return                          新分配的 client；失败时返回 NULL
+ */
 client_t*
 alloc_client(uint8_t proto, sock_t fd);
 
-// 通过 peer_id 查找客户端对象，返回 NULL 表示未找到
+/**
+ * @brief                           通过 peer_id 查找 client
+ * @param peer_id
+ * @return                          找到则返回 client，否则返回 NULL
+ */
 client_t*
 find_client(const char *peer_id);
 
-// 唯一标识客户端（注册 local_peer_id，并加入全局索引哈希表）
+/**
+ * @brief                           注册 client 的 local_peer_id，并加入全局索引
+ * @param c
+ * @param peer_id
+ * @return                          是否成功
+ */
 bool
 identify_client(client_t* c, const char peer_id[P2P_PEER_ID_MAX]);
 
-// 使 client 进入或退出活跃状态，触发 cb_activate 回调
+/**
+ * @brief                           调整 client 的活跃状态，并触发 cb_activate 回调
+ * @param c
+ * @param active
+ * @return                          当前或调整后的活跃状态
+ */
 bool
 activate_client(client_t* c, int active);
 
 //-----------------------------------------------------------------------------
 
-// 释放 session。参数 terminate 表示是否为硬终止，此时 session 的数据将不再完整。否则 session 的发送数据会转移到 client 的队列
+/**
+ * @brief                           释放 session
+ * @param s
+ * @param terminate                 true 表示硬终止，此时 session 中未发完的数据不再保证完整
+ * @return                          无
+ */
 void
 free_session(session_t *s, bool terminate);
 
-// 释放所有 session
+/**
+ * @brief                           释放 client 的所有 session
+ * @param c
+ * @param terminate
+ * @return                          无
+ */
 void
 clear_sessions(client_t *c, bool terminate);
 
-// 创建一个单端会话
+/**
+ * @brief                           创建一个单端会话
+ * @param client
+ * @param local_s
+ * @param session_type_size
+ * @param init
+ * @return                          0 表示成功，其他值表示失败
+ */
 ret_t
 solo_session(client_t *client, session_t **local_s,
              size_t session_type_size, void(*init)(session_t* session));
 
-// 配对一个本端和远程的会话
-// + 返回值：
-//   <0 : 错误码（维持原有错误语义）
-//   =0 : local sess 位于 pair 的 left side
-//   =1 : local sess 位于 pair 的 right side
-// + local_s: 始终返回本端会话对象
-// + remote_s: 对端在线时返回其会话对象，否则为 NULL
+/**
+ * @brief                           创建或加入一个与远端配对的会话
+ * @param c
+ * @param remote_peer_id
+ * @param local_s                   始终返回本端会话对象
+ * @param remote_s                  对端在线时返回其会话对象，否则返回 NULL
+ * @param session_type_size
+ * @param init
+ * @return
+ *  <0                             错误码
+ *  =0                             local_s 位于 pair 的 left side
+ *  =1                             local_s 位于 pair 的 right side
+ */
 ret_t
 pair_session(client_t *c, const char *remote_peer_id,
              session_t **local_s, session_t **remote_s,
              size_t session_type_size, void(*init)(session_t* session));
 
-// 查找会话对象，返回 NULL 表示未找到
+/**
+ * @brief                           通过 session_id 查找会话对象
+ * @param session_id
+ * @return                          找到则返回 session，否则返回 NULL
+ */
 session_t*
 find_session(uint32_t session_id);
 
 //-----------------------------------------------------------------------------
 
-// TCP 握手状态：0:握手完成; >0:握手中; <0:closing;
+/**
+ * @brief                           TCP client 扩展字段
+ * @details                         handshake 中，0 表示握手完成，正值表示握手中，负值表示 closing
+ */
 #define TCP_CLIENT  \
     uint8_t                         io;         \
     int8_t                          handshake;
@@ -508,13 +585,37 @@ typedef struct tcp_client
 
 //-----------------------------------------------------------------------------
 
+/**
+ * @brief                           通过 UDP 套接字发送数据
+ * @param udp_fd
+ * @param buf
+ * @param len
+ * @param to
+ * @param PROTO
+ * @return                          发送结果
+ */
 ssize_t
 udp_send(sock_t udp_fd, const void *buf, int len, const struct sockaddr_in *to, const char *PROTO);
 
+/**
+ * @brief                           通过 TCP client 发送数据
+ * @param client
+ * @param buf
+ * @param w_sz
+ * @param SP
+ * @return                          发送结果
+ */
 int
 tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *SP);
 
-// SP（SUB PROTOCOL）为 NULL 时，默认为 "TCP"
+/**
+ * @brief                           通过 TCP client 接收数据
+ * @param client
+ * @param buf
+ * @param r_sz
+ * @param SP                        子协议名；为 NULL 时默认显示为 "TCP"
+ * @return                          接收结果
+ */
 int
 tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz, const char * SP);
 

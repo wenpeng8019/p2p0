@@ -134,12 +134,12 @@ enum {
     LA_F90,  /* "NAT probe disabled (bind failed)\n"  [server.c] */
     LA_F91,  /* "NAT probe socket listening on port %d\n" (%d)  [server.c] */
     LA_F92,  /* "NAT probe: %s (port %d)\n" (%s,%d)  [server.c] */
-    LA_F93,  /* "%s: '%s' new REG (inst=%u)\n" (%s,%s,%u)  [p2p_wss.c, p2p_relay.c] */
+    LA_F93,  /* "%s: '%.*s' new REG (inst=%u)\n" (%s,%u)  [p2p_relay.c] */
     LA_F94,  /* "%s: invalid instance id\n" (%s)  [p2p_relay.c] */
     LA_F95,  /* "REG: '%s' reconnected (inst=%u), migrating\n" (%s,%u)  [server.c] */
     LA_F96,  /* "%s: invalid peer id\n" (%s)  [p2p_wss.c, p2p_relay.c] */
-    LA_F97,  /* "%s: duplicate from '%s'\n" (%s,%s)  [p2p_wss.c, p2p_relay.c] */
-    LA_F98,  /* "%s: '%s' reconnected & reactive (inst=%u)\n" (%s,%s,%u)  [p2p_wss.c, p2p_relay.c] */
+    LA_F97,  /* "%s: duplicate from '%s'\n" (%s,%s)  [p2p_relay.c] */
+    LA_F98,  /* "%s: '%.*s' reconnected & reactive (inst=%u)\n" (%s,%u)  [p2p_relay.c] */
     LA_F99,  /* "P2P Signaling Server listening on port %d (TCP + UDP)...\n" (%d)  [server.c] */
     LA_F100,  /* "send failed(OOM)\n"  [p2p_relay.c] */
     LA_F101,  /* "Relay %s seq=%u: '%s' -> '%s' (ses_id=%u)\n" (%s,%u,%s,%s,%u)  [p2p_compact.c] */
@@ -174,7 +174,7 @@ enum {
     LA_F130,  /* "[TCP] Failed to set client socket to non-blocking mode\n"  [server.c] */
     LA_F131,  /* "[TCP] Max peers reached, rejecting connection\n"  [server.c] */
     LA_F132,  /* disabled "[TCP] New connection from %s:%d\n" */
-    LA_F133,  /* "[TCP] OOM: cannot allocate recv buffer for new client\n"  [custom_tcp.c] */
+    LA_F133,  /* disabled "% [TCP] OOM: cannot allocate recv buffer for new client\n" */
     LA_F134,  /* "[UDP] SYN0_ACK recv from %s, len=%zu\n" (%s)  [p2p_compact.c] */
     LA_F135,  /* "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n" (%s,%s,%u)  [server.c, p2p_compact.c] */
     LA_F136,  /* "[UDP] %s send to %s:%d failed(%d)\n" (%s,%s,%d,%d)  [server.c] */
@@ -184,11 +184,11 @@ enum {
     LA_F140,  /* "net init failed\n"  [server.c] */
     LA_F141,  /* "probe UDP bind failed(%d)\n" (%d)  [server.c] */
     LA_F142,  /* "%s: invalid remote id\n" (%s)  [p2p_wss.c, p2p_relay.c] */
-    LA_F143,  /* "[WS] HTTP handshake rejected\n"  [custom_ws.c] */
+    LA_F143,  /* "[WS] HTTP accept rejected(%d)\n" (%d)  [custom_ws.c] */
     LA_F144,  /* "[%s] send failed(%d)\n" (%s,%d)  [server.c] */
     LA_F145,  /* "%s: busy (ses_id=%u), pending\n" (%s,%u)  [p2p_relay.c] */
     LA_F146,  /* disabled "%s: ses_id=%u peer not connected\n" */
-    LA_F147,  /* "%s: rejected for not reg\n" (%s)  [p2p_wss.c, p2p_relay.c] */
+    LA_F147,  /* "%s: rejected for not reg(%.*s)\n" (%s)  [p2p_wss.c] */
     LA_F148,  /* "%s: unknown ses_id=%u\n" (%s,%u)  [p2p_wss.c, p2p_relay.c] */
     LA_F149,  /* "BIN: unknown type=0x%02x from '%s'\n" (%s)  [p2p_wss.c] */
 
@@ -198,7 +198,7 @@ enum {
 
     /* Formats (LA_F) */
     LA_F152,  /* "%s: '%s' <-> '%s' paired (ses=%u/%u)\n" (%s,%s,%s,%u,%u)  [p2p_wss.c] */
-    LA_F153,  /* "%s: '%s' reconnected & renew (inst=%u)\n" (%s,%s,%u)  [p2p_wss.c, p2p_relay.c] */
+    LA_F153,  /* "%s: '%.*s' reconnected & renew (inst=%u)\n" (%s,%u)  [p2p_relay.c] */
     LA_F154,  /* "%s: auth_key=%llu, cands=%d from %s\n" (%s,%l,%d,%s)  [p2p_compact.c] */
     LA_F155,  /* "%s: bad frame len=%u\n" (%s,%u)  [p2p_wss.c] */
     LA_F156,  /* "%s: bad payload(len=%u)\n" (%s,%u)  [p2p_wss.c, p2p_relay.c] */
@@ -207,16 +207,16 @@ enum {
     LA_F159,  /* "%s: duplicate SYN0 with different candidates from '%s'\n" (%s,%s)  [p2p_compact.c] */
     LA_F160,  /* "%s: invalid REG format\n" (%s)  [p2p_wss.c] */
     LA_F161,  /* "%s: invalid relay flag from client\n" (%s)  [p2p_compact.c] */
-    LA_F162,  /* "%s: local='%s', remote='%s', online=%d, sync_cache=%u\n" (%s,%s,%s,%d,%u)  [p2p_wss.c] */
-    LA_F163,  /* "%s: peer '%s' offline, cached cands=%d\n" (%s,%s,%d)  [p2p_relay.c] */
+    LA_F162,  /* "%s: local='%s', remote='%s', online=%d, payload=%u\n" (%s,%s,%s,%d,%u)  [p2p_wss.c] */
+    LA_F163,  /* "%s: peer '%s' offline, pending\n" (%s,%s)  [p2p_relay.c] */
     LA_F164,  /* disabled "%s: send failed\n" */
     LA_F165,  /* "%s: ses_id=%u, confirm sid=%u\n" (%s,%u,%u)  [p2p_relay.c] */
     LA_F166,  /* "%s: ses_id=%u, data_len=%u\n" (%s,%u,%u)  [p2p_relay.c] */
-    LA_F167,  /* "%s: sid=%u -> peer_sid=%u (%zu bytes)\n" (%s,%u,%u)  [p2p_wss.c] */
+    LA_F167,  /* "%s: '%s' -> '%s' (%zu bytes)\n" (%s,%s,%s)  [p2p_wss.c] */
     LA_F168,  /* "%s: sid=%u -> peer_sid=%u, data_len=%u\n" (%s,%u,%u,%u)  [p2p_wss.c] */
     LA_F169,  /* disabled "'%s' recv closed\n" */
     LA_F170,  /* "BIN 0x%02x: ses_id=%u peer not connected\n" (%u)  [p2p_wss.c] */
-    LA_F171,  /* "BIN: unknown ses_id=%u type=0x%02x from '%s'\n" (%u,%s)  [p2p_wss.c] */
+    LA_F171,  /* ": unknown ses_id=%u type=0x%02x from '%s'\n" (%u,%s)  [p2p_wss.c] */
     LA_F172,  /* "Client closed during protocol detection (slot %d)\n" (%d)  [server.c] */
     LA_F173,  /* disabled "% Failed to allocate buffer for new WebSocket client\n" */
     LA_F174,  /* "Failed to initialize %s client\n" (%s)  [server.c] */
@@ -252,17 +252,17 @@ enum {
     LA_F204,  /* "unsupported type=%u (ses_id=%u)\n" (%u,%u)  [p2p_relay.c] */
     LA_F205,  /* "%s: bad payload(sid=0)\n" (%s)  [p2p_relay.c] */
     LA_F206,  /* "%s: busy (ses_id=%u, sid=%u), pending\n" (%s,%u,%u)  [p2p_relay.c] */
-    LA_F207,  /* "%s: deprecated (ses_id=%u, sid=%u), drop\n" (%s,%u,%u)  [p2p_relay.c] */
+    LA_F207,  /* "%s: deprecated (ses_id=%u, sid=%u), drop\n" (%s,%u,%u)  [p2p_wss.c, p2p_relay.c] */
     LA_F208,  /* "%s: deprecated (ses_id=%u, sid=%u, last=%u), discarding\n" (%s,%u,%u,%u)  [p2p_relay.c] */
-    LA_F209,  /* "%s: deprecated (ses_id=%u, sid=%u, last=%u), drop\n" (%s,%u,%u,%u)  [p2p_relay.c] */
+    LA_F209,  /* "%s: deprecated (ses_id=%u, sid=%u, last=%u), drop\n" (%s,%u,%u,%u)  [p2p_wss.c, p2p_relay.c] */
     LA_F210,  /* "%s: duplicate SYN0 (ses_id=%u), resend ACK\n" (%s,%u)  [p2p_relay.c] */
     LA_F211,  /* "%s: duplicate SYN0 (ses_id=%u), resend response\n" (%s,%u)  [p2p_wss.c] */
     LA_F212,  /* "%s: invalid sid=0\n" (%s)  [p2p_relay.c] */
     LA_F213,  /* "%s: missing payload\n" (%s)  [p2p_relay.c] */
-    LA_F214,  /* "%s: pkt queue full, dropping\n" (%s)  [p2p_wss.c] */
+    LA_F214,  /* "%s: pkt queue full, reply busy\n" (%s)  [p2p_wss.c] */
     LA_F215,  /* "%s: prev ALV ACK still pending, skip\n" (%s)  [p2p_relay.c] */
-    LA_F216,  /* "%s: request simultaneously for '%s'\n" (%s,%s)  [p2p_relay.c] */
-    LA_F217,  /* "%s: ses_id=%u, dup sid=%u, resend confirm\n" (%s,%u,%u)  [p2p_relay.c] */
+    LA_F216,  /* "%s: request simultaneously for '%s'\n" (%s,%s)  [p2p_wss.c, p2p_relay.c] */
+    LA_F217,  /* "%s: ses_id=%u, dup sid=%u, resend confirm\n" (%s,%u,%u)  [p2p_wss.c, p2p_relay.c] */
     LA_F218,  /* "%s: ses_id=%u, peer offline, drop pkt\n" (%s,%u)  [p2p_relay.c] */
     LA_F219,  /* "%s: ses_id=%u, peer offline, drop rsp\n" (%s,%u)  [p2p_relay.c] */
     LA_F220,  /* "%s: ses_id=%u, peer offline, drop sid=%u\n" (%s,%u,%u)  [p2p_relay.c] */
@@ -273,8 +273,38 @@ enum {
     LA_F225,  /* "[%s] recv failed(%d)\n" (%s,%d)  [server.c] */
     LA_F226,  /* "[WS] OOM in fragment reassembly\n"  [custom_ws.c] */
     LA_F227,  /* "[WS] OOM: cannot allocate HTTP recv buffer\n"  [custom_ws.c] */
-    LA_F228,  /* "[WS] send_frame: payload_pos(%u) < hdr_sz(%u)\n" (%u,%u)  [custom_ws.c] */
+    LA_F228,  /* "[WS] build_frame: payload_pos(%u) < hdr_sz(%u)\n" (%u,%u)  [custom_ws.c] */
     LA_F229,  /* "make err(%d) resp failed(OOM)\n" (%d)  [custom_tcp.c] */
+    LA_F230,  /* "%s: '%s' new REG (inst=%u)\n" (%s,%s,%u)  [p2p_wss.c] */
+    LA_F231,  /* "%s: '%s' reconnected & reactive (inst=%u)\n" (%s,%s,%u)  [p2p_wss.c] */
+    LA_F232,  /* "%s: '%s' reconnected & renew (inst=%u)\n" (%s,%s,%u)  [p2p_wss.c] */
+    LA_F233,  /* "%s: invalid recv layout for zero-copy forward\n" (%s)  [p2p_wss.c] */
+    LA_F234,  /* "%s: missing recv item for zero-copy forward\n" (%s)  [p2p_wss.c] */
+    LA_F235,  /* "%s: peer '%s' unreachable, pending\n" (%s,%s)  [p2p_relay.c] */
+    LA_F236,  /* "%s: rejected for not reg(%s)\n" (%s,%s)  [p2p_wss.c, p2p_relay.c] */
+    LA_F237,  /* "%s: rejected for not reg\n" (%s)  [p2p_wss.c] */
+    LA_F238,  /* "%s: renew sess by peer %s" (%s,%s)  [p2p_relay.c] */
+    LA_F239,  /* "%s: renew sess to peer %s" (%s,%s)  [p2p_relay.c] */
+    LA_F240,  /* "%s: sid=%u -> peer_sid=%u sync_sid=%u\n" (%s,%u,%u,%u)  [p2p_wss.c] */
+    LA_F241,  /* "%s: too many candidates(cnt=%d)\n" (%s,%d)  [p2p_relay.c] */
+    LA_F242,  /* ": bad payload(%u)\n" (%u)  [p2p_wss.c] */
+    LA_F243,  /* "[%s] conn closed during handshake(%d) (EOF on send)\n" (%s,%d)  [server.c] */
+    LA_F244,  /* "[%s] send failed(%d) during handshake(%d)\n" (%s,%d,%d)  [server.c] */
+    LA_F245,  /* "[CT] payload len(%u) overflow, max: %u\n" (%u,%u)  [custom_tcp.c] */
+    LA_F246,  /* "[CT] resolve payload len failed(%d)\n" (%d)  [custom_tcp.c] */
+    LA_F247,  /* "[R] OOM: cannot allocate recv buffer\n"  [p2p_relay.c] */
+    LA_F248,  /* "[WS] CONTINUATION frame without fragmentation going\n"  [custom_ws.c] */
+    LA_F249,  /* "[WS] Client frame missing mask\n"  [custom_ws.c] */
+    LA_F250,  /* "[WS] Invalid UTF-8 in TEXT frame\n"  [custom_ws.c] */
+    LA_F251,  /* "[WS] Invalid UTF-8 in close reason\n"  [custom_ws.c] */
+    LA_F252,  /* "[WS] Invalid close code %u\n" (%u)  [custom_ws.c] */
+    LA_F253,  /* "[WS] Invalid control frame: opcode=%u fin=%u hdr_len=%u\n" (%u,%u,%u)  [custom_ws.c] */
+    LA_F254,  /* "[WS] New %s without fragmentation end\n" (%s)  [custom_ws.c] */
+    LA_F255,  /* "[WS] RSV bit set in opcode %u\n" (%u)  [custom_ws.c] */
+    LA_F256,  /* "[WS] Reserved opcode %u\n" (%u)  [custom_ws.c] */
+    LA_F257,  /* "[WS] invalid last_reason frame\n"  [custom_ws.c] */
+    LA_F258,  /* "[WS] truncate last_reason payload_len=%u to 125\n" (%u)  [custom_ws.c] */
+    LA_F259,  /* "alloc buf failed(OOM)\n"  [p2p_wss.c] */
 
     LA_NUM
 };

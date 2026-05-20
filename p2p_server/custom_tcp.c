@@ -168,10 +168,6 @@ void ct_client_free(client_ctx_t* ctx, client_t *c) { (void)ctx;
 bool ct_client_reset(client_ctx_t* ctx, client_t *c, bool init) { (void)ctx;
     ct_client_t *client = (ct_client_t*)c;
 
-    client->hdr_rs = NULL;
-    client->hdr_sz = 0;
-    client->recv_cur = 0;
-
     if (init) {
 
         client->recv_buf = NULL;
@@ -181,24 +177,11 @@ bool ct_client_reset(client_ctx_t* ctx, client_t *c, bool init) { (void)ctx;
         client->send_buff_queue.head = NULL;
         client->send_buff_queue.rear = NULL;
     }
-    else {
+    else ct_client_free(ctx, c);
 
-        if (client->recv_buf) {
-            if (client->recv_buf->next) free_buf16(client->recv_buf->next);
-            free_buf16(client->recv_buf);
-            client->recv_buf = NULL;
-        }
-
-        // 释放 payload buf
-        if (client->payload_buf) {
-            if (client->payload_buf->next) free_buf16(client->payload_buf->next);
-            free_buffer(client->payload_buf);
-            client->payload_buf = NULL;
-        }
-
-        client->sending_cur = 0;     // 确保正在发送中的数据包也被清除
-        clear_client_sending(client);
-    }
+    client->hdr_rs = NULL;
+    client->hdr_sz = 0;
+    client->recv_cur = 0;
 
     client->send_sess_head = NULL;
     client->send_sess_rear = NULL;
@@ -513,7 +496,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 // ! 作为流模式的 header 协议，此时获得的 header 应该是完整的，所以要求必须解析出有效的 payload_len 值
                 r = ctx->resolve_payload_len(client, buf, sz, &payload_len, &payload_offset);
                 if (r != E_NONE) {
-                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
+                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F246, 246), r);
                     error = CUSTOM_TCP_ERR_PROTOCOL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
@@ -521,7 +504,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                 // 安全检查：payload 过大溢出
                 if (payload_len > ctx->max_payload_len) {
-                    print("E:", LA_F("[CT] payload len(%u) overflow, max: %u\n", 0, 0), payload_len, ctx->max_payload_len);
+                    print("E:", LA_F("[CT] payload len(%u) overflow, max: %u\n", LA_F245, 245), payload_len, ctx->max_payload_len);
                     error = CUSTOM_TCP_ERR_OVERFLOW;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
@@ -633,7 +616,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 // + 作为帧模式的 header 协议，允许根据对已有的 hdr 部分的解析来动态调整后续的 hdr 类型尺寸
                 r = ctx->resolve_payload_len(client, client->hdr_rs, client->hdr_sz, &payload_len, &payload_offset);
                 if (r < 0) {
-                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
+                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F246, 246), r);
                     error = CUSTOM_TCP_ERR_PROTOCOL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
@@ -664,7 +647,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     len = client->hdr_sz;
                     r = ctx->resolve_payload_len(client, buf, client->hdr_sz, &payload_len, &payload_offset);
                     if (r < 0) {
-                        print("E:", LA_F("[CT] resolve payload len failed(%d)\n", 0, 0), r);
+                        print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F246, 246), r);
                         error = CUSTOM_TCP_ERR_PROTOCOL;
                         if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                         goto error;

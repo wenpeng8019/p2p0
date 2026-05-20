@@ -144,20 +144,20 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
 
     // RFC 6455 §5.2: RSV1/2/3 必须为 0（未协商任何扩展时）
     if (hdr_buf[0] & 0x70) {                    // Byte[0] bit4-6: RSV1/2/3
-        print("E:", LA_F("[WS] RSV bit set in opcode %u\n", 0, 0), opcode);
+        print("E:", LA_F("[WS] RSV bit set in opcode %u\n", LA_F255, 255), opcode);
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
     // 服务端要求客户端帧必须有 mask（RFC 6455 §5.3）
     if (!masked) {
-        print("E:", LA_F("[WS] Client frame missing mask\n", 0, 0));
+        print("E:", LA_F("[WS] Client frame missing mask\n", LA_F249, 249));
         ct_client_error(ctx, c, WS_CLOSE_PROTOCOL_ERROR, false);
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
     // RFC 6455 §5.2: 保留 opcode（0x3-0x7 数据帧、0xB-0xF 控制帧）必须拒绝
     if ((opcode >= 0x3 && opcode <= 0x7) || opcode >= 0xB) {
-        print("E:", LA_F("[WS] Reserved opcode %u\n", 0, 0), opcode);
+        print("E:", LA_F("[WS] Reserved opcode %u\n", LA_F256, 256), opcode);
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
@@ -166,18 +166,18 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
     // + 新 TEXT/BINARY 帧不可在已有分片序列进行中出现
     if (client->ws_opcode != 0) {
         if (opcode == WS_OP_TEXT || opcode == WS_OP_BINARY) {
-            print("E:", LA_F("[WS] New %s without fragmentation end\n", 0, 0), opcode == WS_OP_TEXT ? "TEXT" : "BINARY");
+            print("E:", LA_F("[WS] New %s without fragmentation end\n", LA_F254, 254), opcode == WS_OP_TEXT ? "TEXT" : "BINARY");
             return WS_CLOSE_PROTOCOL_ERROR;
         }
     } else if (opcode == WS_OP_CONTINUATION) {
-        print("E:", LA_F("[WS] CONTINUATION frame without fragmentation going\n", 0, 0));
+        print("E:", LA_F("[WS] CONTINUATION frame without fragmentation going\n", LA_F248, 248));
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
     // RFC 6455 §5.5: 控制帧必须 FIN，且 payload ≤ 125 字节
     // + 这里 hdr len > 6 等价于 payload len > 125 字节
     if (opcode >= WS_OP_CLOSE && (!fin || hdr_len > 6)) {
-        print("E:", LA_F("[WS] Invalid control frame: opcode=%u fin=%u hdr_len=%u\n", 0, 0), opcode, fin, hdr_len - 4);
+        print("E:", LA_F("[WS] Invalid control frame: opcode=%u fin=%u hdr_len=%u\n", LA_F253, 253), opcode, fin, hdr_len - 4);
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
@@ -212,7 +212,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
 
                     // RFC 6455 §7.4.1: 状态码必须合法
                     if (!cw_valid_close_code(code)) {
-                        print("E:", LA_F("[WS] Invalid close code %u\n", 0, 0), code);
+                        print("E:", LA_F("[WS] Invalid close code %u\n", LA_F252, 252), code);
                         return WS_CLOSE_PROTOCOL_ERROR;
                     }
                 }
@@ -221,7 +221,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
                 if (payload_len > 2) {
                     uint32_t tmp = WS_UTF8_ACCEPT;
                     if (!cw_utf8_check(&tmp, payload + 2, payload_len - 2) || tmp != WS_UTF8_ACCEPT) {
-                        print("E:", LA_F("[WS] Invalid UTF-8 in close reason\n", 0, 0));
+                        print("E:", LA_F("[WS] Invalid UTF-8 in close reason\n", LA_F251, 251));
                         return WS_CLOSE_PROTOCOL_ERROR;
                     }
                 }
@@ -285,7 +285,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
         bool ok = !payload_len || cw_utf8_check(&client->ws_utf8state, payload, payload_len);
         if (ok && fin && client->ws_utf8state != WS_UTF8_ACCEPT) ok = false;    // FIN 时要确保 UTF-8 序列完整，即不能截断于多字节序列中间
         if (!ok) {
-            print("E:", LA_F("[WS] Invalid UTF-8 in TEXT frame\n", 0, 0));
+            print("E:", LA_F("[WS] Invalid UTF-8 in TEXT frame\n", LA_F250, 250));
             return WS_CLOSE_PROTOCOL_ERROR;
         }
     }
@@ -794,13 +794,13 @@ static buf16_item_t* cw_error_item(ct_client_t *c) {
 
         buf = ITEM2BUF(close_frame) + payload_offset - hdr_sz;
         if ((buf[0] & 0x0F) != WS_OP_CLOSE) {
-            print("E:", LA_F("[WS] invalid last_reason frame\n", 0, 0));
+            print("E:", LA_F("[WS] invalid last_reason frame\n", LA_F257, 257));
             free_buf16(close_frame);
             goto fallback_close;
         }
 
         if (payload_len > 125) {
-            print("W:", LA_F("[WS] truncate last_reason payload_len=%u to 125\n", 0, 0), payload_len);
+            print("W:", LA_F("[WS] truncate last_reason payload_len=%u to 125\n", LA_F258, 258), payload_len);
             hdr_sz = 2;
             buf = ITEM2BUF(close_frame) + payload_offset - hdr_sz;
             buf[0] = 0x80 | WS_OP_CLOSE;

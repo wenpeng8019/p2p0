@@ -319,22 +319,19 @@ static void compact_free_session(session_t *s) {
 
         compact_session_send_fin(peer, "peer_disconnect");
     }
-
-    free_session_base(&cs->base);
 }
 
 // 释放 client
-void compact_free_client(client_t *c) {
+void compact_client_free(client_ctx_t *ctx, client_t *c) { (void)ctx;
     compact_client_t *cc = (compact_client_t*)c;
+
+    clear_sessions(&cc->base, true);
 
     // 从 auth 哈希表移除
     if (cc->auth_key) {
         HASH_DELETE(hh, g_clients_by_auth, cc);
         cc->auth_key = 0;
     }
-
-    while (cc->base.sessions) compact_free_session(cc->base.sessions);
-    free_client_base(&cc->base);
 }
 
 client_ctx_t*
@@ -352,7 +349,7 @@ compact_init(void) {
             offsetof(compact_session_t, rpc_pending_next),
             offsetof(compact_session_t, rpc_sent_time));
 
-    g_ctx.free = compact_free_client;
+    g_ctx.cb_free = compact_client_free;
     return &g_ctx;
 }
 
@@ -992,9 +989,8 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         }
 
         // 初始化客户端槽位
-        memcpy(client->local_peer_id, local_peer_id, P2P_PEER_ID_MAX);
+        identify_client(client, local_peer_id);
         compact_init_client((compact_client_t*)client, from);
-        identify_client(client);
 
         compact_send_reg_ack(client, from, ((compact_client_t*)client)->auth_key, instance_id);
         print("V:", LA_F("%s: auth_key=%" PRIu64 " assigned for '%.*s'\n", LA_F36, 36),
@@ -1025,7 +1021,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         if (off_client) {
             print("V:", LA_F("%s: accepted, releasing slot for '%s'\n", LA_F31, 31),
                    PROTO, off_client->base.local_peer_id);
-            compact_free_client((client_t*)off_client);
+            free_client((client_t*)off_client);
         }
     } break;
 

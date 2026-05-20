@@ -46,25 +46,26 @@ typedef struct ct_session {
 #define CT_PEER(s)                  ((ct_session_t*)PEER(s))
 
 //-----------------------------------------------------------------------------
-// Client 扩展字段（内联宏，供派生 client 结构体使用）
-
-// + last_error:       最近一次错误码（0 表示无错误）
-// + hdr_rs:           流模式：指向边界标识字节串；帧模式：指向固定 header 缓冲（外部分配，生命期由上层管理）
-// + hdr_sz:           流模式：边界标识符长度；帧模式：当前期望读取的 header 字节数（可动态调整）
-// + recv_buf:         流模式接收缓冲（非 NULL = 流模式，NULL = 帧模式）
-//                     流模式：pos 指向当前请求 header 的起始，recv_cur 是边界扫描游标
-//                     切换到帧模式时，若 recv_buf 尚有未消费数据，会保留为 payload_buf（缓释）
-//                     ⚠️ 修改 recv_buf 时无需手动释放旧对象（包括 recv_buf->next），只需直接赋新值或 NULL，
-//                        框架在回调后会自动调用 prepare_next_recv 处理模式切换和资源释放
-// + recv_cur:         流模式：边界扫描游标；帧模式：hdr_rs 已读取字节数
-// + payload_buf:      当前正在接收的 payload 缓冲；NULL 表示未进入 payload 接收阶段
-//                     + 帧模式切换时，原 recv_buf 中未消费的数据会暂存在此（refer=(void*)-1 标记）
-//                     + payload_buf->pos 指向 socket 读入数据的起始偏移；pos 之前为预留前置空间
-// + payload_cur:      payload_buf 中已读入的字节数（从 payload_buf->pos 起算）
-// + send_buff_queue:  client 级发送队列（优先于 session 队列发送）
-// + send_sess_head/rear: 有待发数据的 session 组成的双向链表
-// + sending_sess:     当前正在发送数据的 session（mid-packet 时保持）
-// + sending_cur:      当前正在发送的 buf_item 已发送字节数
+/**
+ * @brief                           Client 扩展字段（内联宏，供派生 client 结构体使用）
+ * @details
+ *  last_error                      最近一次错误码，0 表示无错误
+ *  hdr_rs                          流模式下指向边界标识字节串；帧模式下指向固定 header 缓冲，由上层管理其生命周期
+ *  hdr_sz                          流模式下为边界标识符长度；帧模式下为当前期望读取的 header 字节数，可动态调整
+ *  recv_buf                        流模式接收缓冲。非 NULL 表示流模式，NULL 表示帧模式
+ *                                  流模式下，pos 指向当前请求 header 起始，recv_cur 为边界扫描游标
+ *                                  切换到帧模式时，若 recv_buf 仍有未消费数据，会暂存到 payload_buf
+ *                                  注意：修改 recv_buf 时无需手动释放旧对象，框架会在回调后统一处理模式切换和资源释放
+ *  recv_cur                        流模式下为边界扫描游标；帧模式下为 hdr_rs 已读取字节数
+ *  payload_buf                     当前正在接收的 payload 缓冲，NULL 表示未进入 payload 接收阶段
+ *                                  帧模式切换时，原 recv_buf 的未消费数据可能暂存在这里，并带 refer=(void*)-1 标记
+ *                                  payload_buf->pos 指向 socket 读入数据的起始偏移，pos 之前为预留前置空间
+ *  payload_cur                     payload_buf 中已读入的字节数，从 payload_buf->pos 起算
+ *  send_buff_queue                 client 级发送队列，优先于 session 级发送队列
+ *  send_sess_head/rear             当前有待发数据的 session 双向链表头尾
+ *  sending_sess                    当前正在发送数据的 session，mid-packet 时保持不变
+ *  sending_cur                     当前正在发送的 buf_item 已发送字节数
+ */
 #define CUSTOM_TCP_CLIENT   \
     int16_t                         last_error;         \
     uint8_t*                        hdr_rs;             \
@@ -109,72 +110,98 @@ typedef struct ct_client_ctx ct_client_ctx_t;
 //-----------------------------------------------------------------------------
 // 回调类型
 
-// 解析 header，填充 payload_len（payload 总字节数）和 payload_offset（payload 前置保留空间字节数）
-// + payload_offset：框架在分配 payload1 时会在数据前预留该大小的空间，供应用写入新 header 后
-//   直接将 payload1 投入转发队列，实现零拷贝转发（不需要 payload_offset 时填 0）
-// + 返回:
-//   <0: 解析报错
-//   >0: 表示需要更多 header 数据（帧模式专用，用于动态扩展 header size）
-//       此时需将 client->hdr_sz 更新为新的期望读取长度，框架会继续读取后再次调用
-//       + 流模式下 header 在首次解析时就已完整，必须返回 0
-//   =0: 解析完成且成功
+/**
+ * @brief                           解析 header，并给出 payload 长度与前置保留空间大小
+ * @param client
+ * @param hdr_buf                   header 数据
+ * @param hdr_len                   header 长度
+ * @param payload_len               输出参数，payload 总字节数
+ * @param payload_offset            输出参数，payload 前置保留空间字节数
+ *                                  该值用于让上层在 payload 前直接写入新的 header，从而实现零拷贝转发
+ * @return
+ *  <0                             解析报错
+ *  >0                             需要更多 header 数据（仅帧模式）
+ *                                 此时上层需同步更新 client->hdr_sz，框架会继续读取并再次调用本回调
+ *                                 流模式下 header 首次解析时就必须完整，因此必须返回 0
+ *  =0                             解析成功
+ */
 typedef ret_t (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf, uint16_t hdr_len,
                                            uint32_t* payload_len, uint16_t* payload_offset);
 
-// 握手阶段收到完整消息时触发
-// + *client: 当前握手 client 指针的地址。回调可修改 *client 来切换 client 实例（见【client swap 机制】）
-// + hdr_buf/hdr_len: header 数据（流模式指向 recv_buf 内部，帧模式指向 hdr_rs）
-// + payload0: recv_buf 内部的 payload 片段（零拷贝，NULL 表示无）
-//   ⚠️ payload0 禁止加入任何 buf 队列（回调返回后 recv_buf 会被复用）
-// + payload1: 单独分配的 payload 缓冲（大 payload 跨 socket 读取时使用，NULL 表示无）
-//   - payload1->pos 指向 payload 数据的起点
-//   - 若存在 payload0，则从 pos 开始的前置 len(payload0) 空间为其预留，payload1 实际加载的数据从 pos + len(payload0) 开始
-//   - 此外，如果 ct_resolve_payload_len_cb 返回的 payload_offset 不为 0，则 pos == payload_offset，否则 pos == 0
-// + 返回非 NULL 的 ack buf_item 表示握手成功；返回 NULL 且 last_error==0 表示协议错误
-//   ⚠️ 关键约束：返回的 ack 必须是 buf16_item_t（非 BUF_IS_32BIT），否则会破坏握手发送路径的内存布局约定。
-// + 注意：回调期间不应调整 recv_buf（框架有 assert 保证）
-//
-// 【client swap 机制】重连握手时，回调可通过修改 *client 将 from→reg 的切换通知框架：
-//   1. 回调内调用 resident_client(reg, proto, inst, from)：迁移 fd 至 reg，free_client(from) 释放当前 client
-//   2. 将 *client 更新为 reg（旧槽位指针）
-//   框架检测到 *client 变化后，跳过对已释放的 from client 的状态访问（payload/recv_buf 均已无效），
-//   改由 ct_client_send 向 reg 直接投递 ACK 并调用 handshake_finish，完成握手流程。
+/**
+ * @brief                           握手阶段收到完整消息时触发
+ * @param ctx
+ * @param client                    当前握手 client 指针的地址。回调可修改 *client 来切换 client 实例
+ *                                  例如重连时将 from 切换到 resident 的 reg client
+ * @param hdr_buf                   header 数据。流模式下指向 recv_buf 内部，帧模式下指向 hdr_rs
+ * @param hdr_len                   header 长度
+ * @param payload0                  recv_buf 内部的 payload 片段，零拷贝借用，可能为 NULL
+ *                                  注意：payload0 不能加入任何 buf 队列，回调返回后 recv_buf 会被复用
+ * @param payload1                  单独分配的 payload 缓冲，可能为 NULL
+ *                                  若存在 payload0，则 payload1->pos 开始的前置 len(payload0) 空间是为 payload0 预留的
+ *                                  若 resolve_payload_len 给出了 payload_offset，则 payload1->pos == payload_offset，否则为 0
+ * @return                          返回非 NULL 的 ack buf_item 表示握手成功
+ *                                  返回 NULL 且 last_error==0 表示协议错误
+ *                                  约束：ack 必须是 buf16_item_t，不能是 32-bit buffer
+ */
 typedef buf16_item_t* (*ct_handle_handshake_cb)(ct_client_ctx_t *ctx, ct_client_t **client, uint8_t* hdr_buf, uint16_t hdr_len,
                                                 buf16_item_t* payload0, buf16_item_t* payload1);
 
-// 握手 ACK 发送完成后触发（nullable）
-// + 可在此调整 recv_buf（如切换模式、调整缓冲大小）
+/**
+ * @brief                           握手 ACK 发送完成后触发
+ * @param ctx
+ * @param client
+ * @return                          无
+ */
 typedef void (*ct_handshake_finish_cb)(ct_client_ctx_t *ctx, ct_client_t *client);
 
-// 正常阶段收到完整消息时触发
-// + payload0/payload1 语义同 handle_handshake（payload0 同样禁止加入 buf 队列）
-// + 回调内可通过修改 client->recv_buf 在流/帧模式间切换
-//   框架会在回调返回后通过 prepare_next_recv 处理模式切换的状态一致性
+/**
+ * @brief                           正常阶段收到完整消息时触发
+ * @param ctx
+ * @param client
+ * @param hdr_buf                   header 数据
+ * @param hdr_len                   header 长度
+ * @param payload0                  recv_buf 内部借用的 payload 片段，语义同握手阶段
+ * @param payload1                  独立 payload 缓冲，语义同握手阶段
+ * @return                          无
+ */
 typedef void (*ct_handle_proto_cb)(ct_client_ctx_t *ctx, ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
                                    buf16_item_t* payload0, buf16_item_t* payload1);
 
-// session 级 buf_item 发送完成时触发（nullable）
-// + 用于实现对端感知的发送确认（如中继转发的流量控制）
-// + 可为 NULL，此时跳过对端发送确认通知
+/**
+ * @brief                           session 级 buf_item 发送完成时触发
+ * @param ctx
+ * @param session
+ * @param buf_item
+ * @return                          无
+ */
 typedef void (*ct_handle_peer_sent_cb)(ct_client_ctx_t *ctx, ct_session_t *session, buf16_item_t *buf_item);
 
-// client 变为不可达时触发（nullable）
-// + readOrWrite: true = 读错误，false = 写错误
+/**
+ * @brief                           client 变为不可达时触发
+ * @param ctx
+ * @param client
+ * @param readOrWrite               true 表示读错误，false 表示写错误
+ * @return                          无
+ */
 typedef void (*ct_client_unreachable_cb)(ct_client_ctx_t *ctx, ct_client_t *client, bool readOrWrite);
 
-// 构造错误应答 buf_item（填充错误响应内容到 buf_item 后返回，框架负责发送和释放）
-// + handshake: true 表示发生在握手阶段（此时 last_error 已设置）
-// + 返回 NULL 表示 OOM，框架将按 fatal 处理
-// + 约束：若 handshake=true，返回值必须是 buf16_item_t（非 BUF_IS_32BIT）
-// + 回调本身可以为 NULL（nullable），此时所有错误按 fatal 处理
+/**
+ * @brief                           构造错误应答 buf_item，由框架负责发送和释放
+ * @param client
+ * @return                          返回 NULL 表示 OOM，此时框架按 fatal 处理
+ *                                  握手阶段返回值必须是 buf16_item_t，不能是 32-bit buffer
+ */
 typedef buf16_item_t* (*ct_error_item_cb)(ct_client_t *client);
 
 //-----------------------------------------------------------------------------
 // 协议上下文（每个协议类型共享一个，所有 client 共用）
 
-// 协议上下文扩展字段（内联宏，供派生协议上下文结构体使用）
-// + 参考 CUSTOM_TCP_CLIENT/ct_client_t 的宏继承模式
-// + nullable 字段：handshake_finish, handle_peer_sent, client_unreachable, fatal_item, error_item
+/**
+ * @brief                           协议上下文扩展字段（内联宏，供派生协议上下文结构体使用）
+ * @details                         参考 CUSTOM_TCP_CLIENT/ct_client_t 的宏继承模式
+ *                                  其中 handshake_finish、handle_peer_sent、client_unreachable、fatal_item、error_item 可为空
+ */
 #define CUSTOM_TCP_CTX \
     uint32_t                        max_payload_len;            \
     ct_resolve_payload_len_cb       resolve_payload_len;        \
@@ -191,7 +218,15 @@ struct ct_client_ctx {
     CUSTOM_TCP_CTX
 };
 
-
+/**
+ * @brief                           将（请求包）payload 数据直接转换为（转发）应答包。以实现尽量少的资源开销，例如零拷贝转发
+ * @param client
+ * @param payload                   请求包 payload 数据（指向 recv_buf 内部，零拷贝）
+ * @param payload_len               请求包 payload 长度
+ * @param payload_offset            转为应答包后的 payload 在 buf_item 中的偏移（如果该值等于 payload - payload_item 则零拷贝）
+ * @param payload_item              payload 所属 buf_item。如果该值为 NULL，则会分配新的 buf_item（无法零拷贝）
+ * @return
+ */
 static inline buf16_item_t*
 ct_forward_payload(ct_client_t *client,
                    uint8_t* payload, uint32_t payload_len, uint16_t payload_offset,
@@ -239,45 +274,66 @@ void ct_session_close(client_ctx_t* ctx, session_t *s, bool terminate, bool clea
 
 //-----------------------------------------------------------------------------
 
-// 向 client 发送队列追加 buf_item（仅在 handshake==0 时调用）
-// + immediate=true：高优先级，插入到当前正在发送的包之后（或队头），确保优先发出
-// + immediate=false：追加到队尾
-// + 如 client 可达（WANT_READ），自动设置 WANT_WRITE
+/**
+ * @brief                           向 client 发送队列追加 buf_item
+ * @param client
+ * @param buf_item
+ * @param immediate                 true 表示高优先级插队，false 表示追加到队尾
+ * @return                          无
+ */
 void
 ct_client_send(ct_client_t *client, buf16_item_t* buf_item, bool immediate);
 
-// 向 session 发送队列追加 buf_item（session 存在即意味 client handshake==0）
-// + 队列原本为空时，将 session 挂入 client 的 send_sess 链表，并设置 WANT_WRITE
+/**
+ * @brief                           向 session 发送队列追加 buf_item
+ * @param session
+ * @param buf_item
+ * @return                          无
+ */
 void
 ct_session_send(ct_session_t *session, buf16_item_t* buf_item);
 
 //-----------------------------------------------------------------------------
 // 调度派发接口
 
-// 优雅关闭 client：中断所有 session（CLOSE），释放 recv buf
-// + 如发送队列非空：标记为 CLOSING，停止读取，等发送完成后自动调用 free_client_base
-// + 如发送队列为空：直接调用 free_client_base
+/**
+ * @brief                           优雅关闭 client
+ * @param ctx
+ * @param client
+ * @param last_item                 可选的最后一个发送项
+ * @return                          无
+ */
 void
 ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client, buf16_item_t* last_item);
 
-// 报告错误：
-// + fatal=false（非致命）：停止读取，向 client 发送最后一个错误应答包，发送完成后关闭连接
-//   - 如 error_item 回调为 NULL，则转为 fatal 处理
-// + fatal=true（致命）：终止所有 session，清空发送队列，追加 fatal_item 并在发送完成后释放 client
-//   - 如 fatal_item 为 NULL，直接释放 client
+/**
+ * @brief                           报告 client 错误，并按 fatal 策略执行关闭或销毁
+ * @param ctx
+ * @param client
+ * @param error
+ * @param fatal                     true 表示致命错误，false 表示最后返回一个错误应答后关闭
+ * @return                          无
+ */
 void
 ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool fatal);
 
-// 接收处理（WANT_READ & select 就绪时调用）
-// + 内部循环处理握手和正常消息的读取、解析、分发，直到 would block 或出错
-// + SP：子协议名称标签（用于日志，NULL 时默认显示 "TCP"）
+/**
+ * @brief                           处理 client 的接收路径
+ * @param ctx
+ * @param client
+ * @param SP                        子协议名称标签，NULL 时默认显示为 "TCP"
+ * @return                          无
+ */
 void
 ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP);
 
-// 发送处理（WANT_WRITE & select 就绪时调用）
-// + 按优先级发送：client 队列 > session 队列（session 间轮询）
-// + 发送完成后自动清除 WANT_WRITE；若处于 CLOSING 状态则调用 free_client_base
-// + SP：子协议名称标签（用于日志，NULL 时默认显示 "TCP"）
+/**
+ * @brief                           处理 client 的发送路径
+ * @param ctx
+ * @param client
+ * @param SP                        子协议名称标签，NULL 时默认显示为 "TCP"
+ * @return                          无
+ */
 void
 ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP);
 

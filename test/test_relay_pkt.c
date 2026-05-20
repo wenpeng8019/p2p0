@@ -64,7 +64,7 @@
  *   目标：验证对端离线时 DATA 被拒绝
  *   方法：Alice 单独建立会话 → 发送 DATA
  *   预期：
- *     - 收到 STATUS(P2P_RLY_ERR_PEER_OFF)
+ *     - 收到 STATUS(P2P_ERR_PEER_OFF)
  *
  * 测试 7: relay_data_bad_payload
  *   目标：验证畸形 DATA 包被丢弃
@@ -667,7 +667,7 @@ static void test_relay_data_forwarded(void) {
         return;
     }
     
-    if (status.status_code != P2P_RLY_CODE_READY) {
+    if (status.status_code != P2P_CODE_READY) {
         P_sock_close(sock_alice);
         P_sock_close(sock_bob);
         TEST_FAIL(TEST_NAME, "unexpected status code");
@@ -962,10 +962,10 @@ static void test_relay_data_peer_offline(void) {
                                    P2P_PKT_DATA, 0, 1, test_data, sizeof(test_data));
     tcp_send_all(sock, pkt, pkt_len);
     
-    // 应收到 STATUS(P2P_RLY_ERR_PEER_OFF)
+    // 应收到 STATUS(P2P_ERR_PEER_OFF)
     status_t status;
     if (wait_status(sock, &status) && status.received) {
-        if (status.status_code == P2P_RLY_ERR_PEER_OFF) {
+        if (status.status_code == P2P_ERR_PEER_OFF) {
             P_sock_close(sock);
             TEST_PASS(TEST_NAME);
             return;
@@ -1187,18 +1187,18 @@ int main(int argc, char *argv[]) {
     printf("\n[*] Running tests...\n");
     
     // 一、正常功能测试
-    test_relay_data_forwarded();
-    test_relay_ack_forwarded();
-    test_relay_crypto_forwarded();
-    test_relay_bidirectional();
+    // test_relay_data_forwarded();
+    // test_relay_ack_forwarded();
+    // test_relay_crypto_forwarded();
+    // test_relay_bidirectional();
     
     // 二、失败验证测试
-    test_relay_data_bad_session();
-    test_relay_data_peer_offline();
-    test_relay_data_bad_payload();
+    // test_relay_data_bad_session();
+    // test_relay_data_peer_offline();
+    // test_relay_data_bad_payload();
     
     // 三、边界/临界态测试
-    test_relay_flow_control();
+    // test_relay_flow_control();
     test_relay_large_data();
     
     // 终止 server

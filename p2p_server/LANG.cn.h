@@ -28,11 +28,15 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F21] = "%s retransmit during RSP phase, ignoring, sid=%u (ses_id=%u)\n",  /* SID:21 */
     [LA_F22] = "%s retransmit, resend ACK, sid=%u (ses_id=%u)\n",  /* SID:22 */
     [LA_F48] = "%s: forwarded to peer, cands=%d\n",  /* SID:48 */
+    [LA_F93] = "REG: '%s' came online (inst=%u)\n",  /* [SID:93] UPDATED new: "%s: '%.*s' new REG (inst=%u)\n" */
+    [LA_F98] = "REG_ACK sent to '%s'\n",  /* [SID:98] UPDATED new: "%s: '%.*s' reconnected & reactive (inst=%u)\n" */
+    [LA_F153] = "%s: '%s' reconnected & renew (inst=%u)\n",  /* [SID:153] UPDATED new: "%s: '%.*s' reconnected & renew (inst=%u)\n" */
+    [LA_F167] = "%s: sid=%u -> peer_sid=%u (%zu bytes)\n",  /* [SID:167] UPDATED new: "%s: '%s' -> '%s' (%zu bytes)\n" */
     [LA_F63] = "%s: peer '%s' offline, cached cands=%d\n",  /* SID:63 */
     [LA_F152] = "%s: '%s' <-> '%s' paired (ses=%u/%u)\n",  /* SID:152 */
-    [LA_F93] = "REG: '%s' came online (inst=%u)\n",  /* SID:93 */
-    [LA_F98] = "REG_ACK sent to '%s'\n",  /* SID:98 */
-    [LA_F153] = "%s: '%s' reconnected & renew (inst=%u)\n",  /* SID:153 */
+    [LA_F230] = "REG: '%s' came online (inst=%u)\n",  /* SID:230 */
+    [LA_F231] = "REG_ACK sent to '%s'\n",  /* SID:231 */
+    [LA_F232] = "%s: '%s' reconnected & renew (inst=%u)\n",  /* SID:232 */
     [LA_F45] = "%s: close ses_id=%u\n",  /* SID:45 */
     [LA_F24] = "%s: '%s' sid=%u code=%u data_len=%d\n",  /* SID:24 */
     [LA_F25] = "%s: '%s' sid=%u msg=%u data_len=%d\n",  /* SID:25 */
@@ -78,14 +82,16 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F94] = "REG: '%s' new instance (old=%u, new=%u), destroying old\n",  /* SID:94 */
     [LA_F50] = "%s: invalid instance_id=0 from %s\n",  /* SID:50 */
     [LA_F96] = "REG: bad payload(len=%u, expected=%u)\n",  /* SID:96 */
+    [LA_F233] = "%s: invalid recv layout for zero-copy forward\n",  /* SID:233 new */
     [LA_F161] = "%s: invalid relay flag from client\n",  /* SID:161 */
     [LA_F142] = "recv() failed: errno=%d\n",  /* SID:142 */
     [LA_F52] = "%s: invalid seq=%u\n",  /* SID:52 */
     [LA_F53] = "%s: invalid session_id=%u or sid=%u\n",  /* SID:53 */
     [LA_F212] = "%s: invalid sid=0\n",  /* SID:212 */
     [LA_F55] = "%s: local='%s', remote='%s', side=%d, peer_online=%d, cands=%d\n",  /* SID:55 */
-    [LA_F162] = "%s: local='%s', remote='%s', online=%d, sync_cache=%u\n",  /* SID:162 */
+    [LA_F162] = "%s: local='%s', remote='%s', online=%d, sync_cache=%u\n",  /* [SID:162] UPDATED new: "%s: local='%s', remote='%s', online=%d, payload=%u\n" */
     [LA_F213] = "%s: missing payload\n",  /* SID:213 */
+    [LA_F234] = "%s: missing recv item for zero-copy forward\n",  /* SID:234 new */
     [LA_F56] = "%s: no matching pending msg (sid=%u)\n",  /* SID:56 */
     [LA_F57] = "%s: no matching pending msg (sid=%u, expected=%u)\n",  /* SID:57 */
     [LA_F58] = "%s: obsolete sid=%u (current=%u), ignoring\n",  /* SID:58 */
@@ -93,11 +99,16 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F60] = "%s: paired '%.*s' <-> '%.*s'\n",  /* SID:60 */
     [LA_F61] = "%s: peer '%s' not online for session_id=%u\n",  /* SID:61 */
     [LA_F62] = "%s: peer '%s' not online, rejecting sid=%u\n",  /* SID:62 */
-    [LA_F163] = "%s: peer '%s' offline, cached cands=%d\n",  /* SID:163 */
+    [LA_F163] = "%s: peer '%s' offline, cached cands=%d\n",  /* [SID:163] UPDATED new: "%s: peer '%s' offline, pending\n" */
+    [LA_F235] = "%s: peer '%s' unreachable, pending\n",  /* SID:235 new */
     [LA_F64] = "%s: peer offline, sending error resp\n",  /* SID:64 */
-    [LA_F214] = "%s: pkt queue full, dropping\n",  /* SID:214 */
+    [LA_F214] = "%s: pkt queue full, dropping\n",  /* [SID:214] UPDATED new: "%s: pkt queue full, reply busy\n" */
     [LA_F215] = "%s: prev ALV ACK still pending, skip\n",  /* SID:215 */
-    [LA_F147] = "type=%u rejected: client not logged in\n",  /* SID:147 */
+    [LA_F147] = "type=%u rejected: client not logged in\n",  /* [SID:147] UPDATED new: "%s: rejected for not reg(%.*s)\n" */
+    [LA_F236] = "%s: rejected for not reg(%s)\n",  /* SID:236 new */
+    [LA_F237] = "type=%u rejected: client not logged in\n",  /* SID:237 */
+    [LA_F238] = "%s: renew sess by peer %s",  /* SID:238 new */
+    [LA_F239] = "%s: renew sess to peer %s",  /* SID:239 new */
     [LA_F216] = "%s: request simultaneously for '%s'\n",  /* SID:216 */
     [LA_F65] = "%s: requester not found for ses_id=%u\n",  /* SID:65 */
     [LA_F66] = "%s: requester offline, discarding\n",  /* SID:66 */
@@ -110,19 +121,21 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F220] = "%s: ses_id=%u, peer offline, drop sid=%u\n",  /* SID:220 */
     [LA_F221] = "%s: ses_id=%u, sid=%u, cands=%d\n",  /* SID:221 */
     [LA_F68] = "%s: sid mismatch (got=%u, pending=%u), discarding\n",  /* SID:68 */
-    [LA_F167] = "%s: sid=%u -> peer_sid=%u (%zu bytes)\n",  /* SID:167 */
+    [LA_F240] = "%s: sid=%u -> peer_sid=%u sync_sid=%u\n",  /* SID:240 new */
     [LA_F168] = "%s: sid=%u -> peer_sid=%u, data_len=%zu\n",  /* SID:168 */
+    [LA_F241] = "%s: too many candidates(cnt=%d)\n",  /* SID:241 new */
     [LA_F70] = "%s: unknown auth_key=%llu from %s\n",  /* SID:70 */
     [LA_F148] = "unknown ses_id=%u (type=%u)\n",  /* SID:148 */
     [LA_F71] = "%s: unknown session_id=%u\n",  /* SID:71 */
     [LA_F222] = "%session: alloc buffer failed(OOM)\n",  /* SID:222 */
     [LA_F73] = "'%s' timeout (inactive for %.1f sec)\n",  /* SID:73 */
+    [LA_F242] = ": bad payload(%u)\n",  /* SID:242 new */
+    [LA_F171] = "BIN: unknown ses_id=%u type=0x%02x from '%s'\n",  /* [SID:171] UPDATED new: ": unknown ses_id=%u type=0x%02x from '%s'\n" */
     [LA_F74] = "Addr changed for '%s', but first info packet was abandoned (ses_id=%u)\n",  /* SID:74 */
     [LA_F75] = "Addr changed for '%s', defer notification until first ACK (ses_id=%u)\n",  /* SID:75 */
     [LA_F76] = "Addr changed for '%s', deferred notifying '%s' (ses_id=%u)\n",  /* SID:76 */
     [LA_F77] = "Addr changed for '%s', notifying '%s' (ses_id=%u)\n",  /* SID:77 */
     [LA_F170] = "BIN 0x%02x: ses_id=%u peer not connected\n",  /* SID:170 */
-    [LA_F171] = "BIN: unknown ses_id=%u type=0x%02x from '%s'\n",  /* SID:171 */
     [LA_F149] = "unsupported type=%u (ses_id=%u)\n",  /* SID:149 */
     [LA_F78] = "Cannot relay %s: ses_id=%u (peer unavailable)\n",  /* SID:78 */
     [LA_F172] = "Client closed during protocol detection (slot %d)\n",  /* SID:172 */
@@ -167,9 +180,14 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F11] = "% Client closed connection (EOF on recv)\n",  /* SID:11 */
     [LA_F182] = "[TCP] conn closed (EOF on send, reason=%s)\n",  /* SID:182 */
     [LA_F224] = "[%s] conn closed during handshake(%d) (EOF on recv)\n",  /* SID:224 */
+    [LA_F243] = "[%s] conn closed during handshake(%d) (EOF on send)\n",  /* SID:243 new */
     [LA_F183] = "[TCP] recv failed(%d)\n",  /* SID:183 */
     [LA_F225] = "[%s] recv failed(%d)\n",  /* SID:225 */
+    [LA_F244] = "[%s] send failed(%d) during handshake(%d)\n",  /* SID:244 new */
     [LA_F144] = "send(%s) failed: errno=%d\n",  /* SID:144 */
+    [LA_F245] = "[CT] payload len(%u) overflow, max: %u\n",  /* SID:245 new */
+    [LA_F246] = "[CT] resolve payload len failed(%d)\n",  /* SID:246 new */
+    [LA_F247] = "% [R] OOM: cannot allocate recv buffer\n",  /* SID:247 new */
     [LA_F123] = "[Relay] %s for ses_id=%u: peer unavailable (dropped)\n",  /* SID:123 */
     [LA_F124] = "[Relay] %s for unknown ses_id=%u (dropped)\n",  /* SID:124 */
     [LA_F125] = "[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%u)\n",  /* SID:125 */
@@ -179,7 +197,6 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F129] = "[Relay] %s: missing SESSION flag, dropped\n",  /* SID:129 */
     [LA_F130] = "% [TCP] Failed to set client socket to non-blocking mode\n",  /* SID:130 */
     [LA_F131] = "% [TCP] Max peers reached, rejecting connection\n",  /* SID:131 */
-    [LA_F133] = "% [TCP] OOM: cannot allocate recv buffer for new client\n",  /* SID:133 */
     [LA_F135] = "[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:135 */
     [LA_F136] = "[UDP] %s send to %s:%d failed(%d)\n",  /* SID:136 */
     [LA_F137] = "[UDP] %s send to %s:%d, len=%d\n",  /* SID:137 */
@@ -189,12 +206,24 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F189] = "[UDP] SYN0 recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:189 */
     [LA_F134] = "[UDP] %s recv from %s, len=%zu\n",  /* SID:134 */
     [LA_F190] = "[UDP] SYNC_ACK recv from %s, seq=%u, flags=0x%02x, len=%zu\n",  /* SID:190 */
-    [LA_F143] = "select failed(%d)\n",  /* SID:143 */
+    [LA_F248] = "% [WS] CONTINUATION frame without fragmentation going\n",  /* SID:248 new */
+    [LA_F249] = "% [WS] Client frame missing mask\n",  /* SID:249 new */
+    [LA_F143] = "select failed(%d)\n",  /* [SID:143] UPDATED new: "[WS] HTTP accept rejected(%d)\n" */
+    [LA_F250] = "% [WS] Invalid UTF-8 in TEXT frame\n",  /* SID:250 new */
+    [LA_F251] = "% [WS] Invalid UTF-8 in close reason\n",  /* SID:251 new */
+    [LA_F252] = "[WS] Invalid close code %u\n",  /* SID:252 new */
+    [LA_F253] = "[WS] Invalid control frame: opcode=%u fin=%u hdr_len=%u\n",  /* SID:253 new */
+    [LA_F254] = "[WS] New %s without fragmentation end\n",  /* SID:254 new */
     [LA_F226] = "% [WS] OOM in fragment reassembly\n",  /* SID:226 */
     [LA_F227] = "% [WS] OOM: cannot allocate HTTP recv buffer\n",  /* SID:227 */
+    [LA_F255] = "[WS] RSV bit set in opcode %u\n",  /* SID:255 new */
+    [LA_F256] = "[WS] Reserved opcode %u\n",  /* SID:256 new */
+    [LA_F228] = "[WS] send_frame: payload_pos(%u) < hdr_sz(%u)\n",  /* [SID:228] UPDATED new: "[WS] build_frame: payload_pos(%u) < hdr_sz(%u)\n" */
     [LA_F192] = "[WS] Closing timeout, force close client (slot %d)\n",  /* SID:192 */
-    [LA_F228] = "[WS] send_frame: payload_pos(%u) < hdr_sz(%u)\n",  /* SID:228 */
+    [LA_F257] = "% [WS] invalid last_reason frame\n",  /* SID:257 new */
+    [LA_F258] = "[WS] truncate last_reason payload_len=%u to 125\n",  /* SID:258 new */
     [LA_F199] = "[W] RPC timeout: sid=%u (ses_id=%u)\n",  /* SID:199 */
+    [LA_F259] = "% alloc buf failed(OOM)\n",  /* SID:259 new */
     [LA_F179] = "REG_ACK sent to '%s'\n",  /* SID:179 */
     [LA_F229] = "make err(%d) resp failed(OOM)\n",  /* SID:229 */
     [LA_F140] = "% net init failed\n",  /* SID:140 */
@@ -203,6 +232,7 @@ static const char* s_lang_cn[LA_NUM] = {
     [LA_F100] = "% RPC_ERR: OOM\n",  /* SID:100 */
     [LA_F203] = "unknown msg from '%s': %.32s\n",  /* SID:203 */
     [LA_F204] = "unsupported type=%u (ses_id=%u)\n",  /* SID:204 */
+    [LA_F133] = "% [TCP] OOM: cannot allocate recv buffer for new client\n",  /* SID:133 */
     [LA_F27] = "%s: OOM for relay buffer\n",  /* SID:27 */
     [LA_F41] = "%s: bad payload(len=%u)\n",  /* SID:41 */
     [LA_F164] = "%s: send failed\n",  /* SID:164 */
