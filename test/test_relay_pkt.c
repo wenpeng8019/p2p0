@@ -1187,18 +1187,18 @@ int main(int argc, char *argv[]) {
     printf("\n[*] Running tests...\n");
     
     // 一、正常功能测试
-    // test_relay_data_forwarded();
-    // test_relay_ack_forwarded();
-    // test_relay_crypto_forwarded();
-    // test_relay_bidirectional();
+    test_relay_data_forwarded();
+    test_relay_ack_forwarded();
+    test_relay_crypto_forwarded();
+    test_relay_bidirectional();
     
     // 二、失败验证测试
-    // test_relay_data_bad_session();
-    // test_relay_data_peer_offline();
-    // test_relay_data_bad_payload();
+    test_relay_data_bad_session();
+    test_relay_data_peer_offline();
+    test_relay_data_bad_payload();
     
     // 三、边界/临界态测试
-    // test_relay_flow_control();
+    test_relay_flow_control();
     test_relay_large_data();
     
     // 终止 server

@@ -265,6 +265,7 @@ pair_session(client_t *c, const char *remote_peer_id,
             // + 之前主动断开会将对端的 peer 置位 -1
             if ((*remote_s)->peer == (void*)-1) {
                 assert(!(*local_s)->peer);
+                *remote_s = NULL;
                 return E_DUPLICATE;
             }
 
@@ -279,7 +280,7 @@ pair_session(client_t *c, const char *remote_peer_id,
         }
 
         else if (pair->sessions[0]->client != c) { *remote_s = pair->sessions[0];       // 如果对端存在（本端之前已经脱离）
-            assert(!(*remote_s)->peer || (*remote_s)->peer != (void*)-1);
+            assert(!(*remote_s)->peer || (*remote_s)->peer == (void*)-1);
             side = 1;                                                                   // 本端将位于 pair 的 right side
         } else { *local_s = s = pair->sessions[0];                                      // 如果本端存在（对端之前已经脱离）
             if (!s->peer) return E_DUPLICATE;                                           // 如果是本端重复发起连接（对端不是已脱离状态）
@@ -290,7 +291,7 @@ pair_session(client_t *c, const char *remote_peer_id,
     else { assert(pair->sessions[1]);
 
         if (pair->sessions[1]->client != c) { *remote_s = pair->sessions[1];
-            assert(!(*remote_s)->peer || (*remote_s)->peer != (void*)-1);
+            assert(!(*remote_s)->peer || (*remote_s)->peer == (void*)-1);
             side = 0;
         } else { *local_s = s = pair->sessions[1];
             if (!s->peer) return E_DUPLICATE;

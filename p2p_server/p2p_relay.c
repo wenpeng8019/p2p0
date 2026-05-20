@@ -293,7 +293,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     }
 
     // 重复的 SYN0 请求
-    if (!BUF_R_EMPTY(&local_s->sync_peer_send)) {
+    if (side == E_DUPLICATE) {
 
         // 如果对端不可达，幂等返回 offline ACK
         if (!remote_s || !TCP_REACHABLE(remote_s->base.client)) {
@@ -358,34 +358,18 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
     // 对端已在线，启动双方 syn0 同步
     else {
 
-        // 建立双向引用关系
-        if (side != E_DUPLICATE) {
-            if (!local_s->base.peer) local_s->base.peer = (session_t*)remote_s;
-            if (!remote_s->base.peer) remote_s->base.peer = (session_t*)local_s;
-        }
-
         //-------
         // 向对端发送（转发）本端 SYN0 包
 
         // 添加到对端发送队列
 
-        uint8_t* sid = (uint8_t*)(hdr+1) + P2P_PEER_ID_MAX;         // 本端 SYN0 转发给对端前，需要写入对端 session_id（位于 peer id 之后）
-        nwrite_l(sid, remote_s->base.session_id);
+        p = (uint8_t*)(hdr+1) + P2P_PEER_ID_MAX;                    // 本端 SYN0 转发给对端前，需要写入对端 session_id（位于 peer id 之后）
+        nwrite_l(p, remote_s->base.session_id);
 
         syn0_item->refer = local_s;                                 // 设置 refer 用于触发传完后的 complete 回调
         ct_session_send((ct_session_t*)remote_s, syn0_item);        // 向对端发送（转发） SYN0 包
 
         //-------
-
-        // 如果是（由对端重新初始化重置会话导致的）本端重连
-        if (side == E_DUPLICATE) {
-            // 此时对端肯定已经向本端发送过 SYN0 包，且该 SYN0 包并未被 confirm（对端 SYN0 包需要本端的后续首个 SYNC 包来 confirm)
-            assert(!BUF_R_EMPTY(&remote_s->sync_peer_send)
-                   && ((p2p_relay_hdr_t *)ITEM2BUF(BUF_R_FRONT(&remote_s->sync_peer_send)))->type == P2P_RLY_SYN0
-                   && BUF_R_FRONT(&remote_s->sync_peer_send)->refer != NULL);
-            print("I:", LA_F("%s: renew sess by peer %s", LA_F238, 238), PROTO, (const char *)payload);
-            return;
-        }
 
         // 如果对端暂不可达，立刻返回 syn0 offline
         if (!TCP_REACHABLE(remote_s->base.client)) {
@@ -399,26 +383,16 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
             return;
         }
 
-        // 如果对端是被（本端重新初始化连接）重置的
-        if (BUF_R_EMPTY(&remote_s->sync_peer_send)) {
-            print("I:", LA_F("%s: renew sess to peer %s", LA_F239, 239), PROTO, (const char *)payload);
-            return;
-        }
-
         //-------
         // 对于对端先发起的 syn0 请求（即对端正在等待本端上线）
-
-        assert(!BUF_R_EMPTY(&remote_s->sync_peer_send)
-               && ((p2p_relay_hdr_t *)ITEM2BUF(BUF_R_FRONT(&remote_s->sync_peer_send)))->type == P2P_RLY_SYN0
-               && BUF_R_FRONT(&remote_s->sync_peer_send)->refer == NULL);
 
         buf16_item_t *remote_syn0_item = BUF_R_FRONT(&remote_s->sync_peer_send);
         hdr = (p2p_relay_hdr_t *)ITEM2BUF(remote_syn0_item);
 
         // 添加到本端发送队列
 
-        sid = (uint8_t*)(hdr+1) + P2P_PEER_ID_MAX;                  // 对端 SYN0 转发给本端前，需要写入本端 session_id（位于 peer id 之后）
-        nwrite_l(sid, local_s->base.session_id);
+        p = (uint8_t*)(hdr+1) + P2P_PEER_ID_MAX;                    // 对端 SYN0 转发给本端前，需要写入本端 session_id（位于 peer id 之后）
+        nwrite_l(p, local_s->base.session_id);
 
         remote_syn0_item->refer = remote_s;                         // 设置 refer，用于触发传完后的 complete 回调
         ct_session_send((ct_session_t*)local_s, remote_syn0_item);  // 向本端发送（转发）对端 SYN0 包
@@ -995,7 +969,7 @@ static void relay_handle_proto(ct_client_ctx_t *ctx, ct_client_t *client, uint8_
 
 static buf16_item_t* relay_error_item(ct_client_t *client) {
 
-    buf16_item_t *item = alloc_buf16(BUF_FLAG_512(0));
+    buf16_item_t *item = alloc_buf16(BUF_FLAG_128(0));
     if (!item) return NULL;
     p2p_relay_hdr_t *hdr = (p2p_relay_hdr_t*)ITEM2BUF(item);
     hdr->type = P2P_RLY_STA;
@@ -1098,17 +1072,12 @@ static void relay_session_break(client_ctx_t* ctx, session_t *s, session_t *ps, 
     if (break_mode == SESS_BREAK_STOP) return;
 
     // 如果是 grace 关闭会话
-    if (break_mode == SESS_BREAK_CLOSE) {
-
-        // 将对端剩余数据发给本端
+    if (break_mode == SESS_BREAK_CLOSE) {   // 将对端剩余数据发给本端
         relay_break_forward(&peer->sync_peer_send, session);
         relay_break_forward(&peer->pkt_peer_send,  session);
-    }
-    else {
-
-        // 将本端要发给对端的数据全部释放
-        relay_break_forward(&session->sync_peer_send, NULL);
-        relay_break_forward(&session->pkt_peer_send,  NULL);
+    } else {                                // 将对端要发给本端的数据全部释放
+        relay_break_forward(&peer->sync_peer_send, NULL);
+        relay_break_forward(&peer->pkt_peer_send,  NULL);
     }
 
     // 把剩余数据发给对端
@@ -1126,19 +1095,11 @@ static bool relay_client_reset(client_ctx_t* ctx, client_t *c, bool init) {
 
     relay_client_t* client = (relay_client_t*)c;
 
-    buf16_item_t *recv_buf;
+    if (!ct_client_reset(ctx, c, init)) {
+        return false;
+    }
+
     if (init) {
-
-        recv_buf = alloc_buf16(BUF_FLAG_MTU(0));
-        if (!recv_buf) {
-            print("E:", LA_F("[R] OOM: cannot allocate recv buffer\n", LA_F247, 247));
-            return false;
-        }
-
-        if (!ct_client_reset(ctx, c, true)) {
-            free_buf16(recv_buf);
-            return false;
-        }
 
         // 预初始化内嵌 ALV ACK 缓冲
         buf16_item_t *alv_item = (buf16_item_t*)client->alv_ack_buf;
@@ -1149,18 +1110,7 @@ static bool relay_client_reset(client_ctx_t* ctx, client_t *c, bool init) {
         alv_hdr->size = 0;
         alv_item->len = sizeof(p2p_relay_hdr_t);
     }
-    else {
 
-        recv_buf = client->recv_buf;
-        client->recv_buf = NULL;
-
-        if (!ct_client_reset(ctx, c, false)) {
-            free_buf16(recv_buf);
-            return false;
-        }
-    }
-
-    client->recv_buf = recv_buf;
     ((ct_client_t*)client)->hdr_rs = client->hdr_buf;
     ((ct_client_t*)client)->hdr_sz = sizeof(p2p_relay_hdr_t);
 

@@ -72,69 +72,6 @@ static void wss_session_send_rpc_code(wss_session_t *s, uint16_t sid, uint8_t co
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// handle_peer_sent 回调（对标 relay_handle_peer_sent）
-// PKT：移出队头，启动下一项；队满→满−1时补发 READY 状态
-// SYNC：TCP写出完成，设 ACK_PENDING，等待对端 SYNC confirm（或连接断开时在 session_break 清理）
-static void wss_handle_peer_sent(ct_client_ctx_t *ct_ctx, ct_session_t *ct_session, buf16_item_t *buf_item) { (void)ct_ctx;
-
-    assert(PEER_ONLINE(ct_session));
-    wss_session_t *session = (wss_session_t*)ct_session;
-
-    // 判断是 PKT 还是 SYNC：WS 帧头在 payload_pos 之前，opcode 在 buf_item->pos 偏移0
-    // 简单判断：pkt_peer_send[0] == buf_item → PKT
-    if (!BUF_R_EMPTY(&session->pkt_peer_send) && BUF_R_FRONT(&session->pkt_peer_send) == buf_item) {
-
-        buf_item->refer = NULL;  // 允许调用方释放
-
-        bool was_full = BUF_R_FULL(&session->pkt_peer_send);
-        BUF_R_POP(&session->pkt_peer_send);
-
-        if (!BUF_R_EMPTY(&session->pkt_peer_send)) {
-            buf16_item_t *next = BUF_R_FRONT(&session->pkt_peer_send);
-            next->refer = (void*)session;
-            // 恢复 payload_pos：零拷贝时 pos=0，payload 在 10 字节之后
-            uint8_t *payload_start = ITEM2BUF(next) + 10;
-            uint16_t payload_pos = (uint16_t)(payload_start - ITEM2BUF(next));
-            if (cw_build_frame(WS_OP_BINARY, next, payload_pos) == E_NONE)
-                cw_client_send((cw_client_t*)session->base.client, next, false);
-        }
-        if (was_full && session->base.peer)
-            wss_send_printf((cw_client_t*)session->base.peer->client, 96u,
-                            P2P_WSS_RSP_STA_FMT, session->base.peer->session_id,
-                            "PKT", P2P_CODE_READY);
-
-    } else if (!BUF_R_EMPTY(&session->sync_peer_send) && BUF_R_FRONT(&session->sync_peer_send) == buf_item) {
-
-        // SYNC：TCP 写入完成，保留队头，设 ACK_PENDING 等待应用层 confirm
-        buf_item->refer = ITEM_REF_ACK_PENDING;
-    }
-}
-
-// 清理一个 SYNC/PKT 通道的所有队列项，并将存活项转发给 dst（镜像 relay_ch_break_forward）
-static void wss_ch_break_forward(buffer_round_t *rq, wss_session_t *dst) {
-    if (BUF_R_EMPTY(rq)) return;
-    
-    buf16_item_t *front = BUF_R_FRONT(rq);
-    if (front->refer == ITEM_REF_ACK_PENDING) {
-        free_buffer(front);
-        BUF_R_POP(rq);
-    }
-
-    BUF_R_FOR(rq, it,
-        if (it->refer) it->refer = NULL;                // 如果正在发送中，取消 refer（转为由对方发送完成后自动释放）
-        else ct_session_send((ct_session_t*)dst, it);   // 直接发送到对方的发送队列中，且不添加 refer
-    )
-    BUF_R_CLEAR(rq);
-}
-
-// 清理一个通道的所有队列项并释放
-static void wss_ch_break_free(buffer_round_t *rq) {
-    BUF_R_FOR(rq, it, free_buffer(it);)
-    BUF_R_CLEAR(rq);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
 static buf16_item_t* wss_build_syn0_cache_item(wss_client_t *client,
                                                uint8_t *msg, size_t msg_len,
                                                uint8_t *payload, size_t payload_len,
@@ -182,12 +119,6 @@ static buf16_item_t* wss_build_syn0_cache_item(wss_client_t *client,
     return item;
 }
 
-static void wss_session_init(session_t* s) {
-    wss_session_t* session = (wss_session_t*)s;
-    BUF_R_INIT(&session->sync_peer_send, session->sync_peer_slots, WSS_PEER_Q_MAX);
-    BUF_R_INIT(&session->pkt_peer_send, session->pkt_peer_slots, WSS_PEER_Q_MAX);
-}
-
 static void wss_send_syn0_online_item(cw_client_t *client, buf16_item_t *item,
                                       const char *peer_id, uint32_t session_id) {
     char session_id_hex[9];
@@ -205,6 +136,12 @@ static void wss_send_syn0_online_item(cw_client_t *client, buf16_item_t *item,
     if (cw_client_send(client, item, false) != E_NONE) {
         free_buffer(item);
     }
+}
+
+static void wss_session_init(session_t* s) {
+    wss_session_t* session = (wss_session_t*)s;
+    BUF_R_INIT(&session->sync_peer_send, session->sync_peer_slots, WSS_PEER_Q_MAX);
+    BUF_R_INIT(&session->pkt_peer_send, session->pkt_peer_slots, WSS_PEER_Q_MAX);
 }
 
 // 处理 SYN0 消息：创建/恢复会话
@@ -316,10 +253,6 @@ static void wss_handle_syn0(wss_client_t *client, const char *remote_peer_id,
     }
     // 对端已在线，启动双方 sync0 同步
     else {
-
-        // 建立双向引用关系
-        if (!local_s->base.peer) local_s->base.peer = &remote_s->base;
-        if (!remote_s->base.peer) remote_s->base.peer = &local_s->base;
 
         //-------
 
@@ -1063,14 +996,73 @@ static void wss_handle_frame(cw_client_ctx_t *ctx, cw_client_t *c, uint8_t opcod
 
 ///////////////////////////////////////////////////////////////////////////////
 
+// handle_peer_sent 回调（对标 relay_handle_peer_sent）
+// PKT：移出队头，启动下一项；队满→满−1时补发 READY 状态
+// SYNC：TCP写出完成，设 ACK_PENDING，等待对端 SYNC confirm（或连接断开时在 session_break 清理）
+static void wss_handle_peer_sent(ct_client_ctx_t *ct_ctx, ct_session_t *ct_session, buf16_item_t *buf_item) { (void)ct_ctx;
+
+    assert(PEER_ONLINE(ct_session));
+    wss_session_t *session = (wss_session_t*)ct_session;
+
+    // 判断是 PKT 还是 SYNC：WS 帧头在 payload_pos 之前，opcode 在 buf_item->pos 偏移0
+    // 简单判断：pkt_peer_send[0] == buf_item → PKT
+    if (!BUF_R_EMPTY(&session->pkt_peer_send) && BUF_R_FRONT(&session->pkt_peer_send) == buf_item) {
+
+        buf_item->refer = NULL;  // 允许调用方释放
+
+        bool full = BUF_R_FULL(&session->pkt_peer_send);
+
+        BUF_R_POP(&session->pkt_peer_send);
+        if (!BUF_R_EMPTY(&session->pkt_peer_send)) {
+
+            buf16_item_t *next = BUF_R_FRONT(&session->pkt_peer_send);
+            next->refer = (void*)session;
+
+            // 恢复 payload_pos：零拷贝时 pos=0，payload 在 10 字节之后
+            uint8_t *payload_start = ITEM2BUF(next) + 10;
+            uint16_t payload_pos = (uint16_t)(payload_start - ITEM2BUF(next));
+            if (cw_build_frame(WS_OP_BINARY, next, payload_pos) == E_NONE)
+                cw_client_send((cw_client_t*)session->base.client, next, false);
+        }
+
+        if (full && session->base.peer)
+            wss_send_printf((cw_client_t*)session->base.peer->client, 96u,
+                            P2P_WSS_RSP_STA_FMT, session->base.peer->session_id,
+                            "PKT", P2P_CODE_READY);
+
+    } else if (!BUF_R_EMPTY(&session->sync_peer_send) && BUF_R_FRONT(&session->sync_peer_send) == buf_item) {
+
+        // SYNC：TCP 写入完成，保留队头，设 ACK_PENDING 等待应用层 confirm
+        buf_item->refer = ITEM_REF_ACK_PENDING;
+    }
+}
+
+// 清理一个通道的所有队列项，并将存活项转发给目标会话
+static void wss_break_forward(buffer_round_t *rq, wss_session_t *to) {
+    if (BUF_R_EMPTY(rq)) return;
+
+    buf16_item_t *front = BUF_R_FRONT(rq);
+    if (front->refer == ITEM_REF_ACK_PENDING) {
+        free_buffer(front);
+        BUF_R_POP(rq);
+    }
+
+    BUF_R_FOR(rq, it,
+        if (it->refer) it->refer = NULL;                        // 如果正在发送中，取消 refer（转为由对方发送完成后自动释放）
+        else if (to) ct_session_send((ct_session_t*)to, it);    // 直接发送到对方的发送队列中，且不添加 refer
+        else free_buffer(it);
+    )
+    BUF_R_CLEAR(rq);
+}
+
 // session_break 回调（对标 relay_session_break）
 // 触发时机：其中一端连接断开或主动下线
 static void wss_session_break(client_ctx_t *ctx, session_t *s, session_t *ps, break_mode_e break_mode) { (void)ctx;
 
+    // 前提是双方在线
     assert(PEER_ONLINE(s) && PEER_ONLINE(ps));
 
-    wss_session_t *session = (wss_session_t*)s;
-    wss_session_t *peer    = (wss_session_t*)ps;
+    wss_session_t *session = (wss_session_t*)s; wss_session_t *peer = (wss_session_t*)ps;
 
     // 存在对端发起的 REQ 等待本端 RSP
     if (peer->rpc_pending_sid) {
@@ -1080,10 +1072,12 @@ static void wss_session_break(client_ctx_t *ctx, session_t *s, session_t *ps, br
         peer->rpc_pending_sid = 0;
     }
 
-    // 存在本端发起的 REQ 等待对端 RSP，// fixme 如果是错误导致的 stop，这里 send 数据会断言报错
+    // 存在本端发起的 REQ 等待对端 RSP
     if (session->rpc_pending_sid) {
+
         if (break_mode != SESS_BREAK_TERM)
             wss_session_send_rpc_code(session, session->rpc_pending_sid, P2P_RPC_ERR_BREAK);
+
         if (TQ_INQ(&g_wss_rpc_pending_q, session)) TQ_RM(&g_wss_rpc_pending_q, session);
         session->rpc_sent_time   = 0;
         session->rpc_pending_sid = 0;
@@ -1091,36 +1085,30 @@ static void wss_session_break(client_ctx_t *ctx, session_t *s, session_t *ps, br
 
     if (break_mode == SESS_BREAK_STOP) return;
 
-    // 清理本端队列，转发剩余项给对端
-    wss_ch_break_forward(&session->sync_peer_send, peer);
-    wss_ch_break_forward(&session->pkt_peer_send,  peer);
+    if (break_mode == SESS_BREAK_CLOSE) {
+        wss_break_forward(&peer->sync_peer_send, session);
+        wss_break_forward(&peer->pkt_peer_send,  session);
+    } else {
+        wss_break_forward(&peer->sync_peer_send, NULL);
+        wss_break_forward(&peer->pkt_peer_send, NULL);
+    }
+
+    // 把剩余数据发给对端
+    wss_break_forward(&session->sync_peer_send, peer);
+    wss_break_forward(&session->pkt_peer_send,  peer);
 
     // 向对端发送 FIN
     if (TCP_SENDABLE(peer->base.client))
         wss_send_printf((cw_client_t*)peer->base.client, 16u, "FIN %u", peer->base.session_id);
 
-    if (break_mode == SESS_BREAK_CLOSE) {
-        wss_ch_break_forward(&peer->sync_peer_send, session);
-        wss_ch_break_forward(&peer->pkt_peer_send,  session);
-    } else {
-        wss_ch_break_free(&peer->sync_peer_send);
-        wss_ch_break_free(&peer->pkt_peer_send);
-    }
-
-    session->last_sid = 0;
-    peer->last_sid = 0;
+    session->last_sid = peer->last_sid = 0;
 }
 
 
 cw_client_ctx_t*
 wss_init(void) {
 
-    // 初始化 RPC 待确认队列
-    TQ_INIT(&g_wss_rpc_pending_q,
-            REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
-            offsetof(wss_session_t, rpc_pending_prev),
-            offsetof(wss_session_t, rpc_pending_next),
-            offsetof(wss_session_t, rpc_sent_time));
+    cw_ctx_init(&g_wss_ctx);
 
     g_wss_ctx.base.max_payload_len  = WSS_MAX_PAYLOAD;
     g_wss_ctx.base.base.cb_activate = ct_client_activate;
@@ -1131,7 +1119,12 @@ wss_init(void) {
     g_wss_ctx.handle_handshake = wss_handle_handshake_cb;
     g_wss_ctx.handle_frame     = wss_handle_frame;
 
-    cw_ctx_init(&g_wss_ctx);
+    // 初始化 RPC 待确认队列
+    TQ_INIT(&g_wss_rpc_pending_q,
+            REQ_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
+            offsetof(wss_session_t, rpc_pending_prev),
+            offsetof(wss_session_t, rpc_pending_next),
+            offsetof(wss_session_t, rpc_sent_time));
 
     return &g_wss_ctx;
 }
