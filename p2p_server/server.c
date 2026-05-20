@@ -100,28 +100,312 @@ void free_buf16(buf16_item_t *buf_item) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static void do_free_session(session_t *s) {
+
+    // 解除和 client 的绑定关系
+    client_t *c = s->client;
+    if (c) {
+        if (s->prev) s->prev->next = s->next;
+        else c->sessions = s->next;
+        if (s->next) s->next->prev = s->prev;
+        s->prev = s->next = NULL;
+    }
+
+    // 解除和 pair 的绑定关系
+    session_pair_t *pair = s->pair;
+    if (pair->sessions[0] == s) pair->sessions[0] = NULL; else pair->sessions[1] = NULL;
+
+    // 如果对端之前在线，则标记对端会话已断开（-1）
+    // + 注意，此时需要保留对端的 session id，以及和本端 session id 建立的 pair 关系
+    if (PEER_VALID(s->peer)) {
+        s->peer->peer = (session_t*)-1;
+    }
+    else if (!pair->sessions[0] && !pair->sessions[1]) {
+        HASH_DELETE(hh, g_session_pairs, pair);
+        free(pair);
+    }
+
+    HASH_DELETE(hh, g_sessions, s);
+    free(s);
+}
+
+void
+free_session(session_t *s, bool terminate) {
+    assert(s && s->pair && s->client && s->client->proto >= 0);
+    client_ctx_t* ctx = g_contexts[s->client->proto];
+
+    // 如果已和对端 session 建立连接
+    if (PEER_ONLINE(s)) {
+        ctx->cb_break(ctx, s, PEER(s), terminate ? SESS_BREAK_TERM : SESS_BREAK_CLOSE);
+    }
+
+    if (ctx->cb_close) {
+        ctx->cb_close(ctx, s, terminate, false);
+    }
+
+    do_free_session(s);
+}
+
+void
+clear_sessions(client_t *c, bool terminate) {
+    assert(c && c->proto >= 0);
+    if (!c->sessions) return;
+    client_ctx_t* ctx = g_contexts[c->proto];
+
+    if (ctx->cb_clear) ctx->cb_clear(ctx, c, true);
+
+    while (c->sessions) { session_t* s = c->sessions;
+
+        // 如果已和对端 session 建立连接
+        if (PEER_ONLINE(s)) {
+            ctx->cb_break(ctx, s, PEER(s), terminate ? SESS_BREAK_TERM : SESS_BREAK_CLOSE);
+        }
+
+        if (ctx->cb_close) {
+            ctx->cb_close(ctx, s, terminate, true);
+        }
+
+        do_free_session(s);
+    }
+
+    if (ctx->cb_clear) ctx->cb_clear(ctx, c, false);
+}
+
+// 生成安全的随机 session_id（32位，加密安全，防止跨会话注入攻击）
+static uint32_t
+generate_session_id(void) {
+    uint32_t id;
+    session_t *existing;
+    int attempts = 0;
+
+    // 使用循环代替递归，避免极端情况下的栈溢出
+    do {
+        id = P_rand32();  // 使用 stdc.h 统一封装的加密安全随机数
+        HASH_FIND(hh, g_sessions, &id, sizeof(uint32_t), existing);
+
+        // 安全限制：虽然冲突概率极低（1/2^32），但在极端情况下提供保护
+        if (++attempts > 1000) {
+            print("F:", "Cannot generate unique session_id after 1000 attempts\n");
+            exit(1);
+        }
+    } while (existing);
+
+    return id;
+}
+
+session_t*
+find_session(uint32_t session_id) {
+    session_t *s = NULL;
+    HASH_FIND(hh, g_sessions, &session_id, P2P_SESS_ID_SZ, s);
+    return s;
+}
+
+// 创建一个单端会话
+ret_t
+solo_session(client_t *client, session_t **local_s,
+             size_t session_type_size, void(*init)(session_t* session)) {
+    (void)client;(void)local_s;(void)session_type_size;(void)init;
+    return -1;
+}
+
+// 创建新会话对
+ret_t
+pair_session(client_t *c, const char *remote_peer_id,
+             session_t **local_s, session_t **remote_s,
+             size_t session_type_size, void(*init)(session_t* session)) {
+    assert(c && c->proto >= 0);
+    if (!remote_peer_id || !local_s || !remote_s) return E_INVALID;
+    *local_s = NULL; *remote_s = NULL;
+
+    // 查找和对端的 sess pair
+    char peer_key[3 * P2P_PEER_ID_MAX];
+    memset(peer_key, 0, sizeof(peer_key));
+    strncpy(peer_key, c->local_peer_id, P2P_PEER_ID_MAX);
+    strncpy(peer_key + P2P_PEER_ID_MAX, remote_peer_id, P2P_PEER_ID_MAX);
+    session_pair_t *pair = NULL;
+    HASH_FIND(hh, g_session_pairs, peer_key, 2 * P2P_PEER_ID_MAX, pair);
+    if (!pair) {
+        strncpy(peer_key + 2 * P2P_PEER_ID_MAX, c->local_peer_id, P2P_PEER_ID_MAX);
+        HASH_FIND(hh, g_session_pairs, peer_key + P2P_PEER_ID_MAX, 2 * P2P_PEER_ID_MAX, pair);
+    }
+
+    session_t *s = NULL; int side = -1;
+
+    // 如果不存在和对端的 sess pair，此时对端肯定未发起和本端的连接
+    if (!pair) {
+
+        // 创建 sess pair
+        pair = (session_pair_t*)calloc(1, sizeof(session_pair_t));
+        if (!pair) return E_OUT_OF_MEMORY;
+
+        // 分配本端 sess 对象
+        s = (session_t*)calloc(1, session_type_size);
+        if (!s) { free(pair); return E_OUT_OF_MEMORY; }
+
+        memcpy(pair->peer_id[0], c->local_peer_id, strnlen(c->local_peer_id, P2P_PEER_ID_MAX));
+        memcpy(pair->peer_id[1], remote_peer_id, strnlen(remote_peer_id, P2P_PEER_ID_MAX));
+        HASH_ADD_KEYPTR(hh, g_session_pairs, pair->peer_id, 2 * P2P_PEER_ID_MAX, pair);
+
+        // 本端初始作为 sess pair 的 left side
+        side = 0;
+    }
+    // 如果 sess pair 左侧被置位
+    else if (pair->sessions[0]) {
+
+        // 如果当前已经完成配对，重复配对请求
+        if (pair->sessions[1]) {
+
+            // 确定本端和对端
+            if (pair->sessions[0]->client == c) { *local_s = pair->sessions[0]; side = 0; *remote_s = pair->sessions[1]; }
+            else { *local_s = pair->sessions[1]; side = 1; *remote_s = pair->sessions[0]; }
+
+            assert((*local_s)->peer != (void*)-1 && (*remote_s)->peer != (void*)-1);    // 双方肯定都在线
+            assert((*local_s)->peer || (*remote_s)->peer);                              // 至少有一方已经和对端打通
+
+            if (!(*local_s)->peer) return E_DUPLICATE;                                  // 如果本端已将对端重置（即重复发起连接）
+            (*remote_s)->peer = *local_s;                                               // 完成对端与自己的打通
+            return side;
+        }
+
+        if (pair->sessions[0]->client != c) { *remote_s = pair->sessions[0];            // 如果对端存在（本端之前已经脱离）
+            assert(!(*remote_s)->peer || (*remote_s)->peer != (void*)-1);
+            side = 1;                                                                   // 本端将位于 pair 的 right side
+        } else { *local_s = s = pair->sessions[0];                                      // 如果本端存在（对端之前已经脱离）
+            if (!s->peer) return E_DUPLICATE;                                           // 如果是本端重复发起连接（对端不是已脱离状态）
+            assert(s->peer == (void*)-1);
+            side = 0;                                                                   // 本端位于 pair 的 left side
+        }
+    }
+    else { assert(pair->sessions[1]);
+
+        if (pair->sessions[1]->client != c) { *remote_s = pair->sessions[1];
+            assert(!(*remote_s)->peer || (*remote_s)->peer != (void*)-1);
+            side = 0;
+        } else { *local_s = s = pair->sessions[1];
+            if (!s->peer) return E_DUPLICATE;
+            assert(s->peer == (void*)-1);
+            side = 1;
+        }
+    }
+
+    if (*local_s) { assert(s->peer == (void*)-1);                                       // 如果对端已脱离（对端脱离时，会将本端的 peer 置位 -1）
+
+        // 重置本端为新的连接
+        s->peer = NULL;
+
+        // 重新分配 sess id，并重建索引
+        s->session_id = generate_session_id();
+        HASH_DELETE(hh, g_sessions, s);
+        HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), s);
+        return side;
+    }
+
+    // 分配本端 sess 对象
+    if (!s) {
+
+        s = (session_t*)calloc(1, session_type_size);
+        if (!s) return E_OUT_OF_MEMORY;
+
+        assert(*remote_s);
+
+        // 如果本端主动断开后，又重新发起新的连接
+        // + 主动断开时，会将对端的 peer 置位 -1
+        // + 本端主动断开，不能假设对端已知情（向对端发 fin 是业务层的事，且不一定可靠）
+        // ! 这里要求本端主动断开时，会将对端的 session 重置
+        if ((*remote_s)->peer == (void*)-1) {
+
+            // 重置对端为新的连接，但还未与本端打通
+            // + 此时需要对端执行一次 pair_session 来完成到本端的打通
+            remote_s[0]->peer = s;                                                      // 标记对端被重置后，本端又发起新的连接
+            s->peer = NULL;                                                             // 标记本端已发起新的连接
+
+            // 重新分配 sess id，并重建索引
+            remote_s[0]->session_id = generate_session_id();
+            HASH_DELETE(hh, g_sessions, *remote_s);
+            HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), *remote_s);
+        }
+        else { assert(!(*remote_s)->peer);                                              // 对端已发起对自己的连接
+            remote_s[0]->peer = s;                                                      // 完成两端的打通
+            s->peer = remote_s[0];
+        }
+    }
+    else assert(!*remote_s);
+
+    *local_s = s;
+
+    // 将 sess 和 pair 绑定
+    pair->sessions[side] = s; s->pair = pair;
+
+    // 将 sess 添加到 client 中
+    s->prev = NULL; s->next = c->sessions;
+    if (c->sessions) c->sessions->prev = s;
+    c->sessions = s;
+    s->client = c;
+
+    // 分配 sess id，并构建索引
+    s->session_id = generate_session_id();
+    HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), s);
+
+    // 初始化新的 session
+    if (init) init(s);
+
+    return side;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void
+free_client(client_t *c) {
+    assert(c && c->proto >= 0 && !c->sessions);
+    client_ctx_t* ctx = g_contexts[c->proto];
+
+    ctx->cb_free(ctx, c);
+
+    if (c->hh.tbl) {
+        HASH_DELETE(hh, g_clients, c);
+        c->hh.tbl = NULL;
+    }
+
+    // > PROTO_COMPACT 说明是 TCP 连接
+    if (c->proto > PROTO_COMPACT) {
+
+        if (c->fd != P_INVALID_SOCKET) {
+            P_sock_close(c->fd);
+        }
+    }
+    c->fd = P_INVALID_SOCKET;
+    c->proto = -1;
+}
+
 client_t*
-find_client(const char *local_peer_id) {
+find_client(const char *peer_id) {
     client_t *client = NULL;
-    HASH_FIND_STR(g_clients, local_peer_id, client);
+    HASH_FIND_STR(g_clients, peer_id, client);
     return client;
 }
 
 bool
-identify_client(client_t* c) {
+identify_client(client_t* c, const char peer_id[P2P_PEER_ID_MAX]) {
     assert(c && c->proto >= 0);
-    if (c->local_peer_id[0] == '\0') return false;
+    if (c->local_peer_id[0] != '\0') return false;
+
+    memcpy(c->local_peer_id, peer_id, P2P_PEER_ID_MAX);
+    c->local_peer_id[P2P_PEER_ID_MAX] = '\0';
+
     assert(!find_client(c->local_peer_id));  // 注册前必须确保 local_peer_id 不存在
     HASH_ADD_STR(g_clients, local_peer_id, c);
     return true;
 }
 
 static inline bool init_client(client_t* c) {
+
     assert(c->proto >= 0 && c->fd != P_INVALID_SOCKET);
+    client_ctx_t* ctx = g_contexts[c->proto];
+
     c->local_peer_id[0] = '\0';
     c->instance_id = 0;
     c->last_active = P_tick_ms();
-    if (g_contexts[c->proto]->init && !g_contexts[c->proto]->init(c)) {
+    if (ctx->cb_reset && !ctx->cb_reset(ctx, c, true)) {
         c->proto = -1; c->fd = P_INVALID_SOCKET;
         return false;
     }
@@ -142,42 +426,16 @@ alloc_client(uint8_t proto, sock_t fd) {
     return NULL;
 }
 
-void
-free_client_base(client_t *c) {
-
-    assert(!c->sessions);
-
-    if (c->hh.tbl) {
-        HASH_DELETE(hh, g_clients, c); 
-        c->hh.tbl = NULL;
-    }
-
-    // > PROTO_COMPACT 说明是 TCP 连接
-    if (c->proto > PROTO_COMPACT) {
-
-        if (c->fd != P_INVALID_SOCKET) {
-            P_sock_close(c->fd);
-        }
-    }
-    c->fd = P_INVALID_SOCKET;
-    c->proto = -1;
-}
-
-void
-free_client(client_t *c) {
-    assert(c && c->proto >= 0);
-    g_contexts[c->proto]->free(c);
-}
-
 bool
 resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from) {
 
     assert(c != from);
     assert(c->proto >= 0);
     assert(!from || !*from->local_peer_id);
+    client_ctx_t* ctx = g_contexts[c->proto];
 
     // 对于重连的情况，即之前的 client 连接已经断开，客户端发起新的连接，但状态保留
-    if (c->proto == proto && c->instance_id == instance_id) {
+    if (c->proto == proto && (c->instance_id == instance_id || ctx->cb_reset)) {
 
         // 如果存在新分配的 from client，迁移 fd 和 last_active 到旧的 client
         if (from) {
@@ -192,10 +450,41 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
 
             c->last_active = from->last_active;
 
-            if (g_contexts[proto]->migrate) g_contexts[proto]->migrate(c, from);
-            g_contexts[c->proto]->free(from);
+            if (ctx->cb_migrate) ctx->cb_migrate(ctx, c, from);
+
+            free_client(from);
         }
         else c->last_active = P_tick_ms();
+
+        // 如果客户端发起了新的实例连接
+        if (c->instance_id != instance_id) { c->instance_id = instance_id;
+
+            session_t* s = c->sessions, *n; c->sessions = NULL;
+            for (; s; s = n) { n = s->next;
+
+                if (PEER_ONLINE(s)) {
+
+                    // 如果对端对自己发起了新的连接（本端已被对端重置）重新添加到队列
+                    if (!s->peer->peer) {
+
+                        s->prev = NULL; s->next = c->sessions;
+                        if (c->sessions) c->sessions->prev = s;
+                        c->sessions = s;
+                        continue;
+                    }
+
+                    ctx->cb_break(ctx, s, PEER(s), SESS_BREAK_TERM);
+                }
+
+                if (ctx->cb_close) {
+                    ctx->cb_close(ctx, s, true, true);
+                }
+
+                do_free_session(s);
+            }
+
+            ctx->cb_reset(ctx, c, false);
+        }
 
         return true;
     }
@@ -204,7 +493,7 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
            c->local_peer_id, c->instance_id, instance_id);
 
     // 先将之前的释放
-    g_contexts[c->proto]->free(c);
+    free_client(c);
 
     // 如果没有新的 client，即将之前的 client 重新初始化
     if (!from) {
@@ -216,208 +505,25 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
     return false;
 }
 
-
-// 生成安全的随机 session_id（32位，加密安全，防止跨会话注入攻击）
-static uint32_t
-generate_session_id(void) {
-    uint32_t id;
-    session_t *existing;
-    int attempts = 0;
-    
-    // 使用循环代替递归，避免极端情况下的栈溢出
-    do {
-        id = P_rand32();  // 使用 stdc.h 统一封装的加密安全随机数
-        HASH_FIND(hh, g_sessions, &id, sizeof(uint32_t), existing);
-        
-        // 安全限制：虽然冲突概率极低（1/2^32），但在极端情况下提供保护
-        if (++attempts > 1000) {
-            print("F:", "Cannot generate unique session_id after 1000 attempts\n");
-            exit(1);
-        }
-    } while (existing);
-    
-    return id;
-}
-
-session_t*
-find_session(uint32_t session_id) {
-    session_t *s = NULL;
-    HASH_FIND(hh, g_sessions, &session_id, P2P_SESS_ID_SZ, s);
-    return s;
-}
-
-// 创建一个单端会话
-ret_t
-solo_session(client_t *client, session_t **local_s,
-             size_t session_type_size) {
-    (void)client;(void)local_s;(void)session_type_size;
-    return -1;
-}
-
-// 创建新会话对
-ret_t
-pair_session(client_t *client, const char *remote_peer_id,
-             session_t **local_s, session_t **remote_s,
-             size_t session_type_size, void(*init)(session_t* session)) {
-    if (!client || !remote_peer_id || !local_s || !remote_s) return E_INVALID;
-    *local_s = NULL;
-    *remote_s = NULL;
-    bool new_sess = false;
-
-    // 查找和对端的 sess pair
-    char peer_key[3 * P2P_PEER_ID_MAX];
-    memset(peer_key, 0, sizeof(peer_key));
-    strncpy(peer_key, client->local_peer_id, P2P_PEER_ID_MAX);
-    strncpy(peer_key + P2P_PEER_ID_MAX, remote_peer_id, P2P_PEER_ID_MAX);
-    session_pair_t *pair = NULL;
-    HASH_FIND(hh, g_session_pairs, peer_key, 2 * P2P_PEER_ID_MAX, pair);
-    if (!pair) {
-        strncpy(peer_key + 2 * P2P_PEER_ID_MAX, client->local_peer_id, P2P_PEER_ID_MAX);
-        HASH_FIND(hh, g_session_pairs, peer_key + P2P_PEER_ID_MAX, 2 * P2P_PEER_ID_MAX, pair);
-    }
-
-    session_t *s = NULL; int side = -1;
-
-    // 如果不存在和对端的 sess pair，此时对端肯定未发起和本端的连接
-    if (!pair) {
-
-        // 创建 sess pair
-        pair = (session_pair_t*)calloc(1, sizeof(session_pair_t));
-        if (!pair) return E_OUT_OF_MEMORY;
-
-        // 分配本端 sess 对象
-        s = (session_t*)calloc(1, session_type_size);
-        if (!s) { free(pair); return E_OUT_OF_MEMORY; }
-        new_sess = true;
-
-        pair->valid = true;
-        memcpy(pair->peer_id[0], client->local_peer_id, strnlen(client->local_peer_id, P2P_PEER_ID_MAX));
-        memcpy(pair->peer_id[1], remote_peer_id, strnlen(remote_peer_id, P2P_PEER_ID_MAX));
-        HASH_ADD_KEYPTR(hh, g_session_pairs, pair->peer_id, 2 * P2P_PEER_ID_MAX, pair);
-
-        // 本端初始作为 sess pair 的 left side
-        side = 0;
-    }
-    // 如果 sess pair 左侧被置位
-    else if (pair->sessions[0]) {
-
-        // 如果当前已经完成配对，重复配对请求
-        if (pair->sessions[1]) {
-            // 找到本端的 session
-            if (pair->sessions[0]->client == client) { *local_s = pair->sessions[0]; side = 0; *remote_s = pair->sessions[1]; }
-            else { *local_s = pair->sessions[1]; side = 1; *remote_s = pair->sessions[0]; }
-            return E_DUPLICATE;
-        }
-
-        // 如果对端存在（本端之前已经脱离）
-        if (pair->sessions[0]->client != client) {
-            *remote_s = pair->sessions[0]; side = 1;    // 本端位于 sess pair 的 right side
-        } else { *local_s = s = pair->sessions[0]; side = 0;
-            // 如果是本端重复发起连接（对端不是已脱离状态），返回 E_DUPLICATE（上层协议决定如何处理）
-            if (s->peer != (void*)-1) return E_DUPLICATE;
-        }
-    }
-    else { assert(pair->sessions[1]);
-
-        if (pair->sessions[1]->client != client) {
-            *remote_s = pair->sessions[1]; side = 0;    // 本端位于 sess pair 的 left side
-        } else { *local_s = s = pair->sessions[1]; side = 1;
-            if (s->peer != (void*)-1) return E_DUPLICATE;
-        }
-    }
-
-    // 如果对端已脱离，本端重新发起新的连接
-    // + 对端脱离时，会将本端的 peer 置位 -1
-    // + 此时对端不存在，本端执行自身重置
-    if (*local_s) {
-
-        s->peer = NULL;
-
-        // 重新分配 sess id，并重建索引
-        s->session_id = generate_session_id();
-        HASH_DELETE(hh, g_sessions, s);
-        HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), s);
-        return side;
-    }
-
-    // 分配本端 sess 对象
-    if (!s) {
-        s = (session_t*)calloc(1, session_type_size);
-        if (!s) return E_OUT_OF_MEMORY;
-        new_sess = true;
-    }
-
-    // 如果本端主动断开后，又重新发起新的连接
-    // + 主动断开时，会将对端的 peer 置位 -1
-    // + 不同信令模式下，对端此时的状态可能不同
-    //   > TCP 连接模式下，可能对方还没收到 FIN 通知，也就是上次会话的下行发送队列可能还没空。
-    //     此时，新的会话 sync0 也会排队。所以会话数据是完整的。
-    //   > UDP 连接模式下，会话数据完整性是应用层来维护的，所以之前在发送 FIN 时，会话发送的数据肯定已经完整。
-    //     此时，新的会话 sync0 可以立即发送
-    // ! 注意，上次主动断开对端时，必须将对端的（派生）会话中的数据状态重置
-    if (*remote_s && remote_s[0]->peer == (void*)-1) {
-
-        remote_s[0]->peer = NULL;
-
-        // 重新分配 sess id，并重建索引
-        remote_s[0]->session_id = generate_session_id();
-        HASH_DELETE(hh, g_sessions, *remote_s);
-        HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), *remote_s);
-    }
-
-    // 将 sess 和 pair 绑定
-    pair->sessions[side] = s; s->pair = pair;
-
-    // 将 sess 和 client 绑定
-    s->client = client;
-    s->prev = NULL;
-    s->next = client->sessions;
-    if (client->sessions) client->sessions->prev = s;
-    client->sessions = s;
-
-    // 分配 sess id
-    s->session_id = generate_session_id();
-    HASH_ADD(hh, g_sessions, session_id, sizeof(uint32_t), s);
-
-    // 初始化新的 session
-    if (new_sess && init) {
-        init(s);
-    }
-
-    *local_s = s;
-    return side | (new_sess ? PAIR_NEW_SESS_MASK : 0);
-}
-
-// 释放会话
 void
-free_session_base(session_t *s) {
-    assert(s && s->pair);
+activate_client(client_t* c, bool active) {
+    assert(c && c->proto >= 0);
+    client_ctx_t* ctx = g_contexts[c->proto];
 
-    // 解除和 pair 的绑定关系
-    session_pair_t *pair = s->pair;
-    if (pair->sessions[0] == s) pair->sessions[0] = NULL; else pair->sessions[1] = NULL;
+    if (!ctx->cb_activate) return;
 
-    // 如果对端之前在线，则标记对端会话已断开（-1）
-    // + 注意，此时需要保留对端的 session id，以及和本端 session id 建立的 pair 关系
-    if (PEER_VALID(s->peer)) {
-        s->peer->peer = (session_t*)-1;
+    if (!active) {
+
+        if (!ctx->cb_activate(ctx, c, 0)) return;
+
+        for(session_t *s = c->sessions, *peer; s; s = s->next) { peer = s->peer;
+            if (PEER_VALID(peer) && ctx->cb_activate(ctx, peer->client, 0))
+                ctx->cb_break(ctx, s, peer, SESS_BREAK_STOP);       // 任何一端 deactivate，双方的 session 就会 stop
+        }
+
+        ctx->cb_activate(ctx, c, -1);
     }
-    else if (!pair->sessions[0] && !pair->sessions[1]) {
-        HASH_DELETE(hh, g_session_pairs, pair);
-        free(pair);
-    }
-
-    // 解除和 client 的绑定关系
-    client_t *client = s->client;
-    if (client) {
-        if (s->prev) s->prev->next = s->next;
-        else client->sessions = s->next;
-        if (s->next) s->next->prev = s->prev;
-        s->prev = s->next = NULL;
-    }
-
-    HASH_DELETE(hh, g_sessions, s);
-    free(s);
+    else if (!ctx->cb_activate(ctx, c, 0)) ctx->cb_activate(ctx, c, 1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -820,7 +926,7 @@ int main(int argc, char *argv[]) {
                 if (tick_diff(now, CLIENTS(i)->last_active) >= (uint64_t)ARGS_client_timeout.i64 * 1000u) {
                     print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F73, 73),
                           CLIENTS(i)->local_peer_id, tick_diff(now, CLIENTS(i)->last_active) / 1000.0);
-                    if (m >= 0 && m < PROTO_NUM) g_contexts[m]->free(CLIENTS(i));
+                    if (m >= 0 && m < PROTO_NUM) free_client(CLIENTS(i));
                     else if (m == 127) {
                         P_sock_close(CLIENTS(i)->fd);
                         CLIENTS(i)->fd = P_INVALID_SOCKET;
@@ -1037,7 +1143,7 @@ int main(int argc, char *argv[]) {
     // 关闭所有客户端连接
     for (int i = 0; i < MAX_PEERS; i++) {
         if (CLIENTS(i)->proto < 0) continue;
-        if (CLIENTS(i)->proto < PROTO_NUM) g_contexts[CLIENTS(i)->proto]->free(CLIENTS(i));
+        if (CLIENTS(i)->proto < PROTO_NUM) free_client(CLIENTS(i));
         else if (CLIENTS(i)->fd != P_INVALID_SOCKET) {
             P_sock_close(CLIENTS(i)->fd);
             CLIENTS(i)->fd = P_INVALID_SOCKET;

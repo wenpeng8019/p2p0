@@ -244,7 +244,6 @@ typedef struct buffer_round {
         }                                           \
     }
 
-
 typedef struct buffer_stream {
     buffer_queue_t*                 queue;
     buf16_item_t*                   current;
@@ -346,6 +345,7 @@ enum {
 };
 
 typedef struct session session_t;
+typedef struct client_ctx client_ctx_t;
 
 typedef struct client {
     int8_t                          proto;                          // -1=INV, 0=PROTO_COMPACT, 1=PROTO_RELAY, 2=PROTO_WSS
@@ -360,7 +360,6 @@ typedef struct client {
 static inline bool client_identified(client_t* c) { return c->hh.tbl != NULL; }
 
 typedef struct session_pair {
-    bool                            valid;
     char                            peer_id[2][P2P_PEER_ID_MAX];    // hh_peer 复合 key 起始（与 remote_peer_id 连续）
     session_t*                      sessions[2];                    // 双端会话指针
     UT_hash_handle                  hh;
@@ -390,11 +389,29 @@ typedef enum break_mode {
     SESS_BREAK_TERM,                // 会话会被销毁，且不会再向 client 返回状态数据信息，核心场景是 client/session （立刻）硬退出
 } break_mode_e;
 
-typedef struct client_ctx {
-    void (*free)   (struct client *c);                              // 必须实现；用于释放派生的 client 对象，派生实现最终调用 free_client_base
-    bool (*init)   (struct client *c);                              // nullable；用于初始化派生的 client 对象
-    void (*migrate)(struct client *to, struct client *from);        // nullable; 实现派生 client 对象状态迁移，被 resident_client 调用
-} client_ctx_t;
+struct client_ctx {
+
+    // [required] 用于释放派生的 client 对象，派生实现最终调用 free_client_base
+    void (*cb_free)   (client_ctx_t* ctx, client_t *c);
+
+    // [nullable] 用于初始化或重置 client 对象
+    bool (*cb_reset)  (client_ctx_t* ctx, client_t *c, bool init);
+
+    // [nullable] 实现派生 client 对象状态迁移，被 resident_client 调用
+    void (*cb_migrate)(client_ctx_t* ctx, client_t *to, client_t *from);
+
+    // [nullable] 获取、或调整 client 对象的 active 状态。参数: active: 1 activate; -1: deactivate; 0: query
+    bool (*cb_activate)(client_ctx_t* ctx, client_t *c, int active);
+
+    // [option] 执行对 session 的终止或中断。如果创建了 session 对象，则该接口是必须实现的。如果不使用 session，则可以设为 NULL
+    void (*cb_break)  (client_ctx_t* ctx, session_t *s, session_t *peer, break_mode_e break_mode);
+
+    // [nullable] 执行 session 的销毁和资源回收。相比于 cb_break：cb_break 关注的是双方的关系，cb_close 关注的是 session 对象自身
+    void (*cb_close)  (client_ctx_t* ctx, session_t *s, bool terminate, bool clearing);
+
+    // [nullable] 在清除所有 session 之前/之后触发
+    void (*cb_clear)  (client_ctx_t* ctx, client_t *c, bool preOrPost);
+};
 
 // 释放 client
 void
@@ -407,58 +424,53 @@ free_client(client_t *c);
 bool
 resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from/* nullable */);
 
-//-----------------------------------------------------------------------------
-
-client_t*
-find_client(const char *local_peer_id);
-
-// 由派生协议 client 调用，用于实现基类的释放
-void
-free_client_base(client_t *c);
-
-
 // 分配一个指定派生协议类型的 client 对象
 // + 主要用于 UDP/COMPACT 协议调用，因为 TCP/xxx 协议在 accept 建链时就已经自动分配了 client 对象
 client_t*
 alloc_client(uint8_t proto, sock_t fd);
 
+// 通过 peer_id 查找客户端对象，返回 NULL 表示未找到
+client_t*
+find_client(const char *peer_id);
+
 // 唯一标识客户端（注册 local_peer_id，并加入全局索引哈希表）
-// todo，增加参数 local_peer_id ？
 bool
-identify_client(client_t* c);
+identify_client(client_t* c, const char peer_id[P2P_PEER_ID_MAX]);
 
-
-session_t*
-find_session(uint32_t session_id);
-
-// 由派生协议 session 调用，用于实现基类的释放
+// 使 client 进入或退出活跃状态，触发 cb_activate 回调
 void
-free_session_base(session_t *s);
+activate_client(client_t* c, bool active);
+
+//-----------------------------------------------------------------------------
+
+// 释放 session。参数 terminate 表示是否为硬终止，此时 session 的数据将不再完整。否则 session 的发送数据会转移到 client 的队列
+void
+free_session(session_t *s, bool terminate);
+
+// 释放所有 session
+void
+clear_sessions(client_t *c, bool terminate);
 
 // 创建一个单端会话
 ret_t
 solo_session(client_t *client, session_t **local_s,
-             size_t session_type_size);
+             size_t session_type_size, void(*init)(session_t* session));
 
 // 配对一个本端和远程的会话
 // + 返回值：
 //   <0 : 错误码（维持原有错误语义）
-//   >=0: 按 PAIR_* 宏编码的成功状态（bit0=左右，bit1=本端是否新建）
+//   =0 : local sess 位于 pair 的 left side
+//   =1 : local sess 位于 pair 的 right side
 // + local_s: 始终返回本端会话对象
 // + remote_s: 对端在线时返回其会话对象，否则为 NULL
 ret_t
-pair_session(client_t *client, const char *remote_peer_id,
+pair_session(client_t *c, const char *remote_peer_id,
              session_t **local_s, session_t **remote_s,
              size_t session_type_size, void(*init)(session_t* session));
 
-// pair_session 成功返回值编码（ret_t >= 0）：
-//   bit0: 本端 local_s 在 pair 中的位置（0=left, 1=right）
-//   bit1: 本端 local_s 是否为本次新创建（1=new, 0=复用已存在 session）
-// 失败保持原语义（ret_t < 0，常见如 E_OUT_OF_MEMORY / E_DUPLICATE 等）。
-#define PAIR_SIDE_MASK             ((ret_t)0x01)
-#define PAIR_NEW_SESS_MASK         ((ret_t)0x02)
-#define PAIR_GET_SIDE(v)           ((ret_t)(v) & PAIR_SIDE_MASK)
-#define PAIR_IS_LOCAL_NEW(v)       ((((ret_t)(v)) & PAIR_NEW_SESS_MASK) != 0)
+// 查找会话对象，返回 NULL 表示未找到
+session_t*
+find_session(uint32_t session_id);
 
 //-----------------------------------------------------------------------------
 
