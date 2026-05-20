@@ -475,14 +475,17 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from)
     print("I:", LA_F("[T] '%s' new instance (old=%u, new=%u), resetting session\n", LA_F223, 223),
            c->local_peer_id, c->instance_id, instance_id);
 
+    sock_t fd = c->fd;
+
     // 先将之前的释放
     free_client(c);
 
     // 如果没有新的 client，即将之前的 client 重新初始化
     if (!from) {
         c->proto = proto;
+        c->fd = fd;
+        if (!init_client(c)) return false;
         c->instance_id = instance_id;
-        c->last_active = P_tick_ms();
     }
 
     return false;

@@ -462,12 +462,14 @@ static uint32_t register_peer(sock_t sock, const char *local, const char *remote
         uint8_t drain_buf[64];
         struct sockaddr_in drain_from; socklen_t drain_len = sizeof(drain_from);
         P_sock_rcvtimeo(sock, RECV_TIMEOUT_MS);
-        ssize_t dn = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
-                 (struct sockaddr*)&drain_from, &drain_len);
-        if (dn >= (ssize_t)(4 + SIG_PKT_SYN0_ACK_PSZ) && drain_buf[0] == SIG_PKT_SYN0_ACK) {
-            int off = 4 + P2P_PEER_ID_MAX;
-            return ((uint32_t)drain_buf[off] << 24) | ((uint32_t)drain_buf[off+1] << 16) |
-                   ((uint32_t)drain_buf[off+2] << 8)  | (uint32_t)drain_buf[off+3];
+        for (int i = 0; i < 10; i++) {
+            ssize_t dn = recvfrom(sock, (char*)drain_buf, sizeof(drain_buf), 0,
+                     (struct sockaddr*)&drain_from, &drain_len);
+            if (dn >= (ssize_t)(4 + SIG_PKT_SYN0_ACK_PSZ) && drain_buf[0] == SIG_PKT_SYN0_ACK) {
+                int off = 4 + P2P_PEER_ID_MAX;
+                return ((uint32_t)drain_buf[off] << 24) | ((uint32_t)drain_buf[off+1] << 16) |
+                       ((uint32_t)drain_buf[off+2] << 8)  | (uint32_t)drain_buf[off+3];
+            }
         }
         return 0;
     }
@@ -495,15 +497,21 @@ static int send_msg_req_and_wait_ack(sock_t sock, uint32_t session_id, uint16_t 
     struct sockaddr_in from;
     socklen_t from_len = sizeof(from);
     
-    ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
-                          (struct sockaddr*)&from, &from_len);
-    
-    if (ack_out) {
-        parse_msg_req_ack(recv_buf, (int)n, ack_out);
-        return ack_out->received;
+    for (int i = 0; i < 10; i++) {
+        ssize_t n = recvfrom(sock, (char*)recv_buf, sizeof(recv_buf), 0,
+                              (struct sockaddr*)&from, &from_len);
+        if (n < 11 || recv_buf[0] != SIG_PKT_REQ_ACK) continue;
+
+        if (ack_out) {
+            parse_msg_req_ack(recv_buf, (int)n, ack_out);
+            return ack_out->received;
+        }
+
+        return 1;
     }
-    
-    return (n >= 11 && recv_buf[0] == SIG_PKT_REQ_ACK);
+
+    if (ack_out) ack_out->received = 0;
+    return 0;
 }
 
 // 发送 RSP
@@ -581,6 +589,39 @@ static int wait_msg_resp(sock_t sock, msg_resp_t *resp_out) {
     return 0;
 }
 
+static void ack_sync_packet(sock_t sock, const uint8_t *buf, ssize_t len) {
+    if (len < 10) return;
+    if (buf[0] != SIG_PKT_SYN0 && buf[0] != SIG_PKT_SYNC) return;
+
+    int off = 4;
+    if (buf[0] == SIG_PKT_SYN0) {
+        if (len < (ssize_t)(4 + P2P_PEER_ID_MAX + 4 + 2)) return;
+        off += P2P_PEER_ID_MAX;
+    }
+
+    uint32_t session_id = ((uint32_t)buf[off] << 24) | ((uint32_t)buf[off + 1] << 16) |
+                          ((uint32_t)buf[off + 2] << 8) | (uint32_t)buf[off + 3];
+
+    uint8_t ack[8];
+    ack[0] = SIG_PKT_SYN0_ACK;
+    ack[1] = 0;
+    ack[2] = 0;
+    ack[3] = 0;
+    ack[4] = (uint8_t)(session_id >> 24);
+    ack[5] = (uint8_t)(session_id >> 16);
+    ack[6] = (uint8_t)(session_id >> 8);
+    ack[7] = (uint8_t)session_id;
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(g_server_port);
+    inet_pton(AF_INET, g_server_host, &server_addr.sin_addr);
+
+    sendto(sock, (const char*)ack, sizeof(ack), 0,
+           (struct sockaddr*)&server_addr, sizeof(server_addr));
+}
+
 // 消费所有待处理的 SYNC 等包
 static void drain_pending_packets(sock_t sock) {
     P_sock_rcvtimeo(sock, 200);
@@ -592,6 +633,7 @@ static void drain_pending_packets(sock_t sock) {
         ssize_t n = recvfrom(sock, (char*)discard, sizeof(discard), 0,
                               (struct sockaddr*)&from, &from_len);
         if (n <= 0) break;
+        ack_sync_packet(sock, discard, n);
     }
 }
 

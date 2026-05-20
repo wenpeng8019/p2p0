@@ -11,8 +11,8 @@ ARGS(probe_port);
 
 
 // COMPACT 模式 SYNC 重传参数
-#define SYN0_RETRY_INTERVAL_MS         2000    // 重传间隔（毫秒）
-#define SYN0_MAX_RETRY                 5       // 最大重传次数
+#define SYN0_RETRY_INTERVAL_MS      2000    // 重传间隔（毫秒）
+#define SYN0_MAX_RETRY              5       // 最大重传次数
 
 static compact_client_t*            g_clients_by_auth = NULL;
 
@@ -198,7 +198,7 @@ static void compact_session_send_req_to_peer(compact_session_t *sender) {
     const char* PROTO = "REQ";
 
     assert(sender && PEER_ONLINE(&sender->base));
-    assert(sender->rpc_pending_next && !sender->rpc_responding);
+    assert(!sender->rpc_responding);
 
     compact_session_t *peer   = (compact_session_t*)sender->base.peer;
     compact_client_t  *peer_c = COMPACT_CLIENT(peer);
@@ -276,83 +276,6 @@ static void compact_send_msg_resp_to_requester(compact_session_t *cs) {
     udp_send(client->base.fd, pkt, ofz, &client->addr, PROTO);
 }
 
-///////////////////////////////////////////////////////////////////////////////
-
-static bool compact_init_client(compact_client_t* c, struct sockaddr_in *from) {
-
-    c->addr = *from;
-
-    // 生成 auth_key 并加入哈希表
-    int n = 0;
-    do { c->auth_key = P_rand64();
-        if (++n > 32) return false;
-    } while (!c->auth_key);
-    HASH_ADD(hh, g_clients_by_auth, auth_key, sizeof(uint64_t), c);
-    return true;
-}
-
-// 释放 session
-static void compact_free_session(session_t *s) {
-
-    compact_session_t *cs = (compact_session_t*)s;
-    if (TQ_INQ(&g_sync0_pending_q, cs)) TQ_RM(&g_sync0_pending_q, cs);
-    if (TQ_INQ(&g_rpc_pending_q, cs))   TQ_RM(&g_rpc_pending_q, cs);
-
-    // 通知对端断开，并标记对端 peer 指针为 -1
-    if (PEER_ONLINE(&cs->base)) {
-        compact_session_t *peer = COMPACT_PEER(cs);
-
-        peer->addr_notify_seq = 0;
-        peer->candidate_count = 0;
-
-        if (TQ_INQ(&g_sync0_pending_q, peer)) TQ_RM(&g_sync0_pending_q, peer);
-        peer->sync0_acked = 0;
-        peer->sync0_sent_time = 0;
-        peer->sync0_retry = 0;
-        peer->sync0_base_index = 0;
-
-        if (TQ_INQ(&g_rpc_pending_q, peer)) TQ_RM(&g_rpc_pending_q, peer);
-        peer->rpc_last_sid = 0;
-        peer->rpc_sent_time = 0;
-        peer->rpc_retry = 0;
-        peer->rpc_responding = false;
-
-        compact_session_send_fin(peer, "peer_disconnect");
-    }
-}
-
-// 释放 client
-void compact_client_free(client_ctx_t *ctx, client_t *c) { (void)ctx;
-    compact_client_t *cc = (compact_client_t*)c;
-
-    clear_sessions(&cc->base, true);
-
-    // 从 auth 哈希表移除
-    if (cc->auth_key) {
-        HASH_DELETE(hh, g_clients_by_auth, cc);
-        cc->auth_key = 0;
-    }
-}
-
-client_ctx_t*
-compact_init(void) {
-
-    TQ_INIT(&g_sync0_pending_q,
-            SYN0_MAX_RETRY * SYN0_RETRY_INTERVAL_MS,
-            offsetof(compact_session_t, sync0_pending_prev),
-            offsetof(compact_session_t, sync0_pending_next),
-            offsetof(compact_session_t, sync0_sent_time));
-
-    TQ_INIT(&g_rpc_pending_q,
-            RSP_MAX_RETRY * RPC_RETRY_INTERVAL_MS,
-            offsetof(compact_session_t, rpc_pending_prev),
-            offsetof(compact_session_t, rpc_pending_next),
-            offsetof(compact_session_t, rpc_sent_time));
-
-    g_ctx.cb_free = compact_client_free;
-    return &g_ctx;
-}
-
 // 缓存响应数据并从 REQ 阶段转换到 RSP 阶段
 static void compact_transition_to_resp_pending(compact_session_t *requester, uint64_t now,
                                                uint8_t flags, uint8_t code, const uint8_t *data, int len) {
@@ -370,7 +293,6 @@ static void compact_transition_to_resp_pending(compact_session_t *requester, uin
     TQ_ADD(&g_rpc_pending_q, requester, requester->rpc_sent_time);
     compact_send_msg_resp_to_requester(requester);
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -489,6 +411,7 @@ static void compact_handle_syn0(struct sockaddr_in *from, uint8_t *payload, size
 // SIG_PKT_SYN0_ACK（client→server）
 // + 方向 2：客户端二次确认收到 SYN0_ACK（session_id 已建立）
 // + 方向 3：客户端确认收到服务器 SYN0，停止可靠性重传机制
+// NOLINTNEXTLINE(readability-non-const-parameter)
 static void compact_handle_syn0_ack(struct sockaddr_in *from, uint8_t *payload, size_t payload_len) {
     const char* PROTO = "SYN0_ACK";
 
@@ -677,8 +600,8 @@ static void compact_handle_relay(sock_t udp_fd, uint8_t *buf, size_t len,
 }
 
 // SIG_PKT_REQ: A→Server
-static void compact_handle_req(struct sockaddr_in *from, p2p_packet_hdr_t *hdr,
-                                uint8_t *payload, size_t payload_len) {
+// NOLINTNEXTLINE(readability-non-const-parameter)
+static void compact_handle_req(struct sockaddr_in *from, p2p_packet_hdr_t *hdr, uint8_t *payload, size_t payload_len) {
     const char* PROTO = "REQ";
 
     if (payload_len < SIG_PKT_REQ_MIN_PSZ) {
@@ -731,7 +654,7 @@ static void compact_handle_req(struct sockaddr_in *from, p2p_packet_hdr_t *hdr,
 
     check_addr_change(COMPACT_CLIENT(requester), from);
 
-    if (requester->rpc_pending_next) {
+    if (TQ_INQ(&g_rpc_pending_q, requester)) {
 
         if (sid == requester->rpc_last_sid) {
 
@@ -787,6 +710,7 @@ static void compact_handle_req(struct sockaddr_in *from, p2p_packet_hdr_t *hdr,
 }
 
 // SIG_PKT_RSP: B→Server
+// NOLINTNEXTLINE(readability-non-const-parameter)
 static void compact_handle_rsp(struct sockaddr_in *from, uint8_t *payload, size_t payload_len) {
     const char* PROTO = "RSP";
 
@@ -849,6 +773,7 @@ static void compact_handle_rsp(struct sockaddr_in *from, uint8_t *payload, size_
 }
 
 // SIG_PKT_RSP_ACK: A→Server（A 确认收到 RSP）
+// NOLINTNEXTLINE(readability-non-const-parameter)
 static void compact_handle_rsp_ack(uint8_t *payload, size_t payload_len) {
     const char* PROTO = "RSP_ACK";
 
@@ -988,13 +913,20 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
             client->instance_id = instance_id;
         }
 
-        // 初始化客户端槽位
-        identify_client(client, local_peer_id);
-        compact_init_client((compact_client_t*)client, from);
+         // 初始化客户端槽位
+         identify_client(client, local_peer_id);
+         compact_client_t *compact_client = (compact_client_t*)client;
+         compact_client->addr = *from;
 
-        compact_send_reg_ack(client, from, ((compact_client_t*)client)->auth_key, instance_id);
+         int n = 0;
+         do { compact_client->auth_key = P_rand64();
+             if (++n > 32) return;
+         } while (!compact_client->auth_key);
+         HASH_ADD(hh, g_clients_by_auth, auth_key, sizeof(uint64_t), compact_client);
+
+         compact_send_reg_ack(client, from, compact_client->auth_key, instance_id);
         print("V:", LA_F("%s: auth_key=%" PRIu64 " assigned for '%.*s'\n", LA_F36, 36),
-               PROTO, ((compact_client_t*)client)->auth_key, P2P_PEER_ID_MAX, local_peer_id);
+             PROTO, compact_client->auth_key, P2P_PEER_ID_MAX, local_peer_id);
     } break;
 
     // SIG_PKT_OFF: [auth_key(SIG_AUTH_KEY_PSZ)]
@@ -1133,6 +1065,93 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         print("W:", LA_F("Unknown packet type 0x%02x from %s\n", LA_F122, 122), hdr->type, from_str);
         break;
     } // switch
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// 停止/终止会话
+static void compact_session_break(client_ctx_t *ctx, session_t *s, session_t *ps, break_mode_e break_mode) {
+    (void)ctx;
+
+    assert(PEER_ONLINE(s) && PEER_ONLINE(ps));
+
+    if (break_mode == SESS_BREAK_STOP) return;
+
+    compact_session_t *session = (compact_session_t*)s;
+    compact_session_t *peer = (compact_session_t*)ps;
+
+    // 通知对端断开，并标记对端 peer 指针为 -1
+    peer->addr_notify_seq = 0;
+    peer->candidate_count = 0;
+
+    if (TQ_INQ(&g_sync0_pending_q, peer)) TQ_RM(&g_sync0_pending_q, peer);
+    peer->sync0_acked = 0;
+    peer->sync0_sent_time = 0;
+    peer->sync0_retry = 0;
+    peer->sync0_base_index = 0;
+
+    if (TQ_INQ(&g_rpc_pending_q, peer)) TQ_RM(&g_rpc_pending_q, peer);
+    peer->rpc_last_sid = 0;
+    peer->rpc_sent_time = 0;
+    peer->rpc_retry = 0;
+    peer->rpc_responding = false;
+
+    compact_session_send_fin(peer, "peer_disconnect");
+
+    session->addr_notify_seq = 0;
+    session->candidate_count = 0;
+    session->sync0_acked = 0;
+    session->sync0_sent_time = 0;
+    session->sync0_retry = 0;
+    session->sync0_base_index = 0;
+    session->rpc_last_sid = 0;
+    session->rpc_sent_time = 0;
+    session->rpc_retry = 0;
+    session->rpc_responding = false;
+}
+
+static void compact_session_close(client_ctx_t *ctx, session_t *s, bool terminate, bool clearing) {
+    (void)ctx;
+    (void)terminate;
+    (void)clearing;
+
+    compact_session_t *cs = (compact_session_t*)s;
+
+    if (TQ_INQ(&g_sync0_pending_q, cs)) TQ_RM(&g_sync0_pending_q, cs);
+    if (TQ_INQ(&g_rpc_pending_q, cs))   TQ_RM(&g_rpc_pending_q, cs);
+}
+
+// 释放 client
+static void compact_client_free(client_ctx_t *ctx, client_t *c) { (void)ctx;
+    compact_client_t *cc = (compact_client_t*)c;
+
+    // 从 auth 哈希表移除
+    if (cc->auth_key) {
+        HASH_DELETE(hh, g_clients_by_auth, cc);
+        cc->auth_key = 0;
+    }
+}
+
+client_ctx_t*
+compact_init(void) {
+
+    g_ctx.cb_free = compact_client_free;
+    g_ctx.cb_break = compact_session_break;
+    g_ctx.cb_close = compact_session_close;
+
+    TQ_INIT(&g_sync0_pending_q,
+            SYN0_RETRY_INTERVAL_MS,
+            offsetof(compact_session_t, sync0_pending_prev),
+            offsetof(compact_session_t, sync0_pending_next),
+            offsetof(compact_session_t, sync0_sent_time));
+
+    TQ_INIT(&g_rpc_pending_q,
+            RPC_RETRY_INTERVAL_MS,
+            offsetof(compact_session_t, rpc_pending_prev),
+            offsetof(compact_session_t, rpc_pending_next),
+            offsetof(compact_session_t, rpc_sent_time));
+
+    return &g_ctx;
 }
 
 // 检查并重传 RPC（统一处理 REQ 和 RSP 阶段）

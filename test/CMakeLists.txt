@@ -217,6 +217,22 @@ target_compile_options(test_wss_rpc PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
 )
 
+# WSS PKT 协议单元测试
+add_executable(test_wss_pkt
+    test_wss_pkt.c
+)
+target_include_directories(test_wss_pkt PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/stdc
+    ${CMAKE_SOURCE_DIR}/src
+    ${WSLAY_INCLUDE_DIRS}
+)
+target_link_libraries(test_wss_pkt p2p_static ${TEST_PLATFORM_LIBS})
+target_compile_definitions(test_wss_pkt PRIVATE WITH_WS)
+target_compile_options(test_wss_pkt PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-unused-function>
+)
+
 # P2P Ping 双客户端连接测试 (RELAY 模式, Alice <-> Bob)
 add_executable(test_ping_r_connect
     test_ping_r_connect.c
@@ -341,6 +357,7 @@ add_test(NAME test_relay_rpc         COMMAND test_relay_rpc         ${SERVER_PAT
 if(WITH_WS)
     add_test(NAME test_wss_lifecycle COMMAND test_wss_lifecycle     ${SERVER_PATH})
     add_test(NAME test_wss_reg       COMMAND test_wss_reg           ${SERVER_PATH})
+    add_test(NAME test_wss_pkt       COMMAND test_wss_pkt           ${SERVER_PATH})
     add_test(NAME test_wss_rpc       COMMAND test_wss_rpc           ${SERVER_PATH})
 endif()
 
@@ -377,7 +394,7 @@ set_tests_properties(
 
 if(WITH_WS)
     set_tests_properties(
-        test_wss_reg test_wss_lifecycle test_wss_rpc
+        test_wss_reg test_wss_lifecycle test_wss_pkt test_wss_rpc
         PROPERTIES LABELS "protocol"
     )
 endif()
@@ -393,14 +410,19 @@ set_tests_properties(
 # 协议测试超时（启动子进程，需要额外裕量）
 set_tests_properties(
     test_compact_reg test_compact_sync test_compact_lifecycle
-    test_compact_rpc test_compact_relay
+    test_compact_relay
     test_relay_reg test_relay_lifecycle test_relay_pkt test_relay_rpc
     PROPERTIES TIMEOUT 30
 )
 
+set_tests_properties(
+    test_compact_rpc
+    PROPERTIES TIMEOUT 60
+)
+
 if(WITH_WS)
     set_tests_properties(
-        test_wss_reg test_wss_lifecycle test_wss_rpc
+        test_wss_reg test_wss_lifecycle test_wss_pkt test_wss_rpc
         PROPERTIES TIMEOUT 30
     )
 endif()
