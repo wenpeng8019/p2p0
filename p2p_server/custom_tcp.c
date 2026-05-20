@@ -12,36 +12,6 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// 发送数据 buf 到 client 发送队列
-void ct_client_send(ct_client_t *client, buf16_item_t* buf_item, bool immediate) {
-
-    // 前提是不能处于握手/closing 阶段
-    assert(client->handshake == 0);
-
-    // 高优先级：插到当前正在发送包之后（若有），否则插到队头
-    if (immediate) {
-
-        // 如果存在正在发送的包，则将新包插入到正在发送的包之后
-        if (client->sending_cur && !client->sending_sess) { assert(client->send_buff_queue.head);
-            BUF_Q_AFTER(&client->send_buff_queue, client->send_buff_queue.head, buf_item)
-            return;
-        }
-
-        // 添加到队列的最前面
-        BUF_Q_PUSH(&client->send_buff_queue, buf_item)
-        if (buf_item->next) return;                             // 如果队列之前不空，直接返回
-
-    } else {
-        BUF_Q_APPEND(&client->send_buff_queue, buf_item)
-        if (client->send_buff_queue.head != buf_item) return;  // 如果队列之前不空，直接返回
-    }
-
-    if (TCP_REACHABLE(client)) {        // todo 为什么是 reachable
-        assert(client->base.fd != P_INVALID_SOCKET && client->last_error == 0);
-        client->io |= TCP_IO_FLAG_WANT_WRITE;
-    }
-}
-
 // 发送数据 buf 到 session 发送队列
 void ct_session_send(ct_session_t *session, buf16_item_t* buf_item) {
 
@@ -69,11 +39,8 @@ void ct_session_send(ct_session_t *session, buf16_item_t* buf_item) {
     }
 }
 
-// 清除 session 的发送队列
-// + terminate:
-//   false: 当前发送队列中的数据并不销毁，而是转移到 client 发送队列
-//   true: 直接将当前发送队列中的数据销毁，无需继续发送给 client 端。
-static void clear_session_sending(ct_session_t *session, bool terminate, bool all) {
+void ct_session_close(client_ctx_t* ctx, session_t *s, bool terminate, bool clearing) { (void)ctx;
+    ct_session_t* session = (ct_session_t*)s;
 
     buf16_item_t *item = session->send_queue.head;
     if (!item) {
@@ -103,7 +70,7 @@ static void clear_session_sending(ct_session_t *session, bool terminate, bool al
     }
 
     // 如果 clear 的是 client 的所有 sessions 的发送队列
-    if (all) session->send_next = session->send_prev = NULL;
+    if (clearing) session->send_next = session->send_prev = NULL;
     // 如果只 clear 一个 session 的发送队列
     else {
         // 将 sess 自身从 client 中的 sending sess 集合中移除
@@ -114,11 +81,50 @@ static void clear_session_sending(ct_session_t *session, bool terminate, bool al
     }
 }
 
+void ct_session_clear(client_ctx_t* ctx, client_t *c, bool preOrPost) { (void)ctx;
+
+    if (!preOrPost) {
+        ct_client_t *client = (ct_client_t*)c;
+        client->send_sess_head = NULL;
+        client->send_sess_rear = NULL;
+        client->sending_sess = NULL;
+    }
+}
+
+//-----------------------------------------------------------------------------
+
+// 发送数据 buf 到 client 发送队列
+void ct_client_send(ct_client_t *client, buf16_item_t* buf_item, bool immediate) {
+
+    // 前提是不能处于握手/closing 阶段
+    assert(client->handshake == 0);
+
+    // 高优先级：插到当前正在发送包之后（若有），否则插到队头
+    if (immediate) {
+
+        // 如果存在正在发送的包，则将新包插入到正在发送的包之后
+        if (client->sending_cur && !client->sending_sess) { assert(client->send_buff_queue.head);
+            BUF_Q_AFTER(&client->send_buff_queue, client->send_buff_queue.head, buf_item)
+            return;
+        }
+
+        // 添加到队列的最前面
+        BUF_Q_PUSH(&client->send_buff_queue, buf_item)
+        if (buf_item->next) return;                             // 如果队列之前不空，直接返回
+
+    } else {
+        BUF_Q_APPEND(&client->send_buff_queue, buf_item)
+        if (client->send_buff_queue.head != buf_item) return;  // 如果队列之前不空，直接返回
+    }
+
+    if (TCP_REACHABLE(client)) {
+        assert(client->base.fd != P_INVALID_SOCKET && client->last_error == 0);
+        client->io |= TCP_IO_FLAG_WANT_WRITE;
+    }
+}
+
 // 清除 client 的发送队列（除了正在发送中）
 static void clear_client_sending(ct_client_t *client) {
-
-    // 此时所有 session 肯定都已经释放
-    assert(!client->base.sessions && !client->sending_sess);
 
     // 释放 client 级发送队列
     if (client->send_buff_queue.head) {
@@ -138,114 +144,9 @@ static void clear_client_sending(ct_client_t *client) {
     }
 }
 
-//-----------------------------------------------------------------------------
-
-// 关闭/销毁某个会话
-void ct_session_close(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate) {
-
-    // 如果已和对端 session 建立连接
-    if (PEER_ONLINE(session)) {
-        ctx->session_break(ctx, session, CT_PEER(session), terminate ? SESS_BREAK_TERM : SESS_BREAK_CLOSE);
-    }
-
-    // 清除 session 的 sending 队列
-    clear_session_sending(session, terminate, false);
-
-    // 释放 session
-    free_session_base(&session->base);
-}
-
-void
-ct_session_clear(ct_client_ctx_t* ctx, ct_client_t *client, bool terminate) {
-
-    while (client->base.sessions) { ct_session_t* session = (ct_session_t*)client->base.sessions;
-
-        // 如果已和对端 session 建立连接
-        if (PEER_ONLINE(session)) {
-            ctx->session_break(ctx, session, CT_PEER(session), terminate ? SESS_BREAK_TERM : SESS_BREAK_CLOSE);
-        }
-
-        // 清除 session 的 sending 队列
-        clear_session_sending(session, terminate, true);
-
-        // 释放 session
-        free_session_base(&session->base);
-    }
-
-    client->send_sess_head = NULL;
-    client->send_sess_rear = NULL;
-    client->sending_sess = NULL;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-bool
-ct_init_client(ct_client_t* client) {
-
-    buf16_item_t *buf_item = alloc_buf16(BUF_FLAG_MTU(0));
-    if (!buf_item) {
-        print("E:", LA_F("[TCP] OOM: cannot allocate recv buffer for new client\n", LA_F133, 133));
-        return false;
-    }
-
-    client->last_error = 0;
-
-    client->recv_buf = buf_item;
-    client->recv_cur = 0;
-    
-    client->send_buff_queue.head = NULL;
-    client->send_buff_queue.rear = NULL;
-    client->send_sess_head = NULL;
-    client->send_sess_rear = NULL;
-    client->sending_sess = NULL;
-    client->sending_cur = 0;
-
-    TCP_CLIENT_INIT(client);
-    return true;
-}
-
-void
-ct_reactive_client(ct_client_t *client) {
-
-    client->last_error = 0;                     // 重置错误状态
-    client->io |= TCP_IO_FLAG_WANT_READ;        // 重新激活读取（之前断网时会被关闭）
-    if (client->send_buff_queue.head || client->send_sess_head)
-        client->io |= TCP_IO_FLAG_WANT_WRITE;   // 如果存在未完成的发送，重新激活写入
-}
-
-void
-ct_migrate_client(client_t *to_base, client_t *from_base) {
-    ct_client_t *to   = (ct_client_t*)to_base;
-    ct_client_t *from = (ct_client_t*)from_base;
-
-    // recv_buf 所有权转移（to 已由 ct_init_client 分配，需先释放）
-    if (to->recv_buf) {
-        if (to->recv_buf->next) free_buf16(to->recv_buf->next);
-        free_buf16(to->recv_buf);
-    }
-    to->recv_buf      = from->recv_buf;  from->recv_buf  = NULL;
-
-    // hdr_rs 已读入内容迁移（帧模式：将 from->hdr_rs 中已读字节拷贝到 to->hdr_rs）
-    // + 拷贝上限取 to->hdr_sz，防止 from->recv_cur 超出 to->hdr_rs 缓冲区大小
-    if (to->hdr_rs && from->hdr_rs && from->recv_cur > 0)
-        memcpy(to->hdr_rs, from->hdr_rs, to->hdr_sz);
-    to->recv_cur      = from->recv_cur;  from->recv_cur  = 0;
-
-    // payload_buf 所有权转移
-    if (to->payload_buf) {
-        if (to->payload_buf->next) free_buf16(to->payload_buf->next);
-        free_buffer(to->payload_buf); 
-    }
-    to->payload_buf  = from->payload_buf; from->payload_buf = NULL;
-    to->payload_cur  = from->payload_cur; from->payload_cur = 0;
-}
-
 // 释放 client
-void
-ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client) {
-
-    if (client->base.sessions)
-        ct_session_clear(ctx, client, true);
+void ct_client_free(client_ctx_t* ctx, client_t *c) { (void)ctx;
+    ct_client_t *client = (ct_client_t*)c;
 
     // 释放 recv buf
     if (client->recv_buf) {
@@ -262,29 +163,123 @@ ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client) {
 
     client->sending_cur = 0;     // 确保正在发送中的数据包也被清除
     clear_client_sending(client);
-
-    free_client_base(&client->base);
 }
+
+bool ct_client_reset(client_ctx_t* ctx, client_t *c, bool init) { (void)ctx;
+    ct_client_t *client = (ct_client_t*)c;
+
+    client->hdr_rs = NULL;
+    client->hdr_sz = 0;
+    client->recv_cur = 0;
+
+    if (init) {
+
+        client->recv_buf = NULL;
+        client->payload_buf = NULL;
+
+        client->sending_cur = 0;
+        client->send_buff_queue.head = NULL;
+        client->send_buff_queue.rear = NULL;
+    }
+    else {
+
+        if (client->recv_buf) {
+            if (client->recv_buf->next) free_buf16(client->recv_buf->next);
+            free_buf16(client->recv_buf);
+            client->recv_buf = NULL;
+        }
+
+        // 释放 payload buf
+        if (client->payload_buf) {
+            if (client->payload_buf->next) free_buf16(client->payload_buf->next);
+            free_buffer(client->payload_buf);
+            client->payload_buf = NULL;
+        }
+
+        client->sending_cur = 0;     // 确保正在发送中的数据包也被清除
+        clear_client_sending(client);
+    }
+
+    client->send_sess_head = NULL;
+    client->send_sess_rear = NULL;
+    client->sending_sess = NULL;
+
+    client->last_error = 0;
+
+    TCP_CLIENT_INIT(client);
+    return true;
+}
+
+void ct_client_migrate(client_ctx_t* ctx, client_t *to, client_t *from) { (void)ctx;
+
+    ct_client_t *to_c   = (ct_client_t*)to;
+    ct_client_t *from_c = (ct_client_t*)from;
+
+    // recv_buf 所有权转移（to 已由 ct_init_client 分配，需先释放）
+    if (to_c->recv_buf) {
+        if (to_c->recv_buf->next) free_buf16(to_c->recv_buf->next);
+        free_buf16(to_c->recv_buf);
+    }
+    to_c->recv_buf      = from_c->recv_buf;  from_c->recv_buf  = NULL;
+
+    // hdr_rs 已读入内容迁移（帧模式：将 from->hdr_rs 中已读字节拷贝到 to->hdr_rs）
+    // + 拷贝上限取 to->hdr_sz，防止 from->recv_cur 超出 to->hdr_rs 缓冲区大小
+    if (to_c->hdr_rs && from_c->hdr_rs && from_c->recv_cur > 0)
+        memcpy(to_c->hdr_rs, from_c->hdr_rs, to_c->hdr_sz);
+    to_c->recv_cur      = from_c->recv_cur;  from_c->recv_cur  = 0;
+
+    // payload_buf 所有权转移
+    if (to_c->payload_buf) {
+        if (to_c->payload_buf->next) free_buf16(to_c->payload_buf->next);
+        free_buffer(to_c->payload_buf);
+    }
+    to_c->payload_buf  = from_c->payload_buf; from_c->payload_buf = NULL;
+    to_c->payload_cur  = from_c->payload_cur; from_c->payload_cur = 0;
+}
+
+bool ct_client_activate(client_ctx_t* ctx, client_t *c, int active) { (void)ctx;
+
+    if (!active) return TCP_REACHABLE((ct_client_t*)c);
+
+    ct_client_t *client = (ct_client_t*)c;
+    if (active > 0) {
+
+        client->last_error = 0;                     // 重置错误状态
+        client->io |= TCP_IO_FLAG_WANT_READ;        // 重新激活读取（之前断网时会被关闭）
+        if (client->send_buff_queue.head || client->send_sess_head)
+            client->io |= TCP_IO_FLAG_WANT_WRITE;   // 如果存在未完成的发送，重新激活写入
+    }
+    else {
+
+        if (((ct_client_ctx_t*)ctx)->client_unreachable)
+            ((ct_client_ctx_t*)ctx)->client_unreachable((ct_client_ctx_t*)ctx, client, active == -1);
+    }
+
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+
+void
+ct_ctx_init(ct_client_ctx_t *ctx) {
+    assert(ctx != NULL);
+
+    if (!ctx->base.cb_free) ctx->base.cb_free = ct_client_free;
+    if (!ctx->base.cb_reset) ctx->base.cb_reset = ct_client_reset;
+    if (!ctx->base.cb_migrate) ctx->base.cb_migrate = ct_client_migrate;
+    if (!ctx->base.cb_close) ctx->base.cb_close = ct_session_close;
+    if (!ctx->base.cb_clear) ctx->base.cb_clear = ct_session_clear;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 
 // 优雅的关闭 client
 void 
-ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client, buf16_item_t* last_item) {
+ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client, buf16_item_t* last_item) { (void)ctx;
 
     // 中断所有 session
-    if (client->base.sessions)
-        ct_session_clear(ctx, client, false);
-
-    // 释放 recv buf
-    if (client->recv_buf) {
-        if (client->recv_buf->next) free_buf16(client->recv_buf->next);
-        free_buf16(client->recv_buf);
-        client->recv_buf = NULL;
-    }
-    if (client->payload_buf) {
-        if (client->payload_buf->next) free_buf16(client->payload_buf->next);
-        free_buffer(client->payload_buf);
-        client->payload_buf = NULL;
-    }
+    clear_sessions(&client->base, false);
 
     if (last_item) {
         BUF_Q_APPEND(&client->send_buff_queue, last_item);
@@ -293,10 +288,23 @@ ct_client_off(ct_client_ctx_t* ctx, ct_client_t *client, buf16_item_t* last_item
 
     // 如果发送队列不为空，标记为 closing（send 完成后会自动完成 term），否则直接 term
     if (client->send_buff_queue.head) {
+
         client->handshake = TCP_HS_FLAG_CLOSING;
         client->io &= ~TCP_IO_FLAG_WANT_READ;           // 停止接收数据
+
+        // 释放 recv buf
+        if (client->recv_buf) {
+            if (client->recv_buf->next) free_buf16(client->recv_buf->next);
+            free_buf16(client->recv_buf);
+            client->recv_buf = NULL;
+        }
+        if (client->payload_buf) {
+            if (client->payload_buf->next) free_buf16(client->payload_buf->next);
+            free_buffer(client->payload_buf);
+            client->payload_buf = NULL;
+        }
     }
-    else free_client_base(&client->base);
+    else free_client(&client->base);
 }
 
 void
@@ -322,8 +330,7 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
     }
 
     // 终止所有 session
-    if (client->base.sessions)
-        ct_session_clear(ctx, client, true);
+    clear_sessions(&client->base, true);
 
     // 清除除了正在发送的包以外的所有待发送数据
     clear_client_sending(client);
@@ -896,23 +903,10 @@ error: assert(error && !client->last_error);
     client->recv_cur = 0;
 
     // session 执行 stop 处理
-    if (client->base.sessions) {
-        for(session_t *sess = client->base.sessions, *peer; sess; sess = sess->next) { peer = sess->peer;
-            if (PEER_VALID(peer) && TCP_REACHABLE(peer->client)) {
-                ctx->session_break(ctx, (ct_session_t*)sess, (ct_session_t*)peer, SESS_BREAK_STOP);
-            }
-        }
-    }
-
-    // client 执行 unreachable 处理
-    if (ctx->client_unreachable)
-        ctx->client_unreachable(ctx, client, true);
+    activate_client(&client->base, -1/* on read */);
 
     // 报错处理（这会停止接收新的请求数据，也会禁止再发送新消息，即错误是最后一个消息，所以必须在最后执行）
     ct_client_error(ctx, client, error, false);
-
-    // 重新计时，等待客户端（重置）处理，并通过超时机制来释放 client
-    client->base.last_active = P_tick_ms();
 }
 
 void
@@ -1018,15 +1012,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
             // 清除已发送的部分
             client->sending_cur = 0;
-            // 执行 unreachable 处理
-            for(session_t *sess = client->base.sessions, *peer; sess; sess = sess->next) { peer = sess->peer;
-                if (PEER_VALID(peer) && TCP_REACHABLE(peer->client)) {
-                    ctx->session_break(ctx, (ct_session_t*)sess, (ct_session_t*)peer, SESS_BREAK_STOP);
-                }
-            }
-            if (ctx->client_unreachable)
-                ctx->client_unreachable(ctx, client, false);
-            client->base.last_active = P_tick_ms();             // 重新计时，通过超时机制来释放 client
+            activate_client(&client->base, -2/* on write */);
 
             // 直接关闭连接
             client->last_error = CUSTOM_TCP_ERR_IO;

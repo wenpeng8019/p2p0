@@ -158,12 +158,6 @@ typedef void (*ct_handle_proto_cb)(ct_client_ctx_t *ctx, ct_client_t *client, ui
 // + 可为 NULL，此时跳过对端发送确认通知
 typedef void (*ct_handle_peer_sent_cb)(ct_client_ctx_t *ctx, ct_session_t *session, buf16_item_t *buf_item);
 
-// session 配对关系被打破时触发
-// + SESS_BREAK_STOP: session 保留，仅断开配对关系（如对端暂时不可达）
-// + SESS_BREAK_CLOSE: session 将被销毁，可向 client 返回状态（软退出）
-// + SESS_BREAK_TERM: session 将被销毁，不再向 client 返回任何数据（硬退出）
-typedef void (*ct_session_break_cb)(ct_client_ctx_t *ctx, ct_session_t *session, ct_session_t *peer, break_mode_e break_mode);
-
 // client 变为不可达时触发（nullable）
 // + readOrWrite: true = 读错误，false = 写错误
 typedef void (*ct_client_unreachable_cb)(ct_client_ctx_t *ctx, ct_client_t *client, bool readOrWrite);
@@ -188,7 +182,6 @@ typedef buf16_item_t* (*ct_error_item_cb)(ct_client_t *client);
     ct_handshake_finish_cb          handshake_finish;           /* nullable: 握手完成回调（可选） */ \
     ct_handle_proto_cb              handle_proto;               \
     ct_handle_peer_sent_cb          handle_peer_sent;           /* nullable: 对端发送确认回调（可选） */ \
-    ct_session_break_cb             session_break;              \
     ct_client_unreachable_cb        client_unreachable;         /* nullable: client 不可达回调（可选） */ \
     buf16_item_t*                   fatal_item;                 /* nullable: 致命错误应答包，NULL 时直接释放 client */ \
     ct_error_item_cb                error_item;                 /* nullable: 错误应答构造回调，NULL 时按 fatal 处理 */
@@ -233,40 +226,16 @@ ct_forward_payload(ct_client_t *client,
 //-----------------------------------------------------------------------------
 // Public API
 
-// 初始化 client：分配 MTU 大小的 recv_buf，清零所有发送队列状态，设置 handshake=HANDSHAKING、io=WANT_READ
-// + 调用方需事先将 hdr_rs/hdr_sz 设置好（指向 header 缓冲及其大小）
-bool
-ct_init_client(ct_client_t* client);
-
-// 重连激活：重置 last_error，恢复 WANT_READ，如有未完成发送则恢复 WANT_WRITE
-// + 适用于 TCP 断线重连后，原 client 槽位复用的场景
 void
-ct_reactive_client(ct_client_t *client);
+ct_ctx_init(ct_client_ctx_t *ctx);
 
-// 接收状态迁移，由 resident_client 触发执行（即对 client_ctx_t.migrate 接口的 ct_client 层实现）
-// + 将 from 的 recv_buf/recv_cur/hdr_rs 内容/payload_buf/payload_cur 转移到 to
-//   迁移后 from 对应字段清零，确保 free 时不重复释放
-// + relay、wss 等使用 custom_tcp 框架的模块，默认会将此函数注册为其 client_ctx_t.migrate
-void
-ct_migrate_client(client_t *to, client_t *from);
-
-//-----------------------------------------------------------------------------
-
-// 强制释放 client：关闭所有 session（TERM），释放 recv/payload buf，清空发送队列，调用 free_client_base
-void
-ct_free_client(ct_client_ctx_t* ctx, ct_client_t *client);
-
-// 关闭指定 session
-// + terminate=false：session 的待发数据转移到 client 队列继续发送
-// + terminate=true：session 的待发数据直接丢弃
-void
-ct_session_close(ct_client_ctx_t* ctx, ct_session_t *session, bool terminate);
-
-// 关闭所有 session
-// + terminate=false：session 的待发数据转移到 client 队列继续发送
-// + terminate=true：session 的待发数据直接丢弃
-void
-ct_session_clear(ct_client_ctx_t* ctx, ct_client_t *client, bool terminate);
+// custom tcp 可被重载的接口实现
+void ct_client_free(client_ctx_t* ctx, client_t *c);
+bool ct_client_reset(client_ctx_t* ctx, client_t *c, bool init);
+void ct_client_migrate(client_ctx_t* ctx, client_t *to, client_t *from);
+bool ct_client_activate(client_ctx_t* ctx, client_t *c, int active);
+void ct_session_clear(client_ctx_t* ctx, client_t *c, bool preOrPost);
+void ct_session_close(client_ctx_t* ctx, session_t *s, bool terminate, bool clearing);
 
 //-----------------------------------------------------------------------------
 

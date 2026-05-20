@@ -400,7 +400,7 @@ struct client_ctx {
     // [nullable] 实现派生 client 对象状态迁移，被 resident_client 调用
     void (*cb_migrate)(client_ctx_t* ctx, client_t *to, client_t *from);
 
-    // [nullable] 获取、或调整 client 对象的 active 状态。参数: active: 1 activate; -1: deactivate; 0: query
+    // [nullable] 获取、或调整 client 对象的 active 状态。参数: 0: query; >0: activate code; <0: deactivate code;
     bool (*cb_activate)(client_ctx_t* ctx, client_t *c, int active);
 
     // [option] 执行对 session 的终止或中断。如果创建了 session 对象，则该接口是必须实现的。如果不使用 session，则可以设为 NULL
@@ -438,8 +438,8 @@ bool
 identify_client(client_t* c, const char peer_id[P2P_PEER_ID_MAX]);
 
 // 使 client 进入或退出活跃状态，触发 cb_activate 回调
-void
-activate_client(client_t* c, bool active);
+bool
+activate_client(client_t* c, int active);
 
 //-----------------------------------------------------------------------------
 
