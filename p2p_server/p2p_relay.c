@@ -765,9 +765,8 @@ static ret_t relay_resolve_payload_len(ct_client_t* client, uint8_t* hdr_buf, ui
 }
 
 // NOLINTNEXTLINE(readability-non-const-parameter)
-static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t **t_client, uint8_t* hdr_buf, uint16_t hdr_len,
+static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
                                              buf16_item_t* payload0, buf16_item_t* payload1) { (void)ctx;
-    ct_client_t *client = *t_client;
     assert(hdr_len == sizeof(p2p_relay_hdr_t));
     assert(!client->base.local_peer_id[0]);
     const char* PROTO = "REG";
@@ -822,9 +821,7 @@ static buf16_item_t* relay_handle_handshake(ct_client_ctx_t *ctx, ct_client_t **
 
         // 帧模式：无 recv_buf/recv_len 需要保存
         // 如果 instance_id 一致（断网重连）
-        if (resident_client(&reg->base, PROTO_RELAY, instance_id, &client->base)) {
-
-            *t_client = client = (ct_client_t*)reg;
+        if (restore_client_from(&client->base, &reg->base)) {
 
             // SYNC/SYN0 的 ACK_PENDING 项：TCP 已写出但客户端未确认（连接已断无法确保到达）
             // 重置 refer 并重新入队，让新连接重新投递

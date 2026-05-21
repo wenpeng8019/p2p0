@@ -105,14 +105,14 @@ typedef struct cw_client_ctx cw_client_ctx_t;
 /**
  * @brief                           应用层握手回调
  * @param ctx
- * @param t_client                  当前 client 指针地址，可在回调内替换为 resident 后的新 client
+ * @param client
  * @param opcode                    WS_OP_TEXT 或 WS_OP_BINARY
  * @param payload                   payload 数据指针。握手阶段不支持分片聚合，因此这里必定非 NULL
  * @param payload_len               payload 总字节数
  * @param buf_item                  payload 所属的 buf_item，可直接复用来构造并返回应答
  * @return                          返回握手应答 frame；返回 NULL 则表示握手失败
  */
-typedef buf16_item_t* (*cw_handle_handshake_cb)(cw_client_ctx_t *ctx, cw_client_t ** t_client, uint8_t opcode,
+typedef buf16_item_t* (*cw_handle_handshake_cb)(cw_client_ctx_t *ctx, cw_client_t * client, uint8_t opcode,
                                                 uint8_t *payload, uint32_t payload_len,
                                                 buf16_item_t *buf_item);
 

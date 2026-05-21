@@ -629,11 +629,10 @@ static void wss_handle_sdp(wss_client_t *src_c, const char *remote_peer_id, cons
 
 //-----------------------------------------------------------------------------
 
-static buf16_item_t* wss_handle_handshake_cb(cw_client_ctx_t *ctx, cw_client_t **t_client, uint8_t opcode,
+static buf16_item_t* wss_handle_handshake_cb(cw_client_ctx_t *ctx, cw_client_t *client, uint8_t opcode,
                                              uint8_t *payload, uint32_t payload_len,
                                              buf16_item_t *buf_item) {
     (void)ctx; (void)buf_item;
-    wss_client_t *client = (wss_client_t*)*t_client;
     assert(!client->base.local_peer_id[0]);
     const char *PROTO = "REG";
     const char *close_reason = NULL;
@@ -717,7 +716,7 @@ static buf16_item_t* wss_handle_handshake_cb(cw_client_ctx_t *ctx, cw_client_t *
     }
 
     wss_client_t *reg = (wss_client_t*)find_client(remote_id);
-    if (reg) { assert(reg != client);
+    if (reg) { assert((cw_client_t*)reg != client);
 
         if (TCP_HS_IS_HANDSHAKING(reg)) {
             print("E:", LA_F("%s: request simultaneously for '%s'\n", LA_F216, 216), PROTO, reg->base.local_peer_id);
@@ -726,8 +725,7 @@ static buf16_item_t* wss_handle_handshake_cb(cw_client_ctx_t *ctx, cw_client_t *
             goto error_close;
         }
 
-        if (resident_client(&reg->base, PROTO_WSS, instance_id, &client->base)) {
-            *t_client = (cw_client_t*)reg; client = reg;
+        if (restore_client_from(&client->base, &reg->base)) {
 
             for (session_t *sess = client->base.sessions; sess; sess = sess->next) {
                 wss_session_t *ws_sess = (wss_session_t*)sess;

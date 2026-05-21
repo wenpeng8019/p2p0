@@ -337,10 +337,9 @@ oom:
 // + hdr_buf: recv_buf 中 HTTP 请求文本（不含 "\r\n\r\n" 尾）
 // + hdr_len: HTTP header 文本长度
 // + payload0/payload1: HTTP header 之后不应有 payload（WS 协议握手阶段不携带 body）
-static buf16_item_t *cw_tcp_handle_handshake(ct_client_ctx_t* ctx, ct_client_t **t_c,
+static buf16_item_t *cw_tcp_handle_handshake(ct_client_ctx_t* ctx, ct_client_t *c,
                                              uint8_t *hdr_buf, uint16_t hdr_len,
                                              buf16_item_t *payload0, buf16_item_t *payload1) {
-    ct_client_t *c = *t_c;
     cw_client_t *client = (cw_client_t*)c;
 
     if (c->handshake == TCP_HS_FLAG_HANDSHAKING) { assert(payload0 == NULL && payload1 == NULL);  // HTTP 握手阶段不应有 payload
@@ -376,7 +375,7 @@ static buf16_item_t *cw_tcp_handle_handshake(ct_client_ctx_t* ctx, ct_client_t *
 
         assert(client->ws_opcode == 0);  // 握手阶段不应有分片帧
 
-        payload0 = ((cw_client_ctx_t*)ctx)->handle_handshake((cw_client_ctx_t*)ctx, (cw_client_t **)t_c, code, payload, payload_len, payload1);
+        payload0 = ((cw_client_ctx_t*)ctx)->handle_handshake((cw_client_ctx_t*)ctx, client, code, payload, payload_len, payload1);
         if (payload0) {
             if (payload0 == payload1) client->payload_buf = NULL;  // 所有权已转移，避免框架释放
 
@@ -435,6 +434,7 @@ static void cw_tcp_handshake_finish(ct_client_ctx_t *ctx, ct_client_t *c) {
     else c->handshake = 0;
 }
 
+// NOLINTNEXTLINE(readability-non-const-parameter)
 static void cw_tcp_handle_proto(ct_client_ctx_t *ctx, ct_client_t *c, uint8_t *hdr_buf, uint16_t hdr_len,
                                 buf16_item_t *payload0, buf16_item_t *payload1) { (void)hdr_buf;
     (void)hdr_len;

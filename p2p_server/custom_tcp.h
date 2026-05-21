@@ -131,8 +131,7 @@ typedef ret_t (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf
 /**
  * @brief                           握手阶段收到完整消息时触发
  * @param ctx
- * @param client                    当前握手 client 指针的地址。回调可修改 *client 来切换 client 实例
- *                                  例如重连时将 from 切换到 resident 的 reg client
+ * @param client
  * @param hdr_buf                   header 数据。流模式下指向 recv_buf 内部，帧模式下指向 hdr_rs
  * @param hdr_len                   header 长度
  * @param payload0                  recv_buf 内部的 payload 片段，零拷贝借用，可能为 NULL
@@ -144,7 +143,7 @@ typedef ret_t (*ct_resolve_payload_len_cb)(ct_client_t* client, uint8_t* hdr_buf
  *                                  返回 NULL 且 last_error==0 表示协议错误
  *                                  约束：ack 必须是 buf16_item_t，不能是 32-bit buffer
  */
-typedef buf16_item_t* (*ct_handle_handshake_cb)(ct_client_ctx_t *ctx, ct_client_t **client, uint8_t* hdr_buf, uint16_t hdr_len,
+typedef buf16_item_t* (*ct_handle_handshake_cb)(ct_client_ctx_t *ctx, ct_client_t *client, uint8_t* hdr_buf, uint16_t hdr_len,
                                                 buf16_item_t* payload0, buf16_item_t* payload1);
 
 /**

@@ -895,8 +895,12 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
         if (client) {
 
             //（协议/instance_id 相同）可靠性重传机制，幂等响应
-            if (resident_client(client, PROTO_COMPACT, instance_id, NULL)) {
-
+            int r = restore_client_as(client, PROTO_COMPACT, udp_fd, instance_id);
+            if (r < 0) {
+                print("E:", LA_F("%s: realloc client for '%.*s' failed\n", LA_F51, 51), PROTO, P2P_PEER_ID_MAX, local_peer_id);
+                return;
+            }
+            if (r) {
                 check_addr_change((compact_client_t*)client, from);
                 compact_send_reg_ack(client, from, ((compact_client_t*)client)->auth_key, instance_id);
                 return;

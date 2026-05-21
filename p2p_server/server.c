@@ -429,66 +429,47 @@ alloc_client(uint8_t proto, sock_t fd) {
     return NULL;
 }
 
-bool
-resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from) {
+int
+restore_client_as(client_t* c, int8_t proto, sock_t fd, uint32_t instance_id) {
 
-    assert(c != from);
-    assert(c->proto >= 0);
-    assert(!from || !*from->local_peer_id);
-    client_ctx_t* ctx = g_contexts[c->proto];
+    assert(c->proto >= 0 && *c->local_peer_id);
 
-    // 对于重连的情况，即之前的 client 连接已经断开，客户端发起新的连接，但状态保留
-    if (c->proto == proto && (c->instance_id == instance_id || ctx->cb_reset)) do {
-
-        // 如果客户端发起了新的实例连接
-        if (c->instance_id != instance_id) { c->instance_id = instance_id;
-
-            // 终断并清除所有本端 session
-            if (c->sessions) clear_sessions(c, true);
-
-            if (!ctx->cb_reset(ctx, c, false)) break;
-        }
-
-        // 如果存在新分配的 from client，迁移 fd 和 last_active 到旧的 client
-        if (from) {
-
-            // 同实例重连：迁移 fd 到旧槽位，保留会话状态
-            print("I:", LA_F("[T] '%s' reconnected (inst=%u), migrating\n", LA_F95, 95),
-                   c->local_peer_id, instance_id);
-
-            if (c->fd != P_INVALID_SOCKET) P_sock_close(c->fd);
-            c->fd = from->fd;
-            from->fd = P_INVALID_SOCKET;
-
-            c->last_active = from->last_active;
-
-            if (ctx->cb_migrate) ctx->cb_migrate(ctx, c, from);
-
-            free_client(from);
-        }
-        else c->last_active = P_tick_ms();
-
-        return true;
-
-    } while (0);
-
-    print("I:", LA_F("[T] '%s' new instance (old=%u, new=%u), resetting session\n", LA_F223, 223),
-           c->local_peer_id, c->instance_id, instance_id);
-
-    sock_t fd = c->fd;
+    if (c->proto == proto && c->instance_id == instance_id) {
+        c->fd = fd;
+        c->last_active = P_tick_ms();
+        return 1;
+    }
 
     // 先将之前的释放
     free_client(c);
 
-    // 如果没有新的 client，即将之前的 client 重新初始化
-    if (!from) {
-        c->proto = proto;
-        c->fd = fd;
-        if (!init_client(c)) return false;
-        c->instance_id = instance_id;
+    // 初始化为新的 client
+    c->proto = proto; c->fd = fd;
+    if (!init_client(c)) return -1;
+    c->instance_id = instance_id;
+    return 0;
+}
+
+bool
+restore_client_from(client_t* c, client_t* from) {
+
+    assert(c != from && c->proto >= 0 && from->proto >= 0);
+    assert(!*c->local_peer_id && !c->sessions) ;
+    client_ctx_t* ctx = g_contexts[c->proto];
+
+    bool r = c->proto == from->proto && c->instance_id != from->instance_id;
+    if (r) {
+
+        memcpy(c->local_peer_id, from->local_peer_id, P2P_PEER_ID_MAX+1);
+        HASH_REPLACE_STR(g_clients, local_peer_id, c, from); from->hh.tbl = NULL;
+
+        c->sessions = from->sessions; from->sessions = NULL;
+
+        if (ctx->cb_migrate) ctx->cb_migrate(ctx, c, from);
     }
 
-    return false;
+    free_client(from);
+    return r;
 }
 
 bool

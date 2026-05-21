@@ -443,17 +443,6 @@ void
 free_client(client_t *c);
 
 /**
- * @brief                           合并同一客户端的两个槽位，确保最终只保留一个 client 实例
- * @param c                         已存在的目标 client
- * @param proto
- * @param instance_id
- * @param from                      待归并的来源 client；UDP 场景下可为 NULL
- * @return                          是否成功
- */
-bool
-resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from/* nullable */);
-
-/**
  * @brief                           分配一个指定协议类型的 client 对象
  * @param proto
  * @param fd
@@ -461,6 +450,27 @@ resident_client(client_t* c, int8_t proto, uint32_t instance_id, client_t* from/
  */
 client_t*
 alloc_client(uint8_t proto, sock_t fd);
+
+/**
+ * @brief                           尝试恢复之前已经存在的 client。如果失败则将之前 client free，并将其初始化为新的 client
+ * @param c                         已存在的目标 client
+ * @param proto                     当前请求的 proto
+ * @param fd                        当前请求的 fd
+ * @param instance_id               当前请求的 instance_id
+ * @return                          <0: 初始化为新的 client 失败(当前 client 无效); 0: 初始化为新的 client; 1: 成功恢复为之前的 client
+ */
+int
+restore_client_as(client_t* c, int8_t proto, sock_t fd, uint32_t instance_id);
+
+/**
+ * @brief                           尝试从之前已经存在的 client 恢复，并将之前的 client free
+ * @param c                         当前请求的新的 client
+ * @param from                      之前已经存在的 client
+ * @return                          是否成功
+ */
+
+bool
+restore_client_from(client_t* c, client_t* from);
 
 /**
  * @brief                           通过 peer_id 查找 client

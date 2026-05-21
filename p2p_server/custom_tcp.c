@@ -198,26 +198,17 @@ void ct_client_migrate(client_ctx_t* ctx, client_t *to, client_t *from) { (void)
     ct_client_t *to_c   = (ct_client_t*)to;
     ct_client_t *from_c = (ct_client_t*)from;
 
-    // recv_buf 所有权转移（to 已由 ct_init_client 分配，需先释放）
-    if (to_c->recv_buf) {
-        if (to_c->recv_buf->next) free_buf16(to_c->recv_buf->next);
-        free_buf16(to_c->recv_buf);
-    }
-    to_c->recv_buf      = from_c->recv_buf;  from_c->recv_buf  = NULL;
+    assert(!to_c->send_buff_queue.head && !to_c->send_buff_queue.rear);
+    to_c->send_buff_queue = from_c->send_buff_queue;
+    from_c->send_buff_queue.head = NULL; from_c->send_buff_queue.rear = NULL;
 
-    // hdr_rs 已读入内容迁移（帧模式：将 from->hdr_rs 中已读字节拷贝到 to->hdr_rs）
-    // + 拷贝上限取 to->hdr_sz，防止 from->recv_cur 超出 to->hdr_rs 缓冲区大小
-    if (to_c->hdr_rs && from_c->hdr_rs && from_c->recv_cur > 0)
-        memcpy(to_c->hdr_rs, from_c->hdr_rs, to_c->hdr_sz);
-    to_c->recv_cur      = from_c->recv_cur;  from_c->recv_cur  = 0;
+    assert(!to_c->send_sess_head && !to_c->send_sess_rear);
+    to_c->send_sess_head = from_c->send_sess_head; from_c->send_sess_head = NULL;
+    to_c->send_sess_rear = from_c->send_sess_rear; from_c->send_sess_rear = NULL;
 
-    // payload_buf 所有权转移
-    if (to_c->payload_buf) {
-        if (to_c->payload_buf->next) free_buf16(to_c->payload_buf->next);
-        free_buffer(to_c->payload_buf);
-    }
-    to_c->payload_buf  = from_c->payload_buf; from_c->payload_buf = NULL;
-    to_c->payload_cur  = from_c->payload_cur; from_c->payload_cur = 0;
+    // 这里注意无需恢复 sending_cur
+    assert(!to_c->sending_sess && !to_c->sending_cur);
+    to_c->sending_sess = from_c->sending_sess; from_c->sending_sess = NULL;
 }
 
 bool ct_client_activate(client_ctx_t* ctx, client_t *c, int active) { (void)ctx;
@@ -520,7 +511,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     // 触发应用协议层回调处理
                     if (TCP_HS_IS_HANDSHAKING(client)) {
 
-                        ack_item = ctx->handle_handshake(ctx, &client, buf, sz, NULL, NULL);
+                        ack_item = ctx->handle_handshake(ctx, client, buf, sz, NULL, NULL);
                         assert(buf_item == client->recv_buf);       // handle_handshake 期间不应调整（下一次请求的）recv_buf
                         goto handshake;
                     }
@@ -551,7 +542,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                     // 触发应用协议层回调处理
                     if (TCP_HS_IS_HANDSHAKING(client)) {
-                        ack_item = ctx->handle_handshake(ctx, &client, buf, sz, buf_item, NULL);
+                        ack_item = ctx->handle_handshake(ctx, client, buf, sz, buf_item, NULL);
                         assert(buf_item == client->recv_buf);       // handle_handshake 期间不应调整（下一次请求的）recv_buf
                         if (ack_item) {
                             buf_item->len = len;                    // 恢复 recv_buf 的 len
@@ -672,7 +663,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                         // 触发应用协议层回调处理
                         if (TCP_HS_IS_HANDSHAKING(client)) {
 
-                            ack_item = ctx->handle_handshake(ctx, &client, buf, client->hdr_sz, NULL, NULL);
+                            ack_item = ctx->handle_handshake(ctx, client, buf, client->hdr_sz, NULL, NULL);
                             assert(!client->recv_buf);                      // handle_handshake 期间不应调整（下一次请求的）recv_buf
                             goto handshake;
                         }
@@ -697,7 +688,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                         // 触发应用协议层回调处理
                         if (TCP_HS_IS_HANDSHAKING(client)) {
-                            ack_item = ctx->handle_handshake(ctx, &client, buf, client->hdr_sz, payload_item, NULL);
+                            ack_item = ctx->handle_handshake(ctx, client, buf, client->hdr_sz, payload_item, NULL);
                             assert(!client->recv_buf);                      // handle_handshake 期间不应调整（下一次请求的）recv_buf
                             if (ack_item) {
                                 payload_item->len = len;                    // 恢复 recv_buf 的 len
@@ -794,7 +785,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         else { buf = client->hdr_rs; sz = client->hdr_sz; }
 
         if (TCP_HS_IS_HANDSHAKING(client)) {
-            ack_item = ctx->handle_handshake(ctx, &client, buf, sz, buf_item, payload_item);
+            ack_item = ctx->handle_handshake(ctx, client, buf, sz, buf_item, payload_item);
             assert(bak_item == client->recv_buf);                       // handle_handshake 期间不应调整（下一次请求的）recv_buf
 
             if (client->payload_buf) {
