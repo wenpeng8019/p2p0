@@ -25,8 +25,12 @@ ARGS(client_timeout);
 
 // HTTP 握手 recv 缓冲大小（存放 HTTP 请求 header，流模式 recv_buf 使用 2K）
 #define CW_HTTP_BUF_FLAGS           BUF_FLAG_2048(0)
+
 // WS 帧头最大字节数
-#define CW_WS_HDR_MAX               14
+#define CW_WS_HDR_MAX               10
+
+// 静态帧标识。此时数据包的 hdr 从 buf[0] 开始。对应的 pos 表示 payload 数据的起点
+#define CW_BUF_FLAG_STATIC          0x4
 
 static uint8_t                      s_hdr_sizes[4] = { 0, 2, 4, 10 };
 
@@ -256,10 +260,11 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
 
                 // 如果可以 zero-copy 直接转发
                 if (payload1) {
-                    if (cw_build_frame(WS_OP_PONG, payload1, payload1->pos) == E_NONE)
+                    if (cw_build_frame(WS_OP_PONG, payload1) == E_NONE)
                         cw_client_send(client, payload1, true);
                 }
-                else { buf16_item_t *pong = alloc_buf16(BUF_FLAG_128(0));
+                else {
+                    buf16_item_t *pong = alloc_buf16(BUF_FLAG_128(0));
                     if (pong) {
                         uint8_t *pb = ITEM2BUF(pong);
                         pb[0] = 0x8A;  // FIN | PONG
@@ -394,15 +399,15 @@ static buf16_item_t *cw_tcp_handle_handshake(ct_client_ctx_t* ctx, ct_client_t *
             )
 
             uint8_t hdr_sz = s_hdr_sizes[payload0->flags & CW_BUF_FLAG_HDR_SIZE];
-            if (!hdr_sz) hdr_sz = (uint16_t)(payload0->len - payload0->pos) <= 125 ? 2 : 4;
-            P_check(payload0->pos >= hdr_sz,
+            P_check(hdr_sz,
                 print("E:", LA_F("[WS] invalid handshake ack hdr_sz=%u pos=%u\n", 0, 0), hdr_sz, payload0->pos);
                 free_buf16(payload0);
                 c->last_error = CUSTOM_TCP_ERR_INTERNAL;
                 return NULL;
             )
 
-            payload0->pos = (uint16_t)(payload0->pos - hdr_sz);
+            if (payload0->flags & CW_BUF_FLAG_STATIC)
+                payload0->pos = 0;
         }
     }
     else assert(false);
@@ -491,7 +496,7 @@ buf16_item_t *cw_alloc_frame(uint8_t opcode, uint32_t payload_len) {
 
     payload_len += (uint32_t)hdr_sz;
 
-    buf16_item_t *item = alloc_buffer(frame_flag, payload_len);
+    buf16_item_t *item = alloc_buffer(frame_flag|CW_BUF_FLAG_STATIC, payload_len);
     if (!item) return NULL;
 
     uint8_t *buf = ITEM2BUF(item);
@@ -529,13 +534,20 @@ buf16_item_t *cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args
         item->len = (uint16_t)(10u + text_len);
     }
 
-    if (cw_build_frame(WS_OP_TEXT, item, 10) != E_NONE) return NULL;
+    if (cw_build_frame(WS_OP_TEXT, item) != E_NONE) return NULL;
     return item;
 }
 
-ret_t cw_build_frame(uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_offset) {
+// 构造一个 ws frame：帧头信息、以及 payload 数据在 buf 中的起始位置（payload_offset 的前面是帧头数据）
+ret_t cw_build_frame(uint8_t opcode, buf16_item_t *buf_item) {
 
-    uint32_t payload_len = (BUF_IS_32BIT(buf_item->flags) ? BUF32(buf_item)->len : buf_item->len) - payload_offset;
+    uint8_t *buf; uint32_t len; uint16_t* pos_ptr;
+    if (BUF_IS_32BIT(buf_item->flags)) {
+        buf = ITEM2BUF(BUF32(buf_item)); len = BUF32(buf_item)->len; pos_ptr = &BUF32(buf_item)->pos;
+    } else {
+        buf = ITEM2BUF(buf_item); len = buf_item->len; pos_ptr = &buf_item->pos;
+    }
+    uint32_t payload_len = len - *pos_ptr;
 
     uint8_t hdr_sz; uint8_t hdr[10]; uint8_t frame_flag;
     hdr[0] = 0x80 | (opcode & 0x0F);   // FIN=1, RSV=0, opcode
@@ -554,84 +566,36 @@ ret_t cw_build_frame(uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_of
         hdr[9] = (uint8_t)(payload_len);
     }
 
-    if (payload_offset < hdr_sz) {
-        print("E:", LA_F("[WS] build_frame: payload_pos(%u) < hdr_sz(%u)\n", LA_F228, 228), payload_offset, hdr_sz);
+    if (buf_item->pos < hdr_sz) {
+        print("E:", LA_F("[WS] bad payload pos(%u) < hdr_sz(%u)\n", LA_F228, 228), buf_item->pos, hdr_sz);
         free_buffer(buf_item);
         return E_INVALID;
     }
 
     // 将帧头写入 payload 前的预留空间末尾（紧靠 payload），但保持 pos 仍指向 payload
     buf_item->flags = (uint8_t)((buf_item->flags & (uint8_t)~CW_BUF_FLAG_HDR_SIZE) | frame_flag);
-    uint8_t *buf;
-    if (BUF_IS_32BIT(buf_item->flags)) {
-        buf = ITEM2BUF(BUF32(buf_item));
-        BUF32(buf_item)->pos = payload_offset;
-    } else {
-        buf = ITEM2BUF(buf_item);
-        buf_item->pos = payload_offset;
-    }
-    memcpy(buf + (payload_offset - hdr_sz), hdr, hdr_sz);
+    *pos_ptr = (uint16_t)(*pos_ptr - hdr_sz);
+    memcpy(buf + (*pos_ptr), hdr, hdr_sz);
 
     return E_NONE;
 }
 
-static ret_t cw_prepare_send_frame(buf16_item_t *frame) {
+void
+cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate) {
 
-    uint16_t payload_offset;
-    uint32_t total_len;
-    uint32_t payload_len;
-    uint8_t hdr_sz = s_hdr_sizes[frame->flags & CW_BUF_FLAG_HDR_SIZE];
-
-    if (BUF_IS_32BIT(frame->flags)) {
-
-        payload_offset = BUF32(frame)->pos;
-        total_len = BUF32(frame)->len;
-        P_check(payload_offset <= total_len, return E_INVALID;)
-
-        if (!hdr_sz) { payload_len = total_len - payload_offset;
-            hdr_sz = payload_len <= 125 ? 2 : (payload_len <= 65535 ? 4 : 10);
-        }
-        assert(payload_offset >= hdr_sz);
-        P_check(payload_offset >= hdr_sz, return E_INVALID;)
-
-        BUF32(frame)->pos = payload_offset - hdr_sz;
-    }
-    else {
-        payload_offset = frame->pos;
-        total_len = frame->len;
-        assert(payload_offset <= total_len);
-
-        if (!hdr_sz) { payload_len = total_len - payload_offset;
-            hdr_sz = payload_len <= 125 ? 2 : (payload_len <= 65535 ? 4 : 10);
-        }
-        assert(payload_offset >= hdr_sz);
-        P_check(payload_offset >= hdr_sz, return E_INVALID;)
-
-        frame->pos = payload_offset - hdr_sz;
-    }
-    return E_NONE;
-}
-
-ret_t cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate) {
-
-    P_check(client->handshake == 0, return E_INVALID;)
-
-    ret_t r = cw_prepare_send_frame(frame);
-    if (r != E_NONE) return r;
+    if (frame->flags & CW_BUF_FLAG_STATIC)
+        frame->pos = 0;
 
     ct_client_send((ct_client_t*)client, frame, immediate);
-    return E_NONE;
 }
 
-ret_t cw_session_send(ct_session_t *session, buf16_item_t *frame) {
+void
+cw_session_send(ct_session_t *session, buf16_item_t *frame) {
 
-    P_check(CT_CLIENT(session)->handshake == 0, return E_INVALID;)
-
-    ret_t r = cw_prepare_send_frame(frame);
-    if (r != E_NONE) return r;
+    if (frame->flags & CW_BUF_FLAG_STATIC)
+        frame->pos = 0;
 
     ct_session_send(session, frame);
-    return E_NONE;
 }
 
 ret_t cw_close(cw_client_t *client, uint16_t code, const char* reason/* nullable */) {
@@ -645,15 +609,13 @@ ret_t cw_close(cw_client_t *client, uint16_t code, const char* reason/* nullable
         size_t reason_len = strlen(reason);
         if (reason_len > 123u) reason_len = 123u;
 
-        buf16_item_t *frame = cw_alloc_frame(WS_OP_CLOSE, (uint32_t)(2u + reason_len));
+        buf16_item_t *frame = cw_alloc_frame(WS_OP_CLOSE, 2 + reason_len);
         if (frame) {
-            assert(!BUF_IS_32BIT(frame->flags));
             uint8_t *buf = ITEM2BUF(frame) + frame->pos;
             nwrite_s(buf, code);
             if (reason_len) memcpy(buf + 2, reason, reason_len);
 
-            r = cw_client_send(client, frame, false);
-            if (r == E_NONE) return r;
+            cw_client_send(client, frame, false);
         }  else r = E_OUT_OF_MEMORY;
 
         code = WS_CLOSE_INTERNAL_ERROR;

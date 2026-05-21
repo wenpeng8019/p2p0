@@ -994,14 +994,13 @@ static void relay_handle_peer_sent(ct_client_ctx_t *ctx, ct_session_t *s, buf16_
     if (hdr->type == P2P_RLY_PKT) {
         assert(!BUF_R_EMPTY(&session->pkt_peer_send) && BUF_R_FRONT(&session->pkt_peer_send) == buf_item);
 
-        // 标记该 buf_item 已经处理完成，可被释放
-        buf_item->refer = NULL;
-
         bool full = BUF_R_FULL(&session->pkt_peer_send);
 
-        // 移出队头
+        // 标记该 buf_item 已经处理完成（可被释放），并移出队头
+        buf_item->refer = NULL;
         BUF_R_POP(&session->pkt_peer_send);
-        // 启动下一项（如有）
+
+        // 启动发送下一项（如有）
         if (!BUF_R_EMPTY(&session->pkt_peer_send)) {
             BUF_R_FRONT(&session->pkt_peer_send)->refer = session;
             ct_session_send(CT_PEER(session), BUF_R_FRONT(&session->pkt_peer_send));

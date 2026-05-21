@@ -239,12 +239,10 @@ static inline buf16_item_t* cw_printf_frame(uint32_t expect_sz, const char *fmt,
  * @brief                           在已有 buf_item 上构建 WS frame
  * @param opcode                    WS_OP_TEXT、WS_OP_BINARY 或 WS_OP_CONTINUATION
  * @param buf_item                  上层分配的 buf_item
- * @param payload_offset            payload 数据在 buf_item 中的起始偏移
- *                                  框架会在 [0, payload_offset) 区间写入 WS 帧头，因此该值必须不小于有效 hdr size
  * @return                          0 表示成功，其他值表示失败
  */
 ret_t
-cw_build_frame(uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_offset);
+cw_build_frame(uint8_t opcode, buf16_item_t *buf_item);
 
 //-----------------------------------------------------------------------------
 
@@ -255,7 +253,7 @@ cw_build_frame(uint8_t opcode, buf16_item_t *buf_item, uint16_t payload_offset);
  * @param immediate
  * @return                          0 表示成功，其他值表示失败
  */
-ret_t
+void
 cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
 
 /**
@@ -264,10 +262,8 @@ cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
  * @param frame                     由 cw_alloc_frame 或 cw_build_frame 生成
  * @return                          0 表示成功，其他值表示失败
  */
-ret_t
+void
 cw_session_send(ct_session_t *session, buf16_item_t *frame);
-
-//-----------------------------------------------------------------------------
 
 /**
  * @brief                           服务端主动发起 graceful close

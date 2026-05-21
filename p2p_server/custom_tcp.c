@@ -114,7 +114,7 @@ void ct_client_send(ct_client_t *client, buf16_item_t* buf_item, bool immediate)
 
     } else {
         BUF_Q_APPEND(&client->send_buff_queue, buf_item)
-        if (client->send_buff_queue.head != buf_item) return;  // 如果队列之前不空，直接返回
+        if (client->send_buff_queue.head != buf_item) return;   // 如果队列之前不空，直接返回
     }
 
     if (TCP_REACHABLE(client)) {
@@ -314,7 +314,8 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
         free_client(&client->base);
         return;
     }
-    
+
+    assert(!ctx->fatal_item->next);
     if (client->send_buff_queue.rear) {
         client->send_buff_queue.rear->next = ctx->fatal_item;
         assert((client->io & TCP_IO_FLAG_WANT_WRITE));
@@ -1017,25 +1018,33 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 return;
             }
 
-            // 如果静态内嵌缓冲，不执行 free 操作，仅标记为 NULL（未在发送队列中，即发送完成）；否则正常释放
-            if (item->refer == ITEM_REF_STATIC) item->refer = NULL;
-            else { bool is_error = false;
-
-                if (item->refer == ITEM_REF_CLIENT_STATIC_ERROR) { is_error = true;
-                    item->refer = NULL;
-                } else {
-                    if (item->refer == ITEM_REF_CLIENT_ERROR) is_error = true;
-                    free_buffer(item);
-                }
-
-                // 如果发送的是错误包，发送完成后直接关闭连接并停止写入（等待客户端重连或超时回收）
-                if (is_error) { assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));
-                    P_sock_close(client->base.fd);
-                    client->base.fd = P_INVALID_SOCKET;
-                    client->io &= ~TCP_IO_FLAG_WANT_WRITE;
-                    return;
-                }
+            // 对于普通 buf
+            if (!item->refer) {
+                free_buffer(item);
+                return;
             }
+
+            // 如果发送的是错误包
+            if (item->refer >= ITEM_REF_CLIENT_STATIC_ERROR) {
+                assert(client->last_error && !(client->io & TCP_IO_FLAG_WANT_READ));
+                P_sock_close(client->base.fd);
+                client->base.fd = P_INVALID_SOCKET;
+                client->io &= ~TCP_IO_FLAG_WANT_WRITE;
+            }
+
+            // 如果是静态内嵌缓冲，不执行 free 操作，仅标记为 NULL
+            if (item->refer == ITEM_REF_STATIC || item->refer == ITEM_REF_CLIENT_STATIC_ERROR) {
+                item->refer = NULL;
+                return;
+            }
+
+            // ! 这里并不处理其他 refer 类型，所以此时如果 refer 不为 NULL，那么可能就错过了一些处理
+            // + 例如，这个 item 存在其他引用者，那么这里的释放就会导致悬空引用的问题；
+            if (item->refer != ITEM_REF_CLIENT_ERROR) {
+                print("W:", LA_F("[CT] send item refer invalid(%p)\n", 0, 0), item->refer);
+            }
+
+            free_buffer(item);
         }
         // 对于 session 级的 item（将 item 从 sess 的 send_queue 中移除
         // + 同时轮询下一个（session sending 队列不为空的）session，即 sess 平权遍历
@@ -1065,12 +1074,17 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             }
 
             // 如果发送的是对端发过来的数据
-            if (item->refer && ctx->handle_peer_sent) {
-                ctx->handle_peer_sent(ctx, (ct_session_t*)item->refer, item);
+            if (item->refer) {
+                if (ctx->handle_peer_sent)
+                    ctx->handle_peer_sent(ctx, (ct_session_t*)item->refer, item);
+                else print("W:", LA_F("[CT] send sess item refer invalid(%p)\n", 0, 0), item->refer);
             }
 
-            // 如果 item 没有被（handle_peer_sent）标记为待 ACK 状态，则直接释放
-            if (item->refer != ITEM_REF_ACK_PENDING) { free_buffer(item); }
+            // 如果 item 被（handle_peer_sent）标记为待 ACK 状态，则不执行释放
+            if (item->refer == ITEM_REF_ACK_PENDING) return;
+
+            assert(!item->refer);
+            free_buffer(item);
         }
     }
 }

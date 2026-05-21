@@ -457,7 +457,7 @@ restore_client_from(client_t* c, client_t* from) {
     assert(!*c->local_peer_id && !c->sessions) ;
     client_ctx_t* ctx = g_contexts[c->proto];
 
-    bool r = c->proto == from->proto && c->instance_id != from->instance_id;
+    bool r = c->proto == from->proto && c->instance_id == from->instance_id;
     if (r) {
 
         memcpy(c->local_peer_id, from->local_peer_id, P2P_PEER_ID_MAX+1);
