@@ -256,6 +256,16 @@ cw_build_frame(uint8_t opcode, buf16_item_t *buf_item);
 void
 cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
 
+static ret_t cw_client_printf(cw_client_t *client, bool immediate, uint32_t expect_sz, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);
+    va_end(args);
+    if (!item) return E_OUT_OF_MEMORY;
+    cw_client_send(client, item, immediate);
+    return E_NONE;
+}
+
 /**
  * @brief                           发送已构建完成的 WS frame 到 session
  * @param session
@@ -264,6 +274,16 @@ cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
  */
 void
 cw_session_send(ct_session_t *session, buf16_item_t *frame);
+
+static ret_t cw_session_printf(ct_session_t *session, uint32_t expect_sz, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);
+    va_end(args);
+    if (!item) return E_OUT_OF_MEMORY;
+    cw_session_send(session, item);
+    return E_NONE;
+}
 
 /**
  * @brief                           服务端主动发起 graceful close
