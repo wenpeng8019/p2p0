@@ -38,6 +38,17 @@
 #define CW_BUF_HDR_4                0x2   // 126 <= payload_len <= 65535，对应 4 字节 hdr
 #define CW_BUF_HDR_10               0x3   // payload_len > 65535，对应 10 字节 hdr
 
+#define BUF_IS_WS_FRAME(buf_item) ((buf_item->flags & CW_BUF_FLAG_HDR_SIZE) != 0)
+
+// WS 帧头最大字节数
+#define CW_WS_HDR_MAX               10
+
+static inline uint8_t P_UNUSED_OK
+cw_frame_hdr_sz(const buf16_item_t* buf_item) {
+    uint8_t hdr_sizes[4] = { 0, 2, 4, 10 };
+    return hdr_sizes[buf_item->flags & CW_BUF_FLAG_HDR_SIZE];
+}
+
 //-----------------------------------------------------------------------------
 // WebSocket Close Code 预定义（RFC 6455 §7.4.1）
 //

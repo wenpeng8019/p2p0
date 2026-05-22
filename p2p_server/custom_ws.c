@@ -26,13 +26,9 @@ ARGS(client_timeout);
 // HTTP 握手 recv 缓冲大小（存放 HTTP 请求 header，流模式 recv_buf 使用 2K）
 #define CW_HTTP_BUF_FLAGS           BUF_FLAG_2048(0)
 
-// WS 帧头最大字节数
-#define CW_WS_HDR_MAX               10
 
 // 静态帧标识。此时数据包的 hdr 从 buf[0] 开始。对应的 pos 表示 payload 数据的起点
 #define CW_BUF_FLAG_STATIC          0x4
-
-static uint8_t                      s_hdr_sizes[4] = { 0, 2, 4, 10 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -128,7 +124,7 @@ static ret_t cw_resolve_payload_len(ct_client_t *client, uint8_t *hdr_buf, uint1
     }
 
     // 这里默认为上层零拷贝转发预留 WS 头空间
-    *payload_offset = 10;
+    *payload_offset = CW_WS_HDR_MAX;
     return E_NONE;
 }
 
@@ -188,7 +184,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
     // 解 mask（in-place）
     // + mask key 已被 cw_resolve_payload_len 统一复制到 hdr_buf[10..13]
     //   另外，直接将 payload0 的数据归并到 payload1（如果需要）
-    uint8_t *payload; uint32_t payload_len; const uint8_t *mask = hdr_buf + 10;
+    uint8_t *payload; uint32_t payload_len; const uint8_t *mask = hdr_buf + CW_WS_HDR_MAX;
     if (payload1) {
         payload = ITEM2BUF(payload1) + payload1->pos;
         payload_len = payload1->len - payload1->pos;
@@ -398,7 +394,7 @@ static buf16_item_t *cw_tcp_handle_handshake(ct_client_ctx_t* ctx, ct_client_t *
                 return NULL;
             )
 
-            uint8_t hdr_sz = s_hdr_sizes[payload0->flags & CW_BUF_FLAG_HDR_SIZE];
+            uint8_t hdr_sz = cw_frame_hdr_sz(payload0);
             P_check(hdr_sz,
                 print("E:", LA_F("[WS] invalid handshake ack hdr_sz=%u pos=%u\n", 0, 0), hdr_sz, payload0->pos);
                 free_buf16(payload0);
@@ -477,7 +473,7 @@ static void cw_tcp_handle_proto(ct_client_ctx_t *ctx, ct_client_t *c, uint8_t *h
 // + payload_pos 必须 >= 实际帧头长度（由 payload 大小决定）
 buf16_item_t *cw_alloc_frame(uint8_t opcode, uint32_t payload_len) {
 
-    uint8_t hdr_sz; uint8_t hdr[10]; uint8_t frame_flag;
+    uint8_t hdr_sz; uint8_t hdr[CW_WS_HDR_MAX]; uint8_t frame_flag;
     hdr[0] = 0x80 | (opcode & 0x0F);
     if (payload_len <= 125) { hdr_sz = 2; frame_flag = CW_BUF_HDR_2;
         hdr[1] = (uint8_t)payload_len;
@@ -485,7 +481,7 @@ buf16_item_t *cw_alloc_frame(uint8_t opcode, uint32_t payload_len) {
         hdr[1] = 126;
         hdr[2] = (uint8_t)(payload_len >> 8);
         hdr[3] = (uint8_t)payload_len;
-    } else { hdr_sz = 10; frame_flag = CW_BUF_HDR_10;
+    } else { hdr_sz = CW_WS_HDR_MAX; frame_flag = CW_BUF_HDR_10;
         hdr[1] = 127;
         hdr[2] = 0; hdr[3] = 0; hdr[4] = 0; hdr[5] = 0;
         hdr[6] = (uint8_t)(payload_len >> 24);
@@ -517,7 +513,7 @@ buf16_item_t *cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args
     buf16_item_t *item = alloc_buffer(0, 10u + expect_sz);
     if (!item) return NULL;
 
-    int n = vsnprintf((char*)ITEM2BUF(item) + 10, (size_t)expect_sz, fmt, args);
+    int n = vsnprintf((char*)ITEM2BUF(item) + CW_WS_HDR_MAX, (size_t)expect_sz, fmt, args);
     if (n < 0) {
         free_buffer(item);
         return NULL;
@@ -527,10 +523,10 @@ buf16_item_t *cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args
     if (text_len >= expect_sz) text_len = expect_sz - 1;
 
     if (BUF_IS_32BIT(item->flags)) {
-        BUF32(item)->pos = 10;
-        BUF32(item)->len = 10u + text_len;
+        BUF32(item)->pos = CW_WS_HDR_MAX;
+        BUF32(item)->len = CW_WS_HDR_MAX + text_len;
     } else {
-        item->pos = 10;
+        item->pos = CW_WS_HDR_MAX;
         item->len = (uint16_t)(10u + text_len);
     }
 
@@ -549,7 +545,7 @@ ret_t cw_build_frame(uint8_t opcode, buf16_item_t *buf_item) {
     }
     uint32_t payload_len = len - *pos_ptr;
 
-    uint8_t hdr_sz; uint8_t hdr[10]; uint8_t frame_flag;
+    uint8_t hdr_sz; uint8_t hdr[CW_WS_HDR_MAX]; uint8_t frame_flag;
     hdr[0] = 0x80 | (opcode & 0x0F);   // FIN=1, RSV=0, opcode
     if (payload_len <= 125) { hdr_sz = 2; frame_flag = CW_BUF_HDR_2;
         hdr[1] = (uint8_t)payload_len;
@@ -557,7 +553,7 @@ ret_t cw_build_frame(uint8_t opcode, buf16_item_t *buf_item) {
         hdr[1] = 126;
         hdr[2] = (uint8_t)(payload_len >> 8);
         hdr[3] = (uint8_t)(payload_len);
-    } else { hdr_sz = 10; frame_flag = CW_BUF_HDR_10;
+    } else { hdr_sz = CW_WS_HDR_MAX; frame_flag = CW_BUF_HDR_10;
         hdr[1] = 127;
         hdr[2] = 0; hdr[3] = 0; hdr[4] = 0; hdr[5] = 0;
         hdr[6] = (uint8_t)(payload_len >> 24);
@@ -747,7 +743,7 @@ static buf16_item_t* cw_error_item(ct_client_t *c) {
                 goto fallback_close;)
 
         uint16_t payload_len = (uint16_t)(total_len - payload_offset);
-        uint8_t hdr_sz = s_hdr_sizes[close_frame->flags & CW_BUF_FLAG_HDR_SIZE];
+        uint8_t hdr_sz = cw_frame_hdr_sz(close_frame);
         if (!hdr_sz) hdr_sz = payload_len <= 125 ? 2 : 4;
 
         P_check(payload_offset >= hdr_sz,

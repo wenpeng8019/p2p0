@@ -48,16 +48,10 @@ static bool wss_parse_sync_headline(const uint8_t *text, size_t len, uint32_t *s
 }
 
 static bool wss_item_text(const buf16_item_t *item, const uint8_t **text, size_t *len) {
-    uint16_t hdr_sz;
     uint16_t pos = item->pos;
     uint16_t total = item->len;
 
-    switch (item->flags & CW_BUF_FLAG_HDR_SIZE) {
-    case CW_BUF_HDR_2: hdr_sz = 2; break;
-    case CW_BUF_HDR_4: hdr_sz = 4; break;
-    case CW_BUF_HDR_10: hdr_sz = 10; break;
-    default: hdr_sz = 0; break;
-    }
+    uint16_t hdr_sz = cw_frame_hdr_sz(item);
 
     if (hdr_sz) {
         if ((uint32_t)pos + hdr_sz > total) return false;
@@ -100,7 +94,7 @@ static void wss_sync_send_head(wss_session_t *src_s) {
     }
     else if (head->refer) return;       // 发送中或 ack pending
 
-    if (!(head->flags & CW_BUF_FLAG_HDR_SIZE) && cw_build_frame(WS_OP_TEXT, head) != E_NONE) return;
+    if (!BUF_IS_WS_FRAME(head) && cw_build_frame(WS_OP_TEXT, head) != E_NONE) return;
 
     head->refer = (void*)src_s;
     cw_session_send((ct_session_t*)peer_s, head);
@@ -190,7 +184,7 @@ static void wss_handle_syn0(cw_client_ctx_t *ctx, wss_client_t *client, const ch
 
             buf16_item_t *head = BUF_R_FRONT(&remote_s->sync_peer_send);
             if (head->refer == WSS_ITEM_REF_SYN0_ACK_PENDING) {
-                assert(head->flags & CW_BUF_FLAG_HDR_SIZE);
+                assert(BUF_IS_WS_FRAME(head));
                 head->refer = (void*)remote_s;
                 cw_session_send((ct_session_t*)local_s, head);
             }
