@@ -66,7 +66,7 @@ typedef struct wss_session {
                                                                         * 队头 FRONT 的发送状态由 refer 判定：
                                                                         *   refer=NULL             → 待发但未启动（对端暂不可达，或 sid=0 payload 待组装）
                                                                         *   refer=session          → TCP 写入中
-                                                                        *   refer=ITEM_REF_ACK_PENDING → 等待应用层 ACK */
+                                                                        *   refer=ITEM_REF_ACK_PENDING / WSS 自定义 ACK_PENDING → 等待应用层 ACK */
 
     /* PKT 发送队列（对标 relay pkt_peer_send） */
     buf16_item_t*                   pkt_peer_slots[WSS_PEER_Q_MAX];     /* 循环队列的 slots 数组（指针） */

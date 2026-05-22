@@ -572,7 +572,8 @@ ret_t cw_build_frame(uint8_t opcode, buf16_item_t *buf_item) {
         return E_INVALID;
     }
 
-    // 将帧头写入 payload 前的预留空间末尾（紧靠 payload），但保持 pos 仍指向 payload
+    // 将帧头写入 payload 前的预留空间末尾（紧靠 payload），并将 pos 回退到 frame 头起点。
+    // 之后若要重新取 payload，需要结合 CW_BUF_FLAG_HDR_SIZE 跳过 2/4/10 字节帧头。
     buf_item->flags = (uint8_t)((buf_item->flags & (uint8_t)~CW_BUF_FLAG_HDR_SIZE) | frame_flag);
     *pos_ptr = (uint16_t)(*pos_ptr - hdr_sz);
     memcpy(buf + (*pos_ptr), hdr, hdr_sz);

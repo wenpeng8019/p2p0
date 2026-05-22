@@ -231,7 +231,8 @@ cw_alloc_frame(uint8_t opcode, uint32_t payload_len);
 buf16_item_t*
 cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args);
 
-static inline buf16_item_t* cw_printf_frame(uint32_t expect_sz, const char *fmt, ...) {
+static inline buf16_item_t*
+cw_printf_frame(uint32_t expect_sz, const char *fmt, ...) {
     va_list args; va_start(args, fmt);
     buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);
     va_end(args);
@@ -241,7 +242,7 @@ static inline buf16_item_t* cw_printf_frame(uint32_t expect_sz, const char *fmt,
 /**
  * @brief                           在已有 buf_item 上构建 WS frame
  * @param opcode                    WS_OP_TEXT、WS_OP_BINARY 或 WS_OP_CONTINUATION
- * @param buf_item                  上层分配的 buf_item
+ * @param buf_item                  上层分配的 buf_item；调用前 pos 指向 payload 起点，调用后 pos 回退到 WS frame 头起点
  * @return                          0 表示成功，其他值表示失败
  */
 ret_t
@@ -259,7 +260,8 @@ cw_build_frame(uint8_t opcode, buf16_item_t *buf_item);
 void
 cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
 
-static ret_t cw_client_printf(cw_client_t *client, bool immediate, uint32_t expect_sz, const char *fmt, ...) {
+static inline ret_t
+cw_client_printf(cw_client_t *client, bool immediate, uint32_t expect_sz, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);
@@ -278,7 +280,8 @@ static ret_t cw_client_printf(cw_client_t *client, bool immediate, uint32_t expe
 void
 cw_session_send(ct_session_t *session, buf16_item_t *frame);
 
-static ret_t cw_session_printf(ct_session_t *session, uint32_t expect_sz, const char *fmt, ...) {
+static inline ret_t
+cw_session_printf(ct_session_t *session, uint32_t expect_sz, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);

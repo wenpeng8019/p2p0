@@ -1081,9 +1081,8 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             }
 
             // 如果 item 被（handle_peer_sent）标记为待 ACK 状态，则不执行释放
-            if (item->refer == ITEM_REF_ACK_PENDING) return;
+            if (item->refer >= ITEM_REF_ACK_PENDING) return;
 
-            assert(!item->refer);
             free_buffer(item);
         }
     }

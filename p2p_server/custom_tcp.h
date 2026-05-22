@@ -102,10 +102,13 @@ typedef struct ct_client_ctx ct_client_ctx_t;
 //-----------------------------------------------------------------------------
 // buf_item->refer 特殊标记
 
-// 标记 buf_item 正等待 ACK 确认，发送完成后不立即释放（由上层在 handle_peer_sent 中处理）
-#define ITEM_REF_ACK_PENDING        ((void*)(uintptr_t)1)
+// 16 以下预留给协议层自定义 refer 类型（例如协议内部状态标记）
 // 标记 buf_item 是静态数据（非堆分配），发送完成后仅清除 refer 标记，不 free
-#define ITEM_REF_STATIC             ((void*)(uintptr_t)2)
+#define ITEM_REF_STATIC             ((void*)(uintptr_t)16)
+// 标记 buf_item 正等待 ACK 确认，发送完成后不立即释放（由上层在 handle_peer_sent 中处理）
+#define ITEM_REF_ACK_PENDING        ((void*)(uintptr_t)17)
+// 自定义 ACK_PENDING 扩展起点：向上扩展的值都表示“待 ACK，不释放”
+#define ITEM_REF_CUSTOM_ACK_PENDING ((void*)(uintptr_t)18)
 
 //-----------------------------------------------------------------------------
 // 回调类型
