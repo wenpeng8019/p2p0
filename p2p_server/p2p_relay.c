@@ -502,7 +502,6 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         return;
     }
 
-    session->last_sid = sid;
 
     // SYN0 隐式 ACK：本端首个 SYNC 上行视为是对服务器下发的 SYN0 的确认
     relay_session_t *peer = RELAY_PEER(session);
@@ -554,11 +553,14 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         p[2] = P2P_RLY_SYNC_FIN_MARKER;
     }
 
-    // 交换写入对端的 session_id
+    // 替换转发身份（交换写入对端的 session_id）
     uint8_t *sid_ptr = (uint8_t *)(hdr + 1);
     nwrite_l(sid_ptr, session->base.peer->session_id);
 
-    // 发送入队并在首次时冷启动发送
+    // 推进更新同步序列 id
+    session->last_sid = sid;
+
+    // 在首次入队时，执行冷启动发送
     if (BUF_R_EMPTY(&session->sync_peer_send)) {
         sync_item->refer = session;
         ct_session_send((ct_session_t*)peer, sync_item);

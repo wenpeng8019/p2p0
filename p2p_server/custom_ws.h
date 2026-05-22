@@ -126,6 +126,9 @@ typedef buf16_item_t* (*cw_handle_handshake_cb)(cw_client_ctx_t *ctx, cw_client_
  * @param buf_item                  payload 所属的 buf_item，可用于零拷贝转发
  *                                  若 payload 来自 custom_tcp 的 payload0，则这里为 NULL，需要上层自行复制后转发
  * @return                          无
+ * @note                            对于 payload 转发需求，可以直接使用 ct_forward_payload 工具函数
+ *                                  例如：ct_forward_payload(client, payload, payload_len,
+ *                                                          buf_item ？buf_item->pos : 0, buf_item);
  */
 typedef void (*cw_handle_frame_cb)(cw_client_ctx_t *ctx, cw_client_t *client, uint8_t opcode,
                                    uint8_t *payload, uint32_t payload_len,

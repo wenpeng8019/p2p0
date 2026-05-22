@@ -41,6 +41,101 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
+static inline const uint8_t* str2skip(const uint8_t *p, const uint8_t *end) {
+    const uint8_t *limit = end;
+    if (limit) while (p < limit && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) ++p;
+    else while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
+    return p;
+}
+
+static inline const uint8_t* str2trim(const uint8_t *q, const uint8_t *base, bool bOnlyLine) {
+    if (!q || !base || q <= base) return base;
+    if (bOnlyLine) { while (q > base && (q[-1] == '\r' || q[-1] == '\n')) --q; }
+    else { while (q > base && (q[-1] == ' ' || q[-1] == '\t' || q[-1] == '\r' || q[-1] == '\n')) --q; }
+    return q;
+}
+
+static inline bool str2hex_u64(const uint8_t **pp, const uint8_t *end, uint64_t maxv, uint64_t *out) {
+    const uint8_t *limit = end;
+    const uint8_t *p = str2skip(*pp, end);
+    uint64_t value = 0;
+    bool has_digit = false;
+
+    while (limit ? p < limit : *p) {
+        uint64_t digit;
+        if (*p >= '0' && *p <= '9') digit = (unsigned)(*p - '0');
+        else if (*p >= 'a' && *p <= 'f') digit = (unsigned)(*p - 'a' + 10u);
+        else if (*p >= 'A' && *p <= 'F') digit = (unsigned)(*p - 'A' + 10u);
+        else break;
+
+        if (value > ((maxv - digit) >> 4)) return false;  // overflow by target width
+        has_digit = true;
+        value = (value << 4) | digit;
+        ++p;
+    }
+
+    if (!has_digit) return false;
+    *pp = p;
+    *out = value;
+    return true;
+}
+
+static inline bool str2hex8(const uint8_t **pp, const uint8_t *end, uint8_t *out) {
+    uint64_t v; if (!str2hex_u64(pp, end, UINT8_MAX, &v)) return false; *out = (uint8_t)v; return true;
+}
+static inline bool str2hex16(const uint8_t **pp, const uint8_t *end, uint16_t *out) {
+    uint64_t v; if (!str2hex_u64(pp, end, UINT16_MAX, &v)) return false; *out = (uint16_t)v; return true;
+}
+static inline bool str2hex32(const uint8_t **pp, const uint8_t *end, uint32_t *out) {
+    uint64_t v; if (!str2hex_u64(pp, end, UINT32_MAX, &v)) return false; *out = (uint32_t)v; return true;
+}
+static inline bool str2hex64(const uint8_t **pp, const uint8_t *end, uint64_t *out) {
+    return str2hex_u64(pp, end, UINT64_MAX, out);
+}
+
+static inline bool str2u32(const char *s, uint32_t *out) {
+    if (!s || !out) return false;
+    char *endptr = NULL;
+    unsigned long v = strtoul(s, &endptr, 10);
+    if (endptr == s) return false;
+    endptr = (char*)str2skip((const uint8_t*)endptr, NULL);
+    if (*endptr != '\0') return false;
+#if ULONG_MAX > UINT32_MAX
+    if (v > UINT32_MAX) return false;
+#endif
+    *out = (uint32_t)v;
+    return true;
+}
+static inline bool str2u16(const char *s, uint16_t *out) {
+    uint32_t v = 0; if (!out || !str2u32(s, &v) || v > UINT16_MAX) return false; *out = (uint16_t)v; return true;
+}
+static inline bool str2u8(const char *s, uint8_t *out) {
+    uint32_t v = 0; if (!out || !str2u32(s, &v) || v > UINT8_MAX) return false; *out = (uint8_t)v; return true;
+}
+
+static inline bool str2i32(const char *s, int32_t *out) {
+    if (!s || !out) return false;
+    char *endptr = NULL;
+    long v = strtol(s, &endptr, 10);
+    if (endptr == s) return false;
+    endptr = (char*)str2skip((const uint8_t*)endptr, NULL);
+    if (*endptr != '\0') return false;
+#if LONG_MAX > INT32_MAX || LONG_MIN < INT32_MIN
+    if (v > INT32_MAX || v < INT32_MIN) return false;
+#endif
+    *out = (int32_t)v;
+    return true;
+}
+static inline bool str2i16(const char *s, int16_t *out) {
+    int32_t v = 0; if (!out || !str2i32(s, &v) || v > INT16_MAX || v < INT16_MIN) return false; *out = (int16_t)v; return true;
+}
+static inline bool str2i8(const char *s, int8_t *out) {
+    int32_t v = 0; if (!out || !str2i32(s, &v) || v > INT8_MAX || v < INT8_MIN) return false; *out = (int8_t)v; return true;
+}
+
+
+//-----------------------------------------------------------------------------
+
 #pragma pack(push, 1)
 typedef struct buf16_item {
     struct buf16_item*              next;

@@ -228,7 +228,7 @@ struct ct_client_ctx {
  */
 static inline buf16_item_t*
 ct_forward_payload(ct_client_t *client,
-                   uint8_t* payload, uint32_t payload_len, uint16_t payload_offset,
+                   const uint8_t* payload, uint32_t payload_len, uint16_t payload_offset,
                    buf16_item_t *payload_item) {
     assert(payload_item == client->payload_buf);
     if (payload_item) {
