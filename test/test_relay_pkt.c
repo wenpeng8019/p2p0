@@ -1,5 +1,5 @@
 /*
- * test_relay_data.c - RELAY 数据中继协议单元测试
+ * test_relay_pkt.c - RELAY 数据中继协议单元测试
  *
  * ============================================================================
  * 测试目标
@@ -53,20 +53,20 @@
  * 二、失败验证测试（各种异常输入的防御）
  * ---------------------------------------------------------------------------
  *
- * 测试 5: relay_data_bad_session
+ * 测试 5: relay_pkt_bad_session
  *   目标：验证无效 session_id 的 DATA 包处理
  *   方法：发送包含不存在 session_id 的 DATA 包
  *   预期：
  *     - 不触发异常
  *     - 对端不收到数据
  *
- * 测试 6: relay_data_peer_offline
+ * 测试 6: relay_pkt_peer_offline
  *   目标：验证对端离线时 DATA 被拒绝
  *   方法：Alice 单独建立会话 → 发送 DATA
  *   预期：
  *     - 收到 STATUS(P2P_ERR_PEER_OFF)
  *
- * 测试 7: relay_data_bad_payload
+ * 测试 7: relay_pkt_bad_payload
  *   目标：验证畸形 DATA 包被丢弃
  *   方法：发送 payload 过短的 DATA 包
  *   预期：
@@ -92,10 +92,10 @@
  * 依赖：p2p_server 可执行文件（需支持 --relay 模式）
  * 
  * 用法：
- *   ./test_relay_data <server_path> [port]
+ *   ./test_relay_pkt <server_path> [port]
  *
  * 示例：
- *   ./test_relay_data ./p2p_server 9779
+ *   ./test_relay_pkt ./p2p_server 9779
  */
 
 #define MOD_TAG "TEST"
@@ -282,7 +282,7 @@ static int build_sync0(uint8_t *buf, int buf_size, const char *target_peer_id,
 
 // 构造 DATA 包
 // payload: [session_id(4)][P2P_hdr(4)][data(N)]
-static int build_relay_data(uint8_t *buf, int buf_size, uint32_t session_id,
+static int build_relay_pkt(uint8_t *buf, int buf_size, uint32_t session_id,
                             uint8_t pkt_type, uint8_t flags, uint16_t seq,
                             const uint8_t *data, int data_len) {
     uint16_t payload_len = 4 + 4 + data_len;
@@ -623,7 +623,7 @@ static void test_relay_data_forwarded(void) {
     // Alice 发送 DATA
     uint8_t test_data[] = "Hello, Bob!";
     uint8_t pkt[128];
-    int pkt_len = build_relay_data(pkt, sizeof(pkt), session_alice,
+    int pkt_len = build_relay_pkt(pkt, sizeof(pkt), session_alice,
                                    P2P_PKT_DATA, 0, 1,
                                    test_data, sizeof(test_data));
     if (tcp_send_all(sock_alice, pkt, pkt_len) != pkt_len) {
@@ -847,7 +847,7 @@ static void test_relay_bidirectional(void) {
     // Alice -> Bob
     uint8_t data_a2b[] = "A->B";
     uint8_t pkt[64];
-    int pkt_len = build_relay_data(pkt, sizeof(pkt), session_alice,
+    int pkt_len = build_relay_pkt(pkt, sizeof(pkt), session_alice,
                                    P2P_PKT_DATA, 0, 1, data_a2b, sizeof(data_a2b));
     tcp_send_all(sock_alice, pkt, pkt_len);
     
@@ -865,7 +865,7 @@ static void test_relay_bidirectional(void) {
     
     // Bob -> Alice
     uint8_t data_b2a[] = "B->A";
-    pkt_len = build_relay_data(pkt, sizeof(pkt), session_bob,
+    pkt_len = build_relay_pkt(pkt, sizeof(pkt), session_bob,
                                P2P_PKT_DATA, 0, 2, data_b2a, sizeof(data_b2a));
     tcp_send_all(sock_bob, pkt, pkt_len);
     
@@ -883,8 +883,8 @@ static void test_relay_bidirectional(void) {
 }
 
 // 测试 5: 无效 session_id 的 DATA 包
-static void test_relay_data_bad_session(void) {
-    const char *TEST_NAME = "relay_data_bad_session";
+static void test_relay_pkt_bad_session(void) {
+    const char *TEST_NAME = "relay_pkt_bad_session";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -898,14 +898,14 @@ static void test_relay_data_bad_session(void) {
     
     // REG + SYN0
     online_ack_t online_ack;
-    if (send_online_recv_ack(sock, "bad_data_alice", inst_id, &online_ack) <= 0) {
+    if (send_online_recv_ack(sock, "bad_pkt_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
     sync0_ack_t sync_ack;
-    if (send_sync0_recv_ack(sock, "bad_data_bob", 0, NULL, &sync_ack) <= 0) {
+    if (send_sync0_recv_ack(sock, "bad_pkt_bob", 0, NULL, &sync_ack) <= 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
@@ -915,7 +915,7 @@ static void test_relay_data_bad_session(void) {
     uint64_t fake_session_id = 0xDEADBEEF12345678ULL;
     uint8_t test_data[] = "test";
     uint8_t pkt[64];
-    int pkt_len = build_relay_data(pkt, sizeof(pkt), fake_session_id,
+    int pkt_len = build_relay_pkt(pkt, sizeof(pkt), fake_session_id,
                                    P2P_PKT_DATA, 0, 1, test_data, sizeof(test_data));
     tcp_send_all(sock, pkt, pkt_len);
     
@@ -927,8 +927,8 @@ static void test_relay_data_bad_session(void) {
 }
 
 // 测试 6: 对端离线时发送 DATA
-static void test_relay_data_peer_offline(void) {
-    const char *TEST_NAME = "relay_data_peer_offline";
+static void test_relay_pkt_peer_offline(void) {
+    const char *TEST_NAME = "relay_pkt_peer_offline";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -942,14 +942,14 @@ static void test_relay_data_peer_offline(void) {
     
     // REG + SYN0（对端离线）
     online_ack_t online_ack;
-    if (send_online_recv_ack(sock, "offline_data_alice", inst_id, &online_ack) <= 0) {
+    if (send_online_recv_ack(sock, "offline_pkt_alice", inst_id, &online_ack) <= 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "REG failed");
         return;
     }
     
     sync0_ack_t sync_ack;
-    if (send_sync0_recv_ack(sock, "offline_data_bob", 0, NULL, &sync_ack) <= 0) {
+    if (send_sync0_recv_ack(sock, "offline_pkt_bob", 0, NULL, &sync_ack) <= 0) {
         P_sock_close(sock);
         TEST_FAIL(TEST_NAME, "SYN0 failed");
         return;
@@ -958,7 +958,7 @@ static void test_relay_data_peer_offline(void) {
     // 发送 DATA（对端离线）
     uint8_t test_data[] = "test";
     uint8_t pkt[64];
-    int pkt_len = build_relay_data(pkt, sizeof(pkt), sync_ack.session_id,
+    int pkt_len = build_relay_pkt(pkt, sizeof(pkt), sync_ack.session_id,
                                    P2P_PKT_DATA, 0, 1, test_data, sizeof(test_data));
     tcp_send_all(sock, pkt, pkt_len);
     
@@ -979,8 +979,8 @@ static void test_relay_data_peer_offline(void) {
 }
 
 // 测试 7: 畸形 DATA 包
-static void test_relay_data_bad_payload(void) {
-    const char *TEST_NAME = "relay_data_bad_payload";
+static void test_relay_pkt_bad_payload(void) {
+    const char *TEST_NAME = "relay_pkt_bad_payload";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -1046,7 +1046,7 @@ static void test_relay_flow_control(void) {
     uint8_t pkt[64];
     
     for (int i = 0; i < 3; i++) {
-        int pkt_len = build_relay_data(pkt, sizeof(pkt), session_alice,
+        int pkt_len = build_relay_pkt(pkt, sizeof(pkt), session_alice,
                                        P2P_PKT_DATA, 0, (uint16_t)(i + 1),
                                        test_data, sizeof(test_data));
         tcp_send_all(sock_alice, pkt, pkt_len);
@@ -1096,7 +1096,7 @@ static void test_relay_large_data(void) {
     }
     
     uint8_t pkt[1024];
-    int pkt_len = build_relay_data(pkt, sizeof(pkt), session_alice,
+    int pkt_len = build_relay_pkt(pkt, sizeof(pkt), session_alice,
                                    P2P_PKT_DATA, 0, 1,
                                    large_data, sizeof(large_data));
     if (tcp_send_all(sock_alice, pkt, pkt_len) != pkt_len) {
@@ -1193,9 +1193,9 @@ int main(int argc, char *argv[]) {
     test_relay_bidirectional();
     
     // 二、失败验证测试
-    test_relay_data_bad_session();
-    test_relay_data_peer_offline();
-    test_relay_data_bad_payload();
+    test_relay_pkt_bad_session();
+    test_relay_pkt_peer_offline();
+    test_relay_pkt_bad_payload();
     
     // 三、边界/临界态测试
     test_relay_flow_control();

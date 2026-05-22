@@ -1,5 +1,5 @@
 /*
- * test_wss_register.c - WSS 协议注册/上线单元测试
+ * test_wss_reg.c - WSS 协议注册/上线单元测试
  *
  * ============================================================================
  * 测试目标
@@ -29,7 +29,7 @@
  *   方法：连接 server 并完成 WS 握手
  *   预期：握手成功，连接保持
  *
- * 测试 2: online_success
+ * 测试 2: reg_success
  *   目标：验证 REG 正常流程
  *   方法：发送 "REG <peer_id>" 文本帧
  *   预期：
@@ -55,7 +55,7 @@
  * 二、失败验证测试
  * ---------------------------------------------------------------------------
  *
- * 测试 5: sync0_not_online
+ * 测试 5: sync0_not_reg
  *   目标：验证未 REG 就发 SYN0 被拒绝
  *   方法：直接发送 SYN0（不先发 REG）
  *   预期：收到错误响应
@@ -73,10 +73,10 @@
  *   - ws_client 库（WebSocket 客户端实现）
  *
  * 用法：
- *   ./test_wss_register <server_path> [port]
+ *   ./test_wss_reg <server_path> [port]
  *
  * 示例：
- *   ./test_wss_register ./p2p_server 9777
+ *   ./test_wss_reg ./p2p_server 9777
  */
 
 #define MOD_TAG "TEST"
@@ -311,8 +311,8 @@ static void test_ws_handshake(void) {
     TEST_PASS(TEST_NAME);
 }
 
-static void test_online_success(void) {
-    const char *TEST_NAME = "online_success";
+static void test_reg_success(void) {
+    const char *TEST_NAME = "reg_success";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -480,8 +480,8 @@ static void test_sync0_peer_online(void) {
     TEST_PASS(TEST_NAME);
 }
 
-static void test_sync0_not_online(void) {
-    const char *TEST_NAME = "sync0_not_online";
+static void test_sync0_not_reg(void) {
+    const char *TEST_NAME = "sync0_not_reg";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     
@@ -622,12 +622,12 @@ int main(int argc, char *argv[]) {
     
     // 一、正常功能测试
     test_ws_handshake();
-    test_online_success();
+    test_reg_success();
     test_sync0_peer_offline();
     test_sync0_peer_online();
 
     // 二、失败验证测试
-    test_sync0_not_online();
+    test_sync0_not_reg();
     test_malformed_command();
     
     // 终止 server
