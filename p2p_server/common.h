@@ -47,7 +47,6 @@ static inline const uint8_t* str2skip(const uint8_t *p, const uint8_t *end) {
     else while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
     return p;
 }
-
 static inline const uint8_t* str2trim(const uint8_t *q, const uint8_t *base, bool bOnlyLine) {
     if (!q || !base || q <= base) return base;
     if (bOnlyLine) { while (q > base && (q[-1] == '\r' || q[-1] == '\n')) --q; }
@@ -132,7 +131,6 @@ static inline bool str2i16(const char *s, int16_t *out) {
 static inline bool str2i8(const char *s, int8_t *out) {
     int32_t v = 0; if (!out || !str2i32(s, &v) || v > INT8_MAX || v < INT8_MIN) return false; *out = (int8_t)v; return true;
 }
-
 
 //-----------------------------------------------------------------------------
 

@@ -230,8 +230,6 @@ static bool relay_session_send_rpc_code(relay_session_t *session, uint16_t sid, 
 
 ///////////////////////////////////////////////////////////////////////////////
 
-///////////////////////////////////////////////////////////////////////////////
-
 static void relay_session_init(session_t* s) {
     relay_session_t* session = (relay_session_t*)s;
     BUF_R_INIT(&session->sync_peer_send, session->sync_peer_slots, RELAY_PEER_Q_MAX);
@@ -502,20 +500,20 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         return;
     }
 
-
-    // SYN0 隐式 ACK：本端首个 SYNC 上行视为是对服务器下发的 SYN0 的确认
+    // SYN0 隐式 ACK：仅首个 SYNC(sid=1) 上行视为是对服务器下发的 SYN0 的确认
     relay_session_t *peer = RELAY_PEER(session);
-    if (!BUF_R_EMPTY(&peer->sync_peer_send) && BUF_R_FRONT(&peer->sync_peer_send)->refer == ITEM_REF_ACK_PENDING) {
-        if (((p2p_relay_hdr_t*)ITEM2BUF(BUF_R_FRONT(&peer->sync_peer_send)))->type == P2P_RLY_SYN0) {
+    if (sid == 1
+        && !BUF_R_EMPTY(&peer->sync_peer_send)
+        && BUF_R_FRONT(&peer->sync_peer_send)->refer == ITEM_REF_ACK_PENDING
+        && ((p2p_relay_hdr_t*)ITEM2BUF(BUF_R_FRONT(&peer->sync_peer_send)))->type == P2P_RLY_SYN0) {
 
-            free_buffer(BUF_R_FRONT(&peer->sync_peer_send));
-            BUF_R_POP(&peer->sync_peer_send);
+        free_buffer(BUF_R_FRONT(&peer->sync_peer_send));
+        BUF_R_POP(&peer->sync_peer_send);
 
-            // 如果 peer sess 的 SYNC 队列不空，发送下一个 SYNC
-            if (!BUF_R_EMPTY(&peer->sync_peer_send)) {
-                BUF_R_FRONT(&peer->sync_peer_send)->refer = peer;
-                ct_session_send((ct_session_t*)session, BUF_R_FRONT(&peer->sync_peer_send));
-            }
+        // 如果 peer sess 的 SYNC 队列不空，发送下一个 SYNC
+        if (!BUF_R_EMPTY(&peer->sync_peer_send)) {
+            BUF_R_FRONT(&peer->sync_peer_send)->refer = peer;
+            ct_session_send((ct_session_t*)session, BUF_R_FRONT(&peer->sync_peer_send));
         }
     }
 

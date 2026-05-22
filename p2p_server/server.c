@@ -24,13 +24,13 @@
 
 #define MOD_TAG "P2P0d"
 
+#include "LANG.cn.h"
+
 #include "p2p_compact.h"
 #include "p2p_relay.h"
 #ifdef WITH_WS
 #include "p2p_wss.h"
 #endif
-
-#include "LANG.cn.h"
 
 #include <signal.h>    /* signal() */
 
