@@ -231,7 +231,7 @@ cw_alloc_frame(uint8_t opcode, uint32_t payload_len);
 buf16_item_t*
 cw_vprintf_frame(uint32_t expect_sz, const char *fmt, va_list args);
 
-static inline buf16_item_t*
+static inline buf16_item_t* P_UNUSED_OK
 cw_printf_frame(uint32_t expect_sz, const char *fmt, ...) {
     va_list args; va_start(args, fmt);
     buf16_item_t *item = cw_vprintf_frame(expect_sz, fmt, args);
@@ -260,7 +260,7 @@ cw_build_frame(uint8_t opcode, buf16_item_t *buf_item);
 void
 cw_client_send(cw_client_t *client, buf16_item_t *frame, bool immediate);
 
-static inline ret_t
+static inline ret_t P_UNUSED_OK
 cw_client_printf(cw_client_t *client, bool immediate, uint32_t expect_sz, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -280,7 +280,7 @@ cw_client_printf(cw_client_t *client, bool immediate, uint32_t expect_sz, const 
 void
 cw_session_send(ct_session_t *session, buf16_item_t *frame);
 
-static inline ret_t
+static inline ret_t P_UNUSED_OK
 cw_session_printf(ct_session_t *session, uint32_t expect_sz, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);

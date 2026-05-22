@@ -229,7 +229,7 @@ struct ct_client_ctx {
  * @param payload_item              payload 所属 buf_item。如果该值为 NULL，则会分配新的 buf_item（无法零拷贝）
  * @return
  */
-static inline buf16_item_t*
+static inline buf16_item_t* P_UNUSED_OK
 ct_forward_payload(ct_client_t *client,
                    const uint8_t* payload, uint32_t payload_len, uint16_t payload_offset,
                    buf16_item_t *payload_item) {
