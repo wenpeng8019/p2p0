@@ -843,7 +843,7 @@ void compact_on_peer_sync0(struct p2p_session *s,
     // 排重
     if (!sess_ctx->remote_candidates_0) {
 
-        if (p2p_remote_cands_reserve(s, cand_cnt) != E_NONE) {
+        if (p2p_remote_cands_reserve(s, s->remote_cand_cnt + cand_cnt) != E_NONE) {
             print("E:", LA_F("Failed to reserve remote candidates (cnt=%d)\n", LA_F311, 311), cand_cnt);
             return;
         }
