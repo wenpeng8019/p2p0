@@ -336,7 +336,7 @@ static void disconnect(struct p2p_session *s) {
     // COMPACT 信令模式：取消与对方在服务器上的注册，OFF
     if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
 
-        p2p_signal_compact_disconnect(s);
+        p2p_signal_compact_fin(s);
     }
     // RELAY 信令模式：
     else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
@@ -570,7 +570,7 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
                 inst->state = P2P_SIG_ST_ERROR;
                 break;
             }
-            if ((ret = p2p_signal_compact_online(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
+            if ((ret = p2p_signal_compact_reg(inst, inst->local_peer_id, &server_addr)) != E_NONE) {
                 print("E:", LA_F("Connect to COMPACT signaling server failed(%d)", LA_F292, 292), ret);
                 inst->state = P2P_SIG_ST_ERROR;
                 break;
@@ -639,7 +639,7 @@ p2p_destroy(p2p_handle_t hdl) {
     if (inst->sig_mode == P2P_SIGNALING_MODE_COMPACT &&
         inst->sig_ctx.compact.state != SIG_COMPACT_INIT) {
         print("I:", LA_F("Sending OFF packet to COMPACT signaling server", LA_F410, 410));
-        p2p_signal_compact_offline(inst);
+        p2p_signal_compact_off(inst);
     }
     else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY &&
              inst->sig_ctx.relay.state != SIG_RELAY_INIT) {
@@ -843,7 +843,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
 
             if (!s->sig_sess.compact.remote_peer_id[0])
                 print("I:", LA_F("Starting COMPACT session with %s", LA_F420, 420), remote_peer_id);
-            if ((ret = p2p_signal_compact_connect(s, remote_peer_id)) != E_NONE)
+            if ((ret = p2p_signal_compact_syn0(s, remote_peer_id)) != E_NONE)
                 print("E:", LA_F("Start COMPACT session failed(%d)", LA_F416, 416), ret);
 
             // 无需 client 是否已经 online，这里都是 signaling，因为会话需要注册
@@ -1554,7 +1554,7 @@ p2p_request(p2p_session_t session, uint8_t msg, const void *data, int len) {
     LOCK(s);
     int ret;
     if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
-        ret = p2p_signal_compact_request(s, msg, data, len);
+        ret = p2p_signal_compact_req(s, msg, data, len);
     else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
         ret = p2p_signal_relay_request(s, msg, data, len);
     else
@@ -1572,7 +1572,7 @@ p2p_response(p2p_session_t session, uint8_t code, const void *data, int len) {
     LOCK(s);
     int ret;
     if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT)
-        ret = p2p_signal_compact_response(s, code, data, len);
+        ret = p2p_signal_compact_rsp(s, code, data, len);
     else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
         ret = p2p_signal_relay_response(s, code, data, len);
     else

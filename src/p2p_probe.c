@@ -203,7 +203,7 @@ static void probe_compact_tick(struct p2p_session *s, uint64_t now_ms) {
         case PROBE_COMPACT_PHASE_SENDING: {
 
             print("I:", LA_F("%s: sent MSG(msg=0, sid=%u)", LA_F235, 235), TASK_RELAY_PROBE, ctx->mode.compact.sid);
-            ret_t ret = p2p_signal_compact_request(s, 0, NULL, 0);
+            ret_t ret = p2p_signal_compact_req(s, 0, NULL, 0);
             if (ret != E_NONE) {
                 ctx->mode.compact.phase = PROBE_COMPACT_PHASE_WAIT_ECHO;
                 ctx->mode.compact.sid   = s->sig_sess.compact.req_sid;

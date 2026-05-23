@@ -31,7 +31,7 @@
  * 实例 ID 机制 (instance_id)
  * ============================================================================
  *
- * 每次调用 online() 时生成新的 32 位随机数 instance_id（参考 RTP SSRC）。
+ * 每次调用 reg() 时生成新的 32 位随机数 instance_id（参考 RTP SSRC）。
  * 服务器处理逻辑：
  *   - 相同 (peer_id, instance_id) → 重传，幂等处理
  *   - 相同 peer_id 但不同 instance_id → 客户端重启，重置旧会话，通知对端下线
@@ -40,26 +40,26 @@
  * 状态机（两阶段设计）
  * ============================================================================
  *
- *   阶段1: online() / offline()
+ *   阶段1: reg() / off()
  *   ┌────────────────────────────────────────────────────────────────────────────┐
- *   │  INIT ──→ WAIT_REG_ACK ──→ REG          ← disconnect() 回退到此     │
- *   │                           ↘ (connect() 已调用，REG_ACK 直接到阶段2)    │
+ *   │  INIT ──→ WAIT_REG_ACK ──→ REG          ← fin() 回退到此                   │
+ *   │                           ↘ (syn0() 已调用，REG_ACK 直接到阶段2)          │
  *   └────────────────────────────────────────────────────────────────────────────┘
- *                              ↓ connect()（REG 状态立即发 SYN0）
- *   阶段2: connect() / disconnect()
+ *                              ↓ syn0()（REG 状态立即发 SYN0）
+ *   阶段2: syn0() / fin()
  *   ┌──────────────────────────────────────────────────────────────────────────┐
  *   │  WAIT_SYN0_ACK ──→ WAIT_PEER ──→ SYNCING ──→ READY                     │
  *   └──────────────────────────────────────────────────────────────────────────┘
  *
  *   - INIT:            未启动
  *   - WAIT_REG_ACK: 已发送 REG，等待 REG_ACK（获取 auth_key）
- *   - REG:          已收到 REG_ACK（auth_key 有效），等待 connect() 触发 SYN0
+ *   - REG:          已收到 REG_ACK（auth_key 有效），等待 syn0() 触发 SYN0
  *   - WAIT_SYN0_ACK:  已发送 SYN0，等待 SYN0_ACK（获取 session_id）
  *   - WAIT_PEER:       已分配 session_id，等待对端上线（服务器下发 SYNC seq=0）
  *   - SYNCING:         候选同步中（接收/发送 SYNC）
  *   - READY:           候选同步完成，开始 P2P 打洞
  *
- * connect() 可先于 REG_ACK 调用（仅存储 remote_peer_id），
+ * syn0() 可先于 REG_ACK 调用（仅存储 remote_peer_id），
  * 收到 REG_ACK 后自动触发 SYN0（懒触发，与 RELAY 模式一致）。
  *
  * ============================================================================
@@ -128,8 +128,8 @@ typedef struct {
     int                 sig_sessions;                       /* 正在使用信令服务器的会话（sync0/sync），该值不为 0 则无需 keep-alive */
 
     /* 和服务器的会话 */
-    char                local_peer_id[P2P_PEER_ID_MAX];     /* 本端 ID */
-    uint32_t            instance_id;                        /* 本次 connect() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
+    char                local_peer_id[P2P_PEER_ID_MAX+1];   /* 本端 ID */
+    uint32_t            instance_id;                        /* 本次 syn0() 生成的随机实例 ID（非零，参考 RTP SSRC）*/
     uint64_t            auth_key;                           /* 客户端-服务器认证令牌（64位，0=尚未分配），在 REG_ACK 中获得，用于 SYN0/ALIVE */
 
     /* REG_ACK 返回的信息 */
@@ -149,8 +149,8 @@ typedef struct {
 
 typedef enum {
     SIG_COMPACT_SESS_SUSPENDED = 0,                         /* 挂起的 session，连接过程超时挂起。报错逻辑统一在 p2p_compact_ctx_t 中处理 */
-    SIG_COMPACT_SESS_WAIT_REG,                           /* 执行 connect() 创建了 session，但信令服务还未完成在线登录 */
-    SIG_COMPACT_SESS_WAIT_SYN0_ACK,                        /* 已发送 SYN0，等待 SYN0_ACK */
+    SIG_COMPACT_SESS_WAIT_REG,                              /* 执行 syn0() 创建了 session，但信令服务还未完成在线登录 */
+    SIG_COMPACT_SESS_WAIT_SYN0_ACK,                         /* 已发送 SYN0，等待 SYN0_ACK */
     SIG_COMPACT_SESS_WAIT_PEER,                             /* 已收到 SYN0_ACK（获得 session_id）但 online=0，等待 PEER SYNC */
     SIG_COMPACT_SESS_SYNCING,                               /* 收到 PEER SYN0 或 SYN0_ACK online=1，向对方同步后续候选队列和 FIN */
     SIG_COMPACT_SESS_READY                                  /* 已完成向对方发送包括 FIN 在内的所有候选队列包，并得到确认 */
@@ -163,7 +163,7 @@ typedef struct {
     uint64_t            sync_send_time;                     /* 上次 SYN0/SYNC 发送时间（用于重传控制）*/
     int                 sync_attempts;                      /* SYN0/SYNC 总共尝试次数 */
 
-    char                remote_peer_id[P2P_PEER_ID_MAX];    /* 对端 ID */
+    char                remote_peer_id[P2P_PEER_ID_MAX+1];  /* 对端 ID */
 
     /* 候选同步管理 */
     int                 candidates_cached;                  /* 提交到服务器缓存的本地候选队列数量（REG_ACK 中 max_candidates 限制）*/
@@ -251,7 +251,7 @@ void p2p_signal_compact_nat_detect_tick(struct p2p_instance *inst, uint64_t now)
  * @param server        服务器地址
  * @return              E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_compact_online(struct p2p_instance *inst, const char *local_peer_id,
+ret_t p2p_signal_compact_reg(struct p2p_instance *inst, const char *local_peer_id,
                                 const struct sockaddr_in *server);
 
 /*
@@ -260,7 +260,7 @@ ret_t p2p_signal_compact_online(struct p2p_instance *inst, const char *local_pee
  * @param s 会话对象
  * @return  E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_compact_offline(struct p2p_instance *inst);
+ret_t p2p_signal_compact_off(struct p2p_instance *inst);
 
 //-----------------------------------------------------------------------------
 
@@ -268,21 +268,21 @@ ret_t p2p_signal_compact_offline(struct p2p_instance *inst);
  * 阶段2：建立与对端的会话（发送 SYN0，建立 client↔peer 关系，获取 session_id）
  *
  * 若尚未收到 REG_ACK（WAIT_REG_ACK 状态），将在收到后自动触发 SYN0。
- * 前提：必须已经调用过 online()。
+ * 前提：必须已经调用过 reg()。
  *
  * @param s              会话对象
  * @param remote_peer_id 目标对端 ID
  * @return               E_NONE=成功，E_NONE_CONTEXT=未上线，E_BUSY=已连接其他对端，其他=错误码
  */
-ret_t p2p_signal_compact_connect(struct p2p_session *s, const char *remote_peer_id);
+ret_t p2p_signal_compact_syn0(struct p2p_session *s, const char *remote_peer_id);
 
 /*
- * 阶段2：断开与对端的会话（发送 OFF，清理 peer 会话，回到 REG 等待下次 connect()）
+ * 阶段2：断开与对端的会话（发送 FIN，清理 peer 会话，回到 REG 等待下次 syn0()）
  *
  * @param s 会话对象
  * @return  E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_compact_disconnect(struct p2p_session *s);
+ret_t p2p_signal_compact_fin(struct p2p_session *s);
 
 /*
  * 本地候选异步补发入口（支持 STUN/TURN）
@@ -316,8 +316,8 @@ ret_t p2p_signal_compact_relay(struct p2p_session *s,
  * @param len   数据长度
  * @return      0=已加入发送队列，-1=失败（不支持/已有挂起/参数错误/未注册）
  */
-ret_t p2p_signal_compact_request(struct p2p_session *s,
-                                 uint8_t msg, const void *data, int len);
+ret_t p2p_signal_compact_req(struct p2p_session *s,
+                             uint8_t msg, const void *data, int len);
 
 /*
  * 回复对端的 MSG 请求（B 端）。
@@ -328,8 +328,8 @@ ret_t p2p_signal_compact_request(struct p2p_session *s,
  * @param len   数据长度
  * @return      0=已加入发送队列，-1=失败（参数错误/无挂起请求）
  */
-ret_t p2p_signal_compact_response(struct p2p_session *s,
-                                  uint8_t code, const void *data, int len);
+ret_t p2p_signal_compact_rsp(struct p2p_session *s,
+                             uint8_t code, const void *data, int len);
 
 //-----------------------------------------------------------------------------
 

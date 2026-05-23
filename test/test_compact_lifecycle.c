@@ -5,7 +5,7 @@
  * 测试目标
  * ============================================================================
  * 验证 p2p_server 对 COMPACT 协议生命周期相关包的处理逻辑：
- * - ALIVE / ALIVE_ACK 保活机制
+ * - ALV / ALV_ACK 保活机制
  * - OFF 主动注销
  * - PEER_OFF 对端离线通知
  *
@@ -25,10 +25,10 @@
  * ---------------------------------------------------------------------------
  *
  * 测试 1: alive_keepalive
- *   目标：验证 ALIVE 包正常情况下 server 回复 ALIVE_ACK
+ *   目标：验证 ALIVE 包正常情况下 server 回复 ALV_ACK
  *   方法：注册后发送 ALIVE 包
  *   预期：
- *     - 收到 ALIVE_ACK 回复
+ *     - 收到 ALV_ACK 回复
  *     - server 日志含 "ALIVE accepted"
  *
  * 测试 2: alive_updates_activity
@@ -59,7 +59,7 @@
  *   目标：验证 server 对无效 session_id 的 ALIVE 包处理
  *   方法：发送包含不存在 session_id 的 ALIVE 包
  *   预期：
- *     - 不收到 ALIVE_ACK
+ *     - 不收到 ALV_ACK
  *     - 不触发异常
  *
  * 测试 6: unregister_bad_payload
@@ -318,7 +318,7 @@ static uint64_t register_peer(sock_t sock, const char *local, const char *remote
     return 0;
 }
 
-// 发送 ALIVE 并等待 ALIVE_ACK
+// 发送 ALIVE 并等待 ALV_ACK
 static int send_alive_and_wait_ack(sock_t sock, uint64_t auth_key) {
     uint8_t pkt[16];
     int len = build_alive(pkt, sizeof(pkt), auth_key);
@@ -422,7 +422,7 @@ static void test_alive_keepalive(void) {
     P_sock_close(sock);
     
     if (!got_ack) {
-        TEST_FAIL(TEST_NAME, "no ALIVE_ACK received");
+        TEST_FAIL(TEST_NAME, "no ALV_ACK received");
         return;
     }
     

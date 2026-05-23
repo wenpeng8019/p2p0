@@ -984,7 +984,7 @@ void compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct so
             alive_client->base.last_active = P_tick_ms();
             check_addr_change(alive_client, from);
 
-            {   const char* ACK_PROTO = "ALIVE_ACK";
+            {   const char* ACK_PROTO = "ALV_ACK";
 
                 uint8_t ack[4];
                 p2p_pkt_hdr_encode(ack, SIG_PKT_ALV_ACK, 0, 0);

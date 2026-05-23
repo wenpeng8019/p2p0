@@ -510,13 +510,13 @@ static void handle_online_ack(struct p2p_instance *inst, const uint8_t *payload,
 }
 
 /*
- * 处理 ALIVE_ACK，服务器保活确认
+ * 处理 ALV_ACK，服务器保活确认
  *
- * 包头: [type(P2P_RLY_ALIVE_ACK) | size(2)]
+ * 包头: [type(P2P_RLY_ALV_ACK) | size(2)]
  * 负载: 无
  */
 void handle_alive_ack(struct p2p_instance *inst, uint64_t now) {
-    const char* PROTO = "ALIVE_ACK";
+    const char* PROTO = "ALV_ACK";
 
     p2p_relay_ctx_t *sig_ctx = &inst->sig_ctx.relay;
     if (sig_ctx->state < SIG_RELAY_REG) {
@@ -526,7 +526,7 @@ void handle_alive_ack(struct p2p_instance *inst, uint64_t now) {
 
     print("V:", LA_F("%s: accepted\n", LA_F116, 116), PROTO);
 
-    // 通知路径管理器：ALIVE_ACK 确认（seq=0），完成 RoundTrip 测量
+    // 通知路径管理器：ALV_ACK 确认（seq=0），完成 RoundTrip 测量
     // 仅当 SIGNALING 作为 relay 路径被启用时才统计 RTT
     if (inst->signaling.active) {
         path_manager_on_sig_alive_recv(inst, now);
