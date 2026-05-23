@@ -37,7 +37,7 @@
 // 命令行参数定义
 ARGS_I(false, port,         'p', "port",       LA_CS("Signaling server listen port (TCP+UDP)", LA_S9, 9));
 ARGS_I(false, probe_port,   'P', "probe-port", LA_CS("NAT type detection port (0=disabled)", LA_S6, 6));
-ARGS_I(false, client_timeout,'t', "client-timeout", "Client timeout cleanup in seconds");
+ARGS_I(false, dead_timeout, 'd', "client-timeout", "Client timeout cleanup in seconds");
 #ifdef WITH_WS
 ARGS_B(false, ws,           'w', "ws",         LA_CS("Enable WebSocket service on same TCP port", LA_S150, 150));
 ARGS_I(false, ws_port,      'W', "ws-port",    LA_CS("WebSocket dedicated port (also enables --ws)", LA_S151, 151));
@@ -673,7 +673,7 @@ int main(int argc, char *argv[]) {
         ARGS_parse(argc, argv,
             &ARGS_DEF_port,
             &ARGS_DEF_probe_port,
-            &ARGS_DEF_client_timeout,
+            &ARGS_DEF_dead_timeout,
             &ARGS_DEF_relay,
             &ARGS_DEF_msg,
             &ARGS_DEF_ws,
@@ -687,7 +687,7 @@ int main(int argc, char *argv[]) {
 
     // 获取参数值（设置默认值）
     int port = ARGS_port.i64 ? (int)ARGS_port.i64 : DEFAULT_PORT;
-    if (!ARGS_client_timeout.i64) ARGS_client_timeout.i64 = DEFAULT_CLIENT_TIMEOUT_S;
+    if (!ARGS_dead_timeout.i64) ARGS_dead_timeout.i64 = DEFAULT_CLIENT_TIMEOUT_S;
 
     // 验证端口范围
     if (port <= 0 || port > 65535) {
@@ -726,7 +726,7 @@ int main(int argc, char *argv[]) {
     print("I:", LA_F("NAT probe: %s (port %d)\n", LA_F92, 92), 
           ARGS_probe_port.i64 > 0 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1), 
           (int)ARGS_probe_port.i64);
-        print("I:", "Client timeout: %u sec\n", (unsigned)ARGS_client_timeout.i64);
+        print("I:", "Client timeout: %u sec\n", (unsigned)ARGS_dead_timeout.i64);
     print("I:", LA_F("Relay support: %s\n", LA_F102, 102), 
           ARGS_relay.i64 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
 #ifdef WITH_WS
@@ -899,7 +899,7 @@ int main(int argc, char *argv[]) {
                 if (m < 0) continue;
 
                 // client 超时淘汰检测
-                if (tick_diff(now, CLIENTS(i)->last_active) >= (uint64_t)ARGS_client_timeout.i64 * 1000u) {
+                if (tick_diff(now, CLIENTS(i)->last_active) >= (uint64_t)ARGS_dead_timeout.i64 * 1000u) {
                     print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F73, 73),
                           CLIENTS(i)->local_peer_id, tick_diff(now, CLIENTS(i)->last_active) / 1000.0);
                     if (m >= 0 && m < PROTO_NUM) free_client(CLIENTS(i));

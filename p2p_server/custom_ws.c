@@ -21,7 +21,7 @@
 
 #include "custom_ws.h"
 
-ARGS(client_timeout);
+ARGS(dead_timeout);
 
 // HTTP 握手 recv 缓冲大小（存放 HTTP 请求 header，流模式 recv_buf 使用 2K）
 #define CW_HTTP_BUF_FLAGS           BUF_FLAG_2048(0)
@@ -634,7 +634,7 @@ ret_t cw_close(cw_client_t *client, uint16_t code, const char* reason/* nullable
 
 void cw_retry_closing(cw_client_t *client, uint64_t now) {
     if ((client->io & CW_IO_FLAG_CLOSING) &&
-        tick_diff(now, client->base.last_active) >= (uint64_t)ARGS_client_timeout.i64 * 1000u) {
+        tick_diff(now, client->base.last_active) >= (uint64_t)ARGS_dead_timeout.i64 * 1000u) {
         print("I:", LA_F("[WS] close timeout, force closing\n", LA_F192, 192));
         free_client(&client->base);
     }

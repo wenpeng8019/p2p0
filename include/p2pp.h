@@ -1702,100 +1702,100 @@ typedef struct {
  * 1. 上线流程（建立 WebSocket 连接）
  * ────────────────────────────────────────────────────────────────────────────
  *
- *   Client                        Server
- *   │                                │
- *   ├── WebSocket Connect ─────────►│  HTTP Upgrade → WS
- *   │                                │
- *   ├── "REG alice\n" ─────────────►│  创建 wss_client_t
- *   │                                │  peer_id="alice", cid=N
- *   │◄── "REG OK <sync_max>\n" ─────┤
- *   │                                │
- *   [进入 REG 状态]                  │
- *   │                                │
- *   [WebSocket 自身的 PING/PONG]     │  (保活由 WS 协议层处理)
+ *   Client                              Server
+ *   │                                      │
+ *   ├── WebSocket Connect ───────────────►│  HTTP Upgrade → WS
+ *   │                                      │
+ *   ├── "REG alice\n" ───────────────────►│  创建 wss_client_t
+ *   │                                      │  peer_id="alice", cid=N
+ *   │◄── "REG OK <sync_max>\n" ───────────┤
+ *   │                                      │
+ *   [进入 REG 状态]                        │
+ *   │                                      │
+ *   [WebSocket 自身的 PING/PONG]           │  (保活由 WS 协议层处理)
  *
  * 2. 会话建立（首方离线等待）
  * ────────────────────────────────────────────────────────────────────────────
  *
- *   Alice                         Server                          Bob (离线)
- *   │                                │                                │
- *   ├── "SYN0 bob\nICE\n...\n" ────►│  build_session("alice","bob")  │
- *   │                                │  pair 创建，side=0             │
- *   │                                │  remote_s=NULL (bob 未注册)    │
- *   │                                │  缓存 alice 的 payload         │
- *   │◄── "SYN0 bob 0000002A offline\n" ───┤                          │
- *   │                                │                                │
- *   [等待 SYN0 bob 0000002A online]  │                                │
+ *   Alice                               Server                          Bob (离线)
+ *   │                                      │                                │
+ *   ├── "SYN0 bob\nICE\n...\n" ──────────►│  build_session("alice","bob")  │
+ *   │                                      │  pair 创建，side=0             │
+ *   │                                      │  remote_s=NULL (bob 未注册)    │
+ *   │                                      │  缓存 alice 的 payload         │
+ *   │◄── "SYN0 bob 0000002A offline\n" ───┤                                │
+ *   │                                      │                                │
+ *   [等待 SYN0 bob 0000002A online]        │                                │
  *
  * 3. 会话配对（对端上线 + 双向通知）
  * ────────────────────────────────────────────────────────────────────────────
  *
  *   Alice                         Server                             Bob
- *   │                                │                                │
- *   │                                │◄── "REG bob\n" ───────────────┤
- *   │                                │  创建 wss_client_t             │
- *   │                                ├── "REG OK <sync_max>\n" ─────►│
- *   │                                │                                │
- *   │                                │◄── "SYN0 alice\nICE\n...\n" ──┤
- *   │                                │  build_session("bob","alice")  │
- *   │                                │  pair 找到，side=1             │
- *   │                                │  remote_s=alice's session      │
- *   │                                │  → 双向配对 + 交换缓存        │
- *   │                                │                                │
- *   │◄─ "SYN0 bob 0000002A online\nICE\n...\n" ─┤  (推送给 alice, 含 bob 的 sid=0 payload)
- *   │                                ├─ "SYN0 alice 0000002B online\nICE\n...\n" ─►│
- *   │                                │   (应答给 bob, 含 alice 的 sid=0 payload)
- *   │                                │                                │
- *   [处理 bob 的 sid=0 候选]         │ [处理 alice 的 sid=0 候选]
+ *   │                                            │                                              │
+ *   │                                            │◄── "REG bob\n" ─────────────────────────────┤
+ *   │                                            │  创建 wss_client_t                           │
+ *   │                                            ├── "REG OK <sync_max>\n" ───────────────────►│
+ *   │                                            │                                              │
+ *   │                                            │◄── "SYN0 alice\nICE\n...\n" ────────────────┤
+ *   │                                            │  build_session("bob","alice")                │
+ *   │                                            │  pair 找到，side=1                           │
+ *   │                                            │  remote_s=alice's session                    │
+ *   │                                            │  → 双向配对 + 交换缓存                      │
+ *   │                                            │                                              │
+ *   │◄─ "SYN0 bob 0000002A online\nICE\n...\n" ─┤  (推送给 alice, 含 bob 的 sid=0 payload)     |
+ *   │                                            ├─ "SYN0 alice 0000002B online\nICE\n...\n" ─►│
+ *   │                                            │   (应答给 bob, 含 alice 的 sid=0 payload)    |
+ *   │                                            │                                              │
+ *   [处理 bob 的 sid=0 候选]                     │ [处理 alice 的 sid=0 候选]                   │
  *
  * 4. 同步交换 ICE 候选（alice sid=42, bob sid=43）
  * ────────────────────────────────────────────────────────────────────────────
  *
- *   Alice                         Server                             Bob
- *   │                                │                                │
- *   ├──── "SYNC 0000002A 2A\nICE\n...\n" ───►│ sid=2A → 配对 → bob sid=2B │
- *   │◄── "SYNC 0000002A 2A confirm\n" ────┤                                │
- *   │                                ├──── "SYNC 0000002B 2B\nICE\n...\n" ───►│
- *   │                                │                                │
- *   │                                │◄── "SYNC 0000002B 2B\nICE\n...\n" ─────┤
- *   │                                ├──── "SYNC 0000002B 2B confirm\n" ──►│
- *   │◄── "SYNC 0000002A 2A\nICE\n...\n" ─────┤ sid=2B → 配对 → alice sid=2A │
- *   │                                │                                │
- *   ├──── "SYNC 0000002A 2A\nICE_DONE\n" ───►│                        │
- *   │◄── "SYNC 0000002A 2A confirm\n" ─────┤                        │
- *   │                                ├──── "SYNC 0000002B 2B\nICE_DONE\n" ───►│
- *   │                                │                                │
- *   │                                │◄── "SYNC 0000002B 2B\nICE_DONE\n" ─────┤
- *   │                                ├──── "SYNC 0000002B 2B confirm\n" ───►│
- *   │◄── "SYNC 0000002A 2A\nICE_DONE\n" ─────┤                        │
- *   │                                │                                │
- *   │◄════════════════════════ P2P ICE 打洞 ═══════════════════════►│
+ *   Alice                                     Server                                     Bob
+ *   │                                            │                                              │
+ *   ├──── "SYNC 0000002A 2A\nICE\n...\n" ──────►│ sid=2A → 配对 → bob sid=2B                 │
+ *   │◄── "SYNC 0000002A 2A confirm\n" ──────────┤                                              │
+ *   │                                            ├──── "SYNC 0000002B 2B\nICE\n...\n" ────────►│
+ *   │                                            │                                              │
+ *   │                                            │◄── "SYNC 0000002B 2B\nICE\n...\n" ──────────┤
+ *   │                                            ├──── "SYNC 0000002B 2B confirm\n" ──────────►│
+ *   │◄── "SYNC 0000002A 2A\nICE\n...\n" ────────┤ sid=2B → 配对 → alice sid=2A               │
+ *   │                                            │                                              │
+ *   ├──── "SYNC 0000002A 2A\nICE_DONE\n" ──────►│                                              │
+ *   │◄── "SYNC 0000002A 2A confirm\n" ──────────┤                                              │
+ *   │                                            ├──── "SYNC 0000002B 2B\nICE_DONE\n" ────────►│
+ *   │                                            │                                              │
+ *   │                                            │◄── "SYNC 0000002B 2B\nICE_DONE\n" ──────────┤
+ *   │                                            ├──── "SYNC 0000002B 2B confirm\n" ──────────►│
+ *   │◄── "SYNC 0000002A 2A\nICE_DONE\n" ────────┤                                              │
+ *   │                                            │                                              │
+ *   │◄════════════════════════════════════ P2P ICE 打洞 ═════════════════════════════════════►│
  *
  * 5. 断线重连（会话保留 + 自动恢复）
  * ────────────────────────────────────────────────────────────────────────────
  *
- *   Alice                         Server                             Bob
- *   │                                │                                │
- *   │                                │  Bob WS 断开                   ╳
- *   │                                │  bob.cid = -1 (标记离线)       │
- *   │                                │  bob 会话保留                  │
- *   │◄── "FIN 42\n" ────────────────┤                                │
- *   │                                │                                │
- *   [暂停向 bob 发送 SYNC]           │     ... 网络恢复 ...           │
- *   │                                │                                │
- *   │                                │◄── WebSocket Connect ─────────┤
- *   │                                │◄── "REG bob\n" ───────────────┤
- *   │                                │  复用 wss_client_t             │
- *   │                                │  更新 cid，保留会话            │
- *   │                                ├── "REG OK <sync_max>\n" ─────►│
- *   │                                │                                │
- *   │                                │  遍历 bob 的已配对会话         │
- *   │                                │  推送 online，并把预缓存直接附着在 SYN0 内 │
- *   │◄── "SYN0 bob 0000002A online\nICE\n...\n" ─┤                 │
- *   │                                ├── "SYN0 alice 0000002B online\nICE\n...\n" ►│
- *   │                                │                                │
- *       [重新发起 ICE 候选交换]      │    [重新发起 ICE 候选交换]
- *   ├── "SYNC 0000002A 2A\nICE\n...\n" ─────►│  ...
+ *   Alice                                      Server                                          Bob
+ *   │                                            │                                              │
+ *   │                                            │  Bob WS 断开                                 ╳
+ *   │                                            │  bob.cid = -1 (标记离线)                     │
+ *   │                                            │  bob 会话保留                                │
+ *   │◄─ "FIN 42\n" ─────────────────────────────┤                                              │
+ *   │                                            │                                              │
+ *   [暂停向 bob 发送 SYNC]                       │     ... 网络恢复 ...                         │
+ *   │                                            │                                              │
+ *   │                                            │◄── WebSocket Connect ───────────────────────┤
+ *   │                                            │◄── "REG bob\n" ─────────────────────────────┤
+ *   │                                            │  复用 wss_client_t                           │
+ *   │                                            │  更新 cid，保留会话                          │
+ *   │                                            ├─ "REG OK <sync_max>\n" ────────────────────►│
+ *   │                                            │                                              │
+ *   │                                            │  遍历 bob 的已配对会话                       │
+ *   │                                            │  推送 online，并把预缓存直接附着在 SYN0 内   │
+ *   │◄─ "SYN0 bob 0000002A online\nICE\n...\n" ─┤                                              │
+ *   │                                            ├─ "SYN0 alice 0000002B online\nICE\n...\n" ─►│
+ *   │                                            │                                              │
+ *       [重新发起 ICE 候选交换]                  │    [重新发起 ICE 候选交换]
+ *   ├── "SYNC 0000002A 2A\nICE\n...\n" ────────►│  ...
  *
  * 6. 超时清理（离线过久，释放资源）
  * ────────────────────────────────────────────────────────────────────────────

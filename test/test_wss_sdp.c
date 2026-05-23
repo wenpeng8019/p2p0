@@ -437,7 +437,7 @@ int main(int argc, char **argv) {
     /* ---- 10. 清理 ---- */
     ws_client_destroy(cli);
     stop_server(&sp);
-    printf("[\xe9\x80\x80\xe5\x87\xba] \xe6\xb8\x85\xe7\x90\x86\xe5\xae\x8c\xe6\xaf\x95\xe3\x80\x82\n");
+    printf("[退出] 清理完毕。\n");
     return 0;
 }
 
