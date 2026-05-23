@@ -247,7 +247,7 @@ static void send_reg(struct p2p_instance *inst, p2p_compact_ctx_t *sig_ctx, uint
  *   - remote_peer_id: 目标对端 ID
  *   - candidate_count: 首批候选数量（最多 candidates_cached 个）
  */
-static void send_sync0(struct p2p_instance *inst, struct p2p_session *s, uint64_t now) {
+static void send_syn0(struct p2p_instance *inst, struct p2p_session *s, uint64_t now) {
     const char* PROTO = "SYN0";
 
     assert(s->inst == inst && !s->id);
@@ -661,7 +661,7 @@ void compact_on_reg_ack(struct p2p_instance *inst, uint16_t seq, uint8_t flags,
         assert(sess_ctx->remote_peer_id[0] && sess_ctx->state == SIG_COMPACT_SESS_WAIT_REG);
 
         sess_ctx->state = SIG_COMPACT_SESS_WAIT_SYN0_ACK;
-        send_sync0(inst, s, P_tick_ms());
+        send_syn0(inst, s, P_tick_ms());
         sess_ctx->sync_attempts = 1;
         print("I:", LA_F("REG: auth_key acquired, auto SYN0 sent\n", LA_F368, 368));
 
@@ -1718,7 +1718,7 @@ ret_t p2p_signal_compact_syn0(struct p2p_session *s, const char *remote_peer_id)
     if (sig_ctx->state == SIG_COMPACT_REG) {
 
         ssss_ctx->state = SIG_COMPACT_SESS_WAIT_SYN0_ACK;
-        send_sync0(s->inst, s, P_tick_ms());
+        send_syn0(s->inst, s, P_tick_ms());
         ssss_ctx->sync_attempts = 1;
     }
     else ssss_ctx->state = SIG_COMPACT_SESS_WAIT_REG;
@@ -1970,7 +1970,7 @@ void p2p_signal_compact_tick_recv(struct p2p_instance *inst, uint64_t now) {
                     print("I:", LA_F("SYN0: retry, (attempt %d/%d)\n", LA_F403, 403),
                           sess_ctx->sync_attempts, MAX_SIG_ATTEMPTS);
 
-                    send_sync0(inst, s, now);
+                    send_syn0(inst, s, now);
                 }
                 else {
 

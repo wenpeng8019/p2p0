@@ -184,7 +184,7 @@ typedef struct {
     int                 trickle_sessions;               /* 当前正在进行 trickle sync 的会话数量，该值为 0 则无需攒批检测 */
 
     /* 身份标识 */
-    char                local_peer_id[P2P_PEER_ID_MAX]; /* 本端名称 */
+    char                local_peer_id[P2P_PEER_ID_MAX+1]; /* 本端名称 */
     uint32_t            instance_id;                    /* 本次 online() 生成的实例 ID（参考 RTP SSRC）*/
 
     /* 服务器能力（REG_ACK 返回）*/
@@ -227,7 +227,7 @@ typedef enum {
 typedef struct {
     p2p_relay_sess_st   state;                          /* 会话状态 */
 
-    char                remote_peer_id[P2P_PEER_ID_MAX];/* 目标名称 */
+    char                remote_peer_id[P2P_PEER_ID_MAX+1];/* 目标名称 */
 
     /* 候选同步管理 */
     uint16_t            candidate_syncing_base;         /* 下一个要同步发送的候选索引。该值大于 session 的 local_cand_cnt，则说明已经 fin */
@@ -297,7 +297,7 @@ void p2p_signal_relay_tick_send(struct p2p_instance *inst, uint64_t now);
  * @param server        服务器地址
  * @return              E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_relay_online(struct p2p_instance *inst, const char *local_peer_id,
+ret_t p2p_signal_relay_reg(struct p2p_instance *inst, const char *local_peer_id,
                               const struct sockaddr_in *server);
 
 /*
@@ -309,7 +309,7 @@ ret_t p2p_signal_relay_online(struct p2p_instance *inst, const char *local_peer_
  * @param s   P2P 会话
  * @return    E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_relay_offline(struct p2p_instance *inst);
+ret_t p2p_signal_relay_off(struct p2p_instance *inst);
 
 //-----------------------------------------------------------------------------
 
@@ -337,7 +337,7 @@ void p2p_signal_relay_trickle_candidate(struct p2p_session *s);
  * @param remote_peer_id 目标对端名称
  * @return              E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id);
+ret_t p2p_signal_relay_syn0(struct p2p_session *s, const char *remote_peer_id);
 
 /*
  * 断开当前会话（阶段2：发送 FIN 消息）
@@ -349,7 +349,7 @@ ret_t p2p_signal_relay_connect(struct p2p_session *s, const char *remote_peer_id
  * @param s   P2P 会话
  * @return    E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
+ret_t p2p_signal_relay_fin(struct p2p_session *s);
 
 /*
  * 通过 RELAY 服务器转发数据包（DATA/ACK/CRYPTO）
@@ -371,7 +371,7 @@ ret_t p2p_signal_relay_disconnect(struct p2p_session *s);
  * @param payload_len 负载长度
  * @return            E_NONE=成功，E_BUSY=流控等待，其他=错误码
  */
-ret_t p2p_signal_relay_packet(struct p2p_session *s,
+ret_t p2p_signal_relay_pkt(struct p2p_session *s,
                               uint8_t type, uint8_t flags, uint16_t seq,
                               const void *payload, uint16_t payload_len);
 
@@ -384,7 +384,7 @@ ret_t p2p_signal_relay_packet(struct p2p_session *s,
  * @param len  数据长度
  * @return     E_NONE=成功，E_BUSY=已有挂起请求，其他=错误码
  */
-ret_t p2p_signal_relay_request(struct p2p_session *s,
+ret_t p2p_signal_relay_req(struct p2p_session *s,
                                uint8_t msg, const void *data, int len);
 
 /*
@@ -396,7 +396,7 @@ ret_t p2p_signal_relay_request(struct p2p_session *s,
  * @param len  数据长度
  * @return     E_NONE=成功，其他=错误码
  */
-ret_t p2p_signal_relay_response(struct p2p_session *s,
+ret_t p2p_signal_relay_rsp(struct p2p_session *s,
                                 uint8_t code, const void *data, int len);
 
 
