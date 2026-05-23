@@ -45,6 +45,8 @@ static bool wss_parse_sync_headline(const uint8_t *text, size_t len, uint32_t *s
     }
 
     return p == end;
+    // 这里只解析 SYNC 首行主体："<session_id_hex> <sid_hex> [confirm]"。
+    // 调用方必须先跳过前缀 "SYNC "，并且排除换行后的 payload。
 }
 
 static bool wss_item_text(const buf16_item_t *item, const uint8_t **text, size_t *len) {
@@ -68,10 +70,18 @@ static bool wss_item_text(const buf16_item_t *item, const uint8_t **text, size_t
 static bool wss_item_sync_sid(const buf16_item_t *item, uint8_t *sid) {
     const uint8_t *text = NULL;
     size_t len = 0;
+    const uint8_t *line_end = NULL;
     uint32_t sess_id = 0;
     uint32_t sid_u = 0;
 
     if (!wss_item_text(item, &text, &len)) return false;
+    if (len < P2P_WSS_CMD_SYNC_SZ || memcmp(text, P2P_WSS_CMD_SYNC, P2P_WSS_CMD_SYNC_SZ) != 0) return false;
+    // 队列里的普通 SYNC 项后面还会保留原始 payload，这里只取首行 headline。
+    text += P2P_WSS_CMD_SYNC_SZ;
+    len -= P2P_WSS_CMD_SYNC_SZ;
+    // Queued SYNC items keep the original payload after the first newline.
+    line_end = memchr(text, '\n', len);
+    if (line_end) len = (size_t)(line_end - text);
     if (!wss_parse_sync_headline(text, len, &sess_id, &sid_u, NULL) || sid_u > 0xFFu) return false;
 
     if (sid) *sid = (uint8_t)sid_u;
@@ -320,12 +330,15 @@ static void wss_handle_sync(cw_client_ctx_t *ctx, wss_session_t *session, wss_se
     }
 
     // 替换转发身份（交换写入对端的 session_id）
-    char* headline = (char*)ITEM2BUF(payload_item) + payload_item->pos;
-    if (snprintf(headline, sizeof(P2P_WSS_CMD_SYNC_FMT), P2P_WSS_CMD_SYNC_FMT, peer_s->base.session_id, sid) < 0) {
+    char sync_headline[sizeof(P2P_WSS_CMD_SYNC) + 8u + 1u + 2u + 1u];
+    int headline_len = snprintf(sync_headline, sizeof(sync_headline),
+                                P2P_WSS_CMD_SYNC_FMT, peer_s->base.session_id, sid);
+    if (headline_len <= 0 || (size_t)headline_len >= sizeof(sync_headline)) {
         print("E:", LA_F("%s: snprintf failed\n", LA_F259, 259), "SYNC");
         ct_client_error((ct_client_ctx_t*)ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
+    memcpy(ITEM2BUF(payload_item) + payload_item->pos, sync_headline, (size_t)headline_len);
 
     // 推进更新同步序列 id
     session->last_sid = sid;
@@ -829,9 +842,16 @@ static void wss_handle_text(cw_client_ctx_t *ctx, wss_client_t *client, const ui
 
             buf16_item_t *front = BUF_R_FRONT(&src_s->sync_peer_send);
             uint32_t expected_sess_id = 0, expected_sid = 0;
-            headline = ITEM2BUF(front) + 10; headline_len = (size_t)front->len - 10u;
+            const uint8_t *front_text = NULL;
+            size_t front_len = 0;
+            if (!wss_item_text(front, &front_text, &front_len)) return;
+            if (front_len < P2P_WSS_CMD_SYNC_SZ
+                || memcmp(front_text, P2P_WSS_CMD_SYNC, P2P_WSS_CMD_SYNC_SZ) != 0) return;
+
+            headline = front_text + P2P_WSS_CMD_SYNC_SZ;
+            headline_len = front_len - P2P_WSS_CMD_SYNC_SZ;
             ln = memchr(headline, '\n', headline_len);
-            size_t ln_len = ln ? (size_t)((uint8_t*)ln - headline) : headline_len;
+            size_t ln_len = ln ? (size_t)((const uint8_t*)ln - headline) : headline_len;
 
             if (front->refer == ITEM_REF_ACK_PENDING
                 && wss_parse_sync_headline(headline, ln_len, &expected_sess_id, &expected_sid, NULL)
@@ -888,6 +908,7 @@ static void wss_handle_text(cw_client_ctx_t *ctx, wss_client_t *client, const ui
         }
 
         // 否则为 SYNC <session_id_hex> <sid_hex>\n<payload>
+        *ln = '\n';
         uint8_t *content = (uint8_t*)ln+1;
         wss_handle_sync(ctx, (wss_session_t*)s, peer_s,
                         sid, content, len - (size_t)(content - msg),
