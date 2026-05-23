@@ -690,7 +690,7 @@ int p2p_ice_export_candidate(const p2p_local_candidate_entry_t *cand, char *buf,
     }
     
     if (n < 0 || n >= buf_size) {
-        print("E:", LA_F("WebRTC candidate export buffer overflow", LA_F424, 424));
+        print("E:", LA_F("WebRTC candidate export buffer overflow", LA_F452, 452));
         return -1;
     }
     
@@ -762,11 +762,11 @@ int p2p_ice_export_sdp(const p2p_local_candidate_entry_t *cands, int cnt,
     /* 参数校验 */
     if (!candidates_only) {
         if (!ice_ufrag || !ice_pwd) {
-            print("E:", LA_F("Full SDP generation requires ice_ufrag and ice_pwd", LA_F298, 298));
+            print("E:", LA_F("Full SDP generation requires ice_ufrag and ice_pwd", LA_F320, 320));
             return -1;
         }
         if (buf_size < 2048) {
-            print("W:", LA_F("Buffer size < 2048 may be insufficient for full SDP", LA_F266, 266));
+            print("W:", LA_F("Buffer size < 2048 may be insufficient for full SDP", LA_F286, 286));
         }
     }
     
@@ -872,11 +872,11 @@ int p2p_ice_export_sdp(const p2p_local_candidate_entry_t *cands, int cnt,
         offset += n;
     }
     
-    print("I:", LA_F("Exported %d candidates to SDP (%d bytes)", LA_F278, 278), cnt, offset);
+    print("I:", LA_F("Exported %d candidates to SDP (%d bytes)", LA_F301, 301), cnt, offset);
     return offset;
 
 overflow:
-    print("E:", LA_F("SDP export buffer overflow", LA_F368, 368));
+    print("E:", LA_F("SDP export buffer overflow", LA_F395, 395));
     return -1;
 }
 
@@ -921,7 +921,7 @@ int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands
                             ip_str, &port, type_str);
         
         if (matched < 6) {
-            print("W:", LA_F("Failed to parse SDP candidate line: %s", LA_F285, 285), line);
+            print("W:", LA_F("Failed to parse SDP candidate line: %s", LA_F308, 308), line);
             /* 跳到下一行 */
             while (*line && *line != '\n' && *line != '\r') line++;
             while (*line == '\n' || *line == '\r') line++;
@@ -941,7 +941,7 @@ int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands
         } else if (strcmp(type_str, "prflx") == 0) {
             c->type = P2P_CAND_PRFLX;
         } else {
-            print("W:", LA_F("Unknown candidate type: %s", LA_F421, 421), type_str);
+            print("W:", LA_F("Unknown candidate type: %s", LA_F450, 450), type_str);
             /* 跳到下一行 */
             while (*line && *line != '\n' && *line != '\r') line++;
             while (*line == '\n' || *line == '\r') line++;
@@ -953,7 +953,7 @@ int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands
         c->addr.family = AF_INET;
         c->addr.addr.v4.sin_family = AF_INET;
         if (inet_pton(AF_INET, ip_str, &c->addr.addr.v4.sin_addr) != 1) {
-            print("W:", LA_F("Invalid IP address: %s", LA_F314, 314), ip_str);
+            print("W:", LA_F("Invalid IP address: %s", LA_F339, 339), ip_str);
             /* 跳到下一行 */
             while (*line && *line != '\n' && *line != '\r') line++;
             while (*line == '\n' || *line == '\r') line++;
@@ -970,7 +970,7 @@ int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands
         
         count++;
         
-        print("I:", LA_F("Imported SDP candidate: %s:%d typ %s (priority=0x%08x)", LA_F309, 309),
+        print("I:", LA_F("Imported SDP candidate: %s:%d typ %s (priority=0x%08x)", LA_F336, 336),
                sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr), type_str, priority);
         
         /* 跳到下一行 */
@@ -978,7 +978,7 @@ int p2p_ice_import_sdp(const char *sdp_text, p2p_remote_candidate_entry_t *cands
         while (*line == '\n' || *line == '\r') line++;
     }
     
-    print("I:", LA_F("Imported %d candidates from SDP", LA_F308, 308), count);
+    print("I:", LA_F("Imported %d candidates from SDP", LA_F335, 335), count);
     return count;
 }
 

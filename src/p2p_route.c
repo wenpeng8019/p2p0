@@ -68,7 +68,7 @@ const route_ctx_t *route_shared_get(void) {
 // 检测获取本地所有有效的网络地址
 ret_t route_detect_local(route_ctx_t *rt) {
 
-    printf("%s", LA_S("Detecting local network addresses", LA_S27, 27));
+    printf("%s", LA_S("Detecting local network addresses", LA_S24, 24));
 
     rt->addr_count = 0;
 
@@ -229,16 +229,16 @@ ret_t route_detect_local(route_ctx_t *rt) {
     freeifaddrs(ifa_list);
 #endif
 
-    print("I:", LA_F("Local address detection done: %d IPv4, %d IPv6 address(es)", LA_F318, 318), rt->addr_count, rt->addr6_count);
+    print("I:", LA_F("Local address detection done: %d IPv4, %d IPv6 address(es)", LA_F343, 343), rt->addr_count, rt->addr6_count);
     if (p2p_log_level == P2P_LOG_LEVEL_VERBOSE) {
         for (i = 0; i < rt->addr_count; i++) {
-            print("V:", LA_F("  [%d] %s/%d", LA_F36, 36), i,
+            print("V:", LA_F("  [%d] %s/%d", LA_F31, 31), i,
                   inet_ntoa(rt->local_addrs[i].sin_addr), mask_to_prefix(rt->local_masks[i]));
         }
         for (i = 0; i < rt->addr6_count; i++) {
             char buf6[INET6_ADDRSTRLEN];
             inet_ntop(AF_INET6, &rt->local_addrs6[i].sin6_addr, buf6, sizeof(buf6));
-            print("V:", LA_F("  [v6:%d] %s", LA_F37, 37), i, buf6);
+            print("V:", LA_F("  [v6:%d] %s", LA_F32, 32), i, buf6);
         }
     }
     return rt->addr_count + rt->addr6_count;

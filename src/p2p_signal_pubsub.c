@@ -142,7 +142,7 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
     uint8_t enc_buf[4096];
     size_t enc_len = (size_t)p2p_base64_decode(b64, strlen(b64), enc_buf, sizeof(enc_buf));
     if (enc_len <= 0) {
-        print("W:", LA_F("Base64 decode failed", LA_F262, 262));
+        print("W:", LA_F("Base64 decode failed", LA_F282, 282));
         return 0;
     }
 
@@ -175,7 +175,7 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
     free(dec);
 
     if (parsed <= 0) {
-        print("W:", LA_F("SDP import failed or empty", LA_F515, 515));
+        print("W:", LA_F("SDP import failed or empty", LA_F396, 396));
         return 0;
     }
 
@@ -187,7 +187,7 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
         /* IPv4/IPv6 过滤 */
         if ((tmp_cands[i].addr.family == AF_INET  && s->inst->cfg.test_ice_ipv4_off) ||
             (tmp_cands[i].addr.family == AF_INET6 && s->inst->cfg.test_ice_ipv6_off)) {
-            print("I:", LA_F("SDP REMOTE: %s cand<%s:%d> (disabled)", LA_F513, 513),
+            print("I:", LA_F("SDP REMOTE: %s cand<%s:%d> (disabled)", LA_F393, 393),
                   tmp_cands[i].type == P2P_CAND_HOST ? "host" : tmp_cands[i].type == P2P_CAND_SRFLX ? "srflx" : "relay",
                   sockAddr_str(&tmp_cands[i].addr, _ab, sizeof(_ab)), sockAddr_port(&tmp_cands[i].addr));
             continue;
@@ -199,7 +199,7 @@ static int unpack_remote_candidates(struct p2p_session *s, const uint8_t key[8],
         s->remote_cands[idx] = tmp_cands[i];
         p2p_remote_candidate_entry_t *c = &s->remote_cands[idx];
 
-        print("I:", LA_F("SDP REMOTE: %s cand[%d]<%s:%d> accepted", LA_F514, 514),
+        print("I:", LA_F("SDP REMOTE: %s cand[%d]<%s:%d> accepted", LA_F394, 394),
               c->type == P2P_CAND_HOST ? "host" : c->type == P2P_CAND_SRFLX ? "srflx" : "relay",
               idx, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr));
         added++;
@@ -265,14 +265,14 @@ static void sync0_sub(struct p2p_instance *inst, struct p2p_session *s, uint64_t
     char ts_str[128];
     snprintf(ts_str, sizeof(ts_str), "REG:%lld:%s", (long long)time(NULL), ctx->local_peer_id);
 
-    print("I:", LA_F("%s: writing heartbeat (gist=%s) %s", LA_F495, 495),
+    print("I:", LA_F("%s: writing heartbeat (gist=%s) %s", LA_F272, 272),
           TASK_PUBLISH, ctx->local_gist_id, ts_str);
 
     if (gist_write(ctx, ctx->local_gist_id, ctx->local_peer_id, ts_str) == 0) {
         sess->last_sub = now;
-        print("I:", LA_F("%s: heartbeat written", LA_F260, 260), TASK_PUBLISH);
+        print("I:", LA_F("%s: heartbeat written", LA_F145, 145), TASK_PUBLISH);
     } else {
-        print("W:", LA_F("%s: heartbeat write failed", LA_F481, 481), TASK_PUBLISH);
+        print("W:", LA_F("%s: heartbeat write failed", LA_F144, 144), TASK_PUBLISH);
     }
 }
 
@@ -291,7 +291,7 @@ static bool poll_offer(struct p2p_instance *inst, struct p2p_session *s) {
 
     char content[4096];
     if (gist_poll(ctx, ctx->local_gist_id, ctx->local_peer_id, content, (int)sizeof(content)) != 0) {
-        print("V:", LA_F("%s: mailbox empty, waiting", LA_F483, 483), TASK_POLL);
+        print("V:", LA_F("%s: mailbox empty, waiting", LA_F162, 162), TASK_POLL);
         return false;
     }
 
@@ -314,11 +314,11 @@ static bool poll_offer(struct p2p_instance *inst, struct p2p_session *s) {
         nat_punch(s, -1);
         if (P2P_SESSION_WAITING_STUN(s)) {
             sess->state = SIG_PUBSUB_SESS_WAIT_STUN;
-            print("I:", LA_F("%s: received offer from %s (peer=%s) → WAIT_STUN", LA_F490, 490),
+            print("I:", LA_F("%s: received offer from %s (peer=%s) → WAIT_STUN", LA_F214, 214),
                   TASK_POLL, sess->remote_gist_id, sess->remote_peer_id);
         } else {
             sess->state = SIG_PUBSUB_SESS_SYNCING;
-            print("I:", LA_F("%s: received offer from %s (peer=%s) → SYNCING", LA_F489, 489),
+            print("I:", LA_F("%s: received offer from %s (peer=%s) → SYNCING", LA_F213, 213),
                   TASK_POLL, sess->remote_gist_id, sess->remote_peer_id);
         }
         return true;
@@ -355,18 +355,18 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
                 long long age = (long long)(now_sec - sub_ts);
                 if (age > P2P_PUBSUB_HEARTBEAT_SEC) {
                     print("W:", LA_F("%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",
-                        LA_F351, LA_F581, 581), TASK_POLL, age, P2P_PUBSUB_HEARTBEAT_SEC);
+                        LA_F351, LA_F98, 98), TASK_POLL, age, P2P_PUBSUB_HEARTBEAT_SEC);
                 } else {
-                    print("I:", LA_F("%s: SUB online (heartbeat %llds ago), early nat_punch", LA_F477, 477),
+                    print("I:", LA_F("%s: SUB online (heartbeat %llds ago), early nat_punch", LA_F99, 99),
                         TASK_POLL, age);
                     nat_punch(s, -1);  /* 提前启动 STUN 收集，nat_punch 幂等（state>=PUNCHING 时跳过）*/
                 }
             } else {
-                print("W:", LA_F("%s: SUB gist not REG (content: %.20s...)", LA_F351, 351),
+                print("W:", LA_F("%s: SUB gist not REG (content: %.20s...)", LA_F97, 97),
                     TASK_POLL, probe);
             }
         } else {
-            print("W:", LA_F("%s: cannot read SUB gist %s", LA_F480, 480),
+            print("W:", LA_F("%s: cannot read SUB gist %s", LA_F130, 130),
                   TASK_POLL, sess->remote_gist_id);
         }
     }  /* !resend */
@@ -377,10 +377,10 @@ static void sync0_offer(struct p2p_instance *inst, struct p2p_session *s, bool r
 
     if (gist_write(ctx, sess->remote_gist_id, sess->remote_peer_id, offer) == 0) {
         sess->offer_sent = 1;  /* 已写入，待确认 */
-        print("I:", LA_F("%s: offer %s (my gist=%s)", LA_F484, 484),
+        print("I:", LA_F("%s: offer %s (my gist=%s)", LA_F175, 175),
               TASK_PUBLISH, resend ? "resent" : "sent", ctx->local_gist_id);
     } else {
-        print("W:", LA_F("%s: send offer failed", LA_F491, 491), TASK_PUBLISH);
+        print("W:", LA_F("%s: send offer failed", LA_F233, 233), TASK_PUBLISH);
     }
 }
 
@@ -401,13 +401,13 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
 
     char content[4096];
     if (gist_poll(ctx, sess->remote_gist_id, sess->remote_peer_id, content, (int)sizeof(content)) != 0) {
-        print("V:", LA_F("%s: SUB gist empty, waiting", LA_F577, 577), TASK_POLL);
+        print("V:", LA_F("%s: SUB gist empty, waiting", LA_F96, 96), TASK_POLL);
         return;
     }
 
     /* SUB 心跳覆盖了 offer → 立即重发 */
     if (strncmp(content, "REG:", 7) == 0) {
-        print("W:", LA_F("%s: offer overwritten by SUB heartbeat, resending", LA_F486, 486),
+        print("W:", LA_F("%s: offer overwritten by SUB heartbeat, resending", LA_F177, 177),
               TASK_POLL);
         sync0_offer(inst, s, true);
         return;
@@ -417,7 +417,7 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
     if (strncmp(content, "OFFER:", 6) == 0) {
         if (sess->offer_sent == 1) {
             sess->offer_sent = 2;  /* 确认成功 */
-            print("I:", LA_F("%s: offer confirmed", LA_F485, 485), TASK_POLL);
+            print("I:", LA_F("%s: offer confirmed", LA_F176, 176), TASK_POLL);
         }
         return;
     }
@@ -429,7 +429,7 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
 
     /* 首次 poll 就读到 ver=0（终版）：上一轮残留，跳过 */
     if (ver == 0 && sess->remote_sync_ver == -1) {
-        print("W:", LA_F("%s: skip stale ver=0 from SUB (previous session)", LA_F493, 493),
+        print("W:", LA_F("%s: skip stale ver=0 from SUB (previous session)", LA_F245, 245),
               TASK_POLL);
         sess->remote_sync_ver = ver;
         return;
@@ -441,7 +441,7 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
 
     int added = unpack_remote_candidates(s, key, colon + 1);
     if (added > 0) {
-        print("I:", LA_F("%s: SUB responded with %d candidates (ver=%d)", LA_F478, 478),
+        print("I:", LA_F("%s: SUB responded with %d candidates (ver=%d)", LA_F100, 100),
               TASK_POLL, added, ver);
         if (ver == 0) {
             s->remote_cand_done = true;
@@ -449,10 +449,10 @@ static void poll_answer(struct p2p_instance *inst, struct p2p_session *s) {
         nat_punch(s, -1);
         if (P2P_SESSION_WAITING_STUN(s)) {
             sess->state = SIG_PUBSUB_SESS_WAIT_STUN;
-            print("I:", LA_F("%s: → WAIT_STUN", LA_F498, 498), TASK_POLL);
+            print("I:", LA_F("%s: → WAIT_STUN", LA_F276, 276), TASK_POLL);
         } else {
             sess->state = SIG_PUBSUB_SESS_SYNCING;
-            print("I:", LA_F("%s: → SYNCING", LA_F497, 497), TASK_POLL);
+            print("I:", LA_F("%s: → SYNCING", LA_F275, 275), TASK_POLL);
         }
     }
 }
@@ -513,21 +513,21 @@ static void sync_candidates(struct p2p_instance *inst, struct p2p_session *s) {
     char payload[4200];
     snprintf(payload, sizeof(payload), "%d:%s", ver, b64);
 
-    print("I:", LA_F("%s: publishing %d candidates (ver=%d) to local gist", LA_F423, 423),
+    print("I:", LA_F("%s: publishing %d candidates (ver=%d) to local gist", LA_F197, 197),
           TASK_PUBLISH, s->local_cand_cnt, ver);
 
     if (gist_write(ctx, ctx->local_gist_id, ctx->local_peer_id, payload) == 0) {
         sess->candidate_synced_count = s->local_cand_cnt;
-        print("I:", LA_F("%s: published %d candidates (ver=%d)", LA_F487, 487),
+        print("I:", LA_F("%s: published %d candidates (ver=%d)", LA_F196, 196),
               TASK_PUBLISH, s->local_cand_cnt, ver);
 
         if (final) {
             sess->local_sync_ver = 0;
             sess->state = SIG_PUBSUB_SESS_READY;
-            print("I:", LA_F("%s: → READY", LA_F496, 496), TASK_PUBLISH);
+            print("I:", LA_F("%s: → READY", LA_F274, 274), TASK_PUBLISH);
         }
     } else {
-        print("W:", LA_F("%s: PATCH failed", LA_F439, 439), TASK_PUBLISH);
+        print("W:", LA_F("%s: PATCH failed", LA_F80, 80), TASK_PUBLISH);
     }
 }
 
@@ -545,7 +545,7 @@ static void poll_candidates(struct p2p_instance *inst, struct p2p_session *s) {
 
     char content[4096];
     if (gist_poll(ctx, sess->remote_gist_id, sess->remote_peer_id, content, (int)sizeof(content)) != 0) {
-        print("V:", LA_F("%s: GET %s — empty or failed", LA_F142, 142), TASK_POLL, sess->remote_gist_id);
+        print("V:", LA_F("%s: GET %s — empty or failed", LA_F79, 79), TASK_POLL, sess->remote_gist_id);
         return;
     }
 
@@ -560,7 +560,7 @@ static void poll_candidates(struct p2p_instance *inst, struct p2p_session *s) {
 
     /* 首次 poll 就读到 ver=0（终版）：上一轮残留，跳过 */
     if (ver == 0 && sess->remote_sync_ver == -1) {
-        print("W:", LA_F("%s: skip stale ver=0 from %s (previous session)", LA_F492, 492),
+        print("W:", LA_F("%s: skip stale ver=0 from %s (previous session)", LA_F244, 244),
               TASK_POLL, sess->remote_gist_id);
         sess->remote_sync_ver = ver;
         return;
@@ -572,7 +572,7 @@ static void poll_candidates(struct p2p_instance *inst, struct p2p_session *s) {
 
     int added = unpack_remote_candidates(s, key, colon + 1);
     if (added > 0) {
-        print("I:", LA_F("%s: received %d candidates (ver=%d) from %s", LA_F488, 488),
+        print("I:", LA_F("%s: received %d candidates (ver=%d) from %s", LA_F212, 212),
               TASK_POLL, added, ver, sess->remote_gist_id);
     }
 
@@ -612,7 +612,7 @@ ret_t p2p_signal_pubsub_online(struct p2p_instance *inst, const char *local_peer
 
     /* peer_id 用作 Gist 文件名，不允许含 '/' */
     if (local_peer_id && strchr(local_peer_id, '/')) {
-        print("E:", LA_F("REG: peer_id cannot contain '/' (got \"%s\")", LA_F512, 512), local_peer_id);
+        print("E:", LA_F("REG: peer_id cannot contain '/' (got \"%s\")", LA_F370, 370), local_peer_id);
         return E_INVALID;
     }
 
@@ -625,14 +625,14 @@ ret_t p2p_signal_pubsub_online(struct p2p_instance *inst, const char *local_peer
 
     ctx->state = SIG_PUBSUB_REG;
 
-    print("I:", LA_F("REG: local_gist=%s peer=%s", LA_F511, 511), gist_id, local_peer_id);
+    print("I:", LA_F("REG: local_gist=%s peer=%s", LA_F369, 369), gist_id, local_peer_id);
     return E_NONE;
 }
 
 ret_t p2p_signal_pubsub_offline(struct p2p_instance *inst) {
     p2p_signal_pubsub_ctx_t *ctx = &inst->sig_ctx.pubsub;
     ctx->state = SIG_PUBSUB_INIT;
-    print("I:", LA_F("OFF", LA_F504, 504));
+    print("I:", LA_F("OFF", LA_F350, 350));
     return E_NONE;
 }
 
@@ -643,7 +643,7 @@ ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_addr) 
     p2p_pubsub_session_t *sess = &s->sig_sess.pubsub;
 
     if (ctx->state < SIG_PUBSUB_REG) {
-        print("W:", LA_F("CONNECT: instance not online yet", LA_F501, 501));
+        print("W:", LA_F("CONNECT: instance not online yet", LA_F289, 289));
         return E_NONE_CONTEXT;
     }
 
@@ -669,7 +669,7 @@ ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_addr) 
     if (!remote_addr || !remote_addr[0]) {
         sess->is_pub = false;
         sess->state = SIG_PUBSUB_SESS_WAIT_OFFER;
-        print("I:", LA_F("CONNECT SUB: waiting for offer (gist=%s/%s)", LA_F500, 500),
+        print("I:", LA_F("CONNECT SUB: waiting for offer (gist=%s/%s)", LA_F288, 288),
               ctx->local_gist_id, ctx->local_peer_id);
         sync0_sub(s->inst, s, P_tick_ms());
     }
@@ -695,7 +695,7 @@ ret_t p2p_signal_pubsub_connect(struct p2p_session *s, const char *remote_addr) 
         }
 
         sess->state = SIG_PUBSUB_SESS_OFFERING;
-        print("I:", LA_F("CONNECT PUB: target=%s/%s", LA_F499, 499),
+        print("I:", LA_F("CONNECT PUB: target=%s/%s", LA_F287, 287),
               sess->remote_gist_id, sess->remote_peer_id);
         sync0_offer(s->inst, s, false);
     }
@@ -712,7 +712,7 @@ void p2p_signal_pubsub_disconnect(struct p2p_session *s) {
     sess->remote_gist_id[0] = '\0';
     reset_peer(sess);
 
-    print("I:", LA_F("DISCONNECT", LA_F502, 502));
+    print("I:", LA_F("DISCONNECT", LA_F295, 295));
 }
 
 //-----------------------------------------------------------------------------
@@ -723,7 +723,7 @@ void p2p_signal_pubsub_stun_ready(struct p2p_session *s) {
     if (sess->state != SIG_PUBSUB_SESS_WAIT_STUN) return;
 
     sess->state = SIG_PUBSUB_SESS_SYNCING;
-    print("I:", LA_F("%s: STUN ready → SYNCING", LA_F475, 475), TASK_PUBLISH);
+    print("I:", LA_F("%s: STUN ready → SYNCING", LA_F95, 95), TASK_PUBLISH);
 
     /* 首次发布：有候选则立即同步，否则等 tick_send */
     if (s->local_cand_cnt > 0 || !P2P_CAND_PENDING(s->inst)) {
