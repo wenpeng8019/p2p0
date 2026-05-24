@@ -79,10 +79,10 @@ static volatile sig_atomic_t        g_running = 1;
 // + 注: malloc 分配的内存默认肯定都是至少 8 字节对齐的，而 buffer_item_t 的成员排列满足连续内存对齐原则
 //   所以强转 buffer_item_t* 后可以直接访问 buffer_item_t 的成员
 buf16_item_t* alloc_buf16(uint8_t flags) {
-    int idx = flags >> 4; if (idx > 9) return NULL;
+    unsigned idx = flags >> 4; assert(idx <= sizeof(g_recycle)/sizeof(g_recycle[0]));
     buf16_item_t *item = g_recycle[idx];
     if (item) g_recycle[idx] = item->next;
-    else if (!((item = (buf16_item_t*)malloc(sizeof(buf16_item_t) + idx==3?P2P_MTU:(1 << idx)*128)))) return NULL;
+    else if (!((item = (buf16_item_t*)malloc(sizeof(buf16_item_t) + (idx==3?P2P_MTU:(1 << idx)*128))))) return NULL;
     item->next = NULL;
     item->flags = flags;
     item->refer = NULL;
@@ -93,7 +93,7 @@ buf16_item_t* alloc_buf16(uint8_t flags) {
 
 // 释放 frame buf
 void free_buf16(buf16_item_t *buf_item) {
-    int idx = buf_item->flags >> 4;
+    unsigned idx = buf_item->flags >> 4; assert(idx <= sizeof(g_recycle)/sizeof(g_recycle[0]));
     buf_item->next = g_recycle[idx];
     g_recycle[idx] = buf_item;
 }
@@ -1085,15 +1085,14 @@ int main(int argc, char *argv[]) {
                     assert(false);
 #endif
                 }
-
                 if (m == PROTO_RELAY) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_RELAY], CT_CLIENTS(i), NULL);
 #ifdef WITH_WS
-                else if (ws_client) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS"); // fixme 这里的操作可能会导致 client 被销毁，从而无需再执行后面
+                else if (ws_client) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS");
 #endif
             }
 
-            // 处理数据发送
-            if ((TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_WRITE)
+            // 处理数据发送(注，前面 ct_handle_recv 处理可能会导致 client 被删除
+            if (CLIENTS(i)->proto > 0 && (TCP_CLIENTS(i)->io & TCP_IO_FLAG_WANT_WRITE)
                 && FD_ISSET(CLIENTS(i)->fd, &write_fds)) {
 
                 if (m == PROTO_RELAY) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_RELAY], CT_CLIENTS(i), NULL);
@@ -1101,7 +1100,6 @@ int main(int argc, char *argv[]) {
                 else if (ws_client) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS");
 #endif
             }
-
 #ifdef WITH_WS
             if (ws_client) cw_retry_closing((cw_client_t*)ws_client, now);
 #endif
