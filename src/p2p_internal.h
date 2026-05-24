@@ -17,14 +17,14 @@
  *
  *  P2P_STATE_INIT ──→ P2P_STATE_DETECTING ──→ P2P_STATE_SIGNALING
  *                           │                        │
- *                           ↓                        ↓
+ *                           ↓                       ↓
  *                    (NAT 类型检测)          (交换候选地址)
  *                                                    │
  *                                                    ↓
  *                                          P2P_STATE_CONNECTING
  *                                                    │
  *                         ┌──────────────────────────┼───────────────┐
- *                         ↓                          ↓               ↓
+ *                         ↓                         ↓              ↓
  *                   P2P_PATH_DIRECT          P2P_PATH_RELAY    P2P_PATH_TCP
  *                   (直连成功)               (中继模式)        (TCP 穿透)
  *                         │                          │               │
@@ -37,23 +37,23 @@
  * ============================================================================
  *
  *   ┌─────────────────────────────────────────────────────────────────┐
- *   │                     Application Layer                          │
- *   │                   (p2p_send / p2p_recv)                        │
+ *   │                     Application Layer                           │
+ *   │                   (p2p_send / p2p_recv)                         │
  *   ├─────────────────────────────────────────────────────────────────┤
- *   │                      Stream Layer                              │
- *   │              (流分片、重组、应用数据封装)                        │
+ *   │                      Stream Layer                               │
+ *   │              (流分片、重组、应用数据封装)                       │
  *   ├─────────────────────────────────────────────────────────────────┤
- *   │                    Reliable Layer                              │
- *   │              (ARQ 重传、序列号、确认机制)                        │
+ *   │                    Reliable Layer                               │
+ *   │              (ARQ 重传、序列号、确认机制)                       │
  *   ├─────────────────────────────────────────────────────────────────┤
- *   │                    Transport Layer                             │
- *   │           (DTLS/SCTP/PseudoTCP/Simple 可选)                    │
+ *   │                    Transport Layer                              │
+ *   │           (DTLS/SCTP/PseudoTCP/Simple 可选)                     │
  *   ├─────────────────────────────────────────────────────────────────┤
- *   │                      NAT Layer                                 │
+ *   │                      NAT Layer                                  │
  *   │           (STUN 绑定、ICE 候选、打洞协调)                       │
  *   ├─────────────────────────────────────────────────────────────────┤
- *   │                      UDP / TCP                                 │
- *   │                   (底层 Socket I/O)                            │
+ *   │                      UDP / TCP                                  │
+ *   │                   (底层 Socket I/O)                             │
  *   └─────────────────────────────────────────────────────────────────┘
  */
 
@@ -85,7 +85,7 @@
 #include "p2p_signal_relay.h"   /* 中继模式信令 */
 #include "p2p_signal_pubsub.h"  /* 发布/订阅模式信令 */
 #include "p2p_signal_compact.h" /* COMPACT 模式信令 */
-#include "p2p_signal_ice_ws.h"  /* ICE WebSocket 信令 */
+#include "p2p_signal_wss.h"     /* WSS WebSocket 信令 */
 #include "p2p_path_manager.h"   /* 多路径管理器 */
 #include "p2p_probe.h"          /* 信道外可达性探测 */
 
@@ -142,7 +142,7 @@ struct p2p_instance {
         p2p_relay_ctx_t         relay;                  // RELAY 模式信令上下文（实例级别：与服务器的 TCP 连接）
         p2p_signal_pubsub_ctx_t pubsub;                 // PUB/SUB 模式信令上下文
 #ifdef WITH_WS
-        p2p_ice_ws_ctx_t        ice_ws;                 // ICE WebSocket 信令上下文
+        p2p_wss_ctx_t           wss;                    // WSS WebSocket 信令上下文
 #endif
     }                               sig_ctx;            // 实例级别信令上下文（同时只有一种模式激活）
 
@@ -225,7 +225,7 @@ struct p2p_session {
         p2p_relay_session_t     relay;                  // RELAY 模式信令上下文（会话级别：与对端的关系）
         p2p_pubsub_session_t    pubsub;                 // PUBSUB 模式信令上下文（会话级别：与对端的关系）
 #ifdef WITH_WS
-        p2p_ice_ws_session_t    ice_ws;                 // ICE WebSocket 信令上下文（会话级别）
+        p2p_wss_session_t       wss;                    // WSS WebSocket 信令上下文（会话级别）
 #endif
     }                               sig_sess;
 

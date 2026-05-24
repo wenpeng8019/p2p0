@@ -528,7 +528,9 @@ int p2p_turn_handle_packet(struct p2p_instance *inst, const struct sockaddr_in *
             }
             else if (inst->sig_mode == P2P_SIGNALING_MODE_RELAY)
                 p2p_signal_relay_trickle_candidate(s);
-            else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.on_ice_candidate) {
+            else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE 
+                     && !inst->cfg.server_host     /* 仅自定义信令模式触发回调 */
+                     && inst->cfg.on_ice_candidate) {
                 char cand_str[256];
                 if (p2p_ice_export_candidate(c, cand_str, sizeof(cand_str)) > 0)
                     inst->cfg.on_ice_candidate((p2p_session_t)s, cand_str, inst->cfg.userdata);

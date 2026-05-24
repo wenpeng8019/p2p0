@@ -446,12 +446,11 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         p2p_signal_compact_init(&inst->sig_ctx.compact);
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_RELAY)
         p2p_signal_relay_init(&inst->sig_ctx.relay);
-    else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB) {
+    else if (cfg->signaling_mode == P2P_SIGNALING_MODE_PUBSUB)
         p2p_signal_pubsub_init(&inst->sig_ctx.pubsub);
-    }
 #ifdef WITH_WS
     else if (cfg->signaling_mode == P2P_SIGNALING_MODE_ICE && cfg->server_host) {
-        p2p_signal_ice_ws_init(inst);
+        p2p_signal_wss_init(&inst->sig_ctx.wss);
     }
 #endif
 
@@ -648,7 +647,7 @@ p2p_destroy(p2p_handle_t hdl) {
     }
 #ifdef WITH_WS
     else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
-        p2p_signal_ice_ws_destroy(inst);
+        p2p_signal_wss_off(inst);
     }
 #endif
 
@@ -874,7 +873,7 @@ p2p_connect(p2p_handle_t hdl, const char *remote_peer_id, bool wait_stun_pending
         case P2P_SIGNALING_MODE_ICE: {
 #ifdef WITH_WS
             if (inst->cfg.server_host) {
-                p2p_signal_ice_ws_connect(s, remote_peer_id);
+                p2p_signal_wss_syn0(s, remote_peer_id);
                 s->state = P2P_STATE_SIGNALING;
             } else
 #endif
@@ -1209,7 +1208,7 @@ p2p_update(p2p_handle_t hdl) {
     }
 #ifdef WITH_WS
     else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
-        p2p_signal_ice_ws_tick(inst, now_ms);
+        p2p_signal_wss_tick_recv(inst, now_ms);
     }
 #endif
 
@@ -1458,6 +1457,11 @@ p2p_update(p2p_handle_t hdl) {
     else if (inst->sig_mode == P2P_SIGNALING_MODE_PUBSUB) {
         p2p_signal_pubsub_tick_send(inst, now_ms);
     }
+#ifdef WITH_WS
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
+        p2p_signal_wss_tick_send(inst, now_ms);
+    }
+#endif
 
     /* ========================================================================
     * 阶段 9：NAT 类型检测（后台定期运行 STUN 探测）

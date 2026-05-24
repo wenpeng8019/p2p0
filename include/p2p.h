@@ -370,7 +370,7 @@ p2p_nat_type(p2p_handle_t hdl);
  * 信令模式由 cfg.signaling_mode 决定，remote_peer_id 的使用规则如下：
  * 
  * 1. COMPACT 模式（简单信令，UDP）
- *    - remote_peer_id: 必须非 NULL，指定对方的明确 local_peer_id
+ *    - remote_peer_id: 必须非 NULL，指定对方的明确 peer_id
  *    - 原理：双方各自向服务器注册 pair<local_id, remote_id> 映射，服务器匹配成功后返回对方地址，开始 NAT 打洞
  *    - cfg 配置要求：server_host, server_port
  *    - 示例：p2p_connect(s, "bob")  // 连接到 bob
@@ -565,11 +565,8 @@ p2p_export_ice_sdp(p2p_session_t session, char *sdp_buf, int buf_size,
  *   "a=candidate:1 1 UDP 2130706431 192.168.1.10 54320 typ host\r\n"
  *   "a=candidate:2 1 UDP 1694498815 203.0.113.77 54320 typ srflx raddr 192.168.1.10 rport 54320\r\n"
  */
-// int
-// p2p_import_ice_sdp(p2p_handle_t hdl, const char *sdp_text);
 int
 p2p_import_ice_sdp(p2p_session_t session, const char *sdp_text);
-
 
 ///////////////////////////////////////////////////////////////////////////////
 

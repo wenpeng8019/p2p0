@@ -267,7 +267,7 @@ if(WITH_WS)
     set(WSLAY_LIBRARIES wslay)
     # ws_client 加入 p2p 核心库
     list(APPEND LIB_SRCS src/ws_client.c)
-    list(APPEND LIB_SRCS src/p2p_signal_ice_ws.c)
+    list(APPEND LIB_SRCS src/p2p_signal_wss.c)
     message(STATUS "wslay WebSocket 支持已启用")
 endif()
 

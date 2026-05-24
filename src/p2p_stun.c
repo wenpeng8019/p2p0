@@ -882,7 +882,9 @@ static inline void add_srflx_candidate(struct p2p_instance *inst, int recv_sock_
                 p2p_signal_pubsub_stun_ready(s);
             }
         }
-        else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.on_ice_candidate) {
+        else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE 
+                 && !s->inst->cfg.server_host     /* 仅自定义信令模式触发回调 */
+                 && s->inst->cfg.on_ice_candidate) {
             char sdp_a[256];
             if (p2p_ice_export_candidate(c, sdp_a, sizeof(sdp_a)) > 0)
                 s->inst->cfg.on_ice_candidate((p2p_session_t)s, sdp_a, s->inst->cfg.userdata);
