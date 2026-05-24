@@ -318,10 +318,10 @@ static void disconnect(struct p2p_session *s) {
     assert(s->state != P2P_STATE_CLOSED);
 
     p2p_state_t old_state = s->state;
-
-    // NAT 层 FIN（仅在已连接状态，重复发送提高 UDP 可靠性）
-    // 必须在 session_reset 之前发送，reset 会清除 NAT 状态和路径信息
     if (old_state >= P2P_STATE_LOST) {
+
+        // 触发 NAT 层 FIN（仅在已连接状态，重复发送提高 UDP 可靠性）
+        // + 必须在 session_reset 之前发送，reset 会清除 NAT 状态和路径信息
         print("V:", LA_F("Sending FIN packet to peer before closing", LA_F409, 409));
         nat_send_fin(s);
     }
@@ -333,16 +333,9 @@ static void disconnect(struct p2p_session *s) {
         if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, old_state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
     }
 
-    // COMPACT 信令模式：取消与对方在服务器上的注册，OFF
-    if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) {
-
-        p2p_signal_compact_fin(s);
-    }
-    // RELAY 信令模式：
-    else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY) {
-
-        p2p_signal_relay_fin(s);
-    }
+    // 触发信令层的 FIN
+    if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_fin(s);
+    else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_fin(s);
 
     // 递减连接计数，归零时释放 STUN 资源
     if (--s->inst->connections == 0) {
@@ -355,15 +348,14 @@ static void disconnect(struct p2p_session *s) {
  */
 static void peer_disconnect(struct p2p_session *s) {
 
-    // RELAY FIN 通过 TCP 可靠送达后，handle_relay_fin 已设置 nat.state = NAT_CLOSED
-    // COMPACT FIN 通过 NAT FIN（UDP）触发，nat_on_fin 设置 NAT_CLOSED
-    // 两条路径最终都在此处汇合
+    // 该被动断开连接是由 NAT 层直接触发的
+    // + 信令层 COMPACT/RELAY 收到对方 FIN 后，会设置 NAT 状态为 CLOSED，并间接通过 NAT 触发 peer_disconnect
+    //   最终两条路径会在此处汇合
     assert(s->nat.state == NAT_CLOSED);
-
-    assert(s->state >= P2P_STATE_LOST);
 
     print("I:", LA_F("connection closed by peer", LA_F490, 490));
 
+    assert(s->state >= P2P_STATE_LOST);
     p2p_state_t old_state = s->state;
     p2p_probe_state_t prev_probe_state = s->probe.state;
     p2p_session_reset(s, true);  // 这会设置 s->state = P2P_STATE_CLOSED
@@ -377,6 +369,10 @@ static void peer_disconnect(struct p2p_session *s) {
 
     // 触发状态回调
     if (s->inst->cfg.on_state) s->inst->cfg.on_state((p2p_session_t)s, old_state, P2P_STATE_CLOSED, s->inst->cfg.userdata);
+
+    // 触发信令层的 FIN（如果 peer_disconnect 是由 NAT 层主动触发，而非由信令层 COMPACT/RELAY 收到对方 FIN 后间距触发）
+    if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_fin(s);
+    else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_fin(s);
 
     // 递减连接计数，归零时释放 STUN 资源
     if (--s->inst->connections == 0) {
@@ -931,8 +927,8 @@ p2p_close(p2p_session_t session) {
 
     LOCK_INST(inst);
 
+    // 如果已连接，主动断开连接（NAT FIN + 信令层 FIN）
     if (s->state != P2P_STATE_INIT && s->state != P2P_STATE_CLOSED) {
-        // 主动断开（NAT FIN + 信令层 disconnect）
         disconnect(s);
     }
 
