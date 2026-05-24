@@ -42,6 +42,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F45] = "%s: '%s' ses_id=%u\n",  /* SID:45 */
     [LA_F24] = "%s: '%s' sid=%u code=%u data_len=%d\n",  /* SID:24 */
     [LA_F25] = "%s: '%s' sid=%u msg=%u data_len=%d\n",  /* SID:25 */
+    [LA_F235] = "%s: '%s' unreachable, pending\n",  /* SID:235 */
     [LA_F72] = "%s: '%s'\n",  /* SID:72 */
     [LA_F26] = "%s: 2nd-ack confirmed '%s' (ses_id=%u)\n",  /* SID:26 */
     [LA_F37] = "%s: OOM building session '%s' -> '%s'\n",  /* SID:37 */
@@ -52,6 +53,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F33] = "%s: accepted, ses_id=%u, sid=%u, msg=%u, len=%d\n",  /* SID:33 */
     [LA_F34] = "%s: accepted, ses_id=%u, sid=%u\n",  /* SID:34 */
     [LA_F35] = "%s: addr-notify confirmed '%s' (ses_id=%u)\n",  /* SID:35 */
+    [LA_F259] = "%s: alloc buf failed(OOM)\n",  /* SID:259 */
     [LA_F28] = "%s: alloc buffer failed(OOM)\n",  /* SID:28 */
     [LA_F51] = "%s: alloc client for '%.*s' failed\n",  /* SID:51 */
     [LA_F36] = "%s: auth_key=%llu assigned for '%.*s'\n",  /* SID:36 */
@@ -84,7 +86,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F94] = "%s: invalid instance id\n",  /* SID:94 */
     [LA_F50] = "%s: invalid instance_id=0 from %s\n",  /* SID:50 */
     [LA_F96] = "%s: invalid peer id\n",  /* SID:96 */
-    [LA_F233] = "%s: invalid recv layout for zero-copy forward\n",  /* SID:233 */
     [LA_F161] = "%s: invalid relay flag from client\n",  /* SID:161 */
     [LA_F142] = "%s: invalid remote id\n",  /* SID:142 */
     [LA_F52] = "%s: invalid seq=%u\n",  /* SID:52 */
@@ -93,7 +94,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F55] = "%s: local='%s', remote='%s', online=%d, cands=%d\n",  /* SID:55 */
     [LA_F162] = "%s: local='%s', remote='%s', online=%d, payload=%u\n",  /* SID:162 */
     [LA_F213] = "%s: missing payload\n",  /* SID:213 */
-    [LA_F234] = "%s: missing recv item for zero-copy forward\n",  /* SID:234 */
     [LA_F56] = "%s: no matching pending msg (sid=%u)\n",  /* SID:56 */
     [LA_F57] = "%s: no matching pending msg (sid=%u, expected=%u)\n",  /* SID:57 */
     [LA_F58] = "%s: obsolete sid=%u (current=%u), ignoring\n",  /* SID:58 */
@@ -102,18 +102,16 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F61] = "%s: peer '%s' not online for session_id=%u\n",  /* SID:61 */
     [LA_F62] = "%s: peer '%s' not online, rejecting sid=%u\n",  /* SID:62 */
     [LA_F163] = "%s: peer '%s' offline, pending\n",  /* SID:163 */
-    [LA_F235] = "%s: peer '%s' unreachable, pending\n",  /* SID:235 */
+    [LA_F260] = "%s: peer '%s' unreachable, pending\n",  /* SID:260 */
     [LA_F64] = "%s: peer offline, sending error resp\n",  /* SID:64 */
     [LA_F214] = "%s: pkt queue full, reply busy\n",  /* SID:214 */
     [LA_F215] = "%s: prev ALV ACK still pending, skip\n",  /* SID:215 */
+    [LA_F261] = "%s: realloc client for '%.*s' failed\n",  /* SID:261 */
     [LA_F147] = "%s: rejected for not reg(%.*s)\n",  /* SID:147 */
     [LA_F236] = "%s: rejected for not reg(%s)\n",  /* SID:236 */
     [LA_F237] = "%s: rejected for not reg\n",  /* SID:237 */
-    [LA_F238] = "%s: renew sess by peer %s",  /* SID:238 */
-    [LA_F239] = "%s: renew sess to peer %s",  /* SID:239 */
     [LA_F216] = "%s: request simultaneously for '%s'\n",  /* SID:216 */
     [LA_F65] = "%s: requester not found for ses_id=%u\n",  /* SID:65 */
-    [LA_F66] = "%s: requester offline, discarding\n",  /* SID:66 */
     [LA_F67] = "%s: rpc busy (pending sid=%u)\n",  /* SID:67 */
     [LA_F165] = "%s: ses_id=%u, confirm sid=%u\n",  /* SID:165 */
     [LA_F166] = "%s: ses_id=%u, data_len=%u\n",  /* SID:166 */
@@ -125,6 +123,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F68] = "%s: sid mismatch (got=%u, pending=%u), discarding\n",  /* SID:68 */
     [LA_F240] = "%s: sid=%u -> peer_sid=%u sync_sid=%u\n",  /* SID:240 */
     [LA_F168] = "%s: sid=%u -> peer_sid=%u, data_len=%u\n",  /* SID:168 */
+    [LA_F262] = "%s: snprintf failed\n",  /* SID:262 */
+    [LA_F263] = "%s: text frame overflow(32-bit)\n",  /* SID:263 */
     [LA_F241] = "%s: too many candidates(cnt=%d)\n",  /* SID:241 */
     [LA_F70] = "%s: unknown auth_key=%llu from %s\n",  /* SID:70 */
     [LA_F148] = "%s: unknown ses_id=%u\n",  /* SID:148 */
@@ -153,8 +153,6 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F92] = "NAT probe: %s (port %d)\n",  /* SID:92 */
     [LA_F178] = "New %s client connected from %s:%d, assigned slot %d\n",  /* SID:178 */
     [LA_F99] = "P2P Signaling Server listening on port %d (TCP + UDP)...\n",  /* SID:99 */
-    [LA_F223] = "REG: '%s' new instance (old=%u, new=%u), resetting session\n",  /* SID:223 */
-    [LA_F95] = "REG: '%s' reconnected (inst=%u), migrating\n",  /* SID:95 */
     [LA_F85] = "REQ peer timeout after %d retries, sending timeout error to '%s', sid=%u (ses_id=%u)\n",  /* SID:85 */
     [LA_F86] = "REQ peer went offline, sending error to '%s', sid=%u (ses_id=%u)\n",  /* SID:86 */
     [LA_F87] = "REQ resent, '%s' -> '%s', sid=%u, attempt %d/%d (ses_id=%u)\n",  /* SID:87 */
@@ -189,7 +187,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F144] = "[%s] send failed(%d)\n",  /* SID:144 */
     [LA_F245] = "[CT] payload len(%u) overflow, max: %u\n",  /* SID:245 */
     [LA_F246] = "[CT] resolve payload len failed(%d)\n",  /* SID:246 */
-    [LA_F247] = "% [R] OOM: cannot allocate recv buffer\n",  /* SID:247 */
+    [LA_F264] = "[CT] send item refer invalid(%p)\n",  /* SID:264 */
+    [LA_F265] = "[CT] send sess item refer invalid(%p)\n",  /* SID:265 */
     [LA_F123] = "[Relay] %s for ses_id=%u: peer unavailable (dropped)\n",  /* SID:123 */
     [LA_F124] = "[Relay] %s for unknown ses_id=%u (dropped)\n",  /* SID:124 */
     [LA_F125] = "[Relay] %s seq=%u: '%s' -> '%s' (ses_id=%u)\n",  /* SID:125 */
@@ -220,12 +219,12 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F227] = "% [WS] OOM: cannot allocate HTTP recv buffer\n",  /* SID:227 */
     [LA_F255] = "[WS] RSV bit set in opcode %u\n",  /* SID:255 */
     [LA_F256] = "[WS] Reserved opcode %u\n",  /* SID:256 */
-    [LA_F228] = "[WS] build_frame: payload_pos(%u) < hdr_sz(%u)\n",  /* SID:228 */
+    [LA_F228] = "[WS] bad payload pos(%u) < hdr_sz(%u)\n",  /* SID:228 */
     [LA_F192] = "% [WS] close timeout, force closing\n",  /* SID:192 */
     [LA_F257] = "% [WS] invalid last_reason frame\n",  /* SID:257 */
     [LA_F258] = "[WS] truncate last_reason payload_len=%u to 125\n",  /* SID:258 */
     [LA_F199] = "[W] RPC timeout: sid=%u (ses_id=%u)\n",  /* SID:199 */
-    [LA_F259] = "% alloc buf failed(OOM)\n",  /* SID:259 */
+    [LA_F266] = "% alloc buf failed(OOM)\n",  /* SID:266 */
     [LA_F179] = "handshake<%d> sent to '%s'\n",  /* SID:179 */
     [LA_F229] = "make err(%d) resp failed(OOM)\n",  /* SID:229 */
     [LA_F140] = "% net init failed\n",  /* SID:140 */
@@ -234,6 +233,14 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F100] = "% send failed(OOM)\n",  /* SID:100 */
     [LA_F203] = "unknown msg from '%s': %.32s\n",  /* SID:203 */
     [LA_F204] = "unsupported type=%u (ses_id=%u)\n",  /* SID:204 */
+    [LA_F233] = "%s: invalid recv layout for zero-copy forward\n",  /* SID:233 disabled */
+    [LA_F234] = "%s: missing recv item for zero-copy forward\n",  /* SID:234 disabled */
+    [LA_F238] = "%s: renew sess by peer %s",  /* SID:238 disabled */
+    [LA_F239] = "%s: renew sess to peer %s",  /* SID:239 disabled */
+    [LA_F66] = "%s: requester offline, discarding\n",  /* SID:66 disabled */
+    [LA_F223] = "REG: '%s' new instance (old=%u, new=%u), resetting session\n",  /* SID:223 disabled */
+    [LA_F95] = "REG: '%s' reconnected (inst=%u), migrating\n",  /* SID:95 disabled */
+    [LA_F247] = "% [R] OOM: cannot allocate recv buffer\n",  /* SID:247 disabled */
     [LA_F133] = "% [TCP] OOM: cannot allocate recv buffer for new client\n",  /* SID:133 disabled */
     [LA_F27] = "%s: OOM for relay buffer\n",  /* SID:27 disabled */
     [LA_F41] = "%s: bad frame len=%u\n",  /* SID:41 disabled */

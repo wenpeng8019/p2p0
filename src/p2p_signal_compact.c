@@ -78,7 +78,7 @@ static void unpack_remote_candidates(struct p2p_session *s, const uint8_t *paylo
             c->type = P2P_CAND_SRFLX;
         }
 
-        print("I:", LA_F("%s: sync0 srflx cand[%d]<%s:%d>%s\n", LA_F255, 255),
+        print("I:", LA_F("%s: sync0 srflx cand[%d]<%s:%d>%s\n", LA_F500, 500),
                         TASK_SYNC_REMOTE, 0, sockAddr_str(&c->addr, _ab, sizeof(_ab)), sockAddr_port(&c->addr),
                         s->inst->cfg.test_ice_srflx_off ? " (disabled)" : "");
 

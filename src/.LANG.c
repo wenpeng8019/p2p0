@@ -70,6 +70,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F60] = "%s sent, name='%s' rid=%u\n",  /* SID:60 */
     [LA_F61] = "%s sent, retry=%u\n",  /* SID:61 */
     [LA_F62] = "%s sent, ses_id=%u sid=%u cand_base=%d, cand_cnt=%d fin=%d\n",  /* SID:62 */
+    [LA_F255] = "%s sent, ses_id=%u sid=%u\n",  /* SID:255 */
     [LA_F63] = "%s sent, ses_id=%u\n",  /* SID:63 */
     [LA_F64] = "%s sent, target='%s' cand=%u\n",  /* SID:64 */
     [LA_F65] = "%s sent\n",  /* SID:65 */
@@ -105,7 +106,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F95] = "%s: STUN ready → SYNCING",  /* SID:95 */
     [LA_F96] = "%s: SUB gist empty, waiting",  /* SID:96 */
     [LA_F97] = "%s: SUB gist not REG (content: %.20s...)",  /* SID:97 */
-    [LA_F98] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:98 */
+    [LA_F502] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:502 */
     [LA_F99] = "%s: SUB online (heartbeat %llds ago), early nat_punch",  /* SID:99 */
     [LA_F100] = "%s: SUB responded with %d candidates (ver=%d)",  /* SID:100 */
     [LA_F101] = "%s: SUCCESS: UDP reachable via TURN (RTT: %llu ms)",  /* SID:101 */
@@ -254,6 +255,7 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F244] = "%s: skip stale ver=0 from %s (previous session)",  /* SID:244 */
     [LA_F245] = "%s: skip stale ver=0 from SUB (previous session)",  /* SID:245 */
     [LA_F246] = "%s: stale ACK(ack_inst=%u local_inst=%u), ignored\n",  /* SID:246 */
+    [LA_F256] = "%s: stale confirm(sid=%u expected=%u), drop\n",  /* SID:256 */
     [LA_F247] = "%s: started, sending first probe\n",  /* SID:247 */
     [LA_F248] = "%s: stun collection ready, auto SYNC sent\n",  /* SID:248 */
     [LA_F249] = "%s: sync busy, will retry\n",  /* SID:249 */
@@ -262,8 +264,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F252] = "%s: sync confirm sid=%u synced=%d base=%d\n",  /* SID:252 */
     [LA_F253] = "%s: sync done, st=%s cands=%d\n",  /* SID:253 */
     [LA_F254] = "%s: sync done\n",  /* SID:254 */
-    [LA_F255] = "%s: sync0 srflx cand[%d]<%s:%d>%s\n",  /* SID:255 */
-    [LA_F256] = "%s: timeout (sid=%u)\n",  /* SID:256 */
+    [LA_F500] = "%s: sync0 srflx cand[%d]<%s:%d>%s\n",  /* SID:500 */
+    [LA_F501] = "%s: timeout (sid=%u)\n",  /* SID:501 */
     [LA_F257] = "%s: timeout after %d retries , type unknown\n",  /* SID:257 */
     [LA_F258] = "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates",  /* SID:258 */
     [LA_F259] = "%s: timeout, max(%d) attempts reached, reset to INIT\n",  /* SID:259 */
@@ -475,8 +477,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F465] = "[OpenSSL] DTLS role: %s (mode=%s)",  /* SID:465 */
     [LA_F466] = "[R] %s recv, len=%d\n",  /* SID:466 */
     [LA_F467] = "[R] %s timeout\n",  /* SID:467 */
-    [LA_F468] = "[R] %s%s qsend failed(OOM)\n",  /* SID:468 */
-    [LA_F469] = "[R] %s%s qsend(%d), len=%u\n",  /* SID:469 */
+    [LA_F468] = "[R] %s%s send failed(OOM)\n",  /* SID:468 */
+    [LA_F469] = "[R] %s%s send(%d), len=%u\n",  /* SID:469 */
     [LA_F470] = "[R] Connecting to %s:%d\n",  /* SID:470 */
     [LA_F471] = "% [R] Disconnected, back to REG state\n",  /* SID:471 */
     [LA_F472] = "% [R] Failed to create TCP socket\n",  /* SID:472 */
@@ -506,6 +508,8 @@ static const char* s_lang_en[LA_NUM] = {
     [LA_F496] = "transport send_data failed, %d bytes dropped",  /* SID:496 */
     [LA_F497] = "✓ Gathered Srflx Candidate %s:%d, priority=%u (ses_id=%u)",  /* SID:497 */
     [LA_F498] = "% ✗ Add Srflx candidate failed(OOM)",  /* SID:498 */
+    [LA_F499] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:499 disabled */
+    [LA_F98] = "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline",  /* SID:98 disabled */
 };
 
 /* 语言初始化函数（自动生成，请勿修改）*/

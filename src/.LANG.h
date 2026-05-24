@@ -139,7 +139,7 @@ enum {
     LA_F95,  /* "%s: STUN ready → SYNCING" (%s)  [p2p_signal_pubsub.c] */
     LA_F96,  /* "%s: SUB gist empty, waiting" (%s)  [p2p_signal_pubsub.c] */
     LA_F97,  /* "%s: SUB gist not REG (content: %.20s...)" (%s)  [p2p_signal_pubsub.c] */
-    LA_F98,  /* "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" (%s,%l,%d)  [p2p_signal_pubsub.c] */
+    LA_F98,  /* disabled "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" */
     LA_F99,  /* "%s: SUB online (heartbeat %llds ago), early nat_punch" (%s,%l)  [p2p_signal_pubsub.c] */
     LA_F100,  /* "%s: SUB responded with %d candidates (ver=%d)" (%s,%d,%d)  [p2p_signal_pubsub.c] */
     LA_F101,  /* "%s: SUCCESS: UDP reachable via TURN (RTT: %llu ms)" (%s,%l)  [p2p_probe.c] */
@@ -296,8 +296,8 @@ enum {
     LA_F252,  /* "%s: sync confirm sid=%u synced=%d base=%d\n" (%s,%u,%d,%d)  [p2p_signal_relay.c] */
     LA_F253,  /* "%s: sync done, st=%s cands=%d\n" (%s,%s,%d)  [p2p_signal_relay.c] */
     LA_F254,  /* "%s: sync done\n" (%s)  [p2p_signal_relay.c] */
-    LA_F255,  /* "%s: sync0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
-    LA_F256,  /* "%s: timeout (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
+    LA_F255,  /* "%s sent, ses_id=%u sid=%u\n" (%s,%u,%u)  [p2p_signal_relay.c] */
+    LA_F256,  /* "%s: stale confirm(sid=%u expected=%u), drop\n" (%s,%u,%u)  [p2p_signal_relay.c] */
     LA_F257,  /* "%s: timeout after %d retries , type unknown\n" (%s,%d)  [p2p_signal_compact.c] */
     LA_F258,  /* "%s: timeout but ICE exchange not done yet (%llu ms elapsed, mode=%d), waiting for more candidates" (%s,%l,%d)  [p2p_nat.c] */
     LA_F259,  /* "%s: timeout, max(%d) attempts reached, reset to INIT\n" (%s,%d)  [p2p_signal_compact.c] */
@@ -509,8 +509,8 @@ enum {
     LA_F465,  /* "[OpenSSL] DTLS role: %s (mode=%s)" (%s,%s)  [p2p_dtls_openssl.c] */
     LA_F466,  /* "[R] %s recv, len=%d\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F467,  /* "[R] %s timeout\n" (%s)  [p2p_signal_relay.c] */
-    LA_F468,  /* "[R] %s%s qsend failed(OOM)\n" (%s,%s)  [p2p_signal_relay.c] */
-    LA_F469,  /* "[R] %s%s qsend(%d), len=%u\n" (%s,%s,%d,%u)  [p2p_signal_relay.c] */
+    LA_F468,  /* "[R] %s%s send failed(OOM)\n" (%s,%s)  [p2p_signal_relay.c] */
+    LA_F469,  /* "[R] %s%s send(%d), len=%u\n" (%s,%s,%d,%u)  [p2p_signal_relay.c] */
     LA_F470,  /* "[R] Connecting to %s:%d\n" (%s,%d)  [p2p_signal_relay.c] */
     LA_F471,  /* "[R] Disconnected, back to REG state\n"  [p2p_signal_relay.c] */
     LA_F472,  /* "[R] Failed to create TCP socket\n"  [p2p_signal_relay.c] */
@@ -540,6 +540,10 @@ enum {
     LA_F496,  /* "transport send_data failed, %d bytes dropped" (%d)  [p2p.c] */
     LA_F497,  /* "✓ Gathered Srflx Candidate %s:%d, priority=%u (ses_id=%u)" (%s,%d,%u,%u)  [p2p_stun.c] */
     LA_F498,  /* "✗ Add Srflx candidate failed(OOM)"  [p2p_stun.c] */
+    LA_F499,  /* disabled "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" */
+    LA_F500,  /* "%s: sync0 srflx cand[%d]<%s:%d>%s\n" (%s,%d,%s,%d,%s)  [p2p_signal_compact.c] */
+    LA_F501,  /* "%s: timeout (sid=%u)\n" (%s,%u)  [p2p_signal_relay.c] */
+    LA_F502,  /* "%s: SUB heartbeat stale (%llds ago, threshold %ds), may be offline" (%s,%l,%d)  [p2p_signal_pubsub.c] */
 
     LA_NUM
 };

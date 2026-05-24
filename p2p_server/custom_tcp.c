@@ -762,7 +762,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         assert(payload_item == client->payload_buf && !payload_item->refer);
         if (BUF_IS_32BIT(payload_item->flags)) {
             buf = ITEM2BUF(BUF32(payload_item)); len = BUF32(payload_item)->len;
-        } else { buf = ITEM2BUF(payload_item); len = client->payload_buf->len; }
+        } else { buf = ITEM2BUF(payload_item); len = payload_item->len; }
         while (client->payload_cur < len) {
             io = len - client->payload_cur;
             r = tcp_recv((tcp_client_t*)client, buf + client->payload_cur, &io, SP);
@@ -1041,7 +1041,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             // ! 这里并不处理其他 refer 类型，所以此时如果 refer 不为 NULL，那么可能就错过了一些处理
             // + 例如，这个 item 存在其他引用者，那么这里的释放就会导致悬空引用的问题；
             if (item->refer != ITEM_REF_CLIENT_ERROR) {
-                print("W:", LA_F("[CT] send item refer invalid(%p)\n", 0, 0), item->refer);
+                print("W:", LA_F("[CT] send item refer invalid(%p)\n", LA_F264, 264), item->refer);
             }
 
             free_buffer(item);
@@ -1077,7 +1077,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             if (item->refer) {
                 if (ctx->handle_peer_sent)
                     ctx->handle_peer_sent(ctx, (ct_session_t*)item->refer, item);
-                else print("W:", LA_F("[CT] send sess item refer invalid(%p)\n", 0, 0), item->refer);
+                else print("W:", LA_F("[CT] send sess item refer invalid(%p)\n", LA_F265, 265), item->refer);
             }
 
             // 如果 item 被（handle_peer_sent）标记为待 ACK 状态，则不执行释放
