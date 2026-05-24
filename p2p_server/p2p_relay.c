@@ -375,7 +375,7 @@ static void relay_handle_syn0(relay_client_t *client, uint8_t *payload, uint16_t
             // 立刻返回 syn0 offline（syn0 前面已发到对端的发送队列，对端网络恢复后会继续发送）
             relay_session_send_syn0_off(local_s, (const char *) payload);
 
-            print("I:", LA_F("%s: peer '%s' unreachable, pending\n", LA_F235, 235),
+            print("I:", LA_F("%s: peer '%s' unreachable, pending\n", LA_F260, 260),
                   PROTO, (const char *)payload);
 
             return;
@@ -507,6 +507,12 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         && BUF_R_FRONT(&peer->sync_peer_send)->refer == ITEM_REF_ACK_PENDING
         && ((p2p_relay_hdr_t*)ITEM2BUF(BUF_R_FRONT(&peer->sync_peer_send)))->type == P2P_RLY_SYN0) {
 
+        // 队满时记录尾项 sid，pop SYN0 后补发 confirm（与 C→S confirm handler 对称）
+        uint8_t pending_sid = 0;
+        if (BUF_R_FULL(&peer->sync_peer_send)) {
+            pending_sid = ITEM2BUF(BUF_R_LAST(&peer->sync_peer_send))[sizeof(p2p_relay_hdr_t) + P2P_SESS_ID_SZ];
+        }
+
         free_buffer(BUF_R_FRONT(&peer->sync_peer_send));
         BUF_R_POP(&peer->sync_peer_send);
 
@@ -515,6 +521,8 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
             BUF_R_FRONT(&peer->sync_peer_send)->refer = peer;
             ct_session_send((ct_session_t*)session, BUF_R_FRONT(&peer->sync_peer_send));
         }
+        // 队列从满→非满：peer 之前因队满未收到 confirm，现在补发
+        if (pending_sid) relay_session_send_sync_confirm(peer, pending_sid);
     }
 
     print("V:", LA_F("%s: ses_id=%u, sid=%u, cands=%d\n", LA_F221, 221),
@@ -526,9 +534,9 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         // 零拷贝转发：直接复用 payload1（框架在 payload 前预留了 sizeof(relay_hdr) 字节）
         hdr = (p2p_relay_hdr_t*)ITEM2BUF(payload1);
         hdr->type = P2P_RLY_SYNC;
-        hdr->size = htons((uint16_t)len);   // len = 完整 payload 长度（含 session_id）
-        payload1->pos = 0;                   // 暴露预留的 relay_hdr 前缀
-        ((ct_client_t*)client)->payload_buf = NULL;  // 接管所有权，通知框架跳过释放
+        hdr->size = htons((uint16_t)len);               // len = 完整 payload 长度（含 session_id）
+        payload1->pos = 0;                              // 暴露预留的 relay_hdr 前缀
+        ((ct_client_t*)client)->payload_buf = NULL;     // 接管所有权，通知框架跳过释放
         sync_item = payload1;
     }
     else {
@@ -546,8 +554,8 @@ static void relay_handle_sync(relay_client_t *client, relay_session_t *session, 
         sync_item->len = (uint16_t)(sizeof(p2p_relay_hdr_t) + P2P_RLY_SYNC_PSZ(0, true));
 
         uint8_t *p = (uint8_t*)(hdr+1) + P2P_SESS_ID_SZ;
-        p[0] = sid;                     // 透传 sid
-        p[1] = 0;                       // cand_count = 0
+        p[0] = sid;                                     // 透传 sid
+        p[1] = 0;                                       // cand_count = 0
         p[2] = P2P_RLY_SYNC_FIN_MARKER;
     }
 

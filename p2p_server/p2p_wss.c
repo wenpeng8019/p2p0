@@ -327,7 +327,7 @@ static void wss_handle_sync(cw_client_ctx_t *ctx, wss_session_t *session, wss_se
     int headline_len = snprintf(sync_headline, sizeof(sync_headline),
                                 P2P_WSS_CMD_SYNC_FMT, peer_s->base.session_id, sid);
     if (headline_len <= 0 || (size_t)headline_len >= sizeof(sync_headline)) {
-        print("E:", LA_F("%s: snprintf failed\n", LA_F259, 259), "SYNC");
+        print("E:", LA_F("%s: snprintf failed\n", LA_F262, 262), "SYNC");
         ct_client_error((ct_client_ctx_t*)ctx, (ct_client_t*)client, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
@@ -396,7 +396,7 @@ static void wss_handle_pkt(cw_client_ctx_t *ctx, wss_session_t *session, wss_ses
     ct_client_t* c = CT_CLIENT(session);
     buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
     if (!buf_item) {
-        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F259, 259));
+        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F266, 266));
         ct_client_error(&ctx->base, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
@@ -451,7 +451,7 @@ static void wss_handle_req(cw_client_ctx_t *ctx, wss_session_t *session, wss_ses
     ct_client_t* c = CT_CLIENT(session);
     buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
     if (!buf_item) {
-        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F259, 259));
+        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F266, 266));
         ct_client_error(&ctx->base, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
@@ -498,7 +498,7 @@ static void wss_handle_rsp(cw_client_ctx_t *ctx, wss_session_t *session, wss_ses
     ct_client_t* c = CT_CLIENT(session);
     buf_item = ct_forward_payload(c, payload, len, 10, buf_item);
     if (!buf_item) {
-        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F259, 259));
+        print("E:", LA_F("alloc buf failed(OOM)\n", LA_F266, 266));
         ct_client_error(&ctx->base, c, CUSTOM_TCP_ERR_INTERNAL, true);
         return;
     }
@@ -733,7 +733,7 @@ static void wss_handle_text(cw_client_ctx_t *ctx, wss_client_t *client, const ui
     assert(client->base.local_peer_id[0]);
 
     if (payload_item && BUF_IS_32BIT(payload_item->flags)) {
-        print("E:", LA_F("%s: text frame overflow(32-bit)\n", 0, 0), "TEXT");
+        print("E:", LA_F("%s: text frame overflow(32-bit)\n", LA_F263, 263), "TEXT");
         cw_close((cw_client_t*)client, WS_CLOSE_PROTOCOL_ERROR, NULL);
         return;
     }
@@ -882,9 +882,22 @@ static void wss_handle_text(cw_client_ctx_t *ctx, wss_client_t *client, const ui
 
                 buf16_item_t *front = BUF_R_FRONT(&peer_s->sync_peer_send);
                 if (front->refer == WSS_ITEM_REF_SYN0_ACK_PENDING) {
+
+                    // 队满时记录尾项 sid，pop SYN0 后补发 confirm（与 C→S confirm handler 对称）
+                    uint8_t pending_sid = 0;
+                    if (BUF_R_FULL(&peer_s->sync_peer_send)) {
+                        buf16_item_t *last = BUF_R_LAST(&peer_s->sync_peer_send);
+                        if (last != front) pending_sid = wss_sync_item_sid(last);
+                    }
+
                     free_buffer(front);
                     BUF_R_POP(&peer_s->sync_peer_send);
                     wss_sync_send_head(peer_s);
+
+                    // 队列从满→非满：peer_s 之前因队满未收到 confirm，现在补发
+                    if (pending_sid)
+                        cw_session_printf((ct_session_t*)peer_s, 48u,
+                                          P2P_WSS_RSP_SYNC_CONFIRM_FMT, peer_s->base.session_id, pending_sid);
                 }
             }
         }
