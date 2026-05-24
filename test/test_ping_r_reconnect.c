@@ -276,6 +276,7 @@ static int wait_for_connection(int timeout_ms) {
         P_usleep(100 * 1000);
         elapsed += 100;
     }
+    printf("    [ERROR] Connection timeout after %dms\n", timeout_ms);
     return -1;
 }
 
@@ -304,6 +305,9 @@ static void stop_client(client_t *c) {
         waitpid(c->pid, &status, 0);
         printf("    %s stopped (exit=%d)\n", c->name, WEXITSTATUS(status));
         c->pid = 0;
+        c->rid = 0;
+        c->waiting = 0;
+        c->connected = 0;
     }
 }
 
