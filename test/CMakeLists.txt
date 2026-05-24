@@ -358,6 +358,46 @@ if(WITH_WS)
     target_compile_definitions(test_wss_sdp PRIVATE WITH_WS)
 endif()
 
+set(P2P_TEST_BUILD_TARGETS
+    test_transport
+    test_compact_reg
+    test_compact_sync
+    test_compact_lifecycle
+    test_compact_rpc
+    test_compact_relay
+    test_ping_template
+    test_ping_c_connect
+    test_ping_c_msg
+    test_ping_c_reconnect
+    test_ping_c_filter
+    test_relay_reg
+    test_relay_lifecycle
+    test_relay_pkt
+    test_relay_sync
+    test_relay_rpc
+    test_ping_r_connect
+    test_ping_r_msg
+    test_ping_r_reconnect
+    test_ping_r_filter
+    test_ping_g_connect
+    test_ping_g_filter
+    test_ping_g_msg
+    test_ping_g_reconnect
+)
+
+if(WITH_WS)
+    list(APPEND P2P_TEST_BUILD_TARGETS
+        test_wss_reg
+        test_wss_lifecycle
+        test_wss_rpc
+        test_wss_pkt
+        test_wss_sync
+        test_wss_sdp
+    )
+endif()
+
+add_custom_target(p2p_tests DEPENDS ${P2P_TEST_BUILD_TARGETS})
+
 # 添加测试
 enable_testing()
 

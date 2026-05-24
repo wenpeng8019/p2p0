@@ -9,10 +9,11 @@ setlocal EnableDelayedExpansion
 ::   build.bat [target] [options]
 ::
 :: Targets:
-::   all        Build everything: library + p2p_ping + p2p_server (default)
+::   all        Build default targets: library + p2p_ping + p2p_server (default, no tests)
 ::   lib        Build static library only (p2p_static)
 ::   ping       Build p2p_ping only  (implies lib)
 ::   server     Build p2p_server only (implies lib)
+::   test       Build test binaries only (p2p_tests)
 ::   clean      Clean build output
 ::
 :: Options:
@@ -43,6 +44,7 @@ if /i "%~1"=="all"           ( set "BUILD_TARGET=all"    & shift & goto parse_ar
 if /i "%~1"=="lib"           ( set "BUILD_TARGET=lib"    & shift & goto parse_args )
 if /i "%~1"=="ping"          ( set "BUILD_TARGET=ping"   & shift & goto parse_args )
 if /i "%~1"=="server"        ( set "BUILD_TARGET=server" & shift & goto parse_args )
+if /i "%~1"=="test"          ( set "BUILD_TARGET=test"   & shift & goto parse_args )
 if /i "%~1"=="clean"         ( set "BUILD_TARGET=clean"  & shift & goto parse_args )
 if /i "%~1"=="--build-dir"   ( set "BUILD_DIR=%~2"       & shift & shift & goto parse_args )
 if /i "%~1"=="--config"      ( set "BUILD_CONFIG=%~2"    & shift & shift & goto parse_args )
@@ -84,11 +86,9 @@ if errorlevel 1 (
 set ROOT=%~dp0
 cd /d "%ROOT%"
 
-if not exist "%BUILD_DIR%\CMakeCache.txt" (
-    echo [INFO] Configuring CMake in %BUILD_DIR% ...
-    cmake -S . -B "%BUILD_DIR%" -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=%BUILD_CONFIG%
-    if errorlevel 1 ( echo [ERROR] CMake configure failed. & exit /b 1 )
-)
+echo [INFO] Configuring CMake in %BUILD_DIR% ...
+cmake -S . -B "%BUILD_DIR%" -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=%BUILD_CONFIG%
+if errorlevel 1 ( echo [ERROR] CMake configure failed. & exit /b 1 )
 
 :: ---- clean ----
 if /i "%BUILD_TARGET%"=="clean" (
@@ -99,7 +99,7 @@ if /i "%BUILD_TARGET%"=="clean" (
 
 :: ---- build ----
 if /i "%BUILD_TARGET%"=="all" (
-    echo [INFO] Building: p2p_static + p2p_ping + p2p_server [%BUILD_CONFIG%]
+    echo [INFO] Building default targets: p2p_static + p2p_ping + p2p_server [%BUILD_CONFIG%]
     cmake --build "%BUILD_DIR%" --config %BUILD_CONFIG%
     goto check_result
 )
@@ -122,6 +122,12 @@ if /i "%BUILD_TARGET%"=="server" (
     goto check_result
 )
 
+if /i "%BUILD_TARGET%"=="test" (
+    echo [INFO] Building: p2p_tests [%BUILD_CONFIG%]
+    cmake --build "%BUILD_DIR%" --config %BUILD_CONFIG% --target p2p_tests
+    goto check_result
+)
+
 :check_result
 if errorlevel 1 (
     echo.
@@ -139,6 +145,7 @@ if /i "%BUILD_TARGET%"=="all" (
 if /i "%BUILD_TARGET%"=="ping"   echo        %BUILD_DIR%\p2p_ping\p2p_ping.exe
 if /i "%BUILD_TARGET%"=="server" echo        %BUILD_DIR%\p2p_server\p2p_server.exe
 if /i "%BUILD_TARGET%"=="lib"    echo        %BUILD_DIR%\p2p_static.lib
+if /i "%BUILD_TARGET%"=="test"   echo        %BUILD_DIR%\test\ ^(test binaries^)
 exit /b 0
 
 :show_help
@@ -149,10 +156,11 @@ echo  Usage:
 echo    build.bat [target] [options]
 echo.
 echo  Targets:
-echo    all        Build everything: library + p2p_ping + p2p_server  (default)
+echo    all        Build default targets: library + p2p_ping + p2p_server  (default, no tests)
 echo    lib        Build static library only (p2p_static)
 echo    ping       Build p2p_ping only  (implies lib)
 echo    server     Build p2p_server only (implies lib)
+echo    test       Build test binaries only (p2p_tests)
 echo    clean      Clean build output
 echo.
 echo  Options:
@@ -165,6 +173,7 @@ echo    build.bat
 echo    build.bat all
 echo    build.bat ping
 echo    build.bat server --config Release
+echo    build.bat test
 echo    build.bat clean
 echo    build.bat all --build-dir build_release --config Release
 echo.

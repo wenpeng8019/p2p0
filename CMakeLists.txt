@@ -328,4 +328,4 @@ add_subdirectory(p2p_ping)
 
 # --- 测试 ---
 enable_testing()
-add_subdirectory(test)
+add_subdirectory(test EXCLUDE_FROM_ALL)
