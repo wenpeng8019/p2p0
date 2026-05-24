@@ -27,7 +27,7 @@ ARGS_B(false, dtls,           0,  "dtls",         LA_CS("Enable DTLS (MbedTLS)",
 ARGS_B(false, openssl,        0,  "openssl",      LA_CS("Enable DTLS (OpenSSL)", LA_S19, 19));
 ARGS_B(false, pseudo,         0,  "pseudo",       LA_CS("Enable PseudoTCP", LA_S20, 20));
 ARGS_B(false, compact,       'c', "compact",      LA_CS("Use COMPACT mode (UDP signaling, default is TCP/RELAY)", LA_S32, 32));
-ARGS_B(false, websock,       'w', "websock",      LA_CS("Use WSS mode (WebSocket signaling, default is TCP/RELAY)", LA_S35, 35));
+ARGS_B(false, wss,           'w', "wss",          LA_CS("Use WSS mode (WebSocket signaling, default is TCP/RELAY)", LA_S35, 35));
 ARGS_B(false, echo,           0,  "echo",         LA_CS("Auto-echo received messages back to sender", LA_S12, 12));
 ARGS_S(false, server,        's', "server",       LA_CS("Signaling server IP[:PORT]", LA_S24, 24));
 ARGS_S(false, github,        'G', "github",       LA_CS("GitHub Token for Pub/Sub Signaling", LA_S22, 22));
@@ -425,6 +425,7 @@ int main(int argc, char *argv[]) {
         &ARGS_DEF_openssl,
         &ARGS_DEF_pseudo,
         &ARGS_DEF_compact,
+        &ARGS_DEF_wss,
         &ARGS_DEF_echo,
         &ARGS_DEF_server,
         &ARGS_DEF_github,
@@ -519,7 +520,9 @@ int main(int argc, char *argv[]) {
 #endif
     #endif
 
-    if (ARGS_server.str)
+    if (ARGS_wss.i64 && ARGS_server.str)
+        cfg.signaling_mode = P2P_SIGNALING_MODE_ICE;
+    else if (ARGS_server.str)
         cfg.signaling_mode = cfg.use_ice ? P2P_SIGNALING_MODE_RELAY : P2P_SIGNALING_MODE_COMPACT;
     else if (ARGS_github.str && ARGS_gist.str)
         cfg.signaling_mode = P2P_SIGNALING_MODE_PUBSUB;
@@ -556,7 +559,8 @@ int main(int argc, char *argv[]) {
     }
 
     const char *mode_name = NULL;
-    if (ARGS_server.str) mode_name = cfg.use_ice ? "RELAY" : "COMPACT";
+    if (ARGS_wss.i64 && ARGS_server.str) mode_name = "WSS";
+    else if (ARGS_server.str) mode_name = cfg.use_ice ? "RELAY" : "COMPACT";
     else if (ARGS_github.str && ARGS_gist.str) mode_name = "PUBSUB";
     else {
         print("E:", LA_F("No signaling mode.\nUse --server or --github\n" ,LA_F38, 38));

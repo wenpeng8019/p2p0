@@ -601,6 +601,20 @@ p2p_create(const char *local_peer_id, const p2p_config_t *cfg) {
         }
         else inst->state = P2P_SIG_ST_REG;
     }
+#ifdef WITH_WS
+    else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
+
+        print("I:", LA_F("REG to WSS signaling server at %s:%d", LA_F367, 367),
+              inst->cfg.server_host, inst->cfg.server_port);
+
+        if ((ret = p2p_signal_wss_reg(inst, inst->local_peer_id,
+                                        inst->cfg.server_host, inst->cfg.server_port)) != E_NONE) {
+            print("E:", LA_F("Connect to WSS signaling server failed(%d)", LA_F293, 293), ret);
+            inst->state = P2P_SIG_ST_ERROR;
+        }
+        else inst->state = P2P_SIG_ST_REG;
+    }
+#endif
 
 
 #ifdef P2P_THREADED

@@ -299,6 +299,28 @@ target_include_directories(test_ping_r_filter PRIVATE
 )
 target_link_libraries(test_ping_r_filter stdc ${TEST_PLATFORM_LIBS})
 
+# P2P Ping 双客户端连接测试 (WSS 模式, Alice <-> Bob, WebSocket 信令)
+if(WITH_WS)
+    add_executable(test_ping_w_connect
+        test_ping_w_connect.c
+    )
+    target_include_directories(test_ping_w_connect PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/stdc
+    )
+    target_link_libraries(test_ping_w_connect stdc ${TEST_PLATFORM_LIBS})
+    
+    # P2P Ping 消息互发测试 (WSS 模式)
+    add_executable(test_ping_w_msg
+        test_ping_w_msg.c
+    )
+    target_include_directories(test_ping_w_msg PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/stdc
+    )
+    target_link_libraries(test_ping_w_msg stdc ${TEST_PLATFORM_LIBS})
+endif()
+
 # P2P Ping 双客户端连接测试 (PUBSUB 模式, Alice <-> Bob, GitHub Gist 信令)
 add_executable(test_ping_g_connect
     test_ping_g_connect.c
@@ -393,6 +415,8 @@ if(WITH_WS)
         test_wss_pkt
         test_wss_sync
         test_wss_sdp
+        test_ping_w_connect
+        test_ping_w_msg
     )
 endif()
 
@@ -443,6 +467,12 @@ add_test(NAME test_ping_r_connect    COMMAND test_ping_r_connect    ${PING_PATH}
 add_test(NAME test_ping_r_msg        COMMAND test_ping_r_msg        ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_r_filter     COMMAND test_ping_r_filter     ${PING_PATH} ${SERVER_PATH})
 add_test(NAME test_ping_r_reconnect  COMMAND test_ping_r_reconnect  ${PING_PATH} ${SERVER_PATH})
+
+# --- End-to-end tests WSS (requires p2p_ping + p2p_server --ws) ---
+if(WITH_WS)
+    add_test(NAME test_ping_w_connect COMMAND test_ping_w_connect   ${PING_PATH} ${SERVER_PATH})
+    add_test(NAME test_ping_w_msg     COMMAND test_ping_w_msg       ${PING_PATH} ${SERVER_PATH})
+endif()
 
 # --- 端到端测试 PUBSUB（需要 p2p_ping + GitHub Token/Gist） ---
 add_test(NAME test_ping_g_connect    COMMAND test_ping_g_connect    ${PING_PATH})

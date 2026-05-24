@@ -233,7 +233,7 @@ static void send_sync(struct p2p_instance *inst, struct p2p_session *s, uint64_t
     char payload[4096];
     int payload_len = p2p_ice_export_sdp(&s->local_cands[base], count,
                                           payload, (int)sizeof(payload),
-                                          false, NULL, NULL, NULL);
+                                          true, NULL, NULL, NULL);
     if (payload_len <= 0) {
         print("E:", LA_F("%s: export ICE candidates failed\n", LA_F119, 119), PROTO);
         return;
