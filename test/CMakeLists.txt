@@ -319,6 +319,16 @@ if(WITH_WS)
         ${CMAKE_SOURCE_DIR}/stdc
     )
     target_link_libraries(test_ping_w_msg stdc ${TEST_PLATFORM_LIBS})
+    
+    # P2P Ping 重连测试 (WSS 模式)
+    add_executable(test_ping_w_reconnect
+        test_ping_w_reconnect.c
+    )
+    target_include_directories(test_ping_w_reconnect PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/stdc
+    )
+    target_link_libraries(test_ping_w_reconnect stdc ${TEST_PLATFORM_LIBS})
 endif()
 
 # P2P Ping 双客户端连接测试 (PUBSUB 模式, Alice <-> Bob, GitHub Gist 信令)

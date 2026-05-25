@@ -86,6 +86,7 @@ typedef enum {
     SIG_WSS_SESS_WAIT_REG,                            /* 等待实例级 REG 完成 */
     SIG_WSS_SESS_WAIT_SYN0_ACK,                       /* 等待 SYN0 响应 */
     SIG_WSS_SESS_WAIT_PEER,                           /* 对端离线，等待对端上线 */
+    SIG_WSS_SESS_WAIT_STUN,                           /* 等待 STUN 收集完成 */
     SIG_WSS_SESS_SYNCING,                             /* 候选同步中 */
     SIG_WSS_SESS_READY,                               /* 候选同步完成 */
     SIG_WSS_SESS_SUSPENDED,                           /* 会话已挂起（disconnect 后）*/
@@ -110,6 +111,9 @@ typedef struct {
     uint16_t            req_sid;                      /* A端: 当前挂起的 RPC 序列号 */
     uint8_t             req_msg;                      /* A端: 挂起请求的消息 ID */
     uint16_t            resp_sid;                     /* B端: 待回应的 RPC 序列号 */
+
+    /* 流控状态（当 feature_relay=true 时使用）*/
+    bool                awaiting_relay_ready;         /* 等待 PKT 转发确认（READY）*/
 } p2p_wss_session_t;
 
 /* ============================================================================
@@ -185,6 +189,18 @@ ret_t p2p_signal_wss_syn0(struct p2p_session *s, const char *remote_peer_id);
  * @return    E_NONE=成功，其他=错误码
  */
 ret_t p2p_signal_wss_fin(struct p2p_session *s);
+
+/*
+ * STUN 候选收集完成后，将 WAIT_STUN 会话转入 SYNCING 并发送首批候选
+ */
+void p2p_signal_wss_stun_ready(struct p2p_session *s);
+
+/*
+ * Trickle ICE：本地候选异步补发入口（支持 STUN/TURN）
+ *
+ * @param s   P2P 会话
+ */
+void p2p_signal_wss_trickle_candidate(struct p2p_session *s);
 
 /*
  * 通过 WSS 服务器转发数据包（DATA/ACK/CRYPTO）

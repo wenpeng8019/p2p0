@@ -283,11 +283,13 @@ static void wss_handle_sync(cw_client_ctx_t *ctx, wss_session_t *session, wss_se
                             const uint8_t *msg, size_t msg_len, buf16_item_t *payload_item) { (void)content;
     uint32_t sess_id = session->base.session_id;
 
-    if (!sid || !content_len) {
+    if (!sid) {
         cw_session_printf((ct_session_t*)session, 96u,
                         P2P_WSS_RSP_STA_FMT, sess_id, "SYNC", P2P_ERR_INVALID);
         return;
     }
+
+    // 允许空 payload（content_len=0 或仅一个 \n），用于标记候选发送完成
 
     // 去重：重复包重发 confirm 即可，不重复转发
     if (sid == session->last_sid) {
@@ -362,7 +364,9 @@ static void wss_handle_fin(wss_session_t *session) {
     print("I:", LA_F("%s: '%s' ses_id=%u\n", LA_F45, 45),
           PROTO, session->base.client->local_peer_id, session->base.session_id);
 
-    ct_session_close(&g_wss_ctx.base.base, &session->base, true, false);
+    // 销毁该对话（会话的 break 处理会向对端发送 FIN 包）
+    // ct_session_close(&g_wss_ctx.base.base, &session->base, true, false);
+    free_session((session_t*)session, true);
 }
 
 // 处理 PKT — P2P 数据包中继（重写 session_id，零拷贝转发）
@@ -785,13 +789,14 @@ static void wss_handle_text(cw_client_ctx_t *ctx, wss_client_t *client, const ui
         return;
     }
 
-    // PROTO: FIN <session_id>
+    // PROTO: FIN <session_id_hex>
     if (strncmp((char*)msg, P2P_WSS_CMD_FIN, P2P_WSS_CMD_FIN_SZ) == 0) {
-        char *sess_id_str = (char*)msg + P2P_WSS_CMD_FIN_SZ;
+        const uint8_t *sess_id_str = (const uint8_t*)msg + P2P_WSS_CMD_FIN_SZ;
         uint32_t sess_id = 0;
 
         ln = (char*)str2trim((const uint8_t*)ln, msg, true); *ln = '\0';
-        if (!str2u32(sess_id_str, &sess_id)) {
+        const uint8_t *end = (const uint8_t*)ln;
+        if (!str2hex32(&sess_id_str, end, &sess_id)) {
             cw_client_printf((cw_client_t*)client, false, 96u,
                             P2P_WSS_RSP_STA_FMT, 0, "FIN", P2P_ERR_PROTOCOL);
             return;
@@ -1107,8 +1112,9 @@ static void wss_session_break(client_ctx_t *ctx, session_t *s, session_t *ps, br
     wss_break_forward(&session->sync_peer_send, peer);
     wss_break_forward(&session->pkt_peer_send,  peer);
 
-    // 向对端发送 FIN
-    cw_session_printf((ct_session_t*)peer, 16u, "FIN %u", peer->base.session_id);
+    // 向对端发送 FIN (使用十六进制格式)
+    print("V:", LA_F("FIN: sending to peer, ses_id=%08X\n", LA_F240, 240), peer->base.session_id);
+    cw_session_printf((ct_session_t*)peer, 16u, "FIN %08X\n", peer->base.session_id);
 
     session->last_sid = peer->last_sid = 0;
 }

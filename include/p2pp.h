@@ -1285,8 +1285,8 @@ typedef struct {
 #define P2P_WSS_RSP_SYNC        "SYNC "         /* + <session_id_hex> <sid_hex> confirm\n|busy\n  (S2C 响应) */
 
 /* SYNC payload 子类型前缀（应用层约定，服务器透传） */
+/* 注：候选发送完成由空 payload（即首行后直接 \n）标记，类似 HTTP 空行 */
 #define P2P_WSS_PAY_ICE          "ICE\n"        /* + <candidate_line> */
-#define P2P_WSS_PAY_ICE_DONE     "ICE_DONE"
 
 /* WSS 二进制帧类型（WebSocket binary frame, opcode=0x2）
  *

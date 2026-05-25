@@ -336,6 +336,9 @@ static void disconnect(struct p2p_session *s) {
     // 触发信令层的 FIN
     if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_fin(s);
     else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_fin(s);
+#ifdef WITH_WS
+    else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.server_host) p2p_signal_wss_fin(s);
+#endif
 
     // 递减连接计数，归零时释放 STUN 资源
     if (--s->inst->connections == 0) {
@@ -373,6 +376,9 @@ static void peer_disconnect(struct p2p_session *s) {
     // 触发信令层的 FIN（如果 peer_disconnect 是由 NAT 层主动触发，而非由信令层 COMPACT/RELAY 收到对方 FIN 后间距触发）
     if (s->inst->sig_mode == P2P_SIGNALING_MODE_COMPACT) p2p_signal_compact_fin(s);
     else if (s->inst->sig_mode == P2P_SIGNALING_MODE_RELAY) p2p_signal_relay_fin(s);
+#ifdef WITH_WS
+    else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE && s->inst->cfg.server_host) p2p_signal_wss_fin(s);
+#endif
 
     // 递减连接计数，归零时释放 STUN 资源
     if (--s->inst->connections == 0) {

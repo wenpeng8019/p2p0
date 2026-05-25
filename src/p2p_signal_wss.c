@@ -187,7 +187,7 @@ static void send_sync(struct p2p_instance *inst, struct p2p_session *s, uint64_t
     p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
 
     /* 计算待发送候选 */
-    int base = sess_ctx->candidate_synced_count;
+    int base = sess_ctx->candidate_syncing_base;
     int total = s->local_cand_cnt;
     if (base >= total) return;  /* 无新候选 */
 
@@ -227,12 +227,12 @@ static void send_sync(struct p2p_instance *inst, struct p2p_session *s, uint64_t
 }
 
 /*
- * 发送 ICE_DONE（候选收集完毕）
+ * 发送候选发送完成标记（空 payload）
  *
- * 格式: "SYNC <session_id_hex> <sid_hex>\nICE_DONE\n"
+ * 格式: "SYNC <session_id_hex> <sid_hex>\n\n" （空行标记，类似 HTTP）
  */
 static void send_ice_done(struct p2p_instance *inst, struct p2p_session *s) {
-    const char *PROTO = "SYNC(ICE_DONE)";
+    const char *PROTO = "SYNC(DONE)";
 
     p2p_wss_ctx_t *ctx = &inst->sig_ctx.wss;
     p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
@@ -245,7 +245,7 @@ static void send_ice_done(struct p2p_instance *inst, struct p2p_session *s) {
     format_session_id(s->id, session_id_hex);
 
     char msg[256];
-    snprintf(msg, sizeof(msg), "SYNC %s %02X\nICE_DONE",
+    snprintf(msg, sizeof(msg), "SYNC %s %02X\n\n",
              session_id_hex, sess_ctx->sync_sid);
 
     if (ws_send_text(ctx, msg, PROTO) != E_NONE) {
@@ -455,27 +455,55 @@ static void handle_syn0_from_server(struct p2p_instance *inst, const char *msg) 
     if (online) {
         /* 对端在线，可能携带候选负载 */
         const char *payload_start = strstr(msg, "\n");
+        bool remote_done = false;  /* 本次收到完成标记 */
         if (payload_start) {
             payload_start++;  /* 跳过 '\n' */
             if (strncmp(payload_start, "SDP\n", 4) == 0) {
                 unpack_remote_candidates_from_sdp(s, payload_start + 4);
             } else if (strncmp(payload_start, "ICE\n", 4) == 0) {
-                /* Trickle ICE（单个候选）*/
-                /* TODO: 实现单个候选解析 */
-            } else if (strcmp(payload_start, "ICE_DONE") == 0) {
+                /* ICE 批量候选（与 SDP 格式相同）*/
+                unpack_remote_candidates_from_sdp(s, payload_start + 4);
+            } else if (*payload_start == '\n' || *payload_start == '\0') {
+                /* 空 payload 表示候选发送完成 */
                 s->remote_cand_done = true;
-                print("I:", LA_F("%s: remote '%s' candidates done\n", LA_F222, 222),
+                remote_done = true;
+                print("I:", LA_F("%s: remote '%s' candidates done (empty payload)\n", LA_F222, 222),
                       PROTO, peer_id);
             }
         }
 
-        sess_ctx->state = SIG_WSS_SESS_SYNCING;
-        print("I:", LA_F("%s: peer '%s' online, start syncing\n", LA_F208, 208),
-              PROTO, peer_id);
+        /* 重置候选同步状态，触发重新发送（包括完成标记）*/
+        sess_ctx->candidate_syncing_base = 0;
+        sess_ctx->candidate_synced_count = 0;
+        /* 只在未收到完成标记时重置 remote_cand_done，等待后续 SYNC 消息携带完成标记 */
+        if (!remote_done) {
+            s->remote_cand_done = false;
+        }
 
-        /* 开始打洞 */
-        for (int i = 0; i < s->remote_cand_cnt; i++) {
-            nat_punch(s, i);
+        /* 首次确认双方在线，启动 NAT 打洞（对齐 RELAY）*/
+        nat_punch(s, -1/* all candidates */);
+
+        uint64_t now = P_tick_ms();
+
+        /* 如果需要等待 STUN 收集完成再同步 */
+        if (P2P_SESSION_WAITING_STUN(s)) {
+            sess_ctx->state = SIG_WSS_SESS_WAIT_STUN;
+            print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", LA_F239, 239),
+                  TASK_TOUCH, "WAIT_STUN", "sync0", LA_S("waiting stun pending", LA_S30, 30));
+        }
+        /* 否则直接进入 SYNCING 状态，开始上传候选 */
+        else {
+            sess_ctx->state = SIG_WSS_SESS_SYNCING;
+            print("I:", LA_F("%s: session established(st=%s peer=%s), %s\n", LA_F239, 239),
+                  TASK_TOUCH, "SYNCING", "sync0", LA_S("sync candidates", LA_S28, 28));
+
+            /* 收到对端 SYN0 隐含确认本端首批候选已转发（对齐 RELAY handle_syn0_ack line 675）*/
+            sess_ctx->candidate_synced_count = sess_ctx->candidate_syncing_base;
+
+            /* SYN0 携带的候选可能尚未被 SYNC_ACK 确认 */
+            if (sess_ctx->candidate_syncing_base < s->local_cand_cnt || !P2P_CAND_PENDING(inst))
+                send_sync(inst, s, now);
+            else { sess_ctx->trickle_last_time = now; }
         }
     } else {
         /* 对端离线 */
@@ -546,14 +574,16 @@ static void handle_sync_from_server(struct p2p_instance *inst, const char *msg) 
     }
     payload_start++;  /* 跳过 '\n' */
 
-    if (strncmp(payload_start, "SDP\n", 4) == 0) {
+    /* 空 payload（空行标记）表示候选发送完成 */
+    if (*payload_start == '\n' || *payload_start == '\0') {
+        s->remote_cand_done = true;
+        print("I:", LA_F("%s: remote candidates done (empty payload)\n", LA_F222, 222), PROTO);
+    }
+    else if (strncmp(payload_start, "SDP\n", 4) == 0) {
         unpack_remote_candidates_from_sdp(s, payload_start + 4);
     } else if (strncmp(payload_start, "ICE\n", 4) == 0) {
-        /* Trickle ICE */
-        /* TODO: 实现 */
-    } else if (strcmp(payload_start, "ICE_DONE") == 0) {
-        s->remote_cand_done = true;
-        print("I:", LA_F("%s: remote candidates done\n", LA_F222, 222), PROTO);
+        /* ICE 批量候选（与 SDP 格式相同）*/
+        unpack_remote_candidates_from_sdp(s, payload_start + 4);
     }
 
     print("V:", LA_F("%s: received sid=%02X from ses_id=%08X\n", LA_F469, 469),
@@ -586,6 +616,11 @@ static void handle_fin(struct p2p_instance *inst, const char *msg) {
     }
 
     uint32_t session_id = parse_session_id(session_id_hex);
+    
+    /* 调试：打印接收到的原始数据 */
+    print("V:", LA_F("%s: received hex='%s', parsed_id=%08X\n", LA_F240, 240),
+          PROTO, session_id_hex, session_id);
+    
     struct p2p_session *s = inst->sessions_head;
     for (; s; s = s->next) {
         if (s->id == session_id) break;
@@ -599,12 +634,161 @@ static void handle_fin(struct p2p_instance *inst, const char *msg) {
     print("I:", LA_F("%s: peer disconnected, ses_id=%08X\n", LA_F208, 208),
           PROTO, session_id);
 
-    /* 触发 NAT 层断连处理 */
+    p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
+
+    // 清理会话状态，回到 WAIT_PEER 被动等待（对端主动断开，不自动重连）
+    sess_ctx->state = SIG_WSS_SESS_WAIT_PEER;
+    // 注意：不在这里设置 s->id = 0，避免后续 peer_disconnect 发送 FIN 时 session_id 为 0
+
+    // 重置候选同步状态
+    sess_ctx->candidate_synced_count = 0;
+    s->remote_cand_done = false;
+
+    // 如果还在打洞阶段
+    if (s->state < P2P_STATE_LOST) {
+        s->state = P2P_STATE_LOST;
+    }
+
+    // 触发 NAT 层断开，让 p2p_update 走正常的 peer_disconnect 路径
+    // WSS FIN 经可靠传输，等同于 NAT FIN
     if (s->nat.state > NAT_CLOSED) {
         s->nat.state = NAT_CLOSED;
     }
-    
-    s->sig_sess.wss.state = SIG_WSS_SESS_IDLE;
+}
+
+/*
+ * 处理实例级 STATUS（对齐 RELAY handle_status）
+ *
+ * 用于客户端级别的错误反馈（REG, OFF 等）
+ */
+static void handle_status(struct p2p_instance *inst, const char *req_type, 
+                         uint8_t code, const char *msg) {
+    const char *PROTO = "STATUS";
+
+    if (msg && msg[0])
+        print("E:", LA_F("%s: req_type=%s code=%u msg=%s\n", LA_F225, 225),
+              PROTO, req_type, (unsigned)code, msg);
+    else
+        print("E:", LA_F("%s: req_type=%s code=%u\n", LA_F226, 226),
+              PROTO, req_type, (unsigned)code);
+
+    /* 客户端级错误：关闭 WebSocket 连接 */
+    p2p_wss_ctx_t *ctx = &inst->sig_ctx.wss;
+    if (ctx->ws) {
+        ws_client_close(ctx->ws, 1000);  /* 1000 = 正常关闭 */
+        ctx->ws = NULL;
+    }
+    ctx->state = SIG_WSS_ERROR;
+}
+
+/*
+ * 处理会话级 STATUS（对齐 RELAY handle_session_status）
+ *
+ * 用于会话级别的流控和错误反馈
+ */
+static void handle_session_status(struct p2p_session *s, const char *req_type,
+                                  uint8_t code, const char *msg) {
+    const char *PROTO = "STATUS";
+    struct p2p_instance *inst = s->inst;
+    p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
+
+    const char *lvl = (code == P2P_CODE_READY) ? "V:" : "W:";
+    if (msg && msg[0])
+        print(lvl, LA_F("%s: sess_id=%u req_type=%s code=%u msg=%s\n", LA_F237, 237),
+              PROTO, s->id, req_type, (unsigned)code, msg);
+    else
+        print(lvl, LA_F("%s: sess_id=%u req_type=%s code=%u\n", LA_F238, 238),
+              PROTO, s->id, req_type, (unsigned)code);
+
+    /* 会话忙：服务器转发缓冲区满，稍后重试 */
+    if (code == P2P_ERR_BUSY) {
+        if (strcmp(req_type, "SYNC") == 0 || strcmp(req_type, "SYN0") == 0) {
+            /* 重置 trickle 时间，稍后重试 */
+            if (sess_ctx->trickle_last_time) 
+                sess_ctx->trickle_last_time = P_tick_ms();
+            print("V:", LA_F("%s: sync busy, will retry\n", LA_F249, 249), PROTO);
+        }
+        else if (strcmp(req_type, "PKT") == 0) {
+            /* relay 流控：保持等待，延迟重试 */
+            sess_ctx->awaiting_relay_ready = true;
+            print("V:", LA_F("%s: relay busy, will retry\n", LA_F218, 218), PROTO);
+        }
+    }
+    /* 服务就绪：解除对应流控 */
+    else if (code == P2P_CODE_READY) {
+        if (strcmp(req_type, "PKT") == 0) {
+            sess_ctx->awaiting_relay_ready = false;
+            print("V:", LA_F("%s: relay ready, flow control released\n", LA_F219, 219), PROTO);
+        }
+    }
+    /* 对端离线 */
+    else if (code == P2P_ERR_PEER_OFF) {
+        print("W:", LA_F("%s: peer offline\n", LA_F188, 188), PROTO);
+
+        p2p_wss_ctx_t *ctx = &inst->sig_ctx.wss;
+        if (ctx->state >= SIG_WSS_REG) {
+            sess_ctx->state = SIG_WSS_SESS_WAIT_PEER;
+            s->state = P2P_STATE_WAITING;
+            print("I:", LA_F("[ST:%s] peer went offline, waiting for reconnect\n", LA_F488, 488), 
+                  "WAIT_PEER");
+        }
+    }
+    /* NOT_REG / PROTOCOL / INTERNAL / UNKNOWN → 致命错误 */
+    else {
+        print("E:", LA_F("%s: fatal error code=%u, entering ERROR state\n", LA_F143, 143),
+              PROTO, (unsigned)code);
+
+        /* 会话级致命错误：关闭连接 */
+        p2p_wss_ctx_t *ctx = &inst->sig_ctx.wss;
+        if (ctx->ws) {
+            ws_client_close(ctx->ws, 1000);  /* 1000 = 正常关闭 */
+            ctx->ws = NULL;
+        }
+        ctx->state = SIG_WSS_ERROR;
+    }
+}
+
+/*
+ * 处理 STA 消息（统一状态应答）
+ *
+ * 格式: "STA <session_id_hex> <req_type> <status_hex>\n"
+ */
+static void handle_sta(struct p2p_instance *inst, const char *msg) {
+    const char *PROTO = "STA";
+
+    char session_id_hex[9];
+    char req_type[16];
+    int status_hex;
+
+    /* 解析 "STA <session_id_hex> <req_type> <status_hex>" */
+    if (sscanf(msg + strlen("STA "), "%8s %15s %x", 
+               session_id_hex, req_type, &status_hex) != 3) {
+        print("E:", LA_F("%s: parse failed\n", LA_F208, 208), PROTO);
+        return;
+    }
+
+    uint32_t session_id = parse_session_id(session_id_hex);
+    uint8_t code = (uint8_t)status_hex;
+
+    /* session_id=00000000 表示实例级错误 */
+    if (session_id == 0) {
+        handle_status(inst, req_type, code, NULL);
+        return;
+    }
+
+    /* 查找会话 */
+    struct p2p_session *s = NULL;
+    for (s = inst->sessions_head; s; s = s->next) {
+        if (s->id == session_id) break;
+    }
+    if (!s) {
+        print("W:", LA_F("%s: session %08X not found (req_type=%s)\n", LA_F223, 223),
+              PROTO, session_id, req_type);
+        return;
+    }
+
+    /* 处理会话级状态 */
+    handle_session_status(s, req_type, code, NULL);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -648,9 +832,7 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
         } else if (strncmp(txt, "FIN ", 4) == 0) {
             handle_fin(inst, txt);
         } else if (strncmp(txt, "STA ", 4) == 0) {
-            /* STA 消息：状态应答，格式 "STA <session_id_hex> <req_type> <status_hex>\n"
-             * 用于流控、错误反馈等，客户端当前只记录日志 */
-            print("V:", "[W] STA message: %s", txt);
+            handle_sta(inst, txt);
         } else {
             print("W:", "[W] unknown message: %s\n", txt);
         }
@@ -939,13 +1121,86 @@ ret_t p2p_signal_wss_fin(struct p2p_session *s) {
         return E_NONE;  /* 没有建立过配对 */
     }
 
-    /* 发送 FIN */
-    if (sess_ctx->state >= SIG_WSS_SESS_SYNCING) {
-        send_fin(s);
+    // 如果尚未完成在线：直接取消 syn0 连接状态
+    if (sess_ctx->state == SIG_WSS_SESS_WAIT_REG)
+        sess_ctx->state = SIG_WSS_SESS_SUSPENDED;
+    if (sess_ctx->state == SIG_WSS_SESS_SUSPENDED) {
+        *sess_ctx->remote_peer_id = 0;
+        return E_NONE;
     }
 
-    sess_ctx->state = SIG_WSS_SESS_IDLE;
+    // 如果正在通过信令服务器申请建立连接中
+    if (sess_ctx->state < SIG_WSS_SESS_WAIT_PEER) {
+        return E_BUSY;
+    }
+
+    print("I:", LA_F("[W] Disconnected, back to REG state\n", LA_F471, 471));
+
+    // 发送 FIN 消息（主动断开）
+    send_fin(s);
+
+    // 清理 peer 会话状态
+    sess_ctx->candidate_synced_count = 0;
+    s->remote_cand_done = false;
+    memset(sess_ctx->remote_peer_id, 0, sizeof(sess_ctx->remote_peer_id));
+
+    // 清理会话状态
+    s->id = 0;
     return E_NONE;
+}
+
+void p2p_signal_wss_stun_ready(struct p2p_session *s) {
+
+    assert(s->inst->srflx_active >= s->inst->srflx_count);
+
+    p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
+
+    if (sess_ctx->state == SIG_WSS_SESS_WAIT_STUN) {
+
+        sess_ctx->state = SIG_WSS_SESS_SYNCING;
+        print("I:", LA_F("%s: stun collection ready, auto SYNC sent\n", LA_F248, 248), TASK_TOUCH);
+
+        // 同步发送首批候选（如果有）
+        assert(sess_ctx->candidate_syncing_base == 0);
+        if (s->local_cand_cnt || !s->inst->turn_pending)
+            send_sync(s->inst, s, P_tick_ms());
+        else { sess_ctx->trickle_last_time = P_tick_ms(); s->inst->sig_ctx.wss.trickle_sessions++; }
+    }
+}
+
+void p2p_signal_wss_trickle_candidate(struct p2p_session *s) {
+
+    p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
+
+    if (sess_ctx->state == SIG_WSS_SESS_SYNCING) {
+
+        // 还没进入 trickle 阶段
+        // + 也就是 sync_ack 首次将现有的候选全部同步完成，但又存在待收集的异步候选（如 STUN/TURN）
+        if (!sess_ctx->trickle_last_time) return;
+
+        // 检查是否有新候选
+        if (sess_ctx->candidate_syncing_base >= s->local_cand_cnt) {
+            assert(sess_ctx->candidate_syncing_base == s->local_cand_cnt);
+            return;
+        }
+
+        // 如果上次发送后还没有收到对端的 SYNC_ACK
+        if (sess_ctx->candidate_synced_count < sess_ctx->candidate_syncing_base) return;
+
+        // 发送控制：如果已没有待收集的候选了
+        if (s->inst->srflx_active >= s->inst->srflx_count && !s->inst->turn_pending) {
+
+            sess_ctx->trickle_last_time = 0; s->inst->sig_ctx.wss.trickle_sessions--;
+            send_sync(s->inst, s, P_tick_ms());
+        }
+        // 或已经积累了足够的候选；又或者距离上次发送已经超过攒批时间窗口了
+        else if ((s->local_cand_cnt - sess_ctx->candidate_syncing_base >= s->inst->sig_ctx.wss.sync_max) ||
+                 (P_tick_ms() - sess_ctx->trickle_last_time) >= P2P_WSS_TRICKLE_BATCH_MS) {
+
+            send_sync(s->inst, s, P_tick_ms());
+        }
+    }
+    // todo: >SIG_WSS_SESS_SYNCING 用于动态更新 srflx 地址的变更
 }
 
 void p2p_signal_wss_tick_recv(struct p2p_instance *inst, uint64_t now) {
@@ -1012,14 +1267,15 @@ void p2p_signal_wss_tick_send(struct p2p_instance *inst, uint64_t now) {
         }
         /* 候选收集完毕，发送 ICE_DONE */
         else if (!P2P_CAND_PENDING(inst) && sess_ctx->state != SIG_WSS_SESS_READY) {
-            if (sess_ctx->candidate_synced_count > 0) {
+            /* 检查候选是否全部同步（等待 confirm 完成后再发送 ICE_DONE）*/
+            if (sess_ctx->candidate_synced_count >= s->local_cand_cnt) {
                 send_ice_done(inst, s);
             }
         }
     }
 
-    /* 心跳保活：每 30 秒发送一次 TOUCH 保持连接 */
-    if (tick_diff(now, ctx->last_send_time) > 30000) {
+    /* 心跳保活：定期发送 TOUCH 保持连接 */
+    if (tick_diff(now, ctx->last_send_time) > P2P_WSS_HEARTBEAT_INTERVAL_MS) {
         char msg[64];
         snprintf(msg, sizeof(msg), "TOUCH %s", inst->local_peer_id);
         ws_send_text(ctx, msg, "TOUCH");
@@ -1031,9 +1287,15 @@ ret_t p2p_signal_wss_pkt(struct p2p_session *s,
                           uint8_t type, uint8_t flags, uint16_t seq,
                           const void *payload, uint16_t payload_len) {
     p2p_wss_ctx_t *ctx = &s->inst->sig_ctx.wss;
+    p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
 
     if (ctx->state != SIG_WSS_REG || !ctx->feature_relay) {
         return E_NO_SUPPORT;  /* 服务器不支持数据中继 */
+    }
+
+    /* 流控：等待服务器 READY 确认 */
+    if (sess_ctx->awaiting_relay_ready) {
+        return E_BUSY;
     }
 
     /* 帧格式: [P2P_WSS_BIN_PKT(0x01)][session_id(4)][type(1)][flags(1)][seq(2)][payload(N)] */
@@ -1053,7 +1315,12 @@ ret_t p2p_signal_wss_pkt(struct p2p_session *s,
         memcpy(buf + 9, payload, payload_len);
     }
 
-    return ws_send_binary(ctx, buf, total, "PKT");
+    ret_t ret = ws_send_binary(ctx, buf, total, "PKT");
+    if (ret == E_NONE) {
+        /* 发送后设置流控等待标志 */
+        sess_ctx->awaiting_relay_ready = true;
+    }
+    return ret;
 }
 
 ret_t p2p_signal_wss_req(struct p2p_session *s,

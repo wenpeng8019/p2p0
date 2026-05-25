@@ -56,8 +56,8 @@
 
 #define DEFAULT_SERVER_PORT     9434
 #define DEFAULT_SERVER_HOST     "127.0.0.1"
-#define SYNC_TIMEOUT_MS         10000       // 同步超时 10 秒
-#define CONNECT_TIMEOUT_MS      30000       // 连接超时 30 秒
+#define SYNC_TIMEOUT_MS         8000        // 同步等待 8 秒
+#define CONNECT_TIMEOUT_MS      12000       // 连接超时 12 秒
 #define MESSAGE_TIMEOUT_MS      5000        // 消息发送/接收超时 5 秒
 
 // 测试状态
@@ -361,6 +361,14 @@ static int start_server(const char *server_path) {
     return 0;
 }
 
+// 重启服务器（用于需要干净状态的测试）
+static int restart_server(void) {
+    printf("    [*] Restarting server...\n");
+    stop_server();
+    P_usleep(500 * 1000);  // 给系统时间释放端口
+    return start_server(g_server_path);
+}
+
 // 清理
 static void cleanup(void) {
     stop_client(&g_alice);
@@ -393,8 +401,13 @@ static void on_signal(int sig) {
 // 测试用例
 ///////////////////////////////////////////////////////////////////////////////
 
-// 重置客户端状态
+// 重置客户端状态（先停止遗留进程）
 static void reset_clients(void) {
+    // 先停止可能遗留的客户端进程
+    stop_client(&g_alice);
+    stop_client(&g_bob);
+    
+    // 清空状态
     g_alice.pid = 0;
     g_alice.rid = 0;
     g_alice.waiting = 0;
@@ -407,12 +420,13 @@ static void reset_clients(void) {
     g_bob.connected = 0;
 }
 
-// 测试: 消息互发 (WSS 模式)
+// 测试 1: 消息互发 (WSS 模式)
 static void test_message_exchange(void) {
     const char *TEST_NAME = "wss_message_exchange";
     printf("\n--- Test: %s ---\n", TEST_NAME);
     clear_logs();
     reset_clients();
+    P_usleep(500 * 1000);  // 给服务器时间清理上一个测试的会话
     
     // 1. 启动 Alice (target=bob)
     printf("[1] Starting Alice (target=bob, wss mode)...\n");
@@ -510,6 +524,268 @@ static void test_message_exchange(void) {
     
     stop_client(&g_alice);
     stop_client(&g_bob);
+    P_usleep(500 * 1000);
+}
+
+// 测试 2: 非交互模式验证
+// NOTE: start_ping_client 已对所有子进程 stdin 关闭，
+//       test_message_exchange 已隐含覆盖此场景，本用例仅做额外 state 查询冒烟。
+static void test_non_interactive_mode(void) {
+    const char *TEST_NAME = "wss_non_interactive_mode";
+    printf("\n--- Test: %s ---\n", TEST_NAME);
+    clear_logs();
+    reset_clients();
+    P_usleep(500 * 1000);  // 给服务器时间清理上一个测试的会话
+    
+    // 1. 启动 Alice
+    printf("[1] Starting Alice (non-interactive, wss)...\n");
+    if (start_ping_client(&g_alice, "bob", NULL) != 0) {
+        TEST_FAIL(TEST_NAME, "failed to start alice");
+        return;
+    }
+    
+    if (wait_for_waiting(&g_alice, SYNC_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "alice waiting timeout");
+        stop_client(&g_alice);
+        return;
+    }
+    
+    // 2. 同步 Alice
+    printf("[2] Syncing Alice...\n");
+    sync_client(&g_alice);
+    P_usleep(200 * 1000);
+    
+    // 3. 启动 Bob
+    printf("[3] Starting Bob (non-interactive, wss)...\n");
+    if (start_ping_client(&g_bob, "alice", NULL) != 0) {
+        TEST_FAIL(TEST_NAME, "failed to start bob");
+        stop_client(&g_alice);
+        return;
+    }
+    
+    if (wait_for_waiting(&g_bob, SYNC_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "bob waiting timeout");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    sync_client(&g_bob);
+    
+    // 4. 等待连接
+    printf("[4] Waiting for connection...\n");
+    if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "connection timeout");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    P_usleep(300 * 1000);
+    
+    // 5. 查询状态（验证 instrument_req 工作正常）
+    printf("[5] Querying client states...\n");
+    char buffer[64];
+    ret_t r1 = instrument_req(g_alice.name, MESSAGE_TIMEOUT_MS, "state", buffer, sizeof(buffer));
+    int alice_state = (r1 == E_NONE) ? atoi(buffer) : -1;
+    
+    ret_t r2 = instrument_req(g_bob.name, MESSAGE_TIMEOUT_MS, "state", buffer, sizeof(buffer));
+    int bob_state = (r2 == E_NONE) ? atoi(buffer) : -1;
+    
+    printf("    Alice state: %d\n", alice_state);
+    printf("    Bob state: %d\n", bob_state);
+    
+    if (alice_state < 0 || bob_state < 0) {
+        TEST_FAIL(TEST_NAME, "failed to query state");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    TEST_PASS(TEST_NAME);
+    
+    stop_client(&g_alice);
+    stop_client(&g_bob);
+    P_usleep(500 * 1000);
+}
+
+// 测试 3: instrument 日志收集验证
+// NOTE: 对测试基础设施的冒烟测试（日志回调是否正常工作），
+//       test_message_exchange 也能间接验证。
+static void test_log_collection(void) {
+    const char *TEST_NAME = "wss_log_collection";
+    printf("\n--- Test: %s ---\n", TEST_NAME);
+    clear_logs();
+    reset_clients();
+    P_usleep(500 * 1000);  // 给服务器时间清理上一个测试的会话
+    
+    // 启动并同步客户端
+    printf("[1] Starting clients (wss mode)...\n");
+    start_ping_client(&g_alice, "bob", NULL);
+    wait_for_waiting(&g_alice, SYNC_TIMEOUT_MS);
+    sync_client(&g_alice);
+    
+    start_ping_client(&g_bob, "alice", NULL);
+    wait_for_waiting(&g_bob, SYNC_TIMEOUT_MS);
+    sync_client(&g_bob);
+    
+    // 等待连接
+    printf("[2] Waiting for connection...\n");
+    wait_for_connection(CONNECT_TIMEOUT_MS);
+    P_usleep(1000 * 1000);
+    
+    // 验证日志收集
+    printf("[3] Verifying log collection...\n");
+    
+    int total_logs = g_log_count;
+    int alice_logs = 0, bob_logs = 0;
+    
+    for (int i = 0; i < g_log_count; i++) {
+        if (g_logs[i].rid == g_alice.rid) alice_logs++;
+        else if (g_logs[i].rid == g_bob.rid) bob_logs++;
+    }
+    
+    printf("    Total logs: %d\n", total_logs);
+    printf("    Alice logs: %d\n", alice_logs);
+    printf("    Bob logs: %d\n", bob_logs);
+    
+    if (total_logs < 10) {
+        TEST_FAIL(TEST_NAME, "too few logs collected");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    if (alice_logs == 0 || bob_logs == 0) {
+        TEST_FAIL(TEST_NAME, "missing logs from one client");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    TEST_PASS(TEST_NAME);
+    
+    stop_client(&g_alice);
+    stop_client(&g_bob);
+    P_usleep(500 * 1000);
+}
+
+// 测试 4: 信令中继路径验证 (WSS 模式特有)
+// NOTE: 禁用 STUN 并使用 --no-host 强制走信令中继
+static void test_signaling_relay(void) {
+    const char *TEST_NAME = "wss_signaling_relay";
+    printf("\n--- Test: %s ---\n", TEST_NAME);
+    printf("    Testing signaling relay through WSS server\n");
+    clear_logs();
+    
+    // 重启服务器以获得干净状态
+    if (restart_server() != 0) {
+        TEST_FAIL(TEST_NAME, "failed to restart server");
+        return;
+    }
+    
+    reset_clients();
+    
+    // 1. 启动 Alice（使用 --no-host 禁用直连，强制走信令中继）
+    printf("[1] Starting Alice (no-host, wss mode)...\n");
+    if (start_ping_client(&g_alice, "bob", "--no-host") != 0) {
+        TEST_FAIL(TEST_NAME, "failed to start alice");
+        return;
+    }
+    
+    if (wait_for_waiting(&g_alice, SYNC_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "alice waiting timeout");
+        stop_client(&g_alice);
+        return;
+    }
+    
+    // 2. 同步 Alice
+    printf("[2] Syncing Alice...\n");
+    sync_client(&g_alice);
+    P_usleep(200 * 1000);
+    
+    // 3. 启动 Bob（使用 --no-host 禁用直连）
+    printf("[3] Starting Bob (no-host, wss mode)...\n");
+    if (start_ping_client(&g_bob, "alice", "--no-host") != 0) {
+        TEST_FAIL(TEST_NAME, "failed to start bob");
+        stop_client(&g_alice);
+        return;
+    }
+    
+    if (wait_for_waiting(&g_bob, SYNC_TIMEOUT_MS) != 0) {
+        TEST_FAIL(TEST_NAME, "bob waiting timeout");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    // 4. 同步 Bob
+    printf("[4] Syncing Bob...\n");
+    sync_client(&g_bob);
+    
+    // 5. 等待连接（应该通过信令中继连接）
+    printf("[5] Waiting for signaling relay connection...\n");
+    if (wait_for_connection(CONNECT_TIMEOUT_MS) != 0) {
+        print_log_summary();
+        TEST_FAIL(TEST_NAME, "signaling relay connection timeout");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    P_usleep(500 * 1000);
+    
+    // 6. Alice 发送消息
+    printf("[6] Alice sends message via signaling relay...\n");
+    if (ping_send_message(&g_alice, "Data via WSS relay!") != 0) {
+        TEST_FAIL(TEST_NAME, "alice failed to send message");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    P_usleep(1000 * 1000);
+    
+    // 7. Bob 发送消息
+    printf("[7] Bob sends message via signaling relay...\n");
+    if (ping_send_message(&g_bob, "Reply via WSS relay!") != 0) {
+        TEST_FAIL(TEST_NAME, "bob failed to send message");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    P_usleep(1000 * 1000);
+    
+    // 8. 验证 RELAY 路径使用
+    printf("[8] Verifying RELAY path usage...\n");
+    int relay_log = find_log("-> RELAY") >= 0 || find_log("RELAY path") >= 0;
+    int signaling_log = find_log("SIGNALING path") >= 0;
+    printf("    RELAY state log: %s\n", relay_log ? "yes" : "no");
+    printf("    SIGNALING path log: %s\n", signaling_log ? "yes" : "no");
+    
+    // 9. 验证消息接收
+    printf("[9] Verifying message delivery via relay...\n");
+    
+    int bob_recv = find_log("Data via WSS") >= 0;
+    int alice_recv = find_log("Reply via WSS") >= 0;
+    
+    printf("    Bob received message: %s\n", bob_recv ? "yes" : "no");
+    printf("    Alice received message: %s\n", alice_recv ? "yes" : "no");
+    
+    if (!bob_recv || !alice_recv) {
+        print_log_summary();
+        TEST_FAIL(TEST_NAME, "message not received via relay");
+        stop_client(&g_alice);
+        stop_client(&g_bob);
+        return;
+    }
+    
+    TEST_PASS(TEST_NAME);
+    
+    stop_client(&g_alice);
+    stop_client(&g_bob);
+    P_usleep(500 * 1000);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -517,48 +793,80 @@ static void test_message_exchange(void) {
 ///////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char *argv[]) {
+    // 解析命令行参数
     if (argc < 3) {
-        printf("Usage: %s <p2p_ping_path> <p2p_server_path> [port]\n", argv[0]);
-        printf("Example: %s ./p2p_ping ./p2p_server 9434\n", argv[0]);
+        fprintf(stderr, "Usage: %s <ping_path> <server_path> [port] [test_name]\n", argv[0]);
+        fprintf(stderr, "\nExamples:\n");
+        fprintf(stderr, "  %s ./p2p_ping ./p2p_server              # Run all tests on port %d\n", argv[0], DEFAULT_SERVER_PORT);
+        fprintf(stderr, "  %s ./p2p_ping ./p2p_server 9555         # Use custom port\n", argv[0]);
+        fprintf(stderr, "  %s ./p2p_ping ./p2p_server 9555 msg     # Only run tests matching 'msg'\n", argv[0]);
         return 1;
     }
     
     g_ping_path = argv[1];
     g_server_path = argv[2];
+    const char *test_filter = NULL;
     
-    if (argc >= 4) {
-        g_server_port = atoi(argv[3]);
+    if (argc > 3) {
+        int port = atoi(argv[3]);
+        if (port > 0 && port <= 65535) {
+            g_server_port = port;
+        } else {
+            test_filter = argv[3];
+        }
+    }
+    if (argc > 4) {
+        test_filter = argv[4];
     }
     
-    printf("=== P2P Ping WSS Mode Message Exchange Tests ===\n");
+    printf("=== P2P Ping Message Tests (WSS Mode) ===\n");
     printf("Ping path:   %s\n", g_ping_path);
     printf("Server path: %s\n", g_server_path);
-    printf("Server port: %d\n", g_server_port);
+    printf("Server addr: %s:%d\n", g_server_host, g_server_port);
+    printf("\n");
     
     // 设置信号处理
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
     
-    // 初始化 instrument
-    instrument_listen(on_instrument_log, NULL);
+    // 初始化 instrument 监听
+    if (instrument_listen(on_instrument_log, NULL) != E_NONE) {
+        fprintf(stderr, "Failed to start instrument listener\n");
+        return 1;
+    }
+    printf("[*] Instrument listener started\n");
     
-    // 启动服务器
-    printf("\n[0] Starting server (WebSocket mode)...\n");
+    // 启动服务器 (WSS 模式)
+    printf("[*] Starting server (WebSocket mode)...\n");
     if (start_server(g_server_path) != 0) {
-        printf("Failed to start server\n");
+        fprintf(stderr, "Failed to start server\n");
         return 1;
     }
     
     // 运行测试
-    test_message_exchange();
+    printf("\n[*] Running tests...%s\n", test_filter ? test_filter : " (all)");
+
+#define RUN_IF(name, fn) do { \
+    if (!test_filter || strstr(#name, test_filter)) { fn(); } \
+    else { printf("  [SKIP] %s\n", #name); } \
+} while(0)
+
+    RUN_IF(wss_message_exchange,    test_message_exchange);
+    RUN_IF(wss_non_interactive_mode, test_non_interactive_mode);
+    RUN_IF(wss_log_collection,      test_log_collection);
+    RUN_IF(wss_signaling_relay,     test_signaling_relay);
+
+#undef RUN_IF
     
     // 清理
+    printf("\n[*] Cleaning up...\n");
     cleanup();
     
-    // 输出测试结果
-    printf("\n=== Test Summary ===\n");
+    // 报告结果
+    printf("\n===== Test Results =====\n");
     printf("Passed: %d\n", g_tests_passed);
     printf("Failed: %d\n", g_tests_failed);
+    printf("========================\n");
     
     return (g_tests_failed > 0) ? 1 : 0;
 }

@@ -882,6 +882,15 @@ static inline void add_srflx_candidate(struct p2p_instance *inst, int recv_sock_
                 p2p_signal_pubsub_stun_ready(s);
             }
         }
+#ifdef WITH_WS
+        else if (inst->sig_mode == P2P_SIGNALING_MODE_ICE && inst->cfg.server_host) {
+            if (s->sig_sess.wss.state == SIG_WSS_SESS_SYNCING) {
+                p2p_signal_wss_trickle_candidate(s);
+            } else if (s->sig_sess.wss.state == SIG_WSS_SESS_WAIT_STUN && inst->srflx_active >= inst->srflx_count) {
+                p2p_signal_wss_stun_ready(s);
+            }
+        }
+#endif
         else if (s->inst->sig_mode == P2P_SIGNALING_MODE_ICE 
                  && !s->inst->cfg.server_host     /* 仅自定义信令模式触发回调 */
                  && s->inst->cfg.on_ice_candidate) {
