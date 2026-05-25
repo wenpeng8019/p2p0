@@ -348,13 +348,13 @@ static int start_server(const char *server_path) {
         fprintf(stderr, "Failed to fork server: %s\n", strerror(errno));
         return -1;
     } else if (g_server_pid == 0) {
-        // 带 --ws 参数启用 WebSocket 支持
-        execl(server_path, server_path, "--ws", "-p", port_str, NULL);
+        // 带 --ws 参数启用 WebSocket 支持，以及 -r 和 -m 启用数据中继和 RPC
+        execl(server_path, server_path, "--ws", "-p", port_str, "-r", "-m", NULL);
         fprintf(stderr, "Failed to exec server: %s\n", strerror(errno));
         _exit(127);
     }
     
-    printf("    Server PID: %d (WebSocket mode)\n", g_server_pid);
+    printf("    Server PID: %d (WebSocket mode with relay and msg support)\n", g_server_pid);
     P_usleep(500 * 1000);
     return 0;
 }

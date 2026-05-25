@@ -164,8 +164,8 @@ static int start_server(const char *server_path) {
         fprintf(stderr, "Failed to fork server: %s\n", strerror(errno));
         return -1;
     } else if (g_server_pid == 0) {
-        // WebSocket 模式：使用 --ws 参数
-        execl(server_path, server_path, "-p", port_str, "--ws", NULL);
+        // WebSocket 模式：使用 --ws 参数，并启用 relay 和 msg 支持
+        execl(server_path, server_path, "-p", port_str, "--ws", "-r", "-m", NULL);
         fprintf(stderr, "Failed to exec server: %s\n", strerror(errno));
         _exit(127);
     }

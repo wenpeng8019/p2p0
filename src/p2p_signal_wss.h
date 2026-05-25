@@ -61,6 +61,9 @@ typedef struct {
     uint64_t            last_recv_time;               /* 上次接收时间 */
     int                 trickle_sessions;             /* 当前正在进行 trickle sync 的会话数量 */
 
+    /* 服务器信息 */
+    struct sockaddr_in  server_addr;                  /* 服务器地址（用于标记转发包来源） */
+
     /* 身份标识 */
     char                local_peer_id[P2P_PEER_ID_MAX+1]; /* 本端名称 */
     uint32_t            instance_id;                  /* 本次 reg() 生成的实例 ID */

@@ -613,7 +613,11 @@ static void handle_fin(struct p2p_instance *inst, const char *msg) {
     print("I:", LA_F("%s: peer disconnected, ses_id=%08X\n", LA_F208, 208),
           PROTO, session_id);
 
-    /* TODO: 触发断连回调 */
+    /* 触发 NAT 层断连处理 */
+    if (s->nat.state > NAT_CLOSED) {
+        s->nat.state = NAT_CLOSED;
+    }
+    
     s->sig_sess.wss.state = SIG_WSS_SESS_IDLE;
 }
 
@@ -657,6 +661,10 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
             handle_sync_from_server(inst, txt);
         } else if (strncmp(txt, "FIN ", 4) == 0) {
             handle_fin(inst, txt);
+        } else if (strncmp(txt, "STA ", 4) == 0) {
+            /* STA 消息：状态应答，格式 "STA <session_id_hex> <req_type> <status_hex>\n"
+             * 用于流控、错误反馈等，客户端当前只记录日志 */
+            print("V:", "[W] STA message: %s", txt);
         } else {
             print("W:", "[W] unknown message: %s\n", txt);
         }
@@ -693,8 +701,19 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
                     print("W:", "[W] PKT frame too short\n");
                     return;
                 }
-                /* TODO: 调用 on_packet 回调 */
-                print("V:", "[W] received PKT frame (%u bytes)\n", payload_len);
+                
+                /* 解析 P2P 包头并传递给 NAT 层处理 */
+                p2p_packet_hdr_t hdr;
+                p2p_pkt_hdr_decode(payload, &hdr);
+                
+                print("V:", "[W] received PKT frame (%u bytes), inner type=%u\n", 
+                      payload_len, hdr.type);
+                
+                sockAddr_t from;
+                sockAddr_from_v4(&from, &ctx->server_addr);
+                nat_proto(s, hdr.type, hdr.flags, hdr.seq, 
+                         payload + P2P_HDR_SIZE, payload_len - P2P_HDR_SIZE,
+                         &from, P_tick_ms());
                 break;
             }
 
@@ -709,11 +728,35 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
                 const uint8_t *req_data = payload + 3;
                 int req_len = (int)payload_len - 3;
 
+                /* 去重：忽略正在处理的相同请求 */
+                if (sess_ctx->resp_sid == sid) {
+                    print("V:", "[W] duplicate request ignored (sid=%u)\n", sid);
+                    return;
+                }
+
+                /* 忽略旧请求 */
+                if (sess_ctx->rpc_last_sid != 0 && !uint16_circle_newer(sid, sess_ctx->rpc_last_sid)) {
+                    print("V:", "[W] old request ignored (sid=%u <= last_sid=%u)\n",
+                          sid, sess_ctx->rpc_last_sid);
+                    return;
+                }
+
                 sess_ctx->resp_sid = sid;  /* 记录待回应的 sid */
 
-                /* TODO: 调用 on_request 回调 */
-                print("V:", "[W] received REQ sid=%u msg=%u (%d bytes)\n", sid, msg, req_len);
-                (void)req_data;
+                /* msg=0: 自动 echo 回复 */
+                if (msg == 0) {
+                    print("V:", "[W] msg=0: echo reply (sid=%u)\n", sid);
+                    p2p_signal_wss_rsp(s, 0, req_data, req_len);
+                    return;
+                }
+
+                print("V:", "[W] REQ accepted (ses_id=%u), sid=%u msg=%u\n", 
+                      s->id, sid, msg);
+
+                /* 调用 on_request 回调 */
+                if (s->inst->cfg.on_request)
+                    s->inst->cfg.on_request((p2p_session_t)s, sid, msg, 
+                                           req_data, req_len, s->inst->cfg.userdata);
                 break;
             }
 
@@ -728,19 +771,39 @@ static void on_ws_message(ws_client_t *c, ws_msg_type_t type,
                 const uint8_t *rsp_data = payload + 3;
                 int rsp_len = (int)payload_len - 3;
 
-                /* 验证 sid 匹配 */
-                if (sess_ctx->req_sid != sid) {
-                    print("W:", "[W] RSP sid mismatch (expect=%u, got=%u)\n",
-                          sess_ctx->req_sid, sid);
+                /* 仅命中当前挂起请求 */
+                if (!(sess_ctx->req_state == 1 && sess_ctx->req_sid == sid)) {
+                    print("E:", "[W] irrelevant response (sid=%u, current sid=%u, state=%d)\n",
+                          sid, sess_ctx->req_sid, (int)sess_ctx->req_state);
                     return;
                 }
 
-                sess_ctx->req_state = 0;  /* 清除等待状态 */
-                sess_ctx->rpc_last_sid = sid;  /* 更新已完成的 sid */
+                /* 错误响应 */
+                if (code >= P2P_RPC_ERR_PEER_OFF) {
+                    if (code == P2P_RPC_ERR_PEER_OFF)
+                        print("W:", "[W] peer offline (sid=%u)\n", sid);
+                    else
+                        print("W:", "[W] timeout (sid=%u)\n", sid);
 
-                /* TODO: 调用 on_response 回调 */
-                print("V:", "[W] received RSP sid=%u code=%u (%d bytes)\n", sid, code, rsp_len);
-                (void)rsp_data;
+                    sess_ctx->req_state = 0;
+                    sess_ctx->req_sid   = 0;
+
+                    if (s->inst->cfg.on_response)
+                        s->inst->cfg.on_response((p2p_session_t)s, sid, code, 
+                                                 NULL, -1, s->inst->cfg.userdata);
+                    return;
+                }
+
+                print("V:", "[W] RSP complete (ses_id=%u), sid=%u code=%u\n", 
+                      s->id, sid, code);
+
+                sess_ctx->req_state = 0;  /* 清除等待状态 */
+                sess_ctx->req_sid   = 0;
+
+                /* 调用 on_response 回调 */
+                if (s->inst->cfg.on_response)
+                    s->inst->cfg.on_response((p2p_session_t)s, sid, code, 
+                                            rsp_data, rsp_len, s->inst->cfg.userdata);
                 break;
             }
 
@@ -762,7 +825,15 @@ static void on_ws_close(ws_client_t *c, uint16_t status_code, const char *reason
 
     ctx->state = SIG_WSS_INIT;
 
-    /* TODO: 触发所有会话的断连处理 */
+    /* 触发所有会话的断连处理 */
+    for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
+        if (s->sig_sess.wss.state != SIG_WSS_SESS_IDLE) {
+            s->sig_sess.wss.state = SIG_WSS_SESS_IDLE;
+            if (s->nat.state > NAT_CLOSED) {
+                s->nat.state = NAT_CLOSED;
+            }
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -786,6 +857,16 @@ ret_t p2p_signal_wss_reg(struct p2p_instance *inst, const char *local_peer_id,
     /* 保存身份 */
     strncpy(ctx->local_peer_id, local_peer_id, P2P_PEER_ID_MAX);
     ctx->local_peer_id[P2P_PEER_ID_MAX] = '\0';
+
+    /* 保存服务器地址（用于标记转发包来源） */
+    memset(&ctx->server_addr, 0, sizeof(ctx->server_addr));
+    ctx->server_addr.sin_family = AF_INET;
+    ctx->server_addr.sin_port = htons((uint16_t)server_port);
+    if (inet_pton(AF_INET, server_host, &ctx->server_addr.sin_addr) != 1) {
+        print("E:", "[W] invalid server address: %s\n", server_host);
+        ctx->state = SIG_WSS_ERROR;
+        return E_INVALID;
+    }
 
     /* 生成 instance_id */
     uint32_t rid = 0;
@@ -900,7 +981,14 @@ void p2p_signal_wss_tick_recv(struct p2p_instance *inst, uint64_t now) {
         }
     }
 
-    /* 心跳超时检查（TODO）*/
+    /* 心跳超时检查：超过 60 秒无消息认为连接断开 */
+    if (ctx->state == SIG_WSS_REG) {
+        if (tick_diff(now, ctx->last_recv_time) > 60000) {
+            print("E:", "[W] heartbeat timeout (no message for 60s)\n");
+            ctx->state = SIG_WSS_ERROR;
+            return;
+        }
+    }
 }
 
 void p2p_signal_wss_tick_send(struct p2p_instance *inst, uint64_t now) {
@@ -938,7 +1026,12 @@ void p2p_signal_wss_tick_send(struct p2p_instance *inst, uint64_t now) {
         }
     }
 
-    /* 心跳保活（TODO）*/
+    /* 心跳保活：每 30 秒发送一次 TOUCH 保持连接 */
+    if (tick_diff(now, ctx->last_send_time) > 30000) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "TOUCH %s", inst->local_peer_id);
+        ws_send_text(ctx, msg, "TOUCH");
+    }
 }
 
 /* RPC 和数据中继功能 */
@@ -1051,4 +1144,5 @@ ret_t p2p_signal_wss_rsp(struct p2p_session *s,
     return ret;
 }
 
+///////////////////////////////////////////////////////////////////////////////
 #endif /* WITH_WS */
