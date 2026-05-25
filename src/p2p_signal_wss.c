@@ -162,52 +162,16 @@ static void send_syn0(struct p2p_instance *inst, struct p2p_session *s, uint64_t
     p2p_wss_ctx_t *ctx = &inst->sig_ctx.wss;
     p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
 
-    /* 构造候选负载（ICE 文本格式） */
-    char payload[4096] = {0};
-    int payload_len = 0;
-
-    if (s->local_cand_cnt > 0) {
-        /* 导出 SDP（含候选）*/
-        int sdp_len = p2p_ice_export_sdp(s->local_cands, s->local_cand_cnt,
-                                          payload, (int)sizeof(payload),
-                                          true, NULL, NULL, NULL);
-        if (sdp_len > 0) {
-            /* 追加 ICE 凭证 */
-            if (s->ice_ufrag[0]) {
-                sdp_len += snprintf(payload + sdp_len, sizeof(payload) - (size_t)sdp_len,
-                                    "a=ice-ufrag:%s\r\na=ice-pwd:%s\r\n",
-                                    s->ice_ufrag, s->ice_pwd);
-            }
-
-            /* 前缀 "SDP\n" */
-            memmove(payload + 4, payload, (size_t)sdp_len);
-            memcpy(payload, "SDP\n", 4);
-            payload_len = 4 + sdp_len;
-        }
-    }
-
-    /* 构造完整消息 */
-    char msg[5120];
-    if (payload_len > 0) {
-        snprintf(msg, sizeof(msg), "SYN0 %s\n%s", sess_ctx->remote_peer_id, payload);
-    } else {
-        snprintf(msg, sizeof(msg), "SYN0 %s\n", sess_ctx->remote_peer_id);
-    }
+    /* SYN0 不携带候选，所有候选通过 SYNC 发送并等待 confirm（与 relay 模式一致）*/
+    char msg[256];
+    snprintf(msg, sizeof(msg), "SYN0 %s\n", sess_ctx->remote_peer_id);
 
     if (ws_send_text(ctx, msg, PROTO) != E_NONE) {
         return;
     }
 
-    /* 更新同步状态 */
-    if (payload_len > 0) {
-        sess_ctx->candidate_synced_count = s->local_cand_cnt;
-        sess_ctx->sync_sid = 0;  /* SYN0 视作 sid=0 */
-        print("V:", LA_F("%s sent with %d candidates to '%s'\n", LA_F60, 60),
-              PROTO, s->local_cand_cnt, sess_ctx->remote_peer_id);
-    } else {
-        print("V:", LA_F("%s sent (no candidates yet) to '%s'\n", LA_F60, 60),
-              PROTO, sess_ctx->remote_peer_id);
-    }
+    print("V:", LA_F("%s sent (no candidates) to '%s'\n", LA_F60, 60),
+          PROTO, sess_ctx->remote_peer_id);
 }
 
 /*
@@ -255,9 +219,8 @@ static void send_sync(struct p2p_instance *inst, struct p2p_session *s, uint64_t
         return;
     }
 
-    /* 更新同步状态 */
-    sess_ctx->candidate_syncing_base = base;
-    sess_ctx->candidate_synced_count += count;
+    /* 更新同步状态：设置 syncing_base，但不更新 synced_count（等待 confirm）*/
+    sess_ctx->candidate_syncing_base = base + count;
 
     print("V:", LA_F("%s sent sid=%02X, cands[%d..%d] to ses_id=%u\n", LA_F469, 469),
           PROTO, sess_ctx->sync_sid, base, base + count - 1, s->id);
@@ -554,7 +517,12 @@ static void handle_sync_from_server(struct p2p_instance *inst, const char *msg) 
     if (parsed >= 3 && action[0]) {
         if (strcmp(action, "confirm") == 0) {
             print("V:", LA_F("%s: sid=%02X confirmed\n", LA_F469, 469), PROTO, sid);
-            /* 服务器确认收到我们的 SYNC */
+            /* 服务器确认收到我们的 SYNC，更新 synced_count */
+            p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
+            sess_ctx->sync_sid_confirmed = sid;
+            sess_ctx->candidate_synced_count = sess_ctx->candidate_syncing_base;
+            print("V:", LA_F("%s: synced=%d base=%d\n", LA_F469, 469), 
+                  PROTO, sess_ctx->candidate_synced_count, sess_ctx->candidate_syncing_base);
             return;
         } else if (strcmp(action, "busy") == 0) {
             print("W:", LA_F("%s: sid=%02X busy\n", LA_F223, 223), PROTO, sid);
@@ -583,6 +551,17 @@ static void handle_sync_from_server(struct p2p_instance *inst, const char *msg) 
 
     print("V:", LA_F("%s: received sid=%02X from ses_id=%08X\n", LA_F469, 469),
           PROTO, sid, session_id);
+
+    /* 发送 confirm 消息给服务器，释放服务器端队列 */
+    p2p_wss_ctx_t *ctx = &inst->sig_ctx.wss;
+    char confirm_buf[64];
+    int confirm_len = snprintf(confirm_buf, sizeof(confirm_buf),
+                               "SYNC %08X %02X confirm\n",
+                               session_id, sid);
+    if (confirm_len > 0 && confirm_len < (int)sizeof(confirm_buf)) {
+        ws_send_text(ctx, confirm_buf, "SYNC_CONFIRM");
+        print("V:", LA_F("%s: sent confirm for sid=%02X\n", LA_F469, 469), PROTO, sid);
+    }
 }
 
 /*
@@ -1012,6 +991,12 @@ void p2p_signal_wss_tick_send(struct p2p_instance *inst, uint64_t now) {
 
         /* 有新候选需要同步 */
         if (s->local_cand_cnt > sess_ctx->candidate_synced_count) {
+            /* 流控：检查未确认的 SYNC 数量（限制为 1，避免服务器队列满）*/
+            uint8_t unconfirmed = (sess_ctx->sync_sid - sess_ctx->sync_sid_confirmed) & 0xFF;
+            if (unconfirmed >= 2) {
+                /* 等待之前的 SYNC 被确认 */
+                continue;
+            }
             if (sess_ctx->trickle_last_time == 0 ||
                 tick_diff(now, sess_ctx->trickle_last_time) >= P2P_WSS_TRICKLE_BATCH_MS) {
                 send_sync(inst, s, now);

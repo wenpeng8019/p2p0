@@ -101,6 +101,7 @@ typedef struct {
     int                 candidate_syncing_base;       /* 本地候选同步起始索引 */
     int                 candidate_synced_count;       /* 已同步的本地候选数 */
     uint8_t             sync_sid;                     /* 当前 SYNC 批次序号（循环 1..255）*/
+    uint8_t             sync_sid_confirmed;           /* 最后确认的 SYNC sid */
     uint64_t            trickle_last_time;            /* 上次 trickle 攒批时间 */
 
     /* RPC 消息上下文（仅当 feature_msg=true 时使用）*/
