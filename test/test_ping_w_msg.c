@@ -127,11 +127,13 @@ static void on_instrument_log(uint16_t rid, uint8_t chn, const char* tag, char *
         }
     }
     
-    // 连接状态检测
+    // 连接状态检测（包括 RELAY 状态）
     if (txt && (strstr(txt, "P2P_STATE_CONNECTED") ||
                 strstr(txt, "NAT_CONNECTED") ||
                 strstr(txt, "-> CONNECTED") ||
-                strstr(txt, "State: PUNCHING -> CONNECTED"))) {
+                strstr(txt, "-> RELAY") ||
+                strstr(txt, "State: PUNCHING -> CONNECTED") ||
+                strstr(txt, "State: PUNCHING -> RELAY"))) {
         if (rid == g_alice.rid && !g_alice.connected) {
             g_alice.connected = 1;
             printf("    [CONN] Alice connected!\n");

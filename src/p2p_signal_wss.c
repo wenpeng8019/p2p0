@@ -393,6 +393,13 @@ static void handle_reg_ok(struct p2p_instance *inst, const char *msg) {
           ctx->feature_relay ? "yes" : "no",
           ctx->feature_msg ? "yes" : "no");
 
+    /* 如果服务器支持数据中继，启用信令转发路径 */
+    if (ctx->feature_relay) {
+        inst->signaling_relay_fn = p2p_signal_wss_pkt;
+        path_manager_enable_signaling(inst, &ctx->server_addr);
+        print("I:", LA_F("%s: SIGNALING path enabled (server supports relay)\n", LA_F208, 208), PROTO);
+    }
+
     /* 触发所有等待 REG 的会话 */
     for (struct p2p_session *s = inst->sessions_head; s; s = s->next) {
         p2p_wss_session_t *sess_ctx = &s->sig_sess.wss;
