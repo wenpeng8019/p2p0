@@ -144,20 +144,20 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
 
     // RFC 6455 §5.2: RSV1/2/3 必须为 0（未协商任何扩展时）
     if (hdr_buf[0] & 0x70) {                    // Byte[0] bit4-6: RSV1/2/3
-        print("E:", LA_F("[WS] RSV bit set in opcode %u\n", LA_F255, 255), opcode);
+        print("E:", LA_F("[WS] RSV bit set in opcode %u\n", LA_F207, 207), opcode);
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
     // 服务端要求客户端帧必须有 mask（RFC 6455 §5.3）
     if (!masked) {
-        print("E:", LA_F("[WS] Client frame missing mask\n", LA_F249, 249));
+        print("E:", LA_F("[WS] Client frame missing mask\n", LA_F198, 198));
         ct_client_error(ctx, c, WS_CLOSE_PROTOCOL_ERROR, false);
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
     // RFC 6455 §5.2: 保留 opcode（0x3-0x7 数据帧、0xB-0xF 控制帧）必须拒绝
     if ((opcode >= 0x3 && opcode <= 0x7) || opcode >= 0xB) {
-        print("E:", LA_F("[WS] Reserved opcode %u\n", LA_F256, 256), opcode);
+        print("E:", LA_F("[WS] Reserved opcode %u\n", LA_F208, 208), opcode);
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
@@ -166,18 +166,18 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
     // + 新 TEXT/BINARY 帧不可在已有分片序列进行中出现
     if (client->ws_opcode != 0) {
         if (opcode == WS_OP_TEXT || opcode == WS_OP_BINARY) {
-            print("E:", LA_F("[WS] New %s without fragmentation end\n", LA_F254, 254), opcode == WS_OP_TEXT ? "TEXT" : "BINARY");
+            print("E:", LA_F("[WS] New %s without fragmentation end\n", LA_F204, 204), opcode == WS_OP_TEXT ? "TEXT" : "BINARY");
             return WS_CLOSE_PROTOCOL_ERROR;
         }
     } else if (opcode == WS_OP_CONTINUATION) {
-        print("E:", LA_F("[WS] CONTINUATION frame without fragmentation going\n", LA_F248, 248));
+        print("E:", LA_F("[WS] CONTINUATION frame without fragmentation going\n", LA_F197, 197));
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
     // RFC 6455 §5.5: 控制帧必须 FIN，且 payload ≤ 125 字节
     // + 这里 hdr len > 6 等价于 payload len > 125 字节
     if (opcode >= WS_OP_CLOSE && (!fin || hdr_len > 6)) {
-        print("E:", LA_F("[WS] Invalid control frame: opcode=%u fin=%u hdr_len=%u\n", LA_F253, 253), opcode, fin, hdr_len - 4);
+        print("E:", LA_F("[WS] Invalid control frame: opcode=%u fin=%u hdr_len=%u\n", LA_F203, 203), opcode, fin, hdr_len - 4);
         return WS_CLOSE_PROTOCOL_ERROR;
     }
 
@@ -212,7 +212,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
 
                     // RFC 6455 §7.4.1: 状态码必须合法
                     if (!cw_valid_close_code(code)) {
-                        print("E:", LA_F("[WS] Invalid close code %u\n", LA_F252, 252), code);
+                        print("E:", LA_F("[WS] Invalid close code %u\n", LA_F202, 202), code);
                         return WS_CLOSE_PROTOCOL_ERROR;
                     }
                 }
@@ -221,7 +221,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
                 if (payload_len > 2) {
                     uint32_t tmp = WS_UTF8_ACCEPT;
                     if (!cw_utf8_check(&tmp, payload + 2, payload_len - 2) || tmp != WS_UTF8_ACCEPT) {
-                        print("E:", LA_F("[WS] Invalid UTF-8 in close reason\n", LA_F251, 251));
+                        print("E:", LA_F("[WS] Invalid UTF-8 in close reason\n", LA_F201, 201));
                         return WS_CLOSE_PROTOCOL_ERROR;
                     }
                 }
@@ -286,7 +286,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
         bool ok = !payload_len || cw_utf8_check(&client->ws_utf8state, payload, payload_len);
         if (ok && fin && client->ws_utf8state != WS_UTF8_ACCEPT) ok = false;    // FIN 时要确保 UTF-8 序列完整，即不能截断于多字节序列中间
         if (!ok) {
-            print("E:", LA_F("[WS] Invalid UTF-8 in TEXT frame\n", LA_F250, 250));
+            print("E:", LA_F("[WS] Invalid UTF-8 in TEXT frame\n", LA_F200, 200));
             return WS_CLOSE_PROTOCOL_ERROR;
         }
     }
@@ -324,7 +324,7 @@ static int16_t ws_proto(ct_client_ctx_t *ctx, ct_client_t *c,
     return opcode;
 
 oom:
-    print("E:", LA_F("[WS] OOM in fragment reassembly\n", LA_F226, 226));
+    print("E:", LA_F("[WS] OOM in fragment reassembly\n", LA_F205, 205));
     if (client->ws_frag_q.head) {
         BUF_Q_CLEAR(&client->ws_frag_q, it, free_buf16(it););
         client->ws_frag_len = 0;
@@ -355,7 +355,7 @@ static buf16_item_t *cw_tcp_handle_handshake(ct_client_ctx_t* ctx, ct_client_t *
         hdr_buf[hdr_len] = '\0';
         ret_t r = cw_http_accept((const char*)hdr_buf, (char*)resp_buf, ((cw_client_ctx_t*)ctx)->sub_protocol);
         if (r < E_NONE) {
-            print("E:", LA_F("[WS] HTTP accept rejected(%d)\n", LA_F143, 143));
+            print("E:", LA_F("[WS] HTTP accept rejected(%d)\n", LA_F199, 199));
             c->last_error = CUSTOM_TCP_ERR_PROTOCOL;
             free_buf16(payload0);
             return NULL;
@@ -563,7 +563,7 @@ ret_t cw_build_frame(uint8_t opcode, buf16_item_t *buf_item) {
     }
 
     if (buf_item->pos < hdr_sz) {
-        print("E:", LA_F("[WS] bad payload pos(%u) < hdr_sz(%u)\n", LA_F228, 228), buf_item->pos, hdr_sz);
+        print("E:", LA_F("[WS] bad payload pos(%u) < hdr_sz(%u)\n", LA_F209, 209), buf_item->pos, hdr_sz);
         free_buffer(buf_item);
         return E_INVALID;
     }
@@ -635,7 +635,7 @@ ret_t cw_close(cw_client_t *client, uint16_t code, const char* reason/* nullable
 void cw_retry_closing(cw_client_t *client, uint64_t now) {
     if ((client->io & CW_IO_FLAG_CLOSING) &&
         tick_diff(now, client->base.last_active) >= (uint64_t)ARGS_dead_timeout.i64 * 1000u) {
-        print("I:", LA_F("[WS] close timeout, force closing\n", LA_F192, 192));
+        print("I:", LA_F("[WS] close timeout, force closing\n", LA_F210, 210));
         free_client(&client->base);
     }
 }
@@ -668,7 +668,7 @@ bool cw_client_reset(client_ctx_t* ctx, client_t *c, bool init) { (void)ctx;
     // 分配 HTTP 握手接收缓冲（流模式）
     buf16_item_t *recv_buf = alloc_buf16(CW_HTTP_BUF_FLAGS);
     if (!recv_buf) {
-        print("E:", LA_F("[WS] OOM: cannot allocate HTTP recv buffer\n", LA_F227, 227));
+        print("E:", LA_F("[WS] OOM: cannot allocate HTTP recv buffer\n", LA_F206, 206));
         return false;
     }
     static const uint8_t CRLF2[4] = {'\r','\n','\r','\n'};
@@ -753,13 +753,13 @@ static buf16_item_t* cw_error_item(ct_client_t *c) {
 
         buf = ITEM2BUF(close_frame) + payload_offset - hdr_sz;
         if ((buf[0] & 0x0F) != WS_OP_CLOSE) {
-            print("E:", LA_F("[WS] invalid last_reason frame\n", LA_F257, 257));
+            print("E:", LA_F("[WS] invalid last_reason frame\n", LA_F211, 211));
             free_buf16(close_frame);
             goto fallback_close;
         }
 
         if (payload_len > 125) {
-            print("W:", LA_F("[WS] truncate last_reason payload_len=%u to 125\n", LA_F258, 258), payload_len);
+            print("W:", LA_F("[WS] truncate last_reason payload_len=%u to 125\n", LA_F212, 212), payload_len);
             hdr_sz = 2;
             buf = ITEM2BUF(close_frame) + payload_offset - hdr_sz;
             buf[0] = 0x80 | WS_OP_CLOSE;

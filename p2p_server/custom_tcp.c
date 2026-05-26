@@ -299,7 +299,7 @@ ct_client_error(ct_client_ctx_t* ctx, ct_client_t *client, int16_t error, bool f
             return;
         }
 
-        print("E:", LA_F("make err(%d) resp failed(OOM)\n", LA_F229, 229), client->last_error);
+        print("E:", LA_F("make err(%d) resp failed(OOM)\n", LA_F216, 216), client->last_error);
         client->last_error = CUSTOM_TCP_ERR_INTERNAL;
     }
 
@@ -488,7 +488,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 // ! 作为流模式的 header 协议，此时获得的 header 应该是完整的，所以要求必须解析出有效的 payload_len 值
                 r = ctx->resolve_payload_len(client, buf, sz, &payload_len, &payload_offset);
                 if (r != E_NONE) {
-                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F246, 246), r);
+                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F186, 186), r);
                     error = CUSTOM_TCP_ERR_PROTOCOL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
@@ -496,7 +496,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
 
                 // 安全检查：payload 过大溢出
                 if (payload_len > ctx->max_payload_len) {
-                    print("E:", LA_F("[CT] payload len(%u) overflow, max: %u\n", LA_F245, 245), payload_len, ctx->max_payload_len);
+                    print("E:", LA_F("[CT] payload len(%u) overflow, max: %u\n", LA_F185, 185), payload_len, ctx->max_payload_len);
                     error = CUSTOM_TCP_ERR_OVERFLOW;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
@@ -608,7 +608,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                 // + 作为帧模式的 header 协议，允许根据对已有的 hdr 部分的解析来动态调整后续的 hdr 类型尺寸
                 r = ctx->resolve_payload_len(client, client->hdr_rs, client->hdr_sz, &payload_len, &payload_offset);
                 if (r < 0) {
-                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F246, 246), r);
+                    print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F186, 186), r);
                     error = CUSTOM_TCP_ERR_PROTOCOL;
                     if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                     goto error;
@@ -639,7 +639,7 @@ ct_handle_recv(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
                     len = client->hdr_sz;
                     r = ctx->resolve_payload_len(client, buf, client->hdr_sz, &payload_len, &payload_offset);
                     if (r < 0) {
-                        print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F246, 246), r);
+                        print("E:", LA_F("[CT] resolve payload len failed(%d)\n", LA_F186, 186), r);
                         error = CUSTOM_TCP_ERR_PROTOCOL;
                         if (TCP_HS_IS_HANDSHAKING(client)) goto handshake;
                         goto error;
@@ -914,7 +914,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
         if (buf_item->refer != ITEM_REF_STATIC) free_buf16(buf_item);
 
         // 握手（应答发送）完成
-        print("V:", LA_F("handshake<%d> sent to '%s'\n", LA_F179, 179), client->handshake, client->base.local_peer_id);
+        print("V:", LA_F("handshake<%d> sent to '%s'\n", LA_F215, 215), client->handshake, client->base.local_peer_id);
 
         // 如果（发送的是）握手阶段的错误应答，直接释放 client
         if (client->last_error) {
@@ -1041,7 +1041,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             // ! 这里并不处理其他 refer 类型，所以此时如果 refer 不为 NULL，那么可能就错过了一些处理
             // + 例如，这个 item 存在其他引用者，那么这里的释放就会导致悬空引用的问题；
             if (item->refer != ITEM_REF_CLIENT_ERROR) {
-                print("W:", LA_F("[CT] send item refer invalid(%p)\n", LA_F264, 264), item->refer);
+                print("W:", LA_F("[CT] send item refer invalid(%p)\n", LA_F187, 187), item->refer);
             }
 
             free_buffer(item);
@@ -1077,7 +1077,7 @@ ct_handle_send(ct_client_ctx_t* ctx, ct_client_t *client, const char* SP) {
             if (item->refer) {
                 if (ctx->handle_peer_sent)
                     ctx->handle_peer_sent(ctx, (ct_session_t*)item->refer, item);
-                else print("W:", LA_F("[CT] send sess item refer invalid(%p)\n", LA_F265, 265), item->refer);
+                else print("W:", LA_F("[CT] send sess item refer invalid(%p)\n", LA_F188, 188), item->refer);
             }
 
             // 如果 item 被（handle_peer_sent）标记为待 ACK 状态，则不执行释放

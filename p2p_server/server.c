@@ -35,18 +35,18 @@
 #include <signal.h>    /* signal() */
 
 // 命令行参数定义
-ARGS_I(false, port,         'p', "port",       LA_CS("Signaling server listen port (TCP+UDP)", LA_S9, 9));
-ARGS_I(false, probe_port,   'P', "probe-port", LA_CS("NAT type detection port (0=disabled)", LA_S6, 6));
+ARGS_I(false, port,         'p', "port",       LA_CS("Signaling server listen port (TCP+UDP)", LA_S10, 10));
+ARGS_I(false, probe_port,   'P', "probe-port", LA_CS("NAT type detection port (0=disabled)", LA_S7, 7));
 ARGS_I(false, dead_timeout, 'd', "client-timeout", "Client timeout cleanup in seconds");
 #ifdef WITH_WS
-ARGS_B(false, ws,           'w', "ws",         LA_CS("Enable WebSocket service on same TCP port", LA_S150, 150));
-ARGS_I(false, ws_port,      'W', "ws-port",    LA_CS("WebSocket dedicated port (also enables --ws)", LA_S151, 151));
+ARGS_B(false, ws,           'w', "ws",         LA_CS("Enable WebSocket service on same TCP port", LA_S6, 6));
+ARGS_I(false, ws_port,      'W', "ws-port",    LA_CS("WebSocket dedicated port (also enables --ws)", LA_S12, 12));
 #endif
 ARGS_B(false, relay,        'r', "relay",      LA_CS("Enable data relay support (COMPACT mode fallback)", LA_S4, 4));
 ARGS_B(false, msg,          'm', "msg",        LA_CS("Enable MSG RPC support", LA_S5, 5));
 
 static void cb_cn(const char* argv) { (void)argv;  lang_cn(); }
-ARGS_PRE(cb_cn, cn,          0,  "cn",          LA_CS("Use Chinese language", LA_S10, 10));
+ARGS_PRE(cb_cn, cn,          0,  "cn",          LA_CS("Use Chinese language", LA_S11, 11));
 
 //-----------------------------------------------------------------------------
 
@@ -63,6 +63,9 @@ static client_t*                    g_clients = NULL;
 #define CLIENTS(i)                  ((client_t*)&g_client_slots[i])
 #define TCP_CLIENTS(i)              ((tcp_client_t*)&g_client_slots[i])
 #define CT_CLIENTS(i)               ((ct_client_t*)&g_client_slots[i])
+
+// 计算 client 在 g_client_slots 中的索引
+#define CLIENT_SLOT_INDEX(c)        ((int)(((char*)(c) - (char*)g_client_slots) / sizeof(g_client_slots[0])))
 
 client_ctx_t*                       g_contexts[PROTO_NUM];
 
@@ -510,11 +513,11 @@ udp_send(sock_t udp_fd, const void *buf, int len, const struct sockaddr_in *to, 
     ssize_t sent = sendto(udp_fd, (const char *)buf, len, 0,
                           (const struct sockaddr *)to, sizeof(*to));
     if (sent == (ssize_t)len)
-        printf(LA_F("[UDP] %s send to %s:%d, len=%d\n", LA_F137, 137),
-               PROTO, inet_ntoa(to->sin_addr), ntohs(to->sin_port), (int)sent);
+        printf(LA_F("[U] %s:%d send %s, len=%d\n", LA_F196, 196),
+               inet_ntoa(to->sin_addr), ntohs(to->sin_port), PROTO, (int)sent);
     else
-        print("E:", LA_F("[UDP] %s send to %s:%d failed(%d)\n", LA_F136, 136),
-              PROTO, inet_ntoa(to->sin_addr), ntohs(to->sin_port), P_sock_errno());
+        print("E:", LA_F("[U] %s:%d send %s failed(%d)\n", LA_F195, 195),
+              inet_ntoa(to->sin_addr), ntohs(to->sin_port), PROTO, P_sock_errno());
     return sent;
 }
 
@@ -528,20 +531,19 @@ tcp_recv(tcp_client_t* client, void *buf, size_t *r_sz, const char* SP) {
     assert(client->base.proto >=0 && client->base.fd != P_INVALID_SOCKET);
 
     ret_t r = P_recv_nonblock(client->base.fd, buf, r_sz, 0);
-    
     if (r == E_NONE_CONTEXT) {
         if (client->handshake)
-            print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on recv)\n", LA_F224, 224),
-                  SP?SP:"TCP", (int)client->handshake);
-        else print("I:", LA_F("[%s] conn closed (EOF on recv)\n", LA_F11, 11), SP?SP:"TCP");
+            print("I:", LA_F("[%s] slot %d conn closed during handshake(%d) (EOF on recv)\n", LA_F181, 181),
+                  SP?SP:"T", CLIENT_SLOT_INDEX(client), (int)client->handshake);
+        else print("I:", LA_F("[%s] %s conn closed (EOF on recv)\n", LA_F177, 177), SP?SP:"T", client->base.local_peer_id);
         return -1;
     }
     
     if (r < 0) {
         if (client->handshake)
-            print("E:", LA_F("[%s] recv failed(%d) during handshake(%d) \n", LA_F183, 183),
-                  SP?SP:"TCP", E_EXT_CODE(r), (int)client->handshake);
-        else print("E:", LA_F("[%s] recv failed(%d)\n", LA_F225, 225), SP?SP:"TCP", E_EXT_CODE(r));
+            print("E:", LA_F("[%s] slot %d recv failed(%d) during handshake(%d) \n", LA_F183, 183),
+                  SP?SP:"T", CLIENT_SLOT_INDEX(client), E_EXT_CODE(r), (int)client->handshake);
+        else print("E:", LA_F("[%s] %s recv failed(%d)\n", LA_F179, 179), SP?SP:"T", client->base.local_peer_id, E_EXT_CODE(r));
         return -2;
     }
     
@@ -563,17 +565,17 @@ tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *SP) {
     
     if (r == E_NONE_CONTEXT) {
         if (client->handshake)
-            print("I:", LA_F("[%s] conn closed during handshake(%d) (EOF on send)\n", LA_F243, 243),
-                  SP?SP:"TCP", (int)client->handshake);
-        else print("I:", LA_F("[%s] conn closed (EOF on send)\n", LA_F182, 182), SP?SP:"TCP");
+            print("I:", LA_F("[%s] slot %d conn closed during handshake(%d) (EOF on send)\n", LA_F182, 182),
+                  SP?SP:"T", CLIENT_SLOT_INDEX(client), (int)client->handshake);
+        else print("I:", LA_F("[%s] %s conn closed (EOF on send)\n", LA_F178, 178), SP?SP:"T", client->base.local_peer_id);
         return -1;
     }
     
     if (r < 0) {
         if (client->handshake)
-            print("E:", LA_F("[%s] send failed(%d) during handshake(%d)\n", LA_F244, 244),
-                  SP?SP:"TCP", E_EXT_CODE(r), (int)client->handshake);
-        else print("E:", LA_F("[%s] send failed(%d)\n", LA_F144, 144), SP?SP:"TCP", E_EXT_CODE(r));
+            print("E:", LA_F("[%s] slot %d send failed(%d) during handshake(%d)\n", LA_F184, 184),
+                  SP?SP:"T", CLIENT_SLOT_INDEX(client), E_EXT_CODE(r), (int)client->handshake);
+        else print("E:", LA_F("[%s] %s send failed(%d)\n", LA_F180, 180), SP?SP:"T", client->base.local_peer_id, E_EXT_CODE(r));
         return -2;
     }
     
@@ -584,19 +586,16 @@ tcp_send(tcp_client_t* client, const void *buf, size_t *w_sz, const char *SP) {
 
 static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct sockaddr_in *from) {
 
-    char from_str[64];
-    snprintf(from_str, sizeof(from_str), "%s:%d", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
-
     // NAT_PROBE: [hdr(4)] = 4 bytes
     if (len < 4 || buf[0] != SIG_PKT_NAT) return;
     const char* PROTO = "NAT";
 
     uint16_t req_seq = ((uint16_t)buf[2] << 8) | buf[3];
 
-    printf(LA_F("[UDP] %s recv from %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F135, 135),
-           PROTO, from_str, req_seq, buf[1], len);
+    printf(LA_F("[U] %s:%d recv %s, seq=%u, flags=0x%02x, len=%zu\n", LA_F194, 194),
+           inet_ntoa(from->sin_addr), ntohs(from->sin_port), PROTO, req_seq, buf[1], len);
 
-    // 构造应答包（NAT_PROBE_ACK）
+    // 构造应答包（NAT_ACK）
     // [hdr(4)][probe_ip(4)][probe_port(2)] = 10 bytes
     const char* PROTO_ACK = "NAT_ACK";
     buf[0] = SIG_PKT_NAT_ACK;
@@ -605,9 +604,6 @@ static void handle_probe(sock_t probe_fd, uint8_t *buf, size_t len, struct socka
     buf[3] = (uint8_t)(req_seq & 0xFF);             /* seq lo */
     memcpy(buf + 4, &from->sin_addr.s_addr, 4);     /* probe_ip   */
     memcpy(buf + 8, &from->sin_port, 2);            /* probe_port */
-
-    print("V:", LA_F("Send %s: mapped=%s:%d\n", LA_F111, 111),
-          PROTO_ACK, inet_ntoa(from->sin_addr), ntohs(from->sin_port));
 
     udp_send(probe_fd, buf, 4 + SIG_PKT_NAT_ACK_PSZ, from, PROTO_ACK);
 }
@@ -631,7 +627,7 @@ BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
 #else
 void signal_handler(int signum) {
     if (signum == SIGINT || signum == SIGTERM) {
-        print("I: \n%s\n", LA_S("Received shutdown signal, exiting gracefully...", LA_S7, 7));
+        print("I: \n%s\n", LA_S("Received shutdown signal, exiting gracefully...", LA_S8, 8));
         g_running = 0;
     }
 }
@@ -691,12 +687,12 @@ int main(int argc, char *argv[]) {
 
     // 验证端口范围
     if (port <= 0 || port > 65535) {
-        print("E:", LA_F("Invalid port number %d (range: 1-65535)\n", LA_F83, 83), port);
+        print("E:", LA_F("Invalid port number %d (range: 1-65535)\n", LA_F167, 167), port);
         ARGS_print(argv[0]);
         return 1;
     }
     if (ARGS_probe_port.i64 < 0 || ARGS_probe_port.i64 > 65535) {
-        print("E:", LA_F("Invalid probe port %d (range: 0-65535)\n", LA_F84, 84), (int)ARGS_probe_port.i64);
+        print("E:", LA_F("Invalid probe port %d (range: 0-65535)\n", LA_F168, 168), (int)ARGS_probe_port.i64);
         ARGS_print(argv[0]);
         return 1;
     }
@@ -706,7 +702,7 @@ int main(int argc, char *argv[]) {
     //-------------------------
 
     if (P_net_init() != E_NONE) {
-        print("E:", LA_F("net init failed\n", LA_F140, 140));
+        print("E:", LA_F("net init failed\n", LA_F217, 217));
         return 1;
     }
 
@@ -722,12 +718,12 @@ int main(int argc, char *argv[]) {
     g_contexts[PROTO_WSS] = (client_ctx_t*)wss_init();
 
     // 打印服务器配置信息
-    print("I:", LA_F("Starting P2P signal server on port %d\n", LA_F120, 120), port);
-    print("I:", LA_F("NAT probe: %s (port %d)\n", LA_F92, 92), 
+    print("I:", LA_F("Starting P2P signal server on port %d\n", LA_F175, 175), port);
+    print("I:", LA_F("NAT probe: %s (port %d)\n", LA_F171, 171), 
           ARGS_probe_port.i64 > 0 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1), 
           (int)ARGS_probe_port.i64);
         print("I:", "Client timeout: %u sec\n", (unsigned)ARGS_dead_timeout.i64);
-    print("I:", LA_F("Relay support: %s\n", LA_F102, 102), 
+    print("I:", LA_F("Relay support: %s\n", LA_F174, 174), 
           ARGS_relay.i64 ? LA_W("enabled", LA_W2, 2) : LA_W("disabled", LA_W1, 1));
 #ifdef WITH_WS
     if (!ARGS_ws.i64) {
@@ -800,7 +796,7 @@ int main(int argc, char *argv[]) {
     }
     // 启动 TCP 监听（用于 Relay 模式与客户端连接）
     listen(listen_fd[0], 10);
-    print("I:", LA_F("P2P Signaling Server listening on port %d (TCP + UDP)...\n", LA_F99, 99), port);
+    print("I:", LA_F("P2P Signaling Server listening on port %d (TCP + UDP)...\n", LA_F173, 173), port);
 
     if (ARGS_ws.i64) {
 #ifdef WITH_WS
@@ -811,7 +807,7 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
             listen(listen_fd[1], 10);
-            print("I:", LA_F("WebSocket service listening on port %d\n", LA_F181, 181), (int)ARGS_ws_port.i64);
+            print("I:", LA_F("WebSocket service listening on port %d\n", LA_F176, 176), (int)ARGS_ws_port.i64);
 
             ARGS_ws.i64 = 0; // ARGS_ws 后面的含义变为：是否将 WebSocket 服务嵌入到 P2P 服务端口中
         }
@@ -825,14 +821,14 @@ int main(int argc, char *argv[]) {
     if (probe_fd != P_INVALID_SOCKET) {
         addr.sin_port = htons((uint16_t)ARGS_probe_port.i64);
         if (bind(probe_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            print("E:", LA_F("probe UDP bind failed(%d)\n", LA_F141, 141), P_sock_errno());
+            print("E:", LA_F("probe UDP bind failed(%d)\n", LA_F218, 218), P_sock_errno());
             P_sock_close(probe_fd);
             probe_fd = P_INVALID_SOCKET;
             ARGS_probe_port.i64 = 0;  /* 绑定失败，禁用探测功能 */
-            print("W:", LA_F("NAT probe disabled (bind failed)\n", LA_F90, 90));
+            print("W:", LA_F("NAT probe disabled (bind failed)\n", LA_F169, 169));
         } 
         else {
-            print("I:", LA_F("NAT probe socket listening on port %d\n", LA_F91, 91), (int)ARGS_probe_port.i64);
+            print("I:", LA_F("NAT probe socket listening on port %d\n", LA_F170, 170), (int)ARGS_probe_port.i64);
         }
     }
 
@@ -900,8 +896,11 @@ int main(int argc, char *argv[]) {
 
                 // client 超时淘汰检测
                 if (tick_diff(now, CLIENTS(i)->last_active) >= (uint64_t)ARGS_dead_timeout.i64 * 1000u) {
-                    print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F73, 73),
-                          CLIENTS(i)->local_peer_id, tick_diff(now, CLIENTS(i)->last_active) / 1000.0);
+                    if (*CLIENTS(i)->local_peer_id)
+                        print("W:", LA_F("'%s' timeout & cleanup (inactive for %.1f sec)\n", LA_F155, 155),
+                            CLIENTS(i)->local_peer_id, tick_diff(now, CLIENTS(i)->last_active) / 1000.0);
+                    else print("W:", LA_F("slot %d timeout & cleanup (inactive for %.1f sec)\n", LA_F221, 221),
+                            i, tick_diff(now, CLIENTS(i)->last_active) / 1000.0);
                     if (m >= 0 && m < PROTO_NUM) free_client(CLIENTS(i));
                     else if (m == 127) {
                         P_sock_close(CLIENTS(i)->fd);
@@ -952,7 +951,7 @@ int main(int argc, char *argv[]) {
         int sel_ret = select(max_fd + 1, &read_fds, &write_fds, NULL, &tv);
         if (sel_ret < 0) {
             if (P_sock_is_interrupted()) continue;  // 被信号打断，继续循环
-            print("E:", LA_F("select failed(%d)\n", LA_F201, 201), P_sock_errno());
+            print("E:", LA_F("select failed(%d)\n", LA_F219, 219), P_sock_errno());
             break;
         }
 
@@ -969,7 +968,7 @@ int main(int argc, char *argv[]) {
 
             // 设置为非阻塞模式，避免慢客户端阻塞整个服务器事件循环
             if (P_sock_nonblock(client_fd, true) != E_NONE) {
-                print("W:", LA_F("[TCP] Failed to set client socket to non-blocking mode\n", LA_F130, 130));
+                print("W:", LA_F("[T] Failed to set client socket to non-blocking mode\n", LA_F189, 189));
             }
 
             // 查找一个空闲槽位来存储这个新的连接
@@ -982,23 +981,23 @@ int main(int argc, char *argv[]) {
                     // WebSocket 监听端口
                     if (i == 1) { CLIENTS(k)->proto = PROTO_WSS;
                         if (!init_client(CLIENTS(k))) {
-                            print("E:", LA_F("Failed to initialize %s client\n", LA_F174, 174), "WS/ICE");
+                            print("E:", LA_F("Failed to initialize %s client\n", LA_F162, 162), "TCP/WSS");
                             P_sock_close(client_fd);
                             break;
                         }
-                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
-                                "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
+                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F172, 172),
+                                "TCP/WSS", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
                     }
                     // 如果是多模态混合端口
                     else if (ARGS_ws.i64) CLIENTS(k)->proto = 127;  // 标记为"暂定"模式的客户端
                     // TCP/Relay 监听端口
                     else { CLIENTS(k)->proto = PROTO_RELAY;
                         if (!init_client(CLIENTS(k))) {
-                            print("E:", LA_F("Failed to initialize %s client\n", LA_F174, 174), "TCP/RELAY");
+                            print("E:", LA_F("Failed to initialize %s client\n", LA_F162, 162), "TCP/RELAY");
                             P_sock_close(client_fd);
                             break;
                         }
-                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
+                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F172, 172),
                                 "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), k);
                     }
                     TCP_CLIENTS(k)->io = TCP_IO_FLAG_WANT_READ;  /* 新连接默认进入读取状态，等待客户端发送数据 */
@@ -1006,7 +1005,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             if (k == MAX_PEERS) {
-                print("W:", LA_F("[TCP] Max peers reached, rejecting connection\n", LA_F131, 131));
+                print("W:", LA_F("[T] Max peers reached, rejecting connection\n", LA_F190, 190));
                 P_sock_close(client_fd);
             }
         }
@@ -1050,8 +1049,8 @@ int main(int argc, char *argv[]) {
                     ret_t r = P_recv_nonblock(CLIENTS(i)->fd, buf, &n, MSG_PEEK);
                     if (r > 0) continue; // would block
                     if (r < 0) {
-                        if (r == E_NONE_CONTEXT) print("I:", LA_F("Client closed during protocol detection (slot %d)\n", LA_F172, 172), i);
-                        else print("E:", LA_F("Failed to peek client data for protocol detection (slot %d), errno=%d\n", LA_F177, 177), i, r);
+                        if (r == E_NONE_CONTEXT) print("I:", LA_F("Client closed during protocol detection (slot %d)\n", LA_F160, 160), i);
+                        else print("E:", LA_F("Failed to peek client data for protocol detection (slot %d), errno=%d\n", LA_F165, 165), i, r);
                         P_sock_close(CLIENTS(i)->fd);
                         CLIENTS(i)->fd = P_INVALID_SOCKET;
                         CLIENTS(i)->proto = -1;
@@ -1062,22 +1061,22 @@ int main(int argc, char *argv[]) {
 
                     // WebSocket 握手请求的特征。即 HTTP GET 请求行，也就是以 "GET " 开头
                     if (buf[0] == 'G') { CLIENTS(i)->proto = m = PROTO_WSS;
-                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
-                              "WS/ICE", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
+                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F172, 172),
+                              "TCP/WSS", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
 
                         if (!init_client(CLIENTS(i))) {
                             P_sock_close(saved_fd);
-                            print("E:", LA_F("Failed to initialize WS/ICE client for slot %d\n", LA_F176, 176), i);
+                            print("E:", LA_F("Failed to initialize TCP/WSS client for slot %d\n", LA_F164, 164), i);
                             continue;
                         }
                         ws_client = CT_CLIENTS(i);
                     } else { CLIENTS(i)->proto = m = PROTO_RELAY;
-                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F178, 178),
+                        print("I:", LA_F("New %s client connected from %s:%d, assigned slot %d\n", LA_F172, 172),
                               "TCP/RELAY", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), i);
 
                         if (!init_client(CLIENTS(i))) {
                             P_sock_close(saved_fd);
-                            print("E:", LA_F("Failed to initialize TCP/RELAY client for slot %d\n", LA_F175, 175), i);
+                            print("E:", LA_F("Failed to initialize TCP/RELAY client for slot %d\n", LA_F163, 163), i);
                             continue;
                         }
                     }
@@ -1087,7 +1086,7 @@ int main(int argc, char *argv[]) {
                 }
                 if (m == PROTO_RELAY) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_RELAY], CT_CLIENTS(i), NULL);
 #ifdef WITH_WS
-                else if (ws_client) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS");
+                else if (ws_client) ct_handle_recv((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "W");
 #endif
             }
 
@@ -1097,7 +1096,7 @@ int main(int argc, char *argv[]) {
 
                 if (m == PROTO_RELAY) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_RELAY], CT_CLIENTS(i), NULL);
 #ifdef WITH_WS
-                else if (ws_client) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "WS");
+                else if (ws_client) ct_handle_send((ct_client_ctx_t*)g_contexts[PROTO_WSS], CT_CLIENTS(i), "W");
 #endif
             }
 #ifdef WITH_WS
@@ -1112,7 +1111,7 @@ int main(int argc, char *argv[]) {
     //-------------------------------
 
     // 清理资源
-    print("I: \n%s", LA_S("Shutting down...\n", LA_S8, 8));
+    print("I: \n%s", LA_S("Shutting down...\n", LA_S9, 9));
     
     // 关闭所有客户端连接
     for (int i = 0; i < MAX_PEERS; i++) {
@@ -1140,6 +1139,6 @@ int main(int argc, char *argv[]) {
 
     P_net_cleanup();
 
-    print("I:", LA_F("Goodbye!\n", LA_F82, 82));
+    print("I:", LA_F("Goodbye!\n", LA_F166, 166));
     return 0;
 }

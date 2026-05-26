@@ -58,7 +58,7 @@ client_ctx_t*
 compact_init(void);
 
 void
-compact_handle_signaling(sock_t udp_fd, uint8_t *buf, size_t len, struct sockaddr_in *from);
+compact_handle_signaling(sock_t udp_fd, uint8_t *buf, uint16_t len, struct sockaddr_in *from);
 void
 compact_retry_pending(sock_t udp_fd, uint64_t now);
 
