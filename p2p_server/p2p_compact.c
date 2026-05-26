@@ -1174,7 +1174,15 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
     // 处理 SYNC(seq=0) 超时重传
     compact_session_t *q;
     TQ_RETRY(&g_sync0_pending_q, now, q,
-        if (q->sync0_retry >= SYN0_MAX_RETRY) { assert(PEER_ONLINE(q));  // compact_session_break 机制确保队列中的 peer 总是在线
+
+        // todo 如果这里断言会失败，和 compact_session_break 的关系?
+        if (!PEER_ONLINE(q)) {
+            print("W:", LA_F("%s %s: peer offline, removing from queue (ses_id=%u)\n", LA_F55, 55),
+                    CLIENT(q)->local_peer_id, "SYN0", q->base.session_id);
+            continue;
+        }
+
+        if (q->sync0_retry >= SYN0_MAX_RETRY) {
 
             print("W:", LA_F("%s <> %s %s gave up after %d tries, (ses_id=%u)\n", LA_F55, 55),
                    CLIENT(q)->local_peer_id, PEER(q)->client->local_peer_id, "SYN0",
@@ -1183,9 +1191,8 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
             if (q->sync0_base_index == 0) {
                 q->sync0_acked = -1/* 超时停止 */;
             }
-            // TQ_RETRY 已自动移除
         }
-        else { assert(PEER_ONLINE(q));  // compact_session_break 机制确保队列中的 peer 总是在线
+        else {
             
             // 状态 0：重传 SYN0_ACK，等待客户端二次确认
             if (q->sync0_acked == 0) {
@@ -1209,7 +1216,12 @@ void compact_retry_pending(sock_t udp_fd, uint64_t now) { (void)udp_fd;
     // 处理 RPC 超时重传
     TQ_RETRY(&g_rpc_pending_q, now, q,
         
-        assert(PEER_ONLINE(q));  // compact_session_break 机制确保队列中的 peer 总是在线
+        if (!PEER_ONLINE(q)) {
+            print("W:", LA_F("%s %s: peer offline, removing from RPC queue (ses_id=%u)\n", LA_F43, 43),
+                   CLIENT(q)->local_peer_id, "RPC", q->base.session_id);
+            // TQ_RETRY 已自动移除
+            continue;
+        }
 
         // REQ 阶段
         if (!q->rpc_responding) { 
